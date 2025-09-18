@@ -9,10 +9,11 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 const cpExec = promisify(cp.exec);
-const exec = async (command: string, options: cp.ExecOptionsWithStringEncoding) => cpExec(
-  command,
-  process.platform === 'win32' ? { ...options, shell: 'pwsh.exe' } : options
-);
+const exec = async (command: string, options: cp.ExecOptionsWithStringEncoding) =>
+  cpExec(
+    command,
+    process.platform === 'win32' ? { ...options, shell: 'pwsh.exe' } : options,
+  );
 
 import { replaceUnstableOutput } from './utils.ts';
 
@@ -27,15 +28,17 @@ const casesDir = path.resolve('snap-tests');
 
 const filter = process.argv[2] ?? ''; // Optional filter to run specific test cases
 
-const tasks: Promise<void>[] = [];
+// const tasks: Promise<void>[] = [];
 for (const caseName of fs.readdirSync(casesDir)) {
   if (caseName.startsWith('.')) continue; // Skip hidden files like .DS_Store
   if (caseName.includes(filter)) {
-    tasks.push(runTestCase(caseName));
+    // FIXME: parallel run will cause [Error: Broken pipe (os error 32)] { code: 'GenericFailure' }
+    // tasks.push(runTestCase(caseName));
+    await runTestCase(caseName);
   }
 }
 
-await Promise.all(tasks);
+// await Promise.all(tasks);
 
 interface Steps {
   env: Record<string, string>;
@@ -60,9 +63,9 @@ async function runTestCase(name: string) {
   };
 
   // Sometimes on Windows, the PATH variable is named 'Path'
-  if ("Path" in env && !("PATH" in env)) {
-    env['PATH'] = env["Path"];
-    delete env["Path"];
+  if ('Path' in env && !('PATH' in env)) {
+    env['PATH'] = env['Path'];
+    delete env['Path'];
   }
   env['PATH'] = [
     // Extend PATH to include the package's bin directory
