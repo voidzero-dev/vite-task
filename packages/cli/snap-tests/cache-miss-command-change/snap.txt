@@ -36,7 +36,7 @@ bar
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Statistics:  2 tasks • 1 cache hits • 1 cache misses 
-Performance:  50% cache hit rate
+Performance:  50% cache hit rate, <variable>ms saved in total
 
 Task Details:
 ────────────────────────────────────────────────
@@ -44,7 +44,7 @@ Task Details:
       → Cache miss: command changed from echo foo to echo baz
   ·······················································
   [2] hello: $ echo bar ✓
-      → Cache hit - output replayed
+      → Cache hit - output replayed - <variable>ms saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 > json-edit package.json '_.scripts.hello = "echo bar"' # remove the first subcommand, now the second subcommand becomes the first
@@ -58,10 +58,10 @@ bar
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Statistics:  1 tasks • 1 cache hits • 0 cache misses 
-Performance:  100% cache hit rate
+Performance:  100% cache hit rate, <variable>ms saved in total
 
 Task Details:
 ────────────────────────────────────────────────
   [1] hello: $ echo bar ✓
-      → Cache hit - output replayed
+      → Cache hit - output replayed - <variable>ms saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

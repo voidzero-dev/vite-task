@@ -1,4 +1,4 @@
-use std::{fmt::Display, sync::LazyLock};
+use std::{fmt::Display, sync::LazyLock, time::Duration};
 
 use itertools::Itertools;
 use owo_colors::{Style, Styled};
@@ -101,7 +101,7 @@ impl Display for PreExecutionStatus {
                     .style(CACHE_MISS_STYLE.dimmed())
                 )?;
             }
-            CacheStatus::CacheHit => {
+            CacheStatus::CacheHit { .. } => {
                 if !self.display_options.ignore_replay {
                     if let Some(display_command) = &display_command {
                         write!(f, "{} ", display_command)?;
@@ -141,7 +141,7 @@ impl Display for ExecutionSummary {
 
         for status in &self.execution_statuses {
             match &status.pre_execution_status.cache_status {
-                CacheStatus::CacheHit => cache_hits += 1,
+                CacheStatus::CacheHit { .. } => cache_hits += 1,
                 CacheStatus::CacheMiss(_) => cache_misses += 1,
             }
 
@@ -191,11 +191,25 @@ impl Display for ExecutionSummary {
         let cache_rate =
             if total > 0 { (cache_hits as f64 / total as f64 * 100.0) as u32 } else { 0 };
 
-        writeln!(
+        let total_duration = self
+            .execution_statuses
+            .iter()
+            .map(|status| {
+                if let CacheStatus::CacheHit { original_duration } =
+                    &status.pre_execution_status.cache_status
+                {
+                    *original_duration
+                } else {
+                    Duration::ZERO
+                }
+            })
+            .sum::<std::time::Duration>();
+
+        write!(
             f,
-            "{}  {}% cache hit rate",
+            "{}  {} cache hit rate",
             "Performance:".style(Style::new().bold()),
-            cache_rate.to_string().style(if cache_rate >= 75 {
+            format_args!("{}%", cache_rate).style(if cache_rate >= 75 {
                 Style::new().green().bold()
             } else if cache_rate >= 50 {
                 CACHE_MISS_STYLE
@@ -203,6 +217,14 @@ impl Display for ExecutionSummary {
                 Style::new().red()
             })
         )?;
+        if total_duration > Duration::ZERO {
+            write!(
+                f,
+                ", {:.2?} saved in total",
+                total_duration.style(Style::new().green().bold())
+            )?;
+        }
+        writeln!(f)?;
         writeln!(f)?;
 
         // Detailed task results
@@ -254,11 +276,12 @@ impl Display for ExecutionSummary {
 
             // Cache status details (indented)
             match &status.pre_execution_status.cache_status {
-                CacheStatus::CacheHit => {
+                CacheStatus::CacheHit { original_duration } => {
                     writeln!(
                         f,
-                        "      {}",
+                        "      {} {}",
                         "→ Cache hit - output replayed".style(Style::new().green()),
+                        format!("- {:.2?} saved", original_duration).style(Style::new().green())
                     )?;
                 }
                 CacheStatus::CacheMiss(miss) => {
