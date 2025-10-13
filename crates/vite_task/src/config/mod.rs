@@ -46,6 +46,15 @@ pub struct TaskConfig {
 
     #[serde(default)]
     pub(crate) pass_through_envs: HashSet<Str>,
+
+    #[serde(default)]
+    pub(crate) fingerprint_ignores: Option<Vec<Str>>,
+}
+
+impl TaskConfig {
+    pub fn set_fingerprint_ignores(&mut self, fingerprint_ignores: Option<Vec<Str>>) {
+        self.fingerprint_ignores = fingerprint_ignores;
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -148,6 +157,7 @@ impl ResolvedTask {
             args,
             ResolveCommandResult { bin_path, envs },
             false,
+            None,
         )
     }
 
@@ -157,6 +167,7 @@ impl ResolvedTask {
         args: impl Iterator<Item = impl AsRef<str>> + Clone,
         command_result: ResolveCommandResult,
         ignore_replay: bool,
+        fingerprint_ignores: Option<Vec<Str>>,
     ) -> Result<Self, Error> {
         let ResolveCommandResult { bin_path, envs } = command_result;
         let builtin_task = TaskCommand::Parsed(TaskParsedCommand {
@@ -164,7 +175,8 @@ impl ResolvedTask {
             envs: envs.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
             program: bin_path.into(),
         });
-        let task_config: TaskConfig = builtin_task.clone().into();
+        let mut task_config: TaskConfig = builtin_task.clone().into();
+        task_config.set_fingerprint_ignores(fingerprint_ignores.clone());
         let pass_through_envs = task_config.pass_through_envs.iter().cloned().collect();
         let cwd = &workspace.cwd;
         let resolved_task_config =
@@ -179,6 +191,7 @@ impl ResolvedTask {
                     .into_iter()
                     .collect(),
                 pass_through_envs,
+                fingerprint_ignores,
             },
             all_envs: resolved_envs.all_envs,
         };
@@ -245,6 +258,13 @@ impl std::fmt::Debug for ResolvedTaskCommand {
 /// - The resolver provides envs which become part of the fingerprint
 /// - If resolver provides different envs between runs, cache breaks
 /// - Each built-in task type must have unique task name to avoid cache collision
+///
+/// # Fingerprint Ignores Impact on Cache
+///
+/// The `fingerprint_ignores` field controls which files are tracked in PostRunFingerprint:
+/// - Changes to this config must invalidate the cache
+/// - Vec maintains insertion order (pattern order matters for last-match-wins semantics)
+/// - Even though ignore patterns only affect PostRunFingerprint, the config itself is part of the cache key
 #[derive(Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq, Diff, Clone)]
 #[diff(attr(#[derive(Debug)]))]
 pub struct CommandFingerprint {
@@ -256,6 +276,10 @@ pub struct CommandFingerprint {
     /// even though value changes to `pass_through_envs` shouldn't invalidate the cache,
     /// The names should still be fingerprinted so that the cache can be invalidated if the `pass_through_envs` config changes
     pub pass_through_envs: BTreeSet<Str>, // using BTreeSet to have a stable order in cache db
+
+    /// Glob patterns for fingerprint filtering. Order matters (last match wins).
+    /// Changes to this config invalidate the cache to ensure correct fingerprint tracking.
+    pub fingerprint_ignores: Option<Vec<Str>>,
 }
 
 #[cfg(test)]

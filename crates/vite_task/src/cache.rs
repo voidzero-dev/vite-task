@@ -30,8 +30,10 @@ impl CommandCacheValue {
         executed_task: ExecutedTask,
         fs: &impl FileSystem,
         base_dir: &AbsolutePath,
+        fingerprint_ignores: Option<&[Str]>,
     ) -> Result<Self, Error> {
-        let post_run_fingerprint = PostRunFingerprint::create(&executed_task, fs, base_dir)?;
+        let post_run_fingerprint =
+            PostRunFingerprint::create(&executed_task, fs, base_dir, fingerprint_ignores)?;
         Ok(Self {
             post_run_fingerprint,
             std_outputs: executed_task.std_outputs,
@@ -105,16 +107,18 @@ impl TaskCache {
                         "CREATE TABLE taskrun_to_command (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    conn.execute("PRAGMA user_version = 2", ())?;
+                    // Bump to version 3 to invalidate cache entries due to a change in the serialized cache key content
+                    // (addition of the `fingerprint_ignores` field). No schema change was made.
+                    conn.execute("PRAGMA user_version = 3", ())?;
                 }
-                1 => {
+                1..=2 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                2 => break, // current version
-                3.. => return Err(Error::UnrecognizedDbVersion(user_version)),
+                3 => break, // current version
+                4.. => return Err(Error::UnrecognizedDbVersion(user_version)),
             }
         }
         Ok(Self { conn: Mutex::new(conn), path: cache_path })

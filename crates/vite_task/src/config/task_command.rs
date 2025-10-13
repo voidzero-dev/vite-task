@@ -35,6 +35,7 @@ impl From<TaskCommand> for TaskConfig {
             inputs: Default::default(),
             envs: Default::default(),
             pass_through_envs: Default::default(),
+            fingerprint_ignores: Default::default(),
         }
     }
 }
@@ -105,6 +106,7 @@ impl ResolvedTaskConfig {
                     .into_iter()
                     .collect(),
                 pass_through_envs: self.config.pass_through_envs.iter().cloned().collect(),
+                fingerprint_ignores: self.config.fingerprint_ignores.clone(),
             },
             all_envs: task_envs.all_envs,
         })
