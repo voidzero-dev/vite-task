@@ -14,9 +14,7 @@
   },
   "excludes": [
     "crates/fspy_detours_sys/detours",
-    "pnpm-lock.yaml",
-    "packages/cli/binding/index.d.ts",
-    "packages/cli/binding/index.js"
+    "pnpm-lock.yaml"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.94.0.wasm",
