@@ -7,6 +7,9 @@ pub enum SpawnError {
     )]
     WhichError { program: OsString, path: Option<OsString>, cause: which::Error },
 
+    #[error("failed to initialize seccomp_unotify supervisor: {0}")]
+    SupervisorError(std::io::Error),
+
     #[error("failed to create IPC channel: {0}")]
     ChannelCreationError(std::io::Error),
 

@@ -85,7 +85,7 @@ impl PathAccessIterable {
 
 pub(crate) async fn spawn_impl(mut command: Command) -> Result<TrackedChild, SpawnError> {
     #[cfg(target_os = "linux")]
-    let supervisor = supervise::<SyscallHandler>()?;
+    let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::SupervisorError)?;
 
     let (ipc_channel_conf, ipc_receiver) =
         channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreationError)?;
