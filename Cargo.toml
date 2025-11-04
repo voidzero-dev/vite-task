@@ -115,7 +115,7 @@ vite_path = { path = "crates/vite_path" }
 vite_str = { path = "crates/vite_str" }
 vite_workspace = { path = "crates/vite_workspace" }
 wax = "0.6.0"
-which = "7.0.3"
+which = "8.0.0"
 widestring = "1.2.0"
 winapi = "0.3.9"
 winsafe = { version = "0.0.24", features = ["kernel"] }
