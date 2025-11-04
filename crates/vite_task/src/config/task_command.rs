@@ -42,7 +42,8 @@ impl From<TaskCommand> for TaskConfig {
 
 impl TaskCommand {
     pub fn need_skip_cache(&self) -> bool {
-        matches!(self, Self::Parsed(parsed_command) if parsed_command.program == "vite" || (parsed_command.program.ends_with("vite.js") && parsed_command.args.first() == Some(&("dev".into()))))
+        // `vp` is the alias of vite global cli command used in the vite-plus repo internally.
+        matches!(self, Self::Parsed(parsed_command) if parsed_command.program == "vite" || parsed_command.program == "vp" || (parsed_command.program.ends_with("vite.js") && parsed_command.args.first() == Some(&("dev".into()))))
     }
 
     // Whether the command starts a inner runner.
