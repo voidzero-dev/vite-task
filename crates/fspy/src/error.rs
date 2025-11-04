@@ -1,11 +1,17 @@
-use std::ffi::OsString;
+use std::{ffi::OsString, path::PathBuf};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SpawnError {
     #[error(
-        "could not resolve the full path of program '{program:?}' with PATH={path:?} under cwd() because: {cause}"
+        "could not resolve the full path of program '{program:?}' with PATH={path:?} under cwd({cwd:?})"
     )]
-    WhichError { program: OsString, path: Option<OsString>, cause: which::Error },
+    WhichError {
+        program: OsString,
+        path: Option<OsString>,
+        cwd: PathBuf,
+        #[source]
+        cause: which::Error,
+    },
 
     #[error("failed to initialize seccomp_unotify supervisor: {0}")]
     SupervisorError(std::io::Error),

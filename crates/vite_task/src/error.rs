@@ -106,7 +106,7 @@ pub enum Error {
     #[error(transparent)]
     Nix(#[from] nix::Error),
 
-    #[error("Failed to spawn task because: {0}")]
+    #[error("Failed to spawn task")]
     SpawnError(#[from] SpawnError),
 }
 

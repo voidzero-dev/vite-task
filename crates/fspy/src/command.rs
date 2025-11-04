@@ -172,6 +172,7 @@ impl Command {
             .map_err(|err| SpawnError::WhichError {
                 program: self.program.clone(),
                 path: path_env.map(OsStr::to_owned),
+                cwd,
                 cause: err,
             })?
             .into_os_string();
