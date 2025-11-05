@@ -999,7 +999,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
- "tracing",
  "which",
  "winapi",
  "winsafe 0.0.24",

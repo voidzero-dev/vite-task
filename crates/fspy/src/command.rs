@@ -169,22 +169,12 @@ impl Command {
             std::env::current_dir().expect("failed to get current dir")
         };
         self.program = which::which_in(self.program.as_os_str(), path_env, &cwd)
-            .map_err(|err| {
-                tracing::error!(
-                    "failed to resolve program {:?} with PATH={:?} under cwd({:?}): {}. Metadata of program: {:?}",
-                    self.program,
-                    path_env,
-                    cwd,
-                    err,
-                    std::fs::metadata(&self.program)
-                );
-                SpawnError::WhichError {
+            .map_err(|err| SpawnError::WhichError {
                 program: self.program.clone(),
                 path: path_env.map(OsStr::to_owned),
                 cwd,
                 cause: err,
-            }
-    })?
+            })?
             .into_os_string();
         Ok(())
     }
