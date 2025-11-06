@@ -7,6 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
     future::Future,
+    iter::once,
     sync::Arc,
 };
 
@@ -170,10 +171,23 @@ impl ResolvedTask {
         fingerprint_ignores: Option<Vec<Str>>,
     ) -> Result<Self, Error> {
         let ResolveCommandResult { bin_path, envs } = command_result;
+        // pnpm/npm/yarn doesn't contains separator in the bin path
+        // JavaScript entry like node_modules/oxc/bin/oxlint does have separator
+        #[cfg(unix)]
+        let is_node_command = bin_path.contains('/');
+        #[cfg(windows)]
+        let is_node_command = bin_path.contains('\\');
+
+        let args_str = args.clone().map(|arg| arg.as_ref().into());
+
         let builtin_task = TaskCommand::Parsed(TaskParsedCommand {
-            args: args.clone().map(|arg| arg.as_ref().into()).collect(),
+            args: if is_node_command {
+                once(bin_path.as_str().into()).chain(args_str).collect()
+            } else {
+                args_str.collect()
+            },
             envs: envs.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
-            program: bin_path.into(),
+            program: if is_node_command { "node".into() } else { bin_path.into() },
         });
         let mut task_config: TaskConfig = builtin_task.clone().into();
         task_config.set_fingerprint_ignores(fingerprint_ignores.clone());
