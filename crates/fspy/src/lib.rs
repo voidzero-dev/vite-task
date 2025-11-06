@@ -20,20 +20,38 @@ mod os_impl;
 mod arena;
 mod command;
 
-use std::{env::temp_dir, ffi::OsStr, fs::create_dir, io, sync::OnceLock};
+use std::{env::temp_dir, ffi::OsStr, fs::create_dir, io, process::ExitStatus, sync::OnceLock};
 
 pub use command::Command;
 pub use fspy_shared::ipc::{AccessMode, PathAccess};
 use futures_util::future::BoxFuture;
 pub use os_impl::PathAccessIterable;
 use os_impl::SpyInner;
-use tokio::process::Child;
+use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
+
+/// The result of a tracked child process upon its termination.
+pub struct ChildTermination {
+    /// The exit status of the child process.
+    pub status: ExitStatus,
+    /// The path accesses captured from the child process.
+    pub path_accesses: PathAccessIterable,
+}
 
 pub struct TrackedChild {
-    pub tokio_child: Child,
-    /// This future lazily locks the IPC channel when it's polled.
-    /// Do not `await` it until the child process has exited.
-    pub accesses_future: BoxFuture<'static, io::Result<PathAccessIterable>>,
+    /// The handle for writing to the child's standard input (stdin), if it has
+    /// been captured.
+    pub stdin: Option<ChildStdin>,
+
+    /// The handle for reading from the child's standard output (stdout), if it
+    /// has been captured.
+    pub stdout: Option<ChildStdout>,
+
+    /// The handle for reading from the child's standard error (stderr), if it
+    /// has been captured.
+    pub stderr: Option<ChildStderr>,
+
+    /// The future that resolves to exit status and path accesses when the process exits.
+    pub wait_handle: BoxFuture<'static, io::Result<ChildTermination>>,
 }
 
 pub struct Spy(SpyInner);

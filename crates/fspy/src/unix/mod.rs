@@ -22,7 +22,7 @@ use syscall_handler::SyscallHandler;
 use tokio::task::spawn_blocking;
 
 use crate::{
-    Command, TrackedChild,
+    ChildTermination, Command, TrackedChild,
     arena::PathAccessArena,
     error::SpawnError,
     ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
@@ -131,26 +131,33 @@ pub(crate) async fn spawn_impl(mut command: Command) -> Result<TrackedChild, Spa
     // tokio_command.spawn blocks while executing the `pre_exec` closure.
     // Run it inside spawn_blocking to avoid blocking the tokio runtime, especially the supervisor loop,
     // which needs to accept incoming connections while `pre_exec` is connecting to it.
-    let child = spawn_blocking(move || tokio_command.spawn())
+    let mut child = spawn_blocking(move || tokio_command.spawn())
         .await
         .map_err(|err| SpawnError::OsSpawnError(err.into()))?
         .map_err(SpawnError::OsSpawnError)?;
 
-    let arenas_future = async move {
-        let arenas = std::iter::once(exec_resolve_accesses);
-        #[cfg(target_os = "linux")]
-        let arenas =
-            arenas.chain(supervisor.stop().await?.into_iter().map(|handler| handler.into_arena()));
-        io::Result::Ok(arenas.collect::<Vec<_>>())
-    };
+    Ok(TrackedChild {
+        stdin: child.stdin.take(),
+        stdout: child.stdout.take(),
+        stderr: child.stderr.take(),
+        wait_handle: tokio::spawn(async move {
+            let status = child.wait().await?;
 
-    let accesses_future = async move {
-        let arenas = arenas_future.await?;
-        // `receiver.lock()` blocks. Run it inside `spawn_blocking` to avoid blocking the tokio runtime.
-        let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
-        Ok(PathAccessIterable { arenas, ipc_receiver_lock_guard })
-    }
-    .boxed();
+            let arenas = std::iter::once(exec_resolve_accesses);
+            // Stop the supervisor and collect path accesses from it.
+            #[cfg(target_os = "linux")]
+            let arenas = arenas
+                .chain(supervisor.stop().await?.into_iter().map(|handler| handler.into_arena()));
+            let arenas = arenas.collect::<Vec<_>>();
 
-    Ok(TrackedChild { tokio_child: child, accesses_future })
+            // Lock the ipc channel after the child has exited.
+            // We are not interested in path accesses from decendants after the main child has exited.
+            let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
+            let path_accesses = PathAccessIterable { arenas, ipc_receiver_lock_guard };
+
+            io::Result::Ok(ChildTermination { status, path_accesses })
+        })
+        .map(|f| io::Result::Ok(f??)) // flatten JoinError and io::Result
+        .boxed(),
+    })
 }
