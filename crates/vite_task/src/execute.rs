@@ -75,6 +75,7 @@ async fn collect_std_outputs(
         }
         let content = &buf[..n];
         parent_output_handle.write_all(content).await?;
+        parent_output_handle.flush().await?;
         let mut outputs = outputs.lock().unwrap();
         if let Some(last) = outputs.last_mut()
             && last.kind == kind
