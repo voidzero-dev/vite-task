@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf, StripPrefixError};
 
-use fspy::{AccessMode, PathAccessIterable, TrackedChild};
+use fspy::{AccessMode, PathAccessIterable};
 
 #[track_caller]
 pub fn assert_contains(
@@ -55,10 +55,7 @@ macro_rules! track_child {
 pub async fn _spawn_with_id(id: &str) -> anyhow::Result<PathAccessIterable> {
     let mut command = fspy::Spy::global()?.new_command(::std::env::current_exe()?);
     command.arg(id);
-    let TrackedChild { mut tokio_child, accesses_future } = command.spawn().await?;
-
-    let status = tokio_child.wait().await?;
-    let accesses = accesses_future.await?;
-    assert!(status.success());
-    Ok(accesses)
+    let termination = command.spawn().await?.wait_handle.await?;
+    assert!(termination.status.success());
+    Ok(termination.path_accesses)
 }

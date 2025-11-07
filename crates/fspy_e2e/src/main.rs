@@ -9,6 +9,7 @@ use std::{
 
 use fspy::{AccessMode, PathAccess};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncReadExt;
 
 #[derive(Serialize, Deserialize)]
 struct Config {
@@ -86,25 +87,30 @@ async fn main() {
             .stderr(Stdio::piped())
             .current_dir(&dir);
 
-        let tracked_child = cmd.spawn().await.unwrap();
+        let mut tracked_child = cmd.spawn().await.unwrap();
 
-        let output = tracked_child.tokio_child.wait_with_output().await.unwrap();
-        let accesses = tracked_child.accesses_future.await.unwrap();
+        let mut stdout_bytes = Vec::<u8>::new();
+        tracked_child.stdout.take().unwrap().read_to_end(&mut stdout_bytes).await.unwrap();
 
-        if !output.status.success() {
+        let mut stderr_bytes = Vec::<u8>::new();
+        tracked_child.stderr.take().unwrap().read_to_end(&mut stderr_bytes).await.unwrap();
+
+        let termination = tracked_child.wait_handle.await.unwrap();
+
+        if !termination.status.success() {
             eprintln!("----- stdout begin -----");
-            stderr().write_all(&output.stdout).unwrap();
+            stderr().write_all(&stdout_bytes).unwrap();
             eprintln!("----- stdout end -----");
             eprintln!("----- stderr begin-----");
-            stderr().write_all(&output.stderr).unwrap();
+            stderr().write_all(&stderr_bytes).unwrap();
             eprintln!("----- stderr end -----");
 
-            eprintln!("Case `{}` failed with status: {}", name, output.status);
+            eprintln!("Case `{}` failed with status: {}", name, termination.status);
             process::exit(1);
         }
 
         let mut collector = AccessCollector::new(dir);
-        for access in accesses.iter() {
+        for access in termination.path_accesses.iter() {
             collector.add(access);
         }
         let snap_file = File::create(manifest_dir.join(format!("snaps/{name}.txt"))).unwrap();

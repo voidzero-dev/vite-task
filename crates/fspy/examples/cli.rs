@@ -1,6 +1,6 @@
 use std::{env::args_os, ffi::OsStr, path::PathBuf, pin::Pin};
 
-use fspy::{AccessMode, TrackedChild};
+use fspy::AccessMode;
 use tokio::{
     fs::File,
     io::{AsyncWrite, stdout},
@@ -21,11 +21,8 @@ async fn main() -> anyhow::Result<()> {
     let mut command = spy.new_command(program);
     command.envs(std::env::vars_os()).args(args);
 
-    let TrackedChild { mut tokio_child, accesses_future } = command.spawn().await?;
-
-    let output = tokio_child.wait().await?;
-
-    let accesses = accesses_future.await?;
+    let child = command.spawn().await?;
+    let termination = child.wait_handle.await?;
 
     let mut path_count = 0usize;
     let out_file: Pin<Box<dyn AsyncWrite>> =
@@ -33,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut csv_writer = csv_async::AsyncWriter::from_writer(out_file);
 
-    for acc in accesses.iter() {
+    for acc in termination.path_accesses.iter() {
         path_count += 1;
         csv_writer
             .write_record(&[
@@ -49,6 +46,6 @@ async fn main() -> anyhow::Result<()> {
     }
     csv_writer.flush().await?;
 
-    eprintln!("\nfspy: {path_count} paths accessed. {output}");
+    eprintln!("\nfspy: {path_count} paths accessed. status: {}", termination.status);
     Ok(())
 }

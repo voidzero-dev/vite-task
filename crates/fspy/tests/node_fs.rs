@@ -2,7 +2,7 @@ mod test_utils;
 
 use std::env::{current_dir, vars_os};
 
-use fspy::{AccessMode, PathAccessIterable, TrackedChild};
+use fspy::{AccessMode, PathAccessIterable};
 use test_utils::assert_contains;
 
 async fn track_node_script(script: &str) -> anyhow::Result<PathAccessIterable> {
@@ -11,11 +11,10 @@ async fn track_node_script(script: &str) -> anyhow::Result<PathAccessIterable> {
         .arg("-e")
         .envs(vars_os()) // https://github.com/jdx/mise/discussions/5968
         .arg(script);
-    let TrackedChild { mut tokio_child, accesses_future } = command.spawn().await?;
-    let status = tokio_child.wait().await?;
-    let accesses = accesses_future.await?;
-    assert!(status.success());
-    Ok(accesses)
+    let child = command.spawn().await?;
+    let termination = child.wait_handle.await?;
+    assert!(termination.status.success());
+    Ok(termination.path_accesses)
 }
 
 #[tokio::test]

@@ -9,7 +9,7 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
-use fspy::{AccessMode, Spy, TrackedChild};
+use fspy::{AccessMode, Spy};
 use futures_util::future::try_join3;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -402,74 +402,68 @@ pub async fn execute_task(
     cmd.current_dir(base_dir.join(&resolved_command.fingerprint.cwd))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let TrackedChild { tokio_child: mut child, accesses_future } = cmd.spawn().await?;
+    let mut child = cmd.spawn().await?;
 
     let child_stdout = child.stdout.take().unwrap();
     let child_stderr = child.stderr.take().unwrap();
 
     let outputs = Mutex::new(Vec::<StdOutput>::new());
 
-    let path_accesses_fut = async move {
-        let path_accesses = accesses_future.await?;
-        let mut path_reads = HashMap::<RelativePathBuf, PathRead>::new();
-        let mut path_writes = HashMap::<RelativePathBuf, PathWrite>::new();
-        for access in path_accesses.iter() {
-            let relative_path = access
-                .path
-                .strip_path_prefix(base_dir, |strip_result| {
-                    let Ok(stripped_path) = strip_result else {
-                        return None;
-                    };
-                    Some(RelativePathBuf::new(stripped_path).map_err(|err| {
-                        Error::InvalidRelativePath { path: stripped_path.into(), reason: err }
-                    }))
-                })
-                .transpose()?;
-
-            let Some(relative_path) = relative_path else {
-                // ignore accesses outside the workspace
-                continue;
-            };
-            if relative_path.as_path().strip_prefix(".git").is_ok() {
-                // temp workaround for oxlint reading inside .git
-                continue;
-            }
-            match access.mode {
-                AccessMode::Read => {
-                    path_reads.entry(relative_path).or_insert(PathRead { read_dir_entries: false });
-                }
-                AccessMode::Write => {
-                    path_writes.insert(relative_path, PathWrite);
-                }
-                AccessMode::ReadWrite => {
-                    path_reads
-                        .entry(relative_path.clone())
-                        .or_insert(PathRead { read_dir_entries: false });
-                    path_writes.insert(relative_path, PathWrite);
-                }
-                AccessMode::ReadDir => match path_reads.entry(relative_path) {
-                    Entry::Occupied(mut occupied) => occupied.get_mut().read_dir_entries = true,
-                    Entry::Vacant(vacant) => {
-                        vacant.insert(PathRead { read_dir_entries: true });
-                    }
-                },
-            }
-        }
-        Ok::<_, Error>((path_reads, path_writes))
-    };
-
-    let ((), (), (exit_status, duration)) = try_join3(
+    let ((), (), (termination, duration)) = try_join3(
         collect_std_outputs(&outputs, child_stdout, OutputKind::StdOut),
         collect_std_outputs(&outputs, child_stderr, OutputKind::StdErr),
         async move {
             let start = Instant::now();
-            let exit_status = child.wait().await?;
+            let exit_status = child.wait_handle.await?;
             Ok((exit_status, start.elapsed()))
         },
     )
     .await?;
 
-    let (path_reads, path_writes) = path_accesses_fut.await?;
+    let mut path_reads = HashMap::<RelativePathBuf, PathRead>::new();
+    let mut path_writes = HashMap::<RelativePathBuf, PathWrite>::new();
+    for access in termination.path_accesses.iter() {
+        let relative_path = access
+            .path
+            .strip_path_prefix(base_dir, |strip_result| {
+                let Ok(stripped_path) = strip_result else {
+                    return None;
+                };
+                Some(RelativePathBuf::new(stripped_path).map_err(|err| {
+                    Error::InvalidRelativePath { path: stripped_path.into(), reason: err }
+                }))
+            })
+            .transpose()?;
+
+        let Some(relative_path) = relative_path else {
+            // ignore accesses outside the workspace
+            continue;
+        };
+        if relative_path.as_path().strip_prefix(".git").is_ok() {
+            // temp workaround for oxlint reading inside .git
+            continue;
+        }
+        match access.mode {
+            AccessMode::Read => {
+                path_reads.entry(relative_path).or_insert(PathRead { read_dir_entries: false });
+            }
+            AccessMode::Write => {
+                path_writes.insert(relative_path, PathWrite);
+            }
+            AccessMode::ReadWrite => {
+                path_reads
+                    .entry(relative_path.clone())
+                    .or_insert(PathRead { read_dir_entries: false });
+                path_writes.insert(relative_path, PathWrite);
+            }
+            AccessMode::ReadDir => match path_reads.entry(relative_path) {
+                Entry::Occupied(mut occupied) => occupied.get_mut().read_dir_entries = true,
+                Entry::Vacant(vacant) => {
+                    vacant.insert(PathRead { read_dir_entries: true });
+                }
+            },
+        }
+    }
 
     let outputs = outputs.into_inner().unwrap();
     tracing::debug!(
@@ -477,12 +471,18 @@ pub async fn execute_task(
         path_reads.len(),
         path_writes.len(),
         outputs.len(),
-        exit_status
+        termination.status,
     );
 
     // let input_paths = gather_inputs(task, base_dir)?;
 
-    Ok(ExecutedTask { std_outputs: outputs.into(), exit_status, path_reads, path_writes, duration })
+    Ok(ExecutedTask {
+        std_outputs: outputs.into(),
+        exit_status: termination.status,
+        path_reads,
+        path_writes,
+        duration,
+    })
 }
 
 #[expect(dead_code)]

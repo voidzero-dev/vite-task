@@ -140,6 +140,8 @@ pub(crate) async fn spawn_impl(mut command: Command) -> Result<TrackedChild, Spa
         stdin: child.stdin.take(),
         stdout: child.stdout.take(),
         stderr: child.stderr.take(),
+        // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
+        // because we need to stop the supervisor and lock the channel as soon as the child exits.
         wait_handle: tokio::spawn(async move {
             let status = child.wait().await?;
 
