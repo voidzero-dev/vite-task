@@ -22,6 +22,7 @@ pub use workspace::*;
 
 use crate::{
     Error,
+    cmd::TaskParsedCommand,
     collections::{HashMap, HashSet},
     config::name::TaskName,
     execute::TaskEnvs,
@@ -169,11 +170,10 @@ impl ResolvedTask {
         fingerprint_ignores: Option<Vec<Str>>,
     ) -> Result<Self, Error> {
         let ResolveCommandResult { bin_path, envs } = command_result;
-        // Create parsed command for built-in tasks (for performance)
-        let builtin_task = TaskCommand::Parsed(crate::cmd::TaskParsedCommand {
+        let builtin_task = TaskCommand::Parsed(TaskParsedCommand {
+            args: args.clone().map(|arg| arg.as_ref().into()).collect(),
             envs: envs.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
             program: bin_path.into(),
-            args: args.clone().map(|arg| arg.as_ref().into()).collect(),
         });
         let mut task_config: TaskConfig = builtin_task.clone().into();
         task_config.set_fingerprint_ignores(fingerprint_ignores.clone());
