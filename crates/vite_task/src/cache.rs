@@ -107,18 +107,16 @@ impl TaskCache {
                         "CREATE TABLE taskrun_to_command (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    // Bump to version 3 to invalidate cache entries due to a change in the serialized cache key content
-                    // (addition of the `fingerprint_ignores` field). No schema change was made.
-                    conn.execute("PRAGMA user_version = 3", ())?;
+                    conn.execute("PRAGMA user_version = 4", ())?;
                 }
-                1..=2 => {
+                1..=3 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                3 => break, // current version
-                4.. => return Err(Error::UnrecognizedDbVersion(user_version)),
+                4 => break, // current version
+                5.. => return Err(Error::UnrecognizedDbVersion(user_version)),
             }
         }
         Ok(Self { conn: Mutex::new(conn), path: cache_path })
