@@ -125,7 +125,6 @@ mod tests {
     use vite_str::Str;
 
     use crate::{
-        cmd::TaskParsedCommand,
         collections::HashSet,
         config::{CommandFingerprint, ResolvedTaskConfig, TaskCommand, TaskConfig},
     };
@@ -134,21 +133,12 @@ mod tests {
     fn test_command_fingerprint_stable_with_multiple_envs() {
         use bincode::{decode_from_slice, encode_to_vec};
 
-        // Test that CommandFingerprint with TaskCommand::Parsed maintains stable ordering
-        let parsed_cmd = TaskParsedCommand {
-            envs: [
-                ("VAR_Z".into(), "value_z".into()),
-                ("VAR_A".into(), "value_a".into()),
-                ("VAR_M".into(), "value_m".into()),
-            ]
-            .into(),
-            program: "test".into(),
-            args: vec!["arg1".into(), "arg2".into()],
-        };
+        // Test that CommandFingerprint with TaskCommand maintains stable ordering
+        let cmd_str = "VAR_A=value_a VAR_M=value_m VAR_Z=value_z test arg1 arg2";
 
         let fingerprint1 = CommandFingerprint {
             cwd: RelativePathBuf::default(),
-            command: TaskCommand::Parsed(parsed_cmd.clone()),
+            command: TaskCommand::ShellScript(cmd_str.into()),
             envs_without_pass_through: [
                 ("ENV_C".into(), "c".into()),
                 ("ENV_A".into(), "a".into()),
@@ -162,7 +152,7 @@ mod tests {
 
         let fingerprint2 = CommandFingerprint {
             cwd: RelativePathBuf::default(),
-            command: TaskCommand::Parsed(parsed_cmd),
+            command: TaskCommand::ShellScript(cmd_str.into()),
             envs_without_pass_through: [
                 ("ENV_A".into(), "a".into()),
                 ("ENV_B".into(), "b".into()),
@@ -182,7 +172,6 @@ mod tests {
 
         // Since we're using sorted iteration in TaskEnvs::resolve,
         // the HashMap content should be the same regardless of insertion order
-        // and the TaskParsedCommand uses BTreeMap which maintains order
 
         // Decode and compare
         let (decoded1, _): (CommandFingerprint, _) = decode_from_slice(&bytes1, config).unwrap();
@@ -205,20 +194,12 @@ mod tests {
         // multiple times across different program runs
 
         for _ in 0..5 {
-            let parsed_cmd = TaskParsedCommand {
-                envs: [
-                    ("BUILD_ENV".into(), "production".into()),
-                    ("API_VERSION".into(), "v2".into()),
-                    ("CACHE_DIR".into(), "/tmp/cache".into()),
-                ]
-                .into(),
-                program: "build".into(),
-                args: vec!["--optimize".into()],
-            };
+            let cmd_str =
+                "API_VERSION=v2 BUILD_ENV=production CACHE_DIR=/tmp/cache build --optimize";
 
             let fingerprint = CommandFingerprint {
                 cwd: RelativePathBuf::default(),
-                command: TaskCommand::Parsed(parsed_cmd),
+                command: TaskCommand::ShellScript(cmd_str.into()),
                 envs_without_pass_through: [
                     ("NODE_ENV".into(), "production".into()),
                     ("DEBUG".into(), "false".into()),
@@ -279,30 +260,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parsed_command_env_iteration_order() {
-        // Verify that iteration order is consistent for BTreeMap
-        let cmd = TaskParsedCommand {
-            envs: [
-                ("Z_VAR".into(), "z".into()),
-                ("A_VAR".into(), "a".into()),
-                ("M_VAR".into(), "m".into()),
-            ]
-            .into(),
-            program: "test".into(),
-            args: vec![],
-        };
+    fn test_command_string_stability() {
+        // Verify that command strings remain stable across serialization
+        let cmd = TaskCommand::ShellScript("A_VAR=a M_VAR=m Z_VAR=z test".into());
 
-        // Collect keys multiple times
-        let keys1: Vec<_> = cmd.envs.keys().cloned().collect();
-        let keys2: Vec<_> = cmd.envs.keys().cloned().collect();
-        let keys3: Vec<_> = cmd.envs.keys().cloned().collect();
+        // Serialize multiple times
+        let str1 = cmd.to_string();
+        let str2 = cmd.to_string();
+        let str3 = cmd.to_string();
 
-        // All should be in the same (sorted) order
-        assert_eq!(keys1, keys2);
-        assert_eq!(keys2, keys3);
-
-        // Verify alphabetical order
-        assert_eq!(keys1, vec![Str::from("A_VAR"), Str::from("M_VAR"), Str::from("Z_VAR"),]);
+        // All should be identical
+        assert_eq!(str1, str2);
+        assert_eq!(str2, str3);
+        assert_eq!(str1, "A_VAR=a M_VAR=m Z_VAR=z test");
     }
 
     // Tests for PostRunFingerprint::create with fingerprint_ignores
@@ -681,15 +651,11 @@ mod tests {
         use bincode::encode_to_vec;
 
         // Test that CommandFingerprint includes fingerprint_ignores
-        let parsed_cmd = TaskParsedCommand {
-            envs: [].into(),
-            program: "pnpm".into(),
-            args: vec!["install".into()],
-        };
+        let cmd_str = "pnpm install";
 
         let fingerprint_with_ignores = CommandFingerprint {
             cwd: RelativePathBuf::default(),
-            command: TaskCommand::Parsed(parsed_cmd.clone()),
+            command: TaskCommand::ShellScript(cmd_str.into()),
             envs_without_pass_through: Default::default(),
             pass_through_envs: Default::default(),
             fingerprint_ignores: Some(vec![
@@ -700,7 +666,7 @@ mod tests {
 
         let fingerprint_without_ignores = CommandFingerprint {
             cwd: RelativePathBuf::default(),
-            command: TaskCommand::Parsed(parsed_cmd),
+            command: TaskCommand::ShellScript(cmd_str.into()),
             envs_without_pass_through: Default::default(),
             pass_through_envs: Default::default(),
             fingerprint_ignores: None,
@@ -726,12 +692,11 @@ mod tests {
         use bincode::encode_to_vec;
 
         // Test that the order of fingerprint_ignores patterns matters
-        let parsed_cmd =
-            TaskParsedCommand { envs: [].into(), program: "build".into(), args: vec![] };
+        let cmd_str = "build";
 
         let fingerprint1 = CommandFingerprint {
             cwd: RelativePathBuf::default(),
-            command: TaskCommand::Parsed(parsed_cmd.clone()),
+            command: TaskCommand::ShellScript(cmd_str.into()),
             envs_without_pass_through: Default::default(),
             pass_through_envs: Default::default(),
             fingerprint_ignores: Some(vec![Str::from("dist/**/*"), Str::from("!dist/public/**")]),
@@ -739,7 +704,7 @@ mod tests {
 
         let fingerprint2 = CommandFingerprint {
             cwd: RelativePathBuf::default(),
-            command: TaskCommand::Parsed(parsed_cmd),
+            command: TaskCommand::ShellScript(cmd_str.into()),
             envs_without_pass_through: Default::default(),
             pass_through_envs: Default::default(),
             fingerprint_ignores: Some(vec![Str::from("!dist/public/**"), Str::from("dist/**/*")]),

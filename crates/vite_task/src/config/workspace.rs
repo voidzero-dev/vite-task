@@ -19,7 +19,6 @@ use super::{
 use crate::{
     Error,
     cache::TaskCache,
-    cmd::try_parse_as_and_list,
     collections::{HashMap, HashSet},
     config::{DisplayOptions, TaskGroupId, name::TaskName},
     fs::CachedFileSystem,
@@ -486,35 +485,43 @@ impl Workspace {
             for (script_name, script) in &package_info.package_json.scripts {
                 let script_name = script_name.as_str();
 
-                if let Some(and_list) = try_parse_as_and_list(script) {
-                    let and_list_len = and_list.len();
-                    for (index, command) in and_list.into_iter().enumerate() {
-                        let is_last = index + 1 == and_list_len;
+                // Try to split the script by && to create multiple subtasks
+                match vite_shell::split_by_and(script) {
+                    Ok(and_list) if and_list.len() > 1 => {
+                        let and_list_len = and_list.len();
+                        for (index, command) in and_list.into_iter().enumerate() {
+                            let is_last = index + 1 == and_list_len;
 
+                            let resolved_task = Self::resolve_task(
+                                TaskCommand::ShellScript(command.into()),
+                                package_info,
+                                script_name.into(),
+                                if is_last { None } else { Some(index) },
+                                base_dir,
+                            )?;
+                            let task_id = resolved_task.id();
+                            let deps = if let Some(dep_index) = index.checked_sub(1) {
+                                HashSet::from([TaskId {
+                                    subcommand_index: Some(dep_index),
+                                    ..task_id
+                                }])
+                            } else {
+                                HashSet::default()
+                            };
+                            task_graph_builder.add_task_with_deps(resolved_task, deps)?;
+                        }
+                    }
+                    _ => {
+                        // Either split failed or resulted in a single command, use as-is
                         let resolved_task = Self::resolve_task(
-                            TaskCommand::Parsed(command),
+                            TaskCommand::ShellScript(script.as_str().into()),
                             package_info,
                             script_name.into(),
-                            if is_last { None } else { Some(index) },
+                            None,
                             base_dir,
                         )?;
-                        let task_id = resolved_task.id();
-                        let deps = if let Some(dep_index) = index.checked_sub(1) {
-                            HashSet::from([TaskId { subcommand_index: Some(dep_index), ..task_id }])
-                        } else {
-                            HashSet::default()
-                        };
-                        task_graph_builder.add_task_with_deps(resolved_task, deps)?;
+                        task_graph_builder.add_task_with_deps(resolved_task, HashSet::default())?;
                     }
-                } else {
-                    let resolved_task = Self::resolve_task(
-                        TaskCommand::ShellScript(script.as_str().into()),
-                        package_info,
-                        script_name.into(),
-                        None,
-                        base_dir,
-                    )?;
-                    task_graph_builder.add_task_with_deps(resolved_task, HashSet::default())?;
                 }
             }
         }

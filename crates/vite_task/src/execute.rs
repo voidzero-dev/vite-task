@@ -347,12 +347,12 @@ pub async fn execute_task(
             cmd.envs(&resolved_command.all_envs);
             cmd
         }
-        TaskCommand::Parsed(task_parsed_command) => {
+        TaskCommand::Parsed(parsed_command) => {
             if resolved_command.fingerprint.command.need_skip_cache() {
-                let mut child = tokio::process::Command::new(&task_parsed_command.program)
-                    .args(&task_parsed_command.args)
+                let mut child = tokio::process::Command::new(&parsed_command.program)
+                    .args(&parsed_command.args)
                     .envs(&resolved_command.all_envs)
-                    .envs(&task_parsed_command.envs)
+                    .envs(&parsed_command.envs)
                     .env(
                         "VITE_OUTER_COMMAND",
                         if resolved_command.fingerprint.command.has_inner_runner() {
@@ -391,10 +391,10 @@ pub async fn execute_task(
                     duration,
                 });
             }
-            let mut cmd = spy.new_command(&task_parsed_command.program);
-            cmd.args(&task_parsed_command.args);
+            let mut cmd = spy.new_command(&parsed_command.program);
+            cmd.args(&parsed_command.args);
             cmd.envs(&resolved_command.all_envs);
-            cmd.envs(&task_parsed_command.envs);
+            cmd.envs(&parsed_command.envs);
             cmd
         }
     };

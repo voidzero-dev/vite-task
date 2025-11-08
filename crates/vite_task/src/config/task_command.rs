@@ -20,8 +20,8 @@ pub enum TaskCommand {
 impl Display for TaskCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ShellScript(command) => Display::fmt(&command, f),
-            Self::Parsed(parsed_command) => Display::fmt(&parsed_command, f),
+            Self::ShellScript(script) => Display::fmt(script, f),
+            Self::Parsed(parsed) => Display::fmt(parsed, f),
         }
     }
 }
@@ -42,21 +42,41 @@ impl From<TaskCommand> for TaskConfig {
 
 impl TaskCommand {
     pub fn need_skip_cache(&self) -> bool {
-        matches!(self, Self::Parsed(parsed_command) if parsed_command.program == "vite" || (parsed_command.program.ends_with("vite.js") && parsed_command.args.first() == Some(&("dev".into()))))
+        match self {
+            Self::Parsed(parsed) => {
+                parsed.program == "vite"
+                    || (parsed.program.ends_with("vite.js")
+                        && parsed.args.first() == Some(&("dev".into())))
+            }
+            Self::ShellScript(script) => {
+                let cmd = script.trim();
+                cmd.starts_with("vite dev") || cmd.starts_with("vite.js dev")
+            }
+        }
     }
 
     // Whether the command starts a inner runner.
     pub fn has_inner_runner(&self) -> bool {
-        let Self::Parsed(parsed_command) = self else {
-            return false;
-        };
-        if parsed_command.program != "vite" {
-            return false;
+        match self {
+            Self::Parsed(parsed) => {
+                if parsed.program != "vite" {
+                    return false;
+                }
+                let Some(subcommand) = parsed.args.first() else {
+                    return false;
+                };
+                matches!(subcommand.as_str(), "run" | "lint" | "fmt" | "build" | "test" | "lib")
+            }
+            Self::ShellScript(script) => {
+                let cmd = script.trim();
+                if !cmd.starts_with("vite ") {
+                    return false;
+                }
+                let rest = &cmd[5..]; // Skip "vite "
+                let subcommand = rest.split_whitespace().next().unwrap_or("");
+                matches!(subcommand, "run" | "lint" | "fmt" | "build" | "test" | "lib")
+            }
         }
-        let Some(subcommand) = parsed_command.args.first() else {
-            return false;
-        };
-        matches!(subcommand.as_str(), "run" | "lint" | "fmt" | "build" | "test" | "lib")
     }
 }
 
@@ -78,9 +98,9 @@ impl ResolvedTaskConfig {
             self.config.command.clone()
         } else {
             match &self.config.command {
-                TaskCommand::ShellScript(command_script) => {
+                TaskCommand::ShellScript(script) => {
                     let command_script =
-                        std::iter::once(command_script.clone())
+                        std::iter::once(script.clone())
                             .chain(task_args.iter().map(|arg| {
                                 shell_escape::escape(arg.as_str().into()).as_ref().into()
                             }))
@@ -89,10 +109,10 @@ impl ResolvedTaskConfig {
                             .into();
                     TaskCommand::ShellScript(command_script)
                 }
-                TaskCommand::Parsed(parsed_command) => {
-                    let mut parsed_command = parsed_command.clone();
-                    parsed_command.args.extend_from_slice(task_args);
-                    TaskCommand::Parsed(parsed_command)
+                TaskCommand::Parsed(parsed) => {
+                    let mut parsed = parsed.clone();
+                    parsed.args.extend_from_slice(task_args);
+                    TaskCommand::Parsed(parsed)
                 }
             }
         };
