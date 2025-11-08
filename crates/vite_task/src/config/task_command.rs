@@ -42,21 +42,46 @@ impl From<TaskCommand> for TaskConfig {
 
 impl TaskCommand {
     pub fn need_skip_cache(&self) -> bool {
-        matches!(self, Self::Parsed(parsed_command) if parsed_command.program == "vite" || (parsed_command.program.ends_with("vite.js") && parsed_command.args.first() == Some(&("dev".into()))))
+        match self {
+            Self::Parsed(parsed_command) => {
+                parsed_command.program == "vite"
+                    || (parsed_command.program.ends_with("vite.js")
+                        && parsed_command.args.first() == Some(&("dev".into())))
+            }
+            Self::ShellScript(script) => {
+                let parts: Vec<&str> = script.split_whitespace().collect();
+                if parts.is_empty() {
+                    return false;
+                }
+                let program = parts[0];
+                program == "vite" || (program.ends_with("vite.js") && parts.get(1) == Some(&"dev"))
+            }
+        }
     }
 
     // Whether the command starts a inner runner.
     pub fn has_inner_runner(&self) -> bool {
-        let Self::Parsed(parsed_command) = self else {
-            return false;
-        };
-        if parsed_command.program != "vite" {
-            return false;
+        match self {
+            Self::Parsed(parsed_command) => {
+                if parsed_command.program != "vite" {
+                    return false;
+                }
+                let Some(subcommand) = parsed_command.args.first() else {
+                    return false;
+                };
+                matches!(subcommand.as_str(), "run" | "lint" | "fmt" | "build" | "test" | "lib")
+            }
+            Self::ShellScript(script) => {
+                let parts: Vec<&str> = script.split_whitespace().collect();
+                if parts.len() < 2 {
+                    return false;
+                }
+                let program = parts[0];
+                let subcommand = parts[1];
+                program == "vite"
+                    && matches!(subcommand, "run" | "lint" | "fmt" | "build" | "test" | "lib")
+            }
         }
-        let Some(subcommand) = parsed_command.args.first() else {
-            return false;
-        };
-        matches!(subcommand.as_str(), "run" | "lint" | "fmt" | "build" | "test" | "lib")
     }
 }
 
