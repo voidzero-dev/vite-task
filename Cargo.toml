@@ -125,8 +125,14 @@ winsafe = { version = "0.0.24", features = ["kernel"] }
 xxhash-rust = { version = "0.8.15", features = ["const_xxh3"] }
 
 [workspace.metadata.cargo-shear]
-# These are artifact dependencies. They are not directly `use`d in Rust code.
-ignored = ["fspy_preload_unix", "fspy_preload_windows", "fspy_test_bin"]
+ignored = [
+  # These are artifact dependencies. They are not directly `use`d in Rust code.
+  "fspy_preload_unix",
+  "fspy_preload_windows",
+  "fspy_test_bin",
+  # used in a macro in crates/fspy_test_utils/src/lib.rs
+  "ctor",
+]
 
 [profile.dev]
 # Disabling debug info speeds up local and CI builds,

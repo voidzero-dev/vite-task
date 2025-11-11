@@ -18,7 +18,7 @@ macro_rules! command_executing {
         assert_arg_type(&$arg, $f);
 
         // Register an initializer that runs the provided function when the process is started
-        #[ctor::ctor]
+        #[::ctor::ctor]
         unsafe fn init() {
             $crate::init_impl(ID, $f);
         }

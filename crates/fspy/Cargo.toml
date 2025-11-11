@@ -45,6 +45,7 @@ tempfile = { workspace = true }
 [dev-dependencies]
 anyhow = { workspace = true }
 csv-async = { workspace = true }
+ctor = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "io-std"] }
 
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dev-dependencies]
