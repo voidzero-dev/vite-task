@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf, StripPrefixError};
 
 use fspy::{AccessMode, PathAccessIterable};
+#[doc(hidden)]
+#[allow(unused)]
+pub use fspy_test_utils::command_executing;
 
 #[track_caller]
 pub fn assert_contains(
@@ -32,29 +35,19 @@ pub fn assert_contains(
 #[macro_export]
 macro_rules! track_child {
     ($body: block) => {{
-        const ID: &str =
-            ::core::concat!(::core::file!(), ":", ::core::line!(), ":", ::core::column!());
-        #[ctor::ctor]
-        unsafe fn init() {
-            let mut args = ::std::env::args();
-            let Some(_) = args.next() else {
-                return;
-            };
-            let Some(current_id) = args.next() else {
-                return;
-            };
-            if current_id == ID {
-                $body;
-                ::std::process::exit(0);
-            }
-        }
-        $crate::test_utils::_spawn_with_id(ID)
+        let std_cmd = $crate::test_utils::command_executing!((), |(): ()| {
+            let _ = $body;
+        });
+        $crate::test_utils::spawn_std(std_cmd)
     }};
 }
 
-pub async fn _spawn_with_id(id: &str) -> anyhow::Result<PathAccessIterable> {
-    let mut command = fspy::Command::new(::std::env::current_exe()?);
-    command.arg(id);
+#[doc(hidden)]
+#[allow(unused)]
+pub async fn spawn_std(std_cmd: std::process::Command) -> anyhow::Result<PathAccessIterable> {
+    let mut command = fspy::Command::new(std_cmd.get_program());
+    command.args(std_cmd.get_args());
+
     let termination = command.spawn().await?.wait_handle.await?;
     assert!(termination.status.success());
     Ok(termination.path_accesses)

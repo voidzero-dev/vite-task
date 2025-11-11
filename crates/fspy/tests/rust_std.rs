@@ -13,7 +13,7 @@ use test_utils::assert_contains;
 #[tokio::test]
 async fn open_read() -> anyhow::Result<()> {
     let accesses = track_child!({
-        File::open("hello");
+        let _ = File::open("hello");
     })
     .await?;
     assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
@@ -25,7 +25,7 @@ async fn open_read() -> anyhow::Result<()> {
 async fn open_write() -> anyhow::Result<()> {
     let accesses = track_child!({
         let path = format!("{}/hello", env!("CARGO_TARGET_TMPDIR"));
-        OpenOptions::new().write(true).open(path);
+        let _ = OpenOptions::new().write(true).open(path);
     })
     .await?;
     assert_contains(
@@ -41,7 +41,7 @@ async fn open_write() -> anyhow::Result<()> {
 async fn readdir() -> anyhow::Result<()> {
     let accesses = track_child!({
         let path = format!("{}/hello", env!("CARGO_TARGET_TMPDIR"));
-        std::fs::read_dir(path);
+        let _ = std::fs::read_dir(path);
     })
     .await?;
     assert_contains(

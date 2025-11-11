@@ -12,6 +12,7 @@ bumpalo = { workspace = true }
 const_format = { workspace = true, features = ["fmt"] }
 derive_more = { workspace = true, features = ["debug"] }
 fspy_shared = { workspace = true }
+fspy_test_utils = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
 ouroboros = { workspace = true }
@@ -44,7 +45,6 @@ tempfile = { workspace = true }
 [dev-dependencies]
 anyhow = { workspace = true }
 csv-async = { workspace = true }
-ctor = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "io-std"] }
 
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dev-dependencies]
