@@ -730,6 +730,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -1009,6 +1010,7 @@ dependencies = [
  "const_format",
  "csv-async",
  "ctor",
+ "derive_more",
  "flate2",
  "fspy_detours_sys",
  "fspy_preload_unix",

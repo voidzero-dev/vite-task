@@ -16,9 +16,7 @@ async fn main() -> anyhow::Result<()> {
 
     let program = PathBuf::from(args.next().unwrap());
 
-    let spy = fspy::Spy::global()?;
-
-    let mut command = spy.new_command(program);
+    let mut command = fspy::Command::new(program);
     command.envs(std::env::vars_os()).args(args);
 
     let child = command.spawn().await?;

@@ -9,7 +9,7 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
-use fspy::{AccessMode, Spy};
+use fspy::AccessMode;
 use futures_util::future::try_join3;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -330,17 +330,15 @@ pub async fn execute_task(
     resolved_command: &ResolvedTaskCommand,
     base_dir: &AbsolutePath,
 ) -> Result<ExecutedTask, Error> {
-    let spy = Spy::global()?;
-
     let mut cmd = match &resolved_command.fingerprint.command {
         TaskCommand::ShellScript(script) => {
             let mut cmd = if cfg!(windows) {
-                let mut cmd = spy.new_command("cmd.exe");
+                let mut cmd = fspy::Command::new("cmd.exe");
                 // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
                 cmd.args(["/d", "/s", "/c"]);
                 cmd
             } else {
-                let mut cmd = spy.new_command("sh");
+                let mut cmd = fspy::Command::new("sh");
                 cmd.args(["-c"]);
                 cmd
             };
@@ -422,7 +420,7 @@ pub async fn execute_task(
                     duration,
                 });
             }
-            let mut cmd = spy.new_command(&task_parsed_command.program);
+            let mut cmd = fspy::Command::new(&task_parsed_command.program);
             cmd.args(&task_parsed_command.args);
             cmd.envs(&resolved_command.all_envs);
             cmd.envs(&task_parsed_command.envs);

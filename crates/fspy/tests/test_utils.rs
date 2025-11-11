@@ -53,7 +53,7 @@ macro_rules! track_child {
 }
 
 pub async fn _spawn_with_id(id: &str) -> anyhow::Result<PathAccessIterable> {
-    let mut command = fspy::Spy::global()?.new_command(::std::env::current_exe()?);
+    let mut command = fspy::Command::new(::std::env::current_exe()?);
     command.arg(id);
     let termination = command.spawn().await?.wait_handle.await?;
     assert!(termination.status.success());

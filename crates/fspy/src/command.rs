@@ -9,32 +9,46 @@ use std::{
 use fspy_shared_unix::exec::Exec;
 use tokio::process::Command as TokioCommand;
 
-use crate::{
-    TrackedChild,
-    error::SpawnError,
-    os_impl::{self, spawn_impl},
-};
+use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct Command {
-    pub(crate) program: OsString,
-    pub(crate) args: Vec<OsString>,
-    pub(crate) envs: HashMap<OsString, OsString>,
-    pub(crate) cwd: Option<PathBuf>,
+    program: OsString,
+    args: Vec<OsString>,
+    envs: HashMap<OsString, OsString>,
+    cwd: Option<PathBuf>,
     #[cfg(unix)]
-    pub(crate) arg0: Option<OsString>,
+    arg0: Option<OsString>,
 
-    pub(crate) stderr: Option<Stdio>,
-    pub(crate) stdout: Option<Stdio>,
-    pub(crate) stdin: Option<Stdio>,
+    stderr: Option<Stdio>,
+    stdout: Option<Stdio>,
+    stdin: Option<Stdio>,
 
-    pub(crate) spy_inner: os_impl::SpyInner,
+    #[cfg(unix)]
+    #[debug("({} pre_exec closures)", pre_exec_closures.len())]
+    pre_exec_closures: Vec<Box<dyn FnMut() -> std::io::Result<()> + Send + Sync>>,
 }
 
 impl Command {
+    pub fn new<P: AsRef<OsStr>>(program: P) -> Self {
+        Self {
+            program: program.as_ref().to_os_string(),
+            args: Vec::new(),
+            envs: HashMap::new(),
+            cwd: None,
+            #[cfg(unix)]
+            arg0: None,
+            stderr: None,
+            stdout: None,
+            stdin: None,
+            #[cfg(unix)]
+            pre_exec_closures: Vec::new(),
+        }
+    }
+
     #[cfg(unix)]
     #[must_use]
-    pub fn get_exec(&self) -> Exec {
+    pub(crate) fn get_exec(&self) -> Exec {
         use std::{
             iter::once,
             os::unix::ffi::{OsStrExt, OsStringExt},
@@ -57,7 +71,7 @@ impl Command {
     }
 
     #[cfg(unix)]
-    pub fn set_exec(&mut self, mut exec: Exec) {
+    pub(crate) fn set_exec(&mut self, mut exec: Exec) {
         use std::os::unix::ffi::OsStringExt;
 
         self.program = OsString::from_vec(exec.program.into());
@@ -147,7 +161,7 @@ impl Command {
 
     pub async fn spawn(mut self) -> Result<TrackedChild, SpawnError> {
         self.resolve_program()?;
-        spawn_impl(self).await
+        SPY_IMPL.spawn(self).await
     }
 
     /// Resolve program name to full path using `PATH` and cwd.
@@ -179,7 +193,22 @@ impl Command {
         Ok(())
     }
 
-    pub(crate) fn into_tokio_command(self) -> TokioCommand {
+    /// Schedules a closure to be run just before the exec function is invoked.
+    ///
+    /// # Safety
+    ///
+    /// https://doc.rust-lang.org/1.91.1/std/os/unix/process/trait.CommandExt.html#tymethod.pre_exec
+    #[cfg(unix)]
+    pub unsafe fn pre_exec<F>(&mut self, f: F) -> &mut Self
+    where
+        F: FnMut() -> std::io::Result<()> + Send + Sync + 'static,
+    {
+        self.pre_exec_closures.push(Box::new(f));
+        self
+    }
+
+    /// Convert to a `tokio::process::Command` without tracking.
+    pub fn into_tokio_command(self) -> TokioCommand {
         let mut tokio_cmd = TokioCommand::new(self.program);
         if let Some(cwd) = &self.cwd {
             tokio_cmd.current_dir(cwd);
@@ -203,6 +232,12 @@ impl Command {
 
         if let Some(stderr) = self.stderr {
             tokio_cmd.stderr(stderr);
+        }
+
+        #[cfg(unix)]
+        for pre_exec in self.pre_exec_closures {
+            // Safety: The caller of `pre_exec` is responsible for ensuring safety.
+            unsafe { tokio_cmd.pre_exec(pre_exec) };
         }
 
         tokio_cmd
