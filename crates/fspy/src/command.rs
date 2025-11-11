@@ -200,7 +200,7 @@ impl Command {
     ///
     /// # Safety
     ///
-    /// https://doc.rust-lang.org/1.91.1/std/os/unix/process/trait.CommandExt.html#tymethod.pre_exec
+    /// <https://doc.rust-lang.org/1.91.1/std/os/unix/process/trait.CommandExt.html#tymethod.pre_exec>
     #[cfg(unix)]
     pub unsafe fn pre_exec<F>(&mut self, f: F) -> &mut Self
     where
