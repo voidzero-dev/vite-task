@@ -1,6 +1,9 @@
 mod test_utils;
 
-use std::env::{current_dir, vars_os};
+use std::{
+    env::{current_dir, vars_os},
+    path::Path,
+};
 
 use fspy::{AccessMode, PathAccessIterable};
 use test_utils::assert_contains;
@@ -21,6 +24,22 @@ async fn track_node_script(script: &str) -> anyhow::Result<PathAccessIterable> {
 async fn read_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.readFileSync('hello') } catch {}").await?;
     assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    Ok(())
+}
+
+#[tokio::test]
+async fn write_sync() -> anyhow::Result<()> {
+    let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("hello.json");
+    println!("path: {path:?}");
+    let accesses = track_node_script(&format!(
+        "try {{ fs.writeFileSync('{}', 'world') }} catch {{}}",
+        path.display()
+    ))
+    .await?;
+    for access in accesses.iter() {
+        println!("access: {access:?}");
+    }
+    assert_contains(&accesses, &path, AccessMode::Write);
     Ok(())
 }
 
