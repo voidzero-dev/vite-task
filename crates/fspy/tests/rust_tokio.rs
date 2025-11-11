@@ -11,7 +11,7 @@ async fn open_read() -> anyhow::Result<()> {
     let accesses = track_child!({
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
-                tokio::fs::File::open("hello").await;
+                let _ = tokio::fs::File::open("hello").await;
             },
         );
     })
@@ -28,7 +28,7 @@ async fn open_write() -> anyhow::Result<()> {
 
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
-                OpenOptions::new().write(true).open(path).await;
+                let _ = OpenOptions::new().write(true).open(path).await;
             },
         );
     })
@@ -49,7 +49,7 @@ async fn readdir() -> anyhow::Result<()> {
 
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
-                tokio::fs::read_dir(path).await;
+                let _ = tokio::fs::read_dir(path).await;
             },
         );
     })

@@ -20,13 +20,13 @@ mod os_impl;
 mod arena;
 mod command;
 
-use std::{env::temp_dir, ffi::OsStr, fs::create_dir, io, process::ExitStatus, sync::OnceLock};
+use std::{env::temp_dir, fs::create_dir, io, process::ExitStatus, sync::LazyLock};
 
 pub use command::Command;
 pub use fspy_shared::ipc::{AccessMode, PathAccess};
 use futures_util::future::BoxFuture;
 pub use os_impl::PathAccessIterable;
-use os_impl::SpyInner;
+use os_impl::SpyImpl;
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 
 /// The result of a tracked child process upon its termination.
@@ -54,33 +54,8 @@ pub struct TrackedChild {
     pub wait_handle: BoxFuture<'static, io::Result<ChildTermination>>,
 }
 
-pub struct Spy(SpyInner);
-impl Spy {
-    pub fn new() -> io::Result<Self> {
-        let tmp_dir = temp_dir().join("fspy");
-        let _ = create_dir(&tmp_dir);
-        Ok(Self(SpyInner::init_in(&tmp_dir)?))
-    }
-
-    pub fn global() -> io::Result<&'static Self> {
-        static GLOBAL_SPY: OnceLock<Spy> = OnceLock::new();
-        GLOBAL_SPY.get_or_try_init(Self::new)
-    }
-
-    pub fn new_command<S: AsRef<OsStr>>(&self, program: S) -> Command {
-        Command {
-            program: program.as_ref().to_os_string(),
-            envs: Default::default(),
-            args: vec![],
-            cwd: None,
-            #[cfg(unix)]
-            arg0: None,
-            spy_inner: self.0.clone(),
-            stderr: None,
-            stdout: None,
-            stdin: None,
-        }
-    }
-}
-
-// pub use fspy_shared::ipc::*;
+pub(crate) static SPY_IMPL: LazyLock<SpyImpl> = LazyLock::new(|| {
+    let tmp_dir = temp_dir().join("fspy");
+    let _ = create_dir(&tmp_dir);
+    SpyImpl::init_in(&tmp_dir).expect("Failed to initialize global spy")
+});

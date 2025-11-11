@@ -6,7 +6,7 @@ use fspy::{AccessMode, PathAccessIterable};
 use test_utils::assert_contains;
 
 async fn track_node_script(script: &str) -> anyhow::Result<PathAccessIterable> {
-    let mut command = fspy::Spy::global()?.new_command("node");
+    let mut command = fspy::Command::new("node");
     command
         .arg("-e")
         .envs(vars_os()) // https://github.com/jdx/mise/discussions/5968

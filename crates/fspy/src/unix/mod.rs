@@ -29,7 +29,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct SpyInner {
+pub struct SpyImpl {
     #[cfg(target_os = "macos")]
     fixtures: Fixtures,
 
@@ -38,7 +38,7 @@ pub struct SpyInner {
 
 const PRELOAD_CDYLIB_BINARY: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX"));
 
-impl SpyInner {
+impl SpyImpl {
     /// Initialize the fs access spy by writing the preload library on disk
     pub fn init_in(dir: &Path) -> io::Result<Self> {
         use const_format::formatcp;
@@ -66,6 +66,89 @@ impl SpyInner {
             },
         })
     }
+
+    pub(crate) async fn spawn(&self, mut command: Command) -> Result<TrackedChild, SpawnError> {
+        #[cfg(target_os = "linux")]
+        let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::SupervisorError)?;
+
+        let (ipc_channel_conf, ipc_receiver) =
+            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreationError)?;
+
+        let payload = Payload {
+            ipc_channel_conf,
+
+            #[cfg(target_os = "macos")]
+            fixtures: self.fixtures.clone(),
+
+            preload_path: self.preload_path.clone(),
+
+            #[cfg(target_os = "linux")]
+            seccomp_payload: supervisor.payload().clone(),
+        };
+
+        let encoded_payload = encode_payload(payload);
+
+        let mut exec = command.get_exec();
+        let mut exec_resolve_accesses = PathAccessArena::default();
+        let pre_exec = handle_exec(
+            &mut exec,
+            ExecResolveConfig::search_path_enabled(None),
+            &encoded_payload,
+            |path_access| {
+                exec_resolve_accesses.add(path_access);
+            },
+        )
+        .map_err(|err| SpawnError::InjectionError(err.into()))?;
+        command.set_exec(exec);
+
+        let mut tokio_command = command.into_tokio_command();
+
+        unsafe {
+            tokio_command.pre_exec(move || {
+                if let Some(pre_exec) = pre_exec.as_ref() {
+                    pre_exec.run()?;
+                }
+                Ok(())
+            });
+        }
+
+        // tokio_command.spawn blocks while executing the `pre_exec` closure.
+        // Run it inside spawn_blocking to avoid blocking the tokio runtime, especially the supervisor loop,
+        // which needs to accept incoming connections while `pre_exec` is connecting to it.
+        let mut child = spawn_blocking(move || tokio_command.spawn())
+            .await
+            .map_err(|err| SpawnError::OsSpawnError(err.into()))?
+            .map_err(SpawnError::OsSpawnError)?;
+
+        Ok(TrackedChild {
+            stdin: child.stdin.take(),
+            stdout: child.stdout.take(),
+            stderr: child.stderr.take(),
+            // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
+            // because we need to stop the supervisor and lock the channel as soon as the child exits.
+            wait_handle: tokio::spawn(async move {
+                let status = child.wait().await?;
+
+                let arenas = std::iter::once(exec_resolve_accesses);
+                // Stop the supervisor and collect path accesses from it.
+                #[cfg(target_os = "linux")]
+                let arenas = arenas.chain(
+                    supervisor.stop().await?.into_iter().map(|handler| handler.into_arena()),
+                );
+                let arenas = arenas.collect::<Vec<_>>();
+
+                // Lock the ipc channel after the child has exited.
+                // We are not interested in path accesses from descendants after the main child has exited.
+                let ipc_receiver_lock_guard =
+                    OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
+                let path_accesses = PathAccessIterable { arenas, ipc_receiver_lock_guard };
+
+                io::Result::Ok(ChildTermination { status, path_accesses })
+            })
+            .map(|f| io::Result::Ok(f??)) // flatten JoinError and io::Result
+            .boxed(),
+        })
+    }
 }
 
 pub struct PathAccessIterable {
@@ -81,85 +164,4 @@ impl PathAccessIterable {
         let accesses_in_shm = self.ipc_receiver_lock_guard.iter_path_accesses();
         accesses_in_shm.chain(accesses_in_arena)
     }
-}
-
-pub(crate) async fn spawn_impl(mut command: Command) -> Result<TrackedChild, SpawnError> {
-    #[cfg(target_os = "linux")]
-    let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::SupervisorError)?;
-
-    let (ipc_channel_conf, ipc_receiver) =
-        channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreationError)?;
-
-    let payload = Payload {
-        ipc_channel_conf,
-
-        #[cfg(target_os = "macos")]
-        fixtures: command.spy_inner.fixtures.clone(),
-
-        preload_path: command.spy_inner.preload_path.clone(),
-
-        #[cfg(target_os = "linux")]
-        seccomp_payload: supervisor.payload().clone(),
-    };
-
-    let encoded_payload = encode_payload(payload);
-
-    let mut exec = command.get_exec();
-    let mut exec_resolve_accesses = PathAccessArena::default();
-    let pre_exec = handle_exec(
-        &mut exec,
-        ExecResolveConfig::search_path_enabled(None),
-        &encoded_payload,
-        |path_access| {
-            exec_resolve_accesses.add(path_access);
-        },
-    )
-    .map_err(|err| SpawnError::InjectionError(err.into()))?;
-    command.set_exec(exec);
-
-    let mut tokio_command = command.into_tokio_command();
-
-    unsafe {
-        tokio_command.pre_exec(move || {
-            if let Some(pre_exec) = pre_exec.as_ref() {
-                pre_exec.run()?;
-            }
-            Ok(())
-        });
-    }
-
-    // tokio_command.spawn blocks while executing the `pre_exec` closure.
-    // Run it inside spawn_blocking to avoid blocking the tokio runtime, especially the supervisor loop,
-    // which needs to accept incoming connections while `pre_exec` is connecting to it.
-    let mut child = spawn_blocking(move || tokio_command.spawn())
-        .await
-        .map_err(|err| SpawnError::OsSpawnError(err.into()))?
-        .map_err(SpawnError::OsSpawnError)?;
-
-    Ok(TrackedChild {
-        stdin: child.stdin.take(),
-        stdout: child.stdout.take(),
-        stderr: child.stderr.take(),
-        // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
-        // because we need to stop the supervisor and lock the channel as soon as the child exits.
-        wait_handle: tokio::spawn(async move {
-            let status = child.wait().await?;
-
-            let arenas = std::iter::once(exec_resolve_accesses);
-            // Stop the supervisor and collect path accesses from it.
-            #[cfg(target_os = "linux")]
-            let arenas = arenas
-                .chain(supervisor.stop().await?.into_iter().map(|handler| handler.into_arena()));
-            let arenas = arenas.collect::<Vec<_>>();
-
-            // Lock the ipc channel after the child has exited.
-            // We are not interested in path accesses from descendants after the main child has exited.
-            let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
-            let path_accesses = PathAccessIterable { arenas, ipc_receiver_lock_guard };
-
-            io::Result::Ok(ChildTermination { status, path_accesses })
-        })
-        .map(|f| io::Result::Ok(f??)) // flatten JoinError and io::Result
-        .boxed(),
-    })
 }

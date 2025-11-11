@@ -51,11 +51,11 @@ impl PathAccessIterable {
 // }
 
 #[derive(Debug, Clone)]
-pub struct SpyInner {
+pub struct SpyImpl {
     asni_dll_path_with_nul: Arc<CStr>,
 }
 
-impl SpyInner {
+impl SpyImpl {
     pub fn init_in(path: &Path) -> io::Result<Self> {
         let dll_path = INTERPOSE_CDYLIB.write_to(&path, ".dll").unwrap();
 
@@ -70,82 +70,83 @@ impl SpyInner {
             unsafe { CStr::from_bytes_with_nul_unchecked(asni_dll_path.as_slice()) };
         Ok(Self { asni_dll_path_with_nul: asni_dll_path_with_nul.into() })
     }
-}
 
-pub(crate) async fn spawn_impl(command: Command) -> Result<TrackedChild, SpawnError> {
-    let asni_dll_path_with_nul = Arc::clone(&command.spy_inner.asni_dll_path_with_nul);
-    let mut command = command.into_tokio_command();
+    pub(crate) async fn spawn(&self, command: Command) -> Result<TrackedChild, SpawnError> {
+        let asni_dll_path_with_nul = Arc::clone(&self.asni_dll_path_with_nul);
+        let mut command = command.into_tokio_command();
 
-    command.creation_flags(CREATE_SUSPENDED);
+        command.creation_flags(CREATE_SUSPENDED);
 
-    let (channel_conf, receiver) =
-        channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreationError)?;
+        let (channel_conf, receiver) =
+            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreationError)?;
 
-    let mut spawn_success = false;
-    let spawn_success = &mut spawn_success;
-    let mut child = command
-        .spawn_with(|std_command| {
-            let std_child = std_command.spawn()?;
-            *spawn_success = true;
+        let mut spawn_success = false;
+        let spawn_success = &mut spawn_success;
+        let mut child = command
+            .spawn_with(|std_command| {
+                let std_child = std_command.spawn()?;
+                *spawn_success = true;
 
-            let mut dll_paths = asni_dll_path_with_nul.as_ptr().cast::<c_char>();
-            let process_handle = std_child.as_raw_handle().cast::<winapi::ctypes::c_void>();
-            let success = unsafe { DetourUpdateProcessWithDll(process_handle, &mut dll_paths, 1) };
-            if success != TRUE {
-                return Err(io::Error::last_os_error());
-            }
+                let mut dll_paths = asni_dll_path_with_nul.as_ptr().cast::<c_char>();
+                let process_handle = std_child.as_raw_handle().cast::<winapi::ctypes::c_void>();
+                let success =
+                    unsafe { DetourUpdateProcessWithDll(process_handle, &mut dll_paths, 1) };
+                if success != TRUE {
+                    return Err(io::Error::last_os_error());
+                }
 
-            let payload = Payload {
-                channel_conf: channel_conf.clone(),
-                asni_dll_path_with_nul: asni_dll_path_with_nul.to_bytes(),
-            };
-            let payload_bytes = bincode::encode_to_vec(payload, BINCODE_CONFIG).unwrap();
-            let success = unsafe {
-                DetourCopyPayloadToProcess(
-                    process_handle,
-                    &PAYLOAD_ID,
-                    payload_bytes.as_ptr().cast(),
-                    payload_bytes.len().try_into().unwrap(),
-                )
-            };
-            if success != TRUE {
-                return Err(io::Error::last_os_error());
-            }
+                let payload = Payload {
+                    channel_conf: channel_conf.clone(),
+                    asni_dll_path_with_nul: asni_dll_path_with_nul.to_bytes(),
+                };
+                let payload_bytes = bincode::encode_to_vec(payload, BINCODE_CONFIG).unwrap();
+                let success = unsafe {
+                    DetourCopyPayloadToProcess(
+                        process_handle,
+                        &PAYLOAD_ID,
+                        payload_bytes.as_ptr().cast(),
+                        payload_bytes.len().try_into().unwrap(),
+                    )
+                };
+                if success != TRUE {
+                    return Err(io::Error::last_os_error());
+                }
 
-            let main_thread_handle = std_child.main_thread_handle();
-            let resume_thread_ret =
-                unsafe { ResumeThread(main_thread_handle.as_raw_handle().cast()) } as i32;
+                let main_thread_handle = std_child.main_thread_handle();
+                let resume_thread_ret =
+                    unsafe { ResumeThread(main_thread_handle.as_raw_handle().cast()) } as i32;
 
-            if resume_thread_ret == -1 {
-                return Err(io::Error::last_os_error());
-            }
+                if resume_thread_ret == -1 {
+                    return Err(io::Error::last_os_error());
+                }
 
-            Ok(std_child)
+                Ok(std_child)
+            })
+            .map_err(|err| {
+                if !*spawn_success {
+                    SpawnError::InjectionError(err.into())
+                } else {
+                    SpawnError::OsSpawnError(err.into())
+                }
+            })?;
+
+        Ok(TrackedChild {
+            stdin: child.stdin.take(),
+            stdout: child.stdout.take(),
+            stderr: child.stderr.take(),
+            // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
+            // because we need to stop the supervisor and lock the channel as soon as the child exits.
+            wait_handle: tokio::spawn(async move {
+                let status = child.wait().await?;
+                // Lock the ipc channel after the child has exited.
+                // We are not interested in path accesses from descendants after the main child has exited.
+                let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;
+                let path_accesses = PathAccessIterable { ipc_receiver_lock_guard };
+
+                io::Result::Ok(ChildTermination { status, path_accesses })
+            })
+            .map(|f| io::Result::Ok(f??)) // flatten JoinError and io::Result
+            .boxed(),
         })
-        .map_err(|err| {
-            if !*spawn_success {
-                SpawnError::InjectionError(err.into())
-            } else {
-                SpawnError::OsSpawnError(err.into())
-            }
-        })?;
-
-    Ok(TrackedChild {
-        stdin: child.stdin.take(),
-        stdout: child.stdout.take(),
-        stderr: child.stderr.take(),
-        // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
-        // because we need to stop the supervisor and lock the channel as soon as the child exits.
-        wait_handle: tokio::spawn(async move {
-            let status = child.wait().await?;
-            // Lock the ipc channel after the child has exited.
-            // We are not interested in path accesses from descendants after the main child has exited.
-            let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;
-            let path_accesses = PathAccessIterable { ipc_receiver_lock_guard };
-
-            io::Result::Ok(ChildTermination { status, path_accesses })
-        })
-        .map(|f| io::Result::Ok(f??)) // flatten JoinError and io::Result
-        .boxed(),
-    })
+    }
 }

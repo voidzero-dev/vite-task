@@ -70,7 +70,6 @@ async fn main() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let config = read(manifest_dir.join("e2e_config.toml")).unwrap();
     let config: Config = toml::from_slice(&config).unwrap();
-    let spy = fspy::Spy::global().unwrap();
     for (name, case) in config.cases {
         if let Some(filter) = &filter
             && !name.contains(filter)
@@ -78,7 +77,7 @@ async fn main() {
             continue;
         }
         println!("Running case `{}` in dir `{}`", name, case.dir);
-        let mut cmd = spy.new_command(case.cmd[0].clone());
+        let mut cmd = fspy::Command::new(case.cmd[0].clone());
         let dir = manifest_dir.join(&case.dir);
         cmd.args(&case.cmd[1..])
             .envs(env::vars_os())
