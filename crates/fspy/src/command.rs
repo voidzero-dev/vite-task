@@ -30,6 +30,9 @@ pub struct Command {
 }
 
 impl Command {
+    /// Create a new command to spy on the given program.
+    /// Initially, environment variables are not inherited from the parent.
+    /// To inherit, explicitly use `.envs(std::env::vars_os())`.
     pub fn new<P: AsRef<OsStr>>(program: P) -> Self {
         Self {
             program: program.as_ref().to_os_string(),
