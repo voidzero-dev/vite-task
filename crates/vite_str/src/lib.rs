@@ -71,6 +71,14 @@ impl Str {
     pub fn push_str(&mut self, s: &str) {
         self.0.push_str(s);
     }
+
+    pub fn to_uppercase(&self) -> Self {
+        Self(self.0.to_uppercase())
+    }
+
+    pub fn to_lowercase(&self) -> Self {
+        Self(self.0.to_lowercase())
+    }
 }
 
 impl AsRef<str> for Str {
