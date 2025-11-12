@@ -3,10 +3,11 @@ mod test_utils;
 use std::{env::current_dir, path::Path, process::Stdio};
 
 use fspy::AccessMode;
+use test_log::test;
 use test_utils::assert_contains;
 use tokio::fs::OpenOptions;
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn open_read() -> anyhow::Result<()> {
     let accesses = track_child!({
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
@@ -21,7 +22,7 @@ async fn open_read() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn open_write() -> anyhow::Result<()> {
     let accesses = track_child!({
         let path = format!("{}/hello", env!("CARGO_TARGET_TMPDIR"));
@@ -42,7 +43,7 @@ async fn open_write() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn readdir() -> anyhow::Result<()> {
     let accesses = track_child!({
         let path = format!("{}/hello", env!("CARGO_TARGET_TMPDIR"));
@@ -63,7 +64,7 @@ async fn readdir() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn subprocess() -> anyhow::Result<()> {
     let accesses = track_child!({
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(

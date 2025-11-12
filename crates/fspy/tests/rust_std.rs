@@ -8,9 +8,10 @@ use std::{
 };
 
 use fspy::AccessMode;
+use test_log::test;
 use test_utils::assert_contains;
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn open_read() -> anyhow::Result<()> {
     let accesses = track_child!({
         let _ = File::open("hello");
@@ -21,7 +22,7 @@ async fn open_read() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn open_write() -> anyhow::Result<()> {
     let accesses = track_child!({
         let path = format!("{}/hello", env!("CARGO_TARGET_TMPDIR"));
@@ -37,7 +38,7 @@ async fn open_write() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn readdir() -> anyhow::Result<()> {
     let accesses = track_child!({
         let path = format!("{}/hello", env!("CARGO_TARGET_TMPDIR"));
@@ -53,7 +54,7 @@ async fn readdir() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn subprocess() -> anyhow::Result<()> {
     let accesses = track_child!({
         let mut command = if cfg!(windows) {

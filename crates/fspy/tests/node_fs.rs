@@ -3,6 +3,7 @@ mod test_utils;
 use std::env::{current_dir, vars_os};
 
 use fspy::{AccessMode, PathAccessIterable};
+use test_log::test;
 use test_utils::assert_contains;
 
 async fn track_node_script(script: &str) -> anyhow::Result<PathAccessIterable> {
@@ -17,21 +18,21 @@ async fn track_node_script(script: &str) -> anyhow::Result<PathAccessIterable> {
     Ok(termination.path_accesses)
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn read_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.readFileSync('hello') } catch {}").await?;
     assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn read_dir_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.readdirSync('.') } catch {}").await?;
     assert_contains(&accesses, &current_dir().unwrap(), AccessMode::ReadDir);
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn subprocess() -> anyhow::Result<()> {
     let cmd = if cfg!(windows) {
         r"'cmd', ['/c', 'type hello']"
