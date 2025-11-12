@@ -310,8 +310,23 @@ impl TaskEnvs {
         all_envs.insert("VITE_TASK_EXECUTION_ENV".into(), Arc::<OsStr>::from(OsStr::new("1")));
 
         // Add node_modules/.bin to PATH
-        let env_path =
-            all_envs.entry("PATH".into()).or_insert_with(|| Arc::<OsStr>::from(OsStr::new("")));
+        // On Windows, environment variable names are case-insensitive (e.g., "PATH", "Path", "path" are all the same)
+        // However, Rust's HashMap keys are case-sensitive, so we need to find the existing PATH variable
+        // regardless of its casing to avoid creating duplicate PATH entries with different casings.
+        // For example, if the system has "Path", we should use that instead of creating a new "PATH" entry.
+        let env_path = {
+            if cfg!(windows)
+                && let Some(existing_path) = all_envs.iter_mut().find_map(|(name, value)| {
+                    if name.eq_ignore_ascii_case("path") { Some(value) } else { None }
+                })
+            {
+                // Found existing PATH variable (with any casing), use it
+                existing_path
+            } else {
+                // On Unix or no existing PATH on Windows, create/get "PATH" entry
+                all_envs.entry("PATH".into()).or_insert_with(|| Arc::<OsStr>::from(OsStr::new("")))
+            }
+        };
         let paths = split_paths(env_path);
 
         let node_modules_bin_paths = [
