@@ -46,7 +46,9 @@ macro_rules! track_child {
 #[allow(unused)]
 pub async fn spawn_std(std_cmd: std::process::Command) -> anyhow::Result<PathAccessIterable> {
     let mut command = fspy::Command::new(std_cmd.get_program());
-    command.args(std_cmd.get_args());
+    command
+        .args(std_cmd.get_args())
+        .envs(std_cmd.get_envs().filter_map(|(name, value)| Some((name, value?))));
 
     let termination = command.spawn().await?.wait_handle.await?;
     assert!(termination.status.success());

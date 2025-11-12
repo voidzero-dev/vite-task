@@ -54,6 +54,9 @@ pub fn create_command(id: &str, arg: impl Encode) -> Command {
     let arg_base64 = BASE64_STANDARD_NO_PAD.encode(&arg_bytes);
     command.arg(id).arg(arg_base64);
 
+    // Set inherit environment explicitly, in case it needs to be converted to fspy::Command later
+    command.env_clear().envs(std::env::vars_os());
+
     command
 }
 
