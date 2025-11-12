@@ -985,9 +985,6 @@ mod tests {
 
         let all_envs = result.all_envs;
 
-        // Verify that "PATH" is preserved
-        assert!(all_envs.contains_key("PATH"));
-
         // Verify the complete PATH value matches expected
         let path_value = all_envs.get("PATH").unwrap();
         assert_eq!(
@@ -1026,9 +1023,6 @@ mod tests {
         let result = TaskEnvs::resolve(mock_envs.into_iter(), &base_dir, &resolved).unwrap();
 
         let all_envs = result.all_envs;
-
-        // Verify that "PATH" is created when missing
-        assert!(all_envs.contains_key("PATH"));
 
         // Verify the complete PATH value matches expected (only node_modules/.bin paths, no existing path)
         let path_value = all_envs.get("PATH").unwrap();
@@ -1073,7 +1067,6 @@ mod tests {
         let all_envs = result.all_envs;
 
         // Verify "PATH" exists and the complete value matches expected
-        assert!(all_envs.contains_key("PATH"));
         let path_value = all_envs.get("PATH").unwrap();
         assert_eq!(
             path_value.as_ref(),
