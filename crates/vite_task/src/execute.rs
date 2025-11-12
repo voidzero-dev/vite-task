@@ -327,7 +327,7 @@ impl TaskEnvs {
                 all_envs.entry("PATH".into()).or_insert_with(|| Arc::<OsStr>::from(OsStr::new("")))
             }
         };
-        let paths = split_paths(env_path);
+        let paths = split_paths(env_path).filter(|path| !path.as_os_str().is_empty());
 
         const NODE_MODULES_DOT_BIN: &str =
             if cfg!(windows) { "node_modules\\.bin" } else { "node_modules/.bin" };
