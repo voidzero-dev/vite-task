@@ -245,7 +245,7 @@ const SENSITIVE_PATTERNS: &[&str] = &[
 
 impl TaskEnvs {
     pub fn resolve(
-        current_envs: impl Iterator<Item = (OsString, OsString)> + Clone,
+        current_envs: impl Iterator<Item = (OsString, OsString)>,
         base_dir: &AbsolutePath,
         task: &ResolvedTaskConfig,
     ) -> Result<Self, Error> {
