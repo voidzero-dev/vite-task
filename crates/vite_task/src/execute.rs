@@ -329,9 +329,12 @@ impl TaskEnvs {
         };
         let paths = split_paths(env_path);
 
+        const NODE_MODULES_DOT_BIN: &str =
+            if cfg!(windows) { "node_modules\\.bin" } else { "node_modules/.bin" };
+
         let node_modules_bin_paths = [
-            base_dir.join(&task.config.cwd).join("node_modules/.bin").into_path_buf(),
-            base_dir.join(&task.config_dir).join("node_modules/.bin").into_path_buf(),
+            base_dir.join(&task.config.cwd).join(NODE_MODULES_DOT_BIN).into_path_buf(),
+            base_dir.join(&task.config_dir).join(NODE_MODULES_DOT_BIN).into_path_buf(),
         ];
         *env_path = join_paths(node_modules_bin_paths.into_iter().chain(paths))?.into();
 
