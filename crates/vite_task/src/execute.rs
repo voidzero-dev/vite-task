@@ -265,8 +265,7 @@ impl TaskEnvs {
                 GlobPatternSet::new(task.config.envs.iter().filter(|s| !s.starts_with('!')))?;
             let sensitive_patterns = GlobPatternSet::new(SENSITIVE_PATTERNS)?;
             for (name, value) in &all_envs {
-                let upper_name = name.to_uppercase();
-                if !envs_without_pass_through_patterns.is_match(&upper_name) {
+                if !envs_without_pass_through_patterns.is_match(name) {
                     continue;
                 }
                 let Some(value) = value.to_str() else {
@@ -275,7 +274,7 @@ impl TaskEnvs {
                         value: value.to_os_string(),
                     });
                 };
-                let value: Str = if sensitive_patterns.is_match(&upper_name) {
+                let value: Str = if sensitive_patterns.is_match(name) {
                     let mut hasher = Sha256::new();
                     hasher.update(value.as_bytes());
                     format!("sha256:{:x}", hasher.finalize()).into()
