@@ -901,4 +901,190 @@ mod tests {
         assert!(all_envs.contains_key("app1_name"));
         assert!(all_envs.contains_key("app2_name"));
     }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_windows_path_case_insensitive_mixed_case() {
+        use crate::{
+            collections::HashSet,
+            config::{ResolvedTaskConfig, TaskCommand, TaskConfig},
+        };
+
+        let task_config = TaskConfig {
+            command: TaskCommand::ShellScript("echo test".into()),
+            cwd: RelativePathBuf::default(),
+            cacheable: true,
+            inputs: HashSet::new(),
+            envs: HashSet::new(),
+            pass_through_envs: HashSet::new(),
+            fingerprint_ignores: None,
+        };
+        let resolved =
+            ResolvedTaskConfig { config_dir: RelativePathBuf::default(), config: task_config };
+
+        // Mock environment with mixed case "Path" (common on Windows)
+        let mock_envs = vec![
+            (OsString::from("Path"), OsString::from("C:\\existing\\path")),
+            (OsString::from("OTHER_VAR"), OsString::from("value")),
+        ];
+
+        let base_dir = AbsolutePath::new("C:\\workspace\\packages\\app").unwrap();
+
+        let result = TaskEnvs::resolve(mock_envs.into_iter(), &base_dir, &resolved).unwrap();
+
+        let all_envs = result.all_envs;
+
+        // Verify that the original "Path" casing is preserved, not "PATH"
+        assert!(all_envs.contains_key("Path"));
+        assert!(!all_envs.contains_key("PATH"));
+
+        // Verify the complete PATH value matches expected
+        let path_value = all_envs.get("Path").unwrap();
+        assert_eq!(
+            path_value.as_ref(),
+            OsStr::new(
+                "C:\\workspace\\packages\\app\\node_modules\\.bin;C:\\workspace\\packages\\app\\node_modules\\.bin;C:\\existing\\path"
+            )
+        );
+
+        // Verify no duplicate PATH entry was created
+        let path_like_keys: Vec<_> =
+            all_envs.keys().filter(|k| k.eq_ignore_ascii_case("path")).collect();
+        assert_eq!(path_like_keys.len(), 1);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_windows_path_case_insensitive_uppercase() {
+        use crate::{
+            collections::HashSet,
+            config::{ResolvedTaskConfig, TaskCommand, TaskConfig},
+        };
+
+        let task_config = TaskConfig {
+            command: TaskCommand::ShellScript("echo test".into()),
+            cwd: RelativePathBuf::default(),
+            cacheable: true,
+            inputs: HashSet::new(),
+            envs: HashSet::new(),
+            pass_through_envs: HashSet::new(),
+            fingerprint_ignores: None,
+        };
+        let resolved =
+            ResolvedTaskConfig { config_dir: RelativePathBuf::default(), config: task_config };
+
+        // Mock environment with uppercase "PATH"
+        let mock_envs = vec![
+            (OsString::from("PATH"), OsString::from("C:\\existing\\path")),
+            (OsString::from("OTHER_VAR"), OsString::from("value")),
+        ];
+
+        let base_dir = AbsolutePath::new("C:\\workspace\\packages\\app").unwrap();
+
+        let result = TaskEnvs::resolve(mock_envs.into_iter(), &base_dir, &resolved).unwrap();
+
+        let all_envs = result.all_envs;
+
+        // Verify that "PATH" is preserved
+        assert!(all_envs.contains_key("PATH"));
+
+        // Verify the complete PATH value matches expected
+        let path_value = all_envs.get("PATH").unwrap();
+        assert_eq!(
+            path_value.as_ref(),
+            OsStr::new(
+                "C:\\workspace\\packages\\app\\node_modules\\.bin;C:\\workspace\\packages\\app\\node_modules\\.bin;C:\\existing\\path"
+            )
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_windows_path_created_when_missing() {
+        use crate::{
+            collections::HashSet,
+            config::{ResolvedTaskConfig, TaskCommand, TaskConfig},
+        };
+
+        let task_config = TaskConfig {
+            command: TaskCommand::ShellScript("echo test".into()),
+            cwd: RelativePathBuf::default(),
+            cacheable: true,
+            inputs: HashSet::new(),
+            envs: HashSet::new(),
+            pass_through_envs: HashSet::new(),
+            fingerprint_ignores: None,
+        };
+        let resolved =
+            ResolvedTaskConfig { config_dir: RelativePathBuf::default(), config: task_config };
+
+        // Mock environment without any PATH variable
+        let mock_envs = vec![(OsString::from("OTHER_VAR"), OsString::from("value"))];
+
+        let base_dir = AbsolutePath::new("C:\\workspace\\packages\\app").unwrap();
+
+        let result = TaskEnvs::resolve(mock_envs.into_iter(), &base_dir, &resolved).unwrap();
+
+        let all_envs = result.all_envs;
+
+        // Verify that "PATH" is created when missing
+        assert!(all_envs.contains_key("PATH"));
+
+        // Verify the complete PATH value matches expected (only node_modules/.bin paths, no existing path)
+        let path_value = all_envs.get("PATH").unwrap();
+        assert_eq!(
+            path_value.as_ref(),
+            OsStr::new(
+                "C:\\workspace\\packages\\app\\node_modules\\.bin;C:\\workspace\\packages\\app\\node_modules\\.bin"
+            )
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_unix_path_case_sensitive() {
+        use crate::{
+            collections::HashSet,
+            config::{ResolvedTaskConfig, TaskCommand, TaskConfig},
+        };
+
+        let task_config = TaskConfig {
+            command: TaskCommand::ShellScript("echo test".into()),
+            cwd: RelativePathBuf::default(),
+            cacheable: true,
+            inputs: HashSet::new(),
+            envs: HashSet::new(),
+            pass_through_envs: HashSet::new(),
+            fingerprint_ignores: None,
+        };
+        let resolved =
+            ResolvedTaskConfig { config_dir: RelativePathBuf::default(), config: task_config };
+
+        // Mock environment with "PATH" in uppercase (standard on Unix)
+        let mock_envs = vec![
+            (OsString::from("PATH"), OsString::from("/existing/path")),
+            (OsString::from("OTHER_VAR"), OsString::from("value")),
+        ];
+
+        let base_dir = AbsolutePath::new("/workspace/packages/app").unwrap();
+
+        let result = TaskEnvs::resolve(mock_envs.into_iter(), &base_dir, &resolved).unwrap();
+
+        let all_envs = result.all_envs;
+
+        // Verify "PATH" exists and the complete value matches expected
+        assert!(all_envs.contains_key("PATH"));
+        let path_value = all_envs.get("PATH").unwrap();
+        assert_eq!(
+            path_value.as_ref(),
+            OsStr::new(
+                "/workspace/packages/app/node_modules/.bin:/workspace/packages/app/node_modules/.bin:/existing/path"
+            )
+        );
+
+        // Verify that on Unix, the code uses exact "PATH" match (case-sensitive)
+        // This is a regression test to ensure Windows case-insensitive logic doesn't affect Unix
+        assert!(!all_envs.contains_key("Path"));
+        assert!(!all_envs.contains_key("path"));
+    }
 }
