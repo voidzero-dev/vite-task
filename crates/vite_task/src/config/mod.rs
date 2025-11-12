@@ -181,7 +181,11 @@ impl ResolvedTask {
         let cwd = &workspace.cwd;
         let resolved_task_config =
             ResolvedTaskConfig { config_dir: cwd.clone(), config: task_config };
-        let resolved_envs = TaskEnvs::resolve(&workspace.root_dir, &resolved_task_config)?;
+        let resolved_envs = TaskEnvs::resolve(
+            std::env::vars_os().collect::<Vec<_>>().into_iter(),
+            &workspace.root_dir,
+            &resolved_task_config,
+        )?;
         let resolved_command = ResolvedTaskCommand {
             fingerprint: CommandFingerprint {
                 cwd: cwd.clone(),

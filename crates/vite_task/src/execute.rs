@@ -1,7 +1,7 @@
 use std::{
     collections::hash_map::Entry,
     env::{join_paths, split_paths},
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     path::PathBuf,
     process::{ExitStatus, Stdio},
     sync::{Arc, LazyLock, Mutex},
@@ -123,7 +123,10 @@ pub struct TaskEnvs {
     pub envs_without_pass_through: HashMap<Str, Str>,
 }
 
-fn resolve_envs_with_patterns(patterns: &[&str]) -> Result<HashMap<Str, Arc<OsStr>>, Error> {
+fn resolve_envs_with_patterns(
+    env_vars: impl Iterator<Item = (OsString, OsString)>,
+    patterns: &[&str],
+) -> Result<HashMap<Str, Arc<OsStr>>, Error> {
     let patterns = GlobPatternSet::new(patterns.iter().filter(|pattern| {
         if pattern.starts_with('!') {
             // FIXME: use better way to print warning log
@@ -137,7 +140,7 @@ fn resolve_envs_with_patterns(patterns: &[&str]) -> Result<HashMap<Str, Arc<OsSt
             true
         }
     }))?;
-    let envs: HashMap<Str, Arc<OsStr>> = std::env::vars_os()
+    let envs: HashMap<Str, Arc<OsStr>> = env_vars
         .filter_map(|(name, value)| {
             let Some(name) = name.to_str() else {
                 return None;
@@ -241,7 +244,11 @@ const SENSITIVE_PATTERNS: &[&str] = &[
 ];
 
 impl TaskEnvs {
-    pub fn resolve(base_dir: &AbsolutePath, task: &ResolvedTaskConfig) -> Result<Self, Error> {
+    pub fn resolve(
+        current_envs: impl Iterator<Item = (OsString, OsString)> + Clone,
+        base_dir: &AbsolutePath,
+        task: &ResolvedTaskConfig,
+    ) -> Result<Self, Error> {
         // All envs that are passed to the task
         let all_patterns: Vec<&str> = DEFAULT_PASSTHROUGH_ENVS
             .iter()
@@ -249,7 +256,7 @@ impl TaskEnvs {
             .chain(task.config.pass_through_envs.iter().map(std::convert::AsRef::as_ref))
             .chain(task.config.envs.iter().map(std::convert::AsRef::as_ref))
             .collect();
-        let mut all_envs = resolve_envs_with_patterns(&all_patterns)?;
+        let mut all_envs = resolve_envs_with_patterns(current_envs, &all_patterns)?;
 
         // envs need to calculate fingerprint
         let mut envs_without_pass_through = HashMap::<Str, Str>::new();
@@ -562,17 +569,16 @@ mod tests {
         let resolved_task_config =
             ResolvedTaskConfig { config_dir: RelativePathBuf::default(), config: task_config };
 
-        // Test when FORCE_COLOR is not already set
-        unsafe {
-            std::env::remove_var("FORCE_COLOR");
-        }
-
         let base_dir = if cfg!(windows) {
             AbsolutePath::new("C:\\workspace").unwrap()
         } else {
             AbsolutePath::new("/workspace").unwrap()
         };
-        let result = TaskEnvs::resolve(base_dir, &resolved_task_config).unwrap();
+
+        // Test when FORCE_COLOR is not already set
+        let mock_envs = vec![("PATH".into(), "/usr/bin".into())];
+        let result =
+            TaskEnvs::resolve(mock_envs.into_iter(), base_dir, &resolved_task_config).unwrap();
 
         // FORCE_COLOR should be automatically added if color is supported
         // Note: This test might vary based on the test environment
@@ -585,11 +591,10 @@ mod tests {
         }
 
         // Test when FORCE_COLOR is already set - should not be overridden
-        unsafe {
-            std::env::set_var("FORCE_COLOR", "2");
-        }
-
-        let result2 = TaskEnvs::resolve(base_dir, &resolved_task_config).unwrap();
+        let mock_envs =
+            vec![("PATH".into(), "/usr/bin".into()), ("FORCE_COLOR".into(), "2".into())];
+        let result2 =
+            TaskEnvs::resolve(mock_envs.into_iter(), base_dir, &resolved_task_config).unwrap();
 
         // Should contain the original FORCE_COLOR value
         assert!(result2.all_envs.contains_key("FORCE_COLOR"));
@@ -599,27 +604,15 @@ mod tests {
         // FORCE_COLOR should not be in envs_without_pass_through since it's a passthrough env
         assert!(!result2.envs_without_pass_through.contains_key("FORCE_COLOR"));
 
-        // Clean up
-        unsafe {
-            std::env::remove_var("FORCE_COLOR");
-        }
-
-        // Test when NO_COLOR is already set - should not be overridden
-        unsafe {
-            std::env::set_var("NO_COLOR", "1");
-        }
-
-        let result3 = TaskEnvs::resolve(base_dir, &resolved_task_config).unwrap();
+        // Test when NO_COLOR is already set - FORCE_COLOR should not be automatically added
+        let mock_envs = vec![("PATH".into(), "/usr/bin".into()), ("NO_COLOR".into(), "1".into())];
+        let result3 =
+            TaskEnvs::resolve(mock_envs.into_iter(), base_dir, &resolved_task_config).unwrap();
         assert!(result3.all_envs.contains_key("NO_COLOR"));
         let no_color_value = result3.all_envs.get("NO_COLOR").unwrap();
         assert_eq!(no_color_value.to_str().unwrap(), "1");
         // FORCE_COLOR should not be automatically added since NO_COLOR is set
         assert!(!result3.all_envs.contains_key("FORCE_COLOR"));
-
-        // Clean up
-        unsafe {
-            std::env::remove_var("NO_COLOR");
-        }
     }
 
     #[test]
@@ -654,31 +647,35 @@ mod tests {
         let resolved_task_config =
             ResolvedTaskConfig { config_dir: RelativePathBuf::default(), config: task_config };
 
-        let base_dir = if cfg!(windows) {
-            AbsolutePath::new("C:\\workspace").unwrap()
-        } else {
-            AbsolutePath::new("/workspace").unwrap()
-        };
+        let base_dir = AbsolutePath::new("/workspace").unwrap();
 
-        // Set up environment variables
-        unsafe {
-            std::env::set_var("ZEBRA_VAR", "zebra_value");
-            std::env::set_var("ALPHA_VAR", "alpha_value");
-            std::env::set_var("MIDDLE_VAR", "middle_value");
-            std::env::set_var("BETA_VAR", "beta_value");
-            std::env::set_var("VSCODE_VAR", "vscode_value");
-            std::env::set_var("APP1_TOKEN", "app1_token");
-            std::env::set_var("APP2_TOKEN", "app2_token");
-            std::env::set_var("APP1_NAME", "app1_value");
-            std::env::set_var("APP2_NAME", "app2_value");
-            std::env::set_var("APP1_PASSWORD", "app1_password");
-            std::env::set_var("OXLINT_TSGOLINT_PATH", "/path/to/oxlint_tsgolint");
-        }
+        // Create mock environment variables
+        let mock_envs = vec![
+            ("ZEBRA_VAR".into(), "zebra_value".into()),
+            ("ALPHA_VAR".into(), "alpha_value".into()),
+            ("MIDDLE_VAR".into(), "middle_value".into()),
+            ("BETA_VAR".into(), "beta_value".into()),
+            ("VSCODE_VAR".into(), "vscode_value".into()),
+            ("APP1_TOKEN".into(), "app1_token".into()),
+            ("APP2_TOKEN".into(), "app2_token".into()),
+            ("APP1_NAME".into(), "app1_value".into()),
+            ("APP2_NAME".into(), "app2_value".into()),
+            ("APP1_PASSWORD".into(), "app1_password".into()),
+            ("OXLINT_TSGOLINT_PATH".into(), "/path/to/oxlint_tsgolint".into()),
+            ("PATH".into(), "/usr/bin".into()),
+            ("HOME".into(), "/home/user".into()),
+        ];
 
         // Resolve envs multiple times
-        let result1 = TaskEnvs::resolve(base_dir, &resolved_task_config).unwrap();
-        let result2 = TaskEnvs::resolve(base_dir, &resolved_task_config).unwrap();
-        let result3 = TaskEnvs::resolve(base_dir, &resolved_task_config).unwrap();
+        let result1 =
+            TaskEnvs::resolve(mock_envs.clone().into_iter(), base_dir, &resolved_task_config)
+                .unwrap();
+        let result2 =
+            TaskEnvs::resolve(mock_envs.clone().into_iter(), base_dir, &resolved_task_config)
+                .unwrap();
+        let result3 =
+            TaskEnvs::resolve(mock_envs.clone().into_iter(), base_dir, &resolved_task_config)
+                .unwrap();
 
         // Convert to sorted vecs for comparison
         let mut envs1: Vec<_> = result1.envs_without_pass_through.iter().collect();
@@ -730,21 +727,6 @@ mod tests {
         assert_eq!(env_value.to_str().unwrap(), "1");
         // VITE_TASK_EXECUTION_ENV should not be in envs_without_pass_through since it's not declared
         assert!(!result1.envs_without_pass_through.contains_key("VITE_TASK_EXECUTION_ENV"));
-
-        // Clean up
-        unsafe {
-            std::env::remove_var("ZEBRA_VAR");
-            std::env::remove_var("ALPHA_VAR");
-            std::env::remove_var("MIDDLE_VAR");
-            std::env::remove_var("BETA_VAR");
-            std::env::remove_var("VSCODE_VAR");
-            std::env::remove_var("APP1_NAME");
-            std::env::remove_var("APP2_NAME");
-            std::env::remove_var("APP1_PASSWORD");
-            std::env::remove_var("APP1_TOKEN");
-            std::env::remove_var("APP2_TOKEN");
-            std::env::remove_var("OXLINT_TSGOLINT_PATH");
-        }
     }
 
     #[test]
@@ -777,16 +759,20 @@ mod tests {
         let resolved_task_config =
             ResolvedTaskConfig { config_dir: RelativePathBuf::default(), config: task_config };
 
-        // Set up environment variables with different cases
-        unsafe {
-            std::env::set_var("TEST_VAR", "uppercase");
-            std::env::set_var("test_var", "lowercase");
-            std::env::set_var("Test_Var", "mixed");
-        }
+        // Create mock environment variables with different cases
+        let mock_envs = vec![
+            ("TEST_VAR".into(), "uppercase".into()),
+            ("test_var".into(), "lowercase".into()),
+            ("Test_Var".into(), "mixed".into()),
+        ];
 
         // Resolve envs
-        let result =
-            TaskEnvs::resolve(AbsolutePath::new("/tmp").unwrap(), &resolved_task_config).unwrap();
+        let result = TaskEnvs::resolve(
+            mock_envs.into_iter(),
+            AbsolutePath::new("/tmp").unwrap(),
+            &resolved_task_config,
+        )
+        .unwrap();
         let envs_without_pass_through = result.envs_without_pass_through;
 
         // On Unix, all three should be treated as separate variables
@@ -808,13 +794,6 @@ mod tests {
             envs_without_pass_through.get("Test_Var").map(vite_str::Str::as_str),
             Some("mixed")
         );
-
-        // Clean up
-        unsafe {
-            std::env::remove_var("TEST_VAR");
-            std::env::remove_var("test_var");
-            std::env::remove_var("Test_Var");
-        }
     }
 
     #[test]
@@ -847,28 +826,37 @@ mod tests {
         let resolved_task_config =
             ResolvedTaskConfig { config_dir: RelativePathBuf::default(), config: task_config };
 
-        // Set up environment variables
-        unsafe {
-            std::env::set_var("ZEBRA_VAR", "zebra_value");
-            std::env::set_var("ALPHA_VAR", "alpha_value");
-            std::env::set_var("MIDDLE_VAR", "middle_value");
-            std::env::set_var("BETA_VAR", "beta_value");
-            // VSCode specific
-            std::env::set_var("VSCODE_VAR", "vscode_value");
-            std::env::set_var("app1_name", "app1_value");
-            std::env::set_var("app2_name", "app2_value");
-        }
+        // Create mock environment variables
+        let mock_envs = vec![
+            ("ZEBRA_VAR".into(), "zebra_value".into()),
+            ("ALPHA_VAR".into(), "alpha_value".into()),
+            ("MIDDLE_VAR".into(), "middle_value".into()),
+            ("BETA_VAR".into(), "beta_value".into()),
+            ("VSCODE_VAR".into(), "vscode_value".into()),
+            ("app1_name".into(), "app1_value".into()),
+            ("app2_name".into(), "app2_value".into()),
+            ("Path".into(), "C:\\Windows\\System32".into()),
+        ];
 
         // Resolve envs multiple times
-        let result1 =
-            TaskEnvs::resolve(AbsolutePath::new("C:\\tmp").unwrap(), &resolved_task_config)
-                .unwrap();
-        let result2 =
-            TaskEnvs::resolve(AbsolutePath::new("C:\\tmp").unwrap(), &resolved_task_config)
-                .unwrap();
-        let result3 =
-            TaskEnvs::resolve(AbsolutePath::new("C:\\tmp").unwrap(), &resolved_task_config)
-                .unwrap();
+        let result1 = TaskEnvs::resolve(
+            mock_envs.clone().into_iter(),
+            AbsolutePath::new("C:\\tmp").unwrap(),
+            &resolved_task_config,
+        )
+        .unwrap();
+        let result2 = TaskEnvs::resolve(
+            mock_envs.clone().into_iter(),
+            AbsolutePath::new("C:\\tmp").unwrap(),
+            &resolved_task_config,
+        )
+        .unwrap();
+        let result3 = TaskEnvs::resolve(
+            mock_envs.clone().into_iter(),
+            AbsolutePath::new("C:\\tmp").unwrap(),
+            &resolved_task_config,
+        )
+        .unwrap();
 
         // Convert to sorted vecs for comparison
         let mut envs1: Vec<_> = result1.envs_without_pass_through.iter().collect();
@@ -897,17 +885,6 @@ mod tests {
         assert!(all_envs.contains_key("VSCODE_VAR"));
         assert!(all_envs.contains_key("Path") || all_envs.contains_key("PATH"));
         assert!(all_envs.contains_key("app1_name"));
-        assert!(all_envs.contains_key("app1_name"));
-
-        // Clean up
-        unsafe {
-            std::env::remove_var("ZEBRA_VAR");
-            std::env::remove_var("ALPHA_VAR");
-            std::env::remove_var("MIDDLE_VAR");
-            std::env::remove_var("BETA_VAR");
-            std::env::remove_var("VSCODE_VAR");
-            std::env::remove_var("app1_name");
-            std::env::remove_var("app1_name");
-        }
+        assert!(all_envs.contains_key("app2_name"));
     }
 }

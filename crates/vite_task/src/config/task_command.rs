@@ -96,7 +96,8 @@ impl ResolvedTaskConfig {
                 }
             }
         };
-        let task_envs = TaskEnvs::resolve(base_dir, self)?;
+        let task_envs =
+            TaskEnvs::resolve(std::env::vars_os().collect::<Vec<_>>().into_iter(), base_dir, self)?;
         Ok(ResolvedTaskCommand {
             fingerprint: CommandFingerprint {
                 cwd,
