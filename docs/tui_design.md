@@ -27,7 +27,7 @@
       </td>
       <td>
       <pre>
-$ vite build <br />
+$ vite build <small>(cache hit, replaying)</small><br />
 VITE+ v1.0.0 building for production
 transforming...
 ✓ 32 modules transformed...
