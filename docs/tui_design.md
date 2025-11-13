@@ -1,5 +1,13 @@
 # Vite task TUI Design
 
+```json
+{
+  "script": {
+    "ready": "tsc --noEmit && vite lint && vite run -r build"
+  }
+}
+```
+
 <table>
   <tbody>
     <tr>
@@ -7,19 +15,18 @@
         <ul>
           <li><code>vite run ready</code>
             <ul>
-              <li><code>pkg1#build</code>
+              <li><code>tsc --noEmit</code></li>
+              <li><code>vite lint</code></li>
+              <li><code>vite run -r build</code>
               <ul>
               <li><code>pkg1#build</code></li>
-              <ul>
-              </li>
               <li><code>pkg2#build</code></li>
               <li><code>pkg3#build</code></li>
-            </ul>
           </li>
         </ul>
       </td>
       <td>
-        <div style="height: 100%">terminal</dib>
+        <pre style="height: 100%">terminal</pre>
       </td>
     </tr>
 
