@@ -1,20 +1,25 @@
+# Vite task TUI Design
+
 <table>
   <tbody>
     <tr>
       <td>
         <ul>
-          <li>Apple
+          <li><code>vite run ready</code>
             <ul>
-              <li>Black tea</li>
-              <li>Green tea</li>
+              <li><code>pkg1#build</code>
+              <ul>
+              <li><code>pkg1#build</code></li>
+              <ul>
+              </li>
+              <li><code>pkg2#build</code></li>
+              <li><code>pkg3#build</code></li>
             </ul>
           </li>
-          <li>Banana</li>
-          <li>Orange</li>
         </ul>
       </td>
       <td>
-        <b>Fruits</b>
+        <div style="height: 100%">terminal</dib>
       </td>
     </tr>
 
