@@ -10,7 +10,7 @@
 
 <table>
   <tbody>
-    <tr style="vertical-align: top">
+    <tr valign="top" align="left">
       <td>
         <ul>
           <li><code>vite run ready</code>
