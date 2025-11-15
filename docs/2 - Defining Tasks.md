@@ -11,7 +11,7 @@ The `vite-task.json` file lets you define tasks with more options than `package.
 
 Here is an example of a `vite-task.json` file:
 
-```json
+```jsonc
 {
   "tasks": {
     "build": {
@@ -41,7 +41,7 @@ If you want to keep your existing `package.json` scripts but also need custom co
 
 For example, the following combination of `package.json` and `vite-task.json`:
 
-```json
+```jsonc
 // package.json
 {
     "scripts": {
@@ -60,7 +60,7 @@ For example, the following combination of `package.json` and `vite-task.json`:
 
 is equivalent to:
 
-```json
+```jsonc
 // vite-task.json
 {
   "tasks": {
@@ -78,7 +78,7 @@ is equivalent to:
 
 You can provide default configurations by defining `defaults` in `vite-task.json` at the root of the workspace. **Each configuration defined in `defaults` will be applied to all tasks in the workspace with the same name**, unless a task explicitly overrides it.
 
-```json
+```jsonc
 // vite-task.json
 {
   "defaults": {

@@ -10,7 +10,7 @@ You may already use `&&` in your scripts to run multiple commands in sequence. V
 
 For example:
 
-```json
+```jsonc
 // package.json
 {
   "name": "app",
@@ -62,7 +62,7 @@ dist/assets/index-CAl1KfkQ.js188.06 kB | gzip: 59.21 kB
 
 Vite Task recursively expands `vite run ...` in scripts to run nested tasks directly instead of spawning a new subprocess. This gives you a cleaner overview of all executions and avoids unnecessary overhead.
 
-```json
+```jsonc
 // package.json
 {
   "name": "monorepoRoot",
@@ -123,7 +123,7 @@ For multi-step and nested tasks to be recognized correctly, Vite Task supports a
 
 If a script contains syntax beyond these, Vite Task falls back to normal script execution with system shells. For example, the following script will not be split into multiple steps because of the `if` statement:
 
-```json
+```jsonc
 {
   "scripts": {
     "complex": "if [ -f file.txt ]; then vite lint && vite build ; fi"
@@ -145,7 +145,7 @@ If you put a `vite run ...` command inside a script with unsupported syntax, lik
 
 To make it work, you can disable caching for the outer task by adding `"cache": false` in `vite-task.json`:
 
-```json
+```jsonc
 /// vite-task.json
 {
   "tasks": {
@@ -161,7 +161,7 @@ To make it work, you can disable caching for the outer task by adding `"cache": 
 
 Task dependencies can be defined in `vite-task.json` file. You can specify which tasks need to be executed before a particular task runs:
 
-```json
+```jsonc
 {
   "tasks": {
     "build": {

@@ -4,12 +4,12 @@ Vite is designed to work out of the box with zero configuration. Simply run `vit
 
 For example, if you have the following script defined in your `package.json`:
 
-```
+```jsonc
 // package.json
 {
-    "scripts": {
-        "lint": "vite lint"
-    }
+  "scripts": {
+    "lint": "vite lint"
+  }
 }
 ```
 

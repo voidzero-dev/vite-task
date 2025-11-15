@@ -2,7 +2,7 @@
 
 Fields `cache`, `envs`, `passthroughEnvs`, `inputs`, and `outputs` in `vite-task.json` can be used to configure caching behavior for tasks. All of them are optional. The default values are:
 
-```json
+```jsonc
 {
   "cache": true,
   "envs": [],
@@ -28,7 +28,7 @@ Caching is automatically disabled for tasks that fail or receive user input from
 
 Here are some scenarios where you may want to disable caching explicitly:
 
-```json
+```jsonc
 // vite-task.json
 {
   "tasks": {
@@ -67,7 +67,7 @@ By default, no environment variables are included in the cache fingerprint, and 
 
 Example:
 
-```json
+```jsonc
 // vite-task.json
 {
   "tasks": {
@@ -92,7 +92,7 @@ Example:
 
 Example:
 
-```json
+```jsonc
 // vite-task.json
 {
   "tasks": {
@@ -119,7 +119,7 @@ Example:
 
 Example:
 
-```json
+```jsonc
 // vite-task.json
 {
   "tasks": {
@@ -147,7 +147,7 @@ Vite Task cannot infer idempotency automatically for third-party tools, so you c
 
 Example:
 
-```json
+```jsonc
 // vite-task.json
 {
   "tasks": {
@@ -170,7 +170,7 @@ When a task is expanded into multiple steps or nested tasks (see [Task Orchestra
 
 Example:
 
-```json
+```jsonc
 // vite-task.json
 {
   "tasks": {
