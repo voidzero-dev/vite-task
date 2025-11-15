@@ -3,7 +3,8 @@
 ```json
 {
   "script": {
-    "ready": "tsc --noEmit && vite lint && vite run -r build"
+    "ready": "vite run format && tsc --noEmit && vite run -r build",
+    "format": "dprint fmt && vite fmt"
   }
 }
 ```
@@ -15,8 +16,13 @@
         <ul>
           <li><code>vite run ready</code>
             <ul>
+              <li><code>vite run format</code>
+              <ul>
+                <li><code>dprint fmt</code></li>
+                <li><code>vite fmt</code></li>
+              </ul>
+              </li>
               <li><code>tsc --noEmit</code></li>
-              <li><code>vite lint</code></li>
               <li><code>vite run -r build</code>
               <ul>
               <li><code>pkg1#build</code></li>
@@ -27,20 +33,23 @@
       </td>
       <td>
       <pre>
-$ vite build <small>(cache hit, replaying)</small><br />
+$ vite build
+
+<small>(cache hit, replaying)</small><br />
 VITE+ v1.0.0 building for production
 transforming...
 ✓ 32 modules transformed...
 rendering chunks...
 computing gzip size...
-dist/index.html  0.46 kB | gzip: 0.30 kB
-dist/assets/react-CHdo91hT.svg  4.13 kB | gzip: 2.05 kB
-dist/assets/index-D8b4DHJx.css  1.39 kB | gzip: 0.71 kB
+dist/index.html 0.46 kB | gzip: 0.30 kB
+dist/assets/react-CHdo91hT.svg 4.13 kB | gzip: 2.05 kB
+dist/assets/index-D8b4DHJx.css 1.39 kB | gzip: 0.71 kB
 dist/assets/index-CAl1KfkQ.js188.06 kB | gzip: 59.21 kB
 ✓ built in 308ms
 </pre>
-      </td>
-    </tr>
+
+</td>
+</tr>
 
 </tbody>
 </table>
