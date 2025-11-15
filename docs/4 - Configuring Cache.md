@@ -127,7 +127,7 @@ Example:
       "command": "webpack",
       // Saving files in folder "dist" in cache,
       // and restoring them when cache is hit.
-      "inputs": [
+      "outputs": [
         "dist/**"
       ]
     }

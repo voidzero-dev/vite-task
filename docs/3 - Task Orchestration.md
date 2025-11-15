@@ -169,7 +169,7 @@ Task dependencies can be defined in `vite-task.json` file. You can specify which
       "dependsOn": ["lint", "ui#test", "^build"]
     },
     "lint": {
-      "script": "vite lint"
+      "command": "vite lint"
     }
   }
 }
