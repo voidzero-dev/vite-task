@@ -7,7 +7,7 @@ There are two ways to define tasks in Vite Task:
 
 ## `vite-task.json`
 
-The `vite-task.json` file allows you to define tasks with more flexibility and options compared to `package.json` scripts. **It can be placed in roots of packages alongside `package.json` to define tasks specific to that package.**
+The `vite-task.json` file lets you define tasks with more options than `package.json` scripts. **Place it in the root of a package alongside `package.json` to define tasks for that package.**
 
 Here is an example of a `vite-task.json` file:
 
@@ -37,7 +37,7 @@ Configurable fields for each task:
 
 ### Merging with `package.json` Scripts
 
-If your want to keep your existing `package.json` scripts, but also need customized configurations for them, you can define a task with the same name in `vite-task.json`. **Vite Task will use the configuration from `vite-task.json` and the command from `package.json`**.
+If you want to keep your existing `package.json` scripts but also need custom configurations for them, you can define a task with the same name in `vite-task.json`. **Vite Task will use the configuration from `vite-task.json` and the command from `package.json`**.
 
 For example, the following combination of `package.json` and `vite-task.json`:
 
@@ -72,11 +72,11 @@ is equivalent to:
 }
 ```
 
-> If both script in `package.json` and `command` in `vite-task.json` are defined with the same name, Vite Task will report the conflict and abort.
+> If a script in `package.json` and a `command` in `vite-task.json` have the same name, Vite Task will report the conflict and abort.
 
 ### Merging with `defaults` in `vite-task.json`
 
-You can provide default configurations by defining `defaults` in `vite-task.json` located in the root of the workspace. **Each configuration defined in `defaults` will be applied to all tasks in the workspace with the same name**, unless they explicitly override the configuration.
+You can provide default configurations by defining `defaults` in `vite-task.json` at the root of the workspace. **Each configuration defined in `defaults` will be applied to all tasks in the workspace with the same name**, unless a task explicitly overrides it.
 
 ```json
 // vite-task.json
@@ -90,4 +90,4 @@ You can provide default configurations by defining `defaults` in `vite-task.json
 }
 ```
 
-> `defaults` field in non-root `vite-task.json` files are currently not allowed. Vite Task will report an error and abort if it sees one.
+> The `defaults` field is only allowed in the root `vite-task.json` file. Vite Task will report an error and abort if it finds one elsewhere.

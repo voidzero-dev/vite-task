@@ -13,7 +13,7 @@ For example, if you have the following script defined in your `package.json`:
 }
 ```
 
-The first time of `vite run build`, Vite Task will execute it just like `npm run build`:
+The first time you run `vite run lint`, Vite Task will execute it just like `npm run lint`:
 
 ```
 $ vite run lint
@@ -24,7 +24,7 @@ Found 0 warnings and 0 errors.
 ✓ Finished in 103ms on 3192 files with 88 rules using 10 threads.
 ```
 
-And if you run it again immediately, Vite Task will detect that nothing has changed and replay the cached ouput instantly without re-running the script:
+If you run it again immediately, Vite Task will detect that nothing has changed and replay the cached output instantly without re-running the script:
 
 ```
 $ vite run lint
@@ -35,7 +35,7 @@ Found 0 warnings and 0 errors.
 ✓ Finished in 103ms on 3192 files with 88 rules using 10 threads.
 ```
 
-Then, if you modify some source files and run it again, Vite Task will tell you the reason of cache miss, and re-execute the script:
+If you modify a source file and run it again, Vite Task will tell you why the cache was missed and re-execute the script:
 
 ```
 $ echo "debugger;" > src/index.js && vite run lint

@@ -1,12 +1,12 @@
 # Task Orchestration
 
-## Compositing Tasks Inside Scripts
+## Composing Tasks Inside Scripts
 
-Vite Task allows you to composite tasks with bash-like syntaxes right inside your scripts defined in `package.json`/`vite-task.json`.
+Vite Task lets you compose tasks with bash-like syntax inside your scripts defined in `package.json` or `vite-task.json`.
 
 ### Multi-step Tasks
 
-You may have already use `&&` in your scripts to run multiple commands in sequence. Vite Task regognizes this pattern and caches each step individually.
+You may already use `&&` in your scripts to run multiple commands in sequence. Vite Task recognizes this pattern and caches each step individually.
 
 For example:
 
@@ -60,7 +60,7 @@ dist/assets/index-CAl1KfkQ.js188.06 kB | gzip: 59.21 kB
 
 ### Nested Tasks
 
-Vite Task recursively expands `vite run ...` in scripts to run nested tasks directly instead of spawning a new vite task subprocess. This gives you a cleaner overview of all the executions and avoids unnecessary process spawning overhead.
+Vite Task recursively expands `vite run ...` in scripts to run nested tasks directly instead of spawning a new subprocess. This gives you a cleaner overview of all executions and avoids unnecessary overhead.
 
 ```json
 // package.json
@@ -114,14 +114,14 @@ Found 0 warnings and 0 errors.
 
 ### Supported Syntaxes
 
-In order for multi-step and nested tasks to be recognized correctly, Vite Task currently supports a subset of bash syntaxes:
+For multi-step and nested tasks to be recognized correctly, Vite Task supports a subset of bash syntax:
 
 - Simple commands: `program arg1 arg2 ...`
 - Commands prefixed with environment variables: `VAR=value program arg1 arg2`
 - Referencing variables with `$`: `program $FOO a${BAR}b ${BAZ:42}`
 - Sequential commands: `program1 && VAR=value program2 $FOO && ...`
 
-If a script contains syntaxes beyoud these, Vite Task falls back to normal script execution with system shells. For example, the following script will not be split into multiple steps because of the `if` statement:
+If a script contains syntax beyond these, Vite Task falls back to normal script execution with system shells. For example, the following script will not be split into multiple steps because of the `if` statement:
 
 ```json
 {
@@ -131,9 +131,9 @@ If a script contains syntaxes beyoud these, Vite Task falls back to normal scrip
 }
 ```
 
-Note that even if a script is not expanded, Vite Task is still able to **cache the entire script execution as a single unit**.
+Even if a script is not expanded, Vite Task can still **cache the entire script execution as a single unit**.
 
-If you put a `vite run ...` command inside a script with unsupported syntax, like the example below, the **inner `vite run ...` will fail** at execution time, because it is currently not supported to cache both `build` tasks and `complex` as a single unit at the same time.
+If you put a `vite run ...` command inside a script with unsupported syntax, like the example below, the **inner `vite run ...` will fail** at execution time, because caching both `build` tasks and `complex` as a single unit is not currently supported.
 
 ```bash
 {
