@@ -115,7 +115,7 @@ Example:
 
 > stdout and stderr are always cached regardless of this setting.
 
-> `outputs` for `vite build` are automatically configured without explicit settings.
+> `outputs` for `vite build` are automatically configured without the need for manual setup.
 
 Example:
 

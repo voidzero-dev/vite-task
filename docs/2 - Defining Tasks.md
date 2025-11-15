@@ -7,7 +7,7 @@ There are two ways to define tasks in Vite Task:
 
 ## `vite-task.json`
 
-The `vite-task.json` file lets you define tasks with more options than `package.json` scripts. **Place it in the root of a package alongside `package.json` to define tasks for that package.**
+The `vite-task.json` file lets you define tasks with more options than `package.json` scripts. It should be placed in the root of any package alongside `package.json` to define tasks for that package.
 
 Here is an example of a `vite-task.json` file:
 
