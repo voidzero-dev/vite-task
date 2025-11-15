@@ -22,9 +22,9 @@ Fields `cache`, `envs`, `passthroughEnvs`, `inputs`, and `outputs` in `vite-task
 
 Caching is enabled by default, so scripts in `package.json` are cached unless explicitly disabled.
 
-Caching is automatically disabled for tasks that fail or receive user input from stdin (such as prompts or `Ctrl-C`), so it's generally safe to enable caching for long-running tasks like dev servers.
+Caching is automatically disabled for tasks that fail or receive user input from stdin (such as prompts or `Ctrl-C`), so it's generally safe to enable caching for long-running tasks like dev servers, because they won't be cached anyway when they exit on `Ctrl-C`.
 
-> If cache is disabled, all the other cache-related configurations are irrelevant.
+> If cache is disabled, all the other fields mentioned in this pages are irrelevant.
 
 Here are some scenarios where you may want to disable caching explicitly:
 
