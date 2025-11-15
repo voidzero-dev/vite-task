@@ -166,7 +166,7 @@ Example:
 
 ## Cache Restrictions on Compound Tasks
 
-When a task is expanded into multiple steps or nested tasks (see [Task Orchestration](4%20-%20Task%20Orchestration) for details), Vite Task only supports caching each individual step separately. The overall task cannot be cached as a whole, and trying to enable caching for such tasks will result in an error.
+When a task is expanded into multiple steps or nested tasks (see [Task Orchestration](3%20-%20Task%20Orchestration.md) for details), Vite Task only supports caching each individual step separately. The overall task cannot be cached as a whole, and trying to enable caching for such tasks will result in an error.
 
 Example:
 

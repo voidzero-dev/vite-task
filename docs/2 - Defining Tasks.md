@@ -30,8 +30,8 @@ Configurable fields for each task:
 
 - `command` (string): The command to execute for the task.
 - `cwd` (string, optional): The working directory to run the command in. Defaults to the directory containing the `vite-task.json` file.
-- `dependsOn` (array of strings, optional): A list of other tasks that this task depends on. See [Task Orchestration](4%20-%20Task%20Orchestration) for details.
-- `cache`, `envs`, `passthroughEnvs`, `inputs`, `outputs`: see [Configuring Cache](5%20-%20Configuring%20Cache.md) for details.
+- `dependsOn` (array of strings, optional): A list of other tasks that this task depends on. See [Task Orchestration](3%20-%20Task%20Orchestration.md) for details.
+- `cache`, `envs`, `passthroughEnvs`, `inputs`, `outputs`: see [Configuring Cache](4%20-%20Configuring%20Cache.md) for details.
 
 ## Configuration Merging
 
