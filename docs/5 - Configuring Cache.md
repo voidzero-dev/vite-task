@@ -177,7 +177,7 @@ Example:
     "build-and-test": {
       "command": "vite build && vite test",
       // Error: caching is not supported for multi-step tasks.
-      // Each step can be cached separately.
+      // It's not necessary anyway, as each step is already cached separately.
       "cache": true
     }
   }
