@@ -51,7 +51,7 @@ For example, the following combination of `package.json` and `vite-task.json`:
 // vite-task.json
 {
     "tasks": {
-        "type-check": {
+        "build": {
             "envs": ["NODE_ENV"]
         }
     }
