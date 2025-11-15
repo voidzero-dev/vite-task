@@ -98,12 +98,10 @@ Vite Task will show:
       </td>
       <td>
       <pre>
-$ vite lint
+$ dprint fmt
 
 <small>(cache hit, replaying)</small><br />
-VITE+ v1.0.0 lint
-Found 0 warnings and 0 errors.
-✓ Finished in 1ms on 3 files with 88 rules using 10 threads.
+Formatted 3 files.
 </pre>
 
 </td>
