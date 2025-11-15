@@ -35,7 +35,7 @@ Found 0 warnings and 0 errors.
 ✓ Finished in 103ms on 3192 files with 88 rules using 10 threads.
 ```
 
-Then, if you modify some source files and run it again, Vite Task will re-execute the script to produce fresh output:
+Then, if you modify some source files and run it again, Vite Task will tell you the reason of cache miss, and re-execute the script:
 
 ```
 $ echo "debugger;" > src/index.js && vite run lint

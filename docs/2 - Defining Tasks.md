@@ -2,12 +2,12 @@
 
 There are two ways to define tasks in Vite Task:
 
-- **`scripts` in `package.json`**: Any script you define there can be run with `vite run <script-name>`, just like `npm run <script-name>`.
-- **`vite-task.json`**: You can also define tasks in a dedicated `vite-task.json` file for more flexible configurations.
+- `scripts` in `package.json`: Any script you define there can be run with `vite run <script-name>`, just like `npm run <script-name>`.
+- `vite-task.json`: You can also define tasks in a dedicated `vite-task.json` file.
 
 ## `vite-task.json`
 
-The `vite-task.json` file allows you to define tasks with more flexibility and options compared to `package.json` scripts. **It can be placed in in any packages alongside `package.json` to define tasks specific to that package.**
+The `vite-task.json` file allows you to define tasks with more flexibility and options compared to `package.json` scripts. **It can be placed in roots of packages alongside `package.json` to define tasks specific to that package.**
 
 Here is an example of a `vite-task.json` file:
 
@@ -15,15 +15,12 @@ Here is an example of a `vite-task.json` file:
 {
   "tasks": {
     "build": {
-      "command": "vite build",
-      "cwd": "./packages/app",
-      "env": {
-        "NODE_ENV": "production"
-      }
+      "command": "webpack",
+      "envs": ["NODE_ENV"]
     },
     "test": {
-      "command": "vite test",
-      "cwd": "./packages/app"
+      "command": "vite lint",
+      "cwd": "./src"
     }
   }
 }
@@ -40,7 +37,7 @@ Configurable fields for each task:
 
 ### Merging with `package.json` Scripts
 
-If your want to keep your existing `package.json` scripts, but also need more advanced configurations for some of them, you can define a task with the same name in `vite-task.json`. **Vite Task will use the configuration from `vite-task.json` and the command from `package.json`**.
+If your want to keep your existing `package.json` scripts, but also need customized configurations for them, you can define a task with the same name in `vite-task.json`. **Vite Task will use the configuration from `vite-task.json` and the command from `package.json`**.
 
 For example, the following combination of `package.json` and `vite-task.json`:
 
@@ -75,7 +72,7 @@ is equivalent to:
 }
 ```
 
-> If both script in `package.json` and `command` in `vite-task.json` are defined for the same name, Vite Task will report the conflict and abort.
+> If both script in `package.json` and `command` in `vite-task.json` are defined with the same name, Vite Task will report the conflict and abort.
 
 ### Merging with `defaults` in `vite-task.json`
 
