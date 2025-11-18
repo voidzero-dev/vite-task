@@ -1,6 +1,6 @@
 mod test_utils;
 
-use std::{env::current_dir, path::Path, process::Stdio};
+use std::{env::current_dir, process::Stdio};
 
 use fspy::AccessMode;
 use test_log::test;

@@ -3,7 +3,6 @@ mod test_utils;
 use std::{
     env::current_dir,
     fs::{File, OpenOptions},
-    path::{Path, PathBuf},
     process::Stdio,
 };
 
