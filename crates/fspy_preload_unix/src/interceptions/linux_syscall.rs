@@ -18,12 +18,11 @@ unsafe extern "C" fn syscall(syscall_no: c_long, mut args: ...) -> c_long {
 
     match syscall_no {
         libc::SYS_statx => {
-            dbg!((a0, a1));
-            if let Ok(dirfd) = c_int::try_from(a0) {
-                let pathname = a1 as *const c_char;
-                unsafe {
-                    handle_open(PathAt(dirfd, pathname), AccessMode::Read);
-                }
+            // c-style conversion is expected: (4294967196 -> -100 aka libc::AT_FDCWD)
+            let dirfd = a0 as c_int;
+            let pathname = a1 as *const c_char;
+            unsafe {
+                handle_open(PathAt(dirfd, pathname), AccessMode::Read);
             }
         }
         _ => {}
