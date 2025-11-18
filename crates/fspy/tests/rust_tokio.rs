@@ -9,7 +9,7 @@ use tokio::fs::OpenOptions;
 
 #[test(tokio::test)]
 async fn open_read() -> anyhow::Result<()> {
-    let accesses = track_child!({
+    let accesses = track_child!((), |(): ()| {
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
                 let _ = tokio::fs::File::open("hello").await;
@@ -24,49 +24,40 @@ async fn open_read() -> anyhow::Result<()> {
 
 #[test(tokio::test)]
 async fn open_write() -> anyhow::Result<()> {
-    let accesses = track_child!({
-        let path = format!("{}/hello", env!("CARGO_TARGET_TMPDIR"));
-
+    let tmp_dir = tempfile::tempdir()?;
+    let tmp_path = tmp_dir.path().join("hello");
+    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+    let accesses = track_child!(tmp_path_str, |tmp_path_str: String| {
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
-                let _ = OpenOptions::new().write(true).open(path).await;
+                let _ = OpenOptions::new().write(true).open(tmp_path_str).await;
             },
         );
     })
     .await?;
-    assert_contains(
-        &accesses,
-        Path::new(env!("CARGO_TARGET_TMPDIR")).join("hello").as_path(),
-        AccessMode::Write,
-    );
+    assert_contains(&accesses, tmp_path.as_path(), AccessMode::Write);
 
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn readdir() -> anyhow::Result<()> {
-    let accesses = track_child!({
-        let path = format!("{}/hello", env!("CARGO_TARGET_TMPDIR"));
-
+    let accesses = track_child!((), |(): ()| {
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
-                let _ = tokio::fs::read_dir(path).await;
+                let _ = tokio::fs::read_dir("hello_dir").await;
             },
         );
     })
     .await?;
-    assert_contains(
-        &accesses,
-        Path::new(env!("CARGO_TARGET_TMPDIR")).join("hello").as_path(),
-        AccessMode::ReadDir,
-    );
+    assert_contains(&accesses, current_dir()?.join("hello_dir").as_path(), AccessMode::ReadDir);
 
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn subprocess() -> anyhow::Result<()> {
-    let accesses = track_child!({
+    let accesses = track_child!((), |(): ()| {
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
                 let mut command = if cfg!(windows) {
