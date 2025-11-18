@@ -113,7 +113,7 @@ impl Exec {
                 self.program.as_ref(),
                 path,
                 |path| {
-                    on_path_access(PathAccess { path: path.into(), mode: AccessMode::Read });
+                    on_path_access(PathAccess { path: path.into(), mode: AccessMode::READ });
                     access(OsStr::from_bytes(path), AccessFlags::X_OK)
                 },
                 |program| Ok(program.to_owned()),

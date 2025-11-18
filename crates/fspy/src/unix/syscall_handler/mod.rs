@@ -60,9 +60,9 @@ impl SyscallHandler {
         }
         self.arena.add(PathAccess {
             mode: match flags & libc::O_ACCMODE {
-                libc::O_RDWR => AccessMode::ReadWrite,
-                libc::O_WRONLY => AccessMode::Write,
-                _ => AccessMode::Read,
+                libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
+                libc::O_WRONLY => AccessMode::WRITE,
+                _ => AccessMode::READ,
             },
             path: NativeStr::from_bytes(path.as_os_str().as_bytes()),
         });
@@ -72,7 +72,7 @@ impl SyscallHandler {
     fn handle_open_dir(&mut self, caller: Caller, fd: Fd) -> io::Result<()> {
         let path = fd.get_path(caller)?;
         self.arena.add(PathAccess {
-            mode: AccessMode::ReadDir,
+            mode: AccessMode::READ_DIR,
             path: NativeStr::from_bytes(path.as_bytes()),
         });
         Ok(())

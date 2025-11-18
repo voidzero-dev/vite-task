@@ -12,7 +12,7 @@ use crate::{
 intercept!(stat(64): unsafe extern "C" fn(path: *const c_char, buf: *mut stat_struct) -> c_int);
 unsafe extern "C" fn stat(path: *const c_char, buf: *mut stat_struct) -> c_int {
     unsafe {
-        handle_open(path, AccessMode::Read);
+        handle_open(path, AccessMode::READ);
     }
     unsafe { stat::original()(path, buf) }
 }
@@ -21,7 +21,7 @@ intercept!(lstat(64): unsafe extern "C" fn(path: *const c_char, buf: *mut stat_s
 unsafe extern "C" fn lstat(path: *const c_char, buf: *mut stat_struct) -> c_int {
     // TODO: add accessmode ReadNoFollow
     unsafe {
-        handle_open(path, AccessMode::Read);
+        handle_open(path, AccessMode::READ);
     }
     unsafe { lstat::original()(path, buf) }
 }
@@ -29,7 +29,7 @@ unsafe extern "C" fn lstat(path: *const c_char, buf: *mut stat_struct) -> c_int 
 intercept!(fstat(64): unsafe extern "C" fn(fd: c_int, buf: *mut stat_struct) -> c_int);
 unsafe extern "C" fn fstat(fd: c_int, buf: *mut stat_struct) -> c_int {
     unsafe {
-        handle_open(Fd(fd), AccessMode::Read);
+        handle_open(Fd(fd), AccessMode::READ);
     }
     unsafe { fstat::original()(fd, buf) }
 }
@@ -42,7 +42,7 @@ unsafe extern "C" fn fstatat(
     flags: c_int,
 ) -> c_int {
     unsafe {
-        handle_open(PathAt(dirfd, pathname), AccessMode::Read);
+        handle_open(PathAt(dirfd, pathname), AccessMode::READ);
     }
     unsafe { fstatat::original()(dirfd, pathname, buf, flags) }
 }

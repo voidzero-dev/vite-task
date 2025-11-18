@@ -25,21 +25,21 @@ async fn track_node_script(script: &str, args: &[&OsStr]) -> anyhow::Result<Path
 #[test(tokio::test)]
 async fn read_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.readFileSync('hello') } catch {}", &[]).await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn exist_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.existsSync('hello') } catch {}", &[]).await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn stat_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.statSync('hello') } catch {}", &[]).await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
     Ok(())
 }
 
@@ -50,7 +50,7 @@ async fn create_read_stream() -> anyhow::Result<()> {
         &[],
     )
     .await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
     Ok(())
 }
 
@@ -63,7 +63,7 @@ async fn create_write_stream() -> anyhow::Result<()> {
         &[file_path.as_os_str()],
     )
     .await?;
-    assert_contains(&accesses, file_path.as_path(), AccessMode::Write);
+    assert_contains(&accesses, file_path.as_path(), AccessMode::WRITE);
     Ok(())
 }
 
@@ -76,14 +76,14 @@ async fn write_sync() -> anyhow::Result<()> {
         &[file_path.as_os_str()],
     )
     .await?;
-    assert_contains(&accesses, &file_path, AccessMode::Write);
+    assert_contains(&accesses, &file_path, AccessMode::WRITE);
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn read_dir_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.readdirSync('.') } catch {}", &[]).await?;
-    assert_contains(&accesses, &current_dir().unwrap(), AccessMode::ReadDir);
+    assert_contains(&accesses, &current_dir().unwrap(), AccessMode::READ_DIR);
     Ok(())
 }
 
@@ -99,6 +99,6 @@ async fn subprocess() -> anyhow::Result<()> {
         &[],
     )
     .await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
     Ok(())
 }

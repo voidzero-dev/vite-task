@@ -22,7 +22,7 @@ unsafe extern "C" fn syscall(syscall_no: c_long, mut args: ...) -> c_long {
             let dirfd = a0 as c_int;
             let pathname = a1 as *const c_char;
             unsafe {
-                handle_open(PathAt(dirfd, pathname), AccessMode::Read);
+                handle_open(PathAt(dirfd, pathname), AccessMode::READ);
             }
         }
         _ => {}

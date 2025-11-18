@@ -53,59 +53,67 @@ async fn track_test_bin(args: &[&str], cwd: Option<&str>) -> PathAccessIterable 
 #[test(tokio::test)]
 async fn open_read() {
     let accesses = track_test_bin(&["open_read", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::Read);
+    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::READ);
 }
 
 #[test(tokio::test)]
 async fn open_write() {
     let accesses = track_test_bin(&["open_write", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::Write);
+    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::WRITE);
 }
 
 #[test(tokio::test)]
 async fn open_readwrite() {
     let accesses = track_test_bin(&["open_readwrite", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::ReadWrite);
+    assert_contains(
+        &accesses,
+        Path::new("/hello"),
+        fspy::AccessMode::READ | fspy::AccessMode::WRITE,
+    );
 }
 
 #[test(tokio::test)]
 async fn openat2_read() {
     let accesses = track_test_bin(&["openat2_read", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::Read);
+    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::READ);
 }
 
 #[test(tokio::test)]
 async fn openat2_write() {
     let accesses = track_test_bin(&["openat2_write", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::Write);
+    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::WRITE);
 }
 
 #[test(tokio::test)]
 async fn openat2_readwrite() {
     let accesses = track_test_bin(&["openat2_readwrite", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::ReadWrite);
+    assert_contains(
+        &accesses,
+        Path::new("/hello"),
+        fspy::AccessMode::READ | fspy::AccessMode::WRITE,
+    );
 }
 
 #[test(tokio::test)]
 async fn open_relative() {
     let accesses = track_test_bin(&["open_read", "hello"], Some("/home")).await;
-    assert_contains(&accesses, Path::new("/home/hello"), fspy::AccessMode::Read);
+    assert_contains(&accesses, Path::new("/home/hello"), fspy::AccessMode::READ);
 }
 
 #[test(tokio::test)]
 async fn readdir() {
     let accesses = track_test_bin(&["readdir", "/home"], None).await;
-    assert_contains(&accesses, Path::new("/home"), fspy::AccessMode::ReadDir);
+    assert_contains(&accesses, Path::new("/home"), fspy::AccessMode::READ_DIR);
 }
 
 #[test(tokio::test)]
 async fn stat() {
     let accesses = track_test_bin(&["stat", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::Read);
+    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::READ);
 }
 
 #[test(tokio::test)]
 async fn execve() {
     let accesses = track_test_bin(&["execve", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::Read);
+    assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::READ);
 }

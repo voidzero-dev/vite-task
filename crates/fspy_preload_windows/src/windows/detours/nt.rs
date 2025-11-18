@@ -121,7 +121,7 @@ static DETOUR_NT_QUERY_ATTRIBUTES_FILE: Detour<
             object_attributes: POBJECT_ATTRIBUTES,
             file_information: PFILE_BASIC_INFORMATION,
         ) -> HFILE {
-            unsafe { handle_open(AccessMode::Read, object_attributes) };
+            unsafe { handle_open(AccessMode::READ, object_attributes) };
             unsafe { (DETOUR_NT_QUERY_ATTRIBUTES_FILE.real())(object_attributes, file_information) }
         }
         new_nt_open_file
@@ -145,7 +145,7 @@ unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath)
                     .rposition(|c| *c == b'\\' as u16 || *c == b'/' as u16)
                     .unwrap_or(0);
                 PathAccess {
-                    mode: AccessMode::ReadDir,
+                    mode: AccessMode::READ_DIR,
                     path: NativeStr::from_wide(&path[..slash_pos]),
                 }
             } else {
@@ -265,7 +265,7 @@ static DETOUR_NT_QUERY_DIRECTORY_FILE: Detour<
             file_name: PUNICODE_STRING,
             restart_scan: BOOLEAN,
         ) -> NTSTATUS {
-            unsafe { handle_open(AccessMode::ReadDir, file_handle) };
+            unsafe { handle_open(AccessMode::READ_DIR, file_handle) };
             unsafe {
                 (DETOUR_NT_QUERY_DIRECTORY_FILE.real())(
                     file_handle,

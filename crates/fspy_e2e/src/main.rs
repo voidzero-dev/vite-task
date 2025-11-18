@@ -47,15 +47,7 @@ impl AccessCollector {
                 }
                 Entry::Occupied(mut occupied) => {
                     let occupied_mode = occupied.get_mut();
-                    match (*occupied_mode, access.mode) {
-                        (_, AccessMode::ReadWrite) => {
-                            *occupied_mode = AccessMode::ReadWrite;
-                        }
-                        (AccessMode::Read, AccessMode::ReadDir) => {
-                            *occupied_mode = AccessMode::ReadDir;
-                        }
-                        _ => {}
-                    }
+                    occupied_mode.insert(access.mode);
                 }
             }
         }

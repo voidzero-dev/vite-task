@@ -103,9 +103,9 @@ pub struct OpenFlags(pub c_int);
 impl ToAccessMode for OpenFlags {
     unsafe fn to_access_mode(self) -> AccessMode {
         match self.0 & libc::O_ACCMODE {
-            libc::O_RDWR => AccessMode::ReadWrite,
-            libc::O_WRONLY => AccessMode::Write,
-            _ => AccessMode::Read,
+            libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
+            libc::O_WRONLY => AccessMode::WRITE,
+            _ => AccessMode::READ,
         }
     }
 }
@@ -117,9 +117,9 @@ impl ToAccessMode for ModeStr {
         let has_read = mode_str.contains(&b'r');
         let has_write = mode_str.contains(&b'w') || mode_str.contains(&b'a');
         match (has_read, has_write) {
-            (false, true) => AccessMode::Write,
-            (true, true) => AccessMode::ReadWrite,
-            _ => AccessMode::Read,
+            (false, true) => AccessMode::WRITE,
+            (true, true) => AccessMode::READ | AccessMode::WRITE,
+            _ => AccessMode::READ,
         }
     }
 }

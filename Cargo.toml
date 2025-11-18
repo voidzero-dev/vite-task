@@ -41,6 +41,7 @@ attohttpc = { version = "0.30.1", features = ["tls-native", "tls-native-vendored
 base64 = "0.22.1"
 bincode = "2.0.1"
 bindgen = "0.72.1"
+bitflags = "2.10.0"
 brush-parser = "0.2.18"
 bstr = { version = "1.12.0", default-features = false, features = ["alloc", "std"] }
 bumpalo = { version = "3.17.0", features = ["allocator-api2"] }

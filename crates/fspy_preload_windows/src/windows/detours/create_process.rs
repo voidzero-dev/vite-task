@@ -73,7 +73,7 @@ static DETOUR_CREATE_PROCESS_W: Detour<
             if !lp_application_name.is_null() {
                 unsafe {
                     sender.send(PathAccess {
-                        mode: AccessMode::Read,
+                        mode: AccessMode::READ,
                         path: NativeStr::from_wide(
                             U16CStr::from_ptr_str(lp_application_name).as_slice(),
                         ),
@@ -197,7 +197,7 @@ static DETOUR_CREATE_PROCESS_A: Detour<
             if !lp_application_name.is_null() {
                 unsafe {
                     sender.send(PathAccess {
-                        mode: AccessMode::Read,
+                        mode: AccessMode::READ,
                         path: NativeStr::from_ansi(CStr::from_ptr(lp_application_name).to_bytes()),
                     });
                 }

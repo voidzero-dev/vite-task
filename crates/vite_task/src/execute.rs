@@ -497,25 +497,19 @@ pub async fn execute_task(
             // temp workaround for oxlint reading inside .git
             continue;
         }
-        match access.mode {
-            AccessMode::Read => {
-                path_reads.entry(relative_path).or_insert(PathRead { read_dir_entries: false });
-            }
-            AccessMode::Write => {
-                path_writes.insert(relative_path, PathWrite);
-            }
-            AccessMode::ReadWrite => {
-                path_reads
-                    .entry(relative_path.clone())
-                    .or_insert(PathRead { read_dir_entries: false });
-                path_writes.insert(relative_path, PathWrite);
-            }
-            AccessMode::ReadDir => match path_reads.entry(relative_path) {
+        if access.mode.contains(AccessMode::READ) {
+            path_reads.entry(relative_path.clone()).or_insert(PathRead { read_dir_entries: false });
+        }
+        if access.mode.contains(AccessMode::WRITE) {
+            path_writes.insert(relative_path.clone(), PathWrite);
+        }
+        if access.mode.contains(AccessMode::READ_DIR) {
+            match path_reads.entry(relative_path) {
                 Entry::Occupied(mut occupied) => occupied.get_mut().read_dir_entries = true,
                 Entry::Vacant(vacant) => {
                     vacant.insert(PathRead { read_dir_entries: true });
                 }
-            },
+            }
         }
     }
 

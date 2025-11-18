@@ -16,7 +16,7 @@ async fn open_read() -> anyhow::Result<()> {
         let _ = File::open("hello");
     })
     .await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
 
     Ok(())
 }
@@ -30,7 +30,7 @@ async fn open_write() -> anyhow::Result<()> {
         let _ = OpenOptions::new().write(true).open(tmp_path_str);
     })
     .await?;
-    assert_contains(&accesses, tmp_path.as_path(), AccessMode::Write);
+    assert_contains(&accesses, tmp_path.as_path(), AccessMode::WRITE);
 
     Ok(())
 }
@@ -41,7 +41,7 @@ async fn readdir() -> anyhow::Result<()> {
         let _ = std::fs::read_dir("hello_dir");
     })
     .await?;
-    assert_contains(&accesses, current_dir()?.join("hello_dir").as_path(), AccessMode::ReadDir);
+    assert_contains(&accesses, current_dir()?.join("hello_dir").as_path(), AccessMode::READ_DIR);
 
     Ok(())
 }
@@ -68,7 +68,7 @@ async fn subprocess() -> anyhow::Result<()> {
             .unwrap();
     })
     .await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
 
     Ok(())
 }

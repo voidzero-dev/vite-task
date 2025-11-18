@@ -18,7 +18,7 @@ unsafe extern "C" fn scandir(
     select: *const c_void,
     compar: *const c_void,
 ) -> c_int {
-    unsafe { handle_open(dirname, AccessMode::ReadDir) }
+    unsafe { handle_open(dirname, AccessMode::READ_DIR) }
     unsafe { scandir::original()(dirname, namelist, select, compar) }
 }
 
@@ -37,7 +37,7 @@ mod macos_only {
         select: *const c_void,
         compar: *const c_void,
     ) -> c_int {
-        unsafe { handle_open(dirname, AccessMode::ReadDir) };
+        unsafe { handle_open(dirname, AccessMode::READ_DIR) };
         unsafe { scandir_b::original()(dirname, namelist, select, compar) }
     }
 }
@@ -49,18 +49,18 @@ unsafe extern "C" fn getdirentries(
     nbytes: c_int,
     basep: *mut c_long,
 ) -> c_int {
-    unsafe { handle_open(Fd(fd), AccessMode::ReadDir) };
+    unsafe { handle_open(Fd(fd), AccessMode::READ_DIR) };
     unsafe { getdirentries::original()(fd, buf, nbytes, basep) }
 }
 
 intercept!(fdopendir(64): unsafe extern "C" fn (fd: c_int) -> *mut DIR);
 unsafe extern "C" fn fdopendir(fd: c_int) -> *mut DIR {
-    unsafe { handle_open(Fd(fd), AccessMode::ReadDir) };
+    unsafe { handle_open(Fd(fd), AccessMode::READ_DIR) };
     unsafe { fdopendir::original()(fd) }
 }
 
 intercept!(opendir(64): unsafe extern "C" fn (*const c_char) -> *mut DIR);
 unsafe extern "C" fn opendir(dir_name: *const c_char) -> *mut DIR {
-    unsafe { handle_open(dir_name, AccessMode::ReadDir) };
+    unsafe { handle_open(dir_name, AccessMode::READ_DIR) };
     unsafe { opendir::original()(dir_name) }
 }

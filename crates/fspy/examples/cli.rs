@@ -1,6 +1,5 @@
 use std::{env::args_os, ffi::OsStr, path::PathBuf, pin::Pin};
 
-use fspy::AccessMode;
 use tokio::{
     fs::File,
     io::{AsyncWrite, stdout},
@@ -33,12 +32,7 @@ async fn main() -> anyhow::Result<()> {
         csv_writer
             .write_record(&[
                 acc.path.to_cow_os_str().to_string_lossy().as_ref().as_bytes(),
-                match acc.mode {
-                    AccessMode::Read => b"read".as_slice(),
-                    AccessMode::ReadWrite => b"readwrite",
-                    AccessMode::Write => b"write",
-                    AccessMode::ReadDir => b"readdir",
-                },
+                format!("{:?}", acc.mode).as_bytes(),
             ])
             .await?;
     }

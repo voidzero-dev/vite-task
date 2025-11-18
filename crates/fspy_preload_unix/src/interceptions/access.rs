@@ -9,7 +9,7 @@ use crate::{
 intercept!(access(64): unsafe extern "C" fn(pathname: *const c_char, mode: c_int) -> c_int);
 unsafe extern "C" fn access(pathname: *const c_char, mode: c_int) -> c_int {
     unsafe {
-        handle_open(pathname, AccessMode::Read);
+        handle_open(pathname, AccessMode::READ);
     }
     unsafe { access::original()(pathname, mode) }
 }
@@ -22,7 +22,7 @@ unsafe extern "C" fn faccessat(
     flags: c_int,
 ) -> c_int {
     unsafe {
-        handle_open(PathAt(dirfd, pathname), AccessMode::Read);
+        handle_open(PathAt(dirfd, pathname), AccessMode::READ);
     }
     unsafe { faccessat::original()(dirfd, pathname, mode, flags) }
 }

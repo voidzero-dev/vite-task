@@ -78,9 +78,9 @@ pub fn access_mask_to_mode(desired_access: ACCESS_MASK) -> AccessMode {
     let has_write = (desired_access & (FILE_WRITE_DATA | FILE_APPEND_DATA | GENERIC_WRITE)) != 0;
     let has_read = (desired_access & (FILE_READ_DATA | GENERIC_READ)) != 0;
     if has_write {
-        if has_read { AccessMode::ReadWrite } else { AccessMode::Write }
+        if has_read { AccessMode::READ | AccessMode::WRITE } else { AccessMode::WRITE }
     } else {
-        AccessMode::Read
+        AccessMode::READ
     }
 }
 
