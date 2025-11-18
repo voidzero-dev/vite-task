@@ -1,4 +1,4 @@
-use std::ffi::c_long;
+use std::ffi::{c_char, c_long};
 
 use fspy_shared::ipc::AccessMode;
 
@@ -20,7 +20,7 @@ unsafe extern "C" fn syscall(syscall_no: c_long, mut args: ...) -> c_long {
     match syscall_no {
         libc::SYS_statx => {
             if let Ok(dirfd) = i32::try_from(a0) {
-                let pathname = a1 as *const u8;
+                let pathname = a1 as *const c_char;
                 unsafe {
                     handle_open(PathAt(dirfd, pathname), AccessMode::Read);
                 }
