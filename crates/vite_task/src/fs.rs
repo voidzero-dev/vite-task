@@ -40,6 +40,7 @@ fn hash_content(mut stream: impl Read) -> io::Result<u64> {
 }
 
 impl FileSystem for RealFileSystem {
+    #[tracing::instrument(level = "trace")]
     fn fingerprint_path(
         &self,
         path: &Arc<AbsolutePath>,
@@ -59,7 +60,13 @@ impl FileSystem for RealFileSystem {
                         return RealFileSystem::process_directory(std_path, path_read);
                     }
                 }
-
+                if err.kind() != io::ErrorKind::NotFound {
+                    tracing::trace!(
+                        "Uncommon error when openning {:?} for fingerprinting: {}",
+                        std_path,
+                        err
+                    );
+                }
                 // There are many reasons why opening a file might fail (NotFound, InvalidFilename, NotADirectory, PermissionDenied).
                 // Consider all of them as NotFound for fingerprinting purposes.
                 return Ok(PathFingerprint::NotFound);
