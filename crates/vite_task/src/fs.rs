@@ -62,7 +62,7 @@ impl FileSystem for RealFileSystem {
                 }
                 if err.kind() != io::ErrorKind::NotFound {
                     tracing::trace!(
-                        "Uncommon error when openning {:?} for fingerprinting: {}",
+                        "Uncommon error when opening {:?} for fingerprinting: {}",
                         std_path,
                         err
                     );
