@@ -1,9 +1,9 @@
-use std::{ffi::OsString, io, path::Path, sync::Arc};
+use std::{ffi::OsString, io, path::Path};
 
 use fspy::error::SpawnError;
 use petgraph::algo::Cycle;
 use vite_path::{
-    AbsolutePath, RelativePathBuf,
+    RelativePathBuf,
     absolute::StripPrefixError,
     relative::{FromPathError, InvalidPathDataError},
 };
@@ -53,9 +53,6 @@ pub enum Error {
 
     #[error("The path ({path:?}) is not a valid relative path because: {reason}")]
     InvalidRelativePath { path: Box<Path>, reason: FromPathError },
-
-    #[error("IO error: {err} at {path:?}")]
-    IoWithPath { err: io::Error, path: Arc<AbsolutePath> },
 
     #[cfg(unix)]
     #[error("Unsupported file type: {0:?}")]

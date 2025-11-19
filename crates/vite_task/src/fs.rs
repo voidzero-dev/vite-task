@@ -49,6 +49,7 @@ impl FileSystem for RealFileSystem {
 
         let file = match File::open(std_path) {
             Ok(file) => file,
+            #[allow(unused)]
             Err(err) => {
                 // On Windows, File::open fails specifically for directories with PermissionDenied
                 #[cfg(windows)]
@@ -59,17 +60,9 @@ impl FileSystem for RealFileSystem {
                     }
                 }
 
-                return if matches!(
-                    err.kind(),
-                    io::ErrorKind::NotFound |
-                    // A component used as a directory in path is not a directory,
-                    // e.g. "/foo.txt/bar" where "/foo.txt" is a file
-                    io::ErrorKind::NotADirectory
-                ) {
-                    Ok(PathFingerprint::NotFound)
-                } else {
-                    Err(Error::IoWithPath { err, path: path.clone() })
-                };
+                // There are many reasons why opening a file might fail (NotFound, InvalidFilename, NotADirectory, PermissionDenied).
+                // Consider all of them as NotFound for fingerprinting purposes.
+                return Ok(PathFingerprint::NotFound);
             }
         };
 
