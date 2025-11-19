@@ -11,25 +11,27 @@ pub fn assert_contains(
     expected_path: &Path,
     expected_mode: AccessMode,
 ) {
-    let found = accesses.iter().any(|access| {
+    let mut actual_mode: AccessMode = AccessMode::empty();
+    for access in accesses.iter() {
         let Ok(stripped) =
             access.path.strip_path_prefix::<_, Result<PathBuf, StripPrefixError>, _>(
                 expected_path,
                 |strip_result| strip_result.map(Path::to_path_buf),
             )
         else {
-            return false;
+            continue;
         };
-        stripped.as_os_str().is_empty() && access.mode == expected_mode
-    });
-    if !found {
-        panic!(
-            "Expected to find access to path {:?} with mode {:?}, but it was not found in: {:?}",
-            expected_path,
-            expected_mode,
-            accesses.iter().collect::<Vec<_>>()
-        );
+        if stripped.as_os_str().is_empty() {
+            actual_mode.insert(access.mode);
+        }
     }
+
+    assert_eq!(
+        expected_mode,
+        actual_mode,
+        "Expected to find access to path {:?} with mode {:?}, but it was not found in: {:?}",
+        accesses.iter().collect::<Vec<_>>()
+    );
 }
 
 #[macro_export]
