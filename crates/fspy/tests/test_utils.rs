@@ -30,6 +30,8 @@ pub fn assert_contains(
         expected_mode,
         actual_mode,
         "Expected to find access to path {:?} with mode {:?}, but it was not found in: {:?}",
+        expected_path,
+        expected_mode,
         accesses.iter().collect::<Vec<_>>()
     );
 }
