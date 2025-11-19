@@ -34,10 +34,8 @@ pub fn assert_contains(
 
 #[macro_export]
 macro_rules! track_child {
-    ($body: block) => {{
-        let std_cmd = $crate::test_utils::command_executing!((), |(): ()| {
-            let _ = $body;
-        });
+    ($arg: expr, $body: expr) => {{
+        let std_cmd = $crate::test_utils::command_executing!($arg, $body);
         $crate::test_utils::spawn_std(std_cmd)
     }};
 }

@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use fspy_shared::ipc::AccessMode;
 use widestring::{U16CStr, U16CString, U16Str};
 use winapi::{
@@ -9,7 +11,7 @@ use crate::windows::winapi_utils::{
     access_mask_to_mode, combine_paths, get_path_name, get_u16_str,
 };
 
-pub trait ToAccessMode {
+pub trait ToAccessMode: Debug {
     unsafe fn to_access_mode(self) -> AccessMode;
 }
 
