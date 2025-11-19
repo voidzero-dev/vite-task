@@ -13,11 +13,12 @@ use bincode::{BorrowDecode, Decode, Encode};
 #[cfg(unix)]
 use bstr::BStr;
 
-/// Similar to `OsStr`, but requires zero-copy to construct from either ansi or wide characters on Windows.
+/// Similar to `OsStr`, but requires zero-copy to construct from either wide characters on Windows.
 #[derive(Encode, BorrowDecode, Clone, Copy, PartialEq, Eq)]
 pub struct NativeStr<'a> {
-    #[cfg(windows)]
-    is_wide: bool,
+    // On unix, this is the raw bytes of the OsStr.
+    // On windows, this is safely transmuted from `&[u16]` in `NativeStr::from_wide`. We don't declare it as `&[u16]` to allow `BorrowDecode`.
+    // Transmuting back to `&[u16]` would be unsafe because of different alignments between `u8` and `u16` (See `to_os_string`).
     data: &'a [u8],
 }
 
@@ -46,11 +47,7 @@ impl<'a> NativeStr<'a> {
         let mut data = Vec::<u8, _>::with_capacity_in(self.data.len(), alloc);
         data.extend_from_slice(self.data);
         let data = data.leak::<'new_alloc>();
-        NativeStr {
-            data,
-            #[cfg(windows)]
-            is_wide: self.is_wide,
-        }
+        NativeStr { data }
     }
 
     #[cfg(unix)]
@@ -60,15 +57,9 @@ impl<'a> NativeStr<'a> {
     }
 
     #[cfg(windows)]
-    #[must_use]
-    pub const fn from_ansi(bytes: &'a [u8]) -> Self {
-        Self { is_wide: false, data: bytes }
-    }
-
-    #[cfg(windows)]
     pub fn from_wide(wide: &'a [u16]) -> Self {
         use bytemuck::must_cast_slice;
-        Self { is_wide: true, data: must_cast_slice(wide) }
+        Self { data: must_cast_slice(wide) }
     }
 
     #[cfg(unix)]
@@ -90,20 +81,11 @@ impl<'a> NativeStr<'a> {
         use std::os::windows::ffi::OsStringExt;
 
         use bytemuck::{allocation::pod_collect_to_vec, try_cast_slice};
-        use winsafe::{
-            MultiByteToWideChar,
-            co::{CP, MBC},
-        };
 
-        if self.is_wide {
-            if let Ok(wide) = try_cast_slice::<u8, u16>(self.data) {
-                OsString::from_wide(wide)
-            } else {
-                let wide = pod_collect_to_vec::<u8, u16>(self.data);
-                OsString::from_wide(&wide)
-            }
+        if let Ok(wide) = try_cast_slice::<u8, u16>(self.data) {
+            OsString::from_wide(wide)
         } else {
-            let wide = MultiByteToWideChar(CP::ACP, MBC::ERR_INVALID_CHARS, self.data).unwrap();
+            let wide = pod_collect_to_vec::<u8, u16>(self.data);
             OsString::from_wide(&wide)
         }
     }
@@ -226,15 +208,6 @@ impl<'a> From<&'a std::path::Path> for NativeString {
 mod tests {
     #[cfg(windows)]
     use super::*;
-
-    #[cfg(windows)]
-    #[test]
-    fn test_from_ansi() {
-        let ansi_str = "hello";
-        let native_str = NativeStr::from_ansi(ansi_str.as_bytes());
-        let os_string = native_str.to_os_string();
-        assert_eq!(os_string.to_str().unwrap(), ansi_str);
-    }
 
     #[cfg(windows)]
     #[test]
