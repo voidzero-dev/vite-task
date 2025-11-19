@@ -1,8 +1,4 @@
-use std::ffi::CStr;
-
 use fspy_detours_sys::{DetourCreateProcessWithDllExA, DetourCreateProcessWithDllExW};
-use fspy_shared::ipc::{AccessMode, NativeStr, PathAccess};
-use widestring::U16CStr;
 use winapi::{
     shared::{
         minwindef::{BOOL, DWORD, LPVOID},
@@ -23,6 +19,29 @@ use crate::windows::{
     client::global_client,
     detour::{Detour, DetourAny},
 };
+
+thread_local! {
+    static IS_HOOKING_CREATE_PROCESS: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
+struct HookGuard;
+impl HookGuard {
+    pub fn new() -> Option<Self> {
+        let already_hooking = IS_HOOKING_CREATE_PROCESS.with(|c| {
+            let v = c.get();
+            c.set(true);
+            v
+        });
+        if already_hooking { None } else { Some(Self) }
+    }
+}
+impl Drop for HookGuard {
+    fn drop(&mut self) {
+        IS_HOOKING_CREATE_PROCESS.with(|c| {
+            c.set(false);
+        });
+    }
+}
 
 static DETOUR_CREATE_PROCESS_W: Detour<
     unsafe extern "system" fn(
@@ -51,8 +70,7 @@ static DETOUR_CREATE_PROCESS_W: Detour<
             lp_startup_info: LPSTARTUPINFOW,
             lp_process_information: LPPROCESS_INFORMATION,
         ) -> BOOL {
-            let client = unsafe { global_client() };
-            let Some(sender) = client.sender() else {
+            let Some(_hook_guard) = HookGuard::new() else {
                 // Detect re-entrance and avoid double hooking
                 return unsafe {
                     (DETOUR_CREATE_PROCESS_W.real())(
@@ -61,7 +79,7 @@ static DETOUR_CREATE_PROCESS_W: Detour<
                         lp_process_attributes,
                         lp_thread_attributes,
                         b_inherit_handles,
-                        dw_creation_flags | CREATE_SUSPENDED,
+                        dw_creation_flags,
                         lp_environment,
                         lp_current_directory,
                         lp_startup_info,
@@ -70,16 +88,7 @@ static DETOUR_CREATE_PROCESS_W: Detour<
                 };
             };
 
-            if !lp_application_name.is_null() {
-                unsafe {
-                    sender.send(PathAccess {
-                        mode: AccessMode::READ,
-                        path: NativeStr::from_wide(
-                            U16CStr::from_ptr_str(lp_application_name).as_slice(),
-                        ),
-                    });
-                }
-            }
+            let client = unsafe { global_client() };
 
             unsafe extern "system" fn create_process_with_payload_w(
                 lp_application_name: LPCWSTR,
@@ -175,8 +184,7 @@ static DETOUR_CREATE_PROCESS_A: Detour<
             lp_startup_info: LPSTARTUPINFOA,
             lp_process_information: LPPROCESS_INFORMATION,
         ) -> BOOL {
-            let client = unsafe { global_client() };
-            let Some(sender) = client.sender() else {
+            let Some(_hook_guard) = HookGuard::new() else {
                 // Detect re-entrance and avoid double hooking
                 return unsafe {
                     (DETOUR_CREATE_PROCESS_A.real())(
@@ -185,7 +193,7 @@ static DETOUR_CREATE_PROCESS_A: Detour<
                         lp_process_attributes,
                         lp_thread_attributes,
                         b_inherit_handles,
-                        dw_creation_flags | CREATE_SUSPENDED,
+                        dw_creation_flags,
                         lp_environment,
                         lp_current_directory,
                         lp_startup_info,
@@ -193,15 +201,7 @@ static DETOUR_CREATE_PROCESS_A: Detour<
                     )
                 };
             };
-
-            if !lp_application_name.is_null() {
-                unsafe {
-                    sender.send(PathAccess {
-                        mode: AccessMode::READ,
-                        path: NativeStr::from_ansi(CStr::from_ptr(lp_application_name).to_bytes()),
-                    });
-                }
-            }
+            let client = unsafe { global_client() };
 
             unsafe extern "system" fn create_process_with_payload_a(
                 lp_application_name: LPCSTR,

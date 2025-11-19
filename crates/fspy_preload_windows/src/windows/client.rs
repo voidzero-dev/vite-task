@@ -8,27 +8,9 @@ use fspy_shared::{
 };
 use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
 
-use crate::stack_once::{StackOnceGuard, stack_once_token};
-
 pub struct Client<'a> {
     payload: Payload<'a>,
     ipc_sender: Option<Sender>,
-}
-
-stack_once_token!(PATH_ACCESS_ONCE);
-
-pub struct PathAccessSender<'a> {
-    ipc_sender: &'a Option<Sender>,
-    _once_guard: StackOnceGuard,
-}
-
-impl<'a> PathAccessSender<'a> {
-    pub fn send(&self, access: PathAccess<'_>) {
-        let Some(sender) = &self.ipc_sender else {
-            return;
-        };
-        sender.write_encoded(&access, BINCODE_CONFIG).expect("failed to send path access");
-    }
 }
 
 impl<'a> Client<'a> {
@@ -56,11 +38,6 @@ impl<'a> Client<'a> {
             return;
         };
         sender.write_encoded(&access, BINCODE_CONFIG).expect("failed to send path access");
-    }
-
-    pub fn sender(&self) -> Option<PathAccessSender<'_>> {
-        let guard = PATH_ACCESS_ONCE.try_enter()?;
-        Some(PathAccessSender { ipc_sender: &self.ipc_sender, _once_guard: guard })
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {
