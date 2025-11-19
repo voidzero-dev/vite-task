@@ -52,7 +52,7 @@ impl PathAccessIterable {
 
 #[derive(Debug, Clone)]
 pub struct SpyImpl {
-    asni_dll_path_with_nul: Arc<CStr>,
+    ansi_dll_path_with_nul: Arc<CStr>,
 }
 
 impl SpyImpl {
@@ -60,19 +60,19 @@ impl SpyImpl {
         let dll_path = INTERPOSE_CDYLIB.write_to(&path, ".dll").unwrap();
 
         let wide_dll_path = dll_path.as_os_str().encode_wide().collect::<Vec<u16>>();
-        let mut asni_dll_path =
+        let mut ansi_dll_path =
             winsafe::WideCharToMultiByte(CP::ACP, WC::NoValue, &wide_dll_path, None, None)
                 .map_err(|err| io::Error::from_raw_os_error(err.raw() as i32))?;
 
-        asni_dll_path.push(0);
+        ansi_dll_path.push(0);
 
-        let asni_dll_path_with_nul =
-            unsafe { CStr::from_bytes_with_nul_unchecked(asni_dll_path.as_slice()) };
-        Ok(Self { asni_dll_path_with_nul: asni_dll_path_with_nul.into() })
+        let ansi_dll_path_with_nul =
+            unsafe { CStr::from_bytes_with_nul_unchecked(ansi_dll_path.as_slice()) };
+        Ok(Self { ansi_dll_path_with_nul: ansi_dll_path_with_nul.into() })
     }
 
     pub(crate) async fn spawn(&self, command: Command) -> Result<TrackedChild, SpawnError> {
-        let asni_dll_path_with_nul = Arc::clone(&self.asni_dll_path_with_nul);
+        let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
         let mut command = command.into_tokio_command();
 
         command.creation_flags(CREATE_SUSPENDED);
@@ -87,7 +87,7 @@ impl SpyImpl {
                 let std_child = std_command.spawn()?;
                 *spawn_success = true;
 
-                let mut dll_paths = asni_dll_path_with_nul.as_ptr().cast::<c_char>();
+                let mut dll_paths = ansi_dll_path_with_nul.as_ptr().cast::<c_char>();
                 let process_handle = std_child.as_raw_handle().cast::<winapi::ctypes::c_void>();
                 let success =
                     unsafe { DetourUpdateProcessWithDll(process_handle, &mut dll_paths, 1) };
@@ -97,7 +97,7 @@ impl SpyImpl {
 
                 let payload = Payload {
                     channel_conf: channel_conf.clone(),
-                    asni_dll_path_with_nul: asni_dll_path_with_nul.to_bytes(),
+                    ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
                 };
                 let payload_bytes = bincode::encode_to_vec(payload, BINCODE_CONFIG).unwrap();
                 let success = unsafe {

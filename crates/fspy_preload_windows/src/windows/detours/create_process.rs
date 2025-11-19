@@ -148,7 +148,7 @@ static DETOUR_CREATE_PROCESS_W: Detour<
                     lp_current_directory,
                     lp_startup_info,
                     lp_process_information,
-                    client.asni_dll_path().as_ptr().cast(),
+                    client.ansi_dll_path().as_ptr().cast(),
                     Some(create_process_with_payload_w),
                 )
             }
@@ -261,7 +261,7 @@ static DETOUR_CREATE_PROCESS_A: Detour<
                     lp_current_directory,
                     lp_startup_info,
                     lp_process_information,
-                    client.asni_dll_path().as_ptr().cast(),
+                    client.ansi_dll_path().as_ptr().cast(),
                     Some(create_process_with_payload_a),
                 )
             }

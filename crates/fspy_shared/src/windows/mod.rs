@@ -10,5 +10,5 @@ DEFINE_GUID!(PAYLOAD_ID, 0xfc4845f1, 0x3a8b, 0x4f05, 0xa3, 0xd3, 0xa5, 0xe9, 0xe
 #[derive(Encode, BorrowDecode, Debug, Clone)]
 pub struct Payload<'a> {
     pub channel_conf: ChannelConf,
-    pub asni_dll_path_with_nul: &'a [u8],
+    pub ansi_dll_path_with_nul: &'a [u8],
 }

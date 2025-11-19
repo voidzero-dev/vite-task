@@ -52,8 +52,8 @@ impl<'a> Client<'a> {
         }
     }
 
-    pub fn asni_dll_path(&self) -> &'a CStr {
-        unsafe { CStr::from_bytes_with_nul_unchecked(self.payload.asni_dll_path_with_nul) }
+    pub fn ansi_dll_path(&self) -> &'a CStr {
+        unsafe { CStr::from_bytes_with_nul_unchecked(self.payload.ansi_dll_path_with_nul) }
     }
 }
 
