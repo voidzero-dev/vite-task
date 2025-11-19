@@ -32,16 +32,6 @@ impl Debug for AccessMode {
     }
 }
 
-bitflags! {
-    // Attributes can be applied to flags types
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct Flags: u32 {
-        const A = 0b00000001;
-        const B = 0b00000010;
-        const C = 0b00000100;
-    }
-}
-
 #[derive(Encode, BorrowDecode, Debug, Clone, Copy)]
 pub struct PathAccess<'a> {
     pub mode: AccessMode,
