@@ -1,7 +1,7 @@
-use crate::fixture::{Fixture, fixture};
+use crate::artifact::{Artifact, artifact};
 
-pub const COREUTILS_BINARY: Fixture = fixture!("coreutils");
-pub const OILS_BINARY: Fixture = fixture!("oils-for-unix");
+pub const COREUTILS_BINARY: Artifact = artifact!("coreutils");
+pub const OILS_BINARY: Artifact = artifact!("oils-for-unix");
 
 #[cfg(test)]
 mod tests {

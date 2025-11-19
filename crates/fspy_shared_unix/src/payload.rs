@@ -12,7 +12,7 @@ pub struct Payload {
     pub preload_path: NativeString,
 
     #[cfg(target_os = "macos")]
-    pub fixtures: Fixtures,
+    pub artifacts: Artifacts,
 
     #[cfg(target_os = "linux")]
     pub seccomp_payload: fspy_seccomp_unotify::payload::SeccompPayload,
@@ -20,7 +20,7 @@ pub struct Payload {
 
 #[cfg(target_os = "macos")]
 #[derive(Debug, Encode, Decode, Clone)]
-pub struct Fixtures {
+pub struct Artifacts {
     pub bash_path: NativeString,
     pub coreutils_path: NativeString,
     // pub interpose_cdylib_path: NativeString,

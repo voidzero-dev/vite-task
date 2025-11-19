@@ -42,12 +42,12 @@ pub fn handle_exec(
         (program_path.parent(), program_path.file_name())
     {
         if matches!(parent.as_os_str().as_bytes(), b"/bin" | b"/usr/bin") {
-            let fixtures = &encoded_payload.payload.fixtures;
+            let artifacts = &encoded_payload.payload.artifacts;
             if matches!(file_name.as_bytes(), b"sh" | b"bash") {
-                command.program = fixtures.bash_path.as_os_str().as_bytes().into();
+                command.program = artifacts.bash_path.as_os_str().as_bytes().into();
                 true
             } else if COREUTILS_FUNCTIONS.contains(file_name.as_bytes()) {
-                command.program = fixtures.coreutils_path.as_os_str().as_bytes().into();
+                command.program = artifacts.coreutils_path.as_os_str().as_bytes().into();
                 true
             } else {
                 false

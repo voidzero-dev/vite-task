@@ -2,7 +2,7 @@
 mod syscall_handler;
 
 #[cfg(target_os = "macos")]
-mod macos_fixtures;
+mod macos_artifacts;
 
 use std::{io, path::Path};
 
@@ -10,7 +10,7 @@ use std::{io, path::Path};
 use fspy_seccomp_unotify::supervisor::supervise;
 use fspy_shared::ipc::{NativeString, PathAccess, channel::channel};
 #[cfg(target_os = "macos")]
-use fspy_shared_unix::payload::Fixtures;
+use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{Payload, encode_payload},
@@ -31,7 +31,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct SpyImpl {
     #[cfg(target_os = "macos")]
-    fixtures: Fixtures,
+    artifacts: Artifacts,
 
     preload_path: NativeString,
 }
@@ -44,9 +44,9 @@ impl SpyImpl {
         use const_format::formatcp;
         use xxhash_rust::const_xxh3::xxh3_128;
 
-        use crate::fixture::Fixture;
+        use crate::artifact::Artifact;
 
-        const PRELOAD_CDYLIB: Fixture = Fixture {
+        const PRELOAD_CDYLIB: Artifact = Artifact {
             name: "fspy_preload",
             content: PRELOAD_CDYLIB_BINARY,
             hash: formatcp!("{:x}", xxh3_128(PRELOAD_CDYLIB_BINARY)),
@@ -56,10 +56,10 @@ impl SpyImpl {
         Ok(Self {
             preload_path: preload_cdylib_path.as_path().into(),
             #[cfg(target_os = "macos")]
-            fixtures: {
-                let coreutils_path = macos_fixtures::COREUTILS_BINARY.write_to(dir, "")?;
-                let bash_path = macos_fixtures::OILS_BINARY.write_to(dir, "")?;
-                Fixtures {
+            artifacts: {
+                let coreutils_path = macos_artifacts::COREUTILS_BINARY.write_to(dir, "")?;
+                let bash_path = macos_artifacts::OILS_BINARY.write_to(dir, "")?;
+                Artifacts {
                     bash_path: bash_path.as_path().into(),
                     coreutils_path: coreutils_path.as_path().into(),
                 }
@@ -78,7 +78,7 @@ impl SpyImpl {
             ipc_channel_conf,
 
             #[cfg(target_os = "macos")]
-            fixtures: self.fixtures.clone(),
+            artifacts: self.artifacts.clone(),
 
             preload_path: self.preload_path.clone(),
 

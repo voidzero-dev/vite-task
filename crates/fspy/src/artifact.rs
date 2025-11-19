@@ -3,7 +3,9 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
 };
-pub struct Fixture {
+
+/// An artifact (e.g., a DLL or shared library) whose content is embedded and needs to be written to disk.
+pub struct Artifact {
     pub name: &'static str,
     pub content: &'static [u8],
     pub hash: &'static str,
@@ -12,9 +14,9 @@ pub struct Fixture {
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 #[macro_export]
-macro_rules! fixture {
+macro_rules! artifact {
     ($name: literal) => {
-        $crate::fixture::Fixture::new(
+        $crate::artifact::Artifact::new(
             $name,
             ::core::include_bytes!(::core::concat!(::core::env!("OUT_DIR"), "/", $name)),
             ::core::include_str!(::core::concat!(::core::env!("OUT_DIR"), "/", $name, ".hash")),
@@ -23,9 +25,9 @@ macro_rules! fixture {
 }
 
 #[cfg(target_os = "macos")]
-pub use fixture;
+pub use artifact;
 
-impl Fixture {
+impl Artifact {
     #[cfg(not(target_os = "linux"))]
     pub const fn new(name: &'static str, content: &'static [u8], hash: &'static str) -> Self {
         Self { name, content, hash }

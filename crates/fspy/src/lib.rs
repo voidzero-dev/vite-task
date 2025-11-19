@@ -2,7 +2,7 @@
 #![feature(once_cell_try)]
 
 // Persist the injected DLL/shared library somewhere in the filesystem.
-mod fixture;
+mod artifact;
 
 pub mod error;
 

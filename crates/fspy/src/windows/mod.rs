@@ -22,14 +22,14 @@ use xxhash_rust::const_xxh3::xxh3_128;
 
 use crate::{
     ChildTermination, TrackedChild,
+    artifact::Artifact,
     command::Command,
     error::SpawnError,
-    fixture::Fixture,
     ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
 };
 
 const PRELOAD_CDYLIB_BINARY: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_FSPY_PRELOAD_WINDOWS"));
-const INTERPOSE_CDYLIB: Fixture = Fixture::new(
+const INTERPOSE_CDYLIB: Artifact = Artifact::new(
     "fsyp_preload",
     PRELOAD_CDYLIB_BINARY,
     formatcp!("{:x}", xxh3_128(PRELOAD_CDYLIB_BINARY)),
