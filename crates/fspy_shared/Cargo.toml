@@ -19,7 +19,6 @@ uuid = { workspace = true, features = ["v4"] }
 bytemuck = { workspace = true }
 os_str_bytes = { workspace = true }
 winapi = { workspace = true, features = ["std"] }
-winsafe = { workspace = true }
 
 [dev-dependencies]
 assert2 = { workspace = true }

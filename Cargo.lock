@@ -1121,7 +1121,6 @@ dependencies = [
  "tracing",
  "uuid",
  "winapi",
- "winsafe 0.0.24",
 ]
 
 [[package]]
