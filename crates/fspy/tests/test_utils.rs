@@ -26,6 +26,11 @@ pub fn assert_contains(
         }
     }
 
+    if actual_mode.contains(AccessMode::READ_DIR) {
+        // READ_DIR already implies READ.
+        actual_mode.remove(AccessMode::READ);
+    }
+
     assert_eq!(
         expected_mode,
         actual_mode,

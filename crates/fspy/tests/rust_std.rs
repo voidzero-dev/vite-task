@@ -47,7 +47,7 @@ async fn readdir() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
-async fn subprocess() -> anyhow::Result<()> {
+async fn read_in_subprocess() -> anyhow::Result<()> {
     let accesses = track_child!((), |(): ()| {
         let mut command = if cfg!(windows) {
             let mut command = std::process::Command::new("cmd");
@@ -69,6 +69,21 @@ async fn subprocess() -> anyhow::Result<()> {
     })
     .await?;
     assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn read_program() -> anyhow::Result<()> {
+    let accesses = track_child!((), |(): ()| {
+        let _ = std::process::Command::new("./not_exist.exe").spawn();
+    })
+    .await?;
+    assert_contains(
+        &accesses,
+        current_dir().unwrap().join("not_exist.exe").as_path(),
+        AccessMode::READ,
+    );
 
     Ok(())
 }
