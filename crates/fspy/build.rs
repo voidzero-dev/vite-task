@@ -1,19 +1,28 @@
 use std::{
     env::{self, current_dir},
     fs,
-    io::Read,
+    io::{Cursor, Read},
     path::Path,
+    process::{Command, Stdio},
 };
 
 use anyhow::{Context, bail};
 use xxhash_rust::xxh3::xxh3_128;
 
 fn download(url: &str) -> anyhow::Result<impl Read + use<>> {
-    let resp = attohttpc::get(url).send()?;
-    if resp.status() != attohttpc::StatusCode::OK {
-        bail!("non-ok response: {:?}", resp.status())
-    }
-    Ok(resp)
+    let curl = Command::new("curl")
+        .args([
+            "-f", // fail on HTTP errors
+            "-L", // follow redirects
+            url,
+        ])
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let output = curl.wait_with_output()?;
+    if !output.status.success() {
+        bail!("curl exited with status {} trying to download {}", output.status, url);
+    };
+    Ok(Cursor::new(output.stdout))
 }
 
 fn unpack_tar_gz(content: impl Read, path: &str) -> anyhow::Result<Vec<u8>> {
