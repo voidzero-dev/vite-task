@@ -11,6 +11,8 @@ use crate::{
     schedule::{CacheStatus, ExecutionFailure, ExecutionSummary, PreExecutionStatus},
 };
 
+pub trait TaskReporter {}
+
 /// Wrap of `OwoColorize` that ignores style if `NO_COLOR` is set.
 trait ColorizeExt {
     fn style(&self, style: Style) -> Styled<&Self>;

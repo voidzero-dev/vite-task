@@ -46,6 +46,7 @@ bstr = { version = "1.12.0", default-features = false, features = ["alloc", "std
 bumpalo = { version = "3.17.0", features = ["allocator-api2"] }
 bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
 cc = "1.2.39"
+clap = "4.5.52"
 color-eyre = "0.6.5"
 compact_str = "0.9.0"
 const_format = "0.2.34"
@@ -116,6 +117,7 @@ uuid = "1.18.1"
 vite_glob = { path = "crates/vite_glob" }
 vite_path = { path = "crates/vite_path" }
 vite_str = { path = "crates/vite_str" }
+vite_task = { path = "crates/vite_task" }
 vite_workspace = { path = "crates/vite_workspace" }
 wax = "0.6.0"
 which = "8.0.0"

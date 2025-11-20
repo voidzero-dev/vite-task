@@ -1,0 +1,23 @@
+[package]
+name = "vite_task_bin"
+version = "0.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[[bin]]
+name = "vite"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+vite_str = { workspace = true }
+vite_task = { workspace = true }
+
+[lints]
+workspace = true

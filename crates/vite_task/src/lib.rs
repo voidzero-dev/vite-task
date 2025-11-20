@@ -1,4 +1,5 @@
 mod cache;
+pub mod cli;
 mod cmd;
 mod collections;
 mod config;
@@ -8,6 +9,7 @@ mod fingerprint;
 mod fs;
 mod maybe_str;
 mod schedule;
+pub mod session;
 mod types;
 mod ui;
 
@@ -21,3 +23,9 @@ pub use error::Error;
 pub use execute::{CURRENT_EXECUTION_ID, EXECUTION_SUMMARY_DIR};
 pub use schedule::{ExecutionPlan, ExecutionStatus, ExecutionSummary};
 pub use types::ResolveCommandResult;
+
+pub enum CLIArgs {
+    CustomArgs(Vec<String>),
+}
+
+pub fn cli_main(args: CLIArgs) {}
