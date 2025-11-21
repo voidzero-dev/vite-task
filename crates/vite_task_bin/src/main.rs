@@ -32,6 +32,8 @@ enum ViteArgs {
 }
 
 struct ViteTaskHandler;
+
+#[async_trait::async_trait]
 impl SessionHandler<ViteTaskSubcommands> for ViteTaskHandler {
     fn process_for_subcommand(
         &mut self,
@@ -44,7 +46,7 @@ impl SessionHandler<ViteTaskSubcommands> for ViteTaskHandler {
         }
     }
 
-    fn resolve_config(
+    async fn resolve_config(
         &mut self,
         package_dir: &std::path::Path,
     ) -> anyhow::Result<vite_task::session::ViteUserConfig> {

@@ -14,6 +14,7 @@ pub struct SubcommandProcess {
 #[derive(Serialize, Deserialize)]
 pub struct ViteUserConfig {}
 
+#[async_trait::async_trait]
 pub trait SessionHandler<Subcommand>: Send + Sync {
     /// What to spawn for `vite <subcommand_name>`
     fn process_for_subcommand(
@@ -21,7 +22,7 @@ pub trait SessionHandler<Subcommand>: Send + Sync {
         subcommand: &Subcommand,
     ) -> anyhow::Result<SubcommandProcess>;
 
-    fn resolve_config(&mut self, package_dir: &Path) -> anyhow::Result<ViteUserConfig>;
+    async fn resolve_config(&mut self, package_dir: &Path) -> anyhow::Result<ViteUserConfig>;
 }
 
 pub struct Session<Subcommand> {
