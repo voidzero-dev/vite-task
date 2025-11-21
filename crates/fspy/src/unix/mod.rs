@@ -8,7 +8,7 @@ use std::{io, path::Path};
 
 #[cfg(target_os = "linux")]
 use fspy_seccomp_unotify::supervisor::supervise;
-use fspy_shared::ipc::{NativeString, PathAccess, channel::channel};
+use fspy_shared::ipc::{NativeStr, PathAccess, channel::channel};
 #[cfg(target_os = "macos")]
 use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
@@ -28,12 +28,12 @@ use crate::{
     ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SpyImpl {
     #[cfg(target_os = "macos")]
     artifacts: Artifacts,
 
-    preload_path: NativeString,
+    preload_path: Box<NativeStr>,
 }
 
 const PRELOAD_CDYLIB_BINARY: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX"));

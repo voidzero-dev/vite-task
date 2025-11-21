@@ -5,7 +5,7 @@ use std::fmt::Debug;
 
 use bincode::{BorrowDecode, Encode, config::Configuration};
 use bitflags::bitflags;
-pub use native_str::{NativeStr, NativeString};
+pub use native_str::NativeStr;
 
 pub const BINCODE_CONFIG: Configuration = bincode::config::standard();
 
@@ -35,16 +35,16 @@ impl Debug for AccessMode {
 #[derive(Encode, BorrowDecode, Debug, Clone, Copy)]
 pub struct PathAccess<'a> {
     pub mode: AccessMode,
-    pub path: NativeStr<'a>,
+    pub path: &'a NativeStr,
     // TODO: add follow_symlinks (O_NOFOLLOW)
 }
 
 impl<'a> PathAccess<'a> {
-    pub fn read(path: impl Into<NativeStr<'a>>) -> Self {
+    pub fn read(path: impl Into<&'a NativeStr>) -> Self {
         Self { mode: AccessMode::READ, path: path.into() }
     }
 
-    pub fn read_dir(path: impl Into<NativeStr<'a>>) -> Self {
+    pub fn read_dir(path: impl Into<&'a NativeStr>) -> Self {
         Self { mode: AccessMode::READ_DIR, path: path.into() }
     }
 }

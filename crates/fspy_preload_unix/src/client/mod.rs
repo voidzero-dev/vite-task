@@ -1,7 +1,9 @@
 pub mod convert;
 pub mod raw_exec;
 
-use std::{fmt::Debug, num::NonZeroUsize, sync::OnceLock};
+use std::{
+    ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _, sync::OnceLock,
+};
 
 use bincode::{enc::write::SizeWriter, encode_into_slice, encode_into_writer};
 use convert::{ToAbsolutePath, ToAccessMode};
@@ -55,7 +57,7 @@ impl Client {
             // ipc channel not available, skip sending
             return Ok(());
         };
-        let path = path_access.path.as_bstr();
+        let path = path_access.path.as_os_str().as_bytes();
         if path.starts_with(b"/dev/")
             || (cfg!(target_os = "linux")
                 && (path.starts_with(b"/proc/") || path.starts_with(b"/sys/")))
@@ -101,7 +103,7 @@ impl Client {
                 let Some(abs_path) = abs_path else {
                     return Ok(Ok(()));
                 };
-                Ok(self.send(PathAccess { mode, path: abs_path.into() }))
+                Ok(self.send(PathAccess { mode, path: OsStr::from_bytes(abs_path).into() }))
             })
         }??;
 

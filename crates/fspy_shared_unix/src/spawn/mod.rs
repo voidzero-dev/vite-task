@@ -6,7 +6,8 @@ mod os_specific;
 #[path = "./macos.rs"]
 mod os_specific;
 
-use bstr::ByteSlice;
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
 use fspy_shared::ipc::{AccessMode, PathAccess};
 #[doc(hidden)]
 #[cfg(target_os = "macos")]
@@ -40,7 +41,7 @@ pub fn handle_exec(
     mut on_path_access: impl FnMut(PathAccess<'_>),
 ) -> nix::Result<Option<PreExec>> {
     let mut on_path_access = |path_access: PathAccess<'_>| {
-        if path_access.path.as_bstr().first() == Some(&b'/') {
+        if path_access.path.as_os_str().as_bytes().first() == Some(&b'/') {
             on_path_access(path_access);
         } else {
             let path =
@@ -50,7 +51,10 @@ pub fn handle_exec(
     };
 
     command.resolve(&mut on_path_access, config)?;
-    on_path_access(PathAccess { mode: AccessMode::READ, path: command.program.as_bstr().into() });
+    on_path_access(PathAccess {
+        mode: AccessMode::READ,
+        path: OsStr::from_bytes(&command.program).into(),
+    });
 
     os_specific::handle_exec(command, encoded_payload)
 }

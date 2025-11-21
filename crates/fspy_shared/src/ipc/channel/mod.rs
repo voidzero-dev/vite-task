@@ -11,12 +11,12 @@ use shm_io::{ShmReader, ShmWriter};
 use tracing::debug;
 use uuid::Uuid;
 
-use super::NativeString;
+use super::NativeStr;
 
 /// Serializable configuration to create channel senders.
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct ChannelConf {
-    lock_file_path: NativeString,
+    lock_file_path: Box<NativeStr>,
     shm_id: Arc<str>,
     shm_size: usize,
 }
@@ -69,7 +69,7 @@ impl ChannelConf {
 
 pub struct Sender {
     writer: ShmWriter<Shmem>,
-    lock_file_path: NativeString,
+    lock_file_path: Box<NativeStr>,
     lock_file: File,
 }
 
