@@ -1,9 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use vite_str::Str;
 
-use crate::cli::CLIArgs;
+use crate::{cli::CLIArgs, reporter::Reporter};
 
 // Represents the real subprocess to be spawned for a custom subcommand (vite <subcommand_name> ...)
 pub struct SubcommandProcess {
@@ -29,8 +29,9 @@ pub struct Session<CustomSubcommand> {
     handler: Box<dyn SessionHandler<CustomSubcommand>>,
 }
 
-pub enum SessionRunArgs {
-    CustomSubCommand { subcommand_name: Str, extra_args: Vec<Str> },
+pub struct SessionStartParams<CustomSubcommand: clap::Subcommand> {
+    pub cwd: PathBuf,
+    pub args: CLIArgs<CustomSubcommand>,
 }
 
 impl<CustomSubcommand: clap::Subcommand> Session<CustomSubcommand> {
@@ -40,5 +41,11 @@ impl<CustomSubcommand: clap::Subcommand> Session<CustomSubcommand> {
         Ok(Self { handler })
     }
 
-    pub async fn run(&mut self, args: CLIArgs<CustomSubcommand>) {}
+    pub async fn start(
+        &mut self,
+        params: SessionStartParams<CustomSubcommand>,
+        reporter: Box<dyn Reporter>,
+    ) {
+        reporter.report_execution_plan("tree");
+    }
 }

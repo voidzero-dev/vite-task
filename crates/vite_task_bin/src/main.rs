@@ -2,7 +2,7 @@ use clap::Parser;
 use vite_str::Str;
 use vite_task::{
     cli::CLIArgs as ViteTaskCLIArgs,
-    session::{Session, SessionHandler, SubcommandProcess},
+    session::{Session, SessionHandler, SessionStartParams, SubcommandProcess},
 };
 
 #[derive(Parser, Debug, PartialEq, Eq)]
@@ -71,13 +71,18 @@ impl SessionHandler<ViteTaskCustomSubcommand> for ViteTaskHandler {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let args = ViteArgs::parse();
 
-    let mut session = Session::init(Box::new(ViteTaskHandler)).await.unwrap();
+    let mut session = Session::init(Box::new(ViteTaskHandler)).await?;
     match args {
         ViteArgs::ViteTaskCLIArgs(vite_task_args) => {
-            session.run(vite_task_args).await;
+            session
+                .start(
+                    SessionStartParams { cwd: std::env::current_dir()?, args: vite_task_args },
+                    todo!(),
+                )
+                .await;
         }
     }
 }
