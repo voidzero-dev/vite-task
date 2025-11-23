@@ -2,9 +2,9 @@ use clap::{Parser, Subcommand};
 use vite_str::Str;
 
 #[derive(Debug, Parser)]
-pub enum CLIArgs<SubCommands: Subcommand> {
+pub enum CLIArgs<CustomSubCommand: Subcommand> {
     #[clap(flatten)]
-    SubCommands(SubCommands),
+    SubCommands(CustomSubCommand),
 
     Run {
         #[clap(short, long)]

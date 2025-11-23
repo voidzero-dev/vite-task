@@ -3137,7 +3137,9 @@ name = "vite_task_bin"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
+ "serde",
  "serde_json",
  "tokio",
  "vite_str",

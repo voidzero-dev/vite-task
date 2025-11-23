@@ -15,30 +15,30 @@ pub struct SubcommandProcess {
 pub struct ViteUserConfig {}
 
 #[async_trait::async_trait]
-pub trait SessionHandler<Subcommand>: Send + Sync {
+pub trait SessionHandler<CustomSubcommand>: Send + Sync {
     /// What to spawn for `vite <subcommand_name>`
-    fn process_for_subcommand(
+    async fn process_for_subcommand(
         &mut self,
-        subcommand: &Subcommand,
+        subcommand: CustomSubcommand,
     ) -> anyhow::Result<SubcommandProcess>;
 
     async fn resolve_config(&mut self, package_dir: &Path) -> anyhow::Result<ViteUserConfig>;
 }
 
-pub struct Session<Subcommand> {
-    handler: Box<dyn SessionHandler<Subcommand>>,
+pub struct Session<CustomSubcommand> {
+    handler: Box<dyn SessionHandler<CustomSubcommand>>,
 }
 
 pub enum SessionRunArgs {
     CustomSubCommand { subcommand_name: Str, extra_args: Vec<Str> },
 }
 
-impl<Subcommand: clap::Subcommand> Session<Subcommand> {
+impl<CustomSubcommand: clap::Subcommand> Session<CustomSubcommand> {
     pub async fn init(
-        handler: Box<dyn SessionHandler<Subcommand>>,
+        handler: Box<dyn SessionHandler<CustomSubcommand>>,
     ) -> Result<Self, crate::error::Error> {
         Ok(Self { handler })
     }
 
-    pub async fn run(&mut self, args: CLIArgs<Subcommand>) {}
+    pub async fn run(&mut self, args: CLIArgs<CustomSubcommand>) {}
 }
