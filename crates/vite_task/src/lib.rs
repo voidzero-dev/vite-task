@@ -13,6 +13,7 @@ mod schedule;
 pub mod session;
 mod types;
 mod ui;
+mod workspace;
 
 #[cfg(test)]
 mod test_utils;
