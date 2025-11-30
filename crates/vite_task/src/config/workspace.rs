@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{
     Error,
-    cache::TaskCache,
+    cache::CommandCache,
     cmd::try_parse_as_and_list,
     collections::{HashMap, HashSet},
     config::{DisplayOptions, TaskGroupId, name::TaskName},
@@ -34,7 +34,7 @@ pub struct Workspace {
     /// None indicates that it cannot find the package root from the current directory..
     /// This allows distinguishing between workspace-level tasks and package-level tasks.
     pub(crate) current_package_path: Option<RelativePathBuf>,
-    pub(crate) task_cache: TaskCache,
+    pub(crate) task_cache: CommandCache,
     pub(crate) fs: CachedFileSystem,
     pub(crate) package_graph: Graph<PackageInfo, DependencyType>,
     #[expect(unused)]
@@ -99,7 +99,7 @@ impl Workspace {
             tracing::info!("Creating task cache directory at {}", cache_dir.display());
             std::fs::create_dir_all(cache_dir)?;
         }
-        let task_cache = TaskCache::load_from_path(cache_path)?;
+        let task_cache = CommandCache::load_from_path(cache_path)?;
 
         let package_json_path = workspace_root.join("package.json");
         let package_json = if package_json_path.as_path().exists() {
@@ -154,7 +154,7 @@ impl Workspace {
             tracing::info!("Creating task cache directory at {}", cache_dir.display());
             std::fs::create_dir_all(cache_dir)?;
         }
-        let task_cache = TaskCache::load_from_path(cache_path)?;
+        let task_cache = CommandCache::load_from_path(cache_path)?;
 
         // Build the complete task graph
         let mut task_graph_builder = TaskGraphBuilder::default();
@@ -199,7 +199,7 @@ impl Workspace {
         })
     }
 
-    pub const fn cache(&self) -> &TaskCache {
+    pub const fn cache(&self) -> &CommandCache {
         &self.task_cache
     }
 

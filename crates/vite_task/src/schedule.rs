@@ -10,7 +10,7 @@ use vite_path::AbsolutePath;
 
 use crate::{
     Error,
-    cache::{CacheMiss, CommandCacheValue, TaskCache},
+    cache::{CacheMiss, CommandCache, CommandCacheValue},
     config::{DisplayOptions, ResolvedTask, Workspace},
     execute::{OutputKind, execute_task},
     fs::FileSystem,
@@ -183,7 +183,7 @@ impl ExecutionPlan {
 async fn get_cached_or_execute<'a>(
     execution_id: &'a str,
     task: ResolvedTask,
-    cache: &'a TaskCache,
+    cache: &'a CommandCache,
     fs: &'a impl FileSystem,
     base_dir: &'a AbsolutePath,
 ) -> Result<(CacheStatus, BoxFuture<'a, Result<ExitStatus, Error>>), Error> {
