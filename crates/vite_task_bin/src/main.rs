@@ -1,8 +1,12 @@
+use std::{path::Path, sync::Arc};
+
 use clap::Parser;
+use vite_path::{AbsolutePath, current_dir};
 use vite_str::Str;
 use vite_task::{
     cli::CLIArgs as ViteTaskCLIArgs,
-    session::{Session, SessionHandler, SessionStartParams, SubcommandProcess},
+    reporter::stream::StreamReporter,
+    session::{CLIParams, Session, SessionHandler, SubcommandProcess},
 };
 
 #[derive(Parser, Debug, PartialEq, Eq)]
@@ -72,17 +76,19 @@ impl SessionHandler<ViteTaskCustomSubcommand> for ViteTaskHandler {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cwd = Arc::<AbsolutePath>::from(current_dir()?);
     let args = ViteArgs::parse();
 
-    let mut session = Session::init(Box::new(ViteTaskHandler)).await?;
+    let mut session = Session::init(&cwd, Box::new(ViteTaskHandler)).await?;
     match args {
         ViteArgs::ViteTaskCLIArgs(vite_task_args) => {
             session
                 .start(
-                    SessionStartParams { cwd: std::env::current_dir()?, args: vite_task_args },
-                    todo!(),
+                    CLIParams { cwd, args: vite_task_args, envs: std::env::vars_os().collect() },
+                    Box::new(StreamReporter::default()),
                 )
-                .await;
+                .await?;
         }
-    }
+    };
+    Ok(())
 }

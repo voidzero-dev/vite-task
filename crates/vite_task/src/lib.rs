@@ -8,7 +8,7 @@ mod execute;
 mod fingerprint;
 mod fs;
 mod maybe_str;
-mod reporter;
+pub mod reporter;
 mod schedule;
 pub mod session;
 mod types;

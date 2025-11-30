@@ -3142,6 +3142,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "vite_path",
  "vite_str",
  "vite_task",
 ]

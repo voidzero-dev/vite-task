@@ -1,3 +1,5 @@
+pub mod stream;
+
 /// Describes how to report events during a Vite Task session.
 /// It's an abstraction over different kinds of ui (stream, terminial ui, web, etc).
 pub trait Reporter {
