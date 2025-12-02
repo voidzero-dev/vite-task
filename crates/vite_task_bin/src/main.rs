@@ -79,12 +79,16 @@ async fn main() -> anyhow::Result<()> {
     let cwd = Arc::<AbsolutePath>::from(current_dir()?);
     let args = ViteArgs::parse();
 
-    let mut session = Session::init(&cwd, Box::new(ViteTaskHandler)).await?;
+    let mut session = Session::new(&cwd, Box::new(ViteTaskHandler)).await?;
     match args {
         ViteArgs::ViteTaskCLIArgs(vite_task_args) => {
             session
                 .start(
-                    CLIParams { cwd, args: vite_task_args, envs: std::env::vars_os().collect() },
+                    CLIParams {
+                        cwd,
+                        args: vite_task_args,
+                        envs: Arc::new(std::env::vars_os().collect()),
+                    },
                     Box::new(StreamReporter::default()),
                 )
                 .await?;

@@ -33,37 +33,40 @@ pub trait SessionHandler<CustomSubcommand>: Send + Sync {
     async fn resolve_config(&mut self, package_dir: &Path) -> anyhow::Result<ViteUserConfig>;
 }
 
-type Lazy<T> = LazyLock<T, Box<dyn FnOnce() -> T + Send + Sync>>;
-
 pub struct Session<CustomSubcommand> {
     handler: Box<dyn SessionHandler<CustomSubcommand>>,
-
-    /// Lazily discovered workspace
-    lazy_workspace: Arc<Lazy<Result<Workspace, Arc<crate::error::Error>>>>,
-    lazy_task_graph: Lazy<StableDiGraph<ResolvedTask, ()>>,
+    workspace: Workspace,
 }
 
 /// Parameters of a CLI invocation of Vite Task, including current working directory, CLI args, and envs.
+///
+/// This may come from a real CLI command, or be parsed from a task script.
 pub struct CLIParams<CustomSubcommand: clap::Subcommand> {
     pub cwd: Arc<AbsolutePath>,
     pub args: CLIArgs<CustomSubcommand>,
-    pub envs: HashMap<OsString, OsString>,
+    pub envs: Arc<HashMap<OsString, OsString>>,
 }
 
 impl<CustomSubcommand: clap::Subcommand> Session<CustomSubcommand> {
-    pub async fn init(
+    pub async fn new(
         cwd: &Arc<AbsolutePath>,
         handler: Box<dyn SessionHandler<CustomSubcommand>>,
     ) -> Result<Self, crate::error::Error> {
-        Ok(Self { handler })
+        Ok(Self { handler, workspace: Workspace::load(cwd.to_absolute_path_buf(), true)? })
     }
+
+    fn plan(&self, params: CLIParams<CustomSubcommand>) {}
 
     pub async fn start(
         &mut self,
         params: CLIParams<CustomSubcommand>,
         reporter: Box<dyn Reporter>,
     ) -> anyhow::Result<()> {
+        let plan = self.plan(params);
         reporter.report_execution_plan("tree");
         Ok(())
     }
 }
+
+///
+struct ExecutionPlan {}
