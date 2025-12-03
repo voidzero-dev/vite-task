@@ -3176,6 +3176,7 @@ dependencies = [
  "monostate",
  "petgraph",
  "serde",
+ "serde_json",
  "vite_path",
  "vite_str",
  "vite_workspace",
