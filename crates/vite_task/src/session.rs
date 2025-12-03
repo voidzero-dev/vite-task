@@ -1,17 +1,10 @@
-use std::{
-    any,
-    collections::HashMap,
-    ffi::OsString,
-    path::{Path, PathBuf},
-    sync::{Arc, LazyLock},
-};
+use std::{collections::HashMap, ffi::OsString, path::Path, sync::Arc};
 
-use petgraph::prelude::StableDiGraph;
 use serde::{Deserialize, Serialize};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
-use crate::{ResolvedTask, Workspace, cli::CLIArgs, reporter::Reporter};
+use crate::{Workspace, cli::CLIArgs, reporter::Reporter};
 
 // Represents the real subprocess to be spawned for a custom subcommand (vite <subcommand_name> ...)
 pub struct SubcommandProcess {

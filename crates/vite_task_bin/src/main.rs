@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use clap::Parser;
 use vite_path::{AbsolutePath, current_dir};

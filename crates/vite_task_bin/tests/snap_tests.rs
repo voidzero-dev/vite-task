@@ -1,4 +1,4 @@
-use std::env::vars_os;
+use std::env::{var_os, vars_os};
 
 #[test]
 fn hello() {

@@ -10,6 +10,14 @@ use crate::{
     collections::{HashMap, HashSet},
 };
 
+#[derive(Debug, Clone, Copy)]
+pub enum TaskDependencyType {
+    /// The dependency is explicit defined by user in `dependsOn`.
+    Explicit,
+    /// The dependency is added due to topological ordering based on package dependencies.
+    Topological,
+}
+
 /// Uniquely identifies a task group, which is a script in `package.json`, or an entry in `vite-task.json`.
 ///
 /// A task group can be parsed into one task or multiple tasks split by `&&`
@@ -41,47 +49,60 @@ pub struct TaskId {
     pub subcommand_index: Option<usize>,
 }
 
+#[derive(Debug, Clone)]
+pub struct TaskGraphNode {
+    task: ResolvedTask,
+    dependeny_types_by_task_id: HashMap<TaskId, TaskDependencyType>,
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct TaskGraphBuilder {
-    pub(crate) resolved_tasks_and_dep_ids_by_id: HashMap<TaskId, (ResolvedTask, HashSet<TaskId>)>,
+    pub(crate) task_nodes_by_id: HashMap<TaskId, TaskGraphNode>,
 }
 
 impl TaskGraphBuilder {
-    pub(crate) fn add_task_with_deps(
+    pub(crate) fn add_task_with_explicit_deps(
         &mut self,
         task: ResolvedTask,
         dep_ids: HashSet<TaskId>,
     ) -> Result<(), Error> {
-        if let Some((old_task, _)) =
-            self.resolved_tasks_and_dep_ids_by_id.insert(task.id(), (task, dep_ids))
-        {
-            return Err(Error::DuplicatedTask(old_task.display_name()));
+        let task_node = TaskGraphNode {
+            task,
+            dependeny_types_by_task_id: dep_ids
+                .into_iter()
+                .map(|dep_id| (dep_id, TaskDependencyType::Explicit))
+                .collect(),
+        };
+        if let Some(old_task_node) = self.task_nodes_by_id.insert(task_node.task.id(), task_node) {
+            return Err(Error::DuplicatedTask(old_task_node.task.display_name()));
         }
         Ok(())
     }
 
     /// Build the complete task graph including all tasks and their dependencies
-    pub(crate) fn build_complete_graph(self) -> Result<StableDiGraph<ResolvedTask, ()>, Error> {
-        let mut task_graph = StableDiGraph::<ResolvedTask, ()>::new();
+    pub(crate) fn build_complete_graph(
+        self,
+    ) -> Result<StableDiGraph<ResolvedTask, TaskDependencyType>, Error> {
+        let mut task_graph = StableDiGraph::<ResolvedTask, TaskDependencyType>::new();
         let mut node_indices_by_task_ids = HashMap::<TaskId, NodeIndex>::new();
 
         // Add all tasks to the graph
-        for (task_id, (resolved_task, _)) in &self.resolved_tasks_and_dep_ids_by_id {
-            let node_index = task_graph.add_node(resolved_task.clone());
+        for (task_id, task_node) in &self.task_nodes_by_id {
+            let node_index = task_graph.add_node(task_node.task.clone()); // TODO(perf): remove clone here
             node_indices_by_task_ids.insert(task_id.clone(), node_index);
         }
 
         // Add edges from explicit dependencies
-        for (task_id, (_, deps)) in &self.resolved_tasks_and_dep_ids_by_id {
-            let current_task_index = node_indices_by_task_ids[task_id];
-            for dep in deps {
-                let Some(&dep_index) = node_indices_by_task_ids.get(dep) else {
+        for (task_id, task_node) in self.task_nodes_by_id {
+            let current_task_index = node_indices_by_task_ids[&task_id];
+            for (dep_id, dep_type) in task_node.dependeny_types_by_task_id {
+                let Some(&dep_index) = node_indices_by_task_ids.get(&dep_id) else {
                     return Err(Error::TaskDependencyNotFound {
-                        name: dep.task_group_id.task_group_name.clone(),
-                        package_path: dep.task_group_id.config_path.clone(),
+                        name: dep_id.task_group_id.task_group_name.clone(),
+                        package_path: dep_id.task_group_id.config_path.clone(),
                     });
                 };
-                task_graph.add_edge(current_task_index, dep_index, ());
+                task_graph.add_edge(current_task_index, dep_index, dep_type);
             }
         }
 

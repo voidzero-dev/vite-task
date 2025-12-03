@@ -1,6 +1,6 @@
 mod name;
 mod task_command;
-mod task_graph_builder;
+pub mod task_graph_builder;
 mod workspace;
 
 use std::{
