@@ -1612,6 +1612,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "monostate"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb4cc965c89dd0615a9e822ff8002f7633d2466143d51bd58693e4b2c75aabad"
+dependencies = [
+ "monostate-impl",
+ "serde",
+ "serde_core",
+]
+
+[[package]]
+name = "monostate-impl"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23f5b99488110875b5904839d396c2cdfaf241ff6622638acb879cc7effad5de"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
 name = "nix"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3145,6 +3167,18 @@ dependencies = [
  "vite_path",
  "vite_str",
  "vite_task",
+]
+
+[[package]]
+name = "vite_task_graph"
+version = "0.1.0"
+dependencies = [
+ "monostate",
+ "petgraph",
+ "serde",
+ "vite_path",
+ "vite_str",
+ "vite_workspace",
 ]
 
 [[package]]
