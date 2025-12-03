@@ -33,7 +33,7 @@ pub enum UserCacheConfig {
 
 /// Task configuration defined by user in `vite.config.*`
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct UserTaskConfig {
     /// If None, the script from `package.json` with the same name will be used
     command: Option<Box<str>>,
@@ -111,6 +111,14 @@ mod tests {
         let user_config_json = json!({
             "cache": false,
             "envs": ["NODE_ENV"],
+        });
+        assert!(serde_json::from_value::<UserCacheConfig>(user_config_json).is_err());
+    }
+
+    #[test]
+    fn test_deny_unknown_field() {
+        let user_config_json = json!({
+            "foo": 42,
         });
         assert!(serde_json::from_value::<UserCacheConfig>(user_config_json).is_err());
     }
