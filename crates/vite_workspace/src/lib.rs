@@ -160,11 +160,19 @@ impl PackageGraphBuilder {
     }
 }
 
+/// Discover the workspace from cwd and load the package graph.
 pub fn discover_package_graph(
     cwd: impl AsRef<AbsolutePath>,
 ) -> Result<Graph<PackageInfo, DependencyType>, Error> {
-    let mut graph_builder = PackageGraphBuilder::default();
     let workspace_root = find_workspace_root(cwd.as_ref())?;
+    discover_package_graph(&workspace_root.path)
+}
+
+/// Load the package graph from a discovered workspace.
+pub fn load_package_graph(
+    workspace_root: &WorkspaceRoot<'_>,
+) -> Result<Graph<PackageInfo, DependencyType>, Error> {
+    let mut graph_builder = PackageGraphBuilder::default();
     let workspaces = match &workspace_root.workspace_file {
         WorkspaceFile::PnpmWorkspaceYaml(file) => {
             let workspace: PnpmWorkspace = serde_yml::from_reader(file)?;
