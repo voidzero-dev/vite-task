@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock, OnceLock};
 
 use vite_path::AbsolutePath;
-use vite_workspace::{WorkspaceFile, find_workspace_root, get_package_graph};
+use vite_workspace::{WorkspaceFile, discover_package_graph, find_workspace_root};
 
 /// Type alias for a LazyLock that uses a Boxed FnOnce to initialize the value.
 type LazyLockWithBoxFn<T> = LazyLock<T, Box<dyn FnOnce() -> T>>;
@@ -71,7 +71,7 @@ impl Workspace {
 
     pub fn get_task_graph(&self) -> anyhow::Result<&()> {
         let discovered_workspace = self.discover_once()?;
-        let package_graph = get_package_graph(&discovered_workspace.root_path)?;
+        let package_graph = discover_package_graph(&discovered_workspace.root_path)?;
         todo!()
     }
 }

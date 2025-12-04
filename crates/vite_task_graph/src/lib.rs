@@ -81,7 +81,7 @@ impl TaskGraph {
         workspace_root: WorkspaceRoot<'_>,
         config_loader: impl loader::UserConfigLoader,
     ) -> Self {
-        let package_graph = vite_workspace::get_package_graph(&workspace_root.path);
+        let package_graph = vite_workspace::discover_package_graph(&workspace_root.path);
         todo!()
     }
 }

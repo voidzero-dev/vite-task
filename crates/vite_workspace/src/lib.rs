@@ -160,7 +160,7 @@ impl PackageGraphBuilder {
     }
 }
 
-pub fn get_package_graph(
+pub fn discover_package_graph(
     cwd: impl AsRef<AbsolutePath>,
 ) -> Result<Graph<PackageInfo, DependencyType>, Error> {
     let mut graph_builder = PackageGraphBuilder::default();
@@ -242,7 +242,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("package.json"), package_json.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have exactly 1 node (the single package)
         assert_eq!(graph.node_count(), 1);
@@ -292,7 +292,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("packages/pkg-b/package.json"), pkg_b.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have 3 nodes: root + pkg-a + pkg-b
         assert_eq!(graph.node_count(), 3);
@@ -341,7 +341,7 @@ mod tests {
         fs::write(temp_dir_path.join("packages/excluded-test/package.json"), excluded.to_string())
             .unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have the included package
         let mut found_included = false;
@@ -396,7 +396,7 @@ mod tests {
         fs::write(temp_dir_path.join("packages/excluded/a/package.json"), excluded.to_string())
             .unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have the included package
         let mut found_included = false;
@@ -459,7 +459,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("packages/pkg-c/package.json"), pkg_c.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have correct edge types
         let mut found_normal_dep = false;
@@ -510,7 +510,7 @@ mod tests {
         fs::write(temp_dir_path.join("packages/pkg-2/package.json"), pkg_2.to_string()).unwrap();
 
         // Should return an error for duplicate package names
-        let result = get_package_graph(temp_dir_path);
+        let result = discover_package_graph(temp_dir_path);
         assert!(result.is_err());
 
         if let Err(Error::DuplicatedPackageName { name, .. }) = result {
@@ -554,7 +554,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("packages/pkg-a/package.json"), pkg_a.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have 2 nodes but no edges (nameless package can't be referenced)
         assert_eq!(graph.node_count(), 2);
@@ -593,7 +593,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("packages/pkg-b/package.json"), pkg_b.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should correctly parse workspace protocol with version
         let mut found_edge = false;
@@ -641,7 +641,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("packages/pkg-b/package.json"), pkg_b.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have 2 nodes and 2 edges (circular)
         assert_eq!(graph.node_count(), 2);
@@ -689,7 +689,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("packages/pkg-a/package.json"), pkg_a.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have both root and pkg-a (root added automatically)
         assert_eq!(graph.node_count(), 2);
@@ -757,7 +757,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("apps/web/package.json"), web_app.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have 4 nodes: root + shared + ui + web-app
         assert_eq!(graph.node_count(), 4);
@@ -851,7 +851,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("packages/cli/package.json"), cli_pkg.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Should have 4 nodes: root + core + utils + cli-tool
         assert_eq!(graph.node_count(), 4);
@@ -941,7 +941,7 @@ mod tests {
         fs::write(temp_dir_path.join("packages/old.backup/package.json"), backup_pkg.to_string())
             .unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Check which packages were included
         let mut packages_found = HashSet::<String>::new();
@@ -993,7 +993,7 @@ mod tests {
         });
         fs::write(temp_dir_path.join("services/api/package.json"), api_pkg.to_string()).unwrap();
 
-        let graph = get_package_graph(temp_dir_path).unwrap();
+        let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Verify packages
         assert_eq!(graph.node_count(), 3); // root + database + api
