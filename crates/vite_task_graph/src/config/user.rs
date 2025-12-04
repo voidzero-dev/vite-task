@@ -1,4 +1,9 @@
-use std::collections::{HashMap, HashSet};
+//! Configuration structures for user-defined tasks in `vite.config.*`
+
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use monostate::MustBe;
 use serde::Deserialize;
@@ -18,11 +23,11 @@ pub enum UserCacheConfig {
         // Fields only relevant when cache is enabled
         /// Environment variable names to be fingerprinted and passed to the task.
         #[serde(default)] // default to empty if omitted
-        envs: HashSet<Str>,
+        envs: Box<[Str]>,
 
         /// Environment variable names to be passed to the task without fingerprinting.
         #[serde(default)] // default to empty if omitted
-        pass_through_envs: HashSet<Str>,
+        pass_through_envs: Box<[Str]>,
     },
     /// Cache is disabled
     Disabled {
@@ -36,22 +41,24 @@ pub enum UserCacheConfig {
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskConfig {
     /// If None, the script from `package.json` with the same name will be used
-    command: Option<Box<str>>,
+    pub command: Option<Box<str>>,
 
     /// The working directory for the task, relative to the package root (not workspace root).
     #[serde(default)] // default to empty if omitted
-    cwd: RelativePathBuf,
+    #[serde(rename = "cwd")]
+    pub cwd_relative_to_package: RelativePathBuf,
 
     /// Explicit dependencies of this task.
     #[serde(default)] // default to empty if omitted
-    depends_on: HashSet<Str>,
+    pub depends_on: Arc<[Str]>,
 
     /// Cache-related fields
     #[serde(flatten)]
-    cache_config: UserCacheConfig,
+    pub cache_config: UserCacheConfig,
 }
 
 /// User configuration file structure for `vite.config.*`
+#[derive(Debug, Deserialize)]
 pub struct UserConfigFile {
     tasks: HashMap<Str, UserTaskConfig>,
 }
@@ -70,15 +77,24 @@ mod tests {
             user_config,
             UserTaskConfig {
                 command: None,
-                cwd: "".try_into().unwrap(),
-                depends_on: HashSet::new(),
+                cwd_relative_to_package: "".try_into().unwrap(),
+                depends_on: Default::default(),
                 cache_config: UserCacheConfig::Enabled {
                     cache: MustBe!(true),
-                    envs: HashSet::new(),
-                    pass_through_envs: HashSet::new(),
+                    envs: Default::default(),
+                    pass_through_envs: Default::default(),
                 },
             }
         );
+    }
+
+    #[test]
+    fn test_cwd_rename() {
+        let user_config_json = json!({
+            "cwd": "src"
+        });
+        let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(user_config.cwd_relative_to_package.as_str(), "src");
     }
 
     #[test]
@@ -101,7 +117,7 @@ mod tests {
             UserCacheConfig::Enabled {
                 cache: MustBe!(true),
                 envs: ["NODE_ENV".into()].into_iter().collect(),
-                pass_through_envs: HashSet::new(),
+                pass_through_envs: Default::default(),
             },
         );
     }

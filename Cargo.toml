@@ -97,7 +97,7 @@ serde_yml = "0.0.12"
 sha2 = "0.10.9"
 shared_memory = "0.12.4"
 shell-escape = "0.1.5"
-smallvec = { version = "2.0.0-alpha.11", features = ["std"] }
+smallvec = { version = "2.0.0-alpha.12", features = ["std"] }
 stackalloc = "1.2.1"
 supports-color = "3.0.1"
 syscalls = { version = "0.6.18", default-features = false }

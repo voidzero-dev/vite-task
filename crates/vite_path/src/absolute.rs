@@ -1,6 +1,7 @@
 use std::{
     ffi::OsStr,
     fmt::Display,
+    hash::Hash,
     ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
@@ -28,6 +29,12 @@ impl PartialEq<AbsolutePathBuf> for AbsolutePath {
 impl PartialEq<AbsolutePathBuf> for &AbsolutePath {
     fn eq(&self, other: &AbsolutePathBuf) -> bool {
         self.0 == other.0
+    }
+}
+
+impl Hash for AbsolutePath {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
     }
 }
 
