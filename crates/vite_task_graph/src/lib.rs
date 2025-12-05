@@ -8,16 +8,14 @@ use std::{
 
 use config::{ResolvedUserTaskConfig, UserConfigFile};
 use petgraph::{
-    graph::{DiGraph, NodeIndex},
+    graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
     visit::{Control, DfsEvent, depth_first_search},
 };
 use serde::Serialize;
 use vec1::smallvec_v1::SmallVec1;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
-use vite_workspace::{
-    DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot, package,
-};
+use vite_workspace::{DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot};
 
 /// The type of a desk dependency, explaining why it's introduced.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -107,12 +105,32 @@ pub enum SpecifierLookupError {
     TaskNameNotFound { package_name: Str, task_name: Str },
 }
 
+/// newtype of `DefaultIx` for indices in package graphs
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskIx(DefaultIx);
+unsafe impl IndexType for TaskIx {
+    fn new(x: usize) -> Self {
+        Self(DefaultIx::new(x))
+    }
+
+    fn index(&self) -> usize {
+        self.0.index()
+    }
+
+    fn max() -> Self {
+        Self(<DefaultIx as IndexType>::max())
+    }
+}
+
+pub type TaskNodeIndex = NodeIndex<TaskIx>;
+pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
+
 /// Full task graph of a workspace.
 ///
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
 /// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
 pub struct TaskGraph {
-    task_graph: DiGraph<TaskNode, TaskDependencyType>,
+    task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
 
     /// Preserve the package graph for displaying purpose:
     /// `self.task_graph` refers packages via PackageNodeIndex. To display package names and paths, we need to lookup them in package_graph.
@@ -123,7 +141,7 @@ pub struct TaskGraph {
     package_indices_by_name: HashMap<Str, SmallVec1<[PackageNodeIndex; 1]>>,
 
     /// task indices by task id for quick lookup
-    node_indices_by_task_id: HashMap<TaskId, NodeIndex>,
+    node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex>,
 }
 
 impl TaskGraph {
@@ -132,12 +150,12 @@ impl TaskGraph {
         workspace_root: WorkspaceRoot<'_>,
         config_loader: impl loader::UserConfigLoader,
     ) -> Result<Self, TaskGraphLoadError> {
-        let mut task_graph = DiGraph::<TaskNode, TaskDependencyType>::new();
+        let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
 
         let package_graph = vite_workspace::load_package_graph(&workspace_root)?;
 
         // Record dependency specifiers for each task node to add explicit dependencies later
-        let mut dependency_specifiers_with_task_node_indices: Vec<(Arc<[Str]>, NodeIndex)> =
+        let mut dependency_specifiers_with_task_node_indices: Vec<(Arc<[Str]>, TaskNodeIndex)> =
             Vec::new();
 
         // Load task nodes into `task_graph`
@@ -206,7 +224,7 @@ impl TaskGraph {
         }
 
         // index tasks by ids
-        let mut node_indices_by_task_id: HashMap<TaskId, NodeIndex> =
+        let mut node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex> =
             HashMap::with_capacity(task_graph.node_count());
         for node_index in task_graph.node_indices() {
             let task_node = &task_graph[node_index];
@@ -264,7 +282,7 @@ impl TaskGraph {
         }
 
         // Add topological dependencies based on package dependencies
-        let mut topological_edges = Vec::<(NodeIndex, NodeIndex)>::new();
+        let mut topological_edges = Vec::<(TaskNodeIndex, TaskNodeIndex)>::new();
         for task_index in me.task_graph.node_indices() {
             let task_id = &me.task_graph[task_index].task_id;
             let task_name = &task_id.task_name;
@@ -323,7 +341,7 @@ impl TaskGraph {
         &self,
         specifier: &str,
         package_origin: PackageNodeIndex,
-    ) -> Result<NodeIndex, SpecifierLookupError> {
+    ) -> Result<TaskNodeIndex, SpecifierLookupError> {
         let (package_index, task_name): (PackageNodeIndex, Str) =
             if let Some((package_name, task_name)) = specifier.rsplit_once('#') {
                 // Lookup package path by the package name from '#'

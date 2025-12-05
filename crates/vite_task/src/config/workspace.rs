@@ -6,7 +6,6 @@ use std::{
 };
 
 use petgraph::{
-    Graph,
     graph::{DiGraph, NodeIndex},
     stable_graph::StableDiGraph,
     visit::IntoNodeReferences,

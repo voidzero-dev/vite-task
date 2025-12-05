@@ -4,10 +4,7 @@ mod package_manager;
 
 use std::{fs, io};
 
-use petgraph::{
-    Graph,
-    graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
-};
+use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::{Deserialize, Serialize};
 use vite_glob::GlobPatternSet;
