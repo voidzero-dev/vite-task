@@ -3224,21 +3224,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vite_task_bin"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "serde",
- "serde_json",
- "tokio",
- "vite_path",
- "vite_str",
- "vite_task",
-]
-
-[[package]]
 name = "vite_task_graph"
 version = "0.1.0"
 dependencies = [
