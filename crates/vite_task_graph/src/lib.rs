@@ -17,15 +17,31 @@ use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use vite_workspace::{DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot};
 
-/// The type of a desk dependency, explaining why it's introduced.
 #[derive(Debug, Clone, Copy, Serialize)]
-pub enum TaskDependencyType {
+enum TaskDependencyTypeInner {
     /// The dependency is explicitly declared by user in `dependsOn`.
     Explicit,
     /// The dependency is added due to topological ordering based on package dependencies.
     Topological,
     /// The dependency is explicitly declared by user in `dependsOn` and also added due to topological ordering.
     Both,
+}
+
+/// The type of a task dependency, explaining why it's introduced.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(transparent)]
+pub struct TaskDependencyType(TaskDependencyTypeInner);
+
+// It hides `TaskDependencyTypeInner` and only expose `is_explicit`/`is_topological`
+// to avoid incorrectly matching only Explicit variant to check if it's explicit.
+impl TaskDependencyType {
+    pub fn is_explicit(&self) -> bool {
+        matches!(self.0, TaskDependencyTypeInner::Explicit | TaskDependencyTypeInner::Both)
+    }
+
+    pub fn is_topological(&self) -> bool {
+        matches!(self.0, TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both)
+    }
 }
 
 /// Uniquely identifies a task, by its name and the path where it's defined.
@@ -276,7 +292,7 @@ impl TaskGraph {
                 me.task_graph.update_edge(
                     from_node_index,
                     to_node_index,
-                    TaskDependencyType::Explicit,
+                    TaskDependencyType(TaskDependencyTypeInner::Explicit),
                 );
             }
         }
@@ -313,12 +329,12 @@ impl TaskGraph {
                 me.task_graph.find_edge(from_node_index, to_node_index)
             {
                 let existing_edge = &mut me.task_graph[existing_edge_index];
-                match *existing_edge {
-                    TaskDependencyType::Explicit => {
+                match existing_edge.0 {
+                    TaskDependencyTypeInner::Explicit => {
                         // upgrade to Both
-                        *existing_edge = TaskDependencyType::Both;
+                        existing_edge.0 = TaskDependencyTypeInner::Both;
                     }
-                    TaskDependencyType::Topological | TaskDependencyType::Both => {
+                    TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both => {
                         // already has topological dependency, do nothing
                     }
                 }
@@ -327,7 +343,7 @@ impl TaskGraph {
                 me.task_graph.add_edge(
                     from_node_index,
                     to_node_index,
-                    TaskDependencyType::Topological,
+                    TaskDependencyType(TaskDependencyTypeInner::Topological),
                 );
             }
         }
