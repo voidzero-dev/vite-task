@@ -1,5 +1,4 @@
 mod cache;
-pub mod cli;
 mod cmd;
 mod collections;
 mod config;
@@ -8,7 +7,6 @@ mod execute;
 mod fingerprint;
 mod fs;
 mod maybe_str;
-pub mod reporter;
 mod schedule;
 mod types;
 mod ui;
@@ -17,15 +15,9 @@ mod ui;
 mod test_utils;
 
 // Public exports for vite-plus-cli to use
-pub use cache::CommandCache;
+pub use cache::TaskCache;
 pub use config::{ResolvedTask, Workspace};
 pub use error::Error;
 pub use execute::{CURRENT_EXECUTION_ID, EXECUTION_SUMMARY_DIR};
 pub use schedule::{ExecutionPlan, ExecutionStatus, ExecutionSummary};
 pub use types::ResolveCommandResult;
-
-pub enum CLIArgs {
-    CustomArgs(Vec<String>),
-}
-
-pub fn cli_main(args: CLIArgs) {}

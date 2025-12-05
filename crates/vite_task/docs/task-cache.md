@@ -513,16 +513,16 @@ Tasks can be marked as cacheable in `vite-task.json`:
   "tasks": {
     "build": {
       "command": "tsc && rollup -c",
-      "cache": true,
+      "cacheable": true,
       "dependsOn": ["^build"]
     },
     "deploy": {
       "command": "deploy-script.sh",
-      "cache": false // Never cache deployment tasks
+      "cacheable": false // Never cache deployment tasks
     },
     "test": {
       "command": "jest",
-      "cache": true
+      "cacheable": true
     }
   }
 }
@@ -754,11 +754,11 @@ Benefit: Each `&&` separated command is cached independently. If only terser con
   "tasks": {
     "deploy": {
       "command": "deploy-to-production.sh",
-      "cache": false // Always run fresh
+      "cacheable": false // Always run fresh
     },
     "notify": {
       "command": "slack-webhook.sh",
-      "cache": false // Side effect: sends notification
+      "cacheable": false // Side effect: sends notification
     }
   }
 }

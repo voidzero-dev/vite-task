@@ -31,7 +31,7 @@ Extend `TaskConfig` in `vite-task.json` to support a new optional field `fingerp
   "tasks": {
     "my-task": {
       "command": "echo bar",
-      "cache": true,
+      "cacheable": true,
       "fingerprintIgnores": [
         "node_modules/**/*",
         "!node_modules/**/*/package.json"
@@ -386,7 +386,7 @@ Example:
   "tasks": {
     "install": {
       "command": "pnpm install",
-      "cache": true,
+      "cacheable": true,
       "fingerprintIgnores": [
         "node_modules/**/*",
         "!node_modules/**/*/package.json"

@@ -18,10 +18,10 @@ use super::{
 };
 use crate::{
     Error,
-    cache::CommandCache,
+    cache::TaskCache,
     cmd::try_parse_as_and_list,
     collections::{HashMap, HashSet},
-    config::{DisplayOptions, TaskDependencyType, TaskGroupId, name::TaskName},
+    config::{DisplayOptions, TaskGroupId, name::TaskName},
     fs::CachedFileSystem,
 };
 
@@ -34,12 +34,12 @@ pub struct Workspace {
     /// None indicates that it cannot find the package root from the current directory..
     /// This allows distinguishing between workspace-level tasks and package-level tasks.
     pub(crate) current_package_path: Option<RelativePathBuf>,
-    pub(crate) task_cache: CommandCache,
+    pub(crate) task_cache: TaskCache,
     pub(crate) fs: CachedFileSystem,
     pub(crate) package_graph: Graph<PackageInfo, DependencyType>,
     #[expect(unused)]
     pub(crate) package_json: PackageJson,
-    pub(crate) task_graph: StableDiGraph<ResolvedTask, TaskDependencyType>,
+    pub(crate) task_graph: StableDiGraph<ResolvedTask, ()>,
 }
 
 impl Workspace {
@@ -99,7 +99,7 @@ impl Workspace {
             tracing::info!("Creating task cache directory at {}", cache_dir.display());
             std::fs::create_dir_all(cache_dir)?;
         }
-        let task_cache = CommandCache::load_from_path(cache_path)?;
+        let task_cache = TaskCache::load_from_path(cache_path)?;
 
         let package_json_path = workspace_root.join("package.json");
         let package_json = if package_json_path.as_path().exists() {
@@ -131,7 +131,7 @@ impl Workspace {
         let (workspace_root, cwd, current_package_path) =
             Self::determine_current_package_path(&cwd)?;
 
-        let package_graph = vite_workspace::discover_package_graph(workspace_root)?;
+        let package_graph = vite_workspace::get_package_graph(workspace_root)?;
         // Load vite-task.json files for all packages
         let packages_with_task_jsons = Self::load_vite_task_jsons(&package_graph, workspace_root)?;
 
@@ -154,7 +154,7 @@ impl Workspace {
             tracing::info!("Creating task cache directory at {}", cache_dir.display());
             std::fs::create_dir_all(cache_dir)?;
         }
-        let task_cache = CommandCache::load_from_path(cache_path)?;
+        let task_cache = TaskCache::load_from_path(cache_path)?;
 
         // Build the complete task graph
         let mut task_graph_builder = TaskGraphBuilder::default();
@@ -199,7 +199,7 @@ impl Workspace {
         })
     }
 
-    pub const fn cache(&self) -> &CommandCache {
+    pub const fn cache(&self) -> &TaskCache {
         &self.task_cache
     }
 
@@ -391,7 +391,7 @@ impl Workspace {
         // The consistency of node indexes between the full graph and the subgraph will make it easier to render the subgraph in UI.
         let filtered_graph = self.task_graph.filter_map(
             |node_index, _| filtered_tasks_by_node_index.remove(&node_index),
-            |_, dep_type| Some(()), // All edges between filtered tasks are preserved.
+            |_, ()| Some(()), // All edges between filtered tasks are preserved.
         );
         Ok(filtered_graph)
     }
@@ -478,7 +478,7 @@ impl Workspace {
                         })
                         .collect::<Result<HashSet<_>, Error>>()?;
 
-                    task_graph_builder.add_task_with_explicit_deps(resolved_task, deps)?;
+                    task_graph_builder.add_task_with_deps(resolved_task, deps)?;
                 }
             }
 
@@ -504,7 +504,7 @@ impl Workspace {
                         } else {
                             HashSet::default()
                         };
-                        task_graph_builder.add_task_with_explicit_deps(resolved_task, deps)?;
+                        task_graph_builder.add_task_with_deps(resolved_task, deps)?;
                     }
                 } else {
                     let resolved_task = Self::resolve_task(
@@ -514,8 +514,7 @@ impl Workspace {
                         None,
                         base_dir,
                     )?;
-                    task_graph_builder
-                        .add_task_with_explicit_deps(resolved_task, HashSet::default())?;
+                    task_graph_builder.add_task_with_deps(resolved_task, HashSet::default())?;
                 }
             }
         }
@@ -537,7 +536,7 @@ impl Workspace {
             HashMap::default();
 
         // Iterate through all tasks in the graph builder to collect them
-        for task_id in task_graph_builder.task_nodes_by_id.keys() {
+        for task_id in task_graph_builder.resolved_tasks_and_dep_ids_by_id.keys() {
             // Extract package name and task name from the task_id
 
             // Determine the order/index for subtasks
@@ -590,12 +589,12 @@ impl Workspace {
                     }
 
                     // Update the task graph builder with additional dependencies
-                    // if !additional_deps.is_empty()
-                    //     && let Some(task_node) =
-                    //         task_graph_builder.task_nodes_by_id.get_mut(first_task)
-                    // {
-                    //     deps.extend(additional_deps);
-                    // }
+                    if !additional_deps.is_empty()
+                        && let Some((_task, deps)) =
+                            task_graph_builder.resolved_tasks_and_dep_ids_by_id.get_mut(first_task)
+                    {
+                        deps.extend(additional_deps);
+                    }
                 }
             }
         }

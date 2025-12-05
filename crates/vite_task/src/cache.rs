@@ -43,7 +43,7 @@ impl CommandCacheValue {
 }
 
 #[derive(Debug)]
-pub struct CommandCache {
+pub struct TaskCache {
     conn: Mutex<Connection>,
     pub(crate) path: AbsolutePathBuf,
 }
@@ -85,7 +85,7 @@ impl Display for FingerprintMismatch {
     }
 }
 
-impl CommandCache {
+impl TaskCache {
     pub fn load_from_path(cache_path: AbsolutePathBuf) -> Result<Self, Error> {
         let path: &AbsolutePath = cache_path.as_ref();
         tracing::info!("Creating task cache directory at {:?}", path);
@@ -185,7 +185,7 @@ impl CommandCache {
 }
 
 // basic database operations
-impl CommandCache {
+impl TaskCache {
     async fn get_key_by_value<K: Encode, V: Decode<()>>(
         &self,
         table: &str,
