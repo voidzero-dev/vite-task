@@ -4,7 +4,10 @@ mod package_manager;
 
 use std::{fs, io};
 
-use petgraph::{Graph, graph::NodeIndex};
+use petgraph::{
+    Graph,
+    graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
+};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::{Deserialize, Serialize};
 use vite_glob::GlobPatternSet;
@@ -103,10 +106,10 @@ pub struct PackageInfo {
 
 #[derive(Default)]
 struct PackageGraphBuilder {
-    id_and_deps_by_path: HashMap<RelativePathBuf, (NodeIndex, Vec<(Str, DependencyType)>)>,
+    id_and_deps_by_path: HashMap<RelativePathBuf, (PackageNodeIndex, Vec<(Str, DependencyType)>)>,
     // Only for packages with a name
     name_to_path: HashMap<Str, RelativePathBuf>,
-    graph: Graph<PackageInfo, DependencyType>,
+    graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
 }
 
 impl PackageGraphBuilder {
@@ -138,7 +141,7 @@ impl PackageGraphBuilder {
         Ok(())
     }
 
-    fn build(mut self) -> Graph<PackageInfo, DependencyType> {
+    fn build(mut self) -> DiGraph<PackageInfo, DependencyType, PackageIx> {
         for (id, deps) in self.id_and_deps_by_path.values() {
             for (dep_name, dep_type) in deps {
                 // Skip dependencies on nameless packages (empty string)
@@ -160,10 +163,30 @@ impl PackageGraphBuilder {
     }
 }
 
+/// newtype of `DefaultIx` for indices in package graphs
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PackageIx(DefaultIx);
+unsafe impl petgraph::graph::IndexType for PackageIx {
+    fn new(x: usize) -> Self {
+        Self(DefaultIx::new(x))
+    }
+
+    fn index(&self) -> usize {
+        self.0.index()
+    }
+
+    fn max() -> Self {
+        Self(<DefaultIx as IndexType>::max())
+    }
+}
+
+pub type PackageNodeIndex = NodeIndex<PackageIx>;
+pub type PackageEdgeIndex = EdgeIndex<DefaultIx>;
+
 /// Discover the workspace from cwd and load the package graph.
 pub fn discover_package_graph(
     cwd: impl AsRef<AbsolutePath>,
-) -> Result<Graph<PackageInfo, DependencyType>, Error> {
+) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
     let workspace_root = find_workspace_root(cwd.as_ref())?;
     load_package_graph(&workspace_root)
 }
@@ -171,7 +194,7 @@ pub fn discover_package_graph(
 /// Load the package graph from a discovered workspace.
 pub fn load_package_graph(
     workspace_root: &WorkspaceRoot<'_>,
-) -> Result<Graph<PackageInfo, DependencyType>, Error> {
+) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
     let mut graph_builder = PackageGraphBuilder::default();
     let workspaces = match &workspace_root.workspace_file {
         WorkspaceFile::PnpmWorkspaceYaml(file) => {
