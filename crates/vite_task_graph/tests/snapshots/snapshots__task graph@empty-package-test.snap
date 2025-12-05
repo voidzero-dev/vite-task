@@ -22,6 +22,13 @@ input_file: crates/vite_task_graph/tests/fixtures/empty-package-test
       [
         {
           "package_dir": "packages/normal-package",
+          "task_name": "build"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/normal-package",
           "task_name": "test"
         },
         "Explicit"
@@ -68,7 +75,15 @@ input_file: crates/vite_task_graph/tests/fixtures/empty-package-test
     },
     "command": "echo 'Testing another-empty package'",
     "cwd": "packages/another-empty",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/normal-package",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {

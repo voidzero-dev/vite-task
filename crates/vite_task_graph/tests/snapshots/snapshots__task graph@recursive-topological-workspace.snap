@@ -11,7 +11,22 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Building @test/web'",
     "cwd": "apps/web",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/app",
+          "task_name": "build"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/core",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -29,7 +44,15 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Building @test/app'",
     "cwd": "packages/app",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/utils",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -38,7 +61,15 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Testing @test/app'",
     "cwd": "packages/app",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/utils",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -65,7 +96,15 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Preparing @test/utils' && echo 'Building @test/utils' && echo 'Done @test/utils'",
     "cwd": "packages/utils",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/core",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -74,6 +113,14 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Testing @test/utils'",
     "cwd": "packages/utils",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/core",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   }
 ]

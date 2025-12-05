@@ -11,7 +11,22 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Generate schemas && echo Compile TypeScript && echo Bundle API && echo Copy assets",
     "cwd": "packages/api",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/config",
+          "task_name": "build"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -38,7 +53,15 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Testing API",
     "cwd": "packages/api",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -47,7 +70,36 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Clean dist && echo Build client && echo Build server && echo Generate manifest && echo Optimize assets",
     "cwd": "packages/app",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/api",
+          "task_name": "build"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/pkg#special",
+          "task_name": "build"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "build"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/ui",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -65,7 +117,15 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Running dev server",
     "cwd": "packages/app",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/api",
+          "task_name": "dev"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -83,7 +143,36 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Unit tests && echo Integration tests",
     "cwd": "packages/app",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/api",
+          "task_name": "test"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/pkg#special",
+          "task_name": "test"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "test"
+        },
+        "Topological"
+      ],
+      [
+        {
+          "package_dir": "packages/ui",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -110,7 +199,15 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Building package with hash",
     "cwd": "packages/pkg#special",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -119,7 +216,15 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Testing package with hash",
     "cwd": "packages/pkg#special",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -173,7 +278,15 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Validating",
     "cwd": "packages/tools",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/config",
+          "task_name": "validate"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -182,7 +295,15 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Compile styles && echo Build components && echo Generate types",
     "cwd": "packages/ui",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -191,7 +312,15 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Linting UI",
     "cwd": "packages/ui",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "lint"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -209,6 +338,14 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Testing UI",
     "cwd": "packages/ui",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/shared",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   }
 ]

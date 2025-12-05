@@ -9,7 +9,7 @@ use std::{
 use config::{ResolvedUserTaskConfig, UserConfigFile};
 use petgraph::{
     graph::{DiGraph, NodeIndex},
-    visit::depth_first_search,
+    visit::{Control, DfsEvent, depth_first_search},
 };
 use serde::Serialize;
 use vec1::smallvec_v1::SmallVec1;
@@ -111,9 +111,11 @@ pub enum SpecifierLookupError {
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
 /// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
 pub struct TaskGraph {
-    graph: DiGraph<TaskNode, TaskDependencyType>,
+    task_graph: DiGraph<TaskNode, TaskDependencyType>,
 
-    package_graph: Arc<DiGraph<PackageInfo, DependencyType, PackageIx>>,
+    /// Preserve the package graph for displaying purpose:
+    /// `self.task_graph` refers packages via PackageNodeIndex. To display package names and paths, we need to lookup them in package_graph.
+    package_graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
 
     /// Grouping package indices by their package names.
     /// Due to rare but possible name conflicts in monorepos, we use `SmallVec1` to store multiple dirs for same name.
@@ -231,11 +233,10 @@ impl TaskGraph {
             }
         }
 
-        let package_graph = Arc::new(package_graph);
         // Construct `Self` with task_graph with all task nodes ready and indexed, but no edges.
         let mut me = Self {
-            graph: task_graph,
-            package_graph: Arc::clone(&package_graph),
+            task_graph,
+            package_graph,
             node_indices_by_task_id,
             package_indices_by_name: package_dirs_by_name,
         };
@@ -243,7 +244,7 @@ impl TaskGraph {
         // Add explicit dependencies
         for (dependency_specifiers, from_node_index) in dependency_specifiers_with_task_node_indices
         {
-            let from_task_id = me.graph[from_node_index].task_id.clone();
+            let from_task_id = me.task_graph[from_node_index].task_id.clone();
 
             for specifier in dependency_specifiers.iter().cloned() {
                 let to_node_index = me
@@ -253,17 +254,51 @@ impl TaskGraph {
                         specifier,
                         origin_task_id: from_task_id.clone(),
                     })?;
-                me.graph.update_edge(from_node_index, to_node_index, TaskDependencyType::Explicit);
+                me.task_graph.update_edge(
+                    from_node_index,
+                    to_node_index,
+                    TaskDependencyType::Explicit,
+                );
             }
         }
 
         // Add topological dependencies based on package dependencies
-        // for (package_index, task_node_index) in package_indices_with_task_node_indices {
-        //     // For every task,
-        //     // DFS starting from the containing package
-        //     depth_first_search(&package_graph, Some(package_index), |event| {});
-        // }
-
+        let mut topological_edges = Vec::<(NodeIndex, NodeIndex)>::new();
+        for task_index in me.task_graph.node_indices() {
+            let task_id = &me.task_graph[task_index].task_id;
+            let task_name = &task_id.task_name;
+            let package_index = task_id.package_index;
+            // For every task,
+            // DFS starting from the package where it's defined.
+            depth_first_search(&me.package_graph, Some(package_index), |event| {
+                let DfsEvent::TreeEdge(_, dependency_package_index) = event else {
+                    return Control::<()>::Continue;
+                };
+                // If a direct or indirect dependency has a task with the same name
+                if let Some(dependency_task_index) = me.node_indices_by_task_id.get(&TaskId {
+                    package_index: dependency_package_index,
+                    task_name: task_name.clone(),
+                }) {
+                    // form an edge from the current task to that task
+                    topological_edges.push((task_index, *dependency_task_index));
+                    // And stop searching further down this branch
+                    // If there is a task with the same name in a deeper dependency, it will be connected via that nearer dependency's task.
+                    Control::Prune
+                } else {
+                    Control::Continue
+                }
+            });
+        }
+        for (from_node_index, to_node_index) in topological_edges {
+            // Avoid duplicating edges if an explicit dependency already exists
+            if me.task_graph.find_edge(from_node_index, to_node_index).is_none() {
+                me.task_graph.update_edge(
+                    from_node_index,
+                    to_node_index,
+                    TaskDependencyType::Topological,
+                );
+            }
+        }
         Ok(me)
     }
 
@@ -338,15 +373,16 @@ impl TaskGraph {
             depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)>,
         }
 
-        let mut node_snapshots = Vec::<TaskNodeSnapshot>::with_capacity(self.graph.node_count());
-        for a in self.graph.node_indices() {
-            let node = &self.graph[a];
+        let mut node_snapshots =
+            Vec::<TaskNodeSnapshot>::with_capacity(self.task_graph.node_count());
+        for a in self.task_graph.node_indices() {
+            let node = &self.task_graph[a];
             let mut depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)> = self
-                .graph
+                .task_graph
                 .edges_directed(a, petgraph::Direction::Outgoing)
                 .map(|edge| {
                     use petgraph::visit::EdgeRef as _;
-                    let target_node = &self.graph[edge.target()];
+                    let target_node = &self.task_graph[edge.target()];
                     (
                         TaskIdSnapshot::from_task_id(&target_node.task_id, &self.package_graph),
                         *edge.weight(),

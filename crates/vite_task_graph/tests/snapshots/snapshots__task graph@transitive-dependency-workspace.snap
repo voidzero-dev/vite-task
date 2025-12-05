@@ -11,7 +11,15 @@ input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspac
     },
     "command": "echo Building A",
     "cwd": "packages/a",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/c",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
