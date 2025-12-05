@@ -42,9 +42,5 @@ fn test_snapshots() {
     let tokio_runtime = Runtime::new().unwrap();
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePath::new(tmp_dir.path()).unwrap();
-    insta::glob!(current_dir().unwrap(), "tests/fixtures/*", |case_path| run_case(
-        &tokio_runtime,
-        tmp_dir_path,
-        case_path
-    ));
+    insta::glob!("fixtures/*", |case_path| run_case(&tokio_runtime, tmp_dir_path, case_path));
 }
