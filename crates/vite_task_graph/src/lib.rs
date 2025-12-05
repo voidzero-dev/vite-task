@@ -290,8 +290,6 @@ impl TaskGraph {
     ///
     /// All paths are relative to `base_dir`.
     pub fn snapshot(&self, base_dir: &AbsolutePath) -> serde_json::Value {
-        use std::collections::BTreeMap;
-
         use vite_path::RelativePathBuf;
 
         #[derive(serde::Serialize, PartialEq, PartialOrd, Eq, Ord)]

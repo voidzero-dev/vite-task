@@ -1,9 +1,6 @@
 //! Configuration structures for user-defined tasks in `vite.config.*`
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use monostate::MustBe;
 use serde::Deserialize;

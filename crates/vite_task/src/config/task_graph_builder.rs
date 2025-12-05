@@ -15,6 +15,7 @@ pub enum TaskDependencyType {
     /// The dependency is explicit defined by user in `dependsOn`.
     Explicit,
     /// The dependency is added due to topological ordering based on package dependencies.
+    #[expect(unused)]
     Topological,
 }
 

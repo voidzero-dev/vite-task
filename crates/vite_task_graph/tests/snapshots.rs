@@ -1,13 +1,10 @@
-use std::{
-    env::{current_dir, var_os},
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
 use copy_dir::copy_dir;
 use tokio::runtime::Runtime;
 use vite_path::AbsolutePath;
 use vite_task_graph::loader::JsonUserConfigLoader;
-use vite_workspace::{discover_package_graph, find_workspace_root};
+use vite_workspace::find_workspace_root;
 
 fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
     let case_name = case_path.file_name().unwrap().to_str().unwrap();

@@ -1,12 +1,10 @@
-mod command;
 mod user;
 
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
-pub use command::TaskCommand;
 use monostate::MustBe;
 pub use user::{UserCacheConfig, UserConfigFile, UserTaskConfig};
-use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
+use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 
 /// Task configuration resolved from `package.json` scripts and/or `vite.config.ts` tasks,
