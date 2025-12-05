@@ -7,34 +7,50 @@ use std::{
 };
 
 use config::{ResolvedUserTaskConfig, UserConfigFile};
-use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::{
+    graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
+    visit::{Control, DfsEvent, depth_first_search},
+};
 use serde::Serialize;
 use vec1::smallvec_v1::SmallVec1;
-use vite_path::AbsolutePath;
+use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
-use vite_workspace::WorkspaceRoot;
+use vite_workspace::{DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot};
 
-/// The type of a desk dependency, explaining why it's introduced.
 #[derive(Debug, Clone, Copy, Serialize)]
-pub enum TaskDependencyType {
+enum TaskDependencyTypeInner {
     /// The dependency is explicitly declared by user in `dependsOn`.
-    /// If a dependency is both explicit and topological, `TaskDependencyType::Explicit` takes precedenc
     Explicit,
     /// The dependency is added due to topological ordering based on package dependencies.
     Topological,
+    /// The dependency is explicitly declared by user in `dependsOn` and also added due to topological ordering.
+    Both,
+}
+
+/// The type of a task dependency, explaining why it's introduced.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(transparent)]
+pub struct TaskDependencyType(TaskDependencyTypeInner);
+
+// It hides `TaskDependencyTypeInner` and only expose `is_explicit`/`is_topological`
+// to avoid incorrectly matching only Explicit variant to check if it's explicit.
+impl TaskDependencyType {
+    pub fn is_explicit(&self) -> bool {
+        matches!(self.0, TaskDependencyTypeInner::Explicit | TaskDependencyTypeInner::Both)
+    }
+
+    pub fn is_topological(&self) -> bool {
+        matches!(self.0, TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both)
+    }
 }
 
 /// Uniquely identifies a task, by its name and the path where it's defined.
-///
-/// We use package_dir instead of package_name because multiple packages can have the same name in a monorepo.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub struct TaskId {
-    /// This is the path of the package where the task is defined.
+    /// This is the index of the package where the task is defined.
     ///
-    /// Note that this is not always the cwd where the command is run, which is stored in `ResolvedUserTaskConfig`.
-    ///
-    /// `package_dir` is declared from `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
-    pub package_dir: Arc<AbsolutePath>,
+    /// `package_index` is declared from `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
+    pub package_index: PackageNodeIndex,
 
     /// For user defined tasks, this is the name of the script or the entry in `vite-task.json`.
     ///
@@ -75,11 +91,12 @@ pub enum TaskGraphLoadError {
         package_path: Arc<AbsolutePath>,
     },
 
-    #[error("Failed to resolve task config for task {0} at {1:?}: {2}", task_id.task_name, task_id.package_dir, error)]
+    #[error("Failed to resolve task config for task {0}#{1}: {2}", package_name, task_name, error)]
     ResolveConfigError {
         #[source]
         error: crate::config::ResolveTaskError,
-        task_id: TaskId,
+        package_name: Str,
+        task_name: Str,
     },
 
     #[error("Failed to lookup dependency '{specifier}' of task {0} at {1:?}: {error}", origin_task_id.task_name, origin_task_id.task_name)]
@@ -94,31 +111,53 @@ pub enum TaskGraphLoadError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SpecifierLookupError {
-    #[error(
-        "Package name '{package_name}' is ambiguous among multiple packages: {package_paths:?}"
-    )]
-    AmbiguousPackageName { package_name: Str, package_paths: Box<[Arc<AbsolutePath>]> },
+    #[error("Package '{package_name}' is ambiguous among multiple packages: {package_paths:?}")]
+    AmbiguousPackageName { package_name: Str, package_paths: Box<[RelativePathBuf]> },
 
-    #[error("Package name '{package_name}' not found")]
+    #[error("Package '{package_name}' not found")]
     PackageNameNotFound { package_name: Str },
 
-    #[error("Task name '{0}' not found in package {1:?}", task_id.task_name, task_id.package_dir)]
-    TaskNameNotFound { task_id: TaskId },
+    #[error("Task '{task_name}' not found in package {package_name}")]
+    TaskNameNotFound { package_name: Str, task_name: Str },
 }
+
+/// newtype of `DefaultIx` for indices in package graphs
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskIx(DefaultIx);
+unsafe impl IndexType for TaskIx {
+    fn new(x: usize) -> Self {
+        Self(DefaultIx::new(x))
+    }
+
+    fn index(&self) -> usize {
+        self.0.index()
+    }
+
+    fn max() -> Self {
+        Self(<DefaultIx as IndexType>::max())
+    }
+}
+
+pub type TaskNodeIndex = NodeIndex<TaskIx>;
+pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 
 /// Full task graph of a workspace.
 ///
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
 /// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
 pub struct TaskGraph {
-    graph: DiGraph<TaskNode, TaskDependencyType>,
+    task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
 
-    /// Grouping package dirs by their package names.
+    /// Preserve the package graph for displaying purpose:
+    /// `self.task_graph` refers packages via PackageNodeIndex. To display package names and paths, we need to lookup them in package_graph.
+    package_graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
+
+    /// Grouping package indices by their package names.
     /// Due to rare but possible name conflicts in monorepos, we use `SmallVec1` to store multiple dirs for same name.
-    package_dirs_by_name: HashMap<Str, SmallVec1<[Arc<AbsolutePath>; 1]>>,
+    package_indices_by_name: HashMap<Str, SmallVec1<[PackageNodeIndex; 1]>>,
 
     /// task indices by task id for quick lookup
-    node_indices_by_task_id: HashMap<TaskId, NodeIndex>,
+    node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex>,
 }
 
 impl TaskGraph {
@@ -127,14 +166,17 @@ impl TaskGraph {
         workspace_root: WorkspaceRoot<'_>,
         config_loader: impl loader::UserConfigLoader,
     ) -> Result<Self, TaskGraphLoadError> {
-        let mut task_graph = DiGraph::<TaskNode, TaskDependencyType>::new();
+        let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
 
         let package_graph = vite_workspace::load_package_graph(&workspace_root)?;
 
-        let mut dependency_specifiers_with_node_indices: Vec<(Arc<[Str]>, NodeIndex)> = Vec::new();
+        // Record dependency specifiers for each task node to add explicit dependencies later
+        let mut dependency_specifiers_with_task_node_indices: Vec<(Arc<[Str]>, TaskNodeIndex)> =
+            Vec::new();
 
         // Load task nodes into `task_graph`
-        for package in package_graph.node_weights() {
+        for package_index in package_graph.node_indices() {
+            let package = &package_graph[package_index];
             let package_dir: Arc<AbsolutePath> = workspace_root.path.join(&package.path).into();
 
             // Collect package.json scripts into a mutable map for draining lookup.
@@ -155,8 +197,7 @@ impl TaskGraph {
                 // For each task defined in vite.config.*, look up the corresponding package.json script (if any)
                 let package_json_script = package_json_scripts.remove(task_name.as_str());
 
-                let task_id =
-                    TaskId { task_name: task_name.clone(), package_dir: Arc::clone(&package_dir) };
+                let task_id = TaskId { task_name: task_name.clone(), package_index };
 
                 let dependency_specifiers = Arc::clone(&task_user_config.depends_on);
 
@@ -168,7 +209,8 @@ impl TaskGraph {
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
-                    task_id: task_id.clone(),
+                    package_name: package.package_json.name.clone(),
+                    task_name: task_name.clone(),
                 })?;
 
                 let task_node = TaskNode {
@@ -178,15 +220,13 @@ impl TaskGraph {
                 };
 
                 let node_index = task_graph.add_node(task_node);
-                dependency_specifiers_with_node_indices.push((dependency_specifiers, node_index));
+                dependency_specifiers_with_task_node_indices
+                    .push((dependency_specifiers, node_index));
             }
 
             // For remaining package.json scripts not defined in vite.config.*, create tasks with default config
             for (script_name, package_json_script) in package_json_scripts.drain() {
-                let task_id = TaskId {
-                    task_name: Str::from(script_name),
-                    package_dir: Arc::clone(&package_dir),
-                };
+                let task_id = TaskId { task_name: Str::from(script_name), package_index };
                 let resolved_config = ResolvedUserTaskConfig::resolve_package_json_script(
                     &package_dir,
                     package_json_script,
@@ -200,7 +240,7 @@ impl TaskGraph {
         }
 
         // index tasks by ids
-        let mut node_indices_by_task_id: HashMap<TaskId, NodeIndex> =
+        let mut node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex> =
             HashMap::with_capacity(task_graph.node_count());
         for node_index in task_graph.node_indices() {
             let task_node = &task_graph[node_index];
@@ -214,41 +254,99 @@ impl TaskGraph {
         }
 
         // Grouping package dirs by their package names.
-        let mut package_dirs_by_name: HashMap<Str, SmallVec1<[Arc<AbsolutePath>; 1]>> =
+        let mut package_dirs_by_name: HashMap<Str, SmallVec1<[PackageNodeIndex; 1]>> =
             HashMap::new();
-        for package in package_graph.node_weights() {
-            let package_dir: Arc<AbsolutePath> = workspace_root.path.join(&package.path).into();
+        for package_index in package_graph.node_indices() {
+            let package = &package_graph[package_index];
             match package_dirs_by_name.entry(package.package_json.name.clone()) {
                 Entry::Vacant(vacant) => {
-                    vacant.insert(SmallVec1::new(package_dir));
+                    vacant.insert(SmallVec1::new(package_index));
                 }
                 Entry::Occupied(occupied) => {
-                    occupied.into_mut().push(package_dir);
+                    occupied.into_mut().push(package_index);
                 }
             }
         }
 
         // Construct `Self` with task_graph with all task nodes ready and indexed, but no edges.
-        let mut me = Self { graph: task_graph, node_indices_by_task_id, package_dirs_by_name };
+        let mut me = Self {
+            task_graph,
+            package_graph,
+            node_indices_by_task_id,
+            package_indices_by_name: package_dirs_by_name,
+        };
 
         // Add explicit dependencies
-        for (dependency_specifiers, from_node_index) in dependency_specifiers_with_node_indices {
-            let from_task_id = me.graph[from_node_index].task_id.clone();
+        for (dependency_specifiers, from_node_index) in dependency_specifiers_with_task_node_indices
+        {
+            let from_task_id = me.task_graph[from_node_index].task_id.clone();
 
             for specifier in dependency_specifiers.iter().cloned() {
                 let to_node_index = me
-                    .get_task_index_by_specifier(&specifier, &from_task_id.package_dir)
+                    .get_task_index_by_specifier(&specifier, from_task_id.package_index)
                     .map_err(|error| TaskGraphLoadError::DependencySpecifierLookupError {
                         error,
                         specifier,
                         origin_task_id: from_task_id.clone(),
                     })?;
-                me.graph.update_edge(from_node_index, to_node_index, TaskDependencyType::Explicit);
+                me.task_graph.update_edge(
+                    from_node_index,
+                    to_node_index,
+                    TaskDependencyType(TaskDependencyTypeInner::Explicit),
+                );
             }
         }
 
-        // TODO: Add topological dependencies based on package dependencies
-
+        // Add topological dependencies based on package dependencies
+        let mut topological_edges = Vec::<(TaskNodeIndex, TaskNodeIndex)>::new();
+        for task_index in me.task_graph.node_indices() {
+            let task_id = &me.task_graph[task_index].task_id;
+            let task_name = &task_id.task_name;
+            let package_index = task_id.package_index;
+            // For every task,
+            // DFS starting from the package where it's defined.
+            depth_first_search(&me.package_graph, Some(package_index), |event| {
+                let DfsEvent::TreeEdge(_, dependency_package_index) = event else {
+                    return Control::<()>::Continue;
+                };
+                // If a direct or indirect dependency has a task with the same name
+                if let Some(dependency_task_index) = me.node_indices_by_task_id.get(&TaskId {
+                    package_index: dependency_package_index,
+                    task_name: task_name.clone(),
+                }) {
+                    // form an edge from the current task to that task
+                    topological_edges.push((task_index, *dependency_task_index));
+                    // And stop searching further down this branch
+                    // If there is a task with the same name in a deeper dependency, it will be connected via that nearer dependency's task.
+                    Control::Prune
+                } else {
+                    Control::Continue
+                }
+            });
+        }
+        for (from_node_index, to_node_index) in topological_edges {
+            if let Some(existing_edge_index) =
+                me.task_graph.find_edge(from_node_index, to_node_index)
+            {
+                let existing_edge = &mut me.task_graph[existing_edge_index];
+                match existing_edge.0 {
+                    TaskDependencyTypeInner::Explicit => {
+                        // upgrade to Both
+                        existing_edge.0 = TaskDependencyTypeInner::Both;
+                    }
+                    TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both => {
+                        // already has topological dependency, do nothing
+                    }
+                }
+            } else {
+                // add new topological edge if not exists
+                me.task_graph.add_edge(
+                    from_node_index,
+                    to_node_index,
+                    TaskDependencyType(TaskDependencyTypeInner::Topological),
+                );
+            }
+        }
         Ok(me)
     }
 
@@ -258,30 +356,36 @@ impl TaskGraph {
     fn get_task_index_by_specifier(
         &self,
         specifier: &str,
-        package_origin: &Arc<AbsolutePath>,
-    ) -> Result<NodeIndex, SpecifierLookupError> {
-        let (package_dir, task_name): (Arc<AbsolutePath>, Str) =
+        package_origin: PackageNodeIndex,
+    ) -> Result<TaskNodeIndex, SpecifierLookupError> {
+        let (package_index, task_name): (PackageNodeIndex, Str) =
             if let Some((package_name, task_name)) = specifier.rsplit_once('#') {
                 // Lookup package path by the package name from '#'
-                let Some(package_paths) = self.package_dirs_by_name.get(package_name) else {
+                let Some(package_indices) = self.package_indices_by_name.get(package_name) else {
                     return Err(SpecifierLookupError::PackageNameNotFound {
                         package_name: package_name.into(),
                     });
                 };
-                if package_paths.len() > 1 {
+                if package_indices.len() > 1 {
                     return Err(SpecifierLookupError::AmbiguousPackageName {
                         package_name: package_name.into(),
-                        package_paths: package_paths.iter().cloned().collect(),
+                        package_paths: package_indices
+                            .iter()
+                            .map(|package_index| self.package_graph[*package_index].path.clone())
+                            .collect(),
                     });
                 };
-                (Arc::clone(package_paths.first()), task_name.into())
+                (*package_indices.first(), task_name.into())
             } else {
                 // No '#', so the specifier only contains task name, look up in the origin path package
-                (Arc::clone(&package_origin), specifier.into())
+                (package_origin, specifier.into())
             };
-        let task_id = TaskId { task_name, package_dir };
+        let task_id = TaskId { task_name, package_index };
         let Some(node_index) = self.node_indices_by_task_id.get(&task_id) else {
-            return Err(SpecifierLookupError::TaskNameNotFound { task_id });
+            return Err(SpecifierLookupError::TaskNameNotFound {
+                package_name: self.package_graph[package_index].package_json.name.clone(),
+                task_name: task_id.task_name.clone(),
+            });
         };
         Ok(*node_index)
     }
@@ -298,10 +402,13 @@ impl TaskGraph {
             task_name: Str,
         }
         impl TaskIdSnapshot {
-            fn from_task_id(task_id: &TaskId, base_dir: &AbsolutePath) -> Self {
+            fn from_task_id(
+                task_id: &TaskId,
+                package_graph: &DiGraph<PackageInfo, DependencyType, PackageIx>,
+            ) -> Self {
                 Self {
                     task_name: task_id.task_name.clone(),
-                    package_dir: task_id.package_dir.strip_prefix(base_dir).unwrap().unwrap(),
+                    package_dir: package_graph[task_id.package_index].path.clone(),
                 }
             }
         }
@@ -314,21 +421,25 @@ impl TaskGraph {
             depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)>,
         }
 
-        let mut node_snapshots = Vec::<TaskNodeSnapshot>::with_capacity(self.graph.node_count());
-        for a in self.graph.node_indices() {
-            let node = &self.graph[a];
+        let mut node_snapshots =
+            Vec::<TaskNodeSnapshot>::with_capacity(self.task_graph.node_count());
+        for a in self.task_graph.node_indices() {
+            let node = &self.task_graph[a];
             let mut depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)> = self
-                .graph
+                .task_graph
                 .edges_directed(a, petgraph::Direction::Outgoing)
                 .map(|edge| {
                     use petgraph::visit::EdgeRef as _;
-                    let target_node = &self.graph[edge.target()];
-                    (TaskIdSnapshot::from_task_id(&target_node.task_id, base_dir), *edge.weight())
+                    let target_node = &self.task_graph[edge.target()];
+                    (
+                        TaskIdSnapshot::from_task_id(&target_node.task_id, &self.package_graph),
+                        *edge.weight(),
+                    )
                 })
                 .collect();
             depends_on.sort_unstable_by(|a, b| a.0.cmp(&b.0));
             node_snapshots.push(TaskNodeSnapshot {
-                id: TaskIdSnapshot::from_task_id(&node.task_id, base_dir),
+                id: TaskIdSnapshot::from_task_id(&node.task_id, &self.package_graph),
                 command: node.resolved_config.command.clone(),
                 cwd: node.resolved_config.cwd.strip_prefix(base_dir).unwrap().unwrap(),
                 depends_on,

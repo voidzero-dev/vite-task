@@ -11,7 +11,15 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Building @test/app'",
     "cwd": "packages/app",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/utils",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -60,7 +68,15 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Testing @test/app'",
     "cwd": "packages/app",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/utils",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -113,7 +129,15 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Building @test/utils'",
     "cwd": "packages/utils",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/core",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {
@@ -132,6 +156,13 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
       ],
       [
         {
+          "package_dir": "packages/core",
+          "task_name": "lint"
+        },
+        "Topological"
+      ],
+      [
+        {
           "package_dir": "packages/utils",
           "task_name": "build"
         },
@@ -146,6 +177,14 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Testing @test/utils'",
     "cwd": "packages/utils",
-    "depends_on": []
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/core",
+          "task_name": "test"
+        },
+        "Topological"
+      ]
+    ]
   }
 ]

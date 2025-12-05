@@ -5,11 +5,16 @@ use std::{
     sync::Arc,
 };
 
-use petgraph::{Graph, graph::NodeIndex, stable_graph::StableDiGraph, visit::IntoNodeReferences};
+use petgraph::{
+    graph::{DiGraph, NodeIndex},
+    stable_graph::StableDiGraph,
+    visit::IntoNodeReferences,
+};
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePath, RelativePathBuf};
 use vite_str::Str;
 use vite_workspace::{
-    DependencyType, PackageInfo, PackageJson, WorkspaceRoot, find_package_root, find_workspace_root,
+    DependencyType, PackageInfo, PackageIx, PackageJson, PackageNodeIndex, WorkspaceRoot,
+    find_package_root, find_workspace_root,
 };
 
 use super::{
@@ -36,7 +41,7 @@ pub struct Workspace {
     pub(crate) current_package_path: Option<RelativePathBuf>,
     pub(crate) task_cache: TaskCache,
     pub(crate) fs: CachedFileSystem,
-    pub(crate) package_graph: Graph<PackageInfo, DependencyType>,
+    pub(crate) package_graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
     #[expect(unused)]
     pub(crate) package_json: PackageJson,
     pub(crate) task_graph: StableDiGraph<ResolvedTask, ()>,
@@ -111,7 +116,7 @@ impl Workspace {
         };
 
         Ok(Self {
-            package_graph: Graph::new(),
+            package_graph: Default::default(),
             root_dir: workspace_root.to_absolute_path_buf(),
             cwd,
             current_package_path,
@@ -162,7 +167,7 @@ impl Workspace {
         // Create a map from package name to node index for efficient lookups
         // The values are Vecs because multiple packages can have the same name.
         let mut package_path_to_node =
-            HashMap::<Str, Vec<NodeIndex>>::with_capacity(package_graph.node_count());
+            HashMap::<Str, Vec<PackageNodeIndex>>::with_capacity(package_graph.node_count());
         for (package_node_index, package) in package_graph.node_references() {
             package_path_to_node
                 .entry(package.package_json.name.clone())
@@ -398,9 +403,9 @@ impl Workspace {
 
     /// Load tasks from all packages into the task graph builder
     fn load_tasks_into_builder(
-        packages_with_task_jsons: &[(NodeIndex, Option<ViteTaskJson>)],
-        package_graph: &Graph<PackageInfo, DependencyType>,
-        package_name_to_node: &HashMap<Str, Vec<NodeIndex>>,
+        packages_with_task_jsons: &[(PackageNodeIndex, Option<ViteTaskJson>)],
+        package_graph: &DiGraph<PackageInfo, DependencyType, PackageIx>,
+        package_name_to_node: &HashMap<Str, Vec<PackageNodeIndex>>,
         task_graph_builder: &mut TaskGraphBuilder,
         base_dir: &AbsolutePath,
     ) -> Result<(), Error> {
@@ -425,41 +430,43 @@ impl Workspace {
                         .map(|task_request| {
                             let sharp_pos = task_request.find('#');
                             if sharp_pos == task_request.rfind('#') {
-                                let (dep_package_node_index, dep_task_name): (NodeIndex, Str) =
-                                    if let Some(sharp_pos) = sharp_pos {
-                                        let package_name = &task_request[..sharp_pos];
-                                        let package_node_indexes = package_name_to_node
-                                            .get(package_name)
-                                            .ok_or_else(|| Error::TaskNotFound {
-                                                task_request: task_request.clone(),
-                                            })?;
-                                        match package_node_indexes.as_slice() {
-                                            [] => {
-                                                return Err(Error::PackageNotFound(
-                                                    package_name.into(),
-                                                ));
-                                            }
-                                            [package_node_index] => (
-                                                *package_node_index,
-                                                task_request[sharp_pos + 1..].into(),
-                                            ),
-                                            // Found more than one package with the same name
-                                            [package_node_index1, package_node_index2, ..] => {
-                                                return Err(Error::DuplicatedPackageName {
-                                                    name: package_name.into(),
-                                                    path1: package_graph[*package_node_index1]
-                                                        .path
-                                                        .clone(),
-                                                    path2: package_graph[*package_node_index2]
-                                                        .path
-                                                        .clone(),
-                                                });
-                                            }
+                                let (dep_package_node_index, dep_task_name): (
+                                    PackageNodeIndex,
+                                    Str,
+                                ) = if let Some(sharp_pos) = sharp_pos {
+                                    let package_name = &task_request[..sharp_pos];
+                                    let package_node_indexes = package_name_to_node
+                                        .get(package_name)
+                                        .ok_or_else(|| Error::TaskNotFound {
+                                            task_request: task_request.clone(),
+                                        })?;
+                                    match package_node_indexes.as_slice() {
+                                        [] => {
+                                            return Err(Error::PackageNotFound(
+                                                package_name.into(),
+                                            ));
                                         }
-                                    } else {
-                                        // No '#' means it's a local task reference within the same package
-                                        (*package_node_index, task_request)
-                                    };
+                                        [package_node_index] => (
+                                            *package_node_index,
+                                            task_request[sharp_pos + 1..].into(),
+                                        ),
+                                        // Found more than one package with the same name
+                                        [package_node_index1, package_node_index2, ..] => {
+                                            return Err(Error::DuplicatedPackageName {
+                                                name: package_name.into(),
+                                                path1: package_graph[*package_node_index1]
+                                                    .path
+                                                    .clone(),
+                                                path2: package_graph[*package_node_index2]
+                                                    .path
+                                                    .clone(),
+                                            });
+                                        }
+                                    }
+                                } else {
+                                    // No '#' means it's a local task reference within the same package
+                                    (*package_node_index, task_request)
+                                };
 
                                 Ok(TaskId {
                                     task_group_id: TaskGroupId {
@@ -524,12 +531,12 @@ impl Workspace {
     /// Add topological dependencies to the task graph builder
     fn add_topological_dependencies(
         task_graph_builder: &mut TaskGraphBuilder,
-        package_graph: &Graph<PackageInfo, DependencyType>,
+        package_graph: &DiGraph<PackageInfo, DependencyType, PackageIx>,
     ) {
         let package_path_to_node_index = package_graph
             .node_references()
             .map(|(node_index, package)| (package.path.as_relative_path(), node_index))
-            .collect::<HashMap<&RelativePath, NodeIndex>>();
+            .collect::<HashMap<&RelativePath, PackageNodeIndex>>();
 
         // Collect all tasks grouped by task group id
         let mut task_ids_by_task_group_id: HashMap<TaskGroupId, Vec<(TaskId, usize)>> =
@@ -602,9 +609,9 @@ impl Workspace {
 
     /// Load vite-task.json files for all packages
     fn load_vite_task_jsons(
-        package_graph: &Graph<PackageInfo, DependencyType>,
+        package_graph: &DiGraph<PackageInfo, DependencyType, PackageIx>,
         base_dir: &AbsolutePath,
-    ) -> Result<Vec<(NodeIndex, Option<ViteTaskJson>)>, Error> {
+    ) -> Result<Vec<(PackageNodeIndex, Option<ViteTaskJson>)>, Error> {
         let mut packages_with_task_jsons = Vec::new();
 
         for node_idx in package_graph.node_indices() {
@@ -632,8 +639,8 @@ impl Workspace {
 /// Find paths of all transitive dependencies of a package
 fn find_transitive_dependencies(
     package_path: &RelativePath,
-    package_graph: &Graph<PackageInfo, DependencyType>,
-    package_path_to_node_index: &HashMap<&RelativePath, NodeIndex>,
+    package_graph: &DiGraph<PackageInfo, DependencyType, PackageIx>,
+    package_path_to_node_index: &HashMap<&RelativePath, PackageNodeIndex>,
 ) -> Vec<RelativePathBuf> {
     let mut result = Vec::new();
     let mut visited = HashSet::default();
@@ -651,8 +658,8 @@ fn find_transitive_dependencies(
 
 fn find_transitive_dependencies_recursive<'a>(
     package_path: &'a RelativePath,
-    package_graph: &'a Graph<PackageInfo, DependencyType>,
-    package_path_to_node: &HashMap<&'a RelativePath, NodeIndex>,
+    package_graph: &'a DiGraph<PackageInfo, DependencyType, PackageIx>,
+    package_path_to_node: &HashMap<&'a RelativePath, PackageNodeIndex>,
     visited: &mut HashSet<&'a RelativePath>,
     result: &mut Vec<RelativePathBuf>,
 ) {

@@ -1,7 +1,7 @@
 ---
 source: crates/vite_task_graph/tests/snapshots.rs
 expression: task_graph_snapshot
-input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspace
+input_file: crates/vite_task_graph/tests/fixtures/dependency-both-topo-and-explicit
 ---
 [
   {
@@ -9,25 +9,25 @@ input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspac
       "package_dir": "packages/a",
       "task_name": "build"
     },
-    "command": "echo Building A",
+    "command": "build a",
     "cwd": "packages/a",
     "depends_on": [
       [
         {
-          "package_dir": "packages/c",
+          "package_dir": "packages/b",
           "task_name": "build"
         },
-        "Topological"
+        "Both"
       ]
     ]
   },
   {
     "id": {
-      "package_dir": "packages/c",
+      "package_dir": "packages/b",
       "task_name": "build"
     },
-    "command": "echo Building C",
-    "cwd": "packages/c",
+    "command": "build b",
+    "cwd": "packages/b",
     "depends_on": []
   }
 ]
