@@ -165,7 +165,7 @@ pub fn discover_package_graph(
     cwd: impl AsRef<AbsolutePath>,
 ) -> Result<Graph<PackageInfo, DependencyType>, Error> {
     let workspace_root = find_workspace_root(cwd.as_ref())?;
-    discover_package_graph(&workspace_root.path)
+    load_package_graph(&workspace_root)
 }
 
 /// Load the package graph from a discovered workspace.
