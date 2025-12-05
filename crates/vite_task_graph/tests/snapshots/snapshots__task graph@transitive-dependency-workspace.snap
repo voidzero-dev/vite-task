@@ -1,0 +1,25 @@
+---
+source: crates/vite_task_graph/tests/snapshots.rs
+expression: task_graph_snaphost
+input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspace
+---
+[
+  {
+    "id": {
+      "package_dir": "packages/a",
+      "task_name": "build"
+    },
+    "command": "echo Building A",
+    "cwd": "packages/a",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/c",
+      "task_name": "build"
+    },
+    "command": "echo Building C",
+    "cwd": "packages/c",
+    "depends_on": {}
+  }
+]

@@ -1,0 +1,6 @@
+---
+source: crates/vite_task_graph/tests/snapshots.rs
+expression: task_graph_snaphost
+input_file: crates/vite_task_graph/tests/fixtures/fingerprint-ignore-test
+---
+[]

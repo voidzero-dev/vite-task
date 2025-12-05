@@ -57,10 +57,26 @@ pub struct UserTaskConfig {
     pub cache_config: UserCacheConfig,
 }
 
+impl UserTaskConfig {
+    /// The default user task config for package.json scripts.
+    pub fn package_json_script_default() -> Self {
+        Self {
+            command: None,
+            cwd_relative_to_package: RelativePathBuf::default(),
+            depends_on: Arc::new([]),
+            cache_config: UserCacheConfig::Enabled {
+                cache: MustBe!(true),
+                envs: Box::new([]),
+                pass_through_envs: Box::new([]),
+            },
+        }
+    }
+}
+
 /// User configuration file structure for `vite.config.*`
 #[derive(Debug, Deserialize)]
 pub struct UserConfigFile {
-    tasks: HashMap<Str, UserTaskConfig>,
+    pub tasks: HashMap<Str, UserTaskConfig>,
 }
 
 #[cfg(test)]

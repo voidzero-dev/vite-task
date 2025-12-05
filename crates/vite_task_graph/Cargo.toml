@@ -12,12 +12,18 @@ monostate = "1.0.2"
 petgraph = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-smallvec = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
+vec1 = { workspace = true, features = ["smallvec-v1"] }
 vite_path = { workspace = true }
 vite_str = { workspace = true }
 vite_workspace = { workspace = true }
+
+[dev-dependencies]
+copy_dir = { workspace = true }
+insta = { workspace = true, features = ["glob", "json"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["fs", "rt-multi-thread"] }
 
 [lints]
 workspace = true

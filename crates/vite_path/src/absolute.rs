@@ -12,7 +12,7 @@ use ref_cast::{RefCastCustom, ref_cast_custom};
 use crate::relative::{FromPathError, InvalidPathDataError, RelativePathBuf};
 
 /// A path that is guaranteed to be absolute
-#[derive(RefCastCustom, Debug, PartialEq, Eq)]
+#[derive(RefCastCustom, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct AbsolutePath(Path);
 impl AsRef<Self> for AbsolutePath {

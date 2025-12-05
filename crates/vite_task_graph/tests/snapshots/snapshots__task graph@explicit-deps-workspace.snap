@@ -1,0 +1,79 @@
+---
+source: crates/vite_task_graph/tests/snapshots.rs
+expression: task_graph_snaphost
+input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
+---
+[
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "build"
+    },
+    "command": "echo 'Building @test/app'",
+    "cwd": "packages/app",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "start"
+    },
+    "command": "echo 'Starting @test/app'",
+    "cwd": "packages/app",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "test"
+    },
+    "command": "echo 'Testing @test/app'",
+    "cwd": "packages/app",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/core",
+      "task_name": "build"
+    },
+    "command": "echo 'Building @test/core'",
+    "cwd": "packages/core",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/core",
+      "task_name": "clean"
+    },
+    "command": "echo 'Cleaning @test/core'",
+    "cwd": "packages/core",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/core",
+      "task_name": "test"
+    },
+    "command": "echo 'Testing @test/core'",
+    "cwd": "packages/core",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/utils",
+      "task_name": "build"
+    },
+    "command": "echo 'Building @test/utils'",
+    "cwd": "packages/utils",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/utils",
+      "task_name": "test"
+    },
+    "command": "echo 'Testing @test/utils'",
+    "cwd": "packages/utils",
+    "depends_on": {}
+  }
+]

@@ -1,0 +1,34 @@
+---
+source: crates/vite_task_graph/tests/snapshots.rs
+expression: task_graph_snaphost
+input_file: crates/vite_task_graph/tests/fixtures/cache-sharing
+---
+[
+  {
+    "id": {
+      "package_dir": "",
+      "task_name": "a"
+    },
+    "command": "echo a",
+    "cwd": "",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "",
+      "task_name": "b"
+    },
+    "command": "echo a && echo b",
+    "cwd": "",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "",
+      "task_name": "c"
+    },
+    "command": "echo a && echo b && echo c",
+    "cwd": "",
+    "depends_on": {}
+  }
+]

@@ -1,0 +1,214 @@
+---
+source: crates/vite_task_graph/tests/snapshots.rs
+expression: task_graph_snaphost
+input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
+---
+[
+  {
+    "id": {
+      "package_dir": "packages/api",
+      "task_name": "build"
+    },
+    "command": "echo Generate schemas && echo Compile TypeScript && echo Bundle API && echo Copy assets",
+    "cwd": "packages/api",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/api",
+      "task_name": "dev"
+    },
+    "command": "echo Watch mode && echo Start dev server",
+    "cwd": "packages/api",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/api",
+      "task_name": "start"
+    },
+    "command": "echo Starting API server",
+    "cwd": "packages/api",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/api",
+      "task_name": "test"
+    },
+    "command": "echo Testing API",
+    "cwd": "packages/api",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "build"
+    },
+    "command": "echo Clean dist && echo Build client && echo Build server && echo Generate manifest && echo Optimize assets",
+    "cwd": "packages/app",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "deploy"
+    },
+    "command": "echo Validate && echo Upload && echo Verify",
+    "cwd": "packages/app",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "dev"
+    },
+    "command": "echo Running dev server",
+    "cwd": "packages/app",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "preview"
+    },
+    "command": "echo Preview build",
+    "cwd": "packages/app",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "test"
+    },
+    "command": "echo Unit tests && echo Integration tests",
+    "cwd": "packages/app",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/config",
+      "task_name": "build"
+    },
+    "command": "echo Building config",
+    "cwd": "packages/config",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/config",
+      "task_name": "validate"
+    },
+    "command": "echo Validating config",
+    "cwd": "packages/config",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/pkg#special",
+      "task_name": "build"
+    },
+    "command": "echo Building package with hash",
+    "cwd": "packages/pkg#special",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/pkg#special",
+      "task_name": "test"
+    },
+    "command": "echo Testing package with hash",
+    "cwd": "packages/pkg#special",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/shared",
+      "task_name": "build"
+    },
+    "command": "echo Cleaning && echo Compiling shared && echo Generating types",
+    "cwd": "packages/shared",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/shared",
+      "task_name": "lint"
+    },
+    "command": "echo Linting shared",
+    "cwd": "packages/shared",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/shared",
+      "task_name": "test"
+    },
+    "command": "echo Setting up test env && echo Running tests && echo Cleanup",
+    "cwd": "packages/shared",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/shared",
+      "task_name": "typecheck"
+    },
+    "command": "echo Type checking shared",
+    "cwd": "packages/shared",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/tools",
+      "task_name": "generate"
+    },
+    "command": "echo Generating tools",
+    "cwd": "packages/tools",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/tools",
+      "task_name": "validate"
+    },
+    "command": "echo Validating",
+    "cwd": "packages/tools",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/ui",
+      "task_name": "build"
+    },
+    "command": "echo Compile styles && echo Build components && echo Generate types",
+    "cwd": "packages/ui",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/ui",
+      "task_name": "lint"
+    },
+    "command": "echo Linting UI",
+    "cwd": "packages/ui",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/ui",
+      "task_name": "storybook"
+    },
+    "command": "echo Running storybook",
+    "cwd": "packages/ui",
+    "depends_on": {}
+  },
+  {
+    "id": {
+      "package_dir": "packages/ui",
+      "task_name": "test"
+    },
+    "command": "echo Testing UI",
+    "cwd": "packages/ui",
+    "depends_on": {}
+  }
+]

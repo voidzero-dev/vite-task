@@ -1,7 +1,7 @@
 mod command;
 mod user;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 pub use command::TaskCommand;
 use monostate::MustBe;
@@ -51,6 +51,18 @@ pub enum ResolveTaskError {
 }
 
 impl ResolvedUserTaskConfig {
+    pub fn resolve_package_json_script(
+        package_dir: &AbsolutePath,
+        package_json_script: &str,
+    ) -> Self {
+        Self::resolve(
+            UserTaskConfig::package_json_script_default(),
+            package_dir,
+            Some(package_json_script),
+        )
+        .expect("Command conflict/missing for package.json script should never happen")
+    }
+
     /// Resolves from user config, package dir, and package.json script (if any).
     pub fn resolve(
         user_config: UserTaskConfig,
