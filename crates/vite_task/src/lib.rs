@@ -11,9 +11,6 @@ mod schedule;
 mod types;
 mod ui;
 
-#[cfg(test)]
-mod test_utils;
-
 // Public exports for vite-plus-cli to use
 pub use cache::TaskCache;
 pub use config::{ResolvedTask, Workspace};
