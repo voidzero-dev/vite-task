@@ -313,13 +313,13 @@ impl TaskGraph {
             id: TaskIdSnapshot,
             command: Str,
             cwd: RelativePathBuf,
-            depends_on: BTreeMap<TaskIdSnapshot, TaskDependencyType>,
+            depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)>,
         }
 
         let mut node_snapshots = Vec::<TaskNodeSnapshot>::with_capacity(self.graph.node_count());
         for a in self.graph.node_indices() {
             let node = &self.graph[a];
-            let depends_on = self
+            let mut depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)> = self
                 .graph
                 .edges_directed(a, petgraph::Direction::Outgoing)
                 .map(|edge| {
@@ -328,6 +328,7 @@ impl TaskGraph {
                     (TaskIdSnapshot::from_task_id(&target_node.task_id, base_dir), *edge.weight())
                 })
                 .collect();
+            depends_on.sort_unstable_by(|a, b| a.0.cmp(&b.0));
             node_snapshots.push(TaskNodeSnapshot {
                 id: TaskIdSnapshot::from_task_id(&node.task_id, base_dir),
                 command: node.resolved_config.command.clone(),

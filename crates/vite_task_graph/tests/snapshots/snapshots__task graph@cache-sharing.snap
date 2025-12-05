@@ -11,7 +11,7 @@ input_file: crates/vite_task_graph/tests/fixtures/cache-sharing
     },
     "command": "echo a",
     "cwd": "",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -20,7 +20,7 @@ input_file: crates/vite_task_graph/tests/fixtures/cache-sharing
     },
     "command": "echo a && echo b",
     "cwd": "",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -29,6 +29,6 @@ input_file: crates/vite_task_graph/tests/fixtures/cache-sharing
     },
     "command": "echo a && echo b && echo c",
     "cwd": "",
-    "depends_on": {}
+    "depends_on": []
   }
 ]

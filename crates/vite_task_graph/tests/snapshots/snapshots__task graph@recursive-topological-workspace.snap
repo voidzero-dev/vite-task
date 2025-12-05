@@ -11,7 +11,7 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Building @test/web'",
     "cwd": "apps/web",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -20,7 +20,7 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Running @test/web in dev mode'",
     "cwd": "apps/web",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -29,7 +29,7 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Building @test/app'",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -38,7 +38,7 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Testing @test/app'",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -47,7 +47,7 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Building @test/core'",
     "cwd": "packages/core",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -56,7 +56,7 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Testing @test/core'",
     "cwd": "packages/core",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -65,7 +65,7 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Preparing @test/utils' && echo 'Building @test/utils' && echo 'Done @test/utils'",
     "cwd": "packages/utils",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -74,6 +74,6 @@ input_file: crates/vite_task_graph/tests/fixtures/recursive-topological-workspac
     },
     "command": "echo 'Testing @test/utils'",
     "cwd": "packages/utils",
-    "depends_on": {}
+    "depends_on": []
   }
 ]

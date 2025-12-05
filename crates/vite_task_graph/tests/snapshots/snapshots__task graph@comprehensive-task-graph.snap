@@ -11,7 +11,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Generate schemas && echo Compile TypeScript && echo Bundle API && echo Copy assets",
     "cwd": "packages/api",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -20,7 +20,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Watch mode && echo Start dev server",
     "cwd": "packages/api",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -29,7 +29,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Starting API server",
     "cwd": "packages/api",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -38,7 +38,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Testing API",
     "cwd": "packages/api",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -47,7 +47,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Clean dist && echo Build client && echo Build server && echo Generate manifest && echo Optimize assets",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -56,7 +56,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Validate && echo Upload && echo Verify",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -65,7 +65,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Running dev server",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -74,7 +74,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Preview build",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -83,7 +83,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Unit tests && echo Integration tests",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -92,7 +92,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Building config",
     "cwd": "packages/config",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -101,7 +101,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Validating config",
     "cwd": "packages/config",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -110,7 +110,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Building package with hash",
     "cwd": "packages/pkg#special",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -119,7 +119,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Testing package with hash",
     "cwd": "packages/pkg#special",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -128,7 +128,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Cleaning && echo Compiling shared && echo Generating types",
     "cwd": "packages/shared",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -137,7 +137,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Linting shared",
     "cwd": "packages/shared",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -146,7 +146,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Setting up test env && echo Running tests && echo Cleanup",
     "cwd": "packages/shared",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -155,7 +155,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Type checking shared",
     "cwd": "packages/shared",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -164,7 +164,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Generating tools",
     "cwd": "packages/tools",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -173,7 +173,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Validating",
     "cwd": "packages/tools",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -182,7 +182,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Compile styles && echo Build components && echo Generate types",
     "cwd": "packages/ui",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -191,7 +191,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Linting UI",
     "cwd": "packages/ui",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -200,7 +200,7 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Running storybook",
     "cwd": "packages/ui",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -209,6 +209,6 @@ input_file: crates/vite_task_graph/tests/fixtures/comprehensive-task-graph
     },
     "command": "echo Testing UI",
     "cwd": "packages/ui",
-    "depends_on": {}
+    "depends_on": []
   }
 ]

@@ -11,7 +11,38 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Building @test/app'",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
+  },
+  {
+    "id": {
+      "package_dir": "packages/app",
+      "task_name": "deploy"
+    },
+    "command": "deploy-script --prod",
+    "cwd": "packages/app",
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/app",
+          "task_name": "build"
+        },
+        "Explicit"
+      ],
+      [
+        {
+          "package_dir": "packages/app",
+          "task_name": "test"
+        },
+        "Explicit"
+      ],
+      [
+        {
+          "package_dir": "packages/utils",
+          "task_name": "lint"
+        },
+        "Explicit"
+      ]
+    ]
   },
   {
     "id": {
@@ -20,7 +51,7 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Starting @test/app'",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -29,7 +60,7 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Testing @test/app'",
     "cwd": "packages/app",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -38,7 +69,7 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Building @test/core'",
     "cwd": "packages/core",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -47,7 +78,24 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Cleaning @test/core'",
     "cwd": "packages/core",
-    "depends_on": {}
+    "depends_on": []
+  },
+  {
+    "id": {
+      "package_dir": "packages/core",
+      "task_name": "lint"
+    },
+    "command": "eslint src",
+    "cwd": "packages/core",
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/core",
+          "task_name": "clean"
+        },
+        "Explicit"
+      ]
+    ]
   },
   {
     "id": {
@@ -56,7 +104,7 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Testing @test/core'",
     "cwd": "packages/core",
-    "depends_on": {}
+    "depends_on": []
   },
   {
     "id": {
@@ -65,7 +113,31 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Building @test/utils'",
     "cwd": "packages/utils",
-    "depends_on": {}
+    "depends_on": []
+  },
+  {
+    "id": {
+      "package_dir": "packages/utils",
+      "task_name": "lint"
+    },
+    "command": "eslint src",
+    "cwd": "packages/utils",
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/core",
+          "task_name": "build"
+        },
+        "Explicit"
+      ],
+      [
+        {
+          "package_dir": "packages/utils",
+          "task_name": "build"
+        },
+        "Explicit"
+      ]
+    ]
   },
   {
     "id": {
@@ -74,6 +146,6 @@ input_file: crates/vite_task_graph/tests/fixtures/explicit-deps-workspace
     },
     "command": "echo 'Testing @test/utils'",
     "cwd": "packages/utils",
-    "depends_on": {}
+    "depends_on": []
   }
 ]
