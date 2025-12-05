@@ -2,11 +2,11 @@
   "tasks": {
     "build": {
       "command": "echo 'Building normal-package'",
-      "cacheable": true
+      "cache": true
     },
     "test": {
       "command": "echo 'Testing normal-package'",
-      "cacheable": true
+      "cache": true
     }
   }
 }

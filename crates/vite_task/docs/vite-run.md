@@ -125,12 +125,12 @@ Tasks can declare explicit dependencies in `vite-task.json` files using the `dep
   "tasks": {
     "lint": {
       "command": "eslint src",
-      "cacheable": true,
+      "cache": true,
       "dependsOn": ["build", "core#build"]
     },
     "deploy": {
       "command": "deploy-script --prod",
-      "cacheable": false,
+      "cache": false,
       "dependsOn": ["test", "build", "utils#lint"]
     }
   }
