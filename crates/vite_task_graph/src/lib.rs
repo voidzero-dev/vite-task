@@ -23,10 +23,11 @@ use vite_workspace::{
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum TaskDependencyType {
     /// The dependency is explicitly declared by user in `dependsOn`.
-    /// If a dependency is both explicit and topological, `TaskDependencyType::Explicit` takes precedenc
     Explicit,
     /// The dependency is added due to topological ordering based on package dependencies.
     Topological,
+    /// The dependency is explicitly declared by user in `dependsOn` and also added due to topological ordering.
+    Both,
 }
 
 /// Uniquely identifies a task, by its name and the path where it's defined.
@@ -290,9 +291,22 @@ impl TaskGraph {
             });
         }
         for (from_node_index, to_node_index) in topological_edges {
-            // Avoid duplicating edges if an explicit dependency already exists
-            if me.task_graph.find_edge(from_node_index, to_node_index).is_none() {
-                me.task_graph.update_edge(
+            if let Some(existing_edge_index) =
+                me.task_graph.find_edge(from_node_index, to_node_index)
+            {
+                let existing_edge = &mut me.task_graph[existing_edge_index];
+                match *existing_edge {
+                    TaskDependencyType::Explicit => {
+                        // upgrade to Both
+                        *existing_edge = TaskDependencyType::Both;
+                    }
+                    TaskDependencyType::Topological | TaskDependencyType::Both => {
+                        // already has topological dependency, do nothing
+                    }
+                }
+            } else {
+                // add new topological edge if not exists
+                me.task_graph.add_edge(
                     from_node_index,
                     to_node_index,
                     TaskDependencyType::Topological,
