@@ -56,40 +56,41 @@ impl TaskGraphBuilder {
                 panic!("Task with id {:?} was already added: {:?}", occupied.key(), occupied.get(),);
             }
         }
-        self.package_dirs_by_name
-            .entry(task_node.package_name.clone())
-            .or_default()
-            .push(Arc::clone(&task_node.package_dir));
+        // self.package_dirs_by_name
+        //     .entry(task_node.package_name.clone())
+        //     .or_default()
+        //     .push(Arc::clone(&task_node.package_dir));
     }
 
     /// Build the complete task graph with tasks connected to their explict dependencies, and return it along with package_dirs_by_name.
     pub(crate) fn build(
         self,
     ) -> Result<DiGraph<TaskNode, TaskDependencyType>, TaskDependencyNotFound> {
-        let mut task_graph = DiGraph::<TaskNode, TaskDependencyType>::new();
+        todo!()
+        // let mut task_graph = DiGraph::<TaskNode, TaskDependencyType>::new();
 
-        let mut node_indices_by_task_ids = HashMap::<TaskId, NodeIndex>::new();
+        // let mut node_indices_by_task_ids = HashMap::<TaskId, NodeIndex>::new();
 
-        // Add all tasks to the graph
-        for (task_id, task_node) in self.resolved_config_by_task_id {
-            let node_index = task_graph.add_node(task_node.task.clone());
-            node_indices_by_task_ids.insert(task_id.clone(), node_index);
-        }
+        // // Add all tasks to the graph
+        // for (task_id, task_node) in self.resolved_config_by_task_id {
+        //     let node_index = task_graph.add_node(task_node.task.clone());
+        //     node_indices_by_task_ids.insert(task_id.clone(), node_index);
+        // }
 
-        // Add edges from explicit dependencies
-        for (task_id, task_node) in self.resolved_config_by_task_id {
-            let current_task_index = node_indices_by_task_ids[&task_id];
-            for (dep_id, dep_type) in task_node.dependeny_types_by_task_id {
-                let Some(&dep_index) = node_indices_by_task_ids.get(&dep_id) else {
-                    return Err(Error::TaskDependencyNotFound {
-                        name: dep_id.task_group_id.task_group_name.clone(),
-                        package_path: dep_id.task_group_id.config_path.clone(),
-                    });
-                };
-                task_graph.add_edge(current_task_index, dep_index, dep_type);
-            }
-        }
+        // // Add edges from explicit dependencies
+        // for (task_id, task_node) in self.resolved_config_by_task_id {
+        //     let current_task_index = node_indices_by_task_ids[&task_id];
+        //     for (dep_id, dep_type) in task_node.dependeny_types_by_task_id {
+        //         let Some(&dep_index) = node_indices_by_task_ids.get(&dep_id) else {
+        //             return Err(Error::TaskDependencyNotFound {
+        //                 name: dep_id.task_group_id.task_group_name.clone(),
+        //                 package_path: dep_id.task_group_id.config_path.clone(),
+        //             });
+        //         };
+        //         task_graph.add_edge(current_task_index, dep_index, dep_type);
+        //     }
+        // }
 
-        Ok(task_graph)
+        // Ok(task_graph)
     }
 }

@@ -61,8 +61,11 @@ pub enum WorkspaceFile {
 /// If the workspace file is not found, but a package is found, `workspace_file` will be `NonWorkspacePackage` with the `package.json` File.
 #[derive(Debug)]
 pub struct WorkspaceRoot<'a> {
+    /// The absolute path of the workspace root directory.
     pub path: &'a AbsolutePath,
+    /// The cwd that the workspace was found from, relative to the workspace root.
     pub cwd: RelativePathBuf,
+    /// The workspace file.
     pub workspace_file: WorkspaceFile,
 }
 

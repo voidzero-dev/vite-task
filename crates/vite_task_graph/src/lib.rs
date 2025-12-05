@@ -23,14 +23,6 @@ pub enum TaskDependencyType {
     Topological,
 }
 
-/// Full task graph of a workspace.
-///
-/// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
-/// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
-pub struct TaskGraph {
-    graph: DiGraph<TaskNode, TaskDependencyType>,
-}
-
 /// Uniquely identifies a task, by its name and the path where it's defined.
 ///
 /// For user defined tasks, the path is where the package dir.
@@ -75,13 +67,30 @@ pub struct TaskNode {
     pub resolved_config: ResolvedUserTaskConfig,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum TaskGraphLoadError {
+    #[error("Failed to load package graph: {0}")]
+    PackageGraphLoadError(#[from] vite_workspace::Error),
+    // ConfigLoadError(loader::ConfigLoadError),
+}
+
+/// Full task graph of a workspace.
+///
+/// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
+/// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
+pub struct TaskGraph {
+    graph: DiGraph<TaskNode, TaskDependencyType>,
+}
+
 impl TaskGraph {
     /// Load the task graph from a discovered workspace using the provided config loader.
     pub fn load(
         workspace_root: WorkspaceRoot<'_>,
         config_loader: impl loader::UserConfigLoader,
-    ) -> Self {
-        let package_graph = vite_workspace::discover_package_graph(&workspace_root.path);
+    ) -> Result<Self, TaskGraphLoadError> {
+        let package_graph = vite_workspace::load_package_graph(&workspace_root)?;
+
+        for package in package_graph.node_weights() {}
         todo!()
     }
 }
