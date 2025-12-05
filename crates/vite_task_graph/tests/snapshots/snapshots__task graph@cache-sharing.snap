@@ -1,6 +1,6 @@
 ---
 source: crates/vite_task_graph/tests/snapshots.rs
-expression: task_graph_snaphost
+expression: task_graph_snapshot
 input_file: crates/vite_task_graph/tests/fixtures/cache-sharing
 ---
 [

@@ -33,7 +33,7 @@ pub struct TaskId {
     ///
     /// Note that this is not always the cwd where the command is run, which is stored in `ResolvedUserTaskConfig`.
     ///
-    /// `package_dir` is declared from `task_name` to make the `PartialOrd` implmentation group tasks in same packages together.
+    /// `package_dir` is declared from `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
     pub package_dir: Arc<AbsolutePath>,
 
     /// For user defined tasks, this is the name of the script or the entry in `vite-task.json`.
@@ -231,7 +231,7 @@ impl TaskGraph {
         // Construct `Self` with task_graph with all task nodes ready and indexed, but no edges.
         let mut me = Self { graph: task_graph, node_indices_by_task_id, package_dirs_by_name };
 
-        // Add explict dependencies
+        // Add explicit dependencies
         for (dependency_specifiers, from_node_index) in dependency_specifiers_with_node_indices {
             let from_task_id = me.graph[from_node_index].task_id.clone();
 

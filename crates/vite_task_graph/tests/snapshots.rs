@@ -29,8 +29,8 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
             vite_task_graph::TaskGraph::load(workspace_root, JsonUserConfigLoader::default())
                 .await
                 .expect(&format!("Failed to load task graph for case {case_name}"));
-        let task_graph_snaphost = task_graph.snapshot(&case_stage_path);
-        insta::assert_json_snapshot!("task graph", task_graph_snaphost);
+        let task_graph_snapshot = task_graph.snapshot(&case_stage_path);
+        insta::assert_json_snapshot!("task graph", task_graph_snapshot);
     });
 }
 

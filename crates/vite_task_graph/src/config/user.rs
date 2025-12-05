@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_explictly_enabled() {
+    fn test_cache_explicitly_enabled() {
         let user_config_json = json!({
             "cache": true,
             "envs": ["NODE_ENV"],
