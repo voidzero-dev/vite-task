@@ -44,11 +44,11 @@ pub struct TaskDependencyType(TaskDependencyTypeInner);
 // It hides `TaskDependencyTypeInner` and only expose `is_explicit`/`is_topological`
 // to avoid incorrectly matching only Explicit variant to check if it's explicit.
 impl TaskDependencyType {
-    pub fn is_explicit(&self) -> bool {
+    pub fn is_explicit(self) -> bool {
         matches!(self.0, TaskDependencyTypeInner::Explicit | TaskDependencyTypeInner::Both)
     }
 
-    pub fn is_topological(&self) -> bool {
+    pub fn is_topological(self) -> bool {
         matches!(self.0, TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both)
     }
 }

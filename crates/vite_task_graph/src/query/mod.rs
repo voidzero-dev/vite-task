@@ -1,16 +1,23 @@
-use core::task;
+pub mod cli;
+
 use std::{collections::HashSet, sync::Arc};
 
-use clap::{Parser, error};
-use petgraph::{prelude::DiGraphMap, visit::EdgeRef};
+use petgraph::{
+    prelude::DiGraphMap,
+    visit::{Control, DfsEvent, EdgeRef, depth_first_search},
+};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
-use crate::{SpecifierLookupError, TaskGraph, TaskNodeIndex, specifier::TaskSpecifier};
+use crate::{
+    SpecifierLookupError, TaskDependencyType, TaskGraph, TaskNodeIndex, specifier::TaskSpecifier,
+};
 
 /// Different kinds of task queries.
+#[derive(Debug)]
 pub enum TaskQueryKind {
     /// A normal task query specifying task specifiers and options.
+    /// The tasks will be searched in packages in task specifiers, or located from cwd.
     Normal {
         task_specifiers: HashSet<TaskSpecifier>,
         /// Where the query is being run from.
@@ -18,13 +25,15 @@ pub enum TaskQueryKind {
         /// Whether to include topological dependencies
         include_topological_deps: bool,
     },
-    /// A recursive task query specifying only a task name.
+    /// A recursive task query specifying one or multiple task names.
     /// It will match all tasks with the given names across all packages with topological ordering.
+    /// The whole workspace will be searched, so cwd is not relevant.
     Resursive { task_names: HashSet<Str> },
 }
 
 /// Represents a valid query for a task and its dependencies, usually issued from a CLI command `vite run ...`.
 /// A query represented by this struct is always valid, but still may result in no tasks found.
+#[derive(Debug)]
 pub struct TaskQuery {
     /// The kind of task query
     pub kind: TaskQueryKind,
@@ -50,6 +59,13 @@ impl TaskGraph {
         query: TaskQuery,
     ) -> Result<TaskExecutionGraph, SpecifierLookupError<PackageUnknownError>> {
         let mut execution_graph = TaskExecutionGraph::default();
+
+        let include_topologicial_deps = match &query.kind {
+            TaskQueryKind::Normal { include_topological_deps, .. } => *include_topological_deps,
+            TaskQueryKind::Resursive { .. } => true, // recursive means topological across all packages
+        };
+
+        // Add starting tasks without dependencies
         match query.kind {
             TaskQueryKind::Normal { task_specifiers, cwd, include_topological_deps } => {
                 let package_index_from_cwd =
@@ -57,7 +73,7 @@ impl TaskGraph {
 
                 let mut nearest_topological_tasks = Vec::<TaskNodeIndex>::new();
 
-                // For every task specifier
+                // For every task specifier, add matching tasks
                 for specifier in task_specifiers {
                     // Find the starting task
                     let starting_task_result =
@@ -87,6 +103,7 @@ impl TaskGraph {
                                 return Err(err);
                             }
                             // Add nearest tasks to execution graph
+                            // Topoplogical dependencies of nearest tasks will be added later
                             for nearest_task in nearest_topological_tasks.drain(..) {
                                 execution_graph.add_node(nearest_task);
                             }
@@ -97,101 +114,68 @@ impl TaskGraph {
                         }
                     }
                 }
-                todo!()
+
+                // Matching tasks have been added, now add topological dependencies
+                if include_topological_deps {
+                    self.add_dependencies(&mut execution_graph, TaskDependencyType::is_topological);
+                }
             }
             TaskQueryKind::Resursive { task_names } => {
-                // Add all tasks matching the names
+                // Add all tasks matching the names across all packages
                 for task_index in self.task_graph.node_indices() {
                     let current_task_name = self.task_graph[task_index].task_id.task_name.as_str();
                     if task_names.contains(current_task_name) {
                         execution_graph.add_node(task_index);
                     }
                 }
-                // Add topological edges
-                let mut topo_edges = Vec::<(TaskNodeIndex, TaskNodeIndex)>::with_capacity(
-                    execution_graph.node_count(),
-                );
-                for task_index in execution_graph.nodes() {
-                    // for each added task
-                    // Go through its dependencies
-                    for edge_ref in self.task_graph.edges(task_index) {
-                        let dep_index = edge_ref.target();
-                        if edge_ref.weight().is_topological()
-                            && execution_graph.contains_node(dep_index)
-                        {
-                            // only add edge if it's topological and the dependency is also in the execution graph
-                            topo_edges.push((task_index, dep_index));
+            }
+        }
+
+        // Add dependencies as requested
+        // The order matters: add topological dependencies first, then explicit dependencies.
+        // We don't want to include topological dependencies of explicit dependencies even both types are requested.
+        if include_topologicial_deps {
+            self.add_dependencies(&mut execution_graph, TaskDependencyType::is_topological);
+        }
+        if query.include_explicit_deps {
+            self.add_dependencies(&mut execution_graph, TaskDependencyType::is_explicit);
+        }
+
+        Ok(execution_graph)
+    }
+
+    /// Recursively add dependencies to the execution graph based on filtered edges in the task graph
+    fn add_dependencies(
+        &self,
+        execution_graph: &mut TaskExecutionGraph,
+        mut filter_edge: impl FnMut(TaskDependencyType) -> bool,
+    ) {
+        let mut current_starting_node_indices: HashSet<TaskNodeIndex> =
+            execution_graph.nodes().collect();
+
+        // Continue until no new nodes are added
+        while !current_starting_node_indices.is_empty() {
+            // Record newly added nodes in this iteration as starting nodes for next iteration
+            let mut next_starting_node_indices = HashSet::<TaskNodeIndex>::new();
+
+            for from_node in current_starting_node_indices {
+                // For each starting node, traverse its outgoing edges
+                for edge_ref in self.task_graph.edges(from_node) {
+                    let to_node = edge_ref.target();
+                    let dependency_type = edge_ref.weight();
+                    if filter_edge(*dependency_type) {
+                        let is_to_node_new = !execution_graph.contains_node(to_node);
+                        // Add the dependency edge
+                        execution_graph.add_edge(from_node, to_node, ());
+
+                        // Add to_node for next iteration if it's newly added.
+                        if is_to_node_new {
+                            next_starting_node_indices.insert(to_node);
                         }
                     }
                 }
-                for (source, target) in topo_edges {
-                    execution_graph.add_edge(source, target, ());
-                }
             }
+            current_starting_node_indices = next_starting_node_indices;
         }
-        Ok(execution_graph)
-    }
-}
-
-/// Represents task query args of `vite run`
-/// It will be converted to `TaskQuery`, but may be invalid, if so the error is returned early before loading the task graph.
-#[derive(Debug, clap::Parser)]
-pub struct CLITaskQuery {
-    /// Specifies one or multiple tasks to run, in form of `packageName#taskName` or `taskName`.
-    tasks: Vec<TaskSpecifier>,
-
-    /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
-    #[clap(default_value = "false", short, long)]
-    recursive: bool,
-
-    /// Run tasks found in the current package and all its transitive dependencies, in topological order based on package dependencies.
-    #[clap(default_value = "false", short, long)]
-    transitive: bool,
-
-    /// Do not run dependencies specified in `dependsOn` fields.
-    #[clap(default_value = "false", long)]
-    ignore_depends_on: bool,
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum CLITaskQueryError {
-    #[error("--recursive and --transitive cannot be used together")]
-    RecursiveTransitiveConflict,
-
-    #[error("cannot specify package '{package_name}' for task '{task_name}' with --recursive")]
-    PackageNameSpecifiedWithRecursive { package_name: Str, task_name: Str },
-}
-
-impl CLITaskQuery {
-    /// Convert to `TaskQuery`, or return an error if invalid.
-    pub fn into_task_query(self, cwd: &Arc<AbsolutePath>) -> Result<TaskQuery, CLITaskQueryError> {
-        let include_explicit_deps = !self.ignore_depends_on;
-
-        let kind = if self.recursive {
-            if self.transitive {
-                return Err(CLITaskQueryError::RecursiveTransitiveConflict);
-            }
-            let task_names: HashSet<Str> = self
-                .tasks
-                .into_iter()
-                .map(|s| {
-                    if let Some(package_name) = s.package_name {
-                        return Err(CLITaskQueryError::PackageNameSpecifiedWithRecursive {
-                            package_name,
-                            task_name: s.task_name,
-                        });
-                    }
-                    Ok(s.task_name)
-                })
-                .collect::<Result<_, _>>()?;
-            TaskQueryKind::Resursive { task_names }
-        } else {
-            TaskQueryKind::Normal {
-                task_specifiers: self.tasks.into_iter().collect(),
-                cwd: Arc::clone(cwd),
-                include_topological_deps: self.transitive,
-            }
-        };
-        Ok(TaskQuery { kind, include_explicit_deps })
     }
 }
