@@ -152,11 +152,11 @@ unsafe impl IndexType for TaskIx {
 pub type TaskNodeIndex = NodeIndex<TaskIx>;
 pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 
-/// Full task graph of a workspace.
+/// Full task graph of a workspace, with necessary HashMaps for quick task lookup
 ///
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
 /// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
-pub struct TaskGraph {
+pub struct IndexedTaskGraph {
     task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
 
     /// Preserve the package graph for two purposes:
@@ -168,7 +168,7 @@ pub struct TaskGraph {
     node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex>,
 }
 
-impl TaskGraph {
+impl IndexedTaskGraph {
     /// Load the task graph from a discovered workspace using the provided config loader.
     pub async fn load(
         workspace_root: WorkspaceRoot<'_>,
@@ -442,69 +442,15 @@ impl TaskGraph {
         Ok(*node_index)
     }
 
-    /// Create a stable json representation of the task graph for snapshot testing.
-    ///
-    /// All paths are relative to `base_dir`.
-    pub fn snapshot(&self, base_dir: &AbsolutePath) -> serde_json::Value {
-        use vite_path::RelativePathBuf;
+    pub fn task_graph(&self) -> &DiGraph<TaskNode, TaskDependencyType, TaskIx> {
+        &self.task_graph
+    }
 
-        #[derive(serde::Serialize, PartialEq, PartialOrd, Eq, Ord)]
-        struct TaskIdSnapshot {
-            package_dir: RelativePathBuf,
-            task_name: Str,
-        }
-        impl TaskIdSnapshot {
-            fn from_task_id(
-                task_id: &TaskId,
-                package_graph: &DiGraph<PackageInfo, DependencyType, PackageIx>,
-            ) -> Self {
-                Self {
-                    task_name: task_id.task_name.clone(),
-                    package_dir: package_graph[task_id.package_index].path.clone(),
-                }
-            }
-        }
+    pub fn get_package_name(&self, package_index: PackageNodeIndex) -> &str {
+        self.indexed_package_graph.package_graph()[package_index].package_json.name.as_str()
+    }
 
-        #[derive(serde::Serialize)]
-        struct TaskNodeSnapshot {
-            id: TaskIdSnapshot,
-            command: Str,
-            cwd: RelativePathBuf,
-            depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)>,
-        }
-
-        let mut node_snapshots =
-            Vec::<TaskNodeSnapshot>::with_capacity(self.task_graph.node_count());
-        for a in self.task_graph.node_indices() {
-            let node = &self.task_graph[a];
-            let mut depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)> = self
-                .task_graph
-                .edges_directed(a, petgraph::Direction::Outgoing)
-                .map(|edge| {
-                    use petgraph::visit::EdgeRef as _;
-                    let target_node = &self.task_graph[edge.target()];
-                    (
-                        TaskIdSnapshot::from_task_id(
-                            &target_node.task_id,
-                            self.indexed_package_graph.package_graph(),
-                        ),
-                        *edge.weight(),
-                    )
-                })
-                .collect();
-            depends_on.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-            node_snapshots.push(TaskNodeSnapshot {
-                id: TaskIdSnapshot::from_task_id(
-                    &node.task_id,
-                    self.indexed_package_graph.package_graph(),
-                ),
-                command: node.resolved_config.command.clone(),
-                cwd: node.resolved_config.cwd.strip_prefix(base_dir).unwrap().unwrap(),
-                depends_on,
-            });
-        }
-        node_snapshots.sort_unstable_by(|a, b| a.id.cmp(&b.id));
-
-        serde_json::to_value(&node_snapshots).unwrap()
+    pub fn get_package_path(&self, package_index: PackageNodeIndex) -> &Arc<AbsolutePath> {
+        &self.indexed_package_graph.package_graph()[package_index].absolute_path
     }
 }

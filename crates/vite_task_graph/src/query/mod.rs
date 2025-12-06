@@ -7,7 +7,8 @@ use vite_path::AbsolutePath;
 use vite_str::Str;
 
 use crate::{
-    SpecifierLookupError, TaskDependencyType, TaskGraph, TaskNodeIndex, specifier::TaskSpecifier,
+    IndexedTaskGraph, SpecifierLookupError, TaskDependencyType, TaskNodeIndex,
+    specifier::TaskSpecifier,
 };
 
 /// Different kinds of task queries.
@@ -50,7 +51,7 @@ pub struct PackageUnknownError {
     cwd: Arc<AbsolutePath>,
 }
 
-impl TaskGraph {
+impl IndexedTaskGraph {
     pub fn query_tasks(
         &self,
         query: TaskQuery,
