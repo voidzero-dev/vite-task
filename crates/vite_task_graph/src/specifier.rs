@@ -1,0 +1,34 @@
+use std::{convert::Infallible, str::FromStr};
+
+use vite_str::Str;
+
+/// Parsed task specifier (`"packageName#taskName"` or `"taskName"`)
+///
+/// For `taskName`, `package_name` will be `None`.
+/// For `#taskName`, `package_name` will be `Some("")`. It's valid to have an empty package name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TaskSpecifier {
+    pub package_name: Option<Str>,
+    pub task_name: Str,
+}
+
+impl TaskSpecifier {
+    pub fn parse_raw(raw_specifier: &str) -> Self {
+        if let Some((package_name, task_name)) = raw_specifier.rsplit_once('#') {
+            TaskSpecifier {
+                package_name: Some(Str::from(package_name)),
+                task_name: Str::from(task_name),
+            }
+        } else {
+            TaskSpecifier { package_name: None, task_name: Str::from(raw_specifier) }
+        }
+    }
+}
+
+impl FromStr for TaskSpecifier {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(TaskSpecifier::parse_raw(s))
+    }
+}

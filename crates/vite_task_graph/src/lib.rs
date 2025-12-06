@@ -1,21 +1,30 @@
 pub mod config;
 pub mod loader;
+mod package_graph;
+pub mod query;
+mod specifier;
 
 use std::{
     collections::{HashMap, hash_map::Entry},
+    convert::Infallible,
     sync::Arc,
 };
 
 use config::{ResolvedUserTaskConfig, UserConfigFile};
+use package_graph::IndexedPackageGraph;
 use petgraph::{
     graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
     visit::{Control, DfsEvent, depth_first_search},
 };
 use serde::Serialize;
+use serde_json::value::Index;
+use specifier::TaskSpecifier;
 use vec1::smallvec_v1::SmallVec1;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
-use vite_workspace::{DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot};
+use vite_workspace::{
+    DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot, package,
+};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 enum TaskDependencyTypeInner {
@@ -64,16 +73,10 @@ pub struct TaskNode {
     /// The unique id of this task
     pub task_id: TaskId,
 
-    /// The name of the package where this task is defined.
-    /// It's used for matching task specifiers ('packageName#taskName')
-    ///
-    /// If package.json doesn't have a name field, this will be "", so the task can be matched by `#taskName`.
-    pub package_name: Str,
-
     /// The resolved configuration of this task.
     ///
     /// This contains information affecting how the task is spawn,
-    /// whereas `task_id` and `package_name` are for looking up the task.
+    /// whereas `task_id` is for looking up the task.
     ///
     /// However, it does not contain external factors like additional args from cli and env vars.
     pub resolved_config: ResolvedUserTaskConfig,
@@ -109,19 +112,30 @@ pub enum TaskGraphLoadError {
     },
 }
 
+/// Error when looking up a task by its specifier.
+///
+/// It's generic over `UnknownPackageError`, which is the error type when looking up a task without a package name and without a package origin.
+///
+/// - When the specifier is from `dependOn` of a known task, `UnknownPackageError` is `Infallible` because the origin package is always known.
+/// - When the specifier is from a CLI command, `UnknownPackageError` can be a real error type in case cwd is not in any package.
 #[derive(Debug, thiserror::Error)]
-pub enum SpecifierLookupError {
+pub enum SpecifierLookupError<UnknownPackageError = Infallible> {
     #[error("Package '{package_name}' is ambiguous among multiple packages: {package_paths:?}")]
-    AmbiguousPackageName { package_name: Str, package_paths: Box<[RelativePathBuf]> },
+    AmbiguousPackageName { package_name: Str, package_paths: Box<[Arc<AbsolutePath>]> },
 
     #[error("Package '{package_name}' not found")]
     PackageNameNotFound { package_name: Str },
 
     #[error("Task '{task_name}' not found in package {package_name}")]
-    TaskNameNotFound { package_name: Str, task_name: Str },
+    TaskNameNotFound { package_name: Str, task_name: Str, package_index: PackageNodeIndex },
+
+    #[error(
+        "Nowhere to look for task '{task_name}' because the package is unknown: {unspecifier_package_error}"
+    )]
+    PackageUnknown { unspecifier_package_error: UnknownPackageError, task_name: Str },
 }
 
-/// newtype of `DefaultIx` for indices in package graphs
+/// newtype of `DefaultIx` for indices in task graphs
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskIx(DefaultIx);
 unsafe impl IndexType for TaskIx {
@@ -148,13 +162,10 @@ pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 pub struct TaskGraph {
     task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
 
-    /// Preserve the package graph for displaying purpose:
-    /// `self.task_graph` refers packages via PackageNodeIndex. To display package names and paths, we need to lookup them in package_graph.
-    package_graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
-
-    /// Grouping package indices by their package names.
-    /// Due to rare but possible name conflicts in monorepos, we use `SmallVec1` to store multiple dirs for same name.
-    package_indices_by_name: HashMap<Str, SmallVec1<[PackageNodeIndex; 1]>>,
+    /// Preserve the package graph for two purposes:
+    /// - `self.task_graph` refers packages via PackageNodeIndex. To display package names and paths, we need to lookup them in package_graph.
+    /// - To find nearest topological tasks when the starting package itself doesn't contain the task with the given name.
+    indexed_package_graph: IndexedPackageGraph,
 
     /// task indices by task id for quick lookup
     node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex>,
@@ -169,6 +180,15 @@ impl TaskGraph {
         let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
 
         let package_graph = vite_workspace::load_package_graph(&workspace_root)?;
+        // Index package indices by their absolute paths for quick lookup based on cwd
+        let package_indices_by_paths = package_graph
+            .node_indices()
+            .map(|package_index| {
+                let absolute_path: Arc<AbsolutePath> =
+                    Arc::clone(&package_graph[package_index].absolute_path);
+                (absolute_path, package_index)
+            })
+            .collect::<HashMap<Arc<AbsolutePath>, PackageNodeIndex>>();
 
         // Record dependency specifiers for each task node to add explicit dependencies later
         let mut dependency_specifiers_with_task_node_indices: Vec<(Arc<[Str]>, TaskNodeIndex)> =
@@ -213,11 +233,7 @@ impl TaskGraph {
                     task_name: task_name.clone(),
                 })?;
 
-                let task_node = TaskNode {
-                    task_id,
-                    package_name: package.package_json.name.clone(),
-                    resolved_config,
-                };
+                let task_node = TaskNode { task_id, resolved_config };
 
                 let node_index = task_graph.add_node(task_node);
                 dependency_specifiers_with_task_node_indices
@@ -231,11 +247,7 @@ impl TaskGraph {
                     &package_dir,
                     package_json_script,
                 );
-                task_graph.add_node(TaskNode {
-                    task_id,
-                    package_name: package.package_json.name.clone(),
-                    resolved_config,
-                });
+                task_graph.add_node(TaskNode { task_id, resolved_config });
             }
         }
 
@@ -253,12 +265,12 @@ impl TaskGraph {
             }
         }
 
-        // Grouping package dirs by their package names.
-        let mut package_dirs_by_name: HashMap<Str, SmallVec1<[PackageNodeIndex; 1]>> =
+        // Grouping package indices by their package names.
+        let mut package_indices_by_name: HashMap<Str, SmallVec1<[PackageNodeIndex; 1]>> =
             HashMap::new();
         for package_index in package_graph.node_indices() {
             let package = &package_graph[package_index];
-            match package_dirs_by_name.entry(package.package_json.name.clone()) {
+            match package_indices_by_name.entry(package.package_json.name.clone()) {
                 Entry::Vacant(vacant) => {
                     vacant.insert(SmallVec1::new(package_index));
                 }
@@ -271,9 +283,8 @@ impl TaskGraph {
         // Construct `Self` with task_graph with all task nodes ready and indexed, but no edges.
         let mut me = Self {
             task_graph,
-            package_graph,
+            indexed_package_graph: IndexedPackageGraph::index(package_graph),
             node_indices_by_task_id,
-            package_indices_by_name: package_dirs_by_name,
         };
 
         // Add explicit dependencies
@@ -283,7 +294,10 @@ impl TaskGraph {
 
             for specifier in dependency_specifiers.iter().cloned() {
                 let to_node_index = me
-                    .get_task_index_by_specifier(&specifier, from_task_id.package_index)
+                    .get_task_index_by_specifier::<Infallible>(
+                        TaskSpecifier::parse_raw(&specifier),
+                        || Ok(from_task_id.package_index),
+                    )
                     .map_err(|error| TaskGraphLoadError::DependencySpecifierLookupError {
                         error,
                         specifier,
@@ -298,93 +312,143 @@ impl TaskGraph {
         }
 
         // Add topological dependencies based on package dependencies
-        let mut topological_edges = Vec::<(TaskNodeIndex, TaskNodeIndex)>::new();
+        let mut nearest_topological_tasks = Vec::<TaskNodeIndex>::new();
         for task_index in me.task_graph.node_indices() {
             let task_id = &me.task_graph[task_index].task_id;
-            let task_name = &task_id.task_name;
+            let task_name = task_id.task_name.as_str();
             let package_index = task_id.package_index;
-            // For every task,
-            // DFS starting from the package where it's defined.
-            depth_first_search(&me.package_graph, Some(package_index), |event| {
-                let DfsEvent::TreeEdge(_, dependency_package_index) = event else {
-                    return Control::<()>::Continue;
-                };
-                // If a direct or indirect dependency has a task with the same name
-                if let Some(dependency_task_index) = me.node_indices_by_task_id.get(&TaskId {
-                    package_index: dependency_package_index,
-                    task_name: task_name.clone(),
-                }) {
-                    // form an edge from the current task to that task
-                    topological_edges.push((task_index, *dependency_task_index));
-                    // And stop searching further down this branch
-                    // If there is a task with the same name in a deeper dependency, it will be connected via that nearer dependency's task.
-                    Control::Prune
+
+            // For every task, find nearest tasks with the same name.
+            // If there is a task with the same name in a deeper dependency, it will be connected via that nearer dependency's task.
+            me.find_nearest_topological_tasks(
+                task_name,
+                package_index,
+                &mut nearest_topological_tasks,
+            );
+            for nearest_task_index in nearest_topological_tasks.drain(..) {
+                if let Some(existing_edge_index) =
+                    me.task_graph.find_edge(task_index, nearest_task_index)
+                {
+                    // If an edge already exists,
+                    let existing_edge = &mut me.task_graph[existing_edge_index];
+                    match existing_edge.0 {
+                        TaskDependencyTypeInner::Explicit => {
+                            // upgrade from Explicit to Both
+                            existing_edge.0 = TaskDependencyTypeInner::Both;
+                        }
+                        TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both => {
+                            // already has topological dependency, do nothing
+                        }
+                    }
                 } else {
-                    Control::Continue
+                    // add new topological edge if not exists
+                    me.task_graph.add_edge(
+                        task_index,
+                        nearest_task_index,
+                        TaskDependencyType(TaskDependencyTypeInner::Topological),
+                    );
                 }
-            });
-        }
-        for (from_node_index, to_node_index) in topological_edges {
-            if let Some(existing_edge_index) =
-                me.task_graph.find_edge(from_node_index, to_node_index)
-            {
-                let existing_edge = &mut me.task_graph[existing_edge_index];
-                match existing_edge.0 {
-                    TaskDependencyTypeInner::Explicit => {
-                        // upgrade to Both
-                        existing_edge.0 = TaskDependencyTypeInner::Both;
-                    }
-                    TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both => {
-                        // already has topological dependency, do nothing
-                    }
-                }
-            } else {
-                // add new topological edge if not exists
-                me.task_graph.add_edge(
-                    from_node_index,
-                    to_node_index,
-                    TaskDependencyType(TaskDependencyTypeInner::Topological),
-                );
             }
         }
         Ok(me)
     }
 
-    /// Lookup the node index of a task by its specifier.
+    /// Find the nearest tasks with the given name starting from the given package node index.
+    /// This method only considers the package graph topology. It doesn't rely on existing topological edges of
+    /// the task graph, because the starting package itself may not contain a task with the given name
+    ///
+    /// The task with the given name in the starting package won't be included in the result even if there's one.
+    ///
+    /// This performs a BFS on the package graph starting from `starting_from`,
+    /// and collects the first found tasks with the given name in each branch.
+    ///
+    /// For example, if the package graph is A -> B -> C and A -> D -> C,
+    /// and we are looking for task "build" starting from A,
+    ///
+    /// - No matter A contains "build" or not, it's not included in the result.
+    /// - If B and D both have a "build" task, both will be returned, but C's "build" task will not be returned
+    ///   because it's not the nearest in either branch.
+    /// - If B or D doesn't have a "build" task, then C's "build" task will be returned.
+    fn find_nearest_topological_tasks(
+        &self,
+        task_name: &str,
+        starting_from: PackageNodeIndex,
+        out: &mut Vec<TaskNodeIndex>,
+    ) {
+        // DFS the package graph starting from `starting_from`,
+        depth_first_search(
+            self.indexed_package_graph.package_graph(),
+            Some(starting_from),
+            |event| {
+                let DfsEvent::TreeEdge(_, dependency_package_index) = event else {
+                    return Control::<()>::Continue;
+                };
+
+                if let Some(dependency_task_index) = self.node_indices_by_task_id.get(&TaskId {
+                    package_index: dependency_package_index,
+                    task_name: task_name.into(),
+                }) {
+                    // Encountered a package containing the task with the same name
+                    // collect the task index
+                    out.push(*dependency_task_index);
+
+                    // And stop searching further down this branch
+                    Control::Prune
+                } else {
+                    Control::Continue
+                }
+            },
+        );
+    }
+
+    /// Lookup the node index of a task by a specifier.
     ///
     /// The specifier can be either 'packageName#taskName' or just 'taskName' (in which case the task in the origin package is looked up).
-    fn get_task_index_by_specifier(
+    fn get_task_index_by_specifier<PackageUnknownError>(
         &self,
-        specifier: &str,
-        package_origin: PackageNodeIndex,
-    ) -> Result<TaskNodeIndex, SpecifierLookupError> {
-        let (package_index, task_name): (PackageNodeIndex, Str) =
-            if let Some((package_name, task_name)) = specifier.rsplit_once('#') {
-                // Lookup package path by the package name from '#'
-                let Some(package_indices) = self.package_indices_by_name.get(package_name) else {
-                    return Err(SpecifierLookupError::PackageNameNotFound {
-                        package_name: package_name.into(),
-                    });
-                };
-                if package_indices.len() > 1 {
-                    return Err(SpecifierLookupError::AmbiguousPackageName {
-                        package_name: package_name.into(),
-                        package_paths: package_indices
-                            .iter()
-                            .map(|package_index| self.package_graph[*package_index].path.clone())
-                            .collect(),
-                    });
-                };
-                (*package_indices.first(), task_name.into())
-            } else {
-                // No '#', so the specifier only contains task name, look up in the origin path package
-                (package_origin, specifier.into())
+        specifier: TaskSpecifier,
+        get_package_origin: impl FnOnce() -> Result<PackageNodeIndex, PackageUnknownError>,
+    ) -> Result<TaskNodeIndex, SpecifierLookupError<PackageUnknownError>> {
+        let package_index = if let Some(package_name) = specifier.package_name {
+            // Lookup package path by the package name from '#'
+            let Some(package_indices) =
+                self.indexed_package_graph.get_package_indices_by_name(&package_name)
+            else {
+                return Err(SpecifierLookupError::PackageNameNotFound {
+                    package_name: package_name.into(),
+                });
             };
-        let task_id = TaskId { task_name, package_index };
-        let Some(node_index) = self.node_indices_by_task_id.get(&task_id) else {
+            if package_indices.len() > 1 {
+                return Err(SpecifierLookupError::AmbiguousPackageName {
+                    package_name: package_name.into(),
+                    package_paths: package_indices
+                        .iter()
+                        .map(|package_index| {
+                            Arc::clone(
+                                &self.indexed_package_graph.package_graph()[*package_index]
+                                    .absolute_path,
+                            )
+                        })
+                        .collect(),
+                });
+            };
+            *package_indices.first()
+        } else {
+            // No '#', so the specifier only contains task name, look up in the origin path package
+            get_package_origin().map_err(|err| SpecifierLookupError::PackageUnknown {
+                unspecifier_package_error: err,
+                task_name: specifier.task_name.clone(),
+            })?
+        };
+        let task_id_to_lookup = TaskId { task_name: specifier.task_name, package_index };
+        let Some(node_index) = self.node_indices_by_task_id.get(&task_id_to_lookup) else {
             return Err(SpecifierLookupError::TaskNameNotFound {
-                package_name: self.package_graph[package_index].package_json.name.clone(),
-                task_name: task_id.task_name.clone(),
+                package_name: self.indexed_package_graph.package_graph()[package_index]
+                    .package_json
+                    .name
+                    .clone(),
+                task_name: task_id_to_lookup.task_name.clone(),
+                package_index,
             });
         };
         Ok(*node_index)
@@ -432,14 +496,20 @@ impl TaskGraph {
                     use petgraph::visit::EdgeRef as _;
                     let target_node = &self.task_graph[edge.target()];
                     (
-                        TaskIdSnapshot::from_task_id(&target_node.task_id, &self.package_graph),
+                        TaskIdSnapshot::from_task_id(
+                            &target_node.task_id,
+                            self.indexed_package_graph.package_graph(),
+                        ),
                         *edge.weight(),
                     )
                 })
                 .collect();
             depends_on.sort_unstable_by(|a, b| a.0.cmp(&b.0));
             node_snapshots.push(TaskNodeSnapshot {
-                id: TaskIdSnapshot::from_task_id(&node.task_id, &self.package_graph),
+                id: TaskIdSnapshot::from_task_id(
+                    &node.task_id,
+                    self.indexed_package_graph.package_graph(),
+                ),
                 command: node.resolved_config.command.clone(),
                 cwd: node.resolved_config.cwd.strip_prefix(base_dir).unwrap().unwrap(),
                 depends_on,

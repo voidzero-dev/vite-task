@@ -46,6 +46,7 @@ bstr = { version = "1.12.0", default-features = false, features = ["alloc", "std
 bumpalo = { version = "3.17.0", features = ["allocator-api2"] }
 bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
 cc = "1.2.39"
+clap = "4.5.53"
 color-eyre = "0.6.5"
 compact_str = "0.9.0"
 const_format = "0.2.34"

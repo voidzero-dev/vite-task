@@ -38,6 +38,14 @@ impl Hash for AbsolutePath {
     }
 }
 
+impl From<&AbsolutePath> for Arc<AbsolutePath> {
+    fn from(path: &AbsolutePath) -> Self {
+        let arc: Arc<Path> = path.0.into();
+        let arc_raw = Arc::into_raw(arc) as *const AbsolutePath;
+        unsafe { Self::from_raw(arc_raw) }
+    }
+}
+
 impl AbsolutePath {
     /// Creates a [`AbsolutePath`] if the give path is absolute.
     pub fn new<P: AsRef<Path> + ?Sized>(path: &P) -> Option<&Self> {

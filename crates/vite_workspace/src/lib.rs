@@ -96,10 +96,11 @@ impl WorkspaceMemberGlobs {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PackageInfo {
     pub package_json: PackageJson,
     pub path: RelativePathBuf,
+    pub absolute_path: Arc<AbsolutePath>,
 }
 
 #[derive(Default)]
@@ -113,7 +114,11 @@ impl PackageGraphBuilder {
     fn add_package(&mut self, package_path: RelativePathBuf, package_json: PackageJson) {
         let deps = package_json.get_workspace_dependencies().collect::<Vec<_>>();
         let package_name = package_json.name.clone();
-        let id = self.graph.add_node(PackageInfo { package_json, path: package_path.clone() });
+        let id = self.graph.add_node(PackageInfo {
+            package_json,
+            path: package_path.clone(),
+            absolute_path,
+        });
 
         // Always store by path
         self.id_and_deps_by_path.insert(package_path.clone(), (id, deps));
@@ -213,8 +218,8 @@ pub fn load_package_graph(
     let mut has_root_package = false;
     for package_json_path in member_globs.get_package_json_paths(workspace_root.path)? {
         let package_json: PackageJson = serde_json::from_slice(&fs::read(&package_json_path)?)?;
-        let package_path = package_json_path.parent().unwrap();
-        let Some(package_path) = package_path.strip_prefix(workspace_root.path)? else {
+        let absolute_path = package_json_path.parent().unwrap();
+        let Some(package_path) = absolute_path.strip_prefix(workspace_root.path)? else {
             return Err(Error::PackageOutsideWorkspace {
                 package_path: package_json_path,
                 workspace_root: workspace_root.path.to_absolute_path_buf(),
