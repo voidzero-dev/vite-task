@@ -9,18 +9,6 @@ input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspac
       "package_dir": "packages/a",
       "task_name": "build"
     },
-    "deps": [
-      {
-        "package_dir": "packages/a",
-        "task_name": "test"
-      }
-    ]
-  },
-  {
-    "task": {
-      "package_dir": "packages/a",
-      "task_name": "test"
-    },
     "deps": []
   }
 ]

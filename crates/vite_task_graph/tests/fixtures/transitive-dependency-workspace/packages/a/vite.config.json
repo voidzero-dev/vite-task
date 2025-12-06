@@ -1,0 +1,10 @@
+{
+  "tasks": {
+    "build": {
+      "dependsOn": ["test"]
+    },
+    "test": {
+      "command": "echo test a"
+    }
+  }
+}

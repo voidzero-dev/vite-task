@@ -14,12 +14,28 @@ input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspac
     "depends_on": [
       [
         {
+          "package_dir": "packages/a",
+          "task_name": "test"
+        },
+        "Explicit"
+      ],
+      [
+        {
           "package_dir": "packages/c",
           "task_name": "build"
         },
         "Topological"
       ]
     ]
+  },
+  {
+    "id": {
+      "package_dir": "packages/a",
+      "task_name": "test"
+    },
+    "command": "echo test a",
+    "cwd": "packages/a",
+    "depends_on": []
   },
   {
     "id": {

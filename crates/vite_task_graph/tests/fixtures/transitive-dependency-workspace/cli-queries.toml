@@ -2,3 +2,8 @@
 name = "simple task by name"
 cwd = "packages/a"
 args = ["build"]
+
+[[query]]
+name = "ignore depends on"
+cwd = "packages/a"
+args = ["--ignore-depends-on", "build"]
