@@ -4,6 +4,21 @@ cwd = "packages/a"
 args = ["build"]
 
 [[query]]
+name = "under subfolder of package"
+cwd = "packages/a/src"
+args = ["build"]
+
+[[query]]
+name = "explicit package name under different package"
+cwd = "packages/b"
+args = ["@test/a#build"]
+
+[[query]]
+name = "explicit package name under non-package cwd"
+cwd = ""
+args = ["@test/a#build"]
+
+[[query]]
 name = "ignore depends on"
 cwd = "packages/a"
 args = ["--ignore-depends-on", "build"]
