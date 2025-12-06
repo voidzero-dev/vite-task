@@ -2,10 +2,7 @@ pub mod cli;
 
 use std::{collections::HashSet, sync::Arc};
 
-use petgraph::{
-    prelude::DiGraphMap,
-    visit::{Control, DfsEvent, EdgeRef, depth_first_search},
-};
+use petgraph::{prelude::DiGraphMap, visit::EdgeRef};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
@@ -113,11 +110,6 @@ impl TaskGraph {
                             return Err(err);
                         }
                     }
-                }
-
-                // Matching tasks have been added, now add topological dependencies
-                if include_topological_deps {
-                    self.add_dependencies(&mut execution_graph, TaskDependencyType::is_topological);
                 }
             }
             TaskQueryKind::Resursive { task_names } => {

@@ -17,14 +17,11 @@ use petgraph::{
     visit::{Control, DfsEvent, depth_first_search},
 };
 use serde::Serialize;
-use serde_json::value::Index;
 use specifier::TaskSpecifier;
 use vec1::smallvec_v1::SmallVec1;
-use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_workspace::{
-    DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot, package,
-};
+use vite_workspace::{DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 enum TaskDependencyTypeInner {
@@ -180,15 +177,6 @@ impl TaskGraph {
         let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
 
         let package_graph = vite_workspace::load_package_graph(&workspace_root)?;
-        // Index package indices by their absolute paths for quick lookup based on cwd
-        let package_indices_by_paths = package_graph
-            .node_indices()
-            .map(|package_index| {
-                let absolute_path: Arc<AbsolutePath> =
-                    Arc::clone(&package_graph[package_index].absolute_path);
-                (absolute_path, package_index)
-            })
-            .collect::<HashMap<Arc<AbsolutePath>, PackageNodeIndex>>();
 
         // Record dependency specifiers for each task node to add explicit dependencies later
         let mut dependency_specifiers_with_task_node_indices: Vec<(Arc<[Str]>, TaskNodeIndex)> =
