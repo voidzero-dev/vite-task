@@ -3,11 +3,12 @@ use std::{path::Path, sync::Arc};
 
 use clap::Parser;
 use copy_dir::copy_dir;
+use petgraph::visit::EdgeRef as _;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use vite_task_graph::{
-    IndexedTaskGraph, TaskDependencyType, TaskId,
+    IndexedTaskGraph, TaskDependencyType, TaskNodeIndex,
     loader::JsonUserConfigLoader,
     query::{TaskExecutionGraph, cli::CLITaskQuery},
 };
@@ -19,11 +20,12 @@ struct TaskIdSnapshot {
     task_name: Str,
 }
 impl TaskIdSnapshot {
-    fn from_task_id(
-        task_id: &TaskId,
+    fn new(
+        task_index: TaskNodeIndex,
         base_dir: &AbsolutePath,
         indexed_task_graph: &IndexedTaskGraph,
     ) -> Self {
+        let task_id = &indexed_task_graph.task_graph()[task_index].task_id;
         Self {
             task_name: task_id.task_name.clone(),
             package_dir: indexed_task_graph
@@ -57,21 +59,12 @@ fn snapshot_task_graph(
         let mut depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)> = task_graph
             .edges_directed(task_index, petgraph::Direction::Outgoing)
             .map(|edge| {
-                use petgraph::visit::EdgeRef as _;
-                let target_node = &task_graph[edge.target()];
-                (
-                    TaskIdSnapshot::from_task_id(
-                        &target_node.task_id,
-                        base_dir,
-                        indexed_task_graph,
-                    ),
-                    *edge.weight(),
-                )
+                (TaskIdSnapshot::new(edge.target(), base_dir, indexed_task_graph), *edge.weight())
             })
             .collect();
         depends_on.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         node_snapshots.push(TaskNodeSnapshot {
-            id: TaskIdSnapshot::from_task_id(&task_node.task_id, base_dir, indexed_task_graph),
+            id: TaskIdSnapshot::new(task_index, base_dir, indexed_task_graph),
             command: task_node.resolved_config.command.clone(),
             cwd: task_node.resolved_config.cwd.strip_prefix(base_dir).unwrap().unwrap(),
             depends_on,
@@ -90,29 +83,27 @@ fn snapshot_execution_graph(
     indexed_task_graph: &IndexedTaskGraph,
     base_dir: &AbsolutePath,
 ) -> impl serde::Serialize {
-    #[derive(serde::Serialize, PartialEq, PartialOrd, Eq, Ord)]
-    struct EdgeSnapshot {
-        from: TaskIdSnapshot,
-        to: TaskIdSnapshot,
+    #[derive(serde::Serialize, PartialEq)]
+    struct ExecutionNodeSnapshot {
+        task: TaskIdSnapshot,
+        deps: Vec<TaskIdSnapshot>,
     }
-    let task_graph = indexed_task_graph.task_graph();
-    let mut edge_snapshots = Vec::<EdgeSnapshot>::new();
-    for (from_index, to_index, ()) in execution_graph.all_edges() {
-        edge_snapshots.push(EdgeSnapshot {
-            from: TaskIdSnapshot::from_task_id(
-                &task_graph[from_index].task_id,
-                base_dir,
-                indexed_task_graph,
-            ),
-            to: TaskIdSnapshot::from_task_id(
-                &task_graph[to_index].task_id,
-                base_dir,
-                indexed_task_graph,
-            ),
+
+    let mut execution_node_snapshots = Vec::<ExecutionNodeSnapshot>::new();
+    for task_index in execution_graph.nodes() {
+        let mut deps = execution_graph
+            .neighbors(task_index)
+            .map(|dep_index| TaskIdSnapshot::new(dep_index, base_dir, indexed_task_graph))
+            .collect::<Vec<_>>();
+        deps.sort_unstable();
+
+        execution_node_snapshots.push(ExecutionNodeSnapshot {
+            task: TaskIdSnapshot::new(task_index, base_dir, indexed_task_graph),
+            deps,
         });
     }
-    edge_snapshots.sort_unstable();
-    edge_snapshots
+    execution_node_snapshots.sort_unstable_by(|a, b| a.task.cmp(&b.task));
+    execution_node_snapshots
 }
 
 #[derive(serde::Deserialize)]
@@ -183,12 +174,12 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
                 cli_query.name, case_name
             ));
 
-            let task_graph_snapshot =
+            let execution_graph_snapshot =
                 snapshot_execution_graph(&execution_graph, &indexed_task_graph, &case_stage_path);
 
             insta::assert_json_snapshot!(
                 format!("execution graph - {}", cli_query.name),
-                task_graph_snapshot
+                execution_graph_snapshot
             );
         }
 

@@ -21,7 +21,7 @@ use specifier::TaskSpecifier;
 use vec1::smallvec_v1::SmallVec1;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_workspace::{DependencyType, PackageInfo, PackageIx, PackageNodeIndex, WorkspaceRoot};
+use vite_workspace::{PackageNodeIndex, WorkspaceRoot};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 enum TaskDependencyTypeInner {
