@@ -1,0 +1,4 @@
+[[query]]
+name = "simple task by name"
+cwd = "packages/a"
+args = ["build"]

@@ -25,6 +25,7 @@ copy_dir = { workspace = true }
 insta = { workspace = true, features = ["glob", "json"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["fs", "rt-multi-thread"] }
+toml = { workspace = true }
 
 [lints]
 workspace = true

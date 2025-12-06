@@ -3234,6 +3234,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "toml",
  "vec1",
  "vite_path",
  "vite_str",
