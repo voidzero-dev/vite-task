@@ -29,6 +29,11 @@ cwd = "packages/a"
 args = ["--transitive", "build"]
 
 [[query]]
+name = "transitive in package without the task"
+cwd = "packages/a"
+args = ["--transitive", "lint"]
+
+[[query]]
 name = "recursive"
 cwd = ""
 args = ["--recursive", "build"]
