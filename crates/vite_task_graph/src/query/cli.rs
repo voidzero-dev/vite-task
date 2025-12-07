@@ -58,7 +58,7 @@ impl CLITaskQuery {
                     Ok(s.task_name)
                 })
                 .collect::<Result<_, _>>()?;
-            TaskQueryKind::Resursive { task_names }
+            TaskQueryKind::Recursive { task_names }
         } else {
             TaskQueryKind::Normal {
                 task_specifiers: self.tasks.into_iter().collect(),

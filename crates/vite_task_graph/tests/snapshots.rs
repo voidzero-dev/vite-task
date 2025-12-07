@@ -106,21 +106,21 @@ fn snapshot_execution_graph(
     execution_node_snapshots
 }
 
-fn stablize_absolute_path(path: &mut Arc<AbsolutePath>, base_dir: &AbsolutePath) {
+fn stabilize_absolute_path(path: &mut Arc<AbsolutePath>, base_dir: &AbsolutePath) {
     let relative_path = path.strip_prefix(base_dir).unwrap().unwrap();
     let new_base_dir =
         AbsolutePath::new(if cfg!(windows) { "C:\\workspace" } else { "/workspace" }).unwrap();
     *path = new_base_dir.join(relative_path).into();
 }
 
-fn stablize_specifier_lookup_error(
+fn stabilize_specifier_lookup_error(
     err: &mut SpecifierLookupError<PackageUnknownError>,
     base_dir: &AbsolutePath,
 ) {
     match err {
         SpecifierLookupError::AmbiguousPackageName { package_paths, .. } => {
             for path in package_paths.iter_mut() {
-                stablize_absolute_path(path, base_dir);
+                stabilize_absolute_path(path, base_dir);
             }
         }
         SpecifierLookupError::PackageNameNotFound { .. } => {}
@@ -128,7 +128,7 @@ fn stablize_specifier_lookup_error(
             *package_index = Default::default()
         }
         SpecifierLookupError::PackageUnknown { unspecifier_package_error, .. } => {
-            stablize_absolute_path(&mut unspecifier_package_error.cwd, base_dir);
+            stabilize_absolute_path(&mut unspecifier_package_error.cwd, base_dir);
         }
     }
 }
@@ -206,7 +206,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
             let execution_graph = match indexed_task_graph.query_tasks(task_query) {
                 Ok(ok) => ok,
                 Err(mut err) => {
-                    stablize_specifier_lookup_error(&mut err, &case_stage_path);
+                    stabilize_specifier_lookup_error(&mut err, &case_stage_path);
                     insta::assert_debug_snapshot!(snapshot_name, err);
                     continue;
                 }

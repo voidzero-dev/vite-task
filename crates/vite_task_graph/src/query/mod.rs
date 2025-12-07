@@ -26,7 +26,7 @@ pub enum TaskQueryKind {
     /// A recursive task query specifying one or multiple task names.
     /// It will match all tasks with the given names across all packages with topological ordering.
     /// The whole workspace will be searched, so cwd is not relevant.
-    Resursive { task_names: HashSet<Str> },
+    Recursive { task_names: HashSet<Str> },
 }
 
 /// Represents a valid query for a task and its dependencies, usually issued from a CLI command `vite run ...`.
@@ -60,7 +60,7 @@ impl IndexedTaskGraph {
 
         let include_topologicial_deps = match &query.kind {
             TaskQueryKind::Normal { include_topological_deps, .. } => *include_topological_deps,
-            TaskQueryKind::Resursive { .. } => true, // recursive means topological across all packages
+            TaskQueryKind::Recursive { .. } => true, // recursive means topological across all packages
         };
 
         // Add starting tasks without dependencies
@@ -101,7 +101,7 @@ impl IndexedTaskGraph {
                                 return Err(err);
                             }
                             // Add nearest tasks to execution graph
-                            // Topoplogical dependencies of nearest tasks will be added later
+                            // Topological dependencies of nearest tasks will be added later
                             for nearest_task in nearest_topological_tasks.drain(..) {
                                 execution_graph.add_node(nearest_task);
                             }
@@ -113,7 +113,7 @@ impl IndexedTaskGraph {
                     }
                 }
             }
-            TaskQueryKind::Resursive { task_names } => {
+            TaskQueryKind::Recursive { task_names } => {
                 // Add all tasks matching the names across all packages
                 for task_index in self.task_graph.node_indices() {
                     let current_task_name = self.task_graph[task_index].task_id.task_name.as_str();
