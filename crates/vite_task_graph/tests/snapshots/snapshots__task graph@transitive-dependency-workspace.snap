@@ -21,6 +21,13 @@ input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspac
       ],
       [
         {
+          "package_dir": "packages/b2",
+          "task_name": "build"
+        },
+        "Topological"
+      ],
+      [
+        {
           "package_dir": "packages/c",
           "task_name": "build"
         },
@@ -36,6 +43,23 @@ input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspac
     "command": "echo test a",
     "cwd": "packages/a",
     "depends_on": []
+  },
+  {
+    "id": {
+      "package_dir": "packages/b2",
+      "task_name": "build"
+    },
+    "command": "echo build b2",
+    "cwd": "packages/b2",
+    "depends_on": [
+      [
+        {
+          "package_dir": "packages/c",
+          "task_name": "build"
+        },
+        "Topological"
+      ]
+    ]
   },
   {
     "id": {

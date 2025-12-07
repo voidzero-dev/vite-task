@@ -22,3 +22,13 @@ args = ["@test/a#build"]
 name = "ignore depends on"
 cwd = "packages/a"
 args = ["--ignore-depends-on", "build"]
+
+[[query]]
+name = "transitive"
+cwd = "packages/a"
+args = ["--transitive", "build"]
+
+[[query]]
+name = "recursive"
+cwd = ""
+args = ["--recursive", "build"]
