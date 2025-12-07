@@ -37,3 +37,8 @@ args = ["--transitive", "lint"]
 name = "recursive"
 cwd = ""
 args = ["--recursive", "build"]
+
+[[query]]
+name = "recursive and transitive"
+cwd = ""
+args = ["--recursive", "--transitive", "build"]
