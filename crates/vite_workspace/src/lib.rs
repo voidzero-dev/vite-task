@@ -2,11 +2,11 @@ mod error;
 pub mod package;
 mod package_manager;
 
-use std::{collections::hash_map::Entry, fs, io};
+use std::{collections::hash_map::Entry, fs, io, sync::Arc};
 
 use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use vec1::smallvec_v1::SmallVec1;
 use vite_glob::GlobPatternSet;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
@@ -111,7 +111,12 @@ struct PackageGraphBuilder {
 }
 
 impl PackageGraphBuilder {
-    fn add_package(&mut self, package_path: RelativePathBuf, package_json: PackageJson) {
+    fn add_package(
+        &mut self,
+        package_path: RelativePathBuf,
+        absolute_path: Arc<AbsolutePath>,
+        package_json: PackageJson,
+    ) {
         let deps = package_json.get_workspace_dependencies().collect::<Vec<_>>();
         let package_name = package_json.name.clone();
         let id = self.graph.add_node(PackageInfo {
@@ -208,7 +213,11 @@ pub fn load_package_graph(
         WorkspaceFile::NonWorkspacePackage(file) => {
             // For non-workspace packages, add the package.json to the graph as a root package
             let package_json: PackageJson = serde_json::from_reader(file)?;
-            graph_builder.add_package(RelativePathBuf::default(), package_json);
+            graph_builder.add_package(
+                RelativePathBuf::default(),
+                workspace_root.path.into(),
+                package_json,
+            );
 
             return graph_builder.build();
         }
@@ -227,7 +236,7 @@ pub fn load_package_graph(
         };
 
         has_root_package = has_root_package || package_path.as_str().is_empty();
-        graph_builder.add_package(package_path, package_json);
+        graph_builder.add_package(package_path, absolute_path.into(), package_json);
     }
     // try add the root package anyway if the member globs do not include it.
     if !has_root_package {
@@ -235,7 +244,11 @@ pub fn load_package_graph(
         match fs::read(&package_json_path) {
             Ok(package_json) => {
                 let package_json: PackageJson = serde_json::from_slice(&package_json)?;
-                graph_builder.add_package(RelativePathBuf::default(), package_json);
+                graph_builder.add_package(
+                    RelativePathBuf::default(),
+                    workspace_root.path.into(),
+                    package_json,
+                );
             }
             Err(err) => {
                 if err.kind() != io::ErrorKind::NotFound {

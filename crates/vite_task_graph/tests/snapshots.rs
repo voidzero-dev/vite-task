@@ -5,7 +5,7 @@ use clap::Parser;
 use copy_dir::copy_dir;
 use petgraph::visit::EdgeRef as _;
 use tokio::runtime::Runtime;
-use vite_path::{AbsolutePath, RelativePathBuf, relative};
+use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use vite_task_graph::{
     IndexedTaskGraph, SpecifierLookupError, TaskDependencyType, TaskNodeIndex,
