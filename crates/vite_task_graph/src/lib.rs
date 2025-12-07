@@ -116,7 +116,7 @@ pub enum TaskGraphLoadError {
 /// - When the specifier is from `dependOn` of a known task, `UnknownPackageError` is `Infallible` because the origin package is always known.
 /// - When the specifier is from a CLI command, `UnknownPackageError` can be a real error type in case cwd is not in any package.
 #[derive(Debug, thiserror::Error)]
-pub enum SpecifierLookupError<UnknownPackageError = Infallible> {
+pub enum SpecifierLookupError<PackageUnknownError = Infallible> {
     #[error("Package '{package_name}' is ambiguous among multiple packages: {package_paths:?}")]
     AmbiguousPackageName { package_name: Str, package_paths: Box<[Arc<AbsolutePath>]> },
 
@@ -129,7 +129,7 @@ pub enum SpecifierLookupError<UnknownPackageError = Infallible> {
     #[error(
         "Nowhere to look for task '{task_name}' because the package is unknown: {unspecifier_package_error}"
     )]
-    PackageUnknown { unspecifier_package_error: UnknownPackageError, task_name: Str },
+    PackageUnknown { unspecifier_package_error: PackageUnknownError, task_name: Str },
 }
 
 /// newtype of `DefaultIx` for indices in task graphs

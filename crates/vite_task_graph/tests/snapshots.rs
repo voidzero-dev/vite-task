@@ -5,12 +5,12 @@ use clap::Parser;
 use copy_dir::copy_dir;
 use petgraph::visit::EdgeRef as _;
 use tokio::runtime::Runtime;
-use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_path::{AbsolutePath, RelativePathBuf, relative};
 use vite_str::Str;
 use vite_task_graph::{
-    IndexedTaskGraph, TaskDependencyType, TaskNodeIndex,
+    IndexedTaskGraph, SpecifierLookupError, TaskDependencyType, TaskNodeIndex,
     loader::JsonUserConfigLoader,
-    query::{TaskExecutionGraph, cli::CLITaskQuery},
+    query::{PackageUnknownError, TaskExecutionGraph, cli::CLITaskQuery},
 };
 use vite_workspace::find_workspace_root;
 
@@ -106,6 +106,33 @@ fn snapshot_execution_graph(
     execution_node_snapshots
 }
 
+fn stablize_absolute_path(path: &mut Arc<AbsolutePath>, base_dir: &AbsolutePath) {
+    let relative_path = path.strip_prefix(base_dir).unwrap().unwrap();
+    let new_base_dir =
+        AbsolutePath::new(if cfg!(windows) { "C:\\workspace" } else { "/workspace" }).unwrap();
+    *path = new_base_dir.join(relative_path).into();
+}
+
+fn stablize_specifier_lookup_error(
+    err: &mut SpecifierLookupError<PackageUnknownError>,
+    base_dir: &AbsolutePath,
+) {
+    match err {
+        SpecifierLookupError::AmbiguousPackageName { package_paths, .. } => {
+            for path in package_paths.iter_mut() {
+                stablize_absolute_path(path, base_dir);
+            }
+        }
+        SpecifierLookupError::PackageNameNotFound { .. } => {}
+        SpecifierLookupError::TaskNameNotFound { package_index, .. } => {
+            *package_index = Default::default()
+        }
+        SpecifierLookupError::PackageUnknown { unspecifier_package_error, .. } => {
+            stablize_absolute_path(&mut unspecifier_package_error.cwd, base_dir);
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct CLIQuery {
     pub name: Str,
@@ -154,6 +181,8 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
         let task_graph_snapshot = snapshot_task_graph(&indexed_task_graph, &case_stage_path);
 
         for cli_query in cli_queries_file.queries {
+            let snapshot_name = format!("query - {}", cli_query.name);
+
             let cli_task_query = CLITaskQuery::try_parse_from(
                 std::iter::once("vite-run") // dummy program name
                     .chain(cli_query.args.iter().map(|s| s.as_str())),
@@ -164,23 +193,27 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
             ));
 
             let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
-            let task_query = cli_task_query.into_task_query(&cwd).expect(&format!(
-                "Invalid task query for query '{}' in case '{}'",
-                cli_query.name, case_name
-            ));
+            let task_query = match cli_task_query.into_task_query(&cwd) {
+                Ok(ok) => ok,
+                Err(err) => {
+                    insta::assert_debug_snapshot!(snapshot_name, err);
+                    continue;
+                }
+            };
 
-            let execution_graph = indexed_task_graph.query_tasks(task_query).expect(&format!(
-                "Failed to query tasks for query '{}' in case '{}'",
-                cli_query.name, case_name
-            ));
+            let execution_graph = match indexed_task_graph.query_tasks(task_query) {
+                Ok(ok) => ok,
+                Err(mut err) => {
+                    stablize_specifier_lookup_error(&mut err, &case_stage_path);
+                    insta::assert_snapshot!(snapshot_name, err);
+                    continue;
+                }
+            };
 
             let execution_graph_snapshot =
                 snapshot_execution_graph(&execution_graph, &indexed_task_graph, &case_stage_path);
 
-            insta::assert_json_snapshot!(
-                format!("execution graph - {}", cli_query.name),
-                execution_graph_snapshot
-            );
+            insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
         }
 
         insta::assert_json_snapshot!("task graph", task_graph_snapshot);

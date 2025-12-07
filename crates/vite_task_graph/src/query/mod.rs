@@ -48,7 +48,7 @@ pub type TaskExecutionGraph = DiGraphMap<TaskNodeIndex, ()>;
 #[derive(Debug, thiserror::Error)]
 #[error("The current working directory {cwd:?} is in not any package")]
 pub struct PackageUnknownError {
-    cwd: Arc<AbsolutePath>,
+    pub cwd: Arc<AbsolutePath>,
 }
 
 impl IndexedTaskGraph {
