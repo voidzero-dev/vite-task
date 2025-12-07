@@ -106,13 +106,15 @@ fn snapshot_execution_graph(
     execution_node_snapshots
 }
 
+/// Modify absolute paths to be stable across different tmpdir locations.
 fn stabilize_absolute_path(path: &mut Arc<AbsolutePath>, base_dir: &AbsolutePath) {
     let relative_path = path.strip_prefix(base_dir).unwrap().unwrap();
-    let new_base_dir =
-        AbsolutePath::new(if cfg!(windows) { "C:\\workspace" } else { "/workspace" }).unwrap();
+    // this path is considered absolute on all platforms
+    let new_base_dir = AbsolutePath::new("//?/workspace/").unwrap();
     *path = new_base_dir.join(relative_path).into();
 }
 
+/// Modify absolute paths in the SpecifierLookupError to be stable across different tmpdir locations.
 fn stabilize_specifier_lookup_error(
     err: &mut SpecifierLookupError<PackageUnknownError>,
     base_dir: &AbsolutePath,
