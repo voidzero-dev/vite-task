@@ -46,6 +46,15 @@ input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspac
   },
   {
     "id": {
+      "package_dir": "packages/another-a",
+      "task_name": "build"
+    },
+    "command": "echo Building another A",
+    "cwd": "packages/another-a",
+    "depends_on": []
+  },
+  {
+    "id": {
       "package_dir": "packages/b1",
       "task_name": "lint"
     },

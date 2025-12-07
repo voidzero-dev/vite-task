@@ -1,0 +1,10 @@
+---
+source: crates/vite_task_graph/tests/snapshots.rs
+expression: err
+input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspace
+---
+TaskNameNotFound {
+    package_name: "@test/a",
+    task_name: "non-existent-task",
+    package_index: NodeIndex(PackageIx(0)),
+}

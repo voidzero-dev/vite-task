@@ -178,7 +178,9 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
         )
         .await
         .expect(&format!("Failed to load task graph for case {case_name}"));
+
         let task_graph_snapshot = snapshot_task_graph(&indexed_task_graph, &case_stage_path);
+        insta::assert_json_snapshot!("task graph", task_graph_snapshot);
 
         for cli_query in cli_queries_file.queries {
             let snapshot_name = format!("query - {}", cli_query.name);
@@ -205,18 +207,15 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
                 Ok(ok) => ok,
                 Err(mut err) => {
                     stablize_specifier_lookup_error(&mut err, &case_stage_path);
-                    insta::assert_snapshot!(snapshot_name, err);
+                    insta::assert_debug_snapshot!(snapshot_name, err);
                     continue;
                 }
             };
 
             let execution_graph_snapshot =
                 snapshot_execution_graph(&execution_graph, &indexed_task_graph, &case_stage_path);
-
             insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
         }
-
-        insta::assert_json_snapshot!("task graph", task_graph_snapshot);
     });
 }
 

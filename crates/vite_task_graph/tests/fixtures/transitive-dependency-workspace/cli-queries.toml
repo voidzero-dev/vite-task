@@ -10,11 +10,16 @@ args = ["build"]
 
 [[query]]
 name = "explicit package name under different package"
-cwd = "packages/b"
-args = ["@test/a#build"]
+cwd = "packages/a"
+args = ["@test/c#build"]
 
 [[query]]
 name = "explicit package name under non-package cwd"
+cwd = ""
+args = ["@test/c#build"]
+
+[[query]]
+name = "ambiguous task name"
 cwd = ""
 args = ["@test/a#build"]
 
@@ -32,6 +37,11 @@ args = ["--transitive", "build"]
 name = "transitive in package without the task"
 cwd = "packages/a"
 args = ["--transitive", "lint"]
+
+[[query]]
+name = "transitive non existent task"
+cwd = "packages/a"
+args = ["--transitive", "non-existent-task"]
 
 [[query]]
 name = "recursive"
