@@ -3220,6 +3220,7 @@ dependencies = [
  "serde_yml",
  "tempfile",
  "thiserror 2.0.17",
+ "vec1",
  "vite_glob",
  "vite_path",
  "vite_str",

@@ -2,11 +2,12 @@ mod error;
 pub mod package;
 mod package_manager;
 
-use std::{fs, io};
+use std::{collections::hash_map::Entry, fs, io};
 
 use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::{Deserialize, Serialize};
+use vec1::smallvec_v1::SmallVec1;
 use vite_glob::GlobPatternSet;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
@@ -104,17 +105,12 @@ pub struct PackageInfo {
 #[derive(Default)]
 struct PackageGraphBuilder {
     id_and_deps_by_path: HashMap<RelativePathBuf, (PackageNodeIndex, Vec<(Str, DependencyType)>)>,
-    // Only for packages with a name
-    name_to_path: HashMap<Str, RelativePathBuf>,
+    name_to_path: HashMap<Str, SmallVec1<[RelativePathBuf; 1]>>,
     graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
 }
 
 impl PackageGraphBuilder {
-    fn add_package(
-        &mut self,
-        package_path: RelativePathBuf,
-        package_json: PackageJson,
-    ) -> Result<(), Error> {
+    fn add_package(&mut self, package_path: RelativePathBuf, package_json: PackageJson) {
         let deps = package_json.get_workspace_dependencies().collect::<Vec<_>>();
         let package_name = package_json.name.clone();
         let id = self.graph.add_node(PackageInfo { package_json, path: package_path.clone() });
@@ -123,22 +119,17 @@ impl PackageGraphBuilder {
         self.id_and_deps_by_path.insert(package_path.clone(), (id, deps));
 
         // Also maintain name to path mapping for dependency resolution
-        if !package_name.is_empty()
-            && let Some(existing_path) = self.name_to_path.insert(package_name, package_path)
-        {
-            // Duplicate package name found
-            let existing_id = self.id_and_deps_by_path.get(&existing_path).unwrap().0;
-            let existing_package_info = &self.graph[existing_id];
-            return Err(Error::DuplicatedPackageName {
-                name: existing_package_info.package_json.name.clone(),
-                path1: existing_package_info.path.clone(),
-                path2: self.graph[id].path.clone(),
-            });
+        match self.name_to_path.entry(package_name.clone()) {
+            Entry::Vacant(entry) => {
+                entry.insert(SmallVec1::new(package_path));
+            }
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().push(package_path);
+            }
         }
-        Ok(())
     }
 
-    fn build(mut self) -> DiGraph<PackageInfo, DependencyType, PackageIx> {
+    fn build(mut self) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
         for (id, deps) in self.id_and_deps_by_path.values() {
             for (dep_name, dep_type) in deps {
                 // Skip dependencies on nameless packages (empty string)
@@ -148,15 +139,22 @@ impl PackageGraphBuilder {
                 }
 
                 // Resolve dependency name to path, then find the node
-                if let Some(dep_path) = self.name_to_path.get(dep_name)
-                    && let Some((dep_id, _)) = self.id_and_deps_by_path.get(dep_path)
+                if let Some(dep_paths) = self.name_to_path.get(dep_name)
+                    && let Some((dep_id, _)) = self.id_and_deps_by_path.get(dep_paths.first())
                 {
+                    if let [dep_path1, dep_path2, ..] = dep_paths.as_slice() {
+                        return Err(Error::DuplicatedPackageName {
+                            name: dep_name.clone(),
+                            path1: dep_path1.clone(),
+                            path2: dep_path2.clone(),
+                        });
+                    }
                     self.graph.add_edge(*id, *dep_id, *dep_type);
                 }
                 // Silently skip if dependency not found - it might be an external package
             }
         }
-        self.graph
+        Ok(self.graph)
     }
 }
 
@@ -205,9 +203,9 @@ pub fn load_package_graph(
         WorkspaceFile::NonWorkspacePackage(file) => {
             // For non-workspace packages, add the package.json to the graph as a root package
             let package_json: PackageJson = serde_json::from_reader(file)?;
-            graph_builder.add_package(RelativePathBuf::default(), package_json)?;
+            graph_builder.add_package(RelativePathBuf::default(), package_json);
 
-            return Ok(graph_builder.build());
+            return graph_builder.build();
         }
     };
 
@@ -224,7 +222,7 @@ pub fn load_package_graph(
         };
 
         has_root_package = has_root_package || package_path.as_str().is_empty();
-        graph_builder.add_package(package_path, package_json)?;
+        graph_builder.add_package(package_path, package_json);
     }
     // try add the root package anyway if the member globs do not include it.
     if !has_root_package {
@@ -232,7 +230,7 @@ pub fn load_package_graph(
         match fs::read(&package_json_path) {
             Ok(package_json) => {
                 let package_json: PackageJson = serde_json::from_slice(&package_json)?;
-                graph_builder.add_package(RelativePathBuf::default(), package_json)?;
+                graph_builder.add_package(RelativePathBuf::default(), package_json);
             }
             Err(err) => {
                 if err.kind() != io::ErrorKind::NotFound {
@@ -241,7 +239,7 @@ pub fn load_package_graph(
             }
         }
     }
-    Ok(graph_builder.build())
+    graph_builder.build()
 }
 
 #[cfg(test)]
@@ -537,15 +535,9 @@ mod tests {
         });
         fs::write(temp_dir_path.join("packages/pkg-2/package.json"), pkg_2.to_string()).unwrap();
 
-        // Should return an error for duplicate package names
+        // duplicate package names is allowed.
         let result = discover_package_graph(temp_dir_path);
-        assert!(result.is_err());
-
-        if let Err(Error::DuplicatedPackageName { name, .. }) = result {
-            assert_eq!(name, "duplicate");
-        } else {
-            panic!("Expected DuplicatedPackageName error, got: {result:?}");
-        }
+        assert!(result.is_ok());
     }
 
     #[test]
