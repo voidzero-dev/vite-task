@@ -3229,6 +3229,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vite_task_plan"
+version = "0.1.0"
+dependencies = [
+ "vite_path",
+ "vite_shell",
+ "vite_str",
+ "vite_task_graph",
+]
+
+[[package]]
 name = "vite_tui"
 version = "0.0.0"
 dependencies = [
