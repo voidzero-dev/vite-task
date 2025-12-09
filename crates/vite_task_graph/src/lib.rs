@@ -58,7 +58,7 @@ pub struct TaskId {
     /// `package_index` is declared from `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
     pub package_index: PackageNodeIndex,
 
-    /// For user defined tasks, this is the name of the script or the entry in `vite-task.json`.
+    /// For user defined tasks, this is the name of the script or the entry in `vite.config.*`.
     ///
     /// For synthesized tasks, this is the program.
     pub task_name: Str,

@@ -11,6 +11,9 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+petgraph = { workspace = true }
 vite_path = { workspace = true }
 vite_shell = { workspace = true }
 vite_str = { workspace = true }
