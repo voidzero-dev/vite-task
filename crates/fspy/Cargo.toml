@@ -19,7 +19,7 @@ ouroboros = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["net", "process", "io-util", "sync"] }
+tokio = { workspace = true, features = ["net", "process", "io-util", "sync", "rt"] }
 which = { workspace = true, features = ["tracing"] }
 xxhash-rust = { workspace = true }
 

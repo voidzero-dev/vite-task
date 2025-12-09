@@ -55,9 +55,9 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[(&str, &str, u128)])] = &[
         "aarch64",
         &[
             (
-                "https://github.com/branchseer/oils-for-unix-binaries/releases/download/0.29.0-manual/oils-for-unix-0.29.0-aarch64-apple-darwin.tar.gz",
+                "https://github.com/branchseer/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-arm64.tar.gz",
                 "oils-for-unix",
-                149_945_237_112_824_769_531_360_595_981_178_091_193,
+                282073174065923237490435663309538399576,
             ),
             (
                 "https://github.com/uutils/coreutils/releases/download/0.1.0/coreutils-0.1.0-aarch64-apple-darwin.tar.gz",
@@ -70,9 +70,9 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[(&str, &str, u128)])] = &[
         "x86_64",
         &[
             (
-                "https://github.com/branchseer/oils-for-unix-binaries/releases/download/0.29.0-manual/oils-for-unix-0.29.0-x86_64-apple-darwin.tar.gz",
+                "https://github.com/branchseer/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-x86_64.tar.gz",
                 "oils-for-unix",
-                286_203_014_616_009_968_685_843_701_528_129_413_859,
+                142673558272427867831039361796426010330,
             ),
             (
                 "https://github.com/uutils/coreutils/releases/download/0.1.0/coreutils-0.1.0-x86_64-apple-darwin.tar.gz",
@@ -87,6 +87,7 @@ fn fetch_macos_binaries() -> anyhow::Result<()> {
     if env::var("CARGO_CFG_TARGET_OS").unwrap() != "macos" {
         return Ok(());
     }
+
     let out_dir = current_dir().unwrap().join(Path::new(&std::env::var_os("OUT_DIR").unwrap()));
 
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
