@@ -75,17 +75,18 @@ pub fn handle_exec(
 }
 
 pub static COREUTILS_FUNCTIONS: Set<&'static [u8]> = phf_set! {
-    b"[", b"arch", b"b2sum", b"b3sum", b"base32", b"base64", b"basename", b"basenc",
-    b"cat", b"chgrp", b"chmod", b"chown", b"chroot", b"cksum", b"comm", b"cp", b"csplit",
-    b"cut", b"date", b"dd", b"df", b"dir", b"dircolors", b"dirname", b"du", b"echo", b"env",
-    b"expand", b"expr", b"factor", b"false", b"fmt", b"fold", b"groups", b"hashsum", b"head",
-    b"hostid", b"hostname", b"id", b"install", b"join", b"kill", b"link", b"ln", b"logname",
-    b"ls", b"md5sum", b"mkdir", b"mkfifo", b"mknod", b"mktemp", b"more", b"mv", b"nice", b"nl",
-    b"nohup", b"nproc", b"numfmt", b"od", b"paste", b"pathchk", b"pinky", b"pr", b"printenv",
-    b"printf", b"ptx", b"pwd", b"readlink", b"realpath", b"rm", b"rmdir", b"seq", b"sha1sum",
-    b"sha224sum", b"sha256sum", b"sha3-224sum", b"sha3-256sum", b"sha3-384sum", b"sha3-512sum",
-    b"sha384sum", b"sha3sum", b"sha512sum", b"shake128sum", b"shake256sum", b"shred", b"shuf",
-    b"sleep", b"sort", b"split", b"stat", b"stdbuf", b"stty", b"sum", b"sync", b"tac", b"tail",
-    b"tee", b"test", b"timeout", b"touch", b"tr", b"true", b"truncate", b"tsort", b"tty", b"uname",
-    b"unexpand", b"uniq", b"unlink", b"uptime", b"users", b"vdir", b"wc", b"who", b"whoami", b"yes",
+    b"[", b"arch", b"b2sum", b"base32", b"base64", b"basename", b"basenc", b"cat",
+    b"chgrp", b"chmod", b"chown", b"chroot", b"cksum", b"comm", b"cp", b"csplit",
+    b"cut", b"date", b"dd", b"df", b"dir", b"dircolors", b"dirname", b"du", b"echo",
+    b"env", b"expand", b"expr", b"factor", b"false", b"fmt", b"fold", b"groups",
+    b"hashsum", b"head", b"hostid", b"hostname", b"id", b"install", b"join", b"kill",
+    b"link", b"ln", b"logname", b"ls", b"md5sum", b"mkdir", b"mkfifo", b"mknod",
+    b"mktemp", b"more", b"mv", b"nice", b"nl", b"nohup", b"nproc", b"numfmt", b"od",
+    b"paste", b"pathchk", b"pinky", b"pr", b"printenv", b"printf", b"ptx", b"pwd",
+    b"readlink", b"realpath", b"rm", b"rmdir", b"seq", b"sha1sum", b"sha224sum",
+    b"sha256sum", b"sha384sum", b"sha512sum", b"shred", b"shuf", b"sleep", b"sort",
+    b"split", b"stat", b"stdbuf", b"stty", b"sum", b"sync", b"tac", b"tail", b"tee",
+    b"test", b"timeout", b"touch", b"tr", b"true", b"truncate", b"tsort", b"tty",
+    b"uname", b"unexpand", b"uniq", b"unlink", b"uptime", b"users", b"vdir", b"wc",
+    b"who", b"whoami", b"yes"
 };
