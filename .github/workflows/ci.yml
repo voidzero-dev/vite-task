@@ -63,6 +63,14 @@ jobs:
         env:
           RUSTFLAGS: '-D warnings --cfg tokio_unstable' # also update .cargo/config.toml
 
+      # fspy contains tests for Node.js fs accesses.
+      # use x86_64 node for x86_64-apple-darwin target.
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version-file: .node-version
+          architecture: x64
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+
       - run: cargo test --target ${{ matrix.target }}
         if: ${{ matrix.os != 'ubuntu-latest' }}
 
