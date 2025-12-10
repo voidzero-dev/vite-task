@@ -11,6 +11,7 @@ use petgraph::{
     visit::IntoNodeReferences,
 };
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePath, RelativePathBuf};
+use vite_shell::try_parse_as_and_list;
 use vite_str::Str;
 use vite_workspace::{
     DependencyType, PackageInfo, PackageIx, PackageJson, PackageNodeIndex, WorkspaceRoot,
@@ -24,7 +25,6 @@ use super::{
 use crate::{
     Error,
     cache::TaskCache,
-    cmd::try_parse_as_and_list,
     collections::{HashMap, HashSet},
     config::{DisplayOptions, TaskGroupId, name::TaskName},
     fs::CachedFileSystem,
@@ -495,7 +495,7 @@ impl Workspace {
 
                 if let Some(and_list) = try_parse_as_and_list(script) {
                     let and_list_len = and_list.len();
-                    for (index, command) in and_list.into_iter().enumerate() {
+                    for (index, (command, _)) in and_list.into_iter().enumerate() {
                         let is_last = index + 1 == and_list_len;
 
                         let resolved_task = Self::resolve_task(

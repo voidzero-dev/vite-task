@@ -36,12 +36,13 @@ allocator-api2 = { version = "0.2.21", default-features = false, features = ["al
 anyhow = "1.0.98"
 assert2 = "0.3.16"
 assertables = "9.8.1"
-ast-grep-core = "0.32.2"
 base64 = "0.22.1"
 bincode = "2.0.1"
 bindgen = "0.72.1"
 bitflags = "2.10.0"
-brush-parser = "0.2.18"
+# The newest released version (0.3.0) of brush-parser has a bug that reports incorrect locations for some ast nodes.
+# The latest commit has fixed it. TODO: switch back to released version when a new version is published.
+brush-parser = { git = "https://github.com/reubeno/brush", rev = "dcb760933b10ee0433d7b740a5709b06f5c67c6b" }
 bstr = { version = "1.12.0", default-features = false, features = ["alloc", "std"] }
 bumpalo = { version = "3.17.0", features = ["allocator-api2"] }
 bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
@@ -109,16 +110,16 @@ thiserror = "2"
 tokio = "1.48.0"
 tokio-util = "0.7.17"
 toml = "0.9.5"
-tracing = "0.1.41"
+tracing = "0.1.43"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "serde"] }
-tree-sitter-bash = "0.23.1"
 tui-term = "0.2.0"
 twox-hash = "2.1.1"
 uuid = "1.18.1"
 vec1 = "1.12.1"
 vite_glob = { path = "crates/vite_glob" }
 vite_path = { path = "crates/vite_path" }
+vite_shell = { path = "crates/vite_shell" }
 vite_str = { path = "crates/vite_str" }
 vite_workspace = { path = "crates/vite_workspace" }
 wax = "0.6.0"

@@ -1,189 +1,125 @@
-//! Shell script parsing utilities using ast-grep for syntax analysis.
-//!
-//! This crate provides functionality to parse and split bash scripts by top-level operators.
+use std::{collections::BTreeMap, fmt::Display, ops::Range};
 
-use ast_grep_core::{AstGrep, Doc, Language};
-use thiserror::Error;
+use bincode::{Decode, Encode};
+use brush_parser::{
+    Parser, ParserOptions,
+    ast::{
+        AndOr, Assignment, AssignmentName, AssignmentValue, Command, CommandPrefix,
+        CommandPrefixOrSuffixItem, CommandSuffix, CompoundListItem, Pipeline, Program,
+        SeparatorOperator, SimpleCommand, SourceLocation, Word,
+    },
+    unquote_str,
+};
+use diff::Diff;
+use serde::{Deserialize, Serialize};
+use vite_str::Str;
 
-/// Errors that can occur during shell script parsing.
-#[derive(Debug, Error)]
-pub enum ShellParseError {
-    /// The shell script has invalid syntax.
-    #[error("Invalid shell syntax: {0}")]
-    InvalidSyntax(String),
-
-    /// An error occurred during parsing.
-    #[error("Parse error: {0}")]
-    ParseError(String),
+/// "FOO=BAR program arg1 arg2"
+#[derive(Encode, Decode, Serialize, Deserialize, Debug, PartialEq, Eq, Diff, Clone)]
+#[diff(attr(#[derive(Debug)]))]
+pub struct TaskParsedCommand {
+    pub envs: BTreeMap<Str, Str>,
+    pub program: Str,
+    pub args: Vec<Str>,
 }
 
-/// Bash language implementation for ast-grep.
-#[derive(Clone)]
-struct BashLanguage;
-
-impl Language for BashLanguage {
-    fn get_ts_language(&self) -> ast_grep_core::language::TSLanguage {
-        tree_sitter_bash::LANGUAGE.into()
-    }
-}
-
-/// Splits a bash script string into multiple command strings by top-level `&&` operators.
-///
-/// This function parses the bash script and identifies command lists separated by `&&` at the
-/// top level (not nested within subshells, functions, or other constructs).
-///
-/// # Arguments
-///
-/// * `script` - The bash script string to split
-///
-/// # Returns
-///
-/// A `Result` containing a vector of command strings, or a `ShellParseError` if parsing fails.
-///
-/// # Examples
-///
-/// ```
-/// use vite_shell::split_by_and;
-///
-/// let script = "npm run build && npm test";
-/// let commands = split_by_and(script).unwrap();
-/// assert_eq!(commands, vec!["npm run build", "npm test"]);
-/// ```
-///
-/// ```
-/// use vite_shell::split_by_and;
-///
-/// let script = "echo 'hello' && echo 'world' && echo 'rust'";
-/// let commands = split_by_and(script).unwrap();
-/// assert_eq!(commands, vec!["echo 'hello'", "echo 'world'", "echo 'rust'"]);
-/// ```
-pub fn split_by_and(script: &str) -> Result<Vec<String>, ShellParseError> {
-    let grep = AstGrep::new(script, BashLanguage);
-    let root = grep.root();
-
-    // Split by top-level && operators
-    let commands = split_list_by_operator(&root, "&&", script);
-
-    if commands.is_empty() {
-        // If no && operators found, return the entire script as a single command
-        Ok(vec![script.trim().to_string()])
-    } else {
-        Ok(commands)
-    }
-}
-
-/// Splits a node by a specific operator at the top level only.
-///
-/// This function walks the AST and splits only at the specified operator,
-/// but handles nested lists that ALSO have the same operator (continuing the chain).
-fn split_list_by_operator<D: Doc>(
-    node: &ast_grep_core::Node<D>,
-    operator: &str,
-    script: &str,
-) -> Vec<String> {
-    let kind = node.kind();
-
-    // Only process "list" nodes which contain operator sequences
-    if kind.as_ref() != "list" {
-        // For program nodes, check children
-        if kind.as_ref() == "program" {
-            for child in node.children() {
-                let results = split_list_by_operator(&child, operator, script);
-                if !results.is_empty() {
-                    return results;
-                }
-            }
+impl Display for TaskParsedCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // BTreeMap ensures stable iteration order
+        for (name, value) in &self.envs {
+            Display::fmt(
+                &format_args!("{}={} ", name, shell_escape::escape(value.as_str().into())),
+                f,
+            )?;
         }
-        return Vec::new();
+        Display::fmt(&shell_escape::escape(self.program.as_str().into()), f)?;
+        for arg in &self.args {
+            Display::fmt(" ", f)?;
+            Display::fmt(&shell_escape::escape(arg.as_str().into()), f)?;
+        }
+
+        Ok(())
     }
+}
 
-    // We have a list node - check if it contains our target operator AT THIS LEVEL
-    let children: Vec<_> = node.children().collect();
-    let has_target_operator = children.iter().any(|c| c.kind().as_ref() == operator);
+fn unquote(word: &Word) -> String {
+    let Word { value, loc: _ } = word;
+    unquote_str(value.as_str())
+}
 
-    if !has_target_operator {
-        // No target operator at this level
-        return Vec::new();
-    }
+fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<usize>)> {
+    let location = pipeline.location()?;
+    let range = location.start.index..location.end.index;
 
-    // Found target operator at this level - split by it
-    // If we encounter a nested list, check if it's ONLY our operator (continue chain)
-    // or if it has OTHER operators (treat as atomic)
-    let mut commands = Vec::new();
-    let mut current_start: Option<usize> = None;
-    let mut current_end: Option<usize> = None;
-
-    for child in &children {
-        let child_kind = child.kind();
-
-        if child_kind.as_ref() == operator {
-            // Hit the operator - save current command if we have one
-            if let (Some(start), Some(end)) = (current_start, current_end) {
-                commands.push(script[start..end].trim().to_string());
-            }
-            // Reset for next command
-            current_start = None;
-            current_end = None;
-        } else if child_kind.as_ref() == "list" {
-            // Nested list - check what operators it contains
-            let nested_children: Vec<_> = child.children().collect();
-            let has_our_operator = nested_children.iter().any(|c| c.kind().as_ref() == operator);
-            let has_other_operator = nested_children.iter().any(|c| {
-                let k = c.kind();
-                k.as_ref() == "||" || k.as_ref() == ";" || k.as_ref() == "|" || k.as_ref() == "&"
-            });
-
-            if has_our_operator && !has_other_operator {
-                // This nested list ONLY has our operator - it's a continuation of the chain
-                // Recursively process it and merge
-                let nested_results = split_list_by_operator(child, operator, script);
-                if !nested_results.is_empty() {
-                    if let (Some(start), Some(_)) = (current_start, current_end) {
-                        // Merge first result with accumulated parts
-                        let prefix = script[start..child.range().start].trim();
-                        if !prefix.is_empty() {
-                            commands.push(format!("{} && {}", prefix, nested_results[0]));
-                            commands.extend(nested_results.into_iter().skip(1));
-                        } else {
-                            commands.extend(nested_results);
-                        }
-                        current_start = None;
-                        current_end = None;
-                    } else {
-                        commands.extend(nested_results);
-                    }
-                } else {
-                    // Shouldn't happen, but treat as atomic
-                    let range = child.range();
-                    if current_start.is_none() {
-                        current_start = Some(range.start);
-                    }
-                    current_end = Some(range.end);
-                }
-            } else {
-                // Nested list has other operators or no our operator - treat as atomic
-                let range = child.range();
-                if current_start.is_none() {
-                    current_start = Some(range.start);
-                }
-                current_end = Some(range.end);
-            }
-        } else {
-            // Part of a command
-            let range = child.range();
-            if current_start.is_none() {
-                current_start = Some(range.start);
-            }
-            current_end = Some(range.end);
+    let Pipeline { timed: None, bang: false, seq } = pipeline else {
+        return None;
+    };
+    let [Command::Simple(simple_command)] = seq.as_slice() else {
+        return None;
+    };
+    let SimpleCommand { prefix, word_or_name: Some(program), suffix } = simple_command else {
+        return None;
+    };
+    let mut envs = BTreeMap::<Str, Str>::new();
+    if let Some(prefix) = prefix {
+        let CommandPrefix(items) = prefix;
+        for item in items {
+            let CommandPrefixOrSuffixItem::AssignmentWord(
+                Assignment { name, value, append: false, loc: _ },
+                _,
+            ) = item
+            else {
+                return None;
+            };
+            let AssignmentName::VariableName(name) = name else {
+                return None;
+            };
+            let AssignmentValue::Scalar(value) = value else {
+                return None;
+            };
+            envs.insert(name.as_str().into(), unquote(value).into());
         }
     }
-
-    // Don't forget the last command
-    if let (Some(start), Some(end)) = (current_start, current_end) {
-        commands.push(script[start..end].trim().to_string());
+    let mut args = Vec::<Str>::new();
+    if let Some(CommandSuffix(suffix_items)) = suffix {
+        for suffix_item in suffix_items {
+            let CommandPrefixOrSuffixItem::Word(word) = suffix_item else {
+                return None;
+            };
+            args.push(unquote(word).into());
+        }
     }
+    Some((TaskParsedCommand { envs, program: unquote(program).into(), args }, range))
+}
 
-    commands
+pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<usize>)>> {
+    let mut parser = Parser::new(
+        cmd.as_bytes(),
+        &ParserOptions {
+            enable_extended_globbing: false,
+            posix_mode: true,
+            sh_mode: true,
+            tilde_expansion: false,
+        },
+    );
+    let Program { complete_commands } = parser.parse_program().ok()?;
+    let [compound_list] = complete_commands.as_slice() else {
+        return None;
+    };
+    let [CompoundListItem(and_or_list, SeparatorOperator::Sequence)] = compound_list.0.as_slice()
+    else {
+        return None;
+    };
+
+    let mut commands = Vec::<(TaskParsedCommand, Range<usize>)>::new();
+    commands.push(pipeline_to_command(&and_or_list.first)?);
+    for and_or in &and_or_list.additional {
+        let AndOr::And(pipeline) = and_or else {
+            return None;
+        };
+        commands.push(pipeline_to_command(pipeline)?);
+    }
+    Some(commands)
 }
 
 #[cfg(test)]
@@ -191,97 +127,108 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_simple_split() {
-        let script = "cmd1 && cmd2";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["cmd1", "cmd2"]);
+    fn test_parse_single_command() {
+        let source = r#"A=B hello world"#;
+        let list = try_parse_as_and_list(source).unwrap();
+        assert_eq!(list.len(), 1);
+        let (cmd, range) = &list[0];
+        assert_eq!(&source[range.clone()], source);
+        assert_eq!(
+            cmd,
+            &TaskParsedCommand {
+                envs: [("A".into(), "B".into())].into(),
+                program: "hello".into(),
+                args: vec!["world".into()],
+            }
+        );
     }
 
     #[test]
-    fn test_or_then_and() {
-        // || and && have same precedence, left-associative
-        // So this parses as: (cmd0 || cmd1) && cmd2
-        let script = "cmd0 || cmd1 && cmd2";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["cmd0 || cmd1", "cmd2"]);
+    fn test_parse_command() {
+        let source = r#"A=B hello world && FOO="BE\"R" program "arg1" "arg\"2" && zzz"#;
+        let list = try_parse_as_and_list(source).unwrap();
+
+        let commands = list.iter().map(|(cmd, _)| cmd).collect::<Vec<_>>();
+        assert_eq!(
+            commands,
+            vec![
+                &TaskParsedCommand {
+                    envs: [("A".into(), "B".into())].into(),
+                    program: "hello".into(),
+                    args: vec!["world".into()],
+                },
+                &TaskParsedCommand {
+                    envs: [("FOO".into(), "BE\"R".into())].into(),
+                    program: "program".into(),
+                    args: vec!["arg1".into(), "arg\"2".into()],
+                },
+                &TaskParsedCommand { envs: [].into(), program: "zzz".into(), args: vec![] }
+            ]
+        );
+
+        let substrs = list.iter().map(|(_, range)| &source[range.clone()]).collect::<Vec<_>>();
+
+        assert_eq!(
+            substrs,
+            vec!["A=B hello world", r#"FOO="BE\"R" program "arg1" "arg\"2""#, "zzz"]
+        );
     }
 
     #[test]
-    fn test_and_then_or() {
-        // This parses as: (a && b) || c
-        // The && is nested in a list inside an || context
-        // Since there's no && at the top level (only ||), we don't split
-        let script = "a && b || c";
-        let commands = split_by_and(script).unwrap();
-        // No top-level &&, so return the whole thing
-        assert_eq!(commands, vec!["a && b || c"]);
+    fn test_task_parsed_command_stable_env_ordering() {
+        // Test that environment variables maintain stable ordering
+        let cmd = TaskParsedCommand {
+            envs: [
+                ("ZEBRA".into(), "last".into()),
+                ("ALPHA".into(), "first".into()),
+                ("MIDDLE".into(), "middle".into()),
+            ]
+            .into(),
+            program: "test".into(),
+            args: vec![],
+        };
+
+        // Convert to string multiple times and verify it's always the same
+        let str1 = cmd.to_string();
+        let str2 = cmd.to_string();
+        let str3 = cmd.to_string();
+
+        assert_eq!(str1, str2);
+        assert_eq!(str2, str3);
+
+        // Verify the order is alphabetical (BTreeMap sorts by key)
+        assert!(str1.starts_with("ALPHA=first MIDDLE=middle ZEBRA=last"));
     }
 
     #[test]
-    fn test_mixed_operators() {
-        // Parses as: ((a && b) || c) && d
-        let script = "a && b || c && d";
-        let commands = split_by_and(script).unwrap();
-        // There IS a top-level && (between "((a && b) || c)" and "d")
-        // So we split there, treating the left side as atomic
-        assert_eq!(commands, vec!["a && b || c", "d"]);
-    }
+    fn test_task_parsed_command_serialization_stability() {
+        use bincode::{decode_from_slice, encode_to_vec};
 
-    #[test]
-    fn test_only_or() {
-        // Only || operators, no splitting
-        let script = "cmd1 || cmd2 || cmd3";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["cmd1 || cmd2 || cmd3"]);
-    }
+        // Create a command with multiple environment variables
+        let cmd = TaskParsedCommand {
+            envs: [
+                ("VAR_C".into(), "value_c".into()),
+                ("VAR_A".into(), "value_a".into()),
+                ("VAR_B".into(), "value_b".into()),
+            ]
+            .into(),
+            program: "program".into(),
+            args: vec!["arg1".into(), "arg2".into()],
+        };
 
-    #[test]
-    fn test_multiple_and() {
-        let script = "a && b && c";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["a", "b", "c"]);
-    }
+        // Serialize multiple times
+        let config = bincode::config::standard();
+        let bytes1 = encode_to_vec(&cmd, config).unwrap();
+        let bytes2 = encode_to_vec(&cmd, config).unwrap();
 
-    #[test]
-    fn test_no_and() {
-        let script = "single command";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["single command"]);
-    }
+        // Verify serialization is stable
+        assert_eq!(bytes1, bytes2);
 
-    #[test]
-    fn test_with_whitespace() {
-        let script = "  cmd1  &&  cmd2  ";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["cmd1", "cmd2"]);
-    }
+        // Verify deserialization works and maintains order
+        let (decoded, _): (TaskParsedCommand, _) = decode_from_slice(&bytes1, config).unwrap();
+        assert_eq!(decoded, cmd);
 
-    #[test]
-    fn test_complex_commands() {
-        let script = "npm run build && npm test --coverage && echo 'done'";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["npm run build", "npm test --coverage", "echo 'done'"]);
-    }
-
-    #[test]
-    fn test_subshell_with_and() {
-        let script = "(cmd1 && cmd2) && cmd3";
-        let commands = split_by_and(script).unwrap();
-        // Should split at the top-level &&, keeping the subshell intact
-        assert_eq!(commands, vec!["(cmd1 && cmd2)", "cmd3"]);
-    }
-
-    #[test]
-    fn test_with_pipes() {
-        let script = "cat file.txt | grep pattern && echo 'found'";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["cat file.txt | grep pattern", "echo 'found'"]);
-    }
-
-    #[test]
-    fn test_with_newlines() {
-        let script = "cmd1 &&\n  cmd2 &&\n  cmd3";
-        let commands = split_by_and(script).unwrap();
-        assert_eq!(commands, vec!["cmd1", "cmd2", "cmd3"]);
+        // Verify the decoded command still has stable string representation
+        assert_eq!(decoded.to_string(), cmd.to_string());
     }
 }

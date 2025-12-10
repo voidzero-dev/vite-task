@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 bincode = { workspace = true, features = ["derive"] }
-brush-parser = { workspace = true }
 bstr = { workspace = true }
 compact_str = { workspace = true, features = ["serde"] }
 dashmap = { workspace = true }
@@ -40,6 +39,7 @@ twox-hash = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 vite_glob = { workspace = true }
 vite_path = { workspace = true }
+vite_shell = { workspace = true }
 vite_str = { workspace = true }
 vite_workspace = { workspace = true }
 wax = { workspace = true }
