@@ -1,4 +1,4 @@
-use std::{convert::Infallible, str::FromStr};
+use std::{convert::Infallible, fmt::Display, str::FromStr};
 
 use vite_str::Str;
 
@@ -10,6 +10,15 @@ use vite_str::Str;
 pub struct TaskSpecifier {
     pub package_name: Option<Str>,
     pub task_name: Str,
+}
+
+impl Display for TaskSpecifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(package_name) = &self.package_name {
+            write!(f, "{}#", package_name)?
+        }
+        write!(f, "{}", self.task_name)
+    }
 }
 
 impl TaskSpecifier {

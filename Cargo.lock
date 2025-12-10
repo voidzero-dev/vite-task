@@ -3232,9 +3232,11 @@ dependencies = [
 name = "vite_task_plan"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "futures-core",
  "futures-util",
  "petgraph",
+ "thiserror 2.0.17",
  "vite_path",
  "vite_shell",
  "vite_str",

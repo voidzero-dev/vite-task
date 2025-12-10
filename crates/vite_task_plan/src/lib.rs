@@ -1,4 +1,6 @@
 mod envs;
+mod expand;
+mod leaf;
 
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
@@ -9,7 +11,7 @@ use petgraph::graph::DiGraph;
 use vite_path::AbsolutePath;
 use vite_shell::ParsedScript;
 use vite_str::Str;
-use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, query::TaskQuery};
+use vite_task_graph::{IndexedTaskGraph, TaskNode, TaskNodeIndex, query::TaskQuery};
 
 /// Where an execution originates from
 #[derive(Debug)]
@@ -37,7 +39,7 @@ pub enum ExecutionOrigin {
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug)]
-pub struct LeafExecution {
+pub struct LeafExecutionItem {
     /// Where this resolved command originates from
     pub origin: ExecutionOrigin,
 
@@ -51,6 +53,17 @@ pub struct LeafExecution {
     pub kind: LeafExecutionKind,
 }
 
+pub enum LeafTaskResolutionError {}
+
+impl LeafExecutionItem {
+    pub fn resolve_from_task(
+        task_node: &TaskNode,
+        context: PlanContext<'_>,
+    ) -> Result<Self, LeafTaskResolutionError> {
+        todo!()
+    }
+}
+
 /// The kind of a leaf execution
 #[derive(Debug)]
 pub enum LeafExecutionKind {
@@ -60,30 +73,65 @@ pub enum LeafExecutionKind {
     ShellScript(Str),
 }
 
-/// A group execution containing a graph of sub-executions, expanded from a parsed script, like `vite run ...` or `vite lint`.
+/// A node in the execution graph, coresponding to a task.
 #[derive(Debug)]
-pub struct GroupExecution {
-    /// The script that this group is expanded from. For displaying purpose.
-    expanded_from: ParsedScript,
+pub struct ExecutionGraphNode {
+    /// The task index in the task graph
+    pub task_index: TaskNodeIndex,
 
-    /// The expanded execution nodes in this group
-    execution_graph: DiGraph<ExecutionNode, ()>,
+    /// A task's command is splitted by `&&` and expanded into multiple execution items.
+    ///
+    /// It contains a single item if the command has no `&&`
+    pub items: Vec<ExecutionItem>,
 }
 
-/// An execution node, either a group or a resolved command
 #[derive(Debug)]
-pub enum ExecutionNode {
-    /// A group of execution nodes, expanded from a parsed script, like `vite run ...` or `vite lint`.
-    Group(GroupExecution),
-    /// A leaf execution ready, like `tsc --noEmit`.
-    Leaf(LeafExecution),
+pub enum ExecutionItemScript {
+    Parsed(ParsedScript),
+    ShellScript(Str),
 }
 
+/// An execution item, either expanded from a known vite subcommand, or a leaf execution.
+#[derive(Debug)]
+pub struct ExecutionItem {
+    /// The script that this execution item is resolved from.
+    ///
+    /// This field is for displaying purpose only. The actual execution info is in `kind`.
+    pub script: ExecutionItemScript,
+
+    /// The kind of this execution item
+    pub kind: ExecutionItemKind,
+}
+
+/// An execution item, from a splitted subcommand in a task's command (`item1 && item2 && ...`).
+#[derive(Debug)]
+pub enum ExecutionItemKind {
+    /// Expanded from a known vite subcommand, like `vite run ...` or `vite lint`.
+    Expanded(DiGraph<ExecutionGraphNode, ()>),
+    /// A normal leaf execution, like `tsc --noEmit`.
+    Leaf(LeafExecutionItem),
+}
+
+/// Callbackes needed during planning.
+/// See each method for details.
 pub trait PlanCallbacks: Debug {
     fn load_task_graph<'s>(
         &'s mut self,
     ) -> BoxFuture<'s, Result<&'s IndexedTaskGraph, vite_task_graph::TaskGraphLoadError>>;
-    fn parse_args(&mut self, program: &str, args: &[Str]) -> ParsedArgs;
+
+    /// This is called for every parsable command in order to determine how to expand it.
+    ///
+    /// `vite_task_plan` doesn't have the knowledge of how cli args should be parsed. It relies on this callback
+    ///
+    /// - If it returns `Err`, the planning will abort with the returned error.
+    /// - If it returns `Ok(None)`, the command will be spawned as a normal process.
+    /// - If it returns `Ok(Some(ParsedArgs::QueryTaskGraph)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
+    /// - If it returns `Ok(Some(ParsedArgs::Synthetic)`, the command will expanded as a `ExpandedExecution` with a task graph containing the synthetic task.
+    fn parse_into_expansion_args(
+        &mut self,
+        program: &str,
+        args: &[Str],
+    ) -> anyhow::Result<Option<ExpansionArgs>>;
 }
 
 /// The context for planning an execution from a task.
@@ -91,11 +139,12 @@ pub trait PlanCallbacks: Debug {
 pub struct PlanContext<'a> {
     pub cwd: Arc<AbsolutePath>,
     pub envs: HashMap<Str, Arc<str>>,
-    pub callbacks: &'a dyn PlanCallbacks,
+    pub callbacks: &'a mut dyn PlanCallbacks,
 }
 
+/// The parsed cli arguments for expansion.
 #[derive(Debug)]
-pub enum ParsedArgs {
+pub enum ExpansionArgs {
     QueryTaskGraph { query: TaskQuery, plan_options: PlanOptions },
     Synthetic { name: Str, extra_args: Arc<[Str]> },
 }
@@ -107,8 +156,7 @@ pub struct PlanOptions {
 
 #[derive(Debug)]
 pub struct ExecutionPlan {
-    /// The plan starts from a root group, expanded from the cli args
-    root_group: GroupExecution,
+    root_node: ExecutionItemKind,
 }
 
 pub struct Args {
@@ -116,9 +164,9 @@ pub struct Args {
 }
 
 impl ExecutionPlan {
-    pub fn root_group(&self) -> &GroupExecution {
-        &self.root_group
+    pub fn root_node(&self) -> &ExecutionItemKind {
+        &self.root_node
     }
 
-    pub async fn plan(&self, args: ParsedArgs, context: PlanContext<'_>) {}
+    pub async fn plan(&self, args: ExpansionArgs, context: PlanContext<'_>) {}
 }
