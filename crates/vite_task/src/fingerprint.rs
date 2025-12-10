@@ -122,10 +122,10 @@ impl PostRunFingerprint {
 #[cfg(test)]
 mod tests {
     use vite_path::RelativePathBuf;
+    use vite_shell::TaskParsedCommand;
     use vite_str::Str;
 
     use crate::{
-        cmd::TaskParsedCommand,
         collections::HashSet,
         config::{CommandFingerprint, ResolvedTaskConfig, TaskCommand, TaskConfig},
     };
