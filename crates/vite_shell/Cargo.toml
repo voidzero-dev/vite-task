@@ -13,7 +13,6 @@ brush-parser = { workspace = true }
 diff-struct = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 shell-escape = { workspace = true }
-thiserror = { workspace = true }
 vite_str = { workspace = true }
 
 [lints]

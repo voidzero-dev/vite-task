@@ -3146,7 +3146,6 @@ dependencies = [
  "diff-struct",
  "serde",
  "shell-escape",
- "thiserror 2.0.17",
  "vite_str",
 ]
 
@@ -3166,7 +3165,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "bincode",
- "brush-parser",
  "bstr",
  "compact_str 0.9.0",
  "dashmap",
