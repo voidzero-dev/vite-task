@@ -1,38 +1,50 @@
 mod envs;
+mod error;
 mod expand;
 mod leaf;
 
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ffi::OsStr,
+    fmt::Debug,
+    hash::Hash,
+    ops::Range,
+    sync::Arc,
+};
 
 use envs::ResolvedEnvs;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use petgraph::graph::DiGraph;
 use vite_path::AbsolutePath;
-use vite_shell::ParsedScript;
+use vite_shell::TaskParsedCommand;
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskNode, TaskNodeIndex, query::TaskQuery};
 
+/*
 /// Where an execution originates from
 #[derive(Debug)]
 pub enum ExecutionOrigin {
     /// the execution originates from the task graph (defined in `package.json` or `vite.config.*`)
-    TaskGraph {
-        /// the task index in the task graph
-        task_index: TaskNodeIndex,
-        /// the index of the subcommand in parsed script `subcommand0 && subcommand1 ...`.
-        ///
-        /// 0 if the script is not parsable.
-        subcommand: usize,
-    },
+    ///
+    /// The precise location of this execution in the task graph can be inferred by
+    /// `ExecutionGraphNode.task_index` and index of `ExecutionItem` in `ExecutionGraphNode.items`.
+    TaskGraph,
 
     /// the command originates from an synthetic command, like `oxlint ...` synthesized from `vite lint`
-    Synthetic {
-        /// the name of the synthetic command.
-        /// This is going to be part of associated task name in cache, so that a second `vite lint` can
-        /// report cache miss compared to the first one.
-        name: Str,
-    },
+    Synthetic
+}
+ */
+
+/// Resolved cache configuration for a leaf execution.
+#[derive(Debug)]
+pub struct ResolvedCacheConfig {
+    /// Environment variables that should be fingerprinted for this execution.
+    pub fingerprinted_envs: Arc<BTreeMap<Str, Arc<str>>>,
+
+    /// Environment variable names that should be passed through without values being fingerprinted.
+    /// Names are still included in the fingerprint so that changes to these names can invalidate the cache.
+    pub pass_through_envs: Arc<[Str]>,
 }
 
 /// A resolved leaf execution.
@@ -40,17 +52,21 @@ pub enum ExecutionOrigin {
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug)]
 pub struct LeafExecutionItem {
-    /// Where this resolved command originates from
-    pub origin: ExecutionOrigin,
+    /*
+        /// Where this resolved command originates from
+        pub origin: ExecutionOrigin,
+    */
+    /// Resolved cache configuration for this execution. `None` means caching is disabled.
+    pub resolved_cache_config: Option<ResolvedCacheConfig>,
 
-    /// Environment variables to set for the command
-    pub resolved_envs: ResolvedEnvs,
+    /// Environment variables to set for the command, including both fingerprinted and pass-through envs.
+    pub all_envs: Arc<HashMap<Str, Arc<str>>>,
 
     /// Current working directory
     pub cwd: Arc<AbsolutePath>,
 
     /// parsed program with args or shell script
-    pub kind: LeafExecutionKind,
+    pub command_kind: LeafCommandKind,
 }
 
 pub enum LeafTaskResolutionError {}
@@ -58,7 +74,7 @@ pub enum LeafTaskResolutionError {}
 impl LeafExecutionItem {
     pub fn resolve_from_task(
         task_node: &TaskNode,
-        context: PlanContext<'_>,
+        context: PlanContext,
     ) -> Result<Self, LeafTaskResolutionError> {
         todo!()
     }
@@ -66,7 +82,7 @@ impl LeafExecutionItem {
 
 /// The kind of a leaf execution
 #[derive(Debug)]
-pub enum LeafExecutionKind {
+pub enum LeafCommandKind {
     /// A program with args to be executed directly
     Program { program: Str, args: Arc<[Str]> },
     /// A script to be executed by os shell
@@ -85,19 +101,14 @@ pub struct ExecutionGraphNode {
     pub items: Vec<ExecutionItem>,
 }
 
-#[derive(Debug)]
-pub enum ExecutionItemScript {
-    Parsed(ParsedScript),
-    ShellScript(Str),
-}
-
 /// An execution item, either expanded from a known vite subcommand, or a leaf execution.
 #[derive(Debug)]
 pub struct ExecutionItem {
-    /// The script that this execution item is resolved from.
+    /// The range of the task command that this execution item is resolved from.
     ///
-    /// This field is for displaying purpose only. The actual execution info is in `kind`.
-    pub script: ExecutionItemScript,
+    /// This field is for displaying purpose only.
+    /// The actual execution info (if this is leaf) is in `LeafExecutionItem.command_kind`.
+    pub command_span: Range<usize>,
 
     /// The kind of this execution item
     pub kind: ExecutionItemKind,
@@ -115,37 +126,73 @@ pub enum ExecutionItemKind {
 /// Callbackes needed during planning.
 /// See each method for details.
 pub trait PlanCallbacks: Debug {
-    fn load_task_graph<'s>(
-        &'s mut self,
-    ) -> BoxFuture<'s, Result<&'s IndexedTaskGraph, vite_task_graph::TaskGraphLoadError>>;
+    fn load_task_graph<'me>(
+        &'me self,
+    ) -> BoxFuture<'me, Result<&'me IndexedTaskGraph, vite_task_graph::TaskGraphLoadError>>;
 
-    /// This is called for every parsable command in order to determine how to expand it.
+    /// This is called for every parsable command in the task graph in order to determine how to execute it.
     ///
-    /// `vite_task_plan` doesn't have the knowledge of how cli args should be parsed. It relies on this callback
+    /// `vite_task_plan` doesn't have the knowledge of how cli args should be parsed. It relies on this callback.
     ///
     /// - If it returns `Err`, the planning will abort with the returned error.
     /// - If it returns `Ok(None)`, the command will be spawned as a normal process.
-    /// - If it returns `Ok(Some(ParsedArgs::QueryTaskGraph)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
-    /// - If it returns `Ok(Some(ParsedArgs::Synthetic)`, the command will expanded as a `ExpandedExecution` with a task graph containing the synthetic task.
-    fn parse_into_expansion_args(
-        &mut self,
-        program: &str,
-        args: &[Str],
-    ) -> anyhow::Result<Option<ExpansionArgs>>;
+    /// - If it returns `Ok(Some(ParsedArgs::TaskQuery)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
+    /// - If it returns `Ok(Some(ParsedArgs::Synthetic)`, the command will become a `LeafExecution` with the synthetic task.
+    fn parse_args(&self, program: &str, args: &[Str]) -> anyhow::Result<Option<Subcommand>>;
 }
 
 /// The context for planning an execution from a task.
 #[derive(Debug)]
-pub struct PlanContext<'a> {
+pub struct PlanContext {
     pub cwd: Arc<AbsolutePath>,
-    pub envs: HashMap<Str, Arc<str>>,
-    pub callbacks: &'a mut dyn PlanCallbacks,
+    pub envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
+    pub callbacks: Arc<dyn PlanCallbacks>,
 }
 
-/// The parsed cli arguments for expansion.
+impl PlanContext {
+    /// Create a new context with additional environment variables.
+    pub fn with_envs(
+        &self,
+        envs: impl Iterator<Item = (impl AsRef<OsStr>, impl AsRef<OsStr>)>,
+    ) -> PlanContext {
+        let mut new_envs: Option<HashMap<Arc<OsStr>, Arc<OsStr>>> = None;
+        for (key, value) in envs {
+            // Clone on write
+            new_envs
+                .get_or_insert_default()
+                .insert(Arc::from(key.as_ref()), Arc::from(value.as_ref()));
+        }
+        PlanContext {
+            cwd: Arc::clone(&self.cwd),
+            envs: if let Some(new_envs) = new_envs {
+                Arc::new(new_envs)
+            } else {
+                Arc::clone(&self.envs)
+            },
+            callbacks: Arc::clone(&self.callbacks),
+        }
+    }
+}
+
+/// The command arguments indicating to run tasks queried from the task graph.
+/// For example: `vite run -r build -- arg1 arg2`
 #[derive(Debug)]
-pub enum ExpansionArgs {
-    QueryTaskGraph { query: TaskQuery, plan_options: PlanOptions },
+pub struct QueryTasksSubcommand {
+    /// The query to run against the task graph. For example: `-r build`
+    pub query: TaskQuery,
+
+    /// Other options affecting the planning process, not the task graph querying itself.
+    ///
+    /// For example: `-- arg1 arg2`
+    pub plan_options: PlanOptions,
+}
+
+/// The parsed command arguments.
+#[derive(Debug)]
+pub enum Subcommand {
+    /// The args indicate to run tasks queried from the task graph, like `vite run -r build -- arg1 arg2`.
+    QueryTasks(QueryTasksSubcommand),
+    /// The args indicate to run a synthetic task, like `vite lint`.
     Synthetic { name: Str, extra_args: Arc<[Str]> },
 }
 
@@ -168,5 +215,5 @@ impl ExecutionPlan {
         &self.root_node
     }
 
-    pub async fn plan(&self, args: ExpansionArgs, context: PlanContext<'_>) {}
+    pub async fn plan(&self, args: Subcommand, context: PlanContext) {}
 }

@@ -24,7 +24,7 @@ pub enum UserCacheConfig {
 
         /// Environment variable names to be passed to the task without fingerprinting.
         #[serde(default)] // default to empty if omitted
-        pass_through_envs: Box<[Str]>,
+        pass_through_envs: Vec<Str>,
     },
     /// Cache is disabled
     Disabled {
@@ -64,7 +64,7 @@ impl UserTaskConfig {
             cache_config: UserCacheConfig::Enabled {
                 cache: MustBe!(true),
                 envs: Box::new([]),
-                pass_through_envs: Box::new([]),
+                pass_through_envs: Vec::new(),
             },
         }
     }

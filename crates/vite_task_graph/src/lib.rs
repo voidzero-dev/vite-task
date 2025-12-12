@@ -168,6 +168,8 @@ pub struct IndexedTaskGraph {
     node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex>,
 }
 
+pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
+
 impl IndexedTaskGraph {
     /// Load the task graph from a discovered workspace using the provided config loader.
     pub async fn load(
@@ -442,7 +444,7 @@ impl IndexedTaskGraph {
         Ok(*node_index)
     }
 
-    pub fn task_graph(&self) -> &DiGraph<TaskNode, TaskDependencyType, TaskIx> {
+    pub fn task_graph(&self) -> &TaskGraph {
         &self.task_graph
     }
 

@@ -1,7 +1,8 @@
 {
   "tasks": {
     "test": {
-      "command": "echo Testing",
+      "command": "A=B C=D vite run build",
+      "envs": ["C"],
       "cache": true,
       "dependsOn": ["@test/scope-a#b#c"]
     }
