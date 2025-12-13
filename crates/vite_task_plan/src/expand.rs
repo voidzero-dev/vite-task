@@ -1,5 +1,5 @@
 use core::task;
-use std::{ffi::OsStr, sync::Arc};
+use std::{ffi::OsStr, sync::Arc, task::Context};
 
 use petgraph::graph::DiGraph;
 use vite_shell::try_parse_as_and_list;
@@ -7,7 +7,9 @@ use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskNodeIndex};
 
 use crate::{
     ExecutionGraphNode, ExecutionItem, ExecutionItemKind, LeafExecutionItem, PlanContext,
-    QueryTasksSubcommand, Subcommand, error::Error,
+    QueryTasksSubcommand, ResolvedCacheConfig, Subcommand,
+    envs::ResolvedEnvs,
+    error::{Error, TaskPlanError},
 };
 
 /*
@@ -59,28 +61,16 @@ impl ExpandedExecutionItem {
 
 */
 
-#[derive(Debug, thiserror::Error)]
-pub enum ExecutionExpansionError {
-    #[error("Failed to load task graph")]
-    TaskGraphLoadError(
-        #[source]
-        #[from]
-        vite_task_graph::TaskGraphLoadError,
-    ),
-    #[error("Failed to query tasks from task graph")]
-    TaskQueryError(
-        #[source]
-        #[from]
-        vite_task_graph::query::TaskQueryError,
-    ),
-}
-
 pub async fn resolve_task_to_execution_node(
     indexed_task_graph: &IndexedTaskGraph,
     task_node_index: TaskNodeIndex,
-    context: PlanContext,
-) -> Result<ExecutionGraphNode, Error> {
+    context: PlanContext<'_>,
+) -> Result<ExecutionGraphNode, TaskPlanError> {
     let task_node = &indexed_task_graph.task_graph()[task_node_index];
+
+    if !context.task_call_stack.insert(task_node_index) {
+        todo!("report cycle error");
+    }
 
     // TODO: variable expansion (https://crates.io/crates/shellexpand) BEFORE parsing
     let command_str = task_node.resolved_config.command.as_str();
@@ -91,37 +81,42 @@ pub async fn resolve_task_to_execution_node(
             let parsed_subcommand = context
                 .callbacks
                 .parse_args(&and_item.program, &and_item.args)
-                .map_err(|error| Error::CallbackParseArgsError {
-                    package_path: Arc::clone(
-                        indexed_task_graph.get_package_path(task_node.task_id.package_index),
-                    ),
+                .map_err(|error| TaskPlanError::CallbackParseArgsError {
                     subcommand: (&command_str[add_item_span.clone()]).into(),
                     error,
                 })?;
 
-            // Create a new context with additional envs from `ENV_VAR=value` items
-            let new_context = context
-                .with_envs(and_item.envs.iter().map(|(name, value)| (name.clone(), value.clone())));
-
             let execution_item_kind: ExecutionItemKind = match parsed_subcommand {
+                // Expand task query like `vite run -r build`
                 Some(Subcommand::QueryTasks(query_tasks_subcommand)) => {
-                    // Expand task query like `vite run -r build`
-                    let execution_graph =
-                        expand_into_execution_graph(query_tasks_subcommand, new_context).await?;
-                    ExecutionItemKind::Expanded(execution_graph)
+                    // Add envs from the prefix to the new context
+
+                    // let execution_graph =
+                    //     expand_into_execution_graph(query_tasks_subcommand, new_context).await?;
+                    // ExecutionItemKind::Expanded(execution_graph)
+                    todo!()
                 }
                 Some(Subcommand::Synthetic { name, extra_args }) => {
                     // Synthetic task, like `vite lint`
                     todo!()
                 }
                 None => {
-                    todo!()
                     // Normal 3rd party tool command (like `tsc --noEmit`)
                     // ExecutionItemKind::Leaf(LeafExecutionItem {
-                    //     resolved_envs: todo!(),
+                    //     resolved_cache_config: task_node.resolved_config.cache_config.map(
+                    //         |cache_config| ResolvedCacheConfig {
+                    //             resolved_envs: ResolvedEnvs::resolve(
+                    //                 todo!(),
+                    //                 todo!(),
+                    //                 todo!(),
+                    //                 todo!(),
+                    //             )?,
+                    //         },
+                    //     ),
                     //     cwd: Arc::clone(&new_context.cwd),
                     //     command_kind: todo!(),
                     // })
+                    todo!()
                 }
             };
             items.push(ExecutionItem { command_span: add_item_span, kind: execution_item_kind });
@@ -135,7 +130,7 @@ pub async fn resolve_task_to_execution_node(
 /// Expand the parsed command arguments (like `-r build`) into an execution graph.
 pub async fn expand_into_execution_graph(
     query_tasks_subcommand: QueryTasksSubcommand,
-    context: PlanContext,
+    context: PlanContext<'_>,
 ) -> Result<DiGraph<ExecutionGraphNode, ()>, Error> {
     let indexed_task_graph = context.callbacks.load_task_graph().await?;
 

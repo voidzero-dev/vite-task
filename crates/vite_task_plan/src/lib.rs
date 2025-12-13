@@ -1,3 +1,4 @@
+mod context;
 mod envs;
 mod error;
 mod expand;
@@ -12,6 +13,7 @@ use std::{
     sync::Arc,
 };
 
+use context::PlanContext;
 use envs::ResolvedEnvs;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
@@ -39,12 +41,8 @@ pub enum ExecutionOrigin {
 /// Resolved cache configuration for a leaf execution.
 #[derive(Debug)]
 pub struct ResolvedCacheConfig {
-    /// Environment variables that should be fingerprinted for this execution.
-    pub fingerprinted_envs: Arc<BTreeMap<Str, Arc<str>>>,
-
-    /// Environment variable names that should be passed through without values being fingerprinted.
-    /// Names are still included in the fingerprint so that changes to these names can invalidate the cache.
-    pub pass_through_envs: Arc<[Str]>,
+    /// Environment variables that are used for fingerprinting the cache.
+    pub resolved_envs: ResolvedEnvs,
 }
 
 /// A resolved leaf execution.
@@ -141,39 +139,6 @@ pub trait PlanCallbacks: Debug {
     fn parse_args(&self, program: &str, args: &[Str]) -> anyhow::Result<Option<Subcommand>>;
 }
 
-/// The context for planning an execution from a task.
-#[derive(Debug)]
-pub struct PlanContext {
-    pub cwd: Arc<AbsolutePath>,
-    pub envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
-    pub callbacks: Arc<dyn PlanCallbacks>,
-}
-
-impl PlanContext {
-    /// Create a new context with additional environment variables.
-    pub fn with_envs(
-        &self,
-        envs: impl Iterator<Item = (impl AsRef<OsStr>, impl AsRef<OsStr>)>,
-    ) -> PlanContext {
-        let mut new_envs: Option<HashMap<Arc<OsStr>, Arc<OsStr>>> = None;
-        for (key, value) in envs {
-            // Clone on write
-            new_envs
-                .get_or_insert_default()
-                .insert(Arc::from(key.as_ref()), Arc::from(value.as_ref()));
-        }
-        PlanContext {
-            cwd: Arc::clone(&self.cwd),
-            envs: if let Some(new_envs) = new_envs {
-                Arc::new(new_envs)
-            } else {
-                Arc::clone(&self.envs)
-            },
-            callbacks: Arc::clone(&self.callbacks),
-        }
-    }
-}
-
 /// The command arguments indicating to run tasks queried from the task graph.
 /// For example: `vite run -r build -- arg1 arg2`
 #[derive(Debug)]
@@ -215,5 +180,5 @@ impl ExecutionPlan {
         &self.root_node
     }
 
-    pub async fn plan(&self, args: Subcommand, context: PlanContext) {}
+    pub async fn plan(&self, args: Subcommand, context: PlanContext<'_>) {}
 }
