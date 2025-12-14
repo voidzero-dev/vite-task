@@ -8,7 +8,6 @@ use std::{
 use sha2::{Digest as _, Sha256};
 use supports_color::{Stream, on};
 use vite_glob::GlobPatternSet;
-use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::config::EnvConfig;
 
@@ -218,18 +217,11 @@ mod tests {
 
     #[test]
     fn test_force_color_auto_detection() {
-        let workspace_root = if cfg!(windows) {
-            AbsolutePath::new("C:\\workspace").unwrap()
-        } else {
-            AbsolutePath::new("/workspace").unwrap()
-        };
-
         // Test when FORCE_COLOR is not already set
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin")]);
         let env_config = create_env_config(&[], &["PATH"]);
 
-        let result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
+        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
 
         // FORCE_COLOR should be automatically added if color is supported
         // Note: This test might vary based on the test environment
@@ -245,8 +237,7 @@ mod tests {
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin"), ("FORCE_COLOR", "2")]);
         let env_config = create_env_config(&[], &["PATH", "FORCE_COLOR"]);
 
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
+        let _result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
 
         // Should contain the original FORCE_COLOR value
         assert!(all_envs.contains_key(OsStr::new("FORCE_COLOR")));
@@ -260,8 +251,7 @@ mod tests {
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin"), ("NO_COLOR", "1")]);
         let env_config = create_env_config(&[], &["PATH", "NO_COLOR"]);
 
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
+        let _result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
 
         assert!(all_envs.contains_key(OsStr::new("NO_COLOR")));
         let no_color_value = all_envs.get(OsStr::new("NO_COLOR")).unwrap();
@@ -273,8 +263,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_task_envs_stable_ordering() {
-        let workspace_root = AbsolutePath::new("/workspace").unwrap();
-
         // Create env config with multiple envs
         let env_config = create_env_config(
             &["ZEBRA_VAR", "ALPHA_VAR", "MIDDLE_VAR", "BETA_VAR", "NOT_EXISTS_VAR", "APP?_*"],
@@ -303,12 +291,9 @@ mod tests {
         let mut all_envs2 = create_test_envs(mock_envs.clone());
         let mut all_envs3 = create_test_envs(mock_envs.clone());
 
-        let result1 =
-            ResolvedEnvs::resolve(&mut all_envs1, &env_config, None, workspace_root).unwrap();
-        let result2 =
-            ResolvedEnvs::resolve(&mut all_envs2, &env_config, None, workspace_root).unwrap();
-        let result3 =
-            ResolvedEnvs::resolve(&mut all_envs3, &env_config, None, workspace_root).unwrap();
+        let result1 = ResolvedEnvs::resolve(&mut all_envs1, &env_config).unwrap();
+        let result2 = ResolvedEnvs::resolve(&mut all_envs2, &env_config).unwrap();
+        let result3 = ResolvedEnvs::resolve(&mut all_envs3, &env_config).unwrap();
 
         // Convert to vecs for comparison (BTreeMap already maintains stable ordering)
         let envs1: Vec<_> = result1.fingerprinted_envs.iter().collect();
@@ -349,8 +334,6 @@ mod tests {
     #[cfg(unix)]
     fn test_unix_env_case_sensitive() {
         // Test that Unix environment variable matching is case-sensitive
-        let workspace_root = AbsolutePath::new("/workspace").unwrap();
-
         // Create env config with envs in different cases
         let env_config = create_env_config(&["TEST_VAR", "test_var", "Test_Var"], &[]);
 
@@ -361,8 +344,7 @@ mod tests {
             ("Test_Var", "mixed"),
         ]);
 
-        let result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
+        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
         let fingerprinted_envs = &result.fingerprinted_envs;
 
         // On Unix, all three should be treated as separate variables
@@ -380,8 +362,6 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_windows_env_case_insensitive() {
-        let workspace_root = AbsolutePath::new("C:\\workspace").unwrap();
-
         let env_config = create_env_config(
             &["ZEBRA_VAR", "ALPHA_VAR", "MIDDLE_VAR", "BETA_VAR", "NOT_EXISTS_VAR", "APP?_*"],
             &["Path", "VSCODE_VAR"],
@@ -402,12 +382,9 @@ mod tests {
         let mut all_envs2 = create_test_envs(mock_envs.clone());
         let mut all_envs3 = create_test_envs(mock_envs.clone());
 
-        let result1 =
-            ResolvedEnvs::resolve(&mut all_envs1, &env_config, None, workspace_root).unwrap();
-        let result2 =
-            ResolvedEnvs::resolve(&mut all_envs2, &env_config, None, workspace_root).unwrap();
-        let result3 =
-            ResolvedEnvs::resolve(&mut all_envs3, &env_config, None, workspace_root).unwrap();
+        let result1 = ResolvedEnvs::resolve(&mut all_envs1, &env_config).unwrap();
+        let result2 = ResolvedEnvs::resolve(&mut all_envs2, &env_config).unwrap();
+        let result3 = ResolvedEnvs::resolve(&mut all_envs3, &env_config).unwrap();
 
         let envs1: Vec<_> = result1.fingerprinted_envs.iter().collect();
         let envs2: Vec<_> = result2.fingerprinted_envs.iter().collect();
@@ -439,12 +416,6 @@ mod tests {
     #[test]
     fn test_btreemap_stable_fingerprint() {
         // Verify BTreeMap produces identical ordering regardless of insertion order
-        let workspace_root = if cfg!(windows) {
-            AbsolutePath::new("C:\\workspace").unwrap()
-        } else {
-            AbsolutePath::new("/workspace").unwrap()
-        };
-
         let env_config = create_env_config(&["AAA", "ZZZ", "MMM", "BBB"], &[]);
 
         // Create envs in different orders
@@ -453,10 +424,8 @@ mod tests {
         let mut all_envs2 =
             create_test_envs(vec![("ZZZ", "z"), ("BBB", "b"), ("AAA", "a"), ("MMM", "m")]);
 
-        let result1 =
-            ResolvedEnvs::resolve(&mut all_envs1, &env_config, None, workspace_root).unwrap();
-        let result2 =
-            ResolvedEnvs::resolve(&mut all_envs2, &env_config, None, workspace_root).unwrap();
+        let result1 = ResolvedEnvs::resolve(&mut all_envs1, &env_config).unwrap();
+        let result2 = ResolvedEnvs::resolve(&mut all_envs2, &env_config).unwrap();
 
         // Both should produce identical iteration order due to BTreeMap
         let keys1: Vec<_> = result1.fingerprinted_envs.keys().collect();
@@ -469,12 +438,6 @@ mod tests {
 
     #[test]
     fn test_pass_through_envs_names_stored() {
-        let workspace_root = if cfg!(windows) {
-            AbsolutePath::new("C:\\workspace").unwrap()
-        } else {
-            AbsolutePath::new("/workspace").unwrap()
-        };
-
         let env_config = create_env_config(&["BUILD_MODE"], &["PATH", "HOME", "CI"]);
 
         let mut all_envs = create_test_envs(vec![
@@ -484,8 +447,7 @@ mod tests {
             ("CI", "true"),
         ]);
 
-        let result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
+        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
 
         // Verify pass_through_envs names are stored
         assert_eq!(result.pass_through_envs.len(), 3);
@@ -496,12 +458,6 @@ mod tests {
 
     #[test]
     fn test_all_envs_mutated_after_resolve() {
-        let workspace_root = if cfg!(windows) {
-            AbsolutePath::new("C:\\workspace").unwrap()
-        } else {
-            AbsolutePath::new("/workspace").unwrap()
-        };
-
         // Include some envs that should be filtered out
         let env_config = create_env_config(&["KEEP_THIS"], &["PASS_THROUGH"]);
 
@@ -512,8 +468,7 @@ mod tests {
             ("ANOTHER_FILTERED", "also filtered"),
         ]);
 
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
+        let _result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
 
         // all_envs should only contain fingerprinted + pass_through envs (plus auto-added ones)
         assert!(all_envs.contains_key(OsStr::new("KEEP_THIS")));
@@ -527,8 +482,6 @@ mod tests {
     fn test_error_env_value_not_valid_unicode() {
         use std::os::unix::ffi::OsStrExt;
 
-        let workspace_root = AbsolutePath::new("/workspace").unwrap();
-
         let env_config = create_env_config(&["INVALID_UTF8"], &[]);
 
         // Create invalid UTF-8 sequence
@@ -539,7 +492,7 @@ mod tests {
                 .collect(),
         );
 
-        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root);
+        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config);
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -552,12 +505,6 @@ mod tests {
 
     #[test]
     fn test_sensitive_env_hashing() {
-        let workspace_root = if cfg!(windows) {
-            AbsolutePath::new("C:\\workspace").unwrap()
-        } else {
-            AbsolutePath::new("/workspace").unwrap()
-        };
-
         // Test various sensitive patterns
         let env_config = create_env_config(
             &["API_KEY", "MY_SECRET", "AUTH_TOKEN", "DB_PASSWORD", "NORMAL_VAR"],
@@ -572,8 +519,7 @@ mod tests {
             ("NORMAL_VAR", "normal_value"),
         ]);
 
-        let result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
+        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
 
         // Sensitive envs should be hashed
         assert!(result.fingerprinted_envs.get("API_KEY").unwrap().starts_with("sha256:"));
