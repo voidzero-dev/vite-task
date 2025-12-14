@@ -17,13 +17,8 @@ pub struct TaskDispay {
 
 impl Display for TaskDispay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}#{} ({})",
-            self.package_name,
-            self.task_name,
-            self.package_path.as_path().display()
-        )
+        // TODO: give an option to display package path as well
+        write!(f, "{}#{}", self.package_name, self.task_name,)
     }
 }
 

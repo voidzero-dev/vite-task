@@ -24,6 +24,8 @@ use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_workspace::{PackageNodeIndex, WorkspaceRoot};
 
+use crate::display::TaskDispay;
+
 #[derive(Debug, Clone, Copy, Serialize)]
 enum TaskDependencyTypeInner {
     /// The dependency is explicitly declared by user in `dependsOn`.
@@ -85,28 +87,26 @@ pub enum TaskGraphLoadError {
     #[error("Failed to load package graph: {0}")]
     PackageGraphLoadError(#[from] vite_workspace::Error),
 
-    #[error("Failed to load task config file for package at {package_path:?}: {error}")]
+    #[error("Failed to load task config file for package at {package_path:?}")]
     ConfigLoadError {
+        package_path: Arc<AbsolutePath>,
         #[source]
         error: anyhow::Error,
-        package_path: Arc<AbsolutePath>,
     },
 
-    #[error("Failed to resolve task config for task {0}#{1}: {2}", package_name, task_name, error)]
+    #[error("Failed to resolve task config for task {task_display}")]
     ResolveConfigError {
+        task_display: TaskDispay,
         #[source]
         error: crate::config::ResolveTaskError,
-        package_name: Str,
-        task_name: Str,
     },
 
-    #[error("Failed to lookup dependency '{specifier}' of task {0} at {1:?}: {error}", origin_task_id.task_name, origin_task_id.task_name)]
+    #[error("Failed to lookup dependency '{specifier}' for task {task_display}")]
     DependencySpecifierLookupError {
+        specifier: Str,
+        task_display: TaskDispay,
         #[source]
         error: SpecifierLookupError,
-        specifier: Str,
-        // Where the dependency specifier is defined
-        origin_task_id: TaskId,
     },
 }
 
@@ -221,8 +221,11 @@ impl IndexedTaskGraph {
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
-                    package_name: package.package_json.name.clone(),
-                    task_name: task_name.clone(),
+                    task_display: TaskDispay {
+                        package_name: package.package_json.name.clone(),
+                        task_name: task_name.clone(),
+                        package_path: Arc::clone(&package_dir),
+                    },
                 })?;
 
                 let task_node = TaskNode { task_id, resolved_config };
@@ -293,7 +296,7 @@ impl IndexedTaskGraph {
                     .map_err(|error| TaskGraphLoadError::DependencySpecifierLookupError {
                         error,
                         specifier,
-                        origin_task_id: from_task_id.clone(),
+                        task_display: me.display_task(from_node_index),
                     })?;
                 me.task_graph.update_edge(
                     from_node_index,
