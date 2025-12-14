@@ -1,15 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    env::{self, join_paths, split_paths},
-    ffi::{OsStr, OsString},
-    path::{self, PathBuf},
+    env,
+    ffi::OsStr,
     sync::Arc,
 };
 
 use sha2::{Digest as _, Sha256};
 use supports_color::{Stream, on};
 use vite_glob::GlobPatternSet;
-use vite_path::{AbsolutePath, AbsolutePathBuf};
+use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::config::EnvConfig;
 
@@ -61,8 +60,8 @@ impl ResolvedEnvs {
     pub fn resolve(
         all_envs: &mut Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         env_config: &EnvConfig,
-        package_path: Option<&AbsolutePath>,
-        workspace_root: &AbsolutePath,
+        _package_path: Option<&AbsolutePath>,
+        _workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveEnvError> {
         // Collect all envs matching fingerpinted or pass-through envs in env_config
         *all_envs = Arc::new({
@@ -436,96 +435,6 @@ mod tests {
         );
     }
 
-    #[test]
-    #[cfg(windows)]
-    fn test_windows_path_case_insensitive_mixed_case() {
-        let workspace_root = AbsolutePath::new("C:\\workspace\\packages\\app").unwrap();
-
-        let env_config = create_env_config(&[], &["Path", "OTHER_VAR"]);
-
-        let mut all_envs =
-            create_test_envs(vec![("Path", "C:\\existing\\path"), ("OTHER_VAR", "value")]);
-
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
-
-        // Verify that the original "Path" casing is preserved, not "PATH"
-        assert!(all_envs.contains_key(OsStr::new("Path")));
-        assert!(!all_envs.contains_key(OsStr::new("PATH")));
-
-        // Verify the PATH value has node_modules/.bin prepended
-        let path_value = all_envs.get(OsStr::new("Path")).unwrap();
-        assert!(path_value.to_str().unwrap().contains("node_modules\\.bin"));
-        assert!(path_value.to_str().unwrap().contains("C:\\existing\\path"));
-
-        // Verify no duplicate PATH entry was created
-        let path_like_keys: Vec<_> = all_envs
-            .keys()
-            .filter(|k| k.to_str().map(|s| s.eq_ignore_ascii_case("path")).unwrap_or(false))
-            .collect();
-        assert_eq!(path_like_keys.len(), 1);
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_windows_path_case_insensitive_uppercase() {
-        let workspace_root = AbsolutePath::new("C:\\workspace\\packages\\app").unwrap();
-
-        let env_config = create_env_config(&[], &["PATH", "OTHER_VAR"]);
-
-        let mut all_envs =
-            create_test_envs(vec![("PATH", "C:\\existing\\path"), ("OTHER_VAR", "value")]);
-
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
-
-        // Verify the PATH value has node_modules/.bin prepended
-        let path_value = all_envs.get(OsStr::new("PATH")).unwrap();
-        assert!(path_value.to_str().unwrap().contains("node_modules\\.bin"));
-        assert!(path_value.to_str().unwrap().contains("C:\\existing\\path"));
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_windows_path_created_when_missing() {
-        let workspace_root = AbsolutePath::new("C:\\workspace\\packages\\app").unwrap();
-
-        let env_config = create_env_config(&[], &["OTHER_VAR"]);
-
-        let mut all_envs = create_test_envs(vec![("OTHER_VAR", "value")]);
-
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
-
-        // Verify PATH was created with only node_modules/.bin
-        let path_value = all_envs.get(OsStr::new("PATH")).unwrap();
-        assert!(path_value.to_str().unwrap().contains("node_modules\\.bin"));
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_unix_path_case_sensitive() {
-        let workspace_root = AbsolutePath::new("/workspace/packages/app").unwrap();
-
-        let env_config = create_env_config(&[], &["PATH", "OTHER_VAR"]);
-
-        let mut all_envs =
-            create_test_envs(vec![("PATH", "/existing/path"), ("OTHER_VAR", "value")]);
-
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
-
-        // Verify "PATH" exists and the complete value has node_modules/.bin prepended
-        let path_value = all_envs.get(OsStr::new("PATH")).unwrap();
-        let path_str = path_value.to_str().unwrap();
-        assert!(path_str.contains("node_modules/.bin"));
-        assert!(path_str.contains("/existing/path"));
-
-        // Verify that on Unix, the code uses exact "PATH" match (case-sensitive)
-        assert!(!all_envs.contains_key(OsStr::new("Path")));
-        assert!(!all_envs.contains_key(OsStr::new("path")));
-    }
-
     // ============================================
     // New tests for changed/new logic
     // ============================================
@@ -589,84 +498,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
-    fn test_package_path_equals_workspace_root() {
-        // When package_path == workspace_root, only one node_modules/.bin should be added
-        let workspace_root = AbsolutePath::new("/workspace").unwrap();
-        let package_path = AbsolutePath::new("/workspace").unwrap();
-
-        let env_config = create_env_config(&[], &["PATH"]);
-
-        let mut all_envs = create_test_envs(vec![("PATH", "/existing/path")]);
-
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, Some(package_path), workspace_root)
-                .unwrap();
-
-        let path_value = all_envs.get(OsStr::new("PATH")).unwrap();
-        let path_str = path_value.to_str().unwrap();
-
-        // Should only contain one node_modules/.bin entry (workspace root)
-        let node_modules_count = path_str.matches("node_modules/.bin").count();
-        assert_eq!(
-            node_modules_count, 1,
-            "Should have exactly one node_modules/.bin when package_path == workspace_root"
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_package_path_different_from_workspace_root() {
-        // When paths differ, both node_modules/.bin paths should be added
-        let workspace_root = AbsolutePath::new("/workspace").unwrap();
-        let package_path = AbsolutePath::new("/workspace/packages/app").unwrap();
-
-        let env_config = create_env_config(&[], &["PATH"]);
-
-        let mut all_envs = create_test_envs(vec![("PATH", "/existing/path")]);
-
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, Some(package_path), workspace_root)
-                .unwrap();
-
-        let path_value = all_envs.get(OsStr::new("PATH")).unwrap();
-        let path_str = path_value.to_str().unwrap();
-
-        // Should contain two node_modules/.bin entries
-        let node_modules_count = path_str.matches("node_modules/.bin").count();
-        assert_eq!(node_modules_count, 2, "Should have two node_modules/.bin when paths differ");
-
-        // Package path should come before workspace path
-        let package_pos = path_str.find("/workspace/packages/app/node_modules/.bin");
-        let workspace_pos = path_str.find("/workspace/node_modules/.bin");
-        assert!(package_pos.is_some());
-        assert!(workspace_pos.is_some());
-        assert!(package_pos.unwrap() < workspace_pos.unwrap(), "Package path should come first");
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_package_path_none() {
-        // When package_path is None, only workspace_root/node_modules/.bin should be added
-        let workspace_root = AbsolutePath::new("/workspace").unwrap();
-
-        let env_config = create_env_config(&[], &["PATH"]);
-
-        let mut all_envs = create_test_envs(vec![("PATH", "/existing/path")]);
-
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
-
-        let path_value = all_envs.get(OsStr::new("PATH")).unwrap();
-        let path_str = path_value.to_str().unwrap();
-
-        // Should contain only workspace root's node_modules/.bin
-        assert!(path_str.contains("/workspace/node_modules/.bin"));
-        let node_modules_count = path_str.matches("node_modules/.bin").count();
-        assert_eq!(node_modules_count, 1);
-    }
-
-    #[test]
     fn test_all_envs_mutated_after_resolve() {
         let workspace_root = if cfg!(windows) {
             AbsolutePath::new("C:\\workspace").unwrap()
@@ -720,28 +551,6 @@ mod tests {
             }
             other => panic!("Expected EnvValueIsNotValidUnicode, got {:?}", other),
         }
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_prepend_paths_removes_duplicates() {
-        let workspace_root = AbsolutePath::new("/workspace").unwrap();
-
-        let env_config = create_env_config(&[], &["PATH"]);
-
-        // PATH already contains the node_modules/.bin path
-        let mut all_envs =
-            create_test_envs(vec![("PATH", "/workspace/node_modules/.bin:/other/path")]);
-
-        let _result =
-            ResolvedEnvs::resolve(&mut all_envs, &env_config, None, workspace_root).unwrap();
-
-        let path_value = all_envs.get(OsStr::new("PATH")).unwrap();
-        let path_str = path_value.to_str().unwrap();
-
-        // Should only have one occurrence of node_modules/.bin (duplicates removed)
-        let node_modules_count = path_str.matches("/workspace/node_modules/.bin").count();
-        assert_eq!(node_modules_count, 1, "Duplicate paths should be removed");
     }
 
     #[test]
