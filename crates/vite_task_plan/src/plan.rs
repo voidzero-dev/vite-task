@@ -4,8 +4,9 @@ use vite_shell::try_parse_as_and_list;
 use vite_task_graph::TaskNodeIndex;
 
 use crate::{
-    ExecutionItem, ExecutionItemKind, PlanContext, ResolvedCacheConfig, SpawnCommandKind,
-    SpawnExecutionItem, TaskExecution,
+    ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, ResolvedCacheConfig,
+    SpawnCommandKind, SpawnExecution, TaskExecution,
+    builtin::get_builtin_execution,
     envs::ResolvedEnvs,
     error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
@@ -41,9 +42,10 @@ pub fn plan_task_as_execution_node(
     // TODO: variable expansion (https://crates.io/crates/shellexpand) BEFORE parsing
     let command_str = task_node.resolved_config.command.as_str();
 
+    let mut items = Vec::<ExecutionItem>::new();
+
     // Try to parse the command string as a list of subcommands separated by `&&`
     if let Some(parsed_subcommands) = try_parse_as_and_list(command_str) {
-        let mut items = Vec::<ExecutionItem>::with_capacity(parsed_subcommands.len());
         for (and_item, add_item_span) in parsed_subcommands {
             // Duplicate the context before modifying it for each and_item
             let mut context = context.duplicate();
@@ -51,6 +53,17 @@ pub fn plan_task_as_execution_node(
 
             // Add prefix envs to the context
             context.add_envs(and_item.envs.iter());
+
+            // Check for builtin commands like `echo ...`
+            if let Some(builtin_execution) =
+                get_builtin_execution(&and_item.program, and_item.args.iter())
+            {
+                items.push(ExecutionItem {
+                    command_span: add_item_span,
+                    kind: ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(builtin_execution)),
+                });
+                continue;
+            }
 
             // Try to parse the args of an and_item to a task request like `run -r build`
             let task_request = context
@@ -84,7 +97,7 @@ pub fn plan_task_as_execution_node(
                                 .with_task_call_stack(&context)?;
                         resolved_cache_config = Some(ResolvedCacheConfig { resolved_envs });
                     }
-                    ExecutionItemKind::Spawn(SpawnExecutionItem {
+                    ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(SpawnExecution {
                         all_envs: Arc::new(all_envs.into_owned()),
                         resolved_cache_config,
                         cwd: Arc::clone(&task_node.resolved_config.cwd),
@@ -92,7 +105,7 @@ pub fn plan_task_as_execution_node(
                             program: and_item.program,
                             args: and_item.args.into(),
                         },
-                    })
+                    }))
                 }
             };
             items.push(ExecutionItem { command_span: add_item_span, kind: execution_item_kind });
@@ -100,7 +113,7 @@ pub fn plan_task_as_execution_node(
     } else {
     }
 
-    todo!()
+    Ok(TaskExecution { task_node_index, items })
 }
 
 /// Expand the parsed task request (like `run -r build`/`exec tsc`/`lint`) into an execution graph.

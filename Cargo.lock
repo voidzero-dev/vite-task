@@ -3233,6 +3233,7 @@ name = "vite_task_plan"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "derive_more",
  "futures-core",
  "futures-util",
  "indexmap",

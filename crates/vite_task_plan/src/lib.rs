@@ -1,10 +1,11 @@
+mod builtin;
 mod context;
 mod envs;
 mod error;
 mod execution_graph;
-mod expand;
 mod leaf;
 mod path_env;
+mod plan;
 pub mod task_request;
 
 use std::{
@@ -55,7 +56,7 @@ pub struct ResolvedCacheConfig {
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug)]
-pub struct SpawnExecutionItem {
+pub struct SpawnExecution {
     /*
         /// Where this resolved command originates from
         pub origin: ExecutionOrigin,
@@ -86,7 +87,7 @@ pub enum SpawnCommandKind {
 #[derive(Debug)]
 pub struct TaskExecution {
     /// The task index in the task graph
-    pub task_index: TaskNodeIndex,
+    pub task_node_index: TaskNodeIndex,
 
     /// A task's command is splitted by `&&` and expanded into multiple execution items.
     ///
@@ -107,14 +108,33 @@ pub struct ExecutionItem {
     pub kind: ExecutionItemKind,
 }
 
+pub struct InProcessExecutionOutput {
+    pub stdout: Vec<u8>,
+    // stderr, exit code, etc can be added later
+}
+
+#[derive(derive_more::Debug)]
+pub struct InProcessExecution {
+    #[debug(skip)]
+    func: Box<dyn FnOnce() -> BoxFuture<'static, InProcessExecutionOutput> + Send + Sync>,
+}
+
+/// The kind of a leaf execution item, which cannot be expanded further.
+#[derive(Debug)]
+pub enum LeafExecutionKind {
+    /// The execution is a spawn of a child process
+    Spawn(SpawnExecution),
+    /// The execution is an in-process function call
+    InProcess(InProcessExecution),
+}
+
 /// An execution item, from a splitted subcommand in a task's command (`item1 && item2 && ...`).
 #[derive(Debug)]
 pub enum ExecutionItemKind {
     /// Expanded from a known vite subcommand, like `vite run ...` or `vite lint`.
     Expanded(ExecutionGraph),
     /// A normal execution that spawns a child process, like `tsc --noEmit`.
-    Spawn(SpawnExecutionItem),
-    // In-process function calling execution may be added here in the future.
+    Leaf(LeafExecutionKind),
 }
 
 /// Callbackes needed during planning.

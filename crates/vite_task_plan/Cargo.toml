@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+derive_more = { workspace = true, features = ["debug"] }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
 indexmap = { workspace = true }
