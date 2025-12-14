@@ -20,7 +20,7 @@ pub struct ResolvedEnvs {
     /// Environment variables that should be fingerprinted for this execution.
     ///
     /// Use `BTreeMap` to ensure stable order.
-    pub fingerprinted_envs: Arc<BTreeMap<Str, Arc<str>>>,
+    pub fingerprinted_envs: BTreeMap<Str, Arc<str>>,
 
     /// Environment variable names that should be passed through without values being fingerprinted.
     ///
@@ -118,7 +118,7 @@ impl ResolvedEnvs {
         }
 
         Ok(Self {
-            fingerprinted_envs: Arc::new(fingerprinted_envs),
+            fingerprinted_envs,
             // Save pass_through_envs names as-is, so any changes to it will invalidate the cache
             pass_through_envs: Arc::clone(&env_config.pass_through_envs),
         })

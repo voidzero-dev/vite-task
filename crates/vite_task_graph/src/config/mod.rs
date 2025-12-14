@@ -55,7 +55,7 @@ pub enum ResolveTaskError {
 
 impl ResolvedUserTaskConfig {
     pub fn resolve_package_json_script(
-        package_dir: &AbsolutePath,
+        package_dir: &Arc<AbsolutePath>,
         package_json_script: &str,
     ) -> Self {
         Self::resolve(
@@ -69,7 +69,7 @@ impl ResolvedUserTaskConfig {
     /// Resolves from user config, package dir, and package.json script (if any).
     pub fn resolve(
         user_config: UserTaskConfig,
-        package_dir: &AbsolutePath,
+        package_dir: &Arc<AbsolutePath>,
         package_json_script: Option<&str>,
     ) -> Result<Self, ResolveTaskError> {
         let command = match (&user_config.command, package_json_script) {
@@ -78,7 +78,11 @@ impl ResolvedUserTaskConfig {
             (Some(cmd), None) => cmd.as_ref(),
             (None, Some(script)) => script,
         };
-        let cwd = package_dir.join(user_config.cwd_relative_to_package);
+        let cwd: Arc<AbsolutePath> = if user_config.cwd_relative_to_package.as_str().is_empty() {
+            Arc::clone(package_dir)
+        } else {
+            package_dir.join(user_config.cwd_relative_to_package).into()
+        };
         let cache_config = match user_config.cache_config {
             UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
             UserCacheConfig::Enabled { cache: MustBe!(true), envs, mut pass_through_envs } => {
@@ -91,7 +95,7 @@ impl ResolvedUserTaskConfig {
                 })
             }
         };
-        Ok(Self { command: command.into(), cwd: cwd.into(), cache_config })
+        Ok(Self { command: command.into(), cwd, cache_config })
     }
 }
 

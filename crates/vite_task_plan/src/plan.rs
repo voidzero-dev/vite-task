@@ -1,7 +1,14 @@
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+    ffi::OsStr,
+    sync::Arc,
+};
 
+use vite_path::AbsolutePath;
 use vite_shell::try_parse_as_and_list;
-use vite_task_graph::TaskNodeIndex;
+use vite_str::Str;
+use vite_task_graph::{TaskNodeIndex, config::ResolvedUserTaskConfig};
 
 use crate::{
     ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, ResolvedCacheConfig,
@@ -10,7 +17,7 @@ use crate::{
     envs::ResolvedEnvs,
     error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
-    task_request::{QueryTaskRequest, TaskRequest},
+    task_request::{QueryTaskRequest, SyntheticTaskRequest, TaskRequest},
 };
 
 pub fn plan_task_as_execution_node(
@@ -51,9 +58,6 @@ pub fn plan_task_as_execution_node(
             let mut context = context.duplicate();
             context.push_stack_frame(task_node_index, add_item_span.clone());
 
-            // Add prefix envs to the context
-            context.add_envs(and_item.envs.iter());
-
             // Check for builtin commands like `echo ...`
             if let Some(builtin_execution) =
                 get_builtin_execution(&and_item.program, and_item.args.iter())
@@ -75,8 +79,10 @@ pub fn plan_task_as_execution_node(
             let execution_item_kind: ExecutionItemKind = match task_request {
                 // Expand task query like `vite run -r build`
                 Some(TaskRequest::Query(query_task_request)) => {
+                    // Add prefix envs to the context
+                    context.add_envs(and_item.envs.iter());
                     let execution_graph =
-                        plan_task_request_as_execution_graph(query_task_request, context)?;
+                        plan_query_task_request_as_execution_graph(query_task_request, context)?;
                     ExecutionItemKind::Expanded(execution_graph)
                 }
                 // Synthetic task, like `vite lint`
@@ -85,39 +91,88 @@ pub fn plan_task_as_execution_node(
                 }
                 // Normal 3rd party tool command (like `tsc --noEmit`)
                 None => {
-                    // all envs available in the current context, wrapped in Cow to allow mutation by cache configs.
-                    let mut all_envs = Cow::Borrowed(context.envs());
-
-                    let mut resolved_cache_config = None;
-                    if let Some(cache_config) = &task_node.resolved_config.cache_config {
-                        // Resolve envs according cache configs
-                        let resolved_envs =
-                            ResolvedEnvs::resolve(all_envs.to_mut(), &cache_config.env_config)
-                                .map_err(TaskPlanErrorKind::ResolveEnvError)
-                                .with_task_call_stack(&context)?;
-                        resolved_cache_config = Some(ResolvedCacheConfig { resolved_envs });
-                    }
-                    ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(SpawnExecution {
-                        all_envs: Arc::new(all_envs.into_owned()),
-                        resolved_cache_config,
-                        cwd: Arc::clone(&task_node.resolved_config.cwd),
-                        command_kind: SpawnCommandKind::Program {
+                    let spawn_execution = plan_spawn_execution(
+                        &and_item.envs,
+                        SpawnCommandKind::Program {
                             program: and_item.program,
                             args: and_item.args.into(),
                         },
-                    }))
+                        &task_node.resolved_config,
+                        context,
+                    )?;
+                    ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
             };
             items.push(ExecutionItem { command_span: add_item_span, kind: execution_item_kind });
         }
     } else {
+        let spawn_execution = plan_spawn_execution(
+            &BTreeMap::new(),
+            SpawnCommandKind::ShellScript(command_str.into()),
+            &task_node.resolved_config,
+            context,
+        )?;
+        items.push(ExecutionItem {
+            command_span: 0..command_str.len(),
+            kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
+        });
     }
 
     Ok(TaskExecution { task_node_index, items })
 }
 
+pub fn plan_synthetic_task_request_as_spawn_execution(
+    synthetic_task_request: SyntheticTaskRequest,
+) -> Result<SpawnExecution, Error> {
+    todo!()
+    // let resolved_config =
+    //     ResolvedUserTaskConfig::resolve(synthetic_task_request.user_config, &cwd, None)
+    //         .expect("Command conflict/missing for synthetic task should never happen");
+
+    //     SpawnExecution {
+
+    //     }
+    // todo!()
+}
+
+fn plan_spawn_execution(
+    prefix_envs: &BTreeMap<Str, Str>,
+    command_kind: SpawnCommandKind,
+    resolved_config: &ResolvedUserTaskConfig,
+    context: PlanContext<'_>,
+) -> Result<SpawnExecution, Error> {
+    // all envs available in the current context
+    let mut all_envs = context.envs().clone();
+
+    let mut resolved_cache_config = None;
+    if let Some(cache_config) = &resolved_config.cache_config {
+        // Resolve envs according cache configs
+        let mut resolved_envs = ResolvedEnvs::resolve(&mut all_envs, &cache_config.env_config)
+            .map_err(TaskPlanErrorKind::ResolveEnvError)
+            .with_task_call_stack(&context)?;
+
+        // Add prefix envs to fingerprinted envs
+        resolved_envs
+            .fingerprinted_envs
+            .extend(prefix_envs.iter().map(|(name, value)| (name.clone(), value.as_str().into())));
+        resolved_cache_config = Some(ResolvedCacheConfig { resolved_envs });
+    }
+
+    // Add prefix envs to all envs
+    all_envs.extend(prefix_envs.iter().map(|(name, value)| {
+        (OsStr::new(name.as_str()).into(), OsStr::new(value.as_str()).into())
+    }));
+
+    Ok(SpawnExecution {
+        all_envs: Arc::new(all_envs),
+        resolved_cache_config,
+        cwd: Arc::clone(&resolved_config.cwd),
+        command_kind,
+    })
+}
+
 /// Expand the parsed task request (like `run -r build`/`exec tsc`/`lint`) into an execution graph.
-pub fn plan_task_request_as_execution_graph(
+pub fn plan_query_task_request_as_execution_graph(
     query_task_request: QueryTaskRequest,
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {
