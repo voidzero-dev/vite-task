@@ -119,6 +119,23 @@ pub async fn resolve_task_to_execution_node(
                     todo!()
                 }
                 None => {
+                    // let resolved_cache_config = task_node.resolved_config.cache_config.map(
+                    //     |cache_config| ResolvedCacheConfig {
+                    //         resolved_envs: ResolvedEnvs::resolve(
+                    //             &cache_config.resolved_envs,
+                    //             &context.all_envs,
+                    //             &context.cwd,
+                    //             &context.indexed_task_graph(),
+                    //         )
+                    //         .map_err(|error| TaskPlanErrorKind::ResolveCacheConfigEnvError {
+                    //             task_display: context
+                    //                 .indexed_task_graph()
+                    //                 .display_task(task_node_index),
+                    //             source: error,
+                    //         })
+                    //         .with_task_call_stack(&context)?,
+                    //     },
+                    // );
                     // Normal 3rd party tool command (like `tsc --noEmit`)
                     // ExecutionItemKind::Leaf(LeafExecutionItem {
                     //     resolved_cache_config: task_node.resolved_config.cache_config.map(
@@ -155,8 +172,10 @@ pub async fn expand_into_execution_graph(
     let indexed_task_graph = context.indexed_task_graph();
 
     // Query matching tasks from the task graph
-    let task_node_index_graph =
-        indexed_task_graph.query_tasks(query_tasks_subcommand.query).unwrap();
+    let task_node_index_graph = indexed_task_graph
+        .query_tasks(query_tasks_subcommand.query)
+        .map_err(TaskPlanErrorKind::TaskQueryError)
+        .with_task_call_stack(&context)?;
 
     let task_graph = indexed_task_graph.task_graph();
     for (from_task_index, to_task_index, ()) in task_node_index_graph.all_edges() {

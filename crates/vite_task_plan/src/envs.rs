@@ -54,14 +54,11 @@ impl ResolvedEnvs {
     /// Before the call, `all_envs` is expected to contain all available envs.
     /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + pass_through).
     ///
-    /// node_modules/.bin under package and workspace root will be added to PATH env.
-    ///
-    /// `package_path` can be `None` if the task is not associated with any package (e.g. synthetic tasks).
+    /// `should_also_fingerprint` is a callback to determine additional envs to fingerprint.
+    /// It's for prefix envs in the command, which are always fingerprinted even if not declared in `env_config`.
     pub fn resolve(
         all_envs: &mut Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         env_config: &EnvConfig,
-        _package_path: Option<&AbsolutePath>,
-        _workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveEnvError> {
         // Collect all envs matching fingerpinted or pass-through envs in env_config
         *all_envs = Arc::new({
