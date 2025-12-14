@@ -3,6 +3,7 @@ mod envs;
 mod error;
 mod expand;
 mod leaf;
+mod path_env;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -124,10 +125,6 @@ pub enum ExecutionItemKind {
 /// Callbackes needed during planning.
 /// See each method for details.
 pub trait PlanCallbacks: Debug {
-    fn load_task_graph<'me>(
-        &'me self,
-    ) -> BoxFuture<'me, Result<&'me IndexedTaskGraph, vite_task_graph::TaskGraphLoadError>>;
-
     /// This is called for every parsable command in the task graph in order to determine how to execute it.
     ///
     /// `vite_task_plan` doesn't have the knowledge of how cli args should be parsed. It relies on this callback.

@@ -1,4 +1,5 @@
 pub mod config;
+pub mod display;
 pub mod loader;
 mod package_graph;
 pub mod query;
@@ -156,6 +157,7 @@ pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 ///
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
 /// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
+#[derive(Debug)]
 pub struct IndexedTaskGraph {
     task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
 

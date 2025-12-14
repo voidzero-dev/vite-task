@@ -49,44 +49,6 @@ pub enum ResolveEnvError {
         join_paths_error: env::JoinPathsError,
     },
 }
-
-fn prepend_paths(
-    envs: &mut HashMap<Arc<OsStr>, Arc<OsStr>>,
-    new_paths: &[impl AsRef<AbsolutePath>],
-) -> Result<(), env::JoinPathsError> {
-    // Add node_modules/.bin to PATH
-    // On Windows, environment variable names are case-insensitive (e.g., "PATH", "Path", "path" are all the same)
-    // However, Rust's HashMap keys are case-sensitive, so we need to find the existing PATH variable
-    // regardless of its casing to avoid creating duplicate PATH entries with different casings.
-    // For example, if the system has "Path", we should use that instead of creating a new "PATH" entry.
-    let env_path = {
-        if cfg!(windows)
-            && let Some(existing_path) = envs.iter_mut().find_map(|(name, value)| {
-                if name.eq_ignore_ascii_case("path") { Some(value) } else { None }
-            })
-        {
-            // Found existing PATH variable (with any casing), use it
-            existing_path
-        } else {
-            // On Unix or no existing PATH on Windows, create/get "PATH" entry
-            envs.entry(Arc::from(OsStr::new("PATH")))
-                .or_insert_with(|| Arc::<OsStr>::from(OsStr::new("")))
-        }
-    };
-
-    let existing_paths = split_paths(env_path);
-    let paths = new_paths
-        .iter()
-        .map(|path| path.as_ref().to_absolute_path_buf().into_path_buf()) // Prepend new paths
-        .chain(existing_paths.filter(
-            // and remove duplicates
-            |path| new_paths.iter().all(|new_path| path != new_path.as_ref().as_path()),
-        ));
-
-    *env_path = join_paths(paths)?.into();
-    Ok(())
-}
-
 impl ResolvedEnvs {
     /// Resolves from all available envs and env config.
     ///
@@ -135,18 +97,6 @@ impl ResolvedEnvs {
                     Arc::<OsStr>::from(OsStr::new(force_color_value)),
                 );
             }
-
-            // Prepend package/node_modules/.bin and workspace/node_modules/.bin to PATH
-            prepend_paths(&mut new_all_envs, &{
-                let mut node_modules_bin_paths: Vec<AbsolutePathBuf> = vec![];
-                if let Some(package_path) = package_path
-                    && package_path != workspace_root
-                {
-                    node_modules_bin_paths.push(package_path.join("node_modules").join(".bin"));
-                }
-                node_modules_bin_paths.push(workspace_root.join("node_modules").join(".bin"));
-                node_modules_bin_paths
-            })?;
             new_all_envs
         });
 
