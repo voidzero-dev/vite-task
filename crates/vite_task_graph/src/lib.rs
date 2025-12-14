@@ -457,4 +457,9 @@ impl IndexedTaskGraph {
     pub fn get_package_path(&self, package_index: PackageNodeIndex) -> &Arc<AbsolutePath> {
         &self.indexed_package_graph.package_graph()[package_index].absolute_path
     }
+
+    pub fn get_package_path_for_task(&self, task_index: TaskNodeIndex) -> &Arc<AbsolutePath> {
+        let task_node = &self.task_graph[task_index];
+        self.get_package_path(task_node.task_id.package_index)
+    }
 }

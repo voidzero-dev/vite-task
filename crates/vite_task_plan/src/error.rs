@@ -1,11 +1,10 @@
-use std::{env::JoinPathsError, sync::Arc};
+use std::env::JoinPathsError;
 
-use vite_path::AbsolutePath;
-use vite_str::Str;
-use vite_task_graph::{TaskNodeIndex, display::TaskDispay};
+use vite_task_graph::display::TaskDispay;
 
-use crate::context::{
-    PlanContext, TaskCallStackDisplay, TaskCallStackFrameDisplay, TaskCycleError,
+use crate::{
+    context::{PlanContext, TaskCallStackDisplay, TaskCycleError},
+    envs::ResolveEnvError,
 };
 
 /// Errors that can occur when planning a specific execution from a task .
@@ -28,8 +27,8 @@ pub enum TaskPlanErrorKind {
     #[error(transparent)]
     TaskCycleDetected(#[from] TaskCycleError),
 
-    #[error("Failed to parse command")]
-    CallbackParseArgsError {
+    #[error("Failed to parse command as task request")]
+    ParseAsTaskRequestError {
         #[source]
         error: anyhow::Error,
     },
@@ -43,6 +42,9 @@ pub enum TaskPlanErrorKind {
         #[source]
         join_paths_error: JoinPathsError,
     },
+
+    #[error("Failed to resolve environment variables")]
+    ResolveEnvError(#[source] ResolveEnvError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -54,14 +56,16 @@ pub struct Error {
     kind: TaskPlanErrorKind,
 }
 
-pub trait TaskPlanErrorKindResultExt {
+pub(crate) trait TaskPlanErrorKindResultExt {
     type Ok;
+    /// Attach the current task call stack from the planning context to the error.
     fn with_task_call_stack(self, context: &PlanContext<'_>) -> Result<Self::Ok, Error>;
 }
 
 impl<T> TaskPlanErrorKindResultExt for Result<T, TaskPlanErrorKind> {
     type Ok = T;
 
+    /// Attach the current task call stack from the planning context to the error.
     fn with_task_call_stack(self, context: &PlanContext<'_>) -> Result<T, Error> {
         match self {
             Ok(value) => Ok(value),

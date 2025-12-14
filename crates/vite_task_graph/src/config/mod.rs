@@ -23,7 +23,7 @@ pub struct ResolvedUserTaskConfig {
     pub command: Str,
 
     /// The working directory for the task
-    pub cwd: AbsolutePathBuf,
+    pub cwd: Arc<AbsolutePath>,
 
     /// Cache-related config. None means caching is disabled.
     pub cache_config: Option<CacheConfig>,
@@ -91,7 +91,7 @@ impl ResolvedUserTaskConfig {
                 })
             }
         };
-        Ok(Self { command: command.into(), cwd, cache_config })
+        Ok(Self { command: command.into(), cwd: cwd.into(), cache_config })
     }
 }
 

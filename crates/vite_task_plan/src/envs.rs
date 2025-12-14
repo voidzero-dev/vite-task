@@ -39,28 +39,18 @@ pub enum ResolveEnvError {
 
     #[error("Env value is not valid unicode: {key} = {value:?}")]
     EnvValueIsNotValidUnicode { key: Str, value: Arc<OsStr> },
-
-    #[error("Failed to join paths for PATH env")]
-    JoinPathsError {
-        #[source]
-        #[from]
-        join_paths_error: env::JoinPathsError,
-    },
 }
 impl ResolvedEnvs {
     /// Resolves from all available envs and env config.
     ///
     /// Before the call, `all_envs` is expected to contain all available envs.
     /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + pass_through).
-    ///
-    /// `should_also_fingerprint` is a callback to determine additional envs to fingerprint.
-    /// It's for prefix envs in the command, which are always fingerprinted even if not declared in `env_config`.
     pub fn resolve(
-        all_envs: &mut Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
+        all_envs: &mut HashMap<Arc<OsStr>, Arc<OsStr>>,
         env_config: &EnvConfig,
     ) -> Result<Self, ResolveEnvError> {
         // Collect all envs matching fingerpinted or pass-through envs in env_config
-        *all_envs = Arc::new({
+        *all_envs = {
             let mut new_all_envs = resolve_envs_with_patterns(
                 all_envs.iter(),
                 &env_config
@@ -93,7 +83,7 @@ impl ResolvedEnvs {
                 );
             }
             new_all_envs
-        });
+        };
 
         // Resolve fingerprinted envs
         let mut fingerprinted_envs = BTreeMap::<Str, Arc<str>>::new();
@@ -197,13 +187,11 @@ mod tests {
 
     use super::*;
 
-    fn create_test_envs(pairs: Vec<(&str, &str)>) -> Arc<HashMap<Arc<OsStr>, Arc<OsStr>>> {
-        Arc::new(
-            pairs
-                .into_iter()
-                .map(|(k, v)| (Arc::from(OsStr::new(k)), Arc::from(OsStr::new(v))))
-                .collect(),
-        )
+    fn create_test_envs(pairs: Vec<(&str, &str)>) -> HashMap<Arc<OsStr>, Arc<OsStr>> {
+        pairs
+            .into_iter()
+            .map(|(k, v)| (Arc::from(OsStr::new(k)), Arc::from(OsStr::new(v))))
+            .collect()
     }
 
     fn create_env_config(fingerprinted: &[&str], pass_through: &[&str]) -> EnvConfig {
@@ -486,11 +474,10 @@ mod tests {
 
         // Create invalid UTF-8 sequence
         let invalid_utf8 = OsStr::from_bytes(&[0xff, 0xfe]);
-        let mut all_envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>> = Arc::new(
+        let mut all_envs: HashMap<Arc<OsStr>, Arc<OsStr>> =
             [(Arc::from(OsStr::new("INVALID_UTF8")), Arc::from(invalid_utf8))]
                 .into_iter()
-                .collect(),
-        );
+                .collect();
 
         let result = ResolvedEnvs::resolve(&mut all_envs, &env_config);
 

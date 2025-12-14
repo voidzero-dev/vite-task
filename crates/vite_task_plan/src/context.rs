@@ -105,7 +105,7 @@ impl<'a> PlanContext<'a> {
         Ok(())
     }
 
-    pub fn indexed_task_graph(&self) -> &IndexedTaskGraph {
+    pub fn indexed_task_graph(&self) -> &'a IndexedTaskGraph {
         self.indexed_task_graph
     }
 

@@ -1,9 +1,11 @@
 mod context;
 mod envs;
 mod error;
+mod execution_graph;
 mod expand;
 mod leaf;
 mod path_env;
+pub mod task_request;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -19,10 +21,13 @@ use envs::ResolvedEnvs;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use petgraph::graph::DiGraph;
+use task_request::TaskRequest;
 use vite_path::AbsolutePath;
 use vite_shell::TaskParsedCommand;
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskNode, TaskNodeIndex, query::TaskQuery};
+
+use crate::execution_graph::ExecutionGraph;
 
 /*
 /// Where an execution originates from
@@ -39,18 +44,18 @@ pub enum ExecutionOrigin {
 }
  */
 
-/// Resolved cache configuration for a leaf execution.
+/// Resolved cache configuration for a spawn execution.
 #[derive(Debug)]
 pub struct ResolvedCacheConfig {
     /// Environment variables that are used for fingerprinting the cache.
     pub resolved_envs: ResolvedEnvs,
 }
 
-/// A resolved leaf execution.
+/// A resolved spawn execution.
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug)]
-pub struct LeafExecutionItem {
+pub struct SpawnExecutionItem {
     /*
         /// Where this resolved command originates from
         pub origin: ExecutionOrigin,
@@ -59,38 +64,27 @@ pub struct LeafExecutionItem {
     pub resolved_cache_config: Option<ResolvedCacheConfig>,
 
     /// Environment variables to set for the command, including both fingerprinted and pass-through envs.
-    pub all_envs: Arc<HashMap<Str, Arc<str>>>,
+    pub all_envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
 
     /// Current working directory
     pub cwd: Arc<AbsolutePath>,
 
     /// parsed program with args or shell script
-    pub command_kind: LeafCommandKind,
+    pub command_kind: SpawnCommandKind,
 }
 
-pub enum LeafTaskResolutionError {}
-
-impl LeafExecutionItem {
-    pub fn resolve_from_task(
-        task_node: &TaskNode,
-        context: PlanContext,
-    ) -> Result<Self, LeafTaskResolutionError> {
-        todo!()
-    }
-}
-
-/// The kind of a leaf execution
+/// The kind of a spawn command
 #[derive(Debug)]
-pub enum LeafCommandKind {
+pub enum SpawnCommandKind {
     /// A program with args to be executed directly
     Program { program: Str, args: Arc<[Str]> },
-    /// A script to be executed by os shell
+    /// A script to be executed by os shell (sh or cmd)
     ShellScript(Str),
 }
 
-/// A node in the execution graph, coresponding to a task.
+/// Represents how a task should be executed. It's the node type for the execution graph. Each node corresponds to a task.
 #[derive(Debug)]
-pub struct ExecutionGraphNode {
+pub struct TaskExecution {
     /// The task index in the task graph
     pub task_index: TaskNodeIndex,
 
@@ -100,13 +94,13 @@ pub struct ExecutionGraphNode {
     pub items: Vec<ExecutionItem>,
 }
 
-/// An execution item, either expanded from a known vite subcommand, or a leaf execution.
+/// An execution item, either expanded from a known vite subcommand, or a spawn execution.
 #[derive(Debug)]
 pub struct ExecutionItem {
     /// The range of the task command that this execution item is resolved from.
     ///
     /// This field is for displaying purpose only.
-    /// The actual execution info (if this is leaf) is in `LeafExecutionItem.command_kind`.
+    /// The actual execution info (if this is spawn) is in `SpawnExecutionItem.command_kind`.
     pub command_span: Range<usize>,
 
     /// The kind of this execution item
@@ -117,9 +111,10 @@ pub struct ExecutionItem {
 #[derive(Debug)]
 pub enum ExecutionItemKind {
     /// Expanded from a known vite subcommand, like `vite run ...` or `vite lint`.
-    Expanded(DiGraph<ExecutionGraphNode, ()>),
-    /// A normal leaf execution, like `tsc --noEmit`.
-    Leaf(LeafExecutionItem),
+    Expanded(ExecutionGraph),
+    /// A normal execution that spawns a child process, like `tsc --noEmit`.
+    Spawn(SpawnExecutionItem),
+    // In-process function calling execution may be added here in the future.
 }
 
 /// Callbackes needed during planning.
@@ -132,35 +127,12 @@ pub trait PlanCallbacks: Debug {
     /// - If it returns `Err`, the planning will abort with the returned error.
     /// - If it returns `Ok(None)`, the command will be spawned as a normal process.
     /// - If it returns `Ok(Some(ParsedArgs::TaskQuery)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
-    /// - If it returns `Ok(Some(ParsedArgs::Synthetic)`, the command will become a `LeafExecution` with the synthetic task.
-    fn parse_args(&self, program: &str, args: &[Str]) -> anyhow::Result<Option<Subcommand>>;
-}
-
-/// The command arguments indicating to run tasks queried from the task graph.
-/// For example: `vite run -r build -- arg1 arg2`
-#[derive(Debug)]
-pub struct QueryTasksSubcommand {
-    /// The query to run against the task graph. For example: `-r build`
-    pub query: TaskQuery,
-
-    /// Other options affecting the planning process, not the task graph querying itself.
-    ///
-    /// For example: `-- arg1 arg2`
-    pub plan_options: PlanOptions,
-}
-
-/// The parsed command arguments.
-#[derive(Debug)]
-pub enum Subcommand {
-    /// The args indicate to run tasks queried from the task graph, like `vite run -r build -- arg1 arg2`.
-    QueryTasks(QueryTasksSubcommand),
-    /// The args indicate to run a synthetic task, like `vite lint`.
-    Synthetic { name: Str, extra_args: Arc<[Str]> },
-}
-
-#[derive(Debug)]
-pub struct PlanOptions {
-    pub extra_args: Arc<[Str]>,
+    /// - If it returns `Ok(Some(ParsedArgs::Synthetic)`, the command will become a `SpawnExecution` with the synthetic task.
+    fn parse_as_task_request(
+        &self,
+        program: &str,
+        args: &[Str],
+    ) -> anyhow::Result<Option<TaskRequest>>;
 }
 
 #[derive(Debug)]
@@ -177,5 +149,5 @@ impl ExecutionPlan {
         &self.root_node
     }
 
-    pub async fn plan(&self, args: Subcommand, context: PlanContext<'_>) {}
+    pub async fn plan(context: PlanContext<'_>) {}
 }

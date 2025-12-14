@@ -1,73 +1,21 @@
-use core::task;
-use std::{collections::HashMap, ffi::OsStr, sync::Arc, task::Context};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
-use petgraph::graph::DiGraph;
 use vite_shell::try_parse_as_and_list;
-use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskNodeIndex};
+use vite_task_graph::TaskNodeIndex;
 
 use crate::{
-    ExecutionGraphNode, ExecutionItem, ExecutionItemKind, LeafExecutionItem, PlanContext,
-    QueryTasksSubcommand, ResolvedCacheConfig, Subcommand,
+    ExecutionItem, ExecutionItemKind, PlanContext, ResolvedCacheConfig, SpawnCommandKind,
+    SpawnExecutionItem, TaskExecution,
     envs::ResolvedEnvs,
     error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
+    execution_graph::{ExecutionGraph, ExecutionNodeIndex},
+    task_request::{QueryTaskRequest, TaskRequest},
 };
 
-/*
-
-
-#[derive(Debug, thiserror::Error)]
-pub enum ExecutionExpansionError {
-    #[error("Failed to load task graph")]
-    TaskGraphLoadError(
-        #[source]
-        #[from]
-        vite_task_graph::TaskGraphLoadError,
-    ),
-    #[error("Failed to query tasks from task graph")]
-    TaskQueryError(
-        #[source]
-        #[from]
-        vite_task_graph::query::TaskQueryError,
-    ),
-}
-
-impl ExpandedExecutionItem {
-    pub async fn expand_from(
-        parsed_args: ExpansionArgs,
-        context: PlanContext<'_>,
-    ) -> Result<Self, ExecutionExpansionError> {
-        match parsed_args {
-            ExpansionArgs::QueryTaskGraph { query, plan_options: _ } => {
-                // Load the task graph
-                let indexed_task_graph = context.callbacks.load_task_graph().await?;
-
-                // Expand the task query into execution graph
-                let task_execution_graph = indexed_task_graph.query_tasks(query)?;
-
-                // Resolve each task node into execution nodes
-                let task_graph = indexed_task_graph.task_graph();
-                for (from_task_index, to_task_index, ()) in task_execution_graph.all_edges() {
-                    let from_task = &task_graph[from_task_index];
-                    let to_task = &task_graph[to_task_index];
-                }
-            }
-            ExpansionArgs::Synthetic { name, extra_args } => {
-                todo!()
-            }
-        }
-        todo!()
-    }
-}
-
-*/
-
-pub async fn resolve_task_to_execution_node(
-    indexed_task_graph: &IndexedTaskGraph,
+pub fn plan_task_as_execution_node(
     task_node_index: TaskNodeIndex,
     mut context: PlanContext<'_>,
-) -> Result<ExecutionGraphNode, Error> {
-    let task_node = &indexed_task_graph.task_graph()[task_node_index];
-
+) -> Result<TaskExecution, Error> {
     // Check for cycles in the task call stack.
     context
         .check_cycle(task_node_index)
@@ -75,21 +23,25 @@ pub async fn resolve_task_to_execution_node(
         .with_task_call_stack(&context)?;
 
     // Prepend {package_path}/node_modules/.bin to PATH
+    let package_node_modules_bin_path = context
+        .indexed_task_graph()
+        .get_package_path_for_task(task_node_index)
+        .join("node_modules")
+        .join(".bin");
     context
-        .prepend_path(
-            &indexed_task_graph
-                .get_package_path(task_node.task_id.package_index)
-                .join("node_modules")
-                .join(".bin"),
-        )
+        .prepend_path(&package_node_modules_bin_path)
         .map_err(|join_paths_error| TaskPlanErrorKind::AddNodeModulesBinPathError {
             task_display: context.indexed_task_graph().display_task(task_node_index),
             join_paths_error,
         })
         .with_task_call_stack(&context)?;
 
+    let task_node = &context.indexed_task_graph().task_graph()[task_node_index];
+
     // TODO: variable expansion (https://crates.io/crates/shellexpand) BEFORE parsing
     let command_str = task_node.resolved_config.command.as_str();
+
+    // Try to parse the command string as a list of subcommands separated by `&&`
     if let Some(parsed_subcommands) = try_parse_as_and_list(command_str) {
         let mut items = Vec::<ExecutionItem>::with_capacity(parsed_subcommands.len());
         for (and_item, add_item_span) in parsed_subcommands {
@@ -100,58 +52,47 @@ pub async fn resolve_task_to_execution_node(
             // Add prefix envs to the context
             context.add_envs(and_item.envs.iter());
 
-            // Try to parse the args of an and_item to known vite subcommands like `run -r build`
-            let parsed_subcommand = context
+            // Try to parse the args of an and_item to a task request like `run -r build`
+            let task_request = context
                 .callbacks()
-                .parse_args(&and_item.program, &and_item.args)
-                .map_err(|error| TaskPlanErrorKind::CallbackParseArgsError { error })
+                .parse_as_task_request(&and_item.program, &and_item.args)
+                .map_err(|error| TaskPlanErrorKind::ParseAsTaskRequestError { error })
                 .with_task_call_stack(&context)?;
 
-            let execution_item_kind: ExecutionItemKind = match parsed_subcommand {
+            let execution_item_kind: ExecutionItemKind = match task_request {
                 // Expand task query like `vite run -r build`
-                Some(Subcommand::QueryTasks(query_tasks_subcommand)) => {
+                Some(TaskRequest::Query(query_task_request)) => {
                     let execution_graph =
-                        expand_into_execution_graph(query_tasks_subcommand, context).await?;
+                        plan_task_request_as_execution_graph(query_task_request, context)?;
                     ExecutionItemKind::Expanded(execution_graph)
                 }
-                Some(Subcommand::Synthetic { name, extra_args }) => {
-                    // Synthetic task, like `vite lint`
+                // Synthetic task, like `vite lint`
+                Some(TaskRequest::Synthetic(synthetic_task_request)) => {
                     todo!()
                 }
+                // Normal 3rd party tool command (like `tsc --noEmit`)
                 None => {
-                    // let resolved_cache_config = task_node.resolved_config.cache_config.map(
-                    //     |cache_config| ResolvedCacheConfig {
-                    //         resolved_envs: ResolvedEnvs::resolve(
-                    //             &cache_config.resolved_envs,
-                    //             &context.all_envs,
-                    //             &context.cwd,
-                    //             &context.indexed_task_graph(),
-                    //         )
-                    //         .map_err(|error| TaskPlanErrorKind::ResolveCacheConfigEnvError {
-                    //             task_display: context
-                    //                 .indexed_task_graph()
-                    //                 .display_task(task_node_index),
-                    //             source: error,
-                    //         })
-                    //         .with_task_call_stack(&context)?,
-                    //     },
-                    // );
-                    // Normal 3rd party tool command (like `tsc --noEmit`)
-                    // ExecutionItemKind::Leaf(LeafExecutionItem {
-                    //     resolved_cache_config: task_node.resolved_config.cache_config.map(
-                    //         |cache_config| ResolvedCacheConfig {
-                    //             resolved_envs: ResolvedEnvs::resolve(
-                    //                 todo!(),
-                    //                 todo!(),
-                    //                 todo!(),
-                    //                 todo!(),
-                    //             )?,
-                    //         },
-                    //     ),
-                    //     cwd: Arc::clone(&new_context.cwd),
-                    //     command_kind: todo!(),
-                    // })
-                    todo!()
+                    // all envs available in the current context, wrapped in Cow to allow mutation by cache configs.
+                    let mut all_envs = Cow::Borrowed(context.envs());
+
+                    let mut resolved_cache_config = None;
+                    if let Some(cache_config) = &task_node.resolved_config.cache_config {
+                        // Resolve envs according cache configs
+                        let resolved_envs =
+                            ResolvedEnvs::resolve(all_envs.to_mut(), &cache_config.env_config)
+                                .map_err(TaskPlanErrorKind::ResolveEnvError)
+                                .with_task_call_stack(&context)?;
+                        resolved_cache_config = Some(ResolvedCacheConfig { resolved_envs });
+                    }
+                    ExecutionItemKind::Spawn(SpawnExecutionItem {
+                        all_envs: Arc::new(all_envs.into_owned()),
+                        resolved_cache_config,
+                        cwd: Arc::clone(&task_node.resolved_config.cwd),
+                        command_kind: SpawnCommandKind::Program {
+                            program: and_item.program,
+                            args: and_item.args.into(),
+                        },
+                    })
                 }
             };
             items.push(ExecutionItem { command_span: add_item_span, kind: execution_item_kind });
@@ -159,30 +100,46 @@ pub async fn resolve_task_to_execution_node(
     } else {
     }
 
-    // context.task_call_stack.pop();
-
     todo!()
 }
 
-/// Expand the parsed command arguments (like `-r build`) into an execution graph.
-pub async fn expand_into_execution_graph(
-    query_tasks_subcommand: QueryTasksSubcommand,
+/// Expand the parsed task request (like `run -r build`/`exec tsc`/`lint`) into an execution graph.
+pub fn plan_task_request_as_execution_graph(
+    query_task_request: QueryTaskRequest,
     mut context: PlanContext<'_>,
-) -> Result<DiGraph<ExecutionGraphNode, ()>, Error> {
-    let indexed_task_graph = context.indexed_task_graph();
-
+) -> Result<ExecutionGraph, Error> {
     // Query matching tasks from the task graph
-    let task_node_index_graph = indexed_task_graph
-        .query_tasks(query_tasks_subcommand.query)
+    let task_node_index_graph = context
+        .indexed_task_graph()
+        .query_tasks(query_task_request.query)
         .map_err(TaskPlanErrorKind::TaskQueryError)
         .with_task_call_stack(&context)?;
 
-    let task_graph = indexed_task_graph.task_graph();
-    for (from_task_index, to_task_index, ()) in task_node_index_graph.all_edges() {
-        let from_task = &task_graph[from_task_index];
-        let to_task = &task_graph[to_task_index];
+    let mut execution_node_indices_by_task_index =
+        HashMap::<TaskNodeIndex, ExecutionNodeIndex>::with_capacity(
+            task_node_index_graph.node_count(),
+        );
+
+    let mut execution_graph = ExecutionGraph::with_capacity(
+        task_node_index_graph.node_count(),
+        task_node_index_graph.edge_count(),
+    );
+
+    // Plan each task node as execution nodes
+    for task_index in task_node_index_graph.nodes() {
+        let task_execution = plan_task_as_execution_node(task_index, context.duplicate())?;
+        execution_node_indices_by_task_index
+            .insert(task_index, execution_graph.add_node(task_execution));
     }
 
-    // Subcommand::Synthetic { name, extra_args } => {}
-    todo!()
+    // Add edges between execution nodes according to task dependencies
+    for (from_task_index, to_task_index, ()) in task_node_index_graph.all_edges() {
+        execution_graph.add_edge(
+            execution_node_indices_by_task_index[&from_task_index],
+            execution_node_indices_by_task_index[&to_task_index],
+            (),
+        );
+    }
+
+    Ok(execution_graph)
 }
