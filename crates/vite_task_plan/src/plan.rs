@@ -24,10 +24,10 @@ async fn plan_task_as_execution_node(
     task_node_index: TaskNodeIndex,
     mut context: PlanContext<'_>,
 ) -> Result<TaskExecution, Error> {
-    // Check for cycles in the task call stack.
+    // Check for recursions in the task call stack.
     context
-        .check_cycle(task_node_index)
-        .map_err(TaskPlanErrorKind::TaskCycleDetected)
+        .check_recursion(task_node_index)
+        .map_err(TaskPlanErrorKind::TaskRecursionDetected)
         .with_plan_context(&context)?;
 
     // Prepend {package_path}/node_modules/.bin to PATH

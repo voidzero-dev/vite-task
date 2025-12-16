@@ -9,13 +9,11 @@ use crate::{PlanCallbacks, path_env::prepend_path_env};
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "Detected a cycle in task call stack, from the {0}th frame to the end", cycle_start + 1
+    "Detected a recursion in task call stack: the last frame calls the {0}th frame", recursion_point + 1
 )]
-pub struct TaskCycleError {
-    /// The index in `task_call_stack` where the cycle starts
-    ///
-    /// The cycle ends at the end of `task_call_stack`.
-    cycle_start: usize,
+pub struct TaskRecursionError {
+    /// The index in `task_call_stack` where the last frame recurses to.
+    recursion_point: usize,
 }
 
 /// The context for planning an execution from a task.
@@ -93,12 +91,15 @@ impl<'a> PlanContext<'a> {
         }
     }
 
-    /// Check if adding the given task node index would create a cycle in the call stack.
-    pub fn check_cycle(&self, task_node_index: TaskNodeIndex) -> Result<(), TaskCycleError> {
-        if let Some(cycle_start) =
+    /// Check if adding the given task node index would create a recursion in the call stack.
+    pub fn check_recursion(
+        &self,
+        task_node_index: TaskNodeIndex,
+    ) -> Result<(), TaskRecursionError> {
+        if let Some(recursion_start) =
             self.task_call_stack.iter().position(|(idx, _)| *idx == task_node_index)
         {
-            return Err(TaskCycleError { cycle_start });
+            return Err(TaskRecursionError { recursion_point: recursion_start });
         }
         Ok(())
     }
@@ -139,49 +140,3 @@ impl<'a> PlanContext<'a> {
         }
     }
 }
-//     pub fn enter_package(&mut self, package_path: Arc<AbsolutePath>) -> Result<PlanContext<'_>, PackageCycleError> {
-//         Ok(PlanContext {
-//             cwd: package_path,
-//             envs: Arc::clone(&self.envs),
-//             callbacks: self.callbacks,
-//             stack: self.stack,
-//         })
-//     }
-
-//     /// Create a new context with new frame.
-//     ///
-//     /// Returns `None` if the new frame already exists in the stack (to prevent infinite recursion).
-//     pub fn with_new_frame<R>(
-//         &mut self,
-//         new_frame: PlanStackFrame,
-//         envs: impl Iterator<Item = (impl AsRef<OsStr>, impl AsRef<OsStr>)>,
-//         cwd: Arc<AbsolutePath>,
-//         f: impl FnOnce(PlanContext<'_>) -> R,
-//     ) -> Option<R> {
-//         // IndexSet::insert returns `false` and doesn't touch the set if the item already exists.
-//         if !self.stack.insert(new_frame) {
-//             return None;
-//         }
-//         // Merge envs
-//         let mut new_envs: Option<HashMap<Arc<OsStr>, Arc<OsStr>>> = None;
-//         for (key, value) in envs {
-//             // Clone on write
-//             new_envs
-//                 .get_or_insert_with(|| self.envs.as_ref().clone())
-//                 .insert(Arc::from(key.as_ref()), Arc::from(value.as_ref()));
-//         }
-
-//         let ret = f(PlanContext {
-//             cwd,
-//             envs: if let Some(new_envs) = new_envs {
-//                 Arc::new(new_envs)
-//             } else {
-//                 Arc::clone(&self.envs)
-//             },
-//             callbacks: self.callbacks,
-//             stack: self.stack,
-//         });
-//         self.stack.pop().expect("stack pop should succeed");
-//         Some(ret)
-//     }
-// }

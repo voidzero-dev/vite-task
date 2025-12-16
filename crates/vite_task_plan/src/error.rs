@@ -3,7 +3,7 @@ use std::env::JoinPathsError;
 use vite_task_graph::display::TaskDisplay;
 
 use crate::{
-    context::{PlanContext, TaskCallStackDisplay, TaskCycleError},
+    context::{PlanContext, TaskCallStackDisplay, TaskRecursionError},
     envs::ResolveEnvError,
 };
 
@@ -25,7 +25,7 @@ pub enum TaskPlanErrorKind {
     ),
 
     #[error(transparent)]
-    TaskCycleDetected(#[from] TaskCycleError),
+    TaskRecursionDetected(#[from] TaskRecursionError),
 
     #[error("Invalid vite task command")]
     ParsePlanRequestError {
