@@ -11,7 +11,7 @@ pub struct PlanOptions {
 }
 
 #[derive(Debug)]
-pub struct QueryTaskRequest {
+pub struct QueryPlanRequest {
     /// The query to run against the task graph. For example: `-r build`
     pub query: TaskQuery,
 
@@ -24,7 +24,7 @@ pub struct QueryTaskRequest {
 /// The request to run a synthetic task, like `vite lint` or `vite exec ...`
 /// Synthetic tasks are not defined in the task graph, but are generated on-the-fly.
 #[derive(Debug)]
-pub struct SyntheticTaskRequest {
+pub struct SyntheticPlanRequest {
     /// The command to execute in the synthetic task.
     pub command_kind: SpawnCommandKind,
 
@@ -32,8 +32,8 @@ pub struct SyntheticTaskRequest {
 }
 
 #[derive(Debug)]
-pub enum TaskRequest {
+pub enum PlanRequest {
     /// The request to run tasks queried from the task graph, like `vite run ...` or `vite run-many ...`.
-    Query(QueryTaskRequest),
-    Synthetic(SyntheticTaskRequest),
+    Query(QueryPlanRequest),
+    Synthetic(SyntheticPlanRequest),
 }

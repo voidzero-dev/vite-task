@@ -27,8 +27,8 @@ pub enum TaskPlanErrorKind {
     #[error(transparent)]
     TaskCycleDetected(#[from] TaskCycleError),
 
-    #[error("Failed to parse command as task request")]
-    ParseAsTaskRequestError {
+    #[error("Invalid vite task command")]
+    ParsePlanRequestError {
         #[source]
         error: anyhow::Error,
     },

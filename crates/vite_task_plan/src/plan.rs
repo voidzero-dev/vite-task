@@ -17,7 +17,7 @@ use crate::{
     error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
     in_process::InProcessExecution,
-    task_request::{QueryTaskRequest, SyntheticTaskRequest, TaskRequest},
+    plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest},
 };
 
 pub fn plan_task_as_execution_node(
@@ -73,12 +73,12 @@ pub fn plan_task_as_execution_node(
             let task_request = context
                 .callbacks()
                 .parse_as_task_request(&and_item.program, &and_item.args)
-                .map_err(|error| TaskPlanErrorKind::ParseAsTaskRequestError { error })
+                .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError { error })
                 .with_task_call_stack(&context)?;
 
             let execution_item_kind: ExecutionItemKind = match task_request {
                 // Expand task query like `vite run -r build`
-                Some(TaskRequest::Query(query_task_request)) => {
+                Some(PlanRequest::Query(query_task_request)) => {
                     // Add prefix envs to the context
                     context.add_envs(and_item.envs.iter());
                     let execution_graph =
@@ -86,7 +86,7 @@ pub fn plan_task_as_execution_node(
                     ExecutionItemKind::Expanded(execution_graph)
                 }
                 // Synthetic task, like `vite lint`
-                Some(TaskRequest::Synthetic(synthetic_task_request)) => {
+                Some(PlanRequest::Synthetic(synthetic_task_request)) => {
                     todo!()
                 }
                 // Normal 3rd party tool command (like `tsc --noEmit`)
@@ -122,7 +122,8 @@ pub fn plan_task_as_execution_node(
 }
 
 pub fn plan_synthetic_task_request_as_spawn_execution(
-    synthetic_task_request: SyntheticTaskRequest,
+    synthetic_task_request: SyntheticPlanRequest,
+    cwd: &Arc<AbsolutePath>,
 ) -> Result<SpawnExecution, Error> {
     let resolved_config =
         ResolvedUserTaskConfig::resolve(synthetic_task_request.user_config, &cwd, None)
@@ -172,7 +173,7 @@ fn plan_spawn_execution(
 
 /// Expand the parsed task request (like `run -r build`/`exec tsc`/`lint`) into an execution graph.
 pub fn plan_query_task_request_as_execution_graph(
-    query_task_request: QueryTaskRequest,
+    query_task_request: QueryPlanRequest,
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {
     // Query matching tasks from the task graph

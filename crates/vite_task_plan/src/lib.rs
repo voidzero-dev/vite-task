@@ -6,7 +6,7 @@ mod in_process;
 mod leaf;
 mod path_env;
 mod plan;
-pub mod task_request;
+pub mod plan_request;
 
 use std::{collections::HashMap, ffi::OsStr, fmt::Debug, ops::Range, sync::Arc};
 
@@ -14,7 +14,7 @@ use context::PlanContext;
 use envs::ResolvedEnvs;
 use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
-use task_request::TaskRequest;
+use plan_request::PlanRequest;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskNodeIndex, query::TaskQuery};
@@ -130,7 +130,7 @@ pub trait PlanCallbacks: Debug {
         &self,
         program: &str,
         args: &[Str],
-    ) -> anyhow::Result<Option<TaskRequest>>;
+    ) -> anyhow::Result<Option<PlanRequest>>;
 }
 
 #[derive(Debug)]
