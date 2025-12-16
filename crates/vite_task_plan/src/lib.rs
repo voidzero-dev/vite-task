@@ -147,5 +147,5 @@ impl ExecutionPlan {
         &self.root_node
     }
 
-    pub async fn plan(context: PlanContext<'_>) {}
+    pub async fn plan(plan_request: PlanRequest, cwd: &Arc<AbsolutePath>) {}
 }

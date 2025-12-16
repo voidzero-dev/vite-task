@@ -8,12 +8,12 @@ use std::{
 use vite_path::AbsolutePath;
 use vite_shell::try_parse_as_and_list;
 use vite_str::Str;
-use vite_task_graph::{TaskNodeIndex, config::ResolvedUserTaskConfig};
+use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskConfig};
 
 use crate::{
     ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, ResolvedCacheConfig,
     SpawnCommandKind, SpawnExecution, TaskExecution,
-    envs::ResolvedEnvs,
+    envs::{self, ResolvedEnvs},
     error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
     in_process::InProcessExecution,
@@ -82,7 +82,7 @@ pub fn plan_task_as_execution_node(
                     // Add prefix envs to the context
                     context.add_envs(and_item.envs.iter());
                     let execution_graph =
-                        plan_query_task_request_as_execution_graph(query_task_request, context)?;
+                        plan_query_request_as_execution_graph(query_task_request, context)?;
                     ExecutionItemKind::Expanded(execution_graph)
                 }
                 // Synthetic task, like `vite lint`
@@ -121,12 +121,13 @@ pub fn plan_task_as_execution_node(
     Ok(TaskExecution { task_node_index, items })
 }
 
-pub fn plan_synthetic_task_request_as_spawn_execution(
+pub fn plan_synthetic_request_as_spawn_execution(
     synthetic_task_request: SyntheticPlanRequest,
     cwd: &Arc<AbsolutePath>,
+    envs: &BTreeMap<Arc<OsStr>, Arc<OsStr>>,
 ) -> Result<SpawnExecution, Error> {
     let resolved_config =
-        ResolvedUserTaskConfig::resolve(synthetic_task_request.user_config, &cwd, None)
+        ResolvedTaskConfig::resolve(synthetic_task_request.user_config, &cwd, None)
             .expect("Command conflict/missing for synthetic task should never happen");
 
     // SpawnExecution {
@@ -138,14 +139,14 @@ pub fn plan_synthetic_task_request_as_spawn_execution(
 fn plan_spawn_execution(
     prefix_envs: &BTreeMap<Str, Str>,
     command_kind: SpawnCommandKind,
-    resolved_config: &ResolvedUserTaskConfig,
+    resolved_config: &ResolvedTaskConfig,
     context: PlanContext<'_>,
 ) -> Result<SpawnExecution, Error> {
     // all envs available in the current context
     let mut all_envs = context.envs().clone();
 
     let mut resolved_cache_config = None;
-    if let Some(cache_config) = &resolved_config.cache_config {
+    if let Some(cache_config) = &resolved_config.resolved_options.cache_config {
         // Resolve envs according cache configs
         let mut resolved_envs = ResolvedEnvs::resolve(&mut all_envs, &cache_config.env_config)
             .map_err(TaskPlanErrorKind::ResolveEnvError)
@@ -166,13 +167,13 @@ fn plan_spawn_execution(
     Ok(SpawnExecution {
         all_envs: Arc::new(all_envs),
         resolved_cache_config,
-        cwd: Arc::clone(&resolved_config.cwd),
+        cwd: Arc::clone(&resolved_config.resolved_options.cwd),
         command_kind,
     })
 }
 
 /// Expand the parsed task request (like `run -r build`/`exec tsc`/`lint`) into an execution graph.
-pub fn plan_query_task_request_as_execution_graph(
+pub fn plan_query_request_as_execution_graph(
     query_task_request: QueryPlanRequest,
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {

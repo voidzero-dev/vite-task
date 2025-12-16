@@ -66,7 +66,13 @@ fn snapshot_task_graph(
         node_snapshots.push(TaskNodeSnapshot {
             id: TaskIdSnapshot::new(task_index, base_dir, indexed_task_graph),
             command: task_node.resolved_config.command.clone(),
-            cwd: task_node.resolved_config.cwd.strip_prefix(base_dir).unwrap().unwrap(),
+            cwd: task_node
+                .resolved_config
+                .resolved_options
+                .cwd
+                .strip_prefix(base_dir)
+                .unwrap()
+                .unwrap(),
             depends_on,
         });
     }

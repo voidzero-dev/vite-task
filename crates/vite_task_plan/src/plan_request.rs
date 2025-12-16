@@ -35,5 +35,6 @@ pub struct SyntheticPlanRequest {
 pub enum PlanRequest {
     /// The request to run tasks queried from the task graph, like `vite run ...` or `vite run-many ...`.
     Query(QueryPlanRequest),
+    /// The request to run a synthetic task (not defined in the task graph), like `vite lint` or `vite exec ...`.
     Synthetic(SyntheticPlanRequest),
 }

@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use config::{ResolvedUserTaskConfig, UserConfigFile};
+use config::{ResolvedTaskConfig, UserConfigFile};
 use package_graph::IndexedPackageGraph;
 use petgraph::{
     graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
@@ -79,7 +79,7 @@ pub struct TaskNode {
     /// whereas `task_id` is for looking up the task.
     ///
     /// However, it does not contain external factors like additional args from cli and env vars.
-    pub resolved_config: ResolvedUserTaskConfig,
+    pub resolved_config: ResolvedTaskConfig,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -98,7 +98,7 @@ pub enum TaskGraphLoadError {
     ResolveConfigError {
         task_display: TaskDispay,
         #[source]
-        error: crate::config::ResolveTaskError,
+        error: crate::config::ResolveTaskConfigError,
     },
 
     #[error("Failed to lookup dependency '{specifier}' for task {task_display}")]
@@ -211,10 +211,10 @@ impl IndexedTaskGraph {
 
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
-                let dependency_specifiers = Arc::clone(&task_user_config.depends_on);
+                let dependency_specifiers = Arc::clone(&task_user_config.options.depends_on);
 
                 // Resolve the task configuration combining vite.config.* and package.json script
-                let resolved_config = ResolvedUserTaskConfig::resolve(
+                let resolved_config = ResolvedTaskConfig::resolve(
                     task_user_config,
                     &package_dir,
                     package_json_script,
@@ -238,7 +238,7 @@ impl IndexedTaskGraph {
             // For remaining package.json scripts not defined in vite.config.*, create tasks with default config
             for (script_name, package_json_script) in package_json_scripts.drain() {
                 let task_id = TaskId { task_name: Str::from(script_name), package_index };
-                let resolved_config = ResolvedUserTaskConfig::resolve_package_json_script(
+                let resolved_config = ResolvedTaskConfig::resolve_package_json_script(
                     &package_dir,
                     package_json_script,
                 );

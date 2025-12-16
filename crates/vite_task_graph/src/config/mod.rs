@@ -7,6 +7,8 @@ pub use user::{UserCacheConfig, UserConfigFile, UserTaskConfig};
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 
+use crate::config::user::UserTaskOptions;
+
 /// Task configuration resolved from `package.json` scripts and/or `vite.config.ts` tasks,
 /// without considering external factors like additional args from cli or environment variables.
 ///
@@ -16,68 +18,28 @@ use vite_str::Str;
 /// For example, `cwd` is resolved to absolute ones (no external factor can change it),
 /// but `command` is not parsed into program and args yet because environment variables in it may need to be expanded.
 ///
-/// `depends_on` is not included here because it's represented in the task graph.
+/// `depends_on` is not included here because it's represented by the edges of the task graph.
 #[derive(Debug)]
-pub struct ResolvedUserTaskConfig {
-    /// The command to run for this task
+pub struct ResolvedTaskConfig {
+    /// The command to run for this task, as a raw string.
+    ///
+    /// The command may contain environment variables that need to be expanded later.
     pub command: Str,
 
+    pub resolved_options: ResolvedTaskOptions,
+}
+
+#[derive(Debug)]
+pub struct ResolvedTaskOptions {
     /// The working directory for the task
     pub cwd: Arc<AbsolutePath>,
-
     /// Cache-related config. None means caching is disabled.
     pub cache_config: Option<CacheConfig>,
 }
 
-#[derive(Debug)]
-pub struct CacheConfig {
-    pub env_config: EnvConfig,
-}
-
-#[derive(Debug)]
-pub struct EnvConfig {
-    /// environment variable names to be fingerprinted and passed to the task, with defaults populated
-    pub fingerprinted_envs: HashSet<Str>,
-    /// environment variable names to be passed to the task without fingerprinting, with defaults populated
-    pub pass_through_envs: Arc<[Str]>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ResolveTaskError {
-    /// Both package.json script and vite.config.* task define commands for the task
-    #[error("Both package.json script and vite.config.* task define commands for the task")]
-    CommandConflict,
-
-    /// Neither package.json script nor vite.config.* task define a command for the task
-    #[error("Neither package.json script nor vite.config.* task define a command for the task")]
-    NoCommand,
-}
-
-impl ResolvedUserTaskConfig {
-    pub fn resolve_package_json_script(
-        package_dir: &Arc<AbsolutePath>,
-        package_json_script: &str,
-    ) -> Self {
-        Self::resolve(
-            UserTaskConfig::package_json_script_default(),
-            package_dir,
-            Some(package_json_script),
-        )
-        .expect("Command conflict/missing for package.json script should never happen")
-    }
-
-    /// Resolves from user config, package dir, and package.json script (if any).
-    pub fn resolve(
-        user_config: UserTaskConfig,
-        package_dir: &Arc<AbsolutePath>,
-        package_json_script: Option<&str>,
-    ) -> Result<Self, ResolveTaskError> {
-        let command = match (&user_config.command, package_json_script) {
-            (Some(_), Some(_)) => return Err(ResolveTaskError::CommandConflict),
-            (None, None) => return Err(ResolveTaskError::NoCommand),
-            (Some(cmd), None) => cmd.as_ref(),
-            (None, Some(script)) => script,
-        };
+impl ResolvedTaskOptions {
+    /// Resolves from user config, package dir
+    pub fn resolve(user_config: UserTaskOptions, package_dir: &Arc<AbsolutePath>) -> Self {
         let cwd: Arc<AbsolutePath> = if user_config.cwd_relative_to_package.as_str().is_empty() {
             Arc::clone(package_dir)
         } else {
@@ -95,7 +57,62 @@ impl ResolvedUserTaskConfig {
                 })
             }
         };
-        Ok(Self { command: command.into(), cwd, cache_config })
+        Self { cwd, cache_config }
+    }
+}
+
+#[derive(Debug)]
+pub struct CacheConfig {
+    pub env_config: EnvConfig,
+}
+
+#[derive(Debug)]
+pub struct EnvConfig {
+    /// environment variable names to be fingerprinted and passed to the task, with defaults populated
+    pub fingerprinted_envs: HashSet<Str>,
+    /// environment variable names to be passed to the task without fingerprinting, with defaults populated
+    pub pass_through_envs: Arc<[Str]>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ResolveTaskConfigError {
+    /// Both package.json script and vite.config.* task define commands for the task
+    #[error("Both package.json script and vite.config.* task define commands for the task")]
+    CommandConflict,
+
+    /// Neither package.json script nor vite.config.* task define a command for the task
+    #[error("Neither package.json script nor vite.config.* task define a command for the task")]
+    NoCommand,
+}
+
+impl ResolvedTaskConfig {
+    /// Resolve from package.json script only
+    pub fn resolve_package_json_script(
+        package_dir: &Arc<AbsolutePath>,
+        package_json_script: &str,
+    ) -> Self {
+        Self {
+            command: package_json_script.into(),
+            resolved_options: ResolvedTaskOptions::resolve(UserTaskOptions::default(), package_dir),
+        }
+    }
+
+    /// Resolves from user config, package dir, and package.json script (if any).
+    pub fn resolve(
+        user_config: UserTaskConfig,
+        package_dir: &Arc<AbsolutePath>,
+        package_json_script: Option<&str>,
+    ) -> Result<Self, ResolveTaskConfigError> {
+        let command = match (&user_config.command, package_json_script) {
+            (Some(_), Some(_)) => return Err(ResolveTaskConfigError::CommandConflict),
+            (None, None) => return Err(ResolveTaskConfigError::NoCommand),
+            (Some(cmd), None) => cmd.as_ref(),
+            (None, Some(script)) => script,
+        };
+        Ok(Self {
+            command: command.into(),
+            resolved_options: ResolvedTaskOptions::resolve(user_config.options, package_dir),
+        })
     }
 }
 
