@@ -4,7 +4,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use monostate::MustBe;
 pub use user::{UserCacheConfig, UserConfigFile, UserTaskConfig};
-use vite_path::{AbsolutePath, AbsolutePathBuf};
+use vite_path::AbsolutePath;
 use vite_str::Str;
 
 use crate::config::user::UserTaskOptions;
@@ -38,14 +38,14 @@ pub struct ResolvedTaskOptions {
 }
 
 impl ResolvedTaskOptions {
-    /// Resolves from user config, package dir
-    pub fn resolve(user_config: UserTaskOptions, package_dir: &Arc<AbsolutePath>) -> Self {
-        let cwd: Arc<AbsolutePath> = if user_config.cwd_relative_to_package.as_str().is_empty() {
-            Arc::clone(package_dir)
+    /// Resolves from user-defined options and the directory path where the options are defined.
+    pub fn resolve(user_options: UserTaskOptions, dir: &Arc<AbsolutePath>) -> Self {
+        let cwd: Arc<AbsolutePath> = if user_options.cwd_relative_to_package.as_str().is_empty() {
+            Arc::clone(dir)
         } else {
-            package_dir.join(user_config.cwd_relative_to_package).into()
+            dir.join(user_options.cwd_relative_to_package).into()
         };
-        let cache_config = match user_config.cache_config {
+        let cache_config = match user_options.cache_config {
             UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
             UserCacheConfig::Enabled { cache: MustBe!(true), envs, mut pass_through_envs } => {
                 pass_through_envs.extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));

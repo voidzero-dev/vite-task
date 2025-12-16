@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    env,
     ffi::OsStr,
     sync::Arc,
 };

@@ -1,26 +1,26 @@
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
     sync::Arc,
 };
 
+use futures_util::FutureExt;
 use vite_path::AbsolutePath;
 use vite_shell::try_parse_as_and_list;
 use vite_str::Str;
-use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskConfig};
+use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskOptions};
 
 use crate::{
     ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, ResolvedCacheConfig,
     SpawnCommandKind, SpawnExecution, TaskExecution,
-    envs::{self, ResolvedEnvs},
+    envs::ResolvedEnvs,
     error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
     in_process::InProcessExecution,
     plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest},
 };
 
-pub fn plan_task_as_execution_node(
+async fn plan_task_as_execution_node(
     task_node_index: TaskNodeIndex,
     mut context: PlanContext<'_>,
 ) -> Result<TaskExecution, Error> {
@@ -28,7 +28,7 @@ pub fn plan_task_as_execution_node(
     context
         .check_cycle(task_node_index)
         .map_err(TaskPlanErrorKind::TaskCycleDetected)
-        .with_task_call_stack(&context)?;
+        .with_plan_context(&context)?;
 
     // Prepend {package_path}/node_modules/.bin to PATH
     let package_node_modules_bin_path = context
@@ -42,7 +42,7 @@ pub fn plan_task_as_execution_node(
             task_display: context.indexed_task_graph().display_task(task_node_index),
             join_paths_error,
         })
-        .with_task_call_stack(&context)?;
+        .with_plan_context(&context)?;
 
     let task_node = &context.indexed_task_graph().task_graph()[task_node_index];
 
@@ -72,22 +72,29 @@ pub fn plan_task_as_execution_node(
             // Try to parse the args of an and_item to a task request like `run -r build`
             let task_request = context
                 .callbacks()
-                .parse_as_task_request(&and_item.program, &and_item.args)
+                .get_plan_request(&and_item.program, &and_item.args)
+                .await
                 .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError { error })
-                .with_task_call_stack(&context)?;
+                .with_plan_context(&context)?;
 
             let execution_item_kind: ExecutionItemKind = match task_request {
                 // Expand task query like `vite run -r build`
-                Some(PlanRequest::Query(query_task_request)) => {
+                Some(PlanRequest::Query(query_plan_request)) => {
                     // Add prefix envs to the context
                     context.add_envs(and_item.envs.iter());
-                    let execution_graph =
-                        plan_query_request_as_execution_graph(query_task_request, context)?;
+                    let execution_graph = plan_query_request(query_plan_request, context).await?;
                     ExecutionItemKind::Expanded(execution_graph)
                 }
                 // Synthetic task, like `vite lint`
-                Some(PlanRequest::Synthetic(synthetic_task_request)) => {
-                    todo!()
+                Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
+                    let spawn_execution = plan_synthetic_request(
+                        &and_item.envs,
+                        synthetic_plan_request,
+                        context.cwd(),
+                        context.envs(),
+                    )
+                    .with_plan_context(&context)?;
+                    ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
                 // Normal 3rd party tool command (like `tsc --noEmit`)
                 None => {
@@ -97,9 +104,10 @@ pub fn plan_task_as_execution_node(
                             program: and_item.program,
                             args: and_item.args.into(),
                         },
-                        &task_node.resolved_config,
-                        context,
-                    )?;
+                        &task_node.resolved_config.resolved_options,
+                        context.envs(),
+                    )
+                    .with_plan_context(&context)?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
             };
@@ -109,9 +117,10 @@ pub fn plan_task_as_execution_node(
         let spawn_execution = plan_spawn_execution(
             &BTreeMap::new(),
             SpawnCommandKind::ShellScript(command_str.into()),
-            &task_node.resolved_config,
-            context,
-        )?;
+            &task_node.resolved_config.resolved_options,
+            context.envs(),
+        )
+        .with_plan_context(&context)?;
         items.push(ExecutionItem {
             command_span: 0..command_str.len(),
             kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
@@ -121,36 +130,30 @@ pub fn plan_task_as_execution_node(
     Ok(TaskExecution { task_node_index, items })
 }
 
-pub fn plan_synthetic_request_as_spawn_execution(
-    synthetic_task_request: SyntheticPlanRequest,
+pub fn plan_synthetic_request(
+    prefix_envs: &BTreeMap<Str, Str>,
+    synthetic_plan_request: SyntheticPlanRequest,
     cwd: &Arc<AbsolutePath>,
-    envs: &BTreeMap<Arc<OsStr>, Arc<OsStr>>,
-) -> Result<SpawnExecution, Error> {
-    let resolved_config =
-        ResolvedTaskConfig::resolve(synthetic_task_request.user_task_options, &cwd, None)
-            .expect("Command conflict/missing for synthetic task should never happen");
-
-    // SpawnExecution {
-
-    // }
-    todo!()
+    envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
+) -> Result<SpawnExecution, TaskPlanErrorKind> {
+    let resolved_options = ResolvedTaskOptions::resolve(synthetic_plan_request.task_options, &cwd);
+    plan_spawn_execution(prefix_envs, synthetic_plan_request.command_kind, &resolved_options, envs)
 }
 
 fn plan_spawn_execution(
     prefix_envs: &BTreeMap<Str, Str>,
     command_kind: SpawnCommandKind,
-    resolved_config: &ResolvedTaskConfig,
-    context: PlanContext<'_>,
-) -> Result<SpawnExecution, Error> {
+    resolved_task_options: &ResolvedTaskOptions,
+    envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
+) -> Result<SpawnExecution, TaskPlanErrorKind> {
     // all envs available in the current context
-    let mut all_envs = context.envs().clone();
+    let mut all_envs = envs.clone();
 
     let mut resolved_cache_config = None;
-    if let Some(cache_config) = &resolved_config.resolved_options.cache_config {
+    if let Some(cache_config) = &resolved_task_options.cache_config {
         // Resolve envs according cache configs
         let mut resolved_envs = ResolvedEnvs::resolve(&mut all_envs, &cache_config.env_config)
-            .map_err(TaskPlanErrorKind::ResolveEnvError)
-            .with_task_call_stack(&context)?;
+            .map_err(TaskPlanErrorKind::ResolveEnvError)?;
 
         // Add prefix envs to fingerprinted envs
         resolved_envs
@@ -167,22 +170,22 @@ fn plan_spawn_execution(
     Ok(SpawnExecution {
         all_envs: Arc::new(all_envs),
         resolved_cache_config,
-        cwd: Arc::clone(&resolved_config.resolved_options.cwd),
+        cwd: Arc::clone(&resolved_task_options.cwd),
         command_kind,
     })
 }
 
 /// Expand the parsed task request (like `run -r build`/`exec tsc`/`lint`) into an execution graph.
-pub fn plan_query_request_as_execution_graph(
-    query_task_request: QueryPlanRequest,
+pub async fn plan_query_request(
+    query_plan_request: QueryPlanRequest,
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {
     // Query matching tasks from the task graph
     let task_node_index_graph = context
         .indexed_task_graph()
-        .query_tasks(query_task_request.query)
+        .query_tasks(query_plan_request.query)
         .map_err(TaskPlanErrorKind::TaskQueryError)
-        .with_task_call_stack(&context)?;
+        .with_plan_context(&context)?;
 
     let mut execution_node_indices_by_task_index =
         HashMap::<TaskNodeIndex, ExecutionNodeIndex>::with_capacity(
@@ -196,7 +199,8 @@ pub fn plan_query_request_as_execution_graph(
 
     // Plan each task node as execution nodes
     for task_index in task_node_index_graph.nodes() {
-        let task_execution = plan_task_as_execution_node(task_index, context.duplicate())?;
+        let task_execution =
+            plan_task_as_execution_node(task_index, context.duplicate()).boxed_local().await?;
         execution_node_indices_by_task_index
             .insert(task_index, execution_graph.add_node(task_execution));
     }

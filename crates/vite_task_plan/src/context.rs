@@ -22,24 +22,26 @@ pub struct TaskCycleError {
 #[derive(Debug)]
 pub struct PlanContext<'a> {
     /// The current working directory.
-    cwd: Arc<AbsolutePath>,
+    pub cwd: Arc<AbsolutePath>,
 
     /// The environment variables for the current execution context.
-    envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
+    pub envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
 
     /// The callbacks for loading task graphs and parsing commands.
-    callbacks: &'a mut (dyn PlanCallbacks + 'a),
+    pub callbacks: &'a mut (dyn PlanCallbacks + 'a),
 
     /// The current call stack of task index nodes being planned.
-    task_call_stack: Vec<(TaskNodeIndex, Range<usize>)>,
+    pub task_call_stack: Vec<(TaskNodeIndex, Range<usize>)>,
 
-    indexed_task_graph: &'a IndexedTaskGraph,
+    pub indexed_task_graph: &'a IndexedTaskGraph,
 }
 
 /// A human-readable frame in the task call stack.
 #[derive(Debug, Clone)]
 pub struct TaskCallStackFrameDisplay {
     pub task_display: TaskDispay,
+
+    #[expect(dead_code)] // To be used in terminal error display
     pub command_span: Range<usize>,
 }
 
@@ -51,7 +53,7 @@ impl Display for TaskCallStackFrameDisplay {
 }
 
 /// A human-readable display of the task call stack.
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct TaskCallStackDisplay {
     frames: Arc<[TaskCallStackFrameDisplay]>,
 }
@@ -66,10 +68,6 @@ impl Display for TaskCallStackDisplay {
         }
         Ok(())
     }
-}
-
-pub struct TaskCallFrame {
-    pub task_index: TaskNodeIndex,
 }
 
 impl<'a> PlanContext<'a> {

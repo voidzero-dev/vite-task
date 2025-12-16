@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use vite_str::Str;
-use vite_task_graph::{
-    config::{UserTaskConfig, user::UserTaskOptions},
-    query::TaskQuery,
-};
+use vite_task_graph::{config::user::UserTaskOptions, query::TaskQuery};
 
 use crate::SpawnCommandKind;
 

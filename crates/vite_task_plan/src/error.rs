@@ -59,18 +59,31 @@ pub struct Error {
 pub(crate) trait TaskPlanErrorKindResultExt {
     type Ok;
     /// Attach the current task call stack from the planning context to the error.
-    fn with_task_call_stack(self, context: &PlanContext<'_>) -> Result<Self::Ok, Error>;
+    fn with_plan_context(self, context: &PlanContext<'_>) -> Result<Self::Ok, Error>;
+
+    /// Attach an empty task call stack to the error.
+    fn with_empty_call_stack(self) -> Result<Self::Ok, Error>;
 }
 
 impl<T> TaskPlanErrorKindResultExt for Result<T, TaskPlanErrorKind> {
     type Ok = T;
 
     /// Attach the current task call stack from the planning context to the error.
-    fn with_task_call_stack(self, context: &PlanContext<'_>) -> Result<T, Error> {
+    fn with_plan_context(self, context: &PlanContext<'_>) -> Result<T, Error> {
         match self {
             Ok(value) => Ok(value),
             Err(kind) => {
                 let task_call_stack = context.display_call_stack();
+                Err(Error { task_call_stack, kind })
+            }
+        }
+    }
+
+    fn with_empty_call_stack(self) -> Result<T, Error> {
+        match self {
+            Ok(value) => Ok(value),
+            Err(kind) => {
+                let task_call_stack = TaskCallStackDisplay::default();
                 Err(Error { task_call_stack, kind })
             }
         }
