@@ -80,7 +80,7 @@ pub struct TaskExecution {
     /// The task index in the task graph
     pub task_node_index: TaskNodeIndex,
 
-    /// A task's command is splitted by `&&` and expanded into multiple execution items.
+    /// A task's command is split by `&&` and expanded into multiple execution items.
     ///
     /// It contains a single item if the command has no `&&`
     pub items: Vec<ExecutionItem>,
@@ -108,7 +108,7 @@ pub enum LeafExecutionKind {
     InProcess(InProcessExecution),
 }
 
-/// An execution item, from a splitted subcommand in a task's command (`item1 && item2 && ...`).
+/// An execution item, from a split subcommand in a task's command (`item1 && item2 && ...`).
 #[derive(Debug)]
 pub enum ExecutionItemKind {
     /// Expanded from a known vite subcommand, like `vite run ...` or `vite lint`.

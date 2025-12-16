@@ -3,7 +3,7 @@ use std::{
 };
 
 use vite_path::AbsolutePath;
-use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, display::TaskDispay};
+use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, display::TaskDisplay};
 
 use crate::{PlanCallbacks, path_env::prepend_path_env};
 
@@ -39,7 +39,7 @@ pub struct PlanContext<'a> {
 /// A human-readable frame in the task call stack.
 #[derive(Debug, Clone)]
 pub struct TaskCallStackFrameDisplay {
-    pub task_display: TaskDispay,
+    pub task_display: TaskDisplay,
 
     #[expect(dead_code)] // To be used in terminal error display
     pub command_span: Range<usize>,

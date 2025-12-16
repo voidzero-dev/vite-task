@@ -24,7 +24,7 @@ use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_workspace::{PackageNodeIndex, WorkspaceRoot};
 
-use crate::display::TaskDispay;
+use crate::display::TaskDisplay;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 enum TaskDependencyTypeInner {
@@ -96,7 +96,7 @@ pub enum TaskGraphLoadError {
 
     #[error("Failed to resolve task config for task {task_display}")]
     ResolveConfigError {
-        task_display: TaskDispay,
+        task_display: TaskDisplay,
         #[source]
         error: crate::config::ResolveTaskConfigError,
     },
@@ -104,7 +104,7 @@ pub enum TaskGraphLoadError {
     #[error("Failed to lookup dependency '{specifier}' for task {task_display}")]
     DependencySpecifierLookupError {
         specifier: Str,
-        task_display: TaskDispay,
+        task_display: TaskDisplay,
         #[source]
         error: SpecifierLookupError,
     },
@@ -221,7 +221,7 @@ impl IndexedTaskGraph {
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
-                    task_display: TaskDispay {
+                    task_display: TaskDisplay {
                         package_name: package.package_json.name.clone(),
                         task_name: task_name.clone(),
                         package_path: Arc::clone(&package_dir),
