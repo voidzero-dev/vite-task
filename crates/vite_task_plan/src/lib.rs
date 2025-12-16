@@ -21,21 +21,6 @@ use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, query::TaskQuery};
 
-/*
-/// Where an execution originates from
-#[derive(Debug)]
-pub enum ExecutionOrigin {
-    /// the execution originates from the task graph (defined in `package.json` or `vite.config.*`)
-    ///
-    /// The precise location of this execution in the task graph can be inferred by
-    /// `ExecutionGraphNode.task_index` and index of `ExecutionItem` in `ExecutionGraphNode.items`.
-    TaskGraph,
-
-    /// the command originates from an synthetic command, like `oxlint ...` synthesized from `vite lint`
-    Synthetic
-}
- */
-
 /// Resolved cache configuration for a spawn execution.
 #[derive(Debug)]
 pub struct ResolvedCacheConfig {
@@ -48,10 +33,6 @@ pub struct ResolvedCacheConfig {
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug)]
 pub struct SpawnExecution {
-    /*
-        /// Where this resolved command originates from
-        pub origin: ExecutionOrigin,
-    */
     /// Resolved cache configuration for this execution. `None` means caching is disabled.
     pub resolved_cache_config: Option<ResolvedCacheConfig>,
 
