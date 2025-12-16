@@ -73,7 +73,6 @@ fspy_test_utils = { path = "crates/fspy_test_utils" }
 futures = "0.3.31"
 futures-core = "0.3.31"
 futures-util = "0.3.31"
-indexmap = "2.12.1"
 insta = "1.44.3"
 itertools = "0.14.0"
 libc = "0.2.172"
