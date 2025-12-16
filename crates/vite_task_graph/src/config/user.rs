@@ -35,6 +35,7 @@ pub enum UserCacheConfig {
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
     #[serde(default)] // default to empty if omitted
