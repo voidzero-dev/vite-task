@@ -1,34 +1,23 @@
-mod builtin;
 mod context;
 mod envs;
 mod error;
 mod execution_graph;
+mod in_process;
 mod leaf;
 mod path_env;
 mod plan;
 pub mod task_request;
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    ffi::OsStr,
-    fmt::Debug,
-    hash::Hash,
-    ops::Range,
-    sync::Arc,
-};
+use std::{collections::HashMap, ffi::OsStr, fmt::Debug, ops::Range, sync::Arc};
 
 use context::PlanContext;
 use envs::ResolvedEnvs;
-use futures_core::future::BoxFuture;
-use futures_util::FutureExt;
-use petgraph::graph::DiGraph;
+use execution_graph::ExecutionGraph;
+use in_process::InProcessExecution;
 use task_request::TaskRequest;
 use vite_path::AbsolutePath;
-use vite_shell::TaskParsedCommand;
 use vite_str::Str;
-use vite_task_graph::{IndexedTaskGraph, TaskNode, TaskNodeIndex, query::TaskQuery};
-
-use crate::execution_graph::ExecutionGraph;
+use vite_task_graph::{TaskNodeIndex, query::TaskQuery};
 
 /*
 /// Where an execution originates from
@@ -108,23 +97,12 @@ pub struct ExecutionItem {
     pub kind: ExecutionItemKind,
 }
 
-pub struct InProcessExecutionOutput {
-    pub stdout: Vec<u8>,
-    // stderr, exit code, etc can be added later
-}
-
-#[derive(derive_more::Debug)]
-pub struct InProcessExecution {
-    #[debug(skip)]
-    func: Box<dyn FnOnce() -> BoxFuture<'static, InProcessExecutionOutput> + Send + Sync>,
-}
-
 /// The kind of a leaf execution item, which cannot be expanded further.
 #[derive(Debug)]
 pub enum LeafExecutionKind {
     /// The execution is a spawn of a child process
     Spawn(SpawnExecution),
-    /// The execution is an in-process function call
+    /// The execution is done in-process by InProcessExecution::execute()
     InProcess(InProcessExecution),
 }
 

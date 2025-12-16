@@ -13,10 +13,10 @@ use vite_task_graph::{TaskNodeIndex, config::ResolvedUserTaskConfig};
 use crate::{
     ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, ResolvedCacheConfig,
     SpawnCommandKind, SpawnExecution, TaskExecution,
-    builtin::get_builtin_execution,
     envs::ResolvedEnvs,
     error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
+    in_process::InProcessExecution,
     task_request::{QueryTaskRequest, SyntheticTaskRequest, TaskRequest},
 };
 
@@ -60,7 +60,7 @@ pub fn plan_task_as_execution_node(
 
             // Check for builtin commands like `echo ...`
             if let Some(builtin_execution) =
-                get_builtin_execution(&and_item.program, and_item.args.iter())
+                InProcessExecution::get_builtin_execution(&and_item.program, and_item.args.iter())
             {
                 items.push(ExecutionItem {
                     command_span: add_item_span,
@@ -124,15 +124,14 @@ pub fn plan_task_as_execution_node(
 pub fn plan_synthetic_task_request_as_spawn_execution(
     synthetic_task_request: SyntheticTaskRequest,
 ) -> Result<SpawnExecution, Error> {
+    let resolved_config =
+        ResolvedUserTaskConfig::resolve(synthetic_task_request.user_config, &cwd, None)
+            .expect("Command conflict/missing for synthetic task should never happen");
+
+    // SpawnExecution {
+
+    // }
     todo!()
-    // let resolved_config =
-    //     ResolvedUserTaskConfig::resolve(synthetic_task_request.user_config, &cwd, None)
-    //         .expect("Command conflict/missing for synthetic task should never happen");
-
-    //     SpawnExecution {
-
-    //     }
-    // todo!()
 }
 
 fn plan_spawn_execution(
