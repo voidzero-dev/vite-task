@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use vite_str::Str;
-use vite_task_graph::{config::UserTaskConfig, query::TaskQuery};
+use vite_task_graph::{
+    config::{UserTaskConfig, user::UserTaskOptions},
+    query::TaskQuery,
+};
 
 use crate::SpawnCommandKind;
 
@@ -25,10 +28,11 @@ pub struct QueryPlanRequest {
 /// Synthetic tasks are not defined in the task graph, but are generated on-the-fly.
 #[derive(Debug)]
 pub struct SyntheticPlanRequest {
-    /// The command to execute in the synthetic task.
+    /// The command to execute
     pub command_kind: SpawnCommandKind,
 
-    pub user_config: UserTaskConfig,
+    /// The task options as if it's defined in `vite.config.*`
+    pub task_options: UserTaskOptions,
 }
 
 #[derive(Debug)]

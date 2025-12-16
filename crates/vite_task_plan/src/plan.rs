@@ -127,7 +127,7 @@ pub fn plan_synthetic_request_as_spawn_execution(
     envs: &BTreeMap<Arc<OsStr>, Arc<OsStr>>,
 ) -> Result<SpawnExecution, Error> {
     let resolved_config =
-        ResolvedTaskConfig::resolve(synthetic_task_request.user_config, &cwd, None)
+        ResolvedTaskConfig::resolve(synthetic_task_request.user_task_options, &cwd, None)
             .expect("Command conflict/missing for synthetic task should never happen");
 
     // SpawnExecution {

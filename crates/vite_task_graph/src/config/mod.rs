@@ -1,4 +1,4 @@
-mod user;
+pub mod user;
 
 use std::{collections::HashSet, sync::Arc};
 
