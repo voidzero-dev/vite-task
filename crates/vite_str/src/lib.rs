@@ -5,6 +5,7 @@ use std::{
     ops::Deref,
     path::Path,
     str::from_utf8,
+    sync::Arc,
 };
 
 use bincode::{
@@ -155,6 +156,12 @@ impl From<String> for Str {
 impl From<CompactString> for Str {
     fn from(value: CompactString) -> Self {
         Self(value)
+    }
+}
+
+impl From<Str> for Arc<str> {
+    fn from(value: Str) -> Self {
+        Arc::from(value.as_str())
     }
 }
 

@@ -1,4 +1,5 @@
 pub mod config;
+pub mod display;
 pub mod loader;
 mod package_graph;
 pub mod query;
@@ -10,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use config::{ResolvedUserTaskConfig, UserConfigFile};
+use config::{ResolvedTaskConfig, UserConfigFile};
 use package_graph::IndexedPackageGraph;
 use petgraph::{
     graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
@@ -22,6 +23,8 @@ use vec1::smallvec_v1::SmallVec1;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_workspace::{PackageNodeIndex, WorkspaceRoot};
+
+use crate::display::TaskDisplay;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 enum TaskDependencyTypeInner {
@@ -58,7 +61,7 @@ pub struct TaskId {
     /// `package_index` is declared from `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
     pub package_index: PackageNodeIndex,
 
-    /// For user defined tasks, this is the name of the script or the entry in `vite-task.json`.
+    /// For user defined tasks, this is the name of the script or the entry in `vite.config.*`.
     ///
     /// For synthesized tasks, this is the program.
     pub task_name: Str,
@@ -76,7 +79,7 @@ pub struct TaskNode {
     /// whereas `task_id` is for looking up the task.
     ///
     /// However, it does not contain external factors like additional args from cli and env vars.
-    pub resolved_config: ResolvedUserTaskConfig,
+    pub resolved_config: ResolvedTaskConfig,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -84,28 +87,26 @@ pub enum TaskGraphLoadError {
     #[error("Failed to load package graph: {0}")]
     PackageGraphLoadError(#[from] vite_workspace::Error),
 
-    #[error("Failed to load task config file for package at {package_path:?}: {error}")]
+    #[error("Failed to load task config file for package at {package_path:?}")]
     ConfigLoadError {
+        package_path: Arc<AbsolutePath>,
         #[source]
         error: anyhow::Error,
-        package_path: Arc<AbsolutePath>,
     },
 
-    #[error("Failed to resolve task config for task {0}#{1}: {2}", package_name, task_name, error)]
+    #[error("Failed to resolve task config for task {task_display}")]
     ResolveConfigError {
+        task_display: TaskDisplay,
         #[source]
-        error: crate::config::ResolveTaskError,
-        package_name: Str,
-        task_name: Str,
+        error: crate::config::ResolveTaskConfigError,
     },
 
-    #[error("Failed to lookup dependency '{specifier}' of task {0} at {1:?}: {error}", origin_task_id.task_name, origin_task_id.task_name)]
+    #[error("Failed to lookup dependency '{specifier}' for task {task_display}")]
     DependencySpecifierLookupError {
+        specifier: Str,
+        task_display: TaskDisplay,
         #[source]
         error: SpecifierLookupError,
-        specifier: Str,
-        // Where the dependency specifier is defined
-        origin_task_id: TaskId,
     },
 }
 
@@ -156,6 +157,7 @@ pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 ///
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
 /// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
+#[derive(Debug)]
 pub struct IndexedTaskGraph {
     task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
 
@@ -167,6 +169,8 @@ pub struct IndexedTaskGraph {
     /// task indices by task id for quick lookup
     node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex>,
 }
+
+pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
 
 impl IndexedTaskGraph {
     /// Load the task graph from a discovered workspace using the provided config loader.
@@ -207,18 +211,21 @@ impl IndexedTaskGraph {
 
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
-                let dependency_specifiers = Arc::clone(&task_user_config.depends_on);
+                let dependency_specifiers = Arc::clone(&task_user_config.options.depends_on);
 
                 // Resolve the task configuration combining vite.config.* and package.json script
-                let resolved_config = ResolvedUserTaskConfig::resolve(
+                let resolved_config = ResolvedTaskConfig::resolve(
                     task_user_config,
                     &package_dir,
                     package_json_script,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
-                    package_name: package.package_json.name.clone(),
-                    task_name: task_name.clone(),
+                    task_display: TaskDisplay {
+                        package_name: package.package_json.name.clone(),
+                        task_name: task_name.clone(),
+                        package_path: Arc::clone(&package_dir),
+                    },
                 })?;
 
                 let task_node = TaskNode { task_id, resolved_config };
@@ -231,7 +238,7 @@ impl IndexedTaskGraph {
             // For remaining package.json scripts not defined in vite.config.*, create tasks with default config
             for (script_name, package_json_script) in package_json_scripts.drain() {
                 let task_id = TaskId { task_name: Str::from(script_name), package_index };
-                let resolved_config = ResolvedUserTaskConfig::resolve_package_json_script(
+                let resolved_config = ResolvedTaskConfig::resolve_package_json_script(
                     &package_dir,
                     package_json_script,
                 );
@@ -289,7 +296,7 @@ impl IndexedTaskGraph {
                     .map_err(|error| TaskGraphLoadError::DependencySpecifierLookupError {
                         error,
                         specifier,
-                        origin_task_id: from_task_id.clone(),
+                        task_display: me.display_task(from_node_index),
                     })?;
                 me.task_graph.update_edge(
                     from_node_index,
@@ -442,7 +449,7 @@ impl IndexedTaskGraph {
         Ok(*node_index)
     }
 
-    pub fn task_graph(&self) -> &DiGraph<TaskNode, TaskDependencyType, TaskIx> {
+    pub fn task_graph(&self) -> &TaskGraph {
         &self.task_graph
     }
 
@@ -452,5 +459,10 @@ impl IndexedTaskGraph {
 
     pub fn get_package_path(&self, package_index: PackageNodeIndex) -> &Arc<AbsolutePath> {
         &self.indexed_package_graph.package_graph()[package_index].absolute_path
+    }
+
+    pub fn get_package_path_for_task(&self, task_index: TaskNodeIndex) -> &Arc<AbsolutePath> {
+        let task_node = &self.task_graph[task_index];
+        self.get_package_path(task_node.task_id.package_index)
     }
 }

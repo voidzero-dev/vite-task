@@ -24,7 +24,7 @@ pub enum UserCacheConfig {
 
         /// Environment variable names to be passed to the task without fingerprinting.
         #[serde(default)] // default to empty if omitted
-        pass_through_envs: Box<[Str]>,
+        pass_through_envs: Vec<Str>,
     },
     /// Cache is disabled
     Disabled {
@@ -33,13 +33,10 @@ pub enum UserCacheConfig {
     },
 }
 
-/// Task configuration defined by user in `vite.config.*`
+/// Options for user-defined tasks in `vite.config.*`, excluding the command.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct UserTaskConfig {
-    /// If None, the script from `package.json` with the same name will be used
-    pub command: Option<Box<str>>,
-
+pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
     #[serde(default)] // default to empty if omitted
     #[serde(rename = "cwd")]
@@ -54,20 +51,34 @@ pub struct UserTaskConfig {
     pub cache_config: UserCacheConfig,
 }
 
-impl UserTaskConfig {
-    /// The default user task config for package.json scripts.
-    pub fn package_json_script_default() -> Self {
+impl Default for UserTaskOptions {
+    /// The default user task options for package.json scripts.
+    fn default() -> Self {
         Self {
-            command: None,
+            // Runs in the package root
             cwd_relative_to_package: RelativePathBuf::default(),
+            // No dependencies
             depends_on: Arc::new([]),
+            // Caching enabled with no fingerprinted envs
             cache_config: UserCacheConfig::Enabled {
                 cache: MustBe!(true),
                 envs: Box::new([]),
-                pass_through_envs: Box::new([]),
+                pass_through_envs: Vec::new(),
             },
         }
     }
+}
+
+/// Full user-defined task configuration in `vite.config.*`, including the command and options.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserTaskConfig {
+    /// If None, the script from `package.json` with the same name will be used
+    pub command: Option<Box<str>>,
+
+    /// Fields other than the command
+    #[serde(flatten)]
+    pub options: UserTaskOptions,
 }
 
 /// User configuration file structure for `vite.config.*`
@@ -90,13 +101,8 @@ mod tests {
             user_config,
             UserTaskConfig {
                 command: None,
-                cwd_relative_to_package: "".try_into().unwrap(),
-                depends_on: Default::default(),
-                cache_config: UserCacheConfig::Enabled {
-                    cache: MustBe!(true),
-                    envs: Default::default(),
-                    pass_through_envs: Default::default(),
-                },
+                // A empty task config (`{}`) should be equivalent to not specifying any config at all (just package.json script)
+                options: UserTaskOptions::default(),
             }
         );
     }
@@ -107,7 +113,7 @@ mod tests {
             "cwd": "src"
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(user_config.cwd_relative_to_package.as_str(), "src");
+        assert_eq!(user_config.options.cwd_relative_to_package.as_str(), "src");
     }
 
     #[test]
@@ -116,7 +122,10 @@ mod tests {
             "cache": false
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(user_config.cache_config, UserCacheConfig::Disabled { cache: MustBe!(false) });
+        assert_eq!(
+            user_config.options.cache_config,
+            UserCacheConfig::Disabled { cache: MustBe!(false) }
+        );
     }
 
     #[test]

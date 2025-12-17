@@ -1,0 +1,26 @@
+[package]
+name = "vite_task_plan"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+petgraph = { workspace = true }
+sha2 = { workspace = true }
+supports-color = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+vite_glob = { workspace = true }
+vite_path = { workspace = true }
+vite_shell = { workspace = true }
+vite_str = { workspace = true }
+vite_task_graph = { workspace = true }

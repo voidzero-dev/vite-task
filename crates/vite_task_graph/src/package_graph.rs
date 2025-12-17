@@ -10,6 +10,7 @@ use vite_str::Str;
 use vite_workspace::{DependencyType, PackageInfo, PackageIx, PackageNodeIndex};
 
 /// Package graph with additional HashMaps for quick task lookup
+#[derive(Debug)]
 pub struct IndexedPackageGraph {
     package_graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
 

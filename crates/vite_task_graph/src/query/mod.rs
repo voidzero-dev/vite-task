@@ -51,11 +51,18 @@ pub struct PackageUnknownError {
     pub cwd: Arc<AbsolutePath>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum TaskQueryError {
+    #[error("Failed to look up task from specifier: {specifier}")]
+    SpecifierLookupError {
+        specifier: TaskSpecifier,
+        #[source]
+        lookup_error: SpecifierLookupError<PackageUnknownError>,
+    },
+}
+
 impl IndexedTaskGraph {
-    pub fn query_tasks(
-        &self,
-        query: TaskQuery,
-    ) -> Result<TaskExecutionGraph, SpecifierLookupError<PackageUnknownError>> {
+    pub fn query_tasks(&self, query: TaskQuery) -> Result<TaskExecutionGraph, TaskQueryError> {
         let mut execution_graph = TaskExecutionGraph::default();
 
         let include_topologicial_deps = match &query.kind {
@@ -98,7 +105,10 @@ impl IndexedTaskGraph {
                             );
                             if nearest_topological_tasks.is_empty() {
                                 // No nearest task found, return original error
-                                return Err(err);
+                                return Err(TaskQueryError::SpecifierLookupError {
+                                    specifier,
+                                    lookup_error: err,
+                                });
                             }
                             // Add nearest tasks to execution graph
                             // Topological dependencies of nearest tasks will be added later
@@ -108,7 +118,10 @@ impl IndexedTaskGraph {
                         }
                         Err(err) => {
                             // Not recoverable by finding nearest package, return error
-                            return Err(err);
+                            return Err(TaskQueryError::SpecifierLookupError {
+                                specifier,
+                                lookup_error: err,
+                            });
                         }
                     }
                 }

@@ -10,7 +10,7 @@ use vite_str::Str;
 use vite_task_graph::{
     IndexedTaskGraph, SpecifierLookupError, TaskDependencyType, TaskNodeIndex,
     loader::JsonUserConfigLoader,
-    query::{PackageUnknownError, TaskExecutionGraph, cli::CLITaskQuery},
+    query::{PackageUnknownError, TaskExecutionGraph, TaskQueryError, cli::CLITaskQuery},
 };
 use vite_workspace::find_workspace_root;
 
@@ -66,7 +66,13 @@ fn snapshot_task_graph(
         node_snapshots.push(TaskNodeSnapshot {
             id: TaskIdSnapshot::new(task_index, base_dir, indexed_task_graph),
             command: task_node.resolved_config.command.clone(),
-            cwd: task_node.resolved_config.cwd.strip_prefix(base_dir).unwrap().unwrap(),
+            cwd: task_node
+                .resolved_config
+                .resolved_options
+                .cwd
+                .strip_prefix(base_dir)
+                .unwrap()
+                .unwrap(),
             depends_on,
         });
     }
@@ -208,7 +214,11 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
             let execution_graph = match indexed_task_graph.query_tasks(task_query) {
                 Ok(ok) => ok,
                 Err(mut err) => {
-                    stabilize_specifier_lookup_error(&mut err, &case_stage_path);
+                    match &mut err {
+                        TaskQueryError::SpecifierLookupError { lookup_error, .. } => {
+                            stabilize_specifier_lookup_error(lookup_error, &case_stage_path);
+                        }
+                    }
                     insta::assert_debug_snapshot!(snapshot_name, err);
                     continue;
                 }
