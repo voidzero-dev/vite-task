@@ -181,8 +181,8 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
 
     runtime.block_on(async {
         let indexed_task_graph = vite_task_graph::IndexedTaskGraph::load(
-            workspace_root,
-            JsonUserConfigLoader::default(),
+            &workspace_root,
+            &JsonUserConfigLoader::default(),
         )
         .await
         .expect(&format!("Failed to load task graph for case {case_name}"));

@@ -175,12 +175,12 @@ pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
 impl IndexedTaskGraph {
     /// Load the task graph from a discovered workspace using the provided config loader.
     pub async fn load(
-        workspace_root: WorkspaceRoot,
-        config_loader: impl loader::UserConfigLoader,
+        workspace_root: &WorkspaceRoot,
+        config_loader: &(impl loader::UserConfigLoader + '_),
     ) -> Result<Self, TaskGraphLoadError> {
         let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
 
-        let package_graph = vite_workspace::load_package_graph(&workspace_root)?;
+        let package_graph = vite_workspace::load_package_graph(workspace_root)?;
 
         // Record dependency specifiers for each task node to add explicit dependencies later
         let mut dependency_specifiers_with_task_node_indices: Vec<(Arc<[Str]>, TaskNodeIndex)> =

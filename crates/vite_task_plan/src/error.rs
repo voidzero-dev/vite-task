@@ -35,10 +35,6 @@ pub enum TaskPlanErrorKind {
 
     #[error("Failed to add node_modules/.bin to PATH environment variable")]
     AddNodeModulesBinPathError {
-        /// This error occurred before parse the command of the task,
-        /// so the task call stack doesn't contain the current task (no command_span yet).
-        /// This field is where the error occurred, while the task call stack is the stack leading to it.s
-        task_display: TaskDisplay,
         #[source]
         join_paths_error: JoinPathsError,
     },

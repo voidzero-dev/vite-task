@@ -11,7 +11,8 @@ use std::{collections::HashMap, ffi::OsStr, fmt::Debug, ops::Range, sync::Arc};
 
 use context::PlanContext;
 use envs::ResolvedEnvs;
-use error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt};
+use error::TaskPlanErrorKindResultExt;
+pub use error::{Error, TaskPlanErrorKind};
 use execution_graph::ExecutionGraph;
 use futures_core::future::BoxFuture;
 use in_process::InProcessExecution;
@@ -20,6 +21,8 @@ use plan_request::PlanRequest;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, query::TaskQuery};
+
+use crate::path_env::prepend_path_env;
 
 /// Resolved cache configuration for a spawn execution.
 #[derive(Debug)]
@@ -98,14 +101,9 @@ pub enum ExecutionItemKind {
     Leaf(LeafExecutionKind),
 }
 
-/// Callbackes needed during planning.
-/// See each method for details.
-pub trait PlanCallbacks: Debug {
-    fn load_task_graph(
-        &mut self,
-        cwd: &AbsolutePath,
-    ) -> BoxFuture<'_, Result<Arc<vite_task_graph::IndexedTaskGraph>, TaskGraphLoadError>>;
-
+/// The callback trait for parsing plan requests from cli args.
+/// See the method for details.
+pub trait PlanRequestParser: Debug {
     /// This is called for every parsable command in the task graph in order to determine how to execute it.
     ///
     /// `vite_task_plan` doesn't have the knowledge of how cli args should be parsed. It relies on this callback.
@@ -120,6 +118,12 @@ pub trait PlanCallbacks: Debug {
         args: &[Str],
         cwd: &AbsolutePath,
     ) -> BoxFuture<'_, anyhow::Result<Option<PlanRequest>>>;
+}
+
+pub trait TaskGraphLoader {
+    fn load_task_graph(
+        &mut self,
+    ) -> BoxFuture<'_, Result<Arc<vite_task_graph::IndexedTaskGraph>, TaskGraphLoadError>>;
 }
 
 #[derive(Debug)]
@@ -138,26 +142,39 @@ impl ExecutionPlan {
 
     pub async fn plan(
         plan_request: PlanRequest,
+        workspace_path: &AbsolutePath,
         cwd: &Arc<AbsolutePath>,
         envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
-        callbacks: &mut (dyn PlanCallbacks + '_),
+        plan_request_parser: &mut (dyn PlanRequestParser + '_),
+        task_graph_loader: &mut (dyn TaskGraphLoader + '_),
     ) -> Result<Self, Error> {
+        let workspace_node_modules_bin = workspace_path.join("node_modules").join(".bin");
+        let mut envs = envs.clone();
+        prepend_path_env(&mut envs, &workspace_node_modules_bin)
+            .map_err(|join_paths_error| TaskPlanErrorKind::AddNodeModulesBinPathError {
+                join_paths_error,
+            })
+            .with_empty_call_stack()?;
         let root_node = match plan_request {
             PlanRequest::Query(query_plan_request) => {
-                let indexed_task_graph = callbacks
-                    .load_task_graph(cwd)
+                let indexed_task_graph = task_graph_loader
+                    .load_task_graph()
                     .await
                     .map_err(|load_error| TaskPlanErrorKind::TaskGraphLoadError(load_error))
                     .with_empty_call_stack()?;
 
-                let context =
-                    PlanContext::new(Arc::clone(cwd), envs.clone(), callbacks, &indexed_task_graph);
+                let context = PlanContext::new(
+                    Arc::clone(cwd),
+                    envs.clone(),
+                    plan_request_parser,
+                    &indexed_task_graph,
+                );
                 let execution_graph = plan_query_request(query_plan_request, context).await?;
                 ExecutionItemKind::Expanded(execution_graph)
             }
             PlanRequest::Synthetic(synthetic_plan_request) => {
                 let execution =
-                    plan_synthetic_request(&Default::default(), synthetic_plan_request, cwd, envs)
+                    plan_synthetic_request(&Default::default(), synthetic_plan_request, cwd, &envs)
                         .with_empty_call_stack()?;
 
                 ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution))
