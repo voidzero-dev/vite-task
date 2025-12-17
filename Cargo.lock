@@ -3166,6 +3166,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "bstr",
+ "clap",
  "compact_str 0.9.0",
  "dashmap",
  "diff-struct",
@@ -3193,6 +3194,8 @@ dependencies = [
  "vite_path",
  "vite_shell",
  "vite_str",
+ "vite_task_graph",
+ "vite_task_plan",
  "vite_workspace",
  "wax",
 ]

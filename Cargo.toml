@@ -122,6 +122,7 @@ vite_path = { path = "crates/vite_path" }
 vite_shell = { path = "crates/vite_shell" }
 vite_str = { path = "crates/vite_str" }
 vite_task_graph = { path = "crates/vite_task_graph" }
+vite_task_plan = { path = "crates/vite_task_plan" }
 vite_workspace = { path = "crates/vite_workspace" }
 wax = "0.6.0"
 which = "8.0.0"

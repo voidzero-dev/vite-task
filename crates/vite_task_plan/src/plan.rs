@@ -70,9 +70,10 @@ async fn plan_task_as_execution_node(
             }
 
             // Try to parse the args of an and_item to a task request like `run -r build`
+            let cwd = Arc::clone(context.cwd());
             let task_request = context
                 .callbacks()
-                .get_plan_request(&and_item.program, &and_item.args)
+                .get_plan_request(&and_item.program, &and_item.args, &cwd)
                 .await
                 .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError { error })
                 .with_plan_context(&context)?;

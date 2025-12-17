@@ -118,6 +118,7 @@ pub trait PlanCallbacks: Debug {
         &self,
         program: &str,
         args: &[Str],
+        cwd: &AbsolutePath,
     ) -> BoxFuture<'_, anyhow::Result<Option<PlanRequest>>>;
 }
 
@@ -149,14 +150,8 @@ impl ExecutionPlan {
                     .map_err(|load_error| TaskPlanErrorKind::TaskGraphLoadError(load_error))
                     .with_empty_call_stack()?;
 
-                let context = PlanContext {
-                    cwd: Arc::clone(cwd),
-                    envs: envs.clone(),
-                    callbacks,
-                    task_call_stack: Vec::new(),
-                    indexed_task_graph: &indexed_task_graph,
-                };
-
+                let context =
+                    PlanContext::new(Arc::clone(cwd), envs.clone(), callbacks, &indexed_task_graph);
                 let execution_graph = plan_query_request(query_plan_request, context).await?;
                 ExecutionItemKind::Expanded(execution_graph)
             }

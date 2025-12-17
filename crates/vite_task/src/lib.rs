@@ -1,4 +1,5 @@
 mod cache;
+mod cli;
 mod collections;
 mod config;
 mod error;

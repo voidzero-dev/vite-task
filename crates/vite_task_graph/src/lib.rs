@@ -18,7 +18,7 @@ use petgraph::{
     visit::{Control, DfsEvent, depth_first_search},
 };
 use serde::Serialize;
-use specifier::TaskSpecifier;
+pub use specifier::TaskSpecifier;
 use vec1::smallvec_v1::SmallVec1;
 use vite_path::AbsolutePath;
 use vite_str::Str;
