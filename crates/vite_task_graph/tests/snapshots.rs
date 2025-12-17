@@ -164,10 +164,10 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
     let case_stage_path = tmpdir.join(case_name);
     copy_dir(case_path, &case_stage_path).unwrap();
 
-    let workspace_root = find_workspace_root(&case_stage_path).unwrap();
+    let (workspace_root, _cwd) = find_workspace_root(&case_stage_path).unwrap();
 
     assert_eq!(
-        &case_stage_path, workspace_root.path,
+        &case_stage_path, &*workspace_root.path,
         "folder '{}' should be a workspace root",
         case_name
     );

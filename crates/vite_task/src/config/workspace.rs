@@ -52,8 +52,8 @@ impl Workspace {
     /// Returns (workspace root, cwd relative to workspace root, current package root relative to workspace root).
     fn determine_current_package_path(
         original_cwd: &AbsolutePath,
-    ) -> Result<(&AbsolutePath, RelativePathBuf, Option<RelativePathBuf>), Error> {
-        let WorkspaceRoot { path: workspace_root, cwd, .. } = find_workspace_root(original_cwd)?;
+    ) -> Result<(Arc<AbsolutePath>, RelativePathBuf, Option<RelativePathBuf>), Error> {
+        let (WorkspaceRoot { path: workspace_root, .. }, cwd) = find_workspace_root(original_cwd)?;
         // current package root is None if it can't be found
         let Ok(package_root) = find_package_root(original_cwd) else {
             return Ok((workspace_root, cwd, None));
@@ -61,7 +61,7 @@ impl Workspace {
         let current_package_root = package_root.path;
 
         // Get relative path from workspace root to package root
-        let current_package_root = current_package_root.strip_prefix(workspace_root)?;
+        let current_package_root = current_package_root.strip_prefix(&*workspace_root)?;
         Ok((workspace_root, cwd, current_package_root))
     }
 
@@ -84,7 +84,7 @@ impl Workspace {
 
     pub fn get_cache_path(cwd: &AbsolutePath) -> Result<AbsolutePathBuf, Error> {
         let (workspace_root, _, _) = Self::determine_current_package_path(cwd)?;
-        Ok(Self::get_cache_path_of_workspace(workspace_root))
+        Ok(Self::get_cache_path_of_workspace(&workspace_root))
     }
 
     pub fn partial_load_with_cache_path(
@@ -96,7 +96,7 @@ impl Workspace {
             Self::determine_current_package_path(&cwd)?;
 
         let cache_path =
-            cache_path.unwrap_or_else(|| Self::get_cache_path_of_workspace(workspace_root));
+            cache_path.unwrap_or_else(|| Self::get_cache_path_of_workspace(&workspace_root));
 
         if !cache_path.as_path().exists()
             && let Some(cache_dir) = cache_path.as_path().parent()
@@ -136,9 +136,9 @@ impl Workspace {
         let (workspace_root, cwd, current_package_path) =
             Self::determine_current_package_path(&cwd)?;
 
-        let package_graph = vite_workspace::discover_package_graph(workspace_root)?;
+        let package_graph = vite_workspace::discover_package_graph(&*workspace_root)?;
         // Load vite-task.json files for all packages
-        let packages_with_task_jsons = Self::load_vite_task_jsons(&package_graph, workspace_root)?;
+        let packages_with_task_jsons = Self::load_vite_task_jsons(&package_graph, &workspace_root)?;
 
         // Find root package.json
         let mut package_json = None;
@@ -151,7 +151,7 @@ impl Workspace {
         }
 
         let cache_path =
-            cache_path.unwrap_or_else(|| Self::get_cache_path_of_workspace(workspace_root));
+            cache_path.unwrap_or_else(|| Self::get_cache_path_of_workspace(&workspace_root));
 
         if !cache_path.as_path().exists()
             && let Some(cache_dir) = cache_path.as_path().parent()
@@ -181,7 +181,7 @@ impl Workspace {
             &package_graph,
             &package_path_to_node,
             &mut task_graph_builder,
-            workspace_root,
+            &workspace_root,
         )?;
 
         // Add topological dependencies if enabled

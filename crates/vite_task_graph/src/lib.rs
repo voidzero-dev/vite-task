@@ -175,7 +175,7 @@ pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
 impl IndexedTaskGraph {
     /// Load the task graph from a discovered workspace using the provided config loader.
     pub async fn load(
-        workspace_root: WorkspaceRoot<'_>,
+        workspace_root: WorkspaceRoot,
         config_loader: impl loader::UserConfigLoader,
     ) -> Result<Self, TaskGraphLoadError> {
         let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();

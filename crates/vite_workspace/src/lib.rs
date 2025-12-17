@@ -192,13 +192,13 @@ pub type PackageEdgeIndex = EdgeIndex<DefaultIx>;
 pub fn discover_package_graph(
     cwd: impl AsRef<AbsolutePath>,
 ) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
-    let workspace_root = find_workspace_root(cwd.as_ref())?;
+    let (workspace_root, _cwd) = find_workspace_root(cwd.as_ref())?;
     load_package_graph(&workspace_root)
 }
 
 /// Load the package graph from a discovered workspace.
 pub fn load_package_graph(
-    workspace_root: &WorkspaceRoot<'_>,
+    workspace_root: &WorkspaceRoot,
 ) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
     let mut graph_builder = PackageGraphBuilder::default();
     let workspaces = match &workspace_root.workspace_file {
@@ -215,7 +215,7 @@ pub fn load_package_graph(
             let package_json: PackageJson = serde_json::from_reader(file)?;
             graph_builder.add_package(
                 RelativePathBuf::default(),
-                workspace_root.path.into(),
+                Arc::clone(&workspace_root.path),
                 package_json,
             );
 
@@ -225,10 +225,10 @@ pub fn load_package_graph(
 
     let member_globs = WorkspaceMemberGlobs::new(workspaces);
     let mut has_root_package = false;
-    for package_json_path in member_globs.get_package_json_paths(workspace_root.path)? {
+    for package_json_path in member_globs.get_package_json_paths(&*workspace_root.path)? {
         let package_json: PackageJson = serde_json::from_slice(&fs::read(&package_json_path)?)?;
         let absolute_path = package_json_path.parent().unwrap();
-        let Some(package_path) = absolute_path.strip_prefix(workspace_root.path)? else {
+        let Some(package_path) = absolute_path.strip_prefix(&*workspace_root.path)? else {
             return Err(Error::PackageOutsideWorkspace {
                 package_path: package_json_path,
                 workspace_root: workspace_root.path.to_absolute_path_buf(),
@@ -246,7 +246,7 @@ pub fn load_package_graph(
                 let package_json: PackageJson = serde_json::from_slice(&package_json)?;
                 graph_builder.add_package(
                     RelativePathBuf::default(),
-                    workspace_root.path.into(),
+                    Arc::clone(&workspace_root.path),
                     package_json,
                 );
             }

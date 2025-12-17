@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::{BufReader, Seek, SeekFrom},
     path::Path,
+    sync::Arc,
 };
 
 use vite_path::{AbsolutePath, RelativePathBuf};
@@ -60,33 +61,37 @@ pub enum WorkspaceFile {
 ///
 /// If the workspace file is not found, but a package is found, `workspace_file` will be `NonWorkspacePackage` with the `package.json` File.
 #[derive(Debug)]
-pub struct WorkspaceRoot<'a> {
+pub struct WorkspaceRoot {
     /// The absolute path of the workspace root directory.
-    pub path: &'a AbsolutePath,
-    /// The cwd that the workspace was found from, relative to the workspace root.
-    pub cwd: RelativePathBuf,
+    pub path: Arc<AbsolutePath>,
     /// The workspace file.
     pub workspace_file: WorkspaceFile,
 }
 
 /// Find the workspace root directory from the current working directory. `original_cwd` must be absolute.
 ///
+/// Returns the workspace root and the relative path from the workspace root to the original cwd.
+///
 /// If the workspace file is not found, but a package is found, `workspace_file` will be `NonWorkspacePackage` with the `package.json` File.
 ///
 /// If neither workspace nor package is found, will return `PackageJsonNotFound` error.
-pub fn find_workspace_root(original_cwd: &AbsolutePath) -> Result<WorkspaceRoot<'_>, Error> {
+pub fn find_workspace_root(
+    original_cwd: &AbsolutePath,
+) -> Result<(WorkspaceRoot, RelativePathBuf), Error> {
     let mut cwd = original_cwd;
 
     loop {
         // Check for pnpm-workspace.yaml for pnpm workspace
         if let Some(file) = open_exists_file(cwd.join("pnpm-workspace.yaml"))? {
-            return Ok(WorkspaceRoot {
-                path: cwd,
-                cwd: original_cwd
-                    .strip_prefix(cwd)?
-                    .expect("cwd must be within the pnpm workspace"),
-                workspace_file: WorkspaceFile::PnpmWorkspaceYaml(file),
-            });
+            let relative_cwd =
+                original_cwd.strip_prefix(cwd)?.expect("cwd must be within the pnpm workspace");
+            return Ok((
+                WorkspaceRoot {
+                    path: Arc::from(cwd),
+                    workspace_file: WorkspaceFile::PnpmWorkspaceYaml(file),
+                },
+                relative_cwd,
+            ));
         }
 
         // Check for package.json with workspaces field for npm/yarn workspace
@@ -96,11 +101,15 @@ pub fn find_workspace_root(original_cwd: &AbsolutePath) -> Result<WorkspaceRoot<
             if package_json.get("workspaces").is_some() {
                 // Reset the file cursor since we consumed it reading
                 file.seek(SeekFrom::Start(0))?;
-                return Ok(WorkspaceRoot {
-                    path: cwd,
-                    cwd: original_cwd.strip_prefix(cwd)?.expect("cwd must be within the workspace"),
-                    workspace_file: WorkspaceFile::NpmWorkspaceJson(file),
-                });
+                let relative_cwd =
+                    original_cwd.strip_prefix(cwd)?.expect("cwd must be within the workspace");
+                return Ok((
+                    WorkspaceRoot {
+                        path: Arc::from(cwd),
+                        workspace_file: WorkspaceFile::NpmWorkspaceJson(file),
+                    },
+                    relative_cwd,
+                ));
             }
         }
 
@@ -113,11 +122,10 @@ pub fn find_workspace_root(original_cwd: &AbsolutePath) -> Result<WorkspaceRoot<
             // We've reached the root, try to find the package root and return the non-workspace package.
             let package_root = find_package_root(original_cwd)?;
             let workspace_file = WorkspaceFile::NonWorkspacePackage(package_root.package_json);
-            return Ok(WorkspaceRoot {
-                path: package_root.path,
-                cwd: package_root.cwd,
-                workspace_file,
-            });
+            return Ok((
+                WorkspaceRoot { path: Arc::from(package_root.path), workspace_file },
+                package_root.cwd,
+            ));
         }
     }
 }
