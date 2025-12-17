@@ -3201,15 +3201,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vite_task_bin"
-version = "0.1.0"
-dependencies = [
- "clap",
- "vite_str",
- "vite_task_graph",
-]
-
-[[package]]
 name = "vite_task_graph"
 version = "0.1.0"
 dependencies = [
