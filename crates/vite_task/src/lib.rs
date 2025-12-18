@@ -19,4 +19,5 @@ pub use config::{ResolvedTask, Workspace};
 pub use error::Error;
 pub use execute::{CURRENT_EXECUTION_ID, EXECUTION_SUMMARY_DIR};
 pub use schedule::{ExecutionPlan, ExecutionStatus, ExecutionSummary};
+pub use session::{Session, SessionCallbacks};
 pub use types::ResolveCommandResult;

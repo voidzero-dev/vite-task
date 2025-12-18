@@ -142,6 +142,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59051ec02907378a67b0ba1b8631121f5388c8dbbb3cec8c749d8f93c2c3c211"
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3164,6 +3175,7 @@ name = "vite_task"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bincode",
  "bstr",
  "clap",
@@ -3205,6 +3217,7 @@ name = "vite_task_graph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "copy_dir",
  "insta",
@@ -3227,6 +3240,7 @@ name = "vite_task_plan"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "futures-core",
  "futures-util",
  "petgraph",

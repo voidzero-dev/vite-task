@@ -1,7 +1,5 @@
 use std::env::JoinPathsError;
 
-use vite_task_graph::display::TaskDisplay;
-
 use crate::{
     context::{PlanContext, TaskCallStackDisplay, TaskRecursionError},
     envs::ResolveEnvError,

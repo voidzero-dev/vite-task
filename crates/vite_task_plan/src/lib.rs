@@ -14,7 +14,6 @@ use envs::ResolvedEnvs;
 use error::TaskPlanErrorKindResultExt;
 pub use error::{Error, TaskPlanErrorKind};
 use execution_graph::ExecutionGraph;
-use futures_core::future::BoxFuture;
 use in_process::InProcessExecution;
 use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
@@ -103,6 +102,7 @@ pub enum ExecutionItemKind {
 
 /// The callback trait for parsing plan requests from cli args.
 /// See the method for details.
+#[async_trait::async_trait]
 pub trait PlanRequestParser: Debug {
     /// This is called for every parsable command in the task graph in order to determine how to execute it.
     ///
@@ -112,18 +112,19 @@ pub trait PlanRequestParser: Debug {
     /// - If it returns `Ok(None)`, the command will be spawned as a normal process.
     /// - If it returns `Ok(Some(ParsedArgs::TaskQuery)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
     /// - If it returns `Ok(Some(ParsedArgs::Synthetic)`, the command will become a `SpawnExecution` with the synthetic task.
-    fn get_plan_request(
+    async fn get_plan_request(
         &self,
         program: &str,
         args: &[Str],
         cwd: &AbsolutePath,
-    ) -> BoxFuture<'_, anyhow::Result<Option<PlanRequest>>>;
+    ) -> anyhow::Result<Option<PlanRequest>>;
 }
 
+#[async_trait::async_trait]
 pub trait TaskGraphLoader {
-    fn load_task_graph(
+    async fn load_task_graph(
         &mut self,
-    ) -> BoxFuture<'_, Result<Arc<vite_task_graph::IndexedTaskGraph>, TaskGraphLoadError>>;
+    ) -> Result<&vite_task_graph::IndexedTaskGraph, TaskGraphLoadError>;
 }
 
 #[derive(Debug)]

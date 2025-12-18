@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 monostate = "1.0.2"
 petgraph = { workspace = true }
