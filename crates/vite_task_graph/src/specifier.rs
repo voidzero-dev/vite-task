@@ -1,12 +1,13 @@
 use std::{convert::Infallible, fmt::Display, str::FromStr};
 
+use serde::Serialize;
 use vite_str::Str;
 
 /// Parsed task specifier (`"packageName#taskName"` or `"taskName"`)
 ///
 /// For `taskName`, `package_name` will be `None`.
 /// For `#taskName`, `package_name` will be `Some("")`. It's valid to have an empty package name.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct TaskSpecifier {
     pub package_name: Option<Str>,
     pub task_name: Str,

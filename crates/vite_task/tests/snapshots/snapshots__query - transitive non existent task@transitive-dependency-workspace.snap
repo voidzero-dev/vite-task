@@ -1,16 +1,19 @@
 ---
-source: crates/vite_task_graph/tests/snapshots.rs
+source: crates/vite_task/tests/snapshots.rs
 expression: err
-input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspace
+input_file: crates/vite_task/tests/fixtures/transitive-dependency-workspace
 ---
-SpecifierLookupError {
-    specifier: TaskSpecifier {
-        package_name: None,
-        task_name: "non-existent-task",
+{
+  "SpecifierLookupError": {
+    "specifier": {
+      "package_name": null,
+      "task_name": "non-existent-task"
     },
-    lookup_error: TaskNameNotFound {
-        package_name: "@test/a",
-        task_name: "non-existent-task",
-        package_index: NodeIndex(PackageIx(0)),
-    },
+    "lookup_error": {
+      "TaskNameNotFound": {
+        "package_name": "@test/a",
+        "task_name": "non-existent-task"
+      }
+    }
+  }
 }

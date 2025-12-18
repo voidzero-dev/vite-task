@@ -3,9 +3,11 @@ use std::{path::Path, sync::Arc};
 
 use clap::Parser;
 use copy_dir::copy_dir;
+use insta::internals::Content;
 use petgraph::visit::EdgeRef as _;
+use serde::Serializer;
 use tokio::runtime::Runtime;
-use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_path::{AbsolutePath, RelativePathBuf, redaction::redact_absolute_paths};
 use vite_str::Str;
 use vite_task_graph::{
     IndexedTaskGraph, SpecifierLookupError, TaskDependencyType, TaskNodeIndex,
@@ -16,23 +18,15 @@ use vite_workspace::find_workspace_root;
 
 #[derive(serde::Serialize, PartialEq, PartialOrd, Eq, Ord)]
 struct TaskIdSnapshot {
-    package_dir: RelativePathBuf,
+    package_dir: Arc<AbsolutePath>,
     task_name: Str,
 }
 impl TaskIdSnapshot {
-    fn new(
-        task_index: TaskNodeIndex,
-        base_dir: &AbsolutePath,
-        indexed_task_graph: &IndexedTaskGraph,
-    ) -> Self {
+    fn new(task_index: TaskNodeIndex, indexed_task_graph: &IndexedTaskGraph) -> Self {
         let task_id = &indexed_task_graph.task_graph()[task_index].task_id;
         Self {
             task_name: task_id.task_name.clone(),
-            package_dir: indexed_task_graph
-                .get_package_path(task_id.package_index)
-                .strip_prefix(base_dir)
-                .unwrap()
-                .unwrap(),
+            package_dir: Arc::clone(&indexed_task_graph.get_package_path(task_id.package_index)),
         }
     }
 }
@@ -48,7 +42,7 @@ fn snapshot_task_graph(
     struct TaskNodeSnapshot {
         id: TaskIdSnapshot,
         command: Str,
-        cwd: RelativePathBuf,
+        cwd: Arc<AbsolutePath>,
         depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)>,
     }
 
@@ -58,21 +52,13 @@ fn snapshot_task_graph(
         let task_node = &task_graph[task_index];
         let mut depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)> = task_graph
             .edges_directed(task_index, petgraph::Direction::Outgoing)
-            .map(|edge| {
-                (TaskIdSnapshot::new(edge.target(), base_dir, indexed_task_graph), *edge.weight())
-            })
+            .map(|edge| (TaskIdSnapshot::new(edge.target(), indexed_task_graph), *edge.weight()))
             .collect();
         depends_on.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         node_snapshots.push(TaskNodeSnapshot {
-            id: TaskIdSnapshot::new(task_index, base_dir, indexed_task_graph),
+            id: TaskIdSnapshot::new(task_index, indexed_task_graph),
             command: task_node.resolved_config.command.clone(),
-            cwd: task_node
-                .resolved_config
-                .resolved_options
-                .cwd
-                .strip_prefix(base_dir)
-                .unwrap()
-                .unwrap(),
+            cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
             depends_on,
         });
     }
@@ -87,7 +73,6 @@ fn snapshot_task_graph(
 fn snapshot_execution_graph(
     execution_graph: &TaskExecutionGraph,
     indexed_task_graph: &IndexedTaskGraph,
-    base_dir: &AbsolutePath,
 ) -> impl serde::Serialize {
     #[derive(serde::Serialize, PartialEq)]
     struct ExecutionNodeSnapshot {
@@ -99,46 +84,17 @@ fn snapshot_execution_graph(
     for task_index in execution_graph.nodes() {
         let mut deps = execution_graph
             .neighbors(task_index)
-            .map(|dep_index| TaskIdSnapshot::new(dep_index, base_dir, indexed_task_graph))
+            .map(|dep_index| TaskIdSnapshot::new(dep_index, indexed_task_graph))
             .collect::<Vec<_>>();
         deps.sort_unstable();
 
         execution_node_snapshots.push(ExecutionNodeSnapshot {
-            task: TaskIdSnapshot::new(task_index, base_dir, indexed_task_graph),
+            task: TaskIdSnapshot::new(task_index, indexed_task_graph),
             deps,
         });
     }
     execution_node_snapshots.sort_unstable_by(|a, b| a.task.cmp(&b.task));
     execution_node_snapshots
-}
-
-/// Modify absolute paths to be stable across different tmpdir locations.
-fn stabilize_absolute_path(path: &mut Arc<AbsolutePath>, base_dir: &AbsolutePath) {
-    let relative_path = path.strip_prefix(base_dir).unwrap().unwrap();
-    // this path is considered absolute on all platforms
-    let new_base_dir = AbsolutePath::new("//?/workspace/").unwrap();
-    *path = new_base_dir.join(relative_path).into();
-}
-
-/// Modify absolute paths in the SpecifierLookupError to be stable across different tmpdir locations.
-fn stabilize_specifier_lookup_error(
-    err: &mut SpecifierLookupError<PackageUnknownError>,
-    base_dir: &AbsolutePath,
-) {
-    match err {
-        SpecifierLookupError::AmbiguousPackageName { package_paths, .. } => {
-            for path in package_paths.iter_mut() {
-                stabilize_absolute_path(path, base_dir);
-            }
-        }
-        SpecifierLookupError::PackageNameNotFound { .. } => {}
-        SpecifierLookupError::TaskNameNotFound { package_index, .. } => {
-            *package_index = Default::default()
-        }
-        SpecifierLookupError::PackageUnknown { unspecifier_package_error, .. } => {
-            stabilize_absolute_path(&mut unspecifier_package_error.cwd, base_dir);
-        }
-    }
 }
 
 #[derive(serde::Deserialize)]
@@ -180,6 +136,9 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
     };
 
     runtime.block_on(async {
+        let _redaction_guard =
+            redact_absolute_paths(workspace_root.path.as_path().to_str().unwrap());
+
         let indexed_task_graph = vite_task_graph::IndexedTaskGraph::load(
             &workspace_root,
             &JsonUserConfigLoader::default(),
@@ -206,26 +165,21 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
             let task_query = match cli_task_query.into_task_query(&cwd) {
                 Ok(ok) => ok,
                 Err(err) => {
-                    insta::assert_debug_snapshot!(snapshot_name, err);
+                    insta::assert_json_snapshot!(snapshot_name, err);
                     continue;
                 }
             };
 
             let execution_graph = match indexed_task_graph.query_tasks(task_query) {
                 Ok(ok) => ok,
-                Err(mut err) => {
-                    match &mut err {
-                        TaskQueryError::SpecifierLookupError { lookup_error, .. } => {
-                            stabilize_specifier_lookup_error(lookup_error, &case_stage_path);
-                        }
-                    }
-                    insta::assert_debug_snapshot!(snapshot_name, err);
+                Err(err) => {
+                    insta::assert_json_snapshot!(snapshot_name, err);
                     continue;
                 }
             };
 
             let execution_graph_snapshot =
-                snapshot_execution_graph(&execution_graph, &indexed_task_graph, &case_stage_path);
+                snapshot_execution_graph(&execution_graph, &indexed_task_graph);
             insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
         }
     });
@@ -236,5 +190,6 @@ fn test_snapshots() {
     let tokio_runtime = Runtime::new().unwrap();
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePath::new(tmp_dir.path()).unwrap();
+
     insta::glob!("fixtures/*", |case_path| run_case(&tokio_runtime, tmp_dir_path, case_path));
 }

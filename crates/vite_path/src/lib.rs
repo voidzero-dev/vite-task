@@ -3,6 +3,8 @@ pub mod relative;
 
 use std::io;
 
+#[cfg(feature = "absolute-redaction")]
+pub use absolute::redaction;
 pub use absolute::{AbsolutePath, AbsolutePathBuf};
 pub use relative::{RelativePath, RelativePathBuf};
 

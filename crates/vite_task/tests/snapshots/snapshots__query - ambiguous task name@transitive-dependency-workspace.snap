@@ -1,24 +1,22 @@
 ---
-source: crates/vite_task_graph/tests/snapshots.rs
+source: crates/vite_task/tests/snapshots.rs
 expression: err
-input_file: crates/vite_task_graph/tests/fixtures/transitive-dependency-workspace
+input_file: crates/vite_task/tests/fixtures/transitive-dependency-workspace
 ---
-SpecifierLookupError {
-    specifier: TaskSpecifier {
-        package_name: Some(
-            "@test/a",
-        ),
-        task_name: "build",
+{
+  "SpecifierLookupError": {
+    "specifier": {
+      "package_name": "@test/a",
+      "task_name": "build"
     },
-    lookup_error: AmbiguousPackageName {
-        package_name: "@test/a",
-        package_paths: [
-            AbsolutePath(
-                "//?/workspace/packages/a",
-            ),
-            AbsolutePath(
-                "//?/workspace/packages/another-a",
-            ),
-        ],
-    },
+    "lookup_error": {
+      "AmbiguousPackageName": {
+        "package_name": "@test/a",
+        "package_paths": [
+          "packages/a",
+          "packages/another-a"
+        ]
+      }
+    }
+  }
 }

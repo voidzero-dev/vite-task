@@ -1,5 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
+use serde::Serialize;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
@@ -27,7 +28,7 @@ pub struct CLITaskQuery {
     ignore_depends_on: bool,
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Serialize)]
 pub enum CLITaskQueryError {
     #[error("--recursive and --transitive cannot be used together")]
     RecursiveTransitiveConflict,

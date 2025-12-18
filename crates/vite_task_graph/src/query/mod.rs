@@ -3,6 +3,7 @@ pub mod cli;
 use std::{collections::HashSet, sync::Arc};
 
 use petgraph::{prelude::DiGraphMap, visit::EdgeRef};
+use serde::Serialize;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
@@ -45,13 +46,13 @@ pub struct TaskQuery {
 /// The edges represent the final dependency relationships between tasks. No edge weights.
 pub type TaskExecutionGraph = DiGraphMap<TaskNodeIndex, ()>;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Serialize)]
 #[error("The current working directory {cwd:?} is in not any package")]
 pub struct PackageUnknownError {
     pub cwd: Arc<AbsolutePath>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Serialize)]
 pub enum TaskQueryError {
     #[error("Failed to look up task from specifier: {specifier}")]
     SpecifierLookupError {

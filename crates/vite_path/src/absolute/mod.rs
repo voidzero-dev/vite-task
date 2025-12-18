@@ -1,3 +1,6 @@
+#[cfg(feature = "absolute-redaction")]
+pub mod redaction;
+
 use std::{
     ffi::OsStr,
     fmt::Display,
@@ -8,6 +11,7 @@ use std::{
 };
 
 use ref_cast::{RefCastCustom, ref_cast_custom};
+use serde::Serialize;
 
 use crate::relative::{FromPathError, InvalidPathDataError, RelativePathBuf};
 
@@ -18,6 +22,29 @@ pub struct AbsolutePath(Path);
 impl AsRef<Self> for AbsolutePath {
     fn as_ref(&self) -> &Self {
         self
+    }
+}
+
+impl Serialize for AbsolutePath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self.as_path().to_str() {
+            Some(s) => {
+                #[cfg(feature = "absolute-redaction")]
+                let s = redaction::REDACTION_PREFIX.with_borrow(|redaction_prefix| {
+                    if let Some(redaction_prefix) = redaction_prefix
+                        && let Some(stripped_path) = s.strip_prefix(redaction_prefix.as_ref())
+                    {
+                        return stripped_path.strip_prefix("/").unwrap_or(stripped_path);
+                    }
+                    s
+                });
+                s.serialize(serializer)
+            }
+            None => Err(serde::ser::Error::custom("path contains invalid UTF-8 characters")),
+        }
     }
 }
 
@@ -43,6 +70,14 @@ impl From<&AbsolutePath> for Arc<AbsolutePath> {
         let arc: Arc<Path> = path.0.into();
         let arc_raw = Arc::into_raw(arc) as *const AbsolutePath;
         unsafe { Self::from_raw(arc_raw) }
+    }
+}
+
+impl From<&AbsolutePath> for Box<AbsolutePath> {
+    fn from(path: &AbsolutePath) -> Self {
+        let path_box: Box<Path> = path.0.into();
+        let path_box_raw = Box::into_raw(path_box) as *mut AbsolutePath;
+        unsafe { Self::from_raw(path_box_raw) }
     }
 }
 
