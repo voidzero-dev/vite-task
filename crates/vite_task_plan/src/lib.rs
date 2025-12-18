@@ -102,7 +102,7 @@ pub enum ExecutionItemKind {
 
 /// The callback trait for parsing plan requests from cli args.
 /// See the method for details.
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 pub trait PlanRequestParser: Debug {
     /// This is called for every parsable command in the task graph in order to determine how to execute it.
     ///
@@ -113,14 +113,14 @@ pub trait PlanRequestParser: Debug {
     /// - If it returns `Ok(Some(ParsedArgs::TaskQuery)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
     /// - If it returns `Ok(Some(ParsedArgs::Synthetic)`, the command will become a `SpawnExecution` with the synthetic task.
     async fn get_plan_request(
-        &self,
+        &mut self,
         program: &str,
         args: &[Str],
-        cwd: &AbsolutePath,
+        cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<Option<PlanRequest>>;
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 pub trait TaskGraphLoader {
     async fn load_task_graph(
         &mut self,

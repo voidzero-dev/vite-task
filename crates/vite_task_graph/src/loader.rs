@@ -5,7 +5,7 @@ use vite_path::AbsolutePath;
 use crate::config::UserConfigFile;
 
 /// Loader trait for loading user configuration files (vite.config.*).
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 pub trait UserConfigLoader: Debug + Send + Sync {
     async fn load_user_config_file(
         &self,
@@ -19,7 +19,7 @@ pub trait UserConfigLoader: Debug + Send + Sync {
 #[derive(Default, Debug)]
 pub struct JsonUserConfigLoader(());
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl UserConfigLoader for JsonUserConfigLoader {
     async fn load_user_config_file(
         &self,

@@ -50,6 +50,12 @@ pub struct Error {
     kind: TaskPlanErrorKind,
 }
 
+impl TaskPlanErrorKind {
+    pub fn with_empty_call_stack(self) -> Error {
+        Error { task_call_stack: TaskCallStackDisplay::default(), kind: self }
+    }
+}
+
 pub(crate) trait TaskPlanErrorKindResultExt {
     type Ok;
     /// Attach the current task call stack from the planning context to the error.
@@ -76,10 +82,7 @@ impl<T> TaskPlanErrorKindResultExt for Result<T, TaskPlanErrorKind> {
     fn with_empty_call_stack(self) -> Result<T, Error> {
         match self {
             Ok(value) => Ok(value),
-            Err(kind) => {
-                let task_call_stack = TaskCallStackDisplay::default();
-                Err(Error { task_call_stack, kind })
-            }
+            Err(kind) => Err(kind.with_empty_call_stack()),
         }
     }
 }
