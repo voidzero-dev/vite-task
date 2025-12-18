@@ -30,21 +30,27 @@ impl Serialize for AbsolutePath {
     where
         S: serde::Serializer,
     {
-        match self.as_path().to_str() {
-            Some(s) => {
-                #[cfg(feature = "absolute-redaction")]
-                let s = redaction::REDACTION_PREFIX.with_borrow(|redaction_prefix| {
-                    if let Some(redaction_prefix) = redaction_prefix
-                        && let Some(stripped_path) = s.strip_prefix(redaction_prefix.as_ref())
-                    {
-                        return stripped_path.strip_prefix("/").unwrap_or(stripped_path);
+        #[cfg(feature = "absolute-redaction")]
+        {
+            use redaction::REDACTION_PREFIX;
+
+            if let Some(redaction_prefix) = REDACTION_PREFIX
+                .with(|redaction_prefix| redaction_prefix.borrow().as_ref().map(Arc::clone))
+            {
+                match self.strip_prefix(redaction_prefix) {
+                    Ok(Some(stripped_path)) => return stripped_path.serialize(serializer),
+                    Err(strip_error) => {
+                        return Err(serde::ser::Error::custom(format!(
+                            "Failed to redact absolute path '{}': {}",
+                            self.as_path().display(),
+                            strip_error
+                        )));
                     }
-                    s
-                });
-                s.serialize(serializer)
+                    Ok(None) => { /* continue to serialize full path */ }
+                }
             }
-            None => Err(serde::ser::Error::custom("path contains invalid UTF-8 characters")),
         }
+        self.as_path().serialize(serializer)
     }
 }
 

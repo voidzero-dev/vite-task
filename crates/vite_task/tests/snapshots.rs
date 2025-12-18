@@ -131,8 +131,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
     };
 
     runtime.block_on(async {
-        let _redaction_guard =
-            redact_absolute_paths(workspace_root.path.as_path().to_str().unwrap());
+        let _redaction_guard = redact_absolute_paths(&workspace_root.path);
 
         let indexed_task_graph = vite_task_graph::IndexedTaskGraph::load(
             &workspace_root,
