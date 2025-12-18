@@ -1,5 +1,3 @@
-use super::AbsolutePath;
-
 thread_local! {
     pub(crate) static REDACTION_PREFIX: std::cell::RefCell<Option<Box<str>>> = std::cell::RefCell::new(None);
 }

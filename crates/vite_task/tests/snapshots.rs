@@ -3,16 +3,14 @@ use std::{path::Path, sync::Arc};
 
 use clap::Parser;
 use copy_dir::copy_dir;
-use insta::internals::Content;
 use petgraph::visit::EdgeRef as _;
-use serde::Serializer;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, RelativePathBuf, redaction::redact_absolute_paths};
 use vite_str::Str;
 use vite_task_graph::{
-    IndexedTaskGraph, SpecifierLookupError, TaskDependencyType, TaskNodeIndex,
+    IndexedTaskGraph, TaskDependencyType, TaskNodeIndex,
     loader::JsonUserConfigLoader,
-    query::{PackageUnknownError, TaskExecutionGraph, TaskQueryError, cli::CLITaskQuery},
+    query::{TaskExecutionGraph, cli::CLITaskQuery},
 };
 use vite_workspace::find_workspace_root;
 
@@ -34,10 +32,7 @@ impl TaskIdSnapshot {
 /// Create a stable json representation of the task graph for snapshot testing.
 ///
 /// All paths are relative to `base_dir`.
-fn snapshot_task_graph(
-    indexed_task_graph: &IndexedTaskGraph,
-    base_dir: &AbsolutePath,
-) -> impl serde::Serialize {
+fn snapshot_task_graph(indexed_task_graph: &IndexedTaskGraph) -> impl serde::Serialize {
     #[derive(serde::Serialize)]
     struct TaskNodeSnapshot {
         id: TaskIdSnapshot,
@@ -146,7 +141,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
         .await
         .expect(&format!("Failed to load task graph for case {case_name}"));
 
-        let task_graph_snapshot = snapshot_task_graph(&indexed_task_graph, &case_stage_path);
+        let task_graph_snapshot = snapshot_task_graph(&indexed_task_graph);
         insta::assert_json_snapshot!("task graph", task_graph_snapshot);
 
         for cli_query in cli_queries_file.queries {

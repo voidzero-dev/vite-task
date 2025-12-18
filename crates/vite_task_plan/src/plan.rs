@@ -126,7 +126,10 @@ async fn plan_task_as_execution_node(
         });
     }
 
-    Ok(TaskExecution { task_node_index, items })
+    Ok(TaskExecution {
+        task_display: context.indexed_task_graph().display_task(task_node_index),
+        items,
+    })
 }
 
 pub fn plan_synthetic_request(

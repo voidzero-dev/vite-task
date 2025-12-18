@@ -19,7 +19,7 @@ use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, query::TaskQuery};
+use vite_task_graph::{TaskGraphLoadError, display::TaskDisplay, query::TaskQuery};
 
 use crate::path_env::prepend_path_env;
 
@@ -60,8 +60,8 @@ pub enum SpawnCommandKind {
 /// Represents how a task should be executed. It's the node type for the execution graph. Each node corresponds to a task.
 #[derive(Debug)]
 pub struct TaskExecution {
-    /// The task index in the task graph
-    pub task_node_index: TaskNodeIndex,
+    /// The task this execution corresponds to
+    pub task_display: TaskDisplay,
 
     /// A task's command is split by `&&` and expanded into multiple execution items.
     ///
