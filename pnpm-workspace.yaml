@@ -4,9 +4,11 @@ packages:
 catalog:
   husky: ^9.1.7
   lint-staged: ^16.2.6
+  oxlint: ^1.34.0
+  oxlint-tsgolint: ^0.10.0
 
 catalogMode: prefer
 
 minimumReleaseAge: 1440
 
-minimumReleaseAgeExclude:
+minimumReleaseAgeExclude: null

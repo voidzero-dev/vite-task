@@ -3268,6 +3268,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vite_task_bin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "tokio",
+ "vite_path",
+ "vite_str",
+ "vite_task",
+ "which",
+]
+
+[[package]]
 name = "vite_task_graph"
 version = "0.1.0"
 dependencies = [

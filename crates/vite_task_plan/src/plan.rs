@@ -100,7 +100,7 @@ async fn plan_task_as_execution_node(
                     let spawn_execution = plan_spawn_execution(
                         &and_item.envs,
                         SpawnCommandKind::Program {
-                            program: and_item.program,
+                            program: OsStr::new(&and_item.program).into(),
                             args: and_item.args.into(),
                         },
                         &task_node.resolved_config.resolved_options,
@@ -126,10 +126,7 @@ async fn plan_task_as_execution_node(
         });
     }
 
-    Ok(TaskExecution {
-        task_display: context.indexed_task_graph().display_task(task_node_index),
-        items,
-    })
+    Ok(TaskExecution { task_node_index, items })
 }
 
 pub fn plan_synthetic_request(
@@ -138,8 +135,14 @@ pub fn plan_synthetic_request(
     cwd: &Arc<AbsolutePath>,
     envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
-    let resolved_options = ResolvedTaskOptions::resolve(synthetic_plan_request.task_options, &cwd);
-    plan_spawn_execution(prefix_envs, synthetic_plan_request.command_kind, &resolved_options, envs)
+    let SyntheticPlanRequest { program, args, task_options } = synthetic_plan_request;
+    let resolved_options = ResolvedTaskOptions::resolve(task_options, &cwd);
+    plan_spawn_execution(
+        prefix_envs,
+        SpawnCommandKind::Program { program, args },
+        &resolved_options,
+        envs,
+    )
 }
 
 fn plan_spawn_execution(

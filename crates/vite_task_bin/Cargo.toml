@@ -1,0 +1,24 @@
+[package]
+name = "vite_task_bin"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "vite"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["full"] }
+vite_path = { workspace = true }
+vite_str = { workspace = true }
+vite_task = { workspace = true }
+which = { workspace = true }
+
+[lints]
+workspace = true

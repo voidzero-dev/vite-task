@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ffi::OsStr, sync::Arc};
 
 use vite_str::Str;
 use vite_task_graph::{config::user::UserTaskOptions, query::TaskQuery};
@@ -25,8 +25,11 @@ pub struct QueryPlanRequest {
 /// Synthetic tasks are not defined in the task graph, but are generated on-the-fly.
 #[derive(Debug)]
 pub struct SyntheticPlanRequest {
-    /// The command to execute
-    pub command_kind: SpawnCommandKind,
+    /// The program to execute
+    pub program: Arc<OsStr>,
+
+    /// The arguments to pass to the program
+    pub args: Arc<[Str]>,
 
     /// The task options as if it's defined in `vite.config.*`
     pub task_options: UserTaskOptions,

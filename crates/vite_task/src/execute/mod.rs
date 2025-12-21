@@ -1,3 +1,6 @@
+pub mod execute_plan;
+pub mod reporter;
+
 use std::{
     collections::hash_map::Entry,
     env::{join_paths, split_paths},

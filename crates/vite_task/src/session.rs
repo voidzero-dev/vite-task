@@ -1,6 +1,6 @@
 use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
@@ -38,8 +38,8 @@ impl TaskGraphLoader for LazyTaskGraph<'_> {
 }
 
 pub struct SessionCallbacks<'a, CustomSubCommand> {
-    task_synthesizer: &'a mut (dyn TaskSynthesizer<CustomSubCommand> + 'a),
-    user_config_loader: &'a mut (dyn UserConfigLoader + 'a),
+    pub task_synthesizer: &'a mut (dyn TaskSynthesizer<CustomSubCommand> + 'a),
+    pub user_config_loader: &'a mut (dyn UserConfigLoader + 'a),
 }
 
 #[async_trait::async_trait(?Send)]
@@ -87,13 +87,19 @@ impl<CustomSubCommand: clap::Subcommand> vite_task_plan::PlanRequestParser
         args: &[Str],
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<Option<PlanRequest>> {
-        if !self.task_synthesizer.should_synthesize_for_program(program) {
-            return Ok(None);
-        }
-        let cli_args = CLIArgs::<CustomSubCommand>::try_parse_from(
-            std::iter::once(program).chain(args.iter().map(Str::as_str)),
-        )?;
-        Ok(Some(self.get_plan_request_from_cli_args(cli_args, cwd).await?))
+        Ok(
+            if self.task_synthesizer.should_synthesize_for_program(program)
+                && let Some(subcommand) = args.first()
+                && CLIArgs::<CustomSubCommand>::has_subcommand(subcommand)
+            {
+                let cli_args = CLIArgs::<CustomSubCommand>::try_parse_from(
+                    std::iter::once(program).chain(args.iter().map(Str::as_str)),
+                )?;
+                Some(self.get_plan_request_from_cli_args(cli_args, cwd).await?)
+            } else {
+                None
+            },
+        )
     }
 }
 
