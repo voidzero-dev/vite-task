@@ -25,7 +25,7 @@ use crate::path_env::prepend_path_env;
 
 /// Resolved cache configuration for a spawn execution.
 #[derive(Debug)]
-pub struct ResolvedCacheConfig {
+pub struct ResolvedCacheMetadata {
     /// Environment variables that are used for fingerprinting the cache.
     pub resolved_envs: ResolvedEnvs,
 }
@@ -35,8 +35,8 @@ pub struct ResolvedCacheConfig {
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug)]
 pub struct SpawnExecution {
-    /// Resolved cache configuration for this execution. `None` means caching is disabled.
-    pub resolved_cache_config: Option<ResolvedCacheConfig>,
+    /// Resolved cache metadata for this execution. `None` means caching is disabled.
+    pub resolved_cache_metadata: Option<ResolvedCacheMetadata>,
 
     /// Environment variables to set for the command, including both fingerprinted and pass-through envs.
     pub all_envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
@@ -78,6 +78,23 @@ pub struct ExecutionItem {
     /// The actual execution info (if this is spawn) is in `SpawnExecutionItem.command_kind`.
     pub command_span: Range<usize>,
 
+    /// Extra args appended to this execution item from the cli (`vite run task [extra_args...]`).
+    /// This is for computing the cache key along with the associated task.
+    ///
+    /// `kind` already contains the full resolved args for execution. No need to append these again.
+    pub extra_args: Arc<[Str]>,
+
+    /// The cwd when this execution item is planned.
+    /// This is for displaying purpose only.
+    ///
+    /// `SpawnExecution.cwd` contains the actual cwd for execution.
+    /// These two may differ if the task synthesizer returns a task with a different cwd.
+    ///
+    /// Hypothetically , if `vite lint-src` under cwd `packages/lib` synthesizes a task spawning `oxlint` under `packages/lib/src`.
+    /// The spawned process' cwd will be `packages/lib/src`, while this field will be `packages/lib`,
+    /// which will be displayed like `packages/lib$ vite lint-src``.
+    pub plan_cwd: Arc<AbsolutePath>,
+
     /// The kind of this execution item
     pub kind: ExecutionItemKind,
 }
@@ -110,8 +127,8 @@ pub trait PlanRequestParser: Debug {
     ///
     /// - If it returns `Err`, the planning will abort with the returned error.
     /// - If it returns `Ok(None)`, the command will be spawned as a normal process.
-    /// - If it returns `Ok(Some(ParsedArgs::TaskQuery)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
-    /// - If it returns `Ok(Some(ParsedArgs::Synthetic)`, the command will become a `SpawnExecution` with the synthetic task.
+    /// - If it returns `Ok(Some(PlanRequest::Query)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
+    /// - If it returns `Ok(Some(PlanRequest::Synthetic)`, the command will become a `SpawnExecution` with the synthetic task.
     async fn get_plan_request(
         &mut self,
         program: &str,

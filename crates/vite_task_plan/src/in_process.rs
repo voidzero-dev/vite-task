@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use vite_path::AbsolutePath;
 use vite_str::Str;
 
 /// The output of an in-process execution.
@@ -50,6 +53,7 @@ impl InProcessExecution {
     pub fn get_builtin_execution(
         name: &str,
         mut args: impl Iterator<Item = impl AsRef<str>>,
+        _cwd: &Arc<AbsolutePath>,
     ) -> Option<Self> {
         match name {
             "echo" => {

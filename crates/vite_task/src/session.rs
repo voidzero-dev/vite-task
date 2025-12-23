@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
 use clap::{Parser, Subcommand};
-use vite_path::AbsolutePath;
+use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
 use vite_task_plan::{
@@ -10,7 +10,7 @@ use vite_task_plan::{
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
-use crate::{CLIArgs, collections::HashMap};
+use crate::{CLIArgs, TaskCache, collections::HashMap};
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
@@ -116,6 +116,16 @@ pub struct Session<'a, CustomSubCommand> {
     cwd: Arc<AbsolutePath>,
 
     plan_request_parser: PlanRequestParser<'a, CustomSubCommand>,
+
+    cache: TaskCache,
+}
+
+fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf {
+    if let Ok(env_cache_path) = std::env::var("VITE_CACHE_PATH") {
+        AbsolutePathBuf::new(env_cache_path.into()).expect("Cache path should be absolute")
+    } else {
+        workspace_root.join("node_modules/.vite/task-cache")
+    }
 }
 
 impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
@@ -134,6 +144,15 @@ impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
         callbacks: SessionCallbacks<'a, CustomSubCommand>,
     ) -> anyhow::Result<Self> {
         let (workspace_root, _) = find_workspace_root(&cwd)?;
+        let cache_path = get_cache_path_of_workspace(&workspace_root.path);
+
+        if !cache_path.as_path().exists()
+            && let Some(cache_dir) = cache_path.as_path().parent()
+        {
+            tracing::info!("Creating task cache directory at {}", cache_dir.display());
+            std::fs::create_dir_all(cache_dir)?;
+        }
+        let cache = TaskCache::load_from_path(cache_path)?;
         Ok(Self {
             workspace_path: Arc::clone(&workspace_root.path),
             lazy_task_graph: LazyTaskGraph::Uninitialized {
@@ -143,7 +162,12 @@ impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
             envs,
             cwd,
             plan_request_parser: PlanRequestParser { task_synthesizer: callbacks.task_synthesizer },
+            cache,
         })
+    }
+
+    pub fn cache(&self) -> &TaskCache {
+        &self.cache
     }
 
     pub fn task_graph(&self) -> Option<&TaskGraph> {

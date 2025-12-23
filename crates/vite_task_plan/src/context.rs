@@ -3,6 +3,7 @@ use std::{
 };
 
 use vite_path::AbsolutePath;
+use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, display::TaskDisplay};
 
 use crate::{PlanRequestParser, path_env::prepend_path_env};
@@ -30,6 +31,10 @@ pub struct PlanContext<'a> {
 
     /// The current call stack of task index nodes being planned.
     task_call_stack: Vec<(TaskNodeIndex, Range<usize>)>,
+
+    /// The extra args (`vite run task [extra_arg...]`).
+    /// It may come from real cli args, or commands in task scripts.
+    extra_args: Arc<[Str]>,
 
     indexed_task_graph: &'a IndexedTaskGraph,
 }
@@ -75,7 +80,14 @@ impl<'a> PlanContext<'a> {
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
         indexed_task_graph: &'a IndexedTaskGraph,
     ) -> Self {
-        Self { cwd, envs, callbacks, task_call_stack: Vec::new(), indexed_task_graph }
+        Self {
+            cwd,
+            envs,
+            callbacks,
+            task_call_stack: Vec::new(),
+            indexed_task_graph,
+            extra_args: Default::default(),
+        }
     }
 
     pub fn cwd(&self) -> &Arc<AbsolutePath> {
@@ -139,6 +151,14 @@ impl<'a> PlanContext<'a> {
         }
     }
 
+    pub fn extra_args(&self) -> &Arc<[Str]> {
+        &self.extra_args
+    }
+
+    pub fn set_extra_args(&mut self, extra_args: Arc<[Str]>) {
+        self.extra_args = extra_args;
+    }
+
     pub fn duplicate(&mut self) -> PlanContext<'_> {
         PlanContext {
             cwd: Arc::clone(&self.cwd),
@@ -146,6 +166,7 @@ impl<'a> PlanContext<'a> {
             callbacks: self.callbacks,
             task_call_stack: self.task_call_stack.clone(),
             indexed_task_graph: self.indexed_task_graph,
+            extra_args: Arc::clone(&self.extra_args),
         }
     }
 }

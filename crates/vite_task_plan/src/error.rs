@@ -5,6 +5,15 @@ use crate::{
     envs::ResolveEnvError,
 };
 
+#[derive(Debug, thiserror::Error)]
+pub enum CdCommandError {
+    #[error("No home directory found for 'cd' command with no arguments")]
+    NoHomeDirectory,
+
+    #[error("Too many args for 'cd' command")]
+    ToManyArgs,
+}
+
 /// Errors that can occur when planning a specific execution from a task .
 #[derive(Debug, thiserror::Error)]
 pub enum TaskPlanErrorKind {
@@ -13,6 +22,13 @@ pub enum TaskPlanErrorKind {
         #[source]
         #[from]
         vite_task_graph::TaskGraphLoadError,
+    ),
+
+    #[error("Failed to execute 'cd' command")]
+    CdCommandError(
+        #[source]
+        #[from]
+        CdCommandError,
     ),
 
     #[error("Failed to query tasks from task graph")]

@@ -1,5 +1,6 @@
+pub(crate) mod cache;
+pub mod event;
 pub mod execute_plan;
-pub mod reporter;
 
 use std::{
     collections::hash_map::Entry,

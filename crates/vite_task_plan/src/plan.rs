@@ -1,6 +1,9 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
+    env::home_dir,
     ffi::OsStr,
+    path::Path,
     sync::Arc,
 };
 
@@ -11,10 +14,10 @@ use vite_str::Str;
 use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskOptions};
 
 use crate::{
-    ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, ResolvedCacheConfig,
+    ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, ResolvedCacheMetadata,
     SpawnCommandKind, SpawnExecution, TaskExecution,
     envs::ResolvedEnvs,
-    error::{Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
+    error::{CdCommandError, Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
     in_process::InProcessExecution,
     plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest},
@@ -48,30 +51,63 @@ async fn plan_task_as_execution_node(
 
     let mut items = Vec::<ExecutionItem>::new();
 
+    let mut cwd = Arc::clone(context.cwd());
+
     // TODO: variable expansion (https://crates.io/crates/shellexpand) BEFORE parsing
     // Try to parse the command string as a list of subcommands separated by `&&`
     if let Some(parsed_subcommands) = try_parse_as_and_list(command_str) {
-        for (and_item, add_item_span) in parsed_subcommands {
+        let and_item_count = parsed_subcommands.len();
+        for (index, (and_item, add_item_span)) in parsed_subcommands.into_iter().enumerate() {
             // Duplicate the context before modifying it for each and_item
             let mut context = context.duplicate();
             context.push_stack_frame(task_node_index, add_item_span.clone());
 
+            let mut args = and_item.args;
+            let extra_args = if index == and_item_count - 1 {
+                // For the last and_item, append extra args from the plan context
+                Arc::clone(context.extra_args())
+            } else {
+                Arc::new([])
+            };
+            args.extend(extra_args.iter().cloned());
+
+            // Handle `cd` builtin command
+            if and_item.program == "cd" {
+                let cd_target: Cow<'_, Path> = match args.as_slice() {
+                    // No args, go to home directory
+                    [] => home_dir()
+                        .ok_or_else(|| {
+                            TaskPlanErrorKind::CdCommandError(CdCommandError::NoHomeDirectory)
+                        })
+                        .with_plan_context(&context)?
+                        .into(),
+                    [dir] => Path::new(dir.as_str()).into(),
+                    _ => {
+                        return Err(TaskPlanErrorKind::CdCommandError(CdCommandError::ToManyArgs))
+                            .with_plan_context(&context);
+                    }
+                };
+                cwd = cwd.join(cd_target.as_ref()).into();
+                continue;
+            }
+
             // Check for builtin commands like `echo ...`
             if let Some(builtin_execution) =
-                InProcessExecution::get_builtin_execution(&and_item.program, and_item.args.iter())
+                InProcessExecution::get_builtin_execution(&and_item.program, args.iter(), &cwd)
             {
                 items.push(ExecutionItem {
                     command_span: add_item_span,
+                    plan_cwd: Arc::clone(&cwd),
+                    extra_args,
                     kind: ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(builtin_execution)),
                 });
                 continue;
             }
 
             // Try to parse the args of an and_item to a task request like `run -r build`
-            let cwd = Arc::clone(context.cwd());
             let task_request = context
                 .callbacks()
-                .get_plan_request(&and_item.program, &and_item.args, &cwd)
+                .get_plan_request(&and_item.program, &args, &cwd)
                 .await
                 .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError { error })
                 .with_plan_context(&context)?;
@@ -101,7 +137,7 @@ async fn plan_task_as_execution_node(
                         &and_item.envs,
                         SpawnCommandKind::Program {
                             program: OsStr::new(&and_item.program).into(),
-                            args: and_item.args.into(),
+                            args: args.into(),
                         },
                         &task_node.resolved_config.resolved_options,
                         context.envs(),
@@ -110,7 +146,12 @@ async fn plan_task_as_execution_node(
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
             };
-            items.push(ExecutionItem { command_span: add_item_span, kind: execution_item_kind });
+            items.push(ExecutionItem {
+                command_span: add_item_span,
+                plan_cwd: Arc::clone(&cwd),
+                extra_args,
+                kind: execution_item_kind,
+            });
         }
     } else {
         let spawn_execution = plan_spawn_execution(
@@ -122,6 +163,8 @@ async fn plan_task_as_execution_node(
         .with_plan_context(&context)?;
         items.push(ExecutionItem {
             command_span: 0..command_str.len(),
+            plan_cwd: cwd,
+            extra_args: Arc::clone(context.extra_args()),
             kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
         });
     }
@@ -154,7 +197,7 @@ fn plan_spawn_execution(
     // all envs available in the current context
     let mut all_envs = envs.clone();
 
-    let mut resolved_cache_config = None;
+    let mut resolved_cache_metadata = None;
     if let Some(cache_config) = &resolved_task_options.cache_config {
         // Resolve envs according cache configs
         let mut resolved_envs = ResolvedEnvs::resolve(&mut all_envs, &cache_config.env_config)
@@ -164,7 +207,7 @@ fn plan_spawn_execution(
         resolved_envs
             .fingerprinted_envs
             .extend(prefix_envs.iter().map(|(name, value)| (name.clone(), value.as_str().into())));
-        resolved_cache_config = Some(ResolvedCacheConfig { resolved_envs });
+        resolved_cache_metadata = Some(ResolvedCacheMetadata { resolved_envs });
     }
 
     // Add prefix envs to all envs
@@ -174,7 +217,7 @@ fn plan_spawn_execution(
 
     Ok(SpawnExecution {
         all_envs: Arc::new(all_envs),
-        resolved_cache_config,
+        resolved_cache_metadata,
         cwd: Arc::clone(&resolved_task_options.cwd),
         command_kind,
     })
@@ -185,6 +228,7 @@ pub async fn plan_query_request(
     query_plan_request: QueryPlanRequest,
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {
+    context.set_extra_args(Arc::clone(&query_plan_request.plan_options.extra_args));
     // Query matching tasks from the task graph
     let task_node_index_graph = context
         .indexed_task_graph()
