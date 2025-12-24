@@ -10,7 +10,7 @@ use vite_str::Str;
 
 use crate::{
     Error,
-    config::{CommandFingerprint, ResolvedTask, TaskId},
+    config::{CommandFingerprint, ResolvedTask},
     execute::{ExecutedTask, StdOutput},
     fingerprint::{PostRunFingerprint, PostRunFingerprintMismatch},
     fs::FileSystem,

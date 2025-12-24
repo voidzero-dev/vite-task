@@ -1,5 +1,10 @@
+mod cache;
+mod event;
+mod execute;
+
 use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
+use cache::TaskCache;
 use clap::{Parser, Subcommand};
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
@@ -11,7 +16,6 @@ use vite_task_plan::{
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
 use crate::{
-    CLIArgs, TaskCache,
     cli::{ParsedTaskCLIArgs, TaskCLIArgs},
     collections::HashMap,
 };
@@ -20,6 +24,15 @@ use crate::{
 enum LazyTaskGraph<'a> {
     Uninitialized { workspace_root: WorkspaceRoot, config_loader: &'a dyn UserConfigLoader },
     Initialized(IndexedTaskGraph),
+}
+
+impl LazyTaskGraph<'_> {
+    fn try_get(&self) -> Option<&IndexedTaskGraph> {
+        match self {
+            Self::Initialized(graph) => Some(graph),
+            _ => None,
+        }
+    }
 }
 
 #[async_trait::async_trait(?Send)]

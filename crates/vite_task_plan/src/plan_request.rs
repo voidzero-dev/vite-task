@@ -3,8 +3,6 @@ use std::{ffi::OsStr, sync::Arc};
 use vite_str::Str;
 use vite_task_graph::{config::user::UserTaskOptions, query::TaskQuery};
 
-use crate::SpawnCommandKind;
-
 #[derive(Debug)]
 pub struct PlanOptions {
     pub extra_args: Arc<[Str]>,

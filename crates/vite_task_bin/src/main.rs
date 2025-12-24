@@ -5,16 +5,22 @@ use std::{
     sync::Arc,
 };
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use vite_path::{AbsolutePath, current_dir};
 use vite_str::Str;
 use vite_task::{CLIArgs, Session, SessionCallbacks, plan_request::SyntheticPlanRequest};
 
-/// This is the custom subcommand that synthesizes tasks for vite-task
-#[derive(Debug, Parser)]
-enum TaskCustomSubCommand {
+/// Theses are the custom subcommands that synthesize tasks for vite-task
+#[derive(Debug, Subcommand)]
+enum CustomTaskSubcommand {
     /// oxlint
     Lint { args: Vec<Str> },
+}
+
+// These are the subcommands that is not handled by vite-task
+#[derive(Debug, Subcommand)]
+enum NonTaskSubcommand {
+    Version,
 }
 
 #[derive(Debug)]
@@ -40,18 +46,18 @@ fn find_executable_in_node_modules_bin(
 }
 
 #[async_trait::async_trait(?Send)]
-impl vite_task::TaskSynthesizer<TaskCustomSubCommand> for TaskSynthesizer {
+impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
     fn should_synthesize_for_program(&self, program: &str) -> bool {
         program == "vite"
     }
 
     async fn synthesize_task(
         &mut self,
-        subcommand: TaskCustomSubCommand,
+        subcommand: CustomTaskSubcommand,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<SyntheticPlanRequest> {
         match subcommand {
-            TaskCustomSubCommand::Lint { args } => Ok(SyntheticPlanRequest {
+            CustomTaskSubcommand::Lint { args } => Ok(SyntheticPlanRequest {
                 program: find_executable_in_node_modules_bin(&*cwd, "oxlint")?,
                 args: args.into(),
                 task_options: Default::default(),
@@ -62,17 +68,18 @@ impl vite_task::TaskSynthesizer<TaskCustomSubCommand> for TaskSynthesizer {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // This is the custom subcommand that is not handled by vite-task
-    #[derive(Debug, clap::Subcommand)]
-    enum NonTaskSubCommand {
-        Version,
-    }
-
+    let cwd: Arc<AbsolutePath> = current_dir()?.into();
     // Parse the CLI arguments and see if they are for vite-task or not
-    let args = CLIArgs::<TaskCustomSubCommand, NonTaskSubCommand>::try_parse_from(env::args())?;
+    let args = match CLIArgs::<CustomTaskSubcommand, NonTaskSubcommand>::try_parse_from(env::args())
+    {
+        Ok(ok) => ok,
+        Err(err) => {
+            err.exit();
+        }
+    };
     let task_cli_args = match args {
         CLIArgs::Task(task_cli_args) => task_cli_args,
-        CLIArgs::NonTask(NonTaskSubCommand::Version) => {
+        CLIArgs::NonTask(NonTaskSubcommand::Version) => {
             // Non-task subcommands are not handled by vite-task's session.
             println!("{}", env!("CARGO_PKG_VERSION"));
             return Ok(());
@@ -86,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
         user_config_loader: &mut config_loader,
     })?;
 
-    let plan = session.plan(current_dir()?.into(), task_cli_args).await?;
+    let plan = session.plan(cwd, task_cli_args).await?;
     dbg!(plan);
 
     Ok(())

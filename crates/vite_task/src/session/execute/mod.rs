@@ -21,6 +21,7 @@ use super::{
         ExecutionStartedEvent, OutputKind, TaskInfo,
     },
 };
+use crate::{Session, session::SessionExecutionPlan};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecuteError {
@@ -161,6 +162,12 @@ impl ExecutionContext<'_> {
                     cmd.args(["-c"]);
                     cmd
                 };
+
+                let mut script = script.clone();
+                for arg in args.iter() {
+                    script.push(' ');
+                    script.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
+                }
                 cmd.arg(script);
                 cmd
             }
@@ -170,18 +177,18 @@ impl ExecutionContext<'_> {
     }
 }
 
-pub async fn execute_plan(
-    plan: &ExecutionPlan,
-    args: &Arc<[Str]>,
-    indexed_task_graph: Option<&IndexedTaskGraph>,
-    event_handler: &mut (dyn FnMut(ExecutionEvent) + '_),
-    cache: &TaskCache,
-) -> Result<(), ExecuteError> {
-    let mut execution_context = ExecutionContext {
-        indexed_task_graph,
-        event_handler,
-        current_execution_id: ExecutionId::zero(),
-        cache,
-    };
-    execution_context.execute_item_kind(plan.root_node(), None).await
+impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
+    pub async fn execute(
+        &self,
+        plan: SessionExecutionPlan,
+        event_handler: &mut (dyn FnMut(ExecutionEvent) + '_),
+    ) -> Result<(), ExecuteError> {
+        let mut execution_context = ExecutionContext {
+            indexed_task_graph: self.lazy_task_graph.try_get(),
+            event_handler,
+            current_execution_id: ExecutionId::zero(),
+            cache: &self.cache,
+        };
+        execution_context.execute_item_kind(plan.plan.root_node(), None).await
+    }
 }

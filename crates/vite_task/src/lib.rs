@@ -14,7 +14,7 @@ mod ui;
 
 // Public exports for vite-plus-cli to use
 pub use cache::TaskCache;
-pub use cli::CLIArgs;
+pub use cli::{CLIArgs, TaskCLIArgs};
 pub use config::{ResolvedTask, Workspace};
 pub use error::Error;
 pub use execute::{CURRENT_EXECUTION_ID, EXECUTION_SUMMARY_DIR};
