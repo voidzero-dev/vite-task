@@ -8,38 +8,38 @@ use vite_task_plan::plan_request::{PlanOptions, PlanRequest, QueryPlanRequest};
 
 /// Represents the CLI arguments handled by vite-task, including both built-in and custom subcommands.
 #[derive(Debug)]
-pub struct TaskCLIArgs<CustomSubCommand: Subcommand> {
+pub struct TaskCLIArgs<CustomSubcommand: Subcommand> {
     pub(crate) original: Arc<[Str]>,
-    pub(crate) parsed: ParsedTaskCLIArgs<CustomSubCommand>,
+    pub(crate) parsed: ParsedTaskCLIArgs<CustomSubcommand>,
 }
 
-pub enum CLIArgs<CustomSubCommand: Subcommand, NonTaskSubCommand: Subcommand> {
+pub enum CLIArgs<CustomSubcommand: Subcommand, NonTaskSubcommand: Subcommand> {
     /// vite-task's own built-in subcommands
-    Task(TaskCLIArgs<CustomSubCommand>),
+    Task(TaskCLIArgs<CustomSubcommand>),
     /// custom subcommands provided by vite+
-    NonTask(NonTaskSubCommand),
+    NonTask(NonTaskSubcommand),
 }
 
-impl<CustomSubCommand: Subcommand, NonTaskSubCommand: Subcommand>
-    CLIArgs<CustomSubCommand, NonTaskSubCommand>
+impl<CustomSubcommand: Subcommand, NonTaskSubcommand: Subcommand>
+    CLIArgs<CustomSubcommand, NonTaskSubcommand>
 {
     /// Get the original CLI arguments
     pub fn try_parse_from(
         args: impl Iterator<Item = impl AsRef<str>>,
     ) -> Result<Self, clap::Error> {
         #[derive(Debug, clap::Parser)]
-        enum ParsedCLIArgs<CustomSubCommand: Subcommand, NonTaskSubCommand: Subcommand> {
+        enum ParsedCLIArgs<CustomSubcommand: Subcommand, NonTaskSubcommand: Subcommand> {
             /// subcommands handled by vite task
             #[command(flatten)]
-            Task(ParsedTaskCLIArgs<CustomSubCommand>),
+            Task(ParsedTaskCLIArgs<CustomSubcommand>),
 
             /// subcommands that are not handled by vite task
             #[command(flatten)]
-            NonTask(NonTaskSubCommand),
+            NonTask(NonTaskSubcommand),
         }
 
         let args = args.map(|arg| Str::from(arg.as_ref())).collect::<Arc<[Str]>>();
-        let parsed_cli_args = ParsedCLIArgs::<CustomSubCommand, NonTaskSubCommand>::try_parse_from(
+        let parsed_cli_args = ParsedCLIArgs::<CustomSubcommand, NonTaskSubcommand>::try_parse_from(
             args.iter().map(|s| OsStr::new(s.as_str())),
         )?;
 
@@ -53,13 +53,13 @@ impl<CustomSubCommand: Subcommand, NonTaskSubCommand: Subcommand>
 }
 
 #[derive(Debug, Parser)]
-pub(crate) enum ParsedTaskCLIArgs<CustomSubCommand: Subcommand> {
+pub(crate) enum ParsedTaskCLIArgs<CustomSubcommand: Subcommand> {
     /// subcommands provided by vite task, like `run`
     #[clap(flatten)]
     BuiltIn(BuiltInCommand),
     /// custom subcommands provided by vite+, like `lint`
     #[clap(flatten)]
-    Custom(CustomSubCommand),
+    Custom(CustomSubcommand),
 }
 
 /// vite task CLI subcommands

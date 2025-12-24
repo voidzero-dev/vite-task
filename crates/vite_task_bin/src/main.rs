@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use clap::{Parser, Subcommand};
+use clap::Subcommand;
 use vite_path::{AbsolutePath, current_dir};
 use vite_str::Str;
 use vite_task::{CLIArgs, Session, SessionCallbacks, plan_request::SyntheticPlanRequest};

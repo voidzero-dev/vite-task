@@ -277,7 +277,7 @@ impl ExecutionContext<'_> {
     }
 }
 
-impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
+impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     pub async fn execute(
         &self,
         plan: SessionExecutionPlan,
