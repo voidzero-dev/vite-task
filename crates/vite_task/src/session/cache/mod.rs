@@ -1,3 +1,5 @@
+pub mod fingerprint;
+
 use std::{fmt::Display, io::Write, sync::Arc, time::Duration};
 
 // use bincode::config::{Configuration, standard};
@@ -43,7 +45,7 @@ impl CommandCacheValue {
 }
 
 #[derive(Debug)]
-pub struct TaskCache {
+pub struct ExecutionCache {
     conn: Mutex<Connection>,
 }
 
@@ -51,7 +53,7 @@ pub struct TaskCache {
 #[derive(Debug, Encode, Decode, Serialize)]
 pub struct DirectExecutionCacheKey {
     /// The args after the program name, including the subcommand name. (like `["lint", "--fix"]` for `vite lint --fix`)
-    pub args: Arc<[Str]>,
+    pub args_without_program: Arc<[Str]>,
 
     /// The cwd where the `vite [custom subcommand] ...` is run.
     ///
@@ -109,7 +111,7 @@ impl Display for FingerprintMismatch {
     }
 }
 
-impl TaskCache {
+impl ExecutionCache {
     pub fn load_from_path(cache_path: AbsolutePathBuf) -> Result<Self, Error> {
         let path: &AbsolutePath = cache_path.as_ref();
         tracing::info!("Creating task cache directory at {:?}", path);
@@ -208,7 +210,7 @@ impl TaskCache {
 }
 
 // basic database operations
-impl TaskCache {
+impl ExecutionCache {
     async fn get_key_by_value<K: Encode, V: Decode<()>>(
         &self,
         table: &str,

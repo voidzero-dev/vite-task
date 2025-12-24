@@ -3319,6 +3319,7 @@ dependencies = [
  "vite_shell",
  "vite_str",
  "vite_task_graph",
+ "which",
 ]
 
 [[package]]

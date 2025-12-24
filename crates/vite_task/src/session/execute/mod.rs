@@ -1,46 +1,102 @@
 use core::task;
-use std::sync::Arc;
+use std::{borrow::Cow, ops::Range, path::Path, sync::Arc};
 
 use futures_util::FutureExt;
 use petgraph::{
     algo::{Cycle, toposort},
     graph::DiGraph,
 };
+use sha2::digest::typenum::Abs;
+use vite_path::{AbsolutePath, RelativePathBuf, relative::InvalidPathDataError};
 use vite_str::Str;
-use vite_task_graph::IndexedTaskGraph;
+use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex};
 use vite_task_plan::{
-    ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnCommandKind, SpawnExecution,
-    TaskExecution,
+    ExecutionItem, ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnCommandKind,
+    SpawnExecution, TaskExecution,
     execution_graph::{ExecutionGraph, ExecutionIx, ExecutionNodeIndex},
 };
 
 use super::{
-    cache::{ExecutionCacheKey, TaskCache},
+    cache::{ExecutionCache, ExecutionCacheKey},
     event::{
         CacheDisabledReason, CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId,
-        ExecutionStartedEvent, OutputKind, TaskInfo,
+        ExecutionStartInfo, ExecutionStartedEvent, OutputKind,
     },
 };
-use crate::{Session, session::SessionExecutionPlan};
+use crate::{
+    Session,
+    session::{
+        SessionExecutionPlan,
+        cache::{DirectExecutionCacheKey, UserTaskExecutionCacheKey},
+    },
+};
+
+#[derive(Debug, thiserror::Error)]
+pub enum PathError {
+    #[error("Path {path:?} is outside of the workspace {workspace_path:?}")]
+    PathOutsideWorkspace { path: Arc<AbsolutePath>, workspace_path: Arc<AbsolutePath> },
+    #[error("Path {path:?} contains characters that make it non-portable")]
+    NonPortableRelativePath {
+        path: Arc<Path>,
+        #[source]
+        error: InvalidPathDataError,
+    },
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecuteError {
     #[error("Cycle dependencies detected: {0:?}")]
     CycleDependencies(Cycle<ExecutionNodeIndex>),
+
+    #[error(transparent)]
+    PathError(#[from] PathError),
 }
 
 struct ExecutionContext<'a> {
     indexed_task_graph: Option<&'a IndexedTaskGraph>,
     event_handler: &'a mut (dyn FnMut(ExecutionEvent) + 'a),
     current_execution_id: ExecutionId,
-    cache: &'a TaskCache,
+    cache: &'a ExecutionCache,
+    /// All relative paths in cache are relative to this base path
+    cache_base_path: &'a Arc<AbsolutePath>,
+}
+
+/// The origin of the current execution item, either directly from CLI args, or from a task in the task graph
+enum ExecutionOrigin<'a> {
+    CLIArgs {
+        args_without_program: &'a Arc<[Str]>,
+        cwd: &'a Arc<AbsolutePath>,
+    },
+    UserTask {
+        task_node_index: TaskNodeIndex,
+        item: &'a ExecutionItem,
+        item_index: usize,
+        item_count: usize,
+    },
 }
 
 impl ExecutionContext<'_> {
+    fn strip_prefix_for_cache(
+        &self,
+        path: &Arc<AbsolutePath>,
+    ) -> Result<RelativePathBuf, PathError> {
+        match path.strip_prefix(&*self.cache_base_path) {
+            Ok(Some(rel_path)) => Ok(rel_path),
+            Ok(None) => Err(PathError::PathOutsideWorkspace {
+                path: Arc::clone(path),
+                workspace_path: Arc::clone(self.cache_base_path),
+            }),
+            Err(err) => Err(PathError::NonPortableRelativePath {
+                path: err.stripped_path.into(),
+                error: err.invalid_path_data_error,
+            }),
+        }
+    }
+
     async fn execute_item_kind(
         &mut self,
         item_kind: &ExecutionItemKind,
-        task_info: Option<TaskInfo>,
+        origin: ExecutionOrigin<'_>,
     ) -> Result<(), ExecuteError> {
         match item_kind {
             ExecutionItemKind::Expanded(graph) => {
@@ -67,33 +123,25 @@ impl ExecutionContext<'_> {
                     node_indices.into_iter().map(|id| graph.remove_node(id).unwrap());
                 for task_execution in ordered_executions {
                     let indexed_task_graph = self.indexed_task_graph.unwrap();
-                    let task_command = indexed_task_graph.task_graph()
-                        [task_execution.task_node_index]
-                        .resolved_config
-                        .command
-                        .as_str();
                     let task_display =
                         indexed_task_graph.display_task(task_execution.task_node_index);
-                    for (index, item) in task_execution.items.iter().enumerate() {
-                        let item_command = &task_command[item.command_span.clone()];
-                        let task_info = TaskInfo {
-                            task_display_name: if task_execution.items.len() > 1 {
-                                vite_str::format!("{} ({})", task_display, index)
-                            } else {
-                                vite_str::format!("{}", task_display)
+                    for (item_index, item) in task_execution.items.iter().enumerate() {
+                        self.execute_item_kind(
+                            &item.kind,
+                            ExecutionOrigin::UserTask {
+                                item,
+                                item_index,
+                                item_count: task_execution.items.len(),
+                                task_node_index: task_execution.task_node_index,
                             },
-                            command: item_command.into(),
-                            plan_cwd: Arc::clone(&item.plan_cwd),
-                        };
-                        self.execute_item_kind(&item.kind, Some(task_info)).boxed_local().await?;
+                        )
+                        .boxed_local()
+                        .await?;
                     }
                 }
             }
             ExecutionItemKind::Leaf(leaf_execution_kind) => {
-                let execution_id = self.current_execution_id;
-                self.current_execution_id = self.current_execution_id.next();
-
-                self.execute_leaf(leaf_execution_kind, task_info, todo!()).await?;
+                self.execute_leaf(leaf_execution_kind, origin).await?;
             }
         }
         Ok(())
@@ -102,15 +150,47 @@ impl ExecutionContext<'_> {
     async fn execute_leaf(
         &mut self,
         leaf_execution_kind: &LeafExecutionKind,
-        task_info: Option<TaskInfo>,
-        task_run_cache_key: Option<ExecutionCacheKey>,
+        origin: ExecutionOrigin<'_>,
     ) -> Result<(), ExecuteError> {
+        let start_info = match origin {
+            ExecutionOrigin::CLIArgs { args_without_program, cwd } => ExecutionStartInfo {
+                task_display_name: None,
+                // display command with `vite` followed by the user supplied cli args
+                command: vite_str::format!(
+                    "{}",
+                    std::iter::once(Cow::Borrowed("vite"))
+                        .chain(
+                            args_without_program
+                                .iter()
+                                .map(|s| shell_escape::escape(s.as_str().into()))
+                        )
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+                cwd: Arc::clone(&cwd),
+            },
+            ExecutionOrigin::UserTask { task_node_index, item, item_index, item_count } => {
+                let indexed_task_graph = self.indexed_task_graph.expect("Task graph must have been loaded if there exists an execution associated with a task");
+                let task_node = &indexed_task_graph.task_graph()[task_node_index];
+                let command = &task_node.resolved_config.command[item.command_span.clone()];
+                let task_display = indexed_task_graph.display_task(task_node_index);
+                ExecutionStartInfo {
+                    task_display_name: Some(if item_count > 1 {
+                        vite_str::format!("{} ({})", task_display, item_index)
+                    } else {
+                        vite_str::format!("{}", task_display)
+                    }),
+                    command: command.into(),
+                    cwd: Arc::clone(&item.plan_cwd),
+                }
+            }
+        };
+
         let execution_id = self.current_execution_id;
         self.current_execution_id = self.current_execution_id.next();
-
         (self.event_handler)(ExecutionEvent {
             execution_id,
-            kind: ExecutionEventKind::Start { task_info },
+            kind: ExecutionEventKind::Start(start_info),
         });
 
         match leaf_execution_kind {
@@ -134,7 +214,7 @@ impl ExecutionContext<'_> {
                 });
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
-                self.execute_spawn(execution_id, spawn_execution).await?;
+                self.execute_spawn(execution_id, origin, spawn_execution).await?;
             }
         }
         Ok(())
@@ -143,11 +223,31 @@ impl ExecutionContext<'_> {
     async fn execute_spawn(
         &mut self,
         execution_id: ExecutionId,
+        origin: ExecutionOrigin<'_>,
         spawn_execution: &SpawnExecution,
     ) -> Result<(), ExecuteError> {
+        let execution_cache_key = match origin {
+            ExecutionOrigin::CLIArgs { args_without_program, cwd } => {
+                ExecutionCacheKey::Direct(DirectExecutionCacheKey {
+                    args_without_program: Arc::clone(&args_without_program),
+                    plan_cwd: self.strip_prefix_for_cache(cwd)?,
+                })
+            }
+            ExecutionOrigin::UserTask { task_node_index, item_index, .. } => {
+                let indexed_task_graph = self.indexed_task_graph.expect("Task graph must have been loaded if there exists an execution associated with a task");
+                let task_node = &indexed_task_graph.task_graph()[task_node_index];
+                let package_path = indexed_task_graph.get_package_path_for_task(task_node_index);
+                ExecutionCacheKey::UserTask(UserTaskExecutionCacheKey {
+                    task_name: task_node.task_id.task_name.clone(),
+                    package_path: self.strip_prefix_for_cache(&package_path)?,
+                    and_item_index: item_index,
+                })
+            }
+        };
+
         let mut cmd = match &spawn_execution.command_kind {
-            SpawnCommandKind::Program { program, args } => {
-                let mut cmd = fspy::Command::new(&*program);
+            SpawnCommandKind::Program { program_path, args } => {
+                let mut cmd = fspy::Command::new(program_path.as_path());
                 cmd.args(args.iter().map(|arg| arg.as_str()));
                 cmd
             }
@@ -188,7 +288,16 @@ impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
             event_handler,
             current_execution_id: ExecutionId::zero(),
             cache: &self.cache,
+            cache_base_path: &self.workspace_path,
         };
-        execution_context.execute_item_kind(plan.plan.root_node(), None).await
+        execution_context
+            .execute_item_kind(
+                plan.plan.root_node(),
+                ExecutionOrigin::CLIArgs {
+                    args_without_program: &plan.cli_args_without_program,
+                    cwd: &plan.cwd,
+                },
+            )
+            .await
     }
 }

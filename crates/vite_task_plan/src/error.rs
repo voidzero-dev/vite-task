@@ -1,4 +1,6 @@
-use std::env::JoinPathsError;
+use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, sync::Arc};
+
+use vite_path::AbsolutePath;
 
 use crate::{
     context::{PlanContext, TaskCallStackDisplay, TaskRecursionError},
@@ -12,6 +14,26 @@ pub enum CdCommandError {
 
     #[error("Too many args for 'cd' command")]
     ToManyArgs,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub struct WhichError {
+    pub program: Arc<OsStr>,
+    pub path_env: Option<Arc<OsStr>>,
+    pub cwd: Arc<AbsolutePath>,
+    #[source]
+    pub error: which::Error,
+}
+impl Display for WhichError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Failed to find executable {:?} under cwd {:?} with ", self.program, self.cwd)?;
+        if let Some(path_env) = &self.path_env {
+            write!(f, "PATH: {:?}", path_env)?
+        } else {
+            write!(f, "No PATH")?
+        }
+        Ok(())
+    }
 }
 
 /// Errors that can occur when planning a specific execution from a task .
@@ -30,6 +52,9 @@ pub enum TaskPlanErrorKind {
         #[from]
         CdCommandError,
     ),
+
+    #[error(transparent)]
+    ProgramNotFound(#[from] WhichError),
 
     #[error("Failed to query tasks from task graph")]
     TaskQueryError(

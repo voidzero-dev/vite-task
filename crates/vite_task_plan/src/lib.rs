@@ -52,7 +52,7 @@ pub struct SpawnExecution {
 #[derive(Debug)]
 pub enum SpawnCommandKind {
     /// A program with args to be executed directly
-    Program { program: Arc<OsStr>, args: Arc<[Str]> },
+    Program { program_path: Arc<AbsolutePath>, args: Arc<[Str]> },
     /// A script to be executed by os shell (sh or cmd)
     ShellScript { script: Str, args: Arc<[Str]> },
 }

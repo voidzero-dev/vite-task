@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures_util::FutureExt;
-use vite_path::AbsolutePath;
+use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_shell::try_parse_as_and_list;
 use vite_str::Str;
 use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskOptions};
@@ -20,8 +20,29 @@ use crate::{
     error::{CdCommandError, Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
     in_process::InProcessExecution,
+    path_env::get_path_env,
     plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest},
 };
+
+/// Locate the executable path for a given program name in the provided envs and cwd.
+fn which(
+    program: &Arc<OsStr>,
+    envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
+    cwd: &Arc<AbsolutePath>,
+) -> Result<Arc<AbsolutePath>, crate::error::WhichError> {
+    let path_env = get_path_env(envs);
+    let executable_path = which::which_in(program, path_env, cwd.as_path()).map_err(|err| {
+        crate::error::WhichError {
+            program: Arc::clone(program),
+            path_env: path_env.map(Arc::clone),
+            cwd: Arc::clone(cwd),
+            error: err,
+        }
+    })?;
+    Ok(AbsolutePathBuf::new(executable_path)
+        .expect("path returned by which::which_in should always be absolute")
+        .into())
+}
 
 async fn plan_task_as_execution_node(
     task_node_index: TaskNodeIndex,
@@ -133,12 +154,13 @@ async fn plan_task_as_execution_node(
                 }
                 // Normal 3rd party tool command (like `tsc --noEmit`)
                 None => {
+                    let program_path =
+                        which(&OsStr::new(&and_item.program).into(), context.envs(), &cwd)
+                            .map_err(TaskPlanErrorKind::ProgramNotFound)
+                            .with_plan_context(&context)?;
                     let spawn_execution = plan_spawn_execution(
                         &and_item.envs,
-                        SpawnCommandKind::Program {
-                            program: OsStr::new(&and_item.program).into(),
-                            args: args.into(),
-                        },
+                        SpawnCommandKind::Program { program_path, args: args.into() },
                         &task_node.resolved_config.resolved_options,
                         context.envs(),
                     )
@@ -182,10 +204,11 @@ pub fn plan_synthetic_request(
     envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
     let SyntheticPlanRequest { program, args, task_options } = synthetic_plan_request;
+    let program_path = which(&program, envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
     let resolved_options = ResolvedTaskOptions::resolve(task_options, &cwd);
     plan_spawn_execution(
         prefix_envs,
-        SpawnCommandKind::Program { program, args },
+        SpawnCommandKind::Program { program_path, args },
         &resolved_options,
         envs,
     )

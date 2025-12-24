@@ -4,7 +4,7 @@ mod execute;
 
 use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
-use cache::TaskCache;
+use cache::ExecutionCache;
 use clap::{Parser, Subcommand};
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
@@ -134,7 +134,7 @@ pub struct Session<'a, CustomSubCommand> {
 
     plan_request_parser: PlanRequestParser<'a, CustomSubCommand>,
 
-    cache: TaskCache,
+    cache: ExecutionCache,
 }
 
 fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf {
@@ -169,7 +169,7 @@ impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
             tracing::info!("Creating task cache directory at {}", cache_dir.display());
             std::fs::create_dir_all(cache_dir)?;
         }
-        let cache = TaskCache::load_from_path(cache_path)?;
+        let cache = ExecutionCache::load_from_path(cache_path)?;
         Ok(Self {
             workspace_path: Arc::clone(&workspace_root.path),
             lazy_task_graph: LazyTaskGraph::Uninitialized {
@@ -183,7 +183,7 @@ impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
         })
     }
 
-    pub fn cache(&self) -> &TaskCache {
+    pub fn cache(&self) -> &ExecutionCache {
         &self.cache
     }
 
@@ -201,7 +201,7 @@ pub struct SessionExecutionPlan {
     /// The original command-line arguments used to create this execution plan, excluding the program name.
     ///
     /// It's used to create cache keys for direct executions. See `DirectExecutionCacheKey` for details.
-    original_args: Arc<[Str]>,
+    cli_args_without_program: Arc<[Str]>,
 
     /// The current working directory used to create this execution plan.
     ///
@@ -235,7 +235,7 @@ impl<'a, CustomSubCommand: clap::Subcommand> Session<'a, CustomSubCommand> {
         )
         .await?;
         Ok(SessionExecutionPlan {
-            original_args: cli_args.original.iter().skip(1).cloned().collect(), // Skip program name
+            cli_args_without_program: cli_args.original.iter().skip(1).cloned().collect(), // Skip program name
             cwd,
             plan,
         })

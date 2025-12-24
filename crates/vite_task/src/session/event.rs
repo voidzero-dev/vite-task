@@ -7,10 +7,11 @@ use vite_str::Str;
 use crate::collections::HashMap;
 
 #[derive(Clone, Debug)]
-pub struct TaskInfo {
-    pub task_display_name: Str,
+pub struct ExecutionStartInfo {
+    /// None if the execution is not associated with a specific task, but directly synthesized from CLI args, like `vite lint`/`vite exec ...`
+    pub task_display_name: Option<Str>,
     pub command: Str,
-    pub plan_cwd: Arc<AbsolutePath>,
+    pub cwd: Arc<AbsolutePath>,
 }
 
 #[derive(Debug)]
@@ -45,7 +46,7 @@ impl ExecutionId {
 
 pub struct ExecutionStartedEvent {
     pub execution_id: ExecutionId,
-    pub display: TaskInfo,
+    pub display: ExecutionStartInfo,
 }
 
 pub struct ExecutionOutputEvent {
@@ -62,7 +63,7 @@ pub struct ExecutionEvent {
 
 #[derive(Debug)]
 pub enum ExecutionEventKind {
-    Start { task_info: Option<TaskInfo> },
+    Start(ExecutionStartInfo),
     Output { kind: OutputKind, content: BString },
     Finish { status: Option<i32>, cache_status: CacheStatus },
 }
