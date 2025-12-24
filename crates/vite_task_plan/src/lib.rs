@@ -19,7 +19,7 @@ use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, display::TaskDisplay, query::TaskQuery};
+use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, query::TaskQuery};
 
 use crate::path_env::prepend_path_env;
 
@@ -54,7 +54,7 @@ pub enum SpawnCommandKind {
     /// A program with args to be executed directly
     Program { program: Arc<OsStr>, args: Arc<[Str]> },
     /// A script to be executed by os shell (sh or cmd)
-    ShellScript(Str),
+    ShellScript { script: Str, args: Arc<[Str]> },
 }
 
 /// Represents how a task should be executed. It's the node type for the execution graph. Each node corresponds to a task.

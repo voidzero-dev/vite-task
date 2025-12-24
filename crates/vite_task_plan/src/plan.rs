@@ -156,7 +156,10 @@ async fn plan_task_as_execution_node(
     } else {
         let spawn_execution = plan_spawn_execution(
             &BTreeMap::new(),
-            SpawnCommandKind::ShellScript(command_str.into()),
+            SpawnCommandKind::ShellScript {
+                script: command_str.into(),
+                args: Arc::clone(context.extra_args()),
+            },
             &task_node.resolved_config.resolved_options,
             context.envs(),
         )

@@ -3310,6 +3310,7 @@ dependencies = [
  "futures-util",
  "petgraph",
  "sha2",
+ "shell-escape",
  "supports-color",
  "thiserror 2.0.17",
  "tracing",

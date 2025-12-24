@@ -47,18 +47,24 @@ pub struct TaskCache {
     conn: Mutex<Connection>,
 }
 
-/// Cache key to identify an execution directly from a custom vite-task subcommand.
+/// Cache key to associate an execution with a custom vite-task subcommand (like `vite lint`) directly run by the user.
 #[derive(Debug, Encode, Decode, Serialize)]
 pub struct DirectExecutionCacheKey {
-    pub synthesization_cache_key: Arc<[Str]>,
+    /// The args after the program name, including the subcommand name. (like `["lint", "--fix"]` for `vite lint --fix`)
+    pub args: Arc<[Str]>,
+
+    /// The cwd where the `vite [custom subcommand] ...` is run.
+    ///
+    /// This is not necessarily the actual cwd that the synthesized task runs in.
     pub plan_cwd: RelativePathBuf,
 }
 
-/// Cache key to identify an execution from a user-defined task.
+/// Cache key to associate an execution with a user-defined task  (like `"lint-task": "vite lint" in package.json scripts`).
 #[derive(Debug, Encode, Decode, Serialize)]
 pub struct UserTaskExecutionCacheKey {
-    pub synthesization_cache_key: Arc<[Str]>,
-    pub plan_cwd: RelativePathBuf,
+    pub task_name: Str,
+    pub package_path: RelativePathBuf,
+    pub and_item_index: usize,
 }
 
 /// Key to identify an execution.

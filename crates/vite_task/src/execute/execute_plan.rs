@@ -6,6 +6,7 @@ use petgraph::{
     algo::{Cycle, toposort},
     graph::DiGraph,
 };
+use vite_str::Str;
 use vite_task_graph::IndexedTaskGraph;
 use vite_task_plan::{
     ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnCommandKind, SpawnExecution,
@@ -81,6 +82,7 @@ impl ExecutionContext<'_> {
                                 vite_str::format!("{}", task_display)
                             },
                             command: item_command.into(),
+                            plan_cwd: Arc::clone(&item.plan_cwd),
                         };
                         self.execute_item_kind(&item.kind, Some(task_info)).boxed_local().await?;
                     }
@@ -148,7 +150,7 @@ impl ExecutionContext<'_> {
                 cmd.args(args.iter().map(|arg| arg.as_str()));
                 cmd
             }
-            SpawnCommandKind::ShellScript(script) => {
+            SpawnCommandKind::ShellScript { script, args } => {
                 let mut cmd = if cfg!(windows) {
                     let mut cmd = fspy::Command::new("cmd.exe");
                     // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
@@ -170,6 +172,7 @@ impl ExecutionContext<'_> {
 
 pub async fn execute_plan(
     plan: &ExecutionPlan,
+    args: &Arc<[Str]>,
     indexed_task_graph: Option<&IndexedTaskGraph>,
     event_handler: &mut (dyn FnMut(ExecutionEvent) + '_),
     cache: &TaskCache,

@@ -10,7 +10,11 @@ use vite_task_plan::{
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
-use crate::{CLIArgs, TaskCache, collections::HashMap};
+use crate::{
+    CLIArgs, TaskCache,
+    cli::{ParsedTaskCLIArgs, TaskCLIArgs},
+    collections::HashMap,
+};
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
@@ -61,14 +65,14 @@ struct PlanRequestParser<'a, CustomSubCommand> {
 impl<CustomSubCommand: clap::Subcommand> PlanRequestParser<'_, CustomSubCommand> {
     async fn get_plan_request_from_cli_args(
         &mut self,
-        cli_args: CLIArgs<CustomSubCommand>,
+        cli_args: ParsedTaskCLIArgs<CustomSubCommand>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<PlanRequest> {
         match cli_args {
-            CLIArgs::ViteTaskSubCommand(vite_task_subcommand) => {
+            ParsedTaskCLIArgs::BuiltIn(vite_task_subcommand) => {
                 Ok(vite_task_subcommand.into_plan_request(cwd)?)
             }
-            CLIArgs::Custom(custom_subcommand) => {
+            ParsedTaskCLIArgs::Custom(custom_subcommand) => {
                 let synthetic_plan_request =
                     self.task_synthesizer.synthesize_task(custom_subcommand, cwd).await?;
                 Ok(PlanRequest::Synthetic(synthetic_plan_request))
@@ -90,9 +94,9 @@ impl<CustomSubCommand: clap::Subcommand> vite_task_plan::PlanRequestParser
         Ok(
             if self.task_synthesizer.should_synthesize_for_program(program)
                 && let Some(subcommand) = args.first()
-                && CLIArgs::<CustomSubCommand>::has_subcommand(subcommand)
+                && ParsedTaskCLIArgs::<CustomSubCommand>::has_subcommand(subcommand)
             {
-                let cli_args = CLIArgs::<CustomSubCommand>::try_parse_from(
+                let cli_args = ParsedTaskCLIArgs::<CustomSubCommand>::try_parse_from(
                     std::iter::once(program).chain(args.iter().map(Str::as_str)),
                 )?;
                 Some(self.get_plan_request_from_cli_args(cli_args, cwd).await?)
@@ -178,26 +182,49 @@ impl<'a, CustomSubCommand> Session<'a, CustomSubCommand> {
     }
 }
 
+/// Represents a planned execution of tasks in a session, including information for caching.
+#[derive(Debug)]
+pub struct SessionExecutionPlan {
+    /// The original command-line arguments used to create this execution plan, excluding the program name.
+    ///
+    /// It's used to create cache keys for direct executions. See `DirectExecutionCacheKey` for details.
+    original_args: Arc<[Str]>,
+
+    /// The current working directory used to create this execution plan.
+    ///
+    /// It's used to create cache keys for direct executions. See `DirectExecutionCacheKey` for details.
+    cwd: Arc<AbsolutePath>,
+
+    /// The actual content of the execution plan.
+    plan: vite_task_plan::ExecutionPlan,
+}
+
 impl<'a, CustomSubCommand: clap::Subcommand> Session<'a, CustomSubCommand> {
     pub async fn plan(
         &mut self,
-        cli_args: CLIArgs<CustomSubCommand>,
-    ) -> Result<ExecutionPlan, vite_task_plan::Error> {
+        cwd: Arc<AbsolutePath>,
+        cli_args: TaskCLIArgs<CustomSubCommand>,
+    ) -> Result<SessionExecutionPlan, vite_task_plan::Error> {
         let plan_request = self
             .plan_request_parser
-            .get_plan_request_from_cli_args(cli_args, &self.cwd)
+            .get_plan_request_from_cli_args(cli_args.parsed, &cwd)
             .await
             .map_err(|error| {
                 TaskPlanErrorKind::ParsePlanRequestError { error }.with_empty_call_stack()
             })?;
-        ExecutionPlan::plan(
+        let plan = ExecutionPlan::plan(
             plan_request,
             &self.workspace_path,
-            &self.cwd,
+            &cwd,
             &self.envs,
             &mut self.plan_request_parser,
             &mut self.lazy_task_graph,
         )
-        .await
+        .await?;
+        Ok(SessionExecutionPlan {
+            original_args: cli_args.original.iter().skip(1).cloned().collect(), // Skip program name
+            cwd,
+            plan,
+        })
     }
 }
