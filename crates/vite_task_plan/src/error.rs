@@ -1,6 +1,6 @@
-use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, sync::Arc};
+use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, path::Path, sync::Arc};
 
-use vite_path::AbsolutePath;
+use vite_path::{AbsolutePath, relative::InvalidPathDataError};
 
 use crate::{
     context::{PlanContext, TaskCallStackDisplay, TaskRecursionError},
@@ -36,6 +36,42 @@ impl Display for WhichError {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum PathFingerprintErrorKind {
+    #[error("Path {path:?} is outside of the workspace {workspace_path:?}")]
+    PathOutsideWorkspace { path: Arc<AbsolutePath>, workspace_path: Arc<AbsolutePath> },
+    #[error("Path {path:?} contains characters that make it non-portable")]
+    NonPortableRelativePath {
+        path: Arc<Path>,
+        #[source]
+        error: InvalidPathDataError,
+    },
+}
+
+#[derive(Debug)]
+pub enum PathType {
+    Cwd,
+    Program,
+    PackagePath,
+}
+impl Display for PathType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PathType::Cwd => write!(f, "current working directory"),
+            PathType::Program => write!(f, "program path"),
+            PathType::PackagePath => write!(f, "package path"),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to fingerprint {path_type}")]
+pub struct PathFingerprintError {
+    pub path_type: PathType,
+    #[source]
+    pub kind: PathFingerprintErrorKind,
+}
+
 /// Errors that can occur when planning a specific execution from a task .
 #[derive(Debug, thiserror::Error)]
 pub enum TaskPlanErrorKind {
@@ -55,6 +91,9 @@ pub enum TaskPlanErrorKind {
 
     #[error(transparent)]
     ProgramNotFound(#[from] WhichError),
+
+    #[error(transparent)]
+    PathFingerprintError(#[from] PathFingerprintError),
 
     #[error("Failed to query tasks from task graph")]
     TaskQueryError(

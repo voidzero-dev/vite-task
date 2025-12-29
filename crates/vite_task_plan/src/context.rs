@@ -20,6 +20,9 @@ pub struct TaskRecursionError {
 /// The context for planning an execution from a task.
 #[derive(Debug)]
 pub struct PlanContext<'a> {
+    /// The root path of the workspace.
+    workspace_path: &'a Arc<AbsolutePath>,
+
     /// The current working directory.
     cwd: Arc<AbsolutePath>,
 
@@ -75,12 +78,14 @@ impl Display for TaskCallStackDisplay {
 
 impl<'a> PlanContext<'a> {
     pub fn new(
+        workspace_path: &'a Arc<AbsolutePath>,
         cwd: Arc<AbsolutePath>,
         envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
         indexed_task_graph: &'a IndexedTaskGraph,
     ) -> Self {
         Self {
+            workspace_path,
             cwd,
             envs,
             callbacks,
@@ -129,6 +134,10 @@ impl<'a> PlanContext<'a> {
         self.indexed_task_graph
     }
 
+    pub fn workspace_path(&self) -> &Arc<AbsolutePath> {
+        self.workspace_path
+    }
+
     /// Push a new frame onto the task call stack.
     pub fn push_stack_frame(&mut self, task_node_index: TaskNodeIndex, command_span: Range<usize>) {
         self.task_call_stack.push((task_node_index, command_span));
@@ -161,6 +170,7 @@ impl<'a> PlanContext<'a> {
 
     pub fn duplicate(&mut self) -> PlanContext<'_> {
         PlanContext {
+            workspace_path: self.workspace_path,
             cwd: Arc::clone(&self.cwd),
             envs: self.envs.clone(),
             callbacks: self.callbacks,

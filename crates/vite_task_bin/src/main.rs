@@ -1,6 +1,7 @@
 use std::{
     env::{self, join_paths},
     ffi::OsStr,
+    iter,
     path::PathBuf,
     sync::Arc,
 };
@@ -57,11 +58,16 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<SyntheticPlanRequest> {
         match subcommand {
-            CustomTaskSubcommand::Lint { args } => Ok(SyntheticPlanRequest {
-                program: find_executable_in_node_modules_bin(&*cwd, "oxlint")?,
-                args: args.into(),
-                task_options: Default::default(),
-            }),
+            CustomTaskSubcommand::Lint { args } => {
+                let direct_execution_cache_key: Arc<[Str]> =
+                    iter::once(Str::from("lint")).chain(args.iter().cloned()).collect();
+                Ok(SyntheticPlanRequest {
+                    program: find_executable_in_node_modules_bin(&*cwd, "oxlint")?,
+                    args: args.into(),
+                    task_options: Default::default(),
+                    direct_execution_cache_key,
+                })
+            }
         }
     }
 }

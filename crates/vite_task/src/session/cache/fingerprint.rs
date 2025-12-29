@@ -9,7 +9,7 @@ use diff::Diff;
 use serde::{Deserialize, Serialize};
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
-use vite_task_plan::{SpawnCommandKind, SpawnExecution};
+use vite_task_plan::SpawnExecution;
 
 /// Fingerprint for command execution that affects caching.
 ///

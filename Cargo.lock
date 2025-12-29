@@ -3307,8 +3307,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bincode",
  "futures-util",
  "petgraph",
+ "serde",
  "sha2",
  "shell-escape",
  "supports-color",

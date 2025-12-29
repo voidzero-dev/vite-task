@@ -3,21 +3,28 @@ use std::{
     collections::{BTreeMap, HashMap},
     env::home_dir,
     ffi::OsStr,
-    path::Path,
-    sync::Arc,
+    path::{Path, PathBuf},
+    sync::{Arc, LazyLock},
 };
 
 use futures_util::FutureExt;
-use vite_path::{AbsolutePath, AbsolutePathBuf};
+use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::InvalidPathDataError};
 use vite_shell::try_parse_as_and_list;
 use vite_str::Str;
 use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskOptions};
 
 use crate::{
-    ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, ResolvedCacheMetadata,
-    SpawnCommandKind, SpawnExecution, TaskExecution,
-    envs::ResolvedEnvs,
-    error::{CdCommandError, Error, TaskPlanErrorKind, TaskPlanErrorKindResultExt},
+    ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, SpawnCommand, SpawnExecution,
+    TaskExecution,
+    cache_metadata::{
+        CacheMetadata, ExecutionCacheKey, ExecutionCacheKeyKind, ProgramFingerprint,
+        SpawnFingerprint,
+    },
+    envs::EnvFingerprints,
+    error::{
+        CdCommandError, Error, PathFingerprintError, PathFingerprintErrorKind, PathType,
+        TaskPlanErrorKind, TaskPlanErrorKindResultExt,
+    },
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
     in_process::InProcessExecution,
     path_env::get_path_env,
@@ -57,12 +64,9 @@ async fn plan_task_as_execution_node(
     let task_node = &context.indexed_task_graph().task_graph()[task_node_index];
     let command_str = task_node.resolved_config.command.as_str();
 
+    let package_path = context.indexed_task_graph().get_package_path_for_task(task_node_index);
     // Prepend {package_path}/node_modules/.bin to PATH
-    let package_node_modules_bin_path = context
-        .indexed_task_graph()
-        .get_package_path_for_task(task_node_index)
-        .join("node_modules")
-        .join(".bin");
+    let package_node_modules_bin_path = package_path.join("node_modules").join(".bin");
     if let Err(join_paths_error) = context.prepend_path(&package_node_modules_bin_path) {
         // Push the current task frame with full command span (the path was added for every and_item of the command) before returning the error
         context.push_stack_frame(task_node_index, 0..command_str.len());
@@ -125,15 +129,31 @@ async fn plan_task_as_execution_node(
                 continue;
             }
 
-            // Try to parse the args of an and_item to a task request like `run -r build`
-            let task_request = context
+            // Create execution cache key for this and_item
+            let task_execution_cache_key = ExecutionCacheKey {
+                kind: ExecutionCacheKeyKind::UserTask {
+                    task_name: task_node.task_id.task_name.clone(),
+                    and_item_index: index,
+                },
+                origin_path: strip_prefix_for_cache(package_path, context.workspace_path())
+                    .map_err(|kind| {
+                        TaskPlanErrorKind::PathFingerprintError(PathFingerprintError {
+                            kind,
+                            path_type: PathType::PackagePath,
+                        })
+                    })
+                    .with_plan_context(&context)?,
+            };
+
+            // Try to parse the args of an and_item to a plan request like `run -r build`
+            let plan_request = context
                 .callbacks()
                 .get_plan_request(&and_item.program, &args, &cwd)
                 .await
                 .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError { error })
                 .with_plan_context(&context)?;
 
-            let execution_item_kind: ExecutionItemKind = match task_request {
+            let execution_item_kind: ExecutionItemKind = match plan_request {
                 // Expand task query like `vite run -r build`
                 Some(PlanRequest::Query(query_plan_request)) => {
                     // Add prefix envs to the context
@@ -144,8 +164,10 @@ async fn plan_task_as_execution_node(
                 // Synthetic task, like `vite lint`
                 Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
                     let spawn_execution = plan_synthetic_request(
+                        context.workspace_path(),
                         &and_item.envs,
                         synthetic_plan_request,
+                        Some(task_execution_cache_key),
                         context.cwd(),
                         context.envs(),
                     )
@@ -159,10 +181,13 @@ async fn plan_task_as_execution_node(
                             .map_err(TaskPlanErrorKind::ProgramNotFound)
                             .with_plan_context(&context)?;
                     let spawn_execution = plan_spawn_execution(
+                        context.workspace_path(),
+                        task_execution_cache_key,
                         &and_item.envs,
-                        SpawnCommandKind::Program { program_path, args: args.into() },
                         &task_node.resolved_config.resolved_options,
                         context.envs(),
+                        program_path,
+                        args.into(),
                     )
                     .with_plan_context(&context)?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
@@ -176,14 +201,49 @@ async fn plan_task_as_execution_node(
             });
         }
     } else {
+        let mut context = context.duplicate();
+        context.push_stack_frame(task_node_index, 0..command_str.len());
+
+        static SHELL_PROGRAM_PATH: LazyLock<Arc<AbsolutePath>> = LazyLock::new(|| {
+            if cfg!(target_os = "windows") {
+                AbsolutePathBuf::new(
+                    which::which("cmd.exe")
+                        .unwrap_or_else(|_| PathBuf::from("C:\\Windows\\System32\\cmd.exe")),
+                )
+                .unwrap()
+                .into()
+            } else {
+                AbsolutePath::new("/bin/sh").unwrap().into()
+            }
+        });
+
+        let mut script = Str::from(command_str);
+        for arg in context.extra_args().iter() {
+            script.push(' ');
+            script.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
+        }
+
         let spawn_execution = plan_spawn_execution(
-            &BTreeMap::new(),
-            SpawnCommandKind::ShellScript {
-                script: command_str.into(),
-                args: Arc::clone(context.extra_args()),
+            context.workspace_path(),
+            ExecutionCacheKey {
+                kind: ExecutionCacheKeyKind::UserTask {
+                    task_name: task_node.task_id.task_name.clone(),
+                    and_item_index: 0,
+                },
+                origin_path: strip_prefix_for_cache(package_path, context.workspace_path())
+                    .map_err(|kind| {
+                        TaskPlanErrorKind::PathFingerprintError(PathFingerprintError {
+                            kind,
+                            path_type: PathType::PackagePath,
+                        })
+                    })
+                    .with_plan_context(&context)?,
             },
+            &BTreeMap::new(),
             &task_node.resolved_config.resolved_options,
             context.envs(),
+            Arc::clone(&*SHELL_PROGRAM_PATH),
+            Arc::new([script]),
         )
         .with_plan_context(&context)?;
         items.push(ExecutionItem {
@@ -198,42 +258,116 @@ async fn plan_task_as_execution_node(
 }
 
 pub fn plan_synthetic_request(
+    workspace_path: &Arc<AbsolutePath>,
     prefix_envs: &BTreeMap<Str, Str>,
     synthetic_plan_request: SyntheticPlanRequest,
+    // generated from the task, overrides `synthetic_plan_request.direct_execution_cache_key`
+    task_execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
     envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
-    let SyntheticPlanRequest { program, args, task_options } = synthetic_plan_request;
+    let SyntheticPlanRequest { program, args, task_options, direct_execution_cache_key } =
+        synthetic_plan_request;
     let program_path = which(&program, envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
     let resolved_options = ResolvedTaskOptions::resolve(task_options, &cwd);
+
+    let execution_cache_key = if let Some(task_execution_cache_key) = task_execution_cache_key {
+        // Use task generated cache key if any
+        task_execution_cache_key
+    } else {
+        // Otherwise, use direct execution cache key
+        ExecutionCacheKey {
+            kind: ExecutionCacheKeyKind::DirectSyntatic { direct_execution_cache_key },
+            origin_path: strip_prefix_for_cache(cwd, workspace_path)
+                .map_err(|kind| PathFingerprintError { kind, path_type: PathType::Cwd })?,
+        }
+    };
+
     plan_spawn_execution(
+        workspace_path,
+        execution_cache_key,
         prefix_envs,
-        SpawnCommandKind::Program { program_path, args },
         &resolved_options,
         envs,
+        program_path,
+        args,
     )
 }
 
+fn strip_prefix_for_cache(
+    path: &Arc<AbsolutePath>,
+    workspace_path: &Arc<AbsolutePath>,
+) -> Result<RelativePathBuf, PathFingerprintErrorKind> {
+    match path.strip_prefix(&*workspace_path) {
+        Ok(Some(rel_path)) => Ok(rel_path),
+        Ok(None) => Err(PathFingerprintErrorKind::PathOutsideWorkspace {
+            path: Arc::clone(path),
+            workspace_path: Arc::clone(workspace_path),
+        }),
+        Err(err) => Err(PathFingerprintErrorKind::NonPortableRelativePath {
+            path: err.stripped_path.into(),
+            error: err.invalid_path_data_error,
+        }),
+    }
+}
+
 fn plan_spawn_execution(
+    workspace_path: &Arc<AbsolutePath>,
+    execution_cache_key: ExecutionCacheKey,
     prefix_envs: &BTreeMap<Str, Str>,
-    command_kind: SpawnCommandKind,
     resolved_task_options: &ResolvedTaskOptions,
     envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
+    program_path: Arc<AbsolutePath>,
+    args: Arc<[Str]>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
     // all envs available in the current context
     let mut all_envs = envs.clone();
+    let cwd = Arc::clone(&resolved_task_options.cwd);
 
     let mut resolved_cache_metadata = None;
     if let Some(cache_config) = &resolved_task_options.cache_config {
         // Resolve envs according cache configs
-        let mut resolved_envs = ResolvedEnvs::resolve(&mut all_envs, &cache_config.env_config)
-            .map_err(TaskPlanErrorKind::ResolveEnvError)?;
+        let mut env_fingerprints =
+            EnvFingerprints::resolve(&mut all_envs, &cache_config.env_config)
+                .map_err(TaskPlanErrorKind::ResolveEnvError)?;
 
         // Add prefix envs to fingerprinted envs
-        resolved_envs
+        env_fingerprints
             .fingerprinted_envs
             .extend(prefix_envs.iter().map(|(name, value)| (name.clone(), value.as_str().into())));
-        resolved_cache_metadata = Some(ResolvedCacheMetadata { resolved_envs });
+
+        let program_fingerprint = match strip_prefix_for_cache(&program_path, workspace_path) {
+            Ok(relative_program_path) => {
+                ProgramFingerprint::InsideWorkspace { relative_program_path }
+            }
+            Err(PathFingerprintErrorKind::PathOutsideWorkspace { path, .. }) => {
+                let program_name_os_str = path.as_path().file_name().unwrap_or_default();
+                let Some(program_name_str) = program_name_os_str.to_str() else {
+                    return Err(PathFingerprintError {
+                        kind: PathFingerprintErrorKind::NonPortableRelativePath {
+                            path: Path::new(program_name_os_str).into(),
+                            error: InvalidPathDataError::NonUtf8,
+                        },
+                        path_type: PathType::Program,
+                    }
+                    .into());
+                };
+                ProgramFingerprint::OutsideWorkspace { program_name: program_name_str.into() }
+            }
+            Err(err) => {
+                return Err(PathFingerprintError { kind: err, path_type: PathType::Program }.into());
+            }
+        };
+
+        let spawn_fingerprint: SpawnFingerprint = SpawnFingerprint {
+            cwd: strip_prefix_for_cache(&cwd, workspace_path)
+                .map_err(|kind| PathFingerprintError { kind, path_type: PathType::Cwd })?,
+            program_fingerprint,
+            args: Arc::clone(&args),
+            env_fingerprints,
+            fingerprint_ignores: None,
+        };
+        resolved_cache_metadata = Some(CacheMetadata { execution_cache_key, spawn_fingerprint });
     }
 
     // Add prefix envs to all envs
@@ -242,10 +376,13 @@ fn plan_spawn_execution(
     }));
 
     Ok(SpawnExecution {
-        all_envs: Arc::new(all_envs),
-        resolved_cache_metadata,
-        cwd: Arc::clone(&resolved_task_options.cwd),
-        command_kind,
+        spawn_command: SpawnCommand {
+            program_path,
+            args: Arc::clone(&args),
+            cwd,
+            all_envs: Arc::new(all_envs),
+        },
+        cache_metadata: resolved_cache_metadata,
     })
 }
 

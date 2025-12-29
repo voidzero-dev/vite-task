@@ -1,3 +1,4 @@
+pub mod cache_metadata;
 mod context;
 mod envs;
 mod error;
@@ -9,52 +10,51 @@ pub mod plan_request;
 
 use std::{collections::HashMap, ffi::OsStr, fmt::Debug, ops::Range, sync::Arc};
 
+use bincode::Encode;
 use context::PlanContext;
-use envs::ResolvedEnvs;
+use envs::EnvFingerprints;
 use error::TaskPlanErrorKindResultExt;
 pub use error::{Error, TaskPlanErrorKind};
 use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
 use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
-use vite_path::AbsolutePath;
+use serde::Serialize;
+use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, query::TaskQuery};
 
-use crate::path_env::prepend_path_env;
-
-/// Resolved cache configuration for a spawn execution.
-#[derive(Debug)]
-pub struct ResolvedCacheMetadata {
-    /// Environment variables that are used for fingerprinting the cache.
-    pub resolved_envs: ResolvedEnvs,
-}
+use crate::{
+    cache_metadata::{ExecutionCacheKey, ExecutionCacheKeyKind},
+    path_env::prepend_path_env,
+};
 
 /// A resolved spawn execution.
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug)]
 pub struct SpawnExecution {
-    /// Resolved cache metadata for this execution. `None` means caching is disabled.
-    pub resolved_cache_metadata: Option<ResolvedCacheMetadata>,
+    /// Cache metadata for this execution. `None` means caching is disabled.
+    pub cache_metadata: Option<cache_metadata::CacheMetadata>,
+
+    /// All information about a command to be spawned
+    pub spawn_command: SpawnCommand,
+}
+
+/// All information about a command to be spawned.
+#[derive(Debug)]
+pub struct SpawnCommand {
+    /// A program with args to be executed directly
+    pub program_path: Arc<AbsolutePath>,
+
+    /// args to be passed to the program
+    pub args: Arc<[Str]>,
 
     /// Environment variables to set for the command, including both fingerprinted and pass-through envs.
     pub all_envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
 
     /// Current working directory
     pub cwd: Arc<AbsolutePath>,
-
-    /// parsed program with args or shell script
-    pub command_kind: SpawnCommandKind,
-}
-
-/// The kind of a spawn command
-#[derive(Debug)]
-pub enum SpawnCommandKind {
-    /// A program with args to be executed directly
-    Program { program_path: Arc<AbsolutePath>, args: Arc<[Str]> },
-    /// A script to be executed by os shell (sh or cmd)
-    ShellScript { script: Str, args: Arc<[Str]> },
 }
 
 /// Represents how a task should be executed. It's the node type for the execution graph. Each node corresponds to a task.
@@ -149,10 +149,6 @@ pub struct ExecutionPlan {
     root_node: ExecutionItemKind,
 }
 
-pub struct Args {
-    pub query: TaskQuery,
-}
-
 impl ExecutionPlan {
     pub fn root_node(&self) -> &ExecutionItemKind {
         &self.root_node
@@ -160,7 +156,7 @@ impl ExecutionPlan {
 
     pub async fn plan(
         plan_request: PlanRequest,
-        workspace_path: &AbsolutePath,
+        workspace_path: &Arc<AbsolutePath>,
         cwd: &Arc<AbsolutePath>,
         envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
         plan_request_parser: &mut (dyn PlanRequestParser + '_),
@@ -182,6 +178,7 @@ impl ExecutionPlan {
                     .with_empty_call_stack()?;
 
                 let context = PlanContext::new(
+                    workspace_path,
                     Arc::clone(cwd),
                     envs.clone(),
                     plan_request_parser,
@@ -191,10 +188,15 @@ impl ExecutionPlan {
                 ExecutionItemKind::Expanded(execution_graph)
             }
             PlanRequest::Synthetic(synthetic_plan_request) => {
-                let execution =
-                    plan_synthetic_request(&Default::default(), synthetic_plan_request, cwd, &envs)
-                        .with_empty_call_stack()?;
-
+                let execution = plan_synthetic_request(
+                    workspace_path,
+                    &Default::default(),
+                    synthetic_plan_request,
+                    None,
+                    cwd,
+                    &envs,
+                )
+                .with_empty_call_stack()?;
                 ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution))
             }
         };

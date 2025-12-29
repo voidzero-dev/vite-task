@@ -11,8 +11,8 @@ use vite_path::{AbsolutePath, RelativePathBuf, relative::InvalidPathDataError};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex};
 use vite_task_plan::{
-    ExecutionItem, ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnCommandKind,
-    SpawnExecution, TaskExecution,
+    ExecutionItem, ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnExecution,
+    TaskExecution,
     execution_graph::{ExecutionGraph, ExecutionIx, ExecutionNodeIndex},
 };
 
@@ -245,34 +245,34 @@ impl ExecutionContext<'_> {
             }
         };
 
-        let mut cmd = match &spawn_execution.command_kind {
-            SpawnCommandKind::Program { program_path, args } => {
-                let mut cmd = fspy::Command::new(program_path.as_path());
-                cmd.args(args.iter().map(|arg| arg.as_str()));
-                cmd
-            }
-            SpawnCommandKind::ShellScript { script, args } => {
-                let mut cmd = if cfg!(windows) {
-                    let mut cmd = fspy::Command::new("cmd.exe");
-                    // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
-                    cmd.args(["/d", "/s", "/c"]);
-                    cmd
-                } else {
-                    let mut cmd = fspy::Command::new("sh");
-                    cmd.args(["-c"]);
-                    cmd
-                };
+        // let mut cmd = match &spawn_execution.command_kind {
+        //     SpawnCommandKind::Program { program_path, args } => {
+        //         let mut cmd = fspy::Command::new(program_path.as_path());
+        //         cmd.args(args.iter().map(|arg| arg.as_str()));
+        //         cmd
+        //     }
+        //     SpawnCommandKind::ShellScript { script, args } => {
+        //         let mut cmd = if cfg!(windows) {
+        //             let mut cmd = fspy::Command::new("cmd.exe");
+        //             // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
+        //             cmd.args(["/d", "/s", "/c"]);
+        //             cmd
+        //         } else {
+        //             let mut cmd = fspy::Command::new("sh");
+        //             cmd.args(["-c"]);
+        //             cmd
+        //         };
 
-                let mut script = script.clone();
-                for arg in args.iter() {
-                    script.push(' ');
-                    script.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
-                }
-                cmd.arg(script);
-                cmd
-            }
-        };
-        cmd.envs(spawn_execution.all_envs.iter()).current_dir(&*spawn_execution.cwd);
+        //         let mut script = script.clone();
+        //         for arg in args.iter() {
+        //             script.push(' ');
+        //             script.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
+        //         }
+        //         cmd.arg(script);
+        //         cmd
+        //     }
+        // };
+        // cmd.envs(spawn_execution.all_envs.iter()).current_dir(&*spawn_execution.cwd);
         todo!()
     }
 }
