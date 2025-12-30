@@ -4,8 +4,6 @@ use bstr::BString;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
-use crate::collections::HashMap;
-
 #[derive(Clone, Debug)]
 pub struct ExecutionStartInfo {
     /// None if the execution is not associated with a specific task, but directly synthesized from CLI args, like `vite lint`/`vite exec ...`

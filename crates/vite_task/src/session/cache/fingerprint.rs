@@ -1,15 +1,10 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-    sync::Arc,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use bincode::{Decode, Encode};
 use diff::Diff;
 use serde::{Deserialize, Serialize};
-use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_path::RelativePathBuf;
 use vite_str::Str;
-use vite_task_plan::SpawnExecution;
 
 /// Fingerprint for command execution that affects caching.
 ///

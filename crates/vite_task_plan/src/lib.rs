@@ -10,24 +10,18 @@ pub mod plan_request;
 
 use std::{collections::HashMap, ffi::OsStr, fmt::Debug, ops::Range, sync::Arc};
 
-use bincode::Encode;
 use context::PlanContext;
-use envs::EnvFingerprints;
 use error::TaskPlanErrorKindResultExt;
 pub use error::{Error, TaskPlanErrorKind};
 use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
 use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
-use serde::Serialize;
-use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, query::TaskQuery};
+use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex};
 
-use crate::{
-    cache_metadata::{ExecutionCacheKey, ExecutionCacheKeyKind},
-    path_env::prepend_path_env,
-};
+use crate::path_env::prepend_path_env;
 
 /// A resolved spawn execution.
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,

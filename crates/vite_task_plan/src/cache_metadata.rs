@@ -1,16 +1,11 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    ffi::OsStr,
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use vite_path::RelativePathBuf;
 use vite_str::Str;
-use vite_task_graph::config::CacheConfig;
 
-use crate::{SpawnCommand, envs::EnvFingerprints};
+use crate::envs::EnvFingerprints;
 
 /// The kind of a key to identify an execution.
 #[derive(Debug, Encode, bincode::Decode, Serialize)]

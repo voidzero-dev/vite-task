@@ -9,7 +9,8 @@
   "type": "module",
   "scripts": {
     "prepare": "husky",
-    "hello": "echo Hello, Vite Task Monorepo!"
+    "hello": "echo Hello, Vite Task Monorepo!",
+    "a": "vite foo"
   },
   "devDependencies": {
     "husky": "catalog:",

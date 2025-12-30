@@ -1,26 +1,23 @@
-use core::task;
-use std::{borrow::Cow, ops::Range, path::Path, sync::Arc};
+use std::{borrow::Cow, path::Path, sync::Arc};
 
 use futures_util::FutureExt;
 use petgraph::{
     algo::{Cycle, toposort},
     graph::DiGraph,
 };
-use sha2::digest::typenum::Abs;
 use vite_path::{AbsolutePath, RelativePathBuf, relative::InvalidPathDataError};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex};
 use vite_task_plan::{
-    ExecutionItem, ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnExecution,
-    TaskExecution,
-    execution_graph::{ExecutionGraph, ExecutionIx, ExecutionNodeIndex},
+    ExecutionItem, ExecutionItemKind, LeafExecutionKind, SpawnExecution, TaskExecution,
+    execution_graph::{ExecutionIx, ExecutionNodeIndex},
 };
 
 use super::{
     cache::{ExecutionCache, ExecutionCacheKey},
     event::{
         CacheDisabledReason, CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId,
-        ExecutionStartInfo, ExecutionStartedEvent, OutputKind,
+        ExecutionStartInfo, OutputKind,
     },
 };
 use crate::{
