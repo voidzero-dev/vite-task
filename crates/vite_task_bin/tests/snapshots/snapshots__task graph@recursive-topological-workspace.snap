@@ -1,7 +1,7 @@
 ---
-source: crates/vite_task/tests/snapshots.rs
+source: crates/vite_task_bin/tests/snapshots.rs
 expression: task_graph_snapshot
-input_file: crates/vite_task/tests/fixtures/recursive-topological-workspace
+input_file: crates/vite_task_bin/tests/fixtures/recursive-topological-workspace
 ---
 [
   {

@@ -1,6 +1,0 @@
----
-source: crates/vite_task/tests/snapshots.rs
-expression: err
-input_file: crates/vite_task/tests/fixtures/transitive-dependency-workspace
----
-"RecursiveTransitiveConflict"

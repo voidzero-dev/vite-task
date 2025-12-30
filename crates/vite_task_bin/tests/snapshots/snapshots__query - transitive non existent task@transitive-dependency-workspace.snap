@@ -1,7 +1,7 @@
 ---
-source: crates/vite_task/tests/snapshots.rs
+source: crates/vite_task_bin/tests/snapshots.rs
 expression: err
-input_file: crates/vite_task/tests/fixtures/transitive-dependency-workspace
+input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
 ---
 {
   "SpecifierLookupError": {
