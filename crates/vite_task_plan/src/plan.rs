@@ -132,7 +132,7 @@ async fn plan_task_as_execution_node(
             // Create execution cache key for this and_item
             let task_execution_cache_key = ExecutionCacheKey {
                 kind: ExecutionCacheKeyKind::UserTask {
-                    task_name: task_node.task_id.task_name.clone(),
+                    task_name: task_node.task_display.task_name.clone(),
                     and_item_index: index,
                 },
                 origin_path: strip_prefix_for_cache(package_path, context.workspace_path())
@@ -227,7 +227,7 @@ async fn plan_task_as_execution_node(
             context.workspace_path(),
             ExecutionCacheKey {
                 kind: ExecutionCacheKeyKind::UserTask {
-                    task_name: task_node.task_id.task_name.clone(),
+                    task_name: task_node.task_display.task_name.clone(),
                     and_item_index: 0,
                 },
                 origin_path: strip_prefix_for_cache(package_path, context.workspace_path())
@@ -254,7 +254,7 @@ async fn plan_task_as_execution_node(
         });
     }
 
-    Ok(TaskExecution { task_node_index, items })
+    Ok(TaskExecution { task_display: task_node.task_display.clone(), items })
 }
 
 pub fn plan_synthetic_request(

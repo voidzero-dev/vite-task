@@ -19,7 +19,7 @@ use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex};
+use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, display::TaskDisplay};
 
 use crate::path_env::prepend_path_env;
 
@@ -55,7 +55,7 @@ pub struct SpawnCommand {
 #[derive(Debug)]
 pub struct TaskExecution {
     /// The task this execution corresponds to
-    pub task_node_index: TaskNodeIndex,
+    pub task_display: TaskDisplay,
 
     /// A task's command is split by `&&` and expanded into multiple execution items.
     ///

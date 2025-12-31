@@ -55,7 +55,7 @@ impl TaskDependencyType {
 
 /// Uniquely identifies a task, by its name and the path where it's defined.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
-pub struct TaskId {
+struct TaskId {
     /// This is the index of the package where the task is defined.
     ///
     /// `package_index` is declared before `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
@@ -68,8 +68,8 @@ pub struct TaskId {
 /// A node in the task graph, representing a task with its resolved configuration.
 #[derive(Debug)]
 pub struct TaskNode {
-    /// The unique id of this task
-    pub task_id: TaskId,
+    /// Printing the task in a human-readable way.
+    pub task_display: TaskDisplay,
 
     /// The resolved configuration of this task.
     ///
@@ -186,8 +186,11 @@ impl IndexedTaskGraph {
         let package_graph = vite_workspace::load_package_graph(workspace_root)?;
 
         // Record dependency specifiers for each task node to add explicit dependencies later
-        let mut dependency_specifiers_with_task_node_indices: Vec<(Arc<[Str]>, TaskNodeIndex)> =
-            Vec::new();
+        let mut task_ids_with_dependency_specifiers: Vec<(TaskId, Arc<[Str]>)> = Vec::new();
+
+        // index tasks by ids
+        let mut node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex> =
+            HashMap::with_capacity(task_graph.node_count());
 
         // Load task nodes into `task_graph`
         for package_index in package_graph.node_indices() {
@@ -231,11 +234,18 @@ impl IndexedTaskGraph {
                     },
                 })?;
 
-                let task_node = TaskNode { task_id, resolved_config };
+                let task_node = TaskNode {
+                    task_display: TaskDisplay {
+                        package_name: package.package_json.name.clone(),
+                        task_name: task_name.clone(),
+                        package_path: Arc::clone(&package_dir),
+                    },
+                    resolved_config,
+                };
 
                 let node_index = task_graph.add_node(task_node);
-                dependency_specifiers_with_task_node_indices
-                    .push((dependency_specifiers, node_index));
+                task_ids_with_dependency_specifiers.push((task_id.clone(), dependency_specifiers));
+                node_indices_by_task_id.insert(task_id, node_index);
             }
 
             // For remaining package.json scripts not defined in vite.config.*, create tasks with default config
@@ -245,21 +255,15 @@ impl IndexedTaskGraph {
                     &package_dir,
                     package_json_script,
                 );
-                task_graph.add_node(TaskNode { task_id, resolved_config });
-            }
-        }
-
-        // index tasks by ids
-        let mut node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex> =
-            HashMap::with_capacity(task_graph.node_count());
-        for node_index in task_graph.node_indices() {
-            let task_node = &task_graph[node_index];
-
-            let existing_entry =
-                node_indices_by_task_id.insert(task_node.task_id.clone(), node_index);
-            if existing_entry.is_some() {
-                // This should never happen as we enforce unique task ids when adding nodes.
-                panic!("Duplicate task id found: {:?}", task_node.task_id);
+                let node_index = task_graph.add_node(TaskNode {
+                    task_display: TaskDisplay {
+                        package_name: package.package_json.name.clone(),
+                        task_name: script_name.into(),
+                        package_path: Arc::clone(&package_dir),
+                    },
+                    resolved_config,
+                });
+                node_indices_by_task_id.insert(task_id, node_index);
             }
         }
 
@@ -286,10 +290,8 @@ impl IndexedTaskGraph {
         };
 
         // Add explicit dependencies
-        for (dependency_specifiers, from_node_index) in dependency_specifiers_with_task_node_indices
-        {
-            let from_task_id = me.task_graph[from_node_index].task_id.clone();
-
+        for (from_task_id, dependency_specifiers) in task_ids_with_dependency_specifiers {
+            let from_node_index = me.node_indices_by_task_id[&from_task_id];
             for specifier in dependency_specifiers.iter().cloned() {
                 let to_node_index = me
                     .get_task_index_by_specifier::<Infallible>(
@@ -311,8 +313,7 @@ impl IndexedTaskGraph {
 
         // Add topological dependencies based on package dependencies
         let mut nearest_topological_tasks = Vec::<TaskNodeIndex>::new();
-        for task_index in me.task_graph.node_indices() {
-            let task_id = &me.task_graph[task_index].task_id;
+        for (task_id, task_index) in &me.node_indices_by_task_id {
             let task_name = task_id.task_name.as_str();
             let package_index = task_id.package_index;
 
@@ -325,7 +326,7 @@ impl IndexedTaskGraph {
             );
             for nearest_task_index in nearest_topological_tasks.drain(..) {
                 if let Some(existing_edge_index) =
-                    me.task_graph.find_edge(task_index, nearest_task_index)
+                    me.task_graph.find_edge(*task_index, nearest_task_index)
                 {
                     // If an edge already exists,
                     let existing_edge = &mut me.task_graph[existing_edge_index];
@@ -341,7 +342,7 @@ impl IndexedTaskGraph {
                 } else {
                     // add new topological edge if not exists
                     me.task_graph.add_edge(
-                        task_index,
+                        *task_index,
                         nearest_task_index,
                         TaskDependencyType(TaskDependencyTypeInner::Topological),
                     );
@@ -465,7 +466,6 @@ impl IndexedTaskGraph {
     }
 
     pub fn get_package_path_for_task(&self, task_index: TaskNodeIndex) -> &Arc<AbsolutePath> {
-        let task_node = &self.task_graph[task_index];
-        self.get_package_path(task_node.task_id.package_index)
+        &self.task_graph[task_index].task_display.package_path
     }
 }

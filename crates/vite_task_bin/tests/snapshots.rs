@@ -21,10 +21,10 @@ struct TaskIdSnapshot {
 }
 impl TaskIdSnapshot {
     fn new(task_index: TaskNodeIndex, indexed_task_graph: &IndexedTaskGraph) -> Self {
-        let task_id = &indexed_task_graph.task_graph()[task_index].task_id;
+        let task_display = &indexed_task_graph.task_graph()[task_index].task_display;
         Self {
-            task_name: task_id.task_name.clone(),
-            package_dir: Arc::clone(&indexed_task_graph.get_package_path(task_id.package_index)),
+            task_name: task_display.task_name.clone(),
+            package_dir: Arc::clone(&task_display.package_path),
         }
     }
 }

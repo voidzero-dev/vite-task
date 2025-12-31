@@ -2,13 +2,14 @@
 
 use std::{fmt::Display, sync::Arc};
 
+use serde::Serialize;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
 use crate::{IndexedTaskGraph, TaskNodeIndex};
 
 /// struct for printing a task in a human-readable way.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TaskDisplay {
     pub package_name: Str,
     pub task_name: Str,
@@ -25,12 +26,6 @@ impl Display for TaskDisplay {
 impl IndexedTaskGraph {
     /// Get human-readable display for a task node.
     pub fn display_task(&self, task_index: TaskNodeIndex) -> TaskDisplay {
-        let task_node = &self.task_graph()[task_index];
-        let package = &self.indexed_package_graph.package_graph()[task_node.task_id.package_index];
-        TaskDisplay {
-            package_name: package.package_json.name.clone(),
-            task_name: task_node.task_id.task_name.clone(),
-            package_path: Arc::clone(&package.absolute_path),
-        }
+        self.task_graph()[task_index].task_display.clone()
     }
 }
