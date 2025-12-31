@@ -6,53 +6,53 @@ input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
 [
   {
     "task": {
-      "package_dir": "packages/a",
+      "package_dir": "<redacted>/packages/a",
       "task_name": "build"
     },
     "deps": [
       {
-        "package_dir": "packages/a",
+        "package_dir": "<redacted>/packages/a",
         "task_name": "test"
       },
       {
-        "package_dir": "packages/b2",
+        "package_dir": "<redacted>/packages/b2",
         "task_name": "build"
       },
       {
-        "package_dir": "packages/c",
+        "package_dir": "<redacted>/packages/c",
         "task_name": "build"
       }
     ]
   },
   {
     "task": {
-      "package_dir": "packages/a",
+      "package_dir": "<redacted>/packages/a",
       "task_name": "test"
     },
     "deps": []
   },
   {
     "task": {
-      "package_dir": "packages/another-a",
+      "package_dir": "<redacted>/packages/another-a",
       "task_name": "build"
     },
     "deps": []
   },
   {
     "task": {
-      "package_dir": "packages/b2",
+      "package_dir": "<redacted>/packages/b2",
       "task_name": "build"
     },
     "deps": [
       {
-        "package_dir": "packages/c",
+        "package_dir": "<redacted>/packages/c",
         "task_name": "build"
       }
     ]
   },
   {
     "task": {
-      "package_dir": "packages/c",
+      "package_dir": "<redacted>/packages/c",
       "task_name": "build"
     },
     "deps": []

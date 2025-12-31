@@ -6,11 +6,11 @@ input_file: crates/vite_task_bin/tests/fixtures/fingerprint-ignore-test
 [
   {
     "id": {
-      "package_dir": "",
+      "package_dir": "<redacted>/",
       "task_name": "create-files"
     },
     "command": "mkdir -p node_modules/pkg-a && echo '{\"name\":\"pkg-a\"}' > node_modules/pkg-a/package.json && echo 'content' > node_modules/pkg-a/index.js && mkdir -p dist && echo 'output' > dist/bundle.js",
-    "cwd": "",
+    "cwd": "<redacted>/",
     "depends_on": []
   }
 ]

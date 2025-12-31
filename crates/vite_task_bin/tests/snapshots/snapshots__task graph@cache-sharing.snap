@@ -6,29 +6,29 @@ input_file: crates/vite_task_bin/tests/fixtures/cache-sharing
 [
   {
     "id": {
-      "package_dir": "",
+      "package_dir": "<redacted>/",
       "task_name": "a"
     },
     "command": "echo a",
-    "cwd": "",
+    "cwd": "<redacted>/",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "",
+      "package_dir": "<redacted>/",
       "task_name": "b"
     },
     "command": "echo a && echo b",
-    "cwd": "",
+    "cwd": "<redacted>/",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "",
+      "package_dir": "<redacted>/",
       "task_name": "c"
     },
     "command": "echo a && echo b && echo c",
-    "cwd": "",
+    "cwd": "<redacted>/",
     "depends_on": []
   }
 ]

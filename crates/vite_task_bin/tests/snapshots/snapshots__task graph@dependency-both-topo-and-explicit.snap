@@ -6,15 +6,15 @@ input_file: crates/vite_task_bin/tests/fixtures/dependency-both-topo-and-explici
 [
   {
     "id": {
-      "package_dir": "packages/a",
+      "package_dir": "<redacted>/packages/a",
       "task_name": "build"
     },
     "command": "build a",
-    "cwd": "packages/a",
+    "cwd": "<redacted>/packages/a",
     "depends_on": [
       [
         {
-          "package_dir": "packages/b",
+          "package_dir": "<redacted>/packages/b",
           "task_name": "build"
         },
         "Both"
@@ -23,11 +23,11 @@ input_file: crates/vite_task_bin/tests/fixtures/dependency-both-topo-and-explici
   },
   {
     "id": {
-      "package_dir": "packages/b",
+      "package_dir": "<redacted>/packages/b",
       "task_name": "build"
     },
     "command": "build b",
-    "cwd": "packages/b",
+    "cwd": "<redacted>/packages/b",
     "depends_on": []
   }
 ]

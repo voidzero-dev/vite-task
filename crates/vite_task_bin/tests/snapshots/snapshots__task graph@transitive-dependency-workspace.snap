@@ -6,29 +6,29 @@ input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
 [
   {
     "id": {
-      "package_dir": "packages/a",
+      "package_dir": "<redacted>/packages/a",
       "task_name": "build"
     },
     "command": "echo Building A",
-    "cwd": "packages/a",
+    "cwd": "<redacted>/packages/a",
     "depends_on": [
       [
         {
-          "package_dir": "packages/a",
+          "package_dir": "<redacted>/packages/a",
           "task_name": "test"
         },
         "Explicit"
       ],
       [
         {
-          "package_dir": "packages/b2",
+          "package_dir": "<redacted>/packages/b2",
           "task_name": "build"
         },
         "Topological"
       ],
       [
         {
-          "package_dir": "packages/c",
+          "package_dir": "<redacted>/packages/c",
           "task_name": "build"
         },
         "Topological"
@@ -37,33 +37,33 @@ input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
   },
   {
     "id": {
-      "package_dir": "packages/a",
+      "package_dir": "<redacted>/packages/a",
       "task_name": "test"
     },
     "command": "echo test a",
-    "cwd": "packages/a",
+    "cwd": "<redacted>/packages/a",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/another-a",
+      "package_dir": "<redacted>/packages/another-a",
       "task_name": "build"
     },
     "command": "echo Building another A",
-    "cwd": "packages/another-a",
+    "cwd": "<redacted>/packages/another-a",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/b1",
+      "package_dir": "<redacted>/packages/b1",
       "task_name": "lint"
     },
     "command": "echo lint b1",
-    "cwd": "packages/b1",
+    "cwd": "<redacted>/packages/b1",
     "depends_on": [
       [
         {
-          "package_dir": "packages/c",
+          "package_dir": "<redacted>/packages/c",
           "task_name": "lint"
         },
         "Topological"
@@ -72,15 +72,15 @@ input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
   },
   {
     "id": {
-      "package_dir": "packages/b2",
+      "package_dir": "<redacted>/packages/b2",
       "task_name": "build"
     },
     "command": "echo build b2",
-    "cwd": "packages/b2",
+    "cwd": "<redacted>/packages/b2",
     "depends_on": [
       [
         {
-          "package_dir": "packages/c",
+          "package_dir": "<redacted>/packages/c",
           "task_name": "build"
         },
         "Topological"
@@ -89,20 +89,20 @@ input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
   },
   {
     "id": {
-      "package_dir": "packages/c",
+      "package_dir": "<redacted>/packages/c",
       "task_name": "build"
     },
     "command": "echo Building C",
-    "cwd": "packages/c",
+    "cwd": "<redacted>/packages/c",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/c",
+      "package_dir": "<redacted>/packages/c",
       "task_name": "lint"
     },
     "command": "echo lint c",
-    "cwd": "packages/c",
+    "cwd": "<redacted>/packages/c",
     "depends_on": []
   }
 ]

@@ -6,33 +6,33 @@ input_file: crates/vite_task_bin/tests/fixtures/conflict-test
 [
   {
     "id": {
-      "package_dir": "packages/scope-a",
+      "package_dir": "<redacted>/packages/scope-a",
       "task_name": "b#c"
     },
     "command": "echo Task b#c in scope-a",
-    "cwd": "packages/scope-a",
+    "cwd": "<redacted>/packages/scope-a",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/scope-a-b",
+      "package_dir": "<redacted>/packages/scope-a-b",
       "task_name": "c"
     },
     "command": "echo Task c in scope-a#b",
-    "cwd": "packages/scope-a-b",
+    "cwd": "<redacted>/packages/scope-a-b",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/test-package",
+      "package_dir": "<redacted>/packages/test-package",
       "task_name": "test"
     },
     "command": "echo Testing",
-    "cwd": "packages/test-package",
+    "cwd": "<redacted>/packages/test-package",
     "depends_on": [
       [
         {
-          "package_dir": "packages/scope-a-b",
+          "package_dir": "<redacted>/packages/scope-a-b",
           "task_name": "c"
         },
         "Explicit"

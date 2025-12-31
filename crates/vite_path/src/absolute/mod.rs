@@ -38,7 +38,10 @@ impl Serialize for AbsolutePath {
                 .with(|redaction_prefix| redaction_prefix.borrow().as_ref().map(Arc::clone))
             {
                 match self.strip_prefix(redaction_prefix) {
-                    Ok(Some(stripped_path)) => return stripped_path.serialize(serializer),
+                    Ok(Some(stripped_path)) => {
+                        return serializer
+                            .collect_str(&format_args!("<redacted>/{}", stripped_path.as_str()));
+                    }
                     Err(strip_error) => {
                         return Err(serde::ser::Error::custom(format!(
                             "Failed to redact absolute path '{}': {}",

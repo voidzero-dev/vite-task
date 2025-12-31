@@ -6,15 +6,15 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
 [
   {
     "id": {
-      "package_dir": "packages/app",
+      "package_dir": "<redacted>/packages/app",
       "task_name": "build"
     },
     "command": "echo 'Building @test/app'",
-    "cwd": "packages/app",
+    "cwd": "<redacted>/packages/app",
     "depends_on": [
       [
         {
-          "package_dir": "packages/utils",
+          "package_dir": "<redacted>/packages/utils",
           "task_name": "build"
         },
         "Topological"
@@ -23,29 +23,29 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
   },
   {
     "id": {
-      "package_dir": "packages/app",
+      "package_dir": "<redacted>/packages/app",
       "task_name": "deploy"
     },
     "command": "deploy-script --prod",
-    "cwd": "packages/app",
+    "cwd": "<redacted>/packages/app",
     "depends_on": [
       [
         {
-          "package_dir": "packages/app",
+          "package_dir": "<redacted>/packages/app",
           "task_name": "build"
         },
         "Explicit"
       ],
       [
         {
-          "package_dir": "packages/app",
+          "package_dir": "<redacted>/packages/app",
           "task_name": "test"
         },
         "Explicit"
       ],
       [
         {
-          "package_dir": "packages/utils",
+          "package_dir": "<redacted>/packages/utils",
           "task_name": "lint"
         },
         "Explicit"
@@ -54,24 +54,24 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
   },
   {
     "id": {
-      "package_dir": "packages/app",
+      "package_dir": "<redacted>/packages/app",
       "task_name": "start"
     },
     "command": "echo 'Starting @test/app'",
-    "cwd": "packages/app",
+    "cwd": "<redacted>/packages/app",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/app",
+      "package_dir": "<redacted>/packages/app",
       "task_name": "test"
     },
     "command": "echo 'Testing @test/app'",
-    "cwd": "packages/app",
+    "cwd": "<redacted>/packages/app",
     "depends_on": [
       [
         {
-          "package_dir": "packages/utils",
+          "package_dir": "<redacted>/packages/utils",
           "task_name": "test"
         },
         "Topological"
@@ -80,33 +80,33 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
   },
   {
     "id": {
-      "package_dir": "packages/core",
+      "package_dir": "<redacted>/packages/core",
       "task_name": "build"
     },
     "command": "echo 'Building @test/core'",
-    "cwd": "packages/core",
+    "cwd": "<redacted>/packages/core",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/core",
+      "package_dir": "<redacted>/packages/core",
       "task_name": "clean"
     },
     "command": "echo 'Cleaning @test/core'",
-    "cwd": "packages/core",
+    "cwd": "<redacted>/packages/core",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/core",
+      "package_dir": "<redacted>/packages/core",
       "task_name": "lint"
     },
     "command": "eslint src",
-    "cwd": "packages/core",
+    "cwd": "<redacted>/packages/core",
     "depends_on": [
       [
         {
-          "package_dir": "packages/core",
+          "package_dir": "<redacted>/packages/core",
           "task_name": "clean"
         },
         "Explicit"
@@ -115,24 +115,24 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
   },
   {
     "id": {
-      "package_dir": "packages/core",
+      "package_dir": "<redacted>/packages/core",
       "task_name": "test"
     },
     "command": "echo 'Testing @test/core'",
-    "cwd": "packages/core",
+    "cwd": "<redacted>/packages/core",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/utils",
+      "package_dir": "<redacted>/packages/utils",
       "task_name": "build"
     },
     "command": "echo 'Building @test/utils'",
-    "cwd": "packages/utils",
+    "cwd": "<redacted>/packages/utils",
     "depends_on": [
       [
         {
-          "package_dir": "packages/core",
+          "package_dir": "<redacted>/packages/core",
           "task_name": "build"
         },
         "Topological"
@@ -141,29 +141,29 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
   },
   {
     "id": {
-      "package_dir": "packages/utils",
+      "package_dir": "<redacted>/packages/utils",
       "task_name": "lint"
     },
     "command": "eslint src",
-    "cwd": "packages/utils",
+    "cwd": "<redacted>/packages/utils",
     "depends_on": [
       [
         {
-          "package_dir": "packages/core",
+          "package_dir": "<redacted>/packages/core",
           "task_name": "build"
         },
         "Explicit"
       ],
       [
         {
-          "package_dir": "packages/core",
+          "package_dir": "<redacted>/packages/core",
           "task_name": "lint"
         },
         "Topological"
       ],
       [
         {
-          "package_dir": "packages/utils",
+          "package_dir": "<redacted>/packages/utils",
           "task_name": "build"
         },
         "Explicit"
@@ -172,15 +172,15 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
   },
   {
     "id": {
-      "package_dir": "packages/utils",
+      "package_dir": "<redacted>/packages/utils",
       "task_name": "test"
     },
     "command": "echo 'Testing @test/utils'",
-    "cwd": "packages/utils",
+    "cwd": "<redacted>/packages/utils",
     "depends_on": [
       [
         {
-          "package_dir": "packages/core",
+          "package_dir": "<redacted>/packages/core",
           "task_name": "test"
         },
         "Topological"

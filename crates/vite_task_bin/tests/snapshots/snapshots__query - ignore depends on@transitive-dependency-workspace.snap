@@ -6,7 +6,7 @@ input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
 [
   {
     "task": {
-      "package_dir": "packages/a",
+      "package_dir": "<redacted>/packages/a",
       "task_name": "build"
     },
     "deps": []

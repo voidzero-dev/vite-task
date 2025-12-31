@@ -6,19 +6,19 @@ input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
 [
   {
     "task": {
-      "package_dir": "packages/b1",
+      "package_dir": "<redacted>/packages/b1",
       "task_name": "lint"
     },
     "deps": [
       {
-        "package_dir": "packages/c",
+        "package_dir": "<redacted>/packages/c",
         "task_name": "lint"
       }
     ]
   },
   {
     "task": {
-      "package_dir": "packages/c",
+      "package_dir": "<redacted>/packages/c",
       "task_name": "lint"
     },
     "deps": []

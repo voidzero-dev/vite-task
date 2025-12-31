@@ -6,22 +6,22 @@ input_file: crates/vite_task_bin/tests/fixtures/recursive-topological-workspace
 [
   {
     "id": {
-      "package_dir": "apps/web",
+      "package_dir": "<redacted>/apps/web",
       "task_name": "build"
     },
     "command": "echo 'Building @test/web'",
-    "cwd": "apps/web",
+    "cwd": "<redacted>/apps/web",
     "depends_on": [
       [
         {
-          "package_dir": "packages/app",
+          "package_dir": "<redacted>/packages/app",
           "task_name": "build"
         },
         "Topological"
       ],
       [
         {
-          "package_dir": "packages/core",
+          "package_dir": "<redacted>/packages/core",
           "task_name": "build"
         },
         "Topological"
@@ -30,24 +30,24 @@ input_file: crates/vite_task_bin/tests/fixtures/recursive-topological-workspace
   },
   {
     "id": {
-      "package_dir": "apps/web",
+      "package_dir": "<redacted>/apps/web",
       "task_name": "dev"
     },
     "command": "echo 'Running @test/web in dev mode'",
-    "cwd": "apps/web",
+    "cwd": "<redacted>/apps/web",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/app",
+      "package_dir": "<redacted>/packages/app",
       "task_name": "build"
     },
     "command": "echo 'Building @test/app'",
-    "cwd": "packages/app",
+    "cwd": "<redacted>/packages/app",
     "depends_on": [
       [
         {
-          "package_dir": "packages/utils",
+          "package_dir": "<redacted>/packages/utils",
           "task_name": "build"
         },
         "Topological"
@@ -56,15 +56,15 @@ input_file: crates/vite_task_bin/tests/fixtures/recursive-topological-workspace
   },
   {
     "id": {
-      "package_dir": "packages/app",
+      "package_dir": "<redacted>/packages/app",
       "task_name": "test"
     },
     "command": "echo 'Testing @test/app'",
-    "cwd": "packages/app",
+    "cwd": "<redacted>/packages/app",
     "depends_on": [
       [
         {
-          "package_dir": "packages/utils",
+          "package_dir": "<redacted>/packages/utils",
           "task_name": "test"
         },
         "Topological"
@@ -73,33 +73,33 @@ input_file: crates/vite_task_bin/tests/fixtures/recursive-topological-workspace
   },
   {
     "id": {
-      "package_dir": "packages/core",
+      "package_dir": "<redacted>/packages/core",
       "task_name": "build"
     },
     "command": "echo 'Building @test/core'",
-    "cwd": "packages/core",
+    "cwd": "<redacted>/packages/core",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/core",
+      "package_dir": "<redacted>/packages/core",
       "task_name": "test"
     },
     "command": "echo 'Testing @test/core'",
-    "cwd": "packages/core",
+    "cwd": "<redacted>/packages/core",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/utils",
+      "package_dir": "<redacted>/packages/utils",
       "task_name": "build"
     },
     "command": "echo 'Preparing @test/utils' && echo 'Building @test/utils' && echo 'Done @test/utils'",
-    "cwd": "packages/utils",
+    "cwd": "<redacted>/packages/utils",
     "depends_on": [
       [
         {
-          "package_dir": "packages/core",
+          "package_dir": "<redacted>/packages/core",
           "task_name": "build"
         },
         "Topological"
@@ -108,15 +108,15 @@ input_file: crates/vite_task_bin/tests/fixtures/recursive-topological-workspace
   },
   {
     "id": {
-      "package_dir": "packages/utils",
+      "package_dir": "<redacted>/packages/utils",
       "task_name": "test"
     },
     "command": "echo 'Testing @test/utils'",
-    "cwd": "packages/utils",
+    "cwd": "<redacted>/packages/utils",
     "depends_on": [
       [
         {
-          "package_dir": "packages/core",
+          "package_dir": "<redacted>/packages/core",
           "task_name": "test"
         },
         "Topological"

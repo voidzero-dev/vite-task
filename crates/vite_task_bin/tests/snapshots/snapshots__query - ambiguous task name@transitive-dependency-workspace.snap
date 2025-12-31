@@ -13,8 +13,8 @@ input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
       "AmbiguousPackageName": {
         "package_name": "@test/a",
         "package_paths": [
-          "packages/a",
-          "packages/another-a"
+          "<redacted>/packages/a",
+          "<redacted>/packages/another-a"
         ]
       }
     }

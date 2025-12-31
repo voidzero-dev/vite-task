@@ -6,29 +6,29 @@ input_file: crates/vite_task_bin/tests/fixtures/empty-package-test
 [
   {
     "id": {
-      "package_dir": "packages/another-empty",
+      "package_dir": "<redacted>/packages/another-empty",
       "task_name": "build"
     },
     "command": "echo 'Building another-empty package'",
-    "cwd": "packages/another-empty",
+    "cwd": "<redacted>/packages/another-empty",
     "depends_on": [
       [
         {
-          "package_dir": "packages/another-empty",
+          "package_dir": "<redacted>/packages/another-empty",
           "task_name": "lint"
         },
         "Explicit"
       ],
       [
         {
-          "package_dir": "packages/normal-package",
+          "package_dir": "<redacted>/packages/normal-package",
           "task_name": "build"
         },
         "Topological"
       ],
       [
         {
-          "package_dir": "packages/normal-package",
+          "package_dir": "<redacted>/packages/normal-package",
           "task_name": "test"
         },
         "Explicit"
@@ -37,22 +37,22 @@ input_file: crates/vite_task_bin/tests/fixtures/empty-package-test
   },
   {
     "id": {
-      "package_dir": "packages/another-empty",
+      "package_dir": "<redacted>/packages/another-empty",
       "task_name": "deploy"
     },
     "command": "echo 'Deploying another-empty package'",
-    "cwd": "packages/another-empty",
+    "cwd": "<redacted>/packages/another-empty",
     "depends_on": [
       [
         {
-          "package_dir": "packages/another-empty",
+          "package_dir": "<redacted>/packages/another-empty",
           "task_name": "build"
         },
         "Explicit"
       ],
       [
         {
-          "package_dir": "packages/another-empty",
+          "package_dir": "<redacted>/packages/another-empty",
           "task_name": "test"
         },
         "Explicit"
@@ -61,24 +61,24 @@ input_file: crates/vite_task_bin/tests/fixtures/empty-package-test
   },
   {
     "id": {
-      "package_dir": "packages/another-empty",
+      "package_dir": "<redacted>/packages/another-empty",
       "task_name": "lint"
     },
     "command": "echo 'Linting another-empty package'",
-    "cwd": "packages/another-empty",
+    "cwd": "<redacted>/packages/another-empty",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/another-empty",
+      "package_dir": "<redacted>/packages/another-empty",
       "task_name": "test"
     },
     "command": "echo 'Testing another-empty package'",
-    "cwd": "packages/another-empty",
+    "cwd": "<redacted>/packages/another-empty",
     "depends_on": [
       [
         {
-          "package_dir": "packages/normal-package",
+          "package_dir": "<redacted>/packages/normal-package",
           "task_name": "test"
         },
         "Topological"
@@ -87,15 +87,15 @@ input_file: crates/vite_task_bin/tests/fixtures/empty-package-test
   },
   {
     "id": {
-      "package_dir": "packages/empty-name",
+      "package_dir": "<redacted>/packages/empty-name",
       "task_name": "build"
     },
     "command": "echo 'Building empty-name package'",
-    "cwd": "packages/empty-name",
+    "cwd": "<redacted>/packages/empty-name",
     "depends_on": [
       [
         {
-          "package_dir": "packages/empty-name",
+          "package_dir": "<redacted>/packages/empty-name",
           "task_name": "test"
         },
         "Explicit"
@@ -104,38 +104,38 @@ input_file: crates/vite_task_bin/tests/fixtures/empty-package-test
   },
   {
     "id": {
-      "package_dir": "packages/empty-name",
+      "package_dir": "<redacted>/packages/empty-name",
       "task_name": "lint"
     },
     "command": "echo 'Linting empty-name package'",
-    "cwd": "packages/empty-name",
+    "cwd": "<redacted>/packages/empty-name",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/empty-name",
+      "package_dir": "<redacted>/packages/empty-name",
       "task_name": "test"
     },
     "command": "echo 'Testing empty-name package'",
-    "cwd": "packages/empty-name",
+    "cwd": "<redacted>/packages/empty-name",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/normal-package",
+      "package_dir": "<redacted>/packages/normal-package",
       "task_name": "build"
     },
     "command": "echo 'Building normal-package'",
-    "cwd": "packages/normal-package",
+    "cwd": "<redacted>/packages/normal-package",
     "depends_on": []
   },
   {
     "id": {
-      "package_dir": "packages/normal-package",
+      "package_dir": "<redacted>/packages/normal-package",
       "task_name": "test"
     },
     "command": "echo 'Testing normal-package'",
-    "cwd": "packages/normal-package",
+    "cwd": "<redacted>/packages/normal-package",
     "depends_on": []
   }
 ]
