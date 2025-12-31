@@ -58,12 +58,10 @@ impl TaskDependencyType {
 pub struct TaskId {
     /// This is the index of the package where the task is defined.
     ///
-    /// `package_index` is declared from `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
+    /// `package_index` is declared before `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
     pub package_index: PackageNodeIndex,
 
-    /// For user defined tasks, this is the name of the script or the entry in `vite.config.*`.
-    ///
-    /// For synthesized tasks, this is the program.
+    /// The name of the script or the entry in `vite.config.*`.
     pub task_name: Str,
 }
 
