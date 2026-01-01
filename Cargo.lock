@@ -230,6 +230,9 @@ name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "block-buffer"
@@ -1446,6 +1449,8 @@ dependencies = [
  "once_cell",
  "pest",
  "pest_derive",
+ "regex",
+ "ron",
  "serde",
  "similar",
  "tempfile",
@@ -2366,6 +2371,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caf4aa5b0f434c91fe5c7f1ecb6a5ece2130b02ad2a590589dda5146df959001"
 
 [[package]]
+name = "ron"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd490c5b18261893f14449cbd28cb9c0b637aebf161cd77900bfdedaff21ec32"
+dependencies = [
+ "bitflags 2.10.0",
+ "once_cell",
+ "serde",
+ "serde_derive",
+ "typeid",
+ "unicode-ident",
+]
+
+[[package]]
 name = "rusqlite"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3061,6 +3080,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "typeid"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
+
+[[package]]
 name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3188,6 +3213,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vite_graph_ser"
+version = "0.1.0"
+dependencies = [
+ "petgraph",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "vite_path"
 version = "0.1.0"
 dependencies = [
@@ -3276,10 +3310,13 @@ dependencies = [
  "copy_dir",
  "insta",
  "petgraph",
+ "regex",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "toml",
+ "vite_graph_ser",
  "vite_path",
  "vite_str",
  "vite_task",
@@ -3302,6 +3339,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "vec1",
+ "vite_graph_ser",
  "vite_path",
  "vite_str",
  "vite_workspace",

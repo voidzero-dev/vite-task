@@ -3,6 +3,7 @@ pub mod user;
 use std::{collections::HashSet, sync::Arc};
 
 use monostate::MustBe;
+use serde::Serialize;
 pub use user::{UserCacheConfig, UserConfigFile, UserTaskConfig};
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -19,7 +20,7 @@ use crate::config::user::UserTaskOptions;
 /// but `command` is not parsed into program and args yet because environment variables in it may need to be expanded.
 ///
 /// `depends_on` is not included here because it's represented by the edges of the task graph.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ResolvedTaskConfig {
     /// The command to run for this task, as a raw string.
     ///
@@ -29,7 +30,7 @@ pub struct ResolvedTaskConfig {
     pub resolved_options: ResolvedTaskOptions,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ResolvedTaskOptions {
     /// The working directory for the task
     pub cwd: Arc<AbsolutePath>,
@@ -61,12 +62,12 @@ impl ResolvedTaskOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct CacheConfig {
     pub env_config: EnvConfig,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct EnvConfig {
     /// environment variable names to be fingerprinted and passed to the task, with defaults populated
     pub fingerprinted_envs: HashSet<Str>,

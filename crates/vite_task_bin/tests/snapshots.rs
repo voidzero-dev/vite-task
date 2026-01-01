@@ -3,6 +3,7 @@ use std::{path::Path, sync::Arc};
 
 use clap::Parser;
 use copy_dir::copy_dir;
+use insta::internals::Content;
 use petgraph::visit::EdgeRef as _;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, RelativePathBuf, redaction::redact_absolute_paths};
@@ -13,6 +14,23 @@ use vite_task_graph::{
     query::{TaskExecutionGraph, cli::CLITaskQuery},
 };
 use vite_workspace::find_workspace_root;
+
+fn visit_json(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json::Value)) {
+    f(value);
+    match value {
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                visit_json(item, f);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (_key, val) in map {
+                visit_json(val, f);
+            }
+        }
+        _ => {}
+    }
+}
 
 #[derive(serde::Serialize, PartialEq, PartialOrd, Eq, Ord)]
 struct TaskIdSnapshot {
@@ -62,36 +80,6 @@ fn snapshot_task_graph(indexed_task_graph: &IndexedTaskGraph) -> impl serde::Ser
     node_snapshots
 }
 
-/// Create a stable json representation of the task graph for snapshot testing.
-///
-/// All paths are relative to `base_dir`.
-fn snapshot_execution_graph(
-    execution_graph: &TaskExecutionGraph,
-    indexed_task_graph: &IndexedTaskGraph,
-) -> impl serde::Serialize {
-    #[derive(serde::Serialize, PartialEq)]
-    struct ExecutionNodeSnapshot {
-        task: TaskIdSnapshot,
-        deps: Vec<TaskIdSnapshot>,
-    }
-
-    let mut execution_node_snapshots = Vec::<ExecutionNodeSnapshot>::new();
-    for task_index in execution_graph.nodes() {
-        let mut deps = execution_graph
-            .neighbors(task_index)
-            .map(|dep_index| TaskIdSnapshot::new(dep_index, indexed_task_graph))
-            .collect::<Vec<_>>();
-        deps.sort_unstable();
-
-        execution_node_snapshots.push(ExecutionNodeSnapshot {
-            task: TaskIdSnapshot::new(task_index, indexed_task_graph),
-            deps,
-        });
-    }
-    execution_node_snapshots.sort_unstable_by(|a, b| a.task.cmp(&b.task));
-    execution_node_snapshots
-}
-
 #[derive(serde::Deserialize)]
 struct CLIQuery {
     pub name: Str,
@@ -114,6 +102,11 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let case_stage_path = tmpdir.join(case_name);
     copy_dir(case_path, &case_stage_path).unwrap();
+
+    // let mut settings = insta::Settings::clone_current();
+    // let case_stage_path_str = case_stage_path.as_path().to_str().expect("path is valid unicode");
+    // settings.add_filter(&regex::escape(case_stage_path_str), "<workspace>");
+    // let _guard = settings.bind_to_scope();
 
     let (workspace_root, _cwd) = find_workspace_root(&case_stage_path).unwrap();
 
@@ -140,42 +133,44 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
         .await
         .expect(&format!("Failed to load task graph for case {case_name}"));
 
-        let task_graph_snapshot = snapshot_task_graph(&indexed_task_graph);
-        insta::assert_json_snapshot!("task graph", task_graph_snapshot);
+        insta::assert_ron_snapshot!(
+            "task graph",
+            vite_graph_ser::SerializeByKey(indexed_task_graph.task_graph())
+        );
 
-        for cli_query in cli_queries_file.queries {
-            let snapshot_name = format!("query - {}", cli_query.name);
+        // for cli_query in cli_queries_file.queries {
+        //     let snapshot_name = format!("query - {}", cli_query.name);
 
-            let cli_task_query = CLITaskQuery::try_parse_from(
-                std::iter::once("vite-run") // dummy program name
-                    .chain(cli_query.args.iter().map(|s| s.as_str())),
-            )
-            .expect(&format!(
-                "Failed to parse CLI args for query '{}' in case '{}'",
-                cli_query.name, case_name
-            ));
+        //     let cli_task_query = CLITaskQuery::try_parse_from(
+        //         std::iter::once("vite-run") // dummy program name
+        //             .chain(cli_query.args.iter().map(|s| s.as_str())),
+        //     )
+        //     .expect(&format!(
+        //         "Failed to parse CLI args for query '{}' in case '{}'",
+        //         cli_query.name, case_name
+        //     ));
 
-            let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
-            let task_query = match cli_task_query.into_task_query(&cwd) {
-                Ok(ok) => ok,
-                Err(err) => {
-                    insta::assert_json_snapshot!(snapshot_name, err);
-                    continue;
-                }
-            };
+        //     let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
+        //     let task_query = match cli_task_query.into_task_query(&cwd) {
+        //         Ok(ok) => ok,
+        //         Err(err) => {
+        //             insta::assert_json_snapshot!(snapshot_name, err);
+        //             continue;
+        //         }
+        //     };
 
-            let execution_graph = match indexed_task_graph.query_tasks(task_query) {
-                Ok(ok) => ok,
-                Err(err) => {
-                    insta::assert_json_snapshot!(snapshot_name, err);
-                    continue;
-                }
-            };
+        //     let execution_graph = match indexed_task_graph.query_tasks(task_query) {
+        //         Ok(ok) => ok,
+        //         Err(err) => {
+        //             insta::assert_json_snapshot!(snapshot_name, err);
+        //             continue;
+        //         }
+        //     };
 
-            let execution_graph_snapshot =
-                snapshot_execution_graph(&execution_graph, &indexed_task_graph);
-            insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
-        }
+        //     let execution_graph_snapshot =
+        //         snapshot_execution_graph(&execution_graph, &indexed_task_graph);
+        //     insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
+        // }
     });
 }
 

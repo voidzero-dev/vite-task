@@ -18,6 +18,7 @@ use petgraph::{
     visit::{Control, DfsEvent, depth_first_search},
 };
 use serde::Serialize;
+use serde_json::map::Keys;
 pub use specifier::TaskSpecifier;
 use vec1::smallvec_v1::SmallVec1;
 use vite_path::AbsolutePath;
@@ -53,12 +54,10 @@ impl TaskDependencyType {
     }
 }
 
-/// Uniquely identifies a task, by its name and the path where it's defined.
+/// Uniquely identifies a task, by its name and the package where it's defined.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 struct TaskId {
-    /// This is the index of the package where the task is defined.
-    ///
-    /// `package_index` is declared before `task_name` to make the `PartialOrd` implementation group tasks in same packages together.
+    /// The index of the package where the task is defined.
     pub package_index: PackageNodeIndex,
 
     /// The name of the script or the entry in `vite.config.*`.
@@ -66,7 +65,7 @@ struct TaskId {
 }
 
 /// A node in the task graph, representing a task with its resolved configuration.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct TaskNode {
     /// Printing the task in a human-readable way.
     pub task_display: TaskDisplay,
@@ -78,6 +77,14 @@ pub struct TaskNode {
     ///
     /// However, it does not contain external factors like additional args from cli and env vars.
     pub resolved_config: ResolvedTaskConfig,
+}
+
+impl vite_graph_ser::GetKey for TaskNode {
+    type Key<'a> = (&'a AbsolutePath, &'a str);
+
+    fn key(&self) -> Result<Self::Key<'_>, String> {
+        Ok((&self.task_display.package_path, &self.task_display.task_name))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -137,7 +144,7 @@ pub enum SpecifierLookupError<PackageUnknownError = Infallible> {
 }
 
 /// newtype of `DefaultIx` for indices in task graphs
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct TaskIx(DefaultIx);
 unsafe impl IndexType for TaskIx {
     fn new(x: usize) -> Self {
