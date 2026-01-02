@@ -24,8 +24,8 @@ pub enum NonTaskSubcommand {
     Version,
 }
 
-#[derive(Debug)]
-pub struct TaskSynthesizer;
+#[derive(Debug, Default)]
+pub struct TaskSynthesizer(());
 
 fn find_executable_in_node_modules_bin(
     cwd: &AbsolutePath,
@@ -68,6 +68,21 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
                     direct_execution_cache_key,
                 })
             }
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct OwnedSessionCallbacks {
+    task_synthesizer: TaskSynthesizer,
+    user_config_loader: vite_task::loader::JsonUserConfigLoader,
+}
+
+impl OwnedSessionCallbacks {
+    pub fn as_callbacks(&mut self) -> SessionCallbacks<'_, CustomTaskSubcommand> {
+        SessionCallbacks {
+            task_synthesizer: &mut self.task_synthesizer,
+            user_config_loader: &mut self.user_config_loader,
         }
     }
 }

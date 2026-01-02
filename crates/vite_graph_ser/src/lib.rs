@@ -1,10 +1,10 @@
-use std::{collections::BTreeMap, fmt::Display};
+use std::collections::BTreeMap;
 
 use petgraph::{
     graph::DiGraph,
     visit::{EdgeRef as _, IntoNodeReferences},
 };
-use serde::{Serialize, Serializer, ser::SerializeMap};
+use serde::{Serialize, Serializer};
 
 /// Trait for getting a unique key for a node in the graph.
 /// This key is used for serializing the graph with `serialize_by_key`.

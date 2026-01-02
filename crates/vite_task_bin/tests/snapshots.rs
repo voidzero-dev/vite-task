@@ -8,6 +8,7 @@ use petgraph::visit::EdgeRef as _;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, RelativePathBuf, redaction::redact_absolute_paths};
 use vite_str::Str;
+use vite_task::Session;
 use vite_task_graph::{
     IndexedTaskGraph, TaskDependencyType, TaskNodeIndex,
     loader::JsonUserConfigLoader,
@@ -80,97 +81,107 @@ fn snapshot_task_graph(indexed_task_graph: &IndexedTaskGraph) -> impl serde::Ser
     node_snapshots
 }
 
-#[derive(serde::Deserialize)]
-struct CLIQuery {
+#[derive(serde::Deserialize, Debug)]
+struct Plan {
     pub name: Str,
     pub args: Vec<Str>,
     pub cwd: RelativePathBuf,
 }
 
-#[derive(serde::Deserialize, Default)]
-struct CLIQueriesFile {
-    #[serde(rename = "query")] // toml usually uses singular for arrays
-    pub queries: Vec<CLIQuery>,
+#[derive(serde::Deserialize, Debug)]
+struct E2e {
+    pub steps: Vec<Str>,
 }
 
-fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, case_path: &Path) {
-    let case_name = case_path.file_name().unwrap().to_str().unwrap();
-    if case_name.starts_with(".") {
+#[derive(serde::Deserialize, Default)]
+struct PlansFile {
+    #[serde(rename = "plan", default)] // toml usually uses singular for arrays
+    pub plans: Vec<Plan>,
+    #[serde(rename = "e2e", default)] // toml usually uses singular for arrays
+    pub e2es: Vec<E2e>,
+}
+
+fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
+    let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
+    if fixture_name.starts_with(".") {
         return; // skip hidden files like .DS_Store
     }
 
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
-    let case_stage_path = tmpdir.join(case_name);
-    copy_dir(case_path, &case_stage_path).unwrap();
+    let stage_path = tmpdir.join(fixture_name);
+    copy_dir(fixture_path, &stage_path).unwrap();
 
     // let mut settings = insta::Settings::clone_current();
     // let case_stage_path_str = case_stage_path.as_path().to_str().expect("path is valid unicode");
     // settings.add_filter(&regex::escape(case_stage_path_str), "<workspace>");
     // let _guard = settings.bind_to_scope();
 
-    let (workspace_root, _cwd) = find_workspace_root(&case_stage_path).unwrap();
+    let (workspace_root, _cwd) = find_workspace_root(&stage_path).unwrap();
 
     assert_eq!(
-        &case_stage_path, &*workspace_root.path,
+        &stage_path, &*workspace_root.path,
         "folder '{}' should be a workspace root",
-        case_name
+        fixture_name
     );
 
-    let cli_queries_toml_path = case_path.join("cli-queries.toml");
-    let cli_queries_file: CLIQueriesFile = match std::fs::read(&cli_queries_toml_path) {
+    let cases_toml_path = fixture_path.join("snapshots.toml");
+    let cases_file: PlansFile = match std::fs::read(&cases_toml_path) {
         Ok(content) => toml::from_slice(&content).unwrap(),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Default::default(),
-        Err(err) => panic!("Failed to read cli-queries.toml for case {}: {}", case_name, err),
+        Err(err) => panic!("Failed to read cases.toml for fixture {}: {}", fixture_name, err),
     };
 
     runtime.block_on(async {
         let _redaction_guard = redact_absolute_paths(&workspace_root.path);
 
-        let indexed_task_graph = vite_task_graph::IndexedTaskGraph::load(
-            &workspace_root,
-            &JsonUserConfigLoader::default(),
+        let mut owned_callbacks = vite_task_bin::OwnedSessionCallbacks::default();
+        let mut session = Session::init_with(
+            Default::default(),
+            Arc::clone(&workspace_root.path),
+            owned_callbacks.as_callbacks(),
         )
-        .await
-        .expect(&format!("Failed to load task graph for case {case_name}"));
+        .unwrap();
 
         insta::assert_ron_snapshot!(
             "task graph",
-            vite_graph_ser::SerializeByKey(indexed_task_graph.task_graph())
+            vite_graph_ser::SerializeByKey(
+                session.ensure_task_graph_loaded().await.unwrap().task_graph()
+            )
         );
 
-        // for cli_query in cli_queries_file.queries {
-        //     let snapshot_name = format!("query - {}", cli_query.name);
+        for plan in cases_file.plans {
+            let snapshot_name = format!("query - {}", plan.name);
 
-        //     let cli_task_query = CLITaskQuery::try_parse_from(
-        //         std::iter::once("vite-run") // dummy program name
-        //             .chain(cli_query.args.iter().map(|s| s.as_str())),
-        //     )
-        //     .expect(&format!(
-        //         "Failed to parse CLI args for query '{}' in case '{}'",
-        //         cli_query.name, case_name
-        //     ));
+            let cli_task_query = CLITaskQuery::try_parse_from(
+                std::iter::once("vite") // dummy program name
+                    .chain(plan.args.iter().map(|s| s.as_str())),
+            )
+            .expect(&format!(
+                "Failed to parse CLI args for plan '{}' in '{}'",
+                plan.name, fixture_name
+            ));
 
-        //     let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
-        //     let task_query = match cli_task_query.into_task_query(&cwd) {
-        //         Ok(ok) => ok,
-        //         Err(err) => {
-        //             insta::assert_json_snapshot!(snapshot_name, err);
-        //             continue;
-        //         }
-        //     };
+            //     let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
+            //     let task_query = match cli_task_query.into_task_query(&cwd) {
+            //         Ok(ok) => ok,
+            //         Err(err) => {
+            //             insta::assert_json_snapshot!(snapshot_name, err);
+            //             continue;
+            //         }
+            //     };
 
-        //     let execution_graph = match indexed_task_graph.query_tasks(task_query) {
-        //         Ok(ok) => ok,
-        //         Err(err) => {
-        //             insta::assert_json_snapshot!(snapshot_name, err);
-        //             continue;
-        //         }
-        //     };
+            //     let execution_graph = match indexed_task_graph.query_tasks(task_query) {
+            //         Ok(ok) => ok,
+            //         Err(err) => {
+            //             insta::assert_json_snapshot!(snapshot_name, err);
+            //             continue;
+            //         }
+            //     };
 
-        //     let execution_graph_snapshot =
-        //         snapshot_execution_graph(&execution_graph, &indexed_task_graph);
-        //     insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
-        // }
+            //     let execution_graph_snapshot =
+            //         snapshot_execution_graph(&execution_graph, &indexed_task_graph);
+            //     insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
+        }
     });
 }
 

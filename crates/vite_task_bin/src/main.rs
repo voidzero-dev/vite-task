@@ -2,7 +2,9 @@ use std::{env, sync::Arc};
 
 use vite_path::{AbsolutePath, current_dir};
 use vite_task::{CLIArgs, Session, SessionCallbacks};
-use vite_task_bin::{CustomTaskSubcommand, NonTaskSubcommand, TaskSynthesizer};
+use vite_task_bin::{
+    CustomTaskSubcommand, NonTaskSubcommand, OwnedSessionCallbacks, TaskSynthesizer,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,13 +26,8 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut task_synthesizer = TaskSynthesizer;
-    let mut config_loader = vite_task::loader::JsonUserConfigLoader::default();
-    let mut session = Session::init(SessionCallbacks {
-        task_synthesizer: &mut task_synthesizer,
-        user_config_loader: &mut config_loader,
-    })?;
-
+    let mut owned_callbacks = OwnedSessionCallbacks::default();
+    let mut session = Session::init(owned_callbacks.as_callbacks())?;
     let plan = session.plan(cwd, task_cli_args).await?;
     dbg!(plan);
 

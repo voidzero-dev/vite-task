@@ -154,6 +154,12 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
         Self::init_with(envs, vite_path::current_dir()?.into(), callbacks)
     }
 
+    pub async fn ensure_task_graph_loaded(
+        &mut self,
+    ) -> Result<&IndexedTaskGraph, TaskGraphLoadError> {
+        self.lazy_task_graph.load_task_graph().await
+    }
+
     /// Initialize a session with custom cwd, environment variables. Useful for testing.
     pub fn init_with(
         envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
