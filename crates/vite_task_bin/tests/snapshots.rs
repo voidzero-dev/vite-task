@@ -1,5 +1,5 @@
 use core::panic;
-use std::{convert::Infallible, path::Path, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, ffi::OsStr, path::Path, sync::Arc};
 
 use clap::Parser;
 use copy_dir::copy_dir;
@@ -86,6 +86,7 @@ fn snapshot_task_graph(indexed_task_graph: &IndexedTaskGraph) -> impl serde::Ser
 struct Plan {
     pub name: Str,
     pub args: Vec<Str>,
+    #[serde(default)]
     pub cwd: RelativePathBuf,
 }
 
@@ -132,12 +133,22 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         Err(err) => panic!("Failed to read cases.toml for fixture {}: {}", fixture_name, err),
     };
 
+    // Add bins to PATH so test programs (such as readfile) in fixtures can be found.
+    let envs: HashMap<Arc<OsStr>, Arc<OsStr>> = [(
+        Arc::<OsStr>::from(OsStr::new("PATH")),
+        Arc::<OsStr>::from(
+            std::env::current_dir().unwrap().join("tests").join("bins").into_os_string(),
+        ),
+    )]
+    .into_iter()
+    .collect();
+
     runtime.block_on(async {
         let _redaction_guard = redact_absolute_paths(&workspace_root.path);
 
         let mut owned_callbacks = vite_task_bin::OwnedSessionCallbacks::default();
         let mut session = Session::init_with(
-            Default::default(),
+            envs,
             Arc::clone(&workspace_root.path),
             owned_callbacks.as_callbacks(),
         )

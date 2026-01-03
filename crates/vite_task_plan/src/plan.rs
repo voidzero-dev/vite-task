@@ -380,7 +380,7 @@ fn plan_spawn_execution(
             program_path,
             args: Arc::clone(&args),
             cwd,
-            all_envs: Arc::new(all_envs),
+            all_envs: Arc::new(all_envs.into_iter().collect()),
         },
         cache_metadata: resolved_cache_metadata,
     })

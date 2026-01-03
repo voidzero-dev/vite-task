@@ -8,7 +8,13 @@ mod path_env;
 mod plan;
 pub mod plan_request;
 
-use std::{collections::HashMap, ffi::OsStr, fmt::Debug, ops::Range, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ffi::OsStr,
+    fmt::Debug,
+    ops::Range,
+    sync::Arc,
+};
 
 use context::PlanContext;
 use error::TaskPlanErrorKindResultExt;
@@ -17,7 +23,7 @@ use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
 use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
-use serde::Serialize;
+use serde::{Serialize, ser::SerializeMap as _};
 use vite_graph_ser::serialize_by_key;
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -47,10 +53,26 @@ pub struct SpawnCommand {
     pub args: Arc<[Str]>,
 
     /// Environment variables to set for the command, including both fingerprinted and pass-through envs.
-    pub all_envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
+    #[serde(serialize_with = "serialize_envs")]
+    pub all_envs: Arc<BTreeMap<Arc<OsStr>, Arc<OsStr>>>,
 
     /// Current working directory
     pub cwd: Arc<AbsolutePath>,
+}
+
+/// Serialize environment variables as a map from string to string for better readability.
+fn serialize_envs<S>(
+    envs: &BTreeMap<Arc<OsStr>, Arc<OsStr>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut map_ser = serializer.serialize_map(Some(envs.len()))?;
+    for (key, value) in envs {
+        map_ser.serialize_entry(&key.display().to_string(), &value.display().to_string())?;
+    }
+    map_ser.end()
 }
 
 /// Represents how a task should be executed. It's the node type for the execution graph. Each node corresponds to a task.

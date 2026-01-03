@@ -1,0 +1,3 @@
+[[plan]]
+name = "user task cache key"
+args = ["run", "hello"]

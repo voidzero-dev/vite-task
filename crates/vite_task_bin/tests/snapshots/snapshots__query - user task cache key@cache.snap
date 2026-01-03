@@ -1,0 +1,117 @@
+---
+source: crates/vite_task_bin/tests/snapshots.rs
+expression: "&plan"
+input_file: crates/vite_task_bin/tests/fixtures/cache
+---
+SessionExecutionPlan(
+  cli_args_without_program: [
+    "run",
+    "hello",
+  ],
+  cwd: "<redacted>/",
+  plan: ExecutionPlan(
+    root_node: Expanded({
+      ("<redacted>/", "hello"): DiGraphValue(
+        node: TaskExecution(
+          task_display: TaskDisplay(
+            package_name: "",
+            task_name: "hello",
+            package_path: "<redacted>/",
+          ),
+          items: [
+            ExecutionItem(
+              command_span: Range(
+                start: 0,
+                end: 18,
+              ),
+              extra_args: [],
+              plan_cwd: "<redacted>/",
+              kind: Leaf(Spawn(SpawnExecution(
+                cache_metadata: Some(CacheMetadata(
+                  spawn_fingerprint: SpawnFingerprint(
+                    cwd: RelativePathBuf(""),
+                    program_fingerprint: OutsideWorkspace(
+                      program_name: "readfile",
+                    ),
+                    args: [
+                      "hello.txt",
+                    ],
+                    env_fingerprints: EnvFingerprints(
+                      fingerprinted_envs: {},
+                      pass_through_env_config: [
+                        "HOME",
+                        "USER",
+                        "TZ",
+                        "LANG",
+                        "SHELL",
+                        "PWD",
+                        "PATH",
+                        "CI",
+                        "NODE_OPTIONS",
+                        "COREPACK_HOME",
+                        "NPM_CONFIG_STORE_DIR",
+                        "PNPM_HOME",
+                        "LD_LIBRARY_PATH",
+                        "DYLD_FALLBACK_LIBRARY_PATH",
+                        "LIBPATH",
+                        "COLORTERM",
+                        "TERM",
+                        "TERM_PROGRAM",
+                        "DISPLAY",
+                        "FORCE_COLOR",
+                        "NO_COLOR",
+                        "TMP",
+                        "TEMP",
+                        "VERCEL",
+                        "VERCEL_*",
+                        "NEXT_*",
+                        "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
+                        "NOW_BUILDER",
+                        "APPDATA",
+                        "PROGRAMDATA",
+                        "SYSTEMROOT",
+                        "SYSTEMDRIVE",
+                        "USERPROFILE",
+                        "HOMEDRIVE",
+                        "HOMEPATH",
+                        "ELECTRON_RUN_AS_NODE",
+                        "JB_INTERPRETER",
+                        "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
+                        "JB_IDE_*",
+                        "VSCODE_*",
+                        "DOCKER_*",
+                        "BUILDKIT_*",
+                        "COMPOSE_*",
+                        "*_TOKEN",
+                      ],
+                    ),
+                    fingerprint_ignores: None,
+                  ),
+                  execution_cache_key: ExecutionCacheKey(
+                    kind: UserTask(
+                      task_name: "hello",
+                      and_item_index: 0,
+                    ),
+                    origin_path: RelativePathBuf(""),
+                  ),
+                )),
+                spawn_command: SpawnCommand(
+                  program_path: "/Volumes/code/vite-task/crates/vite_task_bin/tests/bins/readfile",
+                  args: [
+                    "hello.txt",
+                  ],
+                  all_envs: {
+                    "FORCE_COLOR": "3",
+                    "PATH": "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.tmp5Gy398/cache/node_modules/.bin:/Volumes/code/vite-task/crates/vite_task_bin/tests/bins",
+                  },
+                  cwd: "<redacted>/",
+                ),
+              ))),
+            ),
+          ],
+        ),
+        neighbors: {},
+      ),
+    }),
+  ),
+)
