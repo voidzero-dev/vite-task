@@ -1,20 +1,19 @@
 use core::panic;
-use std::{collections::HashMap, convert::Infallible, ffi::OsStr, path::Path, sync::Arc};
+use std::{
+    borrow::Cow, collections::HashMap, convert::Infallible, ffi::OsStr, path::Path, sync::Arc,
+};
 
 use clap::Parser;
 use copy_dir::copy_dir;
 use insta::internals::Content;
 use petgraph::visit::EdgeRef as _;
+use serde::Serialize;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, RelativePathBuf, redaction::redact_absolute_paths};
 use vite_str::Str;
 use vite_task::{CLIArgs, Session};
 use vite_task_bin::CustomTaskSubcommand;
-use vite_task_graph::{
-    IndexedTaskGraph, TaskDependencyType, TaskNodeIndex,
-    loader::JsonUserConfigLoader,
-    query::{TaskExecutionGraph, cli::CLITaskQuery},
-};
+use vite_task_graph::config::DEFAULT_PASSTHROUGH_ENVS;
 use vite_workspace::find_workspace_root;
 
 fn visit_json(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json::Value)) {
@@ -34,52 +33,55 @@ fn visit_json(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json:
     }
 }
 
-#[derive(serde::Serialize, PartialEq, PartialOrd, Eq, Ord)]
-struct TaskIdSnapshot {
-    package_dir: Arc<AbsolutePath>,
-    task_name: Str,
-}
-impl TaskIdSnapshot {
-    fn new(task_index: TaskNodeIndex, indexed_task_graph: &IndexedTaskGraph) -> Self {
-        let task_display = &indexed_task_graph.task_graph()[task_index].task_display;
-        Self {
-            task_name: task_display.task_name.clone(),
-            package_dir: Arc::clone(&task_display.package_path),
+fn redact_strs(value: &mut serde_json::Value, redactions: &[(&str, &str)]) {
+    use cow_utils::CowUtils as _;
+    visit_json(value, &mut |v| {
+        if let serde_json::Value::String(s) = v {
+            for (from, to) in redactions {
+                if let Cow::Owned(replaced) = s.as_str().cow_replace(from, to) {
+                    *s = replaced;
+                }
+            }
         }
-    }
+    });
 }
 
-/// Create a stable json representation of the task graph for snapshot testing.
-///
-/// All paths are relative to `base_dir`.
-fn snapshot_task_graph(indexed_task_graph: &IndexedTaskGraph) -> impl serde::Serialize {
-    #[derive(serde::Serialize)]
-    struct TaskNodeSnapshot {
-        id: TaskIdSnapshot,
-        command: Str,
-        cwd: Arc<AbsolutePath>,
-        depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)>,
-    }
+fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mut json_value = serde_json::to_value(value).unwrap();
+    redact_strs(
+        &mut json_value,
+        &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
+    );
 
-    let task_graph = indexed_task_graph.task_graph();
-    let mut node_snapshots = Vec::<TaskNodeSnapshot>::with_capacity(task_graph.node_count());
-    for task_index in task_graph.node_indices() {
-        let task_node = &task_graph[task_index];
-        let mut depends_on: Vec<(TaskIdSnapshot, TaskDependencyType)> = task_graph
-            .edges_directed(task_index, petgraph::Direction::Outgoing)
-            .map(|edge| (TaskIdSnapshot::new(edge.target(), indexed_task_graph), *edge.weight()))
-            .collect();
-        depends_on.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        node_snapshots.push(TaskNodeSnapshot {
-            id: TaskIdSnapshot::new(task_index, indexed_task_graph),
-            command: task_node.resolved_config.command.clone(),
-            cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
-            depends_on,
-        });
-    }
-    node_snapshots.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+    visit_json(&mut json_value, &mut |v| {
+        let serde_json::Value::Array(array) = v else {
+            return;
+        };
+        let contains_all_default_pass_through_envs =
+            DEFAULT_PASSTHROUGH_ENVS.iter().all(|default_pass_through_envs| {
+                array.iter().any(|item| {
+                    if let serde_json::Value::String(s) = item {
+                        s == *default_pass_through_envs
+                    } else {
+                        false
+                    }
+                })
+            });
+        // Remove default pass-through envs from snapshots to reduce noise
+        if contains_all_default_pass_through_envs {
+            array.retain(|item| {
+                if let serde_json::Value::String(s) = item {
+                    !DEFAULT_PASSTHROUGH_ENVS.contains(&s.as_str())
+                } else {
+                    true
+                }
+            });
+            array.push(serde_json::Value::String("<default pass-through envs>".to_string()));
+        }
+    });
 
-    node_snapshots
+    json_value
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -144,8 +146,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
     .collect();
 
     runtime.block_on(async {
-        let _redaction_guard = redact_absolute_paths(&workspace_root.path);
-
+        let workspace_root_str = workspace_root.path.as_path().to_str().unwrap();
         let mut owned_callbacks = vite_task_bin::OwnedSessionCallbacks::default();
         let mut session = Session::init_with(
             envs,
@@ -154,12 +155,13 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         )
         .unwrap();
 
-        insta::assert_ron_snapshot!(
-            "task graph",
-            vite_graph_ser::SerializeByKey(
-                session.ensure_task_graph_loaded().await.unwrap().task_graph()
-            )
+        let task_graph_json = redact_snapshot(
+            &vite_graph_ser::SerializeByKey(
+                session.ensure_task_graph_loaded().await.unwrap().task_graph(),
+            ),
+            workspace_root_str,
         );
+        insta::assert_json_snapshot!("task graph", task_graph_json);
 
         for plan in cases_file.plans {
             let snapshot_name = format!("query - {}", plan.name);
@@ -188,7 +190,9 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
                     continue;
                 }
             };
-            insta::assert_ron_snapshot!(snapshot_name, &plan);
+
+            let plan_json = redact_snapshot(&plan, workspace_root_str);
+            insta::assert_json_snapshot!(snapshot_name, &plan_json);
 
             //     let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
             //     let task_query = match cli_task_query.into_task_query(&cwd) {

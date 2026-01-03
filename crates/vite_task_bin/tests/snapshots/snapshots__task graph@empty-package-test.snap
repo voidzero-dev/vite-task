@@ -1,571 +1,305 @@
 ---
 source: crates/vite_task_bin/tests/snapshots.rs
-expression: "vite_graph_ser::SerializeByKey(indexed_task_graph.task_graph())"
+expression: task_graph_json
 input_file: crates/vite_task_bin/tests/fixtures/empty-package-test
 ---
-{
-  ("<redacted>/packages/another-empty", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "",
-        task_name: "build",
-        package_path: "<redacted>/packages/another-empty",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Building another-empty package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/another-empty",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/another-empty", "lint"): Explicit,
-      ("<redacted>/packages/normal-package", "build"): Topological,
-      ("<redacted>/packages/normal-package", "test"): Explicit,
+[
+  {
+    "key": [
+      "<workspace>/packages/another-empty",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/another-empty"
+      },
+      "resolved_config": {
+        "command": "echo 'Building another-empty package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/another-empty",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/another-empty", "deploy"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "",
-        task_name: "deploy",
-        package_path: "<redacted>/packages/another-empty",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Deploying another-empty package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/another-empty",
-          cache_config: None,
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/another-empty", "build"): Explicit,
-      ("<redacted>/packages/another-empty", "test"): Explicit,
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/another-empty",
+          "lint"
+        ],
+        "Explicit"
+      ],
+      [
+        [
+          "<workspace>/packages/normal-package",
+          "build"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/normal-package",
+          "test"
+        ],
+        "Explicit"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/another-empty",
+      "deploy"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "deploy",
+        "package_path": "<workspace>/packages/another-empty"
+      },
+      "resolved_config": {
+        "command": "echo 'Deploying another-empty package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/another-empty",
+          "cache_config": null
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/another-empty", "lint"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "",
-        task_name: "lint",
-        package_path: "<redacted>/packages/another-empty",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Linting another-empty package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/another-empty",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/another-empty", "test"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "",
-        task_name: "test",
-        package_path: "<redacted>/packages/another-empty",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Testing another-empty package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/another-empty",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/normal-package", "test"): Topological,
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/another-empty",
+          "build"
+        ],
+        "Explicit"
+      ],
+      [
+        [
+          "<workspace>/packages/another-empty",
+          "test"
+        ],
+        "Explicit"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/another-empty",
+      "lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "lint",
+        "package_path": "<workspace>/packages/another-empty"
+      },
+      "resolved_config": {
+        "command": "echo 'Linting another-empty package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/another-empty",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/empty-name", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "",
-        task_name: "build",
-        package_path: "<redacted>/packages/empty-name",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Building empty-name package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/empty-name",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/empty-name", "test"): Explicit,
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/another-empty",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/another-empty"
+      },
+      "resolved_config": {
+        "command": "echo 'Testing another-empty package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/another-empty",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/empty-name", "lint"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "",
-        task_name: "lint",
-        package_path: "<redacted>/packages/empty-name",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Linting empty-name package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/empty-name",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/empty-name", "test"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "",
-        task_name: "test",
-        package_path: "<redacted>/packages/empty-name",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Testing empty-name package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/empty-name",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/normal-package", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "normal-package",
-        task_name: "build",
-        package_path: "<redacted>/packages/normal-package",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Building normal-package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/normal-package",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/normal-package", "test"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "normal-package",
-        task_name: "test",
-        package_path: "<redacted>/packages/normal-package",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo \'Testing normal-package\'",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/normal-package",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-}
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/normal-package",
+          "test"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/empty-name",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/empty-name"
+      },
+      "resolved_config": {
+        "command": "echo 'Building empty-name package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/empty-name",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/empty-name",
+          "test"
+        ],
+        "Explicit"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/empty-name",
+      "lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "lint",
+        "package_path": "<workspace>/packages/empty-name"
+      },
+      "resolved_config": {
+        "command": "echo 'Linting empty-name package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/empty-name",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/empty-name",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/empty-name"
+      },
+      "resolved_config": {
+        "command": "echo 'Testing empty-name package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/empty-name",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/normal-package",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "normal-package",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/normal-package"
+      },
+      "resolved_config": {
+        "command": "echo 'Building normal-package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/normal-package",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/normal-package",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "normal-package",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/normal-package"
+      },
+      "resolved_config": {
+        "command": "echo 'Testing normal-package'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/normal-package",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  }
+]

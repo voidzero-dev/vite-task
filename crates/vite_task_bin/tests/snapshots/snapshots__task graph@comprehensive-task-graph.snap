@@ -1,1577 +1,788 @@
 ---
 source: crates/vite_task_bin/tests/snapshots.rs
-expression: "vite_graph_ser::SerializeByKey(indexed_task_graph.task_graph())"
+expression: task_graph_json
 input_file: crates/vite_task_bin/tests/fixtures/comprehensive-task-graph
 ---
-{
-  ("<redacted>/packages/api", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/api",
-        task_name: "build",
-        package_path: "<redacted>/packages/api",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Generate schemas && echo Compile TypeScript && echo Bundle API && echo Copy assets",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/api",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/config", "build"): Topological,
-      ("<redacted>/packages/shared", "build"): Topological,
+[
+  {
+    "key": [
+      "<workspace>/packages/api",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/api",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/api"
+      },
+      "resolved_config": {
+        "command": "echo Generate schemas && echo Compile TypeScript && echo Bundle API && echo Copy assets",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/api",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/api", "dev"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/api",
-        task_name: "dev",
-        package_path: "<redacted>/packages/api",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Watch mode && echo Start dev server",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/api",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/api", "start"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/api",
-        task_name: "start",
-        package_path: "<redacted>/packages/api",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Starting API server",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/api",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/api", "test"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/api",
-        task_name: "test",
-        package_path: "<redacted>/packages/api",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Testing API",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/api",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/shared", "test"): Topological,
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/config",
+          "build"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/shared",
+          "build"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/api",
+      "dev"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/api",
+        "task_name": "dev",
+        "package_path": "<workspace>/packages/api"
+      },
+      "resolved_config": {
+        "command": "echo Watch mode && echo Start dev server",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/api",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/app", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/app",
-        task_name: "build",
-        package_path: "<redacted>/packages/app",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Clean dist && echo Build client && echo Build server && echo Generate manifest && echo Optimize assets",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/app",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/api", "build"): Topological,
-      ("<redacted>/packages/pkg#special", "build"): Topological,
-      ("<redacted>/packages/shared", "build"): Topological,
-      ("<redacted>/packages/ui", "build"): Topological,
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/api",
+      "start"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/api",
+        "task_name": "start",
+        "package_path": "<workspace>/packages/api"
+      },
+      "resolved_config": {
+        "command": "echo Starting API server",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/api",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/app", "deploy"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/app",
-        task_name: "deploy",
-        package_path: "<redacted>/packages/app",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Validate && echo Upload && echo Verify",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/app",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/app", "dev"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/app",
-        task_name: "dev",
-        package_path: "<redacted>/packages/app",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Running dev server",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/app",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/api", "dev"): Topological,
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/api",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/api",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/api"
+      },
+      "resolved_config": {
+        "command": "echo Testing API",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/api",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/app", "preview"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/app",
-        task_name: "preview",
-        package_path: "<redacted>/packages/app",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Preview build",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/app",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/app", "test"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/app",
-        task_name: "test",
-        package_path: "<redacted>/packages/app",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Unit tests && echo Integration tests",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/app",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/api", "test"): Topological,
-      ("<redacted>/packages/pkg#special", "test"): Topological,
-      ("<redacted>/packages/shared", "test"): Topological,
-      ("<redacted>/packages/ui", "test"): Topological,
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/shared",
+          "test"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/app",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/app",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/app"
+      },
+      "resolved_config": {
+        "command": "echo Clean dist && echo Build client && echo Build server && echo Generate manifest && echo Optimize assets",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/config", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/config",
-        task_name: "build",
-        package_path: "<redacted>/packages/config",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Building config",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/config",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/config", "validate"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/config",
-        task_name: "validate",
-        package_path: "<redacted>/packages/config",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Validating config",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/config",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/pkg#special", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/pkg#special",
-        task_name: "build",
-        package_path: "<redacted>/packages/pkg#special",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Building package with hash",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/pkg#special",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/shared", "build"): Topological,
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/api",
+          "build"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/pkg#special",
+          "build"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/shared",
+          "build"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/ui",
+          "build"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/app",
+      "deploy"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/app",
+        "task_name": "deploy",
+        "package_path": "<workspace>/packages/app"
+      },
+      "resolved_config": {
+        "command": "echo Validate && echo Upload && echo Verify",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/pkg#special", "test"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/pkg#special",
-        task_name: "test",
-        package_path: "<redacted>/packages/pkg#special",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Testing package with hash",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/pkg#special",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/shared", "test"): Topological,
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/app",
+      "dev"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/app",
+        "task_name": "dev",
+        "package_path": "<workspace>/packages/app"
+      },
+      "resolved_config": {
+        "command": "echo Running dev server",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/shared", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/shared",
-        task_name: "build",
-        package_path: "<redacted>/packages/shared",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Cleaning && echo Compiling shared && echo Generating types",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/shared",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/shared", "lint"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/shared",
-        task_name: "lint",
-        package_path: "<redacted>/packages/shared",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Linting shared",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/shared",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/shared", "test"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/shared",
-        task_name: "test",
-        package_path: "<redacted>/packages/shared",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Setting up test env && echo Running tests && echo Cleanup",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/shared",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/shared", "typecheck"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/shared",
-        task_name: "typecheck",
-        package_path: "<redacted>/packages/shared",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Type checking shared",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/shared",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/tools", "generate"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/tools",
-        task_name: "generate",
-        package_path: "<redacted>/packages/tools",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Generating tools",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/tools",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/tools", "validate"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/tools",
-        task_name: "validate",
-        package_path: "<redacted>/packages/tools",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Validating",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/tools",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/config", "validate"): Topological,
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/api",
+          "dev"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/app",
+      "preview"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/app",
+        "task_name": "preview",
+        "package_path": "<workspace>/packages/app"
+      },
+      "resolved_config": {
+        "command": "echo Preview build",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/ui", "build"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/ui",
-        task_name: "build",
-        package_path: "<redacted>/packages/ui",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Compile styles && echo Build components && echo Generate types",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/ui",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/shared", "build"): Topological,
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/app",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/app",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/app"
+      },
+      "resolved_config": {
+        "command": "echo Unit tests && echo Integration tests",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/ui", "lint"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/ui",
-        task_name: "lint",
-        package_path: "<redacted>/packages/ui",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Linting UI",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/ui",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/shared", "lint"): Topological,
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/api",
+          "test"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/pkg#special",
+          "test"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/shared",
+          "test"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/ui",
+          "test"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/config",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/config",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/config"
+      },
+      "resolved_config": {
+        "command": "echo Building config",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/config",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-  ("<redacted>/packages/ui", "storybook"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/ui",
-        task_name: "storybook",
-        package_path: "<redacted>/packages/ui",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Running storybook",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/ui",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {},
-  ),
-  ("<redacted>/packages/ui", "test"): DiGraphValue(
-    node: TaskNode(
-      task_display: TaskDisplay(
-        package_name: "@test/ui",
-        task_name: "test",
-        package_path: "<redacted>/packages/ui",
-      ),
-      resolved_config: ResolvedTaskConfig(
-        command: "echo Testing UI",
-        resolved_options: ResolvedTaskOptions(
-          cwd: "<redacted>/packages/ui",
-          cache_config: Some(CacheConfig(
-            env_config: EnvConfig(
-              fingerprinted_envs: [],
-              pass_through_envs: [
-                "HOME",
-                "USER",
-                "TZ",
-                "LANG",
-                "SHELL",
-                "PWD",
-                "PATH",
-                "CI",
-                "NODE_OPTIONS",
-                "COREPACK_HOME",
-                "NPM_CONFIG_STORE_DIR",
-                "PNPM_HOME",
-                "LD_LIBRARY_PATH",
-                "DYLD_FALLBACK_LIBRARY_PATH",
-                "LIBPATH",
-                "COLORTERM",
-                "TERM",
-                "TERM_PROGRAM",
-                "DISPLAY",
-                "FORCE_COLOR",
-                "NO_COLOR",
-                "TMP",
-                "TEMP",
-                "VERCEL",
-                "VERCEL_*",
-                "NEXT_*",
-                "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
-                "NOW_BUILDER",
-                "APPDATA",
-                "PROGRAMDATA",
-                "SYSTEMROOT",
-                "SYSTEMDRIVE",
-                "USERPROFILE",
-                "HOMEDRIVE",
-                "HOMEPATH",
-                "ELECTRON_RUN_AS_NODE",
-                "JB_INTERPRETER",
-                "_JETBRAINS_TEST_RUNNER_RUN_SCOPE_TYPE",
-                "JB_IDE_*",
-                "VSCODE_*",
-                "DOCKER_*",
-                "BUILDKIT_*",
-                "COMPOSE_*",
-                "*_TOKEN",
-              ],
-            ),
-          )),
-        ),
-      ),
-    ),
-    neighbors: {
-      ("<redacted>/packages/shared", "test"): Topological,
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/config",
+      "validate"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/config",
+        "task_name": "validate",
+        "package_path": "<workspace>/packages/config"
+      },
+      "resolved_config": {
+        "command": "echo Validating config",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/config",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
     },
-  ),
-}
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/pkg#special",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/pkg#special",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/pkg#special"
+      },
+      "resolved_config": {
+        "command": "echo Building package with hash",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/pkg#special",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/shared",
+          "build"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/pkg#special",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/pkg#special",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/pkg#special"
+      },
+      "resolved_config": {
+        "command": "echo Testing package with hash",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/pkg#special",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/shared",
+          "test"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/shared",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/shared",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/shared"
+      },
+      "resolved_config": {
+        "command": "echo Cleaning && echo Compiling shared && echo Generating types",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/shared",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/shared",
+      "lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/shared",
+        "task_name": "lint",
+        "package_path": "<workspace>/packages/shared"
+      },
+      "resolved_config": {
+        "command": "echo Linting shared",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/shared",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/shared",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/shared",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/shared"
+      },
+      "resolved_config": {
+        "command": "echo Setting up test env && echo Running tests && echo Cleanup",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/shared",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/shared",
+      "typecheck"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/shared",
+        "task_name": "typecheck",
+        "package_path": "<workspace>/packages/shared"
+      },
+      "resolved_config": {
+        "command": "echo Type checking shared",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/shared",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/tools",
+      "generate"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/tools",
+        "task_name": "generate",
+        "package_path": "<workspace>/packages/tools"
+      },
+      "resolved_config": {
+        "command": "echo Generating tools",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/tools",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/tools",
+      "validate"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/tools",
+        "task_name": "validate",
+        "package_path": "<workspace>/packages/tools"
+      },
+      "resolved_config": {
+        "command": "echo Validating",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/tools",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/config",
+          "validate"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/ui",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/ui",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/ui"
+      },
+      "resolved_config": {
+        "command": "echo Compile styles && echo Build components && echo Generate types",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/ui",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/shared",
+          "build"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/ui",
+      "lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/ui",
+        "task_name": "lint",
+        "package_path": "<workspace>/packages/ui"
+      },
+      "resolved_config": {
+        "command": "echo Linting UI",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/ui",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/shared",
+          "lint"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/ui",
+      "storybook"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/ui",
+        "task_name": "storybook",
+        "package_path": "<workspace>/packages/ui"
+      },
+      "resolved_config": {
+        "command": "echo Running storybook",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/ui",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/ui",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/ui",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/ui"
+      },
+      "resolved_config": {
+        "command": "echo Testing UI",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/ui",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/shared",
+          "test"
+        ],
+        "Topological"
+      ]
+    ]
+  }
+]

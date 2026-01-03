@@ -22,6 +22,7 @@ which = { workspace = true }
 
 [dev-dependencies]
 copy_dir = { workspace = true }
+cow-utils = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
 petgraph = { workspace = true }
 regex = { workspace = true }

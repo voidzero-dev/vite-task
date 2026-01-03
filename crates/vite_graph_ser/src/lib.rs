@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use petgraph::{
     graph::DiGraph,
     visit::{EdgeRef as _, IntoNodeReferences},
@@ -17,9 +15,10 @@ pub trait GetKey {
 
 #[derive(Serialize)]
 #[serde(bound = "E: Serialize, N: Serialize")]
-struct DiGraphValue<'a, N: GetKey, E> {
+struct DiGraphNodeItem<'a, N: GetKey, E> {
+    key: N::Key<'a>,
     node: &'a N,
-    neighbors: BTreeMap<N::Key<'a>, &'a E>,
+    neighbors: Vec<(N::Key<'a>, &'a E)>,
 }
 
 /// A wrapper around `DiGraph` that serializes nodes by their keys.
@@ -46,33 +45,24 @@ pub fn serialize_by_key<
     graph: &DiGraph<N, E, Ix>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    let mut map = BTreeMap::<N::Key<'_>, DiGraphValue<'_, N, E>>::new();
-
+    let mut items = Vec::<DiGraphNodeItem<'_, N, E>>::with_capacity(graph.node_count());
     for (node_idx, node) in graph.node_references() {
-        let mut neighbors = BTreeMap::<N::Key<'_>, &E>::new();
+        let mut neighbors = Vec::<(N::Key<'_>, &E)>::new();
 
         for edge in graph.edges(node_idx) {
             let target_idx = edge.target();
             let target_node = graph.node_weight(target_idx).unwrap();
-            let existing = neighbors
-                .insert(target_node.key().map_err(serde::ser::Error::custom)?, edge.weight());
-            if existing.is_some() {
-                return Err(serde::ser::Error::custom(
-                    "multiple edges between nodes with same id are not supported",
-                ));
-            }
+            neighbors.push((target_node.key().map_err(serde::ser::Error::custom)?, edge.weight()));
         }
-        let existing = map.insert(
-            node.key().map_err(serde::ser::Error::custom)?,
-            DiGraphValue { node, neighbors },
-        );
-        if existing.is_some() {
-            return Err(serde::ser::Error::custom(
-                "multiple nodes with the same id are not supported",
-            ));
-        }
+        neighbors.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        items.push(DiGraphNodeItem {
+            key: node.key().map_err(serde::ser::Error::custom)?,
+            node,
+            neighbors,
+        });
     }
-    map.serialize(serializer)
+    items.sort_unstable_by(|a, b| a.key.cmp(&b.key));
+    items.serialize(serializer)
 }
 
 #[cfg(test)]
@@ -119,44 +109,24 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "graph": {
-                    "a": {
+                "graph": [
+                    {
+                        "key": "a",
                         "node": {"id": "a", "value": 1},
-                        "neighbors": {"b": "a->b", "c": "a->c"}
+                        "neighbors": [["b", "a->b"], ["c", "a->c"]]
                     },
-                    "b": {
+                    {
+                        "key": "b",
                         "node": {"id": "b", "value": 2},
-                        "neighbors": {"c": "b->c"}
+                        "neighbors": [["c", "b->c"]]
                     },
-                    "c": {
+                    {
+                        "key": "c",
                         "node": {"id": "c", "value": 3},
-                        "neighbors": {}
+                        "neighbors": []
                     }
-                }
+                ]
             })
         );
-    }
-
-    #[test]
-    fn test_serialize_graph_error_duplicate_nodes() {
-        let mut graph = DiGraph::<TestNode, &'static str>::new();
-        graph.add_node(TestNode { id: "a", value: 1 });
-        graph.add_node(TestNode { id: "a", value: 2 }); // duplicate id
-
-        let err = serde_json::to_string(&GraphWrapper { graph }).unwrap_err();
-        assert!(err.to_string().contains("multiple nodes with the same id"));
-    }
-
-    #[test]
-    fn test_serialize_graph_error_duplicate_edges() {
-        let mut graph = DiGraph::<TestNode, &'static str>::new();
-        let a = graph.add_node(TestNode { id: "a", value: 1 });
-        let b = graph.add_node(TestNode { id: "b", value: 2 });
-
-        graph.add_edge(a, b, "first");
-        graph.add_edge(a, b, "second"); // duplicate edge
-
-        let err = serde_json::to_string(&GraphWrapper { graph }).unwrap_err();
-        assert!(err.to_string().contains("multiple edges between nodes with same id"));
     }
 }
