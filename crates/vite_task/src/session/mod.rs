@@ -6,8 +6,6 @@ use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
 use cache::ExecutionCache;
 use clap::{Parser, Subcommand};
-use nix::libc::PATH_MAX;
-use serde::Serialize;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
@@ -206,29 +204,12 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     }
 }
 
-/// Represents a planned execution of tasks in a session, including information for caching.
-#[derive(Debug, Serialize)]
-pub struct SessionExecutionPlan {
-    /// The original command-line arguments used to create this execution plan, excluding the program name.
-    ///
-    /// It's used to create cache keys for direct executions. See `DirectExecutionCacheKey` for details.
-    cli_args_without_program: Arc<[Str]>,
-
-    /// The current working directory used to create this execution plan.
-    ///
-    /// It's used to create cache keys for direct executions. See `DirectExecutionCacheKey` for details.
-    cwd: Arc<AbsolutePath>,
-
-    /// The actual content of the execution plan.
-    plan: vite_task_plan::ExecutionPlan,
-}
-
 impl<'a, CustomSubcommand: clap::Subcommand> Session<'a, CustomSubcommand> {
     pub async fn plan(
         &mut self,
         cwd: Arc<AbsolutePath>,
         cli_args: TaskCLIArgs<CustomSubcommand>,
-    ) -> Result<SessionExecutionPlan, vite_task_plan::Error> {
+    ) -> Result<ExecutionPlan, vite_task_plan::Error> {
         let path_env = get_path_env(&self.envs);
         let plan_request = self
             .plan_request_parser
@@ -252,10 +233,6 @@ impl<'a, CustomSubcommand: clap::Subcommand> Session<'a, CustomSubcommand> {
             &mut self.lazy_task_graph,
         )
         .await?;
-        Ok(SessionExecutionPlan {
-            cli_args_without_program: cli_args.original.iter().skip(1).cloned().collect(), // Skip program name
-            cwd,
-            plan,
-        })
+        Ok(plan)
     }
 }

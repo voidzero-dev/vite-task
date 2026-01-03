@@ -5,3 +5,8 @@ args = ["run", "hello"]
 [[plan]]
 name = "direct synthetic task cache key"
 args = ["lint"]
+
+[[plan]]
+name = "direct synthetic task cache key with cwd"
+cwd = "subdir"
+args = ["lint"]

@@ -9,7 +9,8 @@ use vite_path::{AbsolutePath, RelativePathBuf, relative::InvalidPathDataError};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, display::TaskDisplay};
 use vite_task_plan::{
-    ExecutionItem, ExecutionItemKind, LeafExecutionKind, SpawnExecution, TaskExecution,
+    ExecutionItem, ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnExecution,
+    TaskExecution,
     execution_graph::{ExecutionIx, ExecutionNodeIndex},
 };
 
@@ -22,10 +23,7 @@ use super::{
 };
 use crate::{
     Session,
-    session::{
-        SessionExecutionPlan,
-        cache::{DirectExecutionCacheKey, UserTaskExecutionCacheKey},
-    },
+    session::cache::{DirectExecutionCacheKey, UserTaskExecutionCacheKey},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -227,7 +225,7 @@ impl ExecutionContext<'_> {
 impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     pub async fn execute(
         &self,
-        plan: SessionExecutionPlan,
+        plan: ExecutionPlan,
         event_handler: &mut (dyn FnMut(ExecutionEvent) + '_),
     ) -> Result<(), ExecuteError> {
         let mut execution_context = ExecutionContext {
@@ -237,14 +235,15 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
             cache: &self.cache,
             cache_base_path: &self.workspace_path,
         };
-        execution_context
-            .execute_item_kind(
-                plan.plan.root_node(),
-                ExecutionOrigin::CLIArgs {
-                    args_without_program: &plan.cli_args_without_program,
-                    cwd: &plan.cwd,
-                },
-            )
-            .await
+        Ok(())
+        // execution_context
+        //     .execute_item_kind(
+        //         plan.plan.root_node(),
+        //         ExecutionOrigin::CLIArgs {
+        //             args_without_program: &plan.cli_args_without_program,
+        //             cwd: &plan.cwd,
+        //         },
+        //     )
+        //     .await
     }
 }
