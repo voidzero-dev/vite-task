@@ -21,6 +21,7 @@ use error::TaskPlanErrorKindResultExt;
 pub use error::{Error, TaskPlanErrorKind};
 use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
+pub use path_env::get_path_env;
 use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
 use serde::{Serialize, ser::SerializeMap as _};
@@ -159,6 +160,7 @@ pub trait PlanRequestParser: Debug {
         &mut self,
         program: &str,
         args: &[Str],
+        path_env: Option<&Arc<OsStr>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<Option<PlanRequest>>;
 }

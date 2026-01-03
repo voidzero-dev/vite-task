@@ -139,7 +139,12 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
     let envs: HashMap<Arc<OsStr>, Arc<OsStr>> = [(
         Arc::<OsStr>::from(OsStr::new("PATH")),
         Arc::<OsStr>::from(
-            std::env::current_dir().unwrap().join("tests").join("bins").into_os_string(),
+            std::env::current_dir()
+                .unwrap()
+                .join("test_bins")
+                .join("node_modules")
+                .join(".bin")
+                .into_os_string(),
         ),
     )]
     .into_iter()

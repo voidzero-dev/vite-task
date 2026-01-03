@@ -1,0 +1,56 @@
+---
+source: crates/vite_task_bin/tests/snapshots.rs
+expression: "&plan_json"
+input_file: crates/vite_task_bin/tests/fixtures/cache
+---
+{
+  "cli_args_without_program": [
+    "lint"
+  ],
+  "cwd": "<workspace>/",
+  "plan": {
+    "root_node": {
+      "Leaf": {
+        "Spawn": {
+          "cache_metadata": {
+            "spawn_fingerprint": {
+              "cwd": "",
+              "program_fingerprint": {
+                "OutsideWorkspace": {
+                  "program_name": "oxlint"
+                }
+              },
+              "args": [],
+              "env_fingerprints": {
+                "fingerprinted_envs": {},
+                "pass_through_env_config": [
+                  "<default pass-through envs>"
+                ]
+              },
+              "fingerprint_ignores": null
+            },
+            "execution_cache_key": {
+              "kind": {
+                "DirectSyntatic": {
+                  "direct_execution_cache_key": [
+                    "lint"
+                  ]
+                }
+              },
+              "origin_path": ""
+            }
+          },
+          "spawn_command": {
+            "program_path": "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+            "args": [],
+            "all_envs": {
+              "FORCE_COLOR": "3",
+              "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"
+            },
+            "cwd": "<workspace>/"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,3 +1,7 @@
 [[plan]]
 name = "user task cache key"
 args = ["run", "hello"]
+
+[[plan]]
+name = "direct synthetic task cache key"
+args = ["lint"]

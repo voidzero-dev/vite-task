@@ -64,13 +64,13 @@ input_file: crates/vite_task_bin/tests/fixtures/cache
                         }
                       },
                       "spawn_command": {
-                        "program_path": "<manifest_dir>/tests/bins/readfile",
+                        "program_path": "<manifest_dir>/test_bins/node_modules/.bin/readfile",
                         "args": [
                           "hello.txt"
                         ],
                         "all_envs": {
                           "FORCE_COLOR": "3",
-                          "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/tests/bins"
+                          "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"
                         },
                         "cwd": "<workspace>/"
                       }

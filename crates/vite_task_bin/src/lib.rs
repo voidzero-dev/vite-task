@@ -27,11 +27,13 @@ pub enum NonTaskSubcommand {
 #[derive(Debug, Default)]
 pub struct TaskSynthesizer(());
 
-fn find_executable_in_node_modules_bin(
+fn find_executable(
+    path_env: Option<&Arc<OsStr>>,
     cwd: &AbsolutePath,
     executable: &str,
 ) -> anyhow::Result<Arc<OsStr>> {
-    let mut paths: Vec<PathBuf> = vec![];
+    let mut paths: Vec<PathBuf> =
+        if let Some(path_env) = path_env { env::split_paths(path_env).collect() } else { vec![] };
     let mut current_cwd_parent = cwd;
     loop {
         let node_modules_bin = current_cwd_parent.join("node_modules").join(".bin");
@@ -55,6 +57,7 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
     async fn synthesize_task(
         &mut self,
         subcommand: CustomTaskSubcommand,
+        path_env: Option<&Arc<OsStr>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<SyntheticPlanRequest> {
         match subcommand {
@@ -62,7 +65,7 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
                 let direct_execution_cache_key: Arc<[Str]> =
                     iter::once(Str::from("lint")).chain(args.iter().cloned()).collect();
                 Ok(SyntheticPlanRequest {
-                    program: find_executable_in_node_modules_bin(&*cwd, "oxlint")?,
+                    program: find_executable(path_env, &*cwd, "oxlint")?,
                     args: args.into(),
                     task_options: Default::default(),
                     direct_execution_cache_key,

@@ -6,12 +6,13 @@ use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
 use cache::ExecutionCache;
 use clap::{Parser, Subcommand};
+use nix::libc::PATH_MAX;
 use serde::Serialize;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
 use vite_task_plan::{
-    ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind,
+    ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind, get_path_env,
     plan_request::{PlanRequest, SyntheticPlanRequest},
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
@@ -66,6 +67,7 @@ pub trait TaskSynthesizer<CustomSubcommand>: Debug {
     async fn synthesize_task(
         &mut self,
         subcommand: CustomSubcommand,
+        path_env: Option<&Arc<OsStr>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<SyntheticPlanRequest>;
 }
@@ -80,6 +82,7 @@ impl<CustomSubcommand: clap::Subcommand> PlanRequestParser<'_, CustomSubcommand>
     async fn get_plan_request_from_cli_args(
         &mut self,
         cli_args: ParsedTaskCLIArgs<CustomSubcommand>,
+        path_env: Option<&Arc<OsStr>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<PlanRequest> {
         match cli_args {
@@ -88,7 +91,7 @@ impl<CustomSubcommand: clap::Subcommand> PlanRequestParser<'_, CustomSubcommand>
             }
             ParsedTaskCLIArgs::Custom(custom_subcommand) => {
                 let synthetic_plan_request =
-                    self.task_synthesizer.synthesize_task(custom_subcommand, cwd).await?;
+                    self.task_synthesizer.synthesize_task(custom_subcommand, path_env, cwd).await?;
                 Ok(PlanRequest::Synthetic(synthetic_plan_request))
             }
         }
@@ -103,6 +106,7 @@ impl<CustomSubcommand: clap::Subcommand> vite_task_plan::PlanRequestParser
         &mut self,
         program: &str,
         args: &[Str],
+        path_env: Option<&Arc<OsStr>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<Option<PlanRequest>> {
         Ok(
@@ -113,7 +117,7 @@ impl<CustomSubcommand: clap::Subcommand> vite_task_plan::PlanRequestParser
                 let cli_args = ParsedTaskCLIArgs::<CustomSubcommand>::try_parse_from(
                     std::iter::once(program).chain(args.iter().map(Str::as_str)),
                 )?;
-                Some(self.get_plan_request_from_cli_args(cli_args, cwd).await?)
+                Some(self.get_plan_request_from_cli_args(cli_args, path_env, cwd).await?)
             } else {
                 None
             },
@@ -225,12 +229,19 @@ impl<'a, CustomSubcommand: clap::Subcommand> Session<'a, CustomSubcommand> {
         cwd: Arc<AbsolutePath>,
         cli_args: TaskCLIArgs<CustomSubcommand>,
     ) -> Result<SessionExecutionPlan, vite_task_plan::Error> {
+        let path_env = get_path_env(&self.envs);
         let plan_request = self
             .plan_request_parser
-            .get_plan_request_from_cli_args(cli_args.parsed, &cwd)
+            .get_plan_request_from_cli_args(cli_args.parsed, path_env, &cwd)
             .await
             .map_err(|error| {
-                TaskPlanErrorKind::ParsePlanRequestError { error }.with_empty_call_stack()
+                TaskPlanErrorKind::ParsePlanRequestError {
+                    error,
+                    program: cli_args.original[0].clone(),
+                    args: cli_args.original.iter().skip(1).cloned().collect(),
+                    cwd: Arc::clone(&cwd),
+                }
+                .with_empty_call_stack()
             })?;
         let plan = ExecutionPlan::plan(
             plan_request,

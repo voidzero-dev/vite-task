@@ -1,5 +1,6 @@
 packages:
   - .
+  - crates/vite_task_bin/test_bins
 
 catalog:
   husky: ^9.1.7

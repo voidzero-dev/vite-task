@@ -1,6 +1,7 @@
 use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, path::Path, sync::Arc};
 
 use vite_path::{AbsolutePath, relative::InvalidPathDataError};
+use vite_str::Str;
 
 use crate::{
     context::{PlanContext, TaskCallStackDisplay, TaskRecursionError},
@@ -105,8 +106,11 @@ pub enum TaskPlanErrorKind {
     #[error(transparent)]
     TaskRecursionDetected(#[from] TaskRecursionError),
 
-    #[error("Invalid vite task command")]
+    #[error("Invalid vite task command: {program} with args {args:?} under cwd {cwd:?}")]
     ParsePlanRequestError {
+        program: Str,
+        args: Arc<[Str]>,
+        cwd: Arc<AbsolutePath>,
         #[source]
         error: anyhow::Error,
     },

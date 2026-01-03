@@ -146,11 +146,17 @@ async fn plan_task_as_execution_node(
             };
 
             // Try to parse the args of an and_item to a plan request like `run -r build`
+            let path_env = get_path_env(context.envs()).cloned();
             let plan_request = context
                 .callbacks()
-                .get_plan_request(&and_item.program, &args, &cwd)
+                .get_plan_request(&and_item.program, &args, path_env.as_ref(), &cwd)
                 .await
-                .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError { error })
+                .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError {
+                    program: and_item.program.clone(),
+                    args: args.clone().into(),
+                    cwd: Arc::clone(&cwd),
+                    error,
+                })
                 .with_plan_context(&context)?;
 
             let execution_item_kind: ExecutionItemKind = match plan_request {

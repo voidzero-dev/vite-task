@@ -1,0 +1,11 @@
+{
+  "name": "vite-task-tests-bins",
+  "private": true,
+  "bin": {
+    "readfile": "./readfile.mjs"
+  },
+  "dependencies": {
+    "oxlint": "catalog:",
+    "vite-task-tests-bins": "link:"
+  }
+}
