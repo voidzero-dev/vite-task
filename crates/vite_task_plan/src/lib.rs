@@ -17,6 +17,8 @@ use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
 use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
+use serde::Serialize;
+use vite_graph_ser::serialize_by_key;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, display::TaskDisplay};
@@ -26,7 +28,7 @@ use crate::path_env::prepend_path_env;
 /// A resolved spawn execution.
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,
 /// like resolved environment variables, current working directory, and additional args from cli.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SpawnExecution {
     /// Cache metadata for this execution. `None` means caching is disabled.
     pub cache_metadata: Option<cache_metadata::CacheMetadata>,
@@ -36,7 +38,7 @@ pub struct SpawnExecution {
 }
 
 /// All information about a command to be spawned.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SpawnCommand {
     /// A program with args to be executed directly
     pub program_path: Arc<AbsolutePath>,
@@ -52,7 +54,7 @@ pub struct SpawnCommand {
 }
 
 /// Represents how a task should be executed. It's the node type for the execution graph. Each node corresponds to a task.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct TaskExecution {
     /// The task this execution corresponds to
     pub task_display: TaskDisplay,
@@ -63,8 +65,16 @@ pub struct TaskExecution {
     pub items: Vec<ExecutionItem>,
 }
 
+impl vite_graph_ser::GetKey for TaskExecution {
+    type Key<'a> = (&'a AbsolutePath, &'a str);
+
+    fn key(&self) -> Result<Self::Key<'_>, String> {
+        Ok((&self.task_display.package_path, &self.task_display.task_name))
+    }
+}
+
 /// An execution item, either expanded from a known vite subcommand, or a spawn execution.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ExecutionItem {
     /// The range of the task command that this execution item is resolved from.
     ///
@@ -94,7 +104,7 @@ pub struct ExecutionItem {
 }
 
 /// The kind of a leaf execution item, which cannot be expanded further.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum LeafExecutionKind {
     /// The execution is a spawn of a child process
     Spawn(SpawnExecution),
@@ -103,10 +113,10 @@ pub enum LeafExecutionKind {
 }
 
 /// An execution item, from a split subcommand in a task's command (`item1 && item2 && ...`).
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum ExecutionItemKind {
     /// Expanded from a known vite subcommand, like `vite run ...` or `vite lint`.
-    Expanded(ExecutionGraph),
+    Expanded(#[serde(serialize_with = "serialize_by_key")] ExecutionGraph),
     /// A normal execution that spawns a child process, like `tsc --noEmit`.
     Leaf(LeafExecutionKind),
 }
@@ -138,7 +148,7 @@ pub trait TaskGraphLoader {
     ) -> Result<&vite_task_graph::IndexedTaskGraph, TaskGraphLoadError>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ExecutionPlan {
     root_node: ExecutionItemKind,
 }

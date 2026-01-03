@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use serde::Serialize;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
@@ -12,7 +13,7 @@ pub struct InProcessExecutionOutput {
 }
 
 /// An in-process execution item
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct InProcessExecution {
     kind: InProcessExecutionKind,
 }
@@ -38,7 +39,7 @@ impl InProcessExecution {
 }
 
 /// The kind of an in-process execution.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 enum InProcessExecutionKind {
     /// echo command
     Echo {

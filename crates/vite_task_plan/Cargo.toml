@@ -23,6 +23,7 @@ supports-color = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 vite_glob = { workspace = true }
+vite_graph_ser = { workspace = true }
 vite_path = { workspace = true }
 vite_shell = { workspace = true }
 vite_str = { workspace = true }

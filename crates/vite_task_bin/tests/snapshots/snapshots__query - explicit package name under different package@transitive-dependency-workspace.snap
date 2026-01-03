@@ -1,14 +1,45 @@
 ---
 source: crates/vite_task_bin/tests/snapshots.rs
-expression: execution_graph_snapshot
+expression: "&plan"
 input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
 ---
-[
-  {
-    "task": {
-      "package_dir": "<redacted>/packages/c",
-      "task_name": "build"
-    },
-    "deps": []
-  }
-]
+SessionExecutionPlan(
+  cli_args_without_program: [
+    "run",
+    "@test/c#build",
+  ],
+  cwd: "<redacted>/packages/a",
+  plan: ExecutionPlan(
+    root_node: Expanded({
+      ("<redacted>/packages/c", "build"): DiGraphValue(
+        node: TaskExecution(
+          task_display: TaskDisplay(
+            package_name: "@test/c",
+            task_name: "build",
+            package_path: "<redacted>/packages/c",
+          ),
+          items: [
+            ExecutionItem(
+              command_span: Range(
+                start: 0,
+                end: 15,
+              ),
+              extra_args: [],
+              plan_cwd: "<redacted>/packages/a",
+              kind: Leaf(InProcess(InProcessExecution(
+                kind: Echo(
+                  strings: [
+                    "Building",
+                    "C",
+                  ],
+                  trailing_newline: true,
+                ),
+              ))),
+            ),
+          ],
+        ),
+        neighbors: {},
+      ),
+    }),
+  ),
+)

@@ -170,16 +170,14 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
             let plan_result =
                 session.plan(workspace_root.path.join(plan.cwd).into(), task_cli_args).await;
 
-            match plan_result {
-                Ok(plan) => {
-                    // let task_graph_snapshot =
-                    //     snapshot_task_graph(&plan.indexed_task_graph);
-                    // insta::assert_json_snapshot!(snapshot_name, task_graph_snapshot);
-                }
+            let plan = match plan_result {
+                Ok(plan) => plan,
                 Err(err) => {
                     insta::assert_debug_snapshot!(snapshot_name, err);
+                    continue;
                 }
-            }
+            };
+            insta::assert_ron_snapshot!(snapshot_name, &plan);
 
             //     let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
             //     let task_query = match cli_task_query.into_task_query(&cwd) {

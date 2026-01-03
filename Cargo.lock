@@ -3361,6 +3361,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tracing",
  "vite_glob",
+ "vite_graph_ser",
  "vite_path",
  "vite_shell",
  "vite_str",

@@ -6,6 +6,7 @@ use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
 use cache::ExecutionCache;
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
@@ -202,7 +203,7 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
 }
 
 /// Represents a planned execution of tasks in a session, including information for caching.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SessionExecutionPlan {
     /// The original command-line arguments used to create this execution plan, excluding the program name.
     ///
