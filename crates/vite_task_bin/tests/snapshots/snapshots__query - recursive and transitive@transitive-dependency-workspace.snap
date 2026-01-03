@@ -3,4 +3,11 @@ source: crates/vite_task_bin/tests/snapshots.rs
 expression: err
 input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
 ---
-"RecursiveTransitiveConflict"
+Error {
+    task_call_stack: TaskCallStackDisplay {
+        frames: [],
+    },
+    kind: ParsePlanRequestError {
+        error: RecursiveTransitiveConflict,
+    },
+}

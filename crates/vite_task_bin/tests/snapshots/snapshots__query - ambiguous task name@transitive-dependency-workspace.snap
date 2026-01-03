@@ -3,20 +3,29 @@ source: crates/vite_task_bin/tests/snapshots.rs
 expression: err
 input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
 ---
-{
-  "SpecifierLookupError": {
-    "specifier": {
-      "package_name": "@test/a",
-      "task_name": "build"
+Error {
+    task_call_stack: TaskCallStackDisplay {
+        frames: [],
     },
-    "lookup_error": {
-      "AmbiguousPackageName": {
-        "package_name": "@test/a",
-        "package_paths": [
-          "<redacted>/packages/a",
-          "<redacted>/packages/another-a"
-        ]
-      }
-    }
-  }
+    kind: TaskQueryError(
+        SpecifierLookupError {
+            specifier: TaskSpecifier {
+                package_name: Some(
+                    "@test/a",
+                ),
+                task_name: "build",
+            },
+            lookup_error: AmbiguousPackageName {
+                package_name: "@test/a",
+                package_paths: [
+                    AbsolutePath(
+                        "<redacted>/packages/a",
+                    ),
+                    AbsolutePath(
+                        "<redacted>/packages/another-a",
+                    ),
+                ],
+            },
+        },
+    ),
 }

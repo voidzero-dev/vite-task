@@ -1,5 +1,5 @@
 use core::panic;
-use std::{path::Path, sync::Arc};
+use std::{convert::Infallible, path::Path, sync::Arc};
 
 use clap::Parser;
 use copy_dir::copy_dir;
@@ -8,7 +8,8 @@ use petgraph::visit::EdgeRef as _;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, RelativePathBuf, redaction::redact_absolute_paths};
 use vite_str::Str;
-use vite_task::Session;
+use vite_task::{CLIArgs, Session};
+use vite_task_bin::CustomTaskSubcommand;
 use vite_task_graph::{
     IndexedTaskGraph, TaskDependencyType, TaskNodeIndex,
     loader::JsonUserConfigLoader,
@@ -152,7 +153,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         for plan in cases_file.plans {
             let snapshot_name = format!("query - {}", plan.name);
 
-            let cli_task_query = CLITaskQuery::try_parse_from(
+            let cli_args = CLIArgs::<CustomTaskSubcommand, Infallible>::try_parse_from(
                 std::iter::once("vite") // dummy program name
                     .chain(plan.args.iter().map(|s| s.as_str())),
             )
@@ -160,6 +161,25 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
                 "Failed to parse CLI args for plan '{}' in '{}'",
                 plan.name, fixture_name
             ));
+
+            let task_cli_args = match cli_args {
+                CLIArgs::Task(task_cli_args) => task_cli_args,
+                CLIArgs::NonTask(never) => match never {},
+            };
+
+            let plan_result =
+                session.plan(workspace_root.path.join(plan.cwd).into(), task_cli_args).await;
+
+            match plan_result {
+                Ok(plan) => {
+                    // let task_graph_snapshot =
+                    //     snapshot_task_graph(&plan.indexed_task_graph);
+                    // insta::assert_json_snapshot!(snapshot_name, task_graph_snapshot);
+                }
+                Err(err) => {
+                    insta::assert_debug_snapshot!(snapshot_name, err);
+                }
+            }
 
             //     let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
             //     let task_query = match cli_task_query.into_task_query(&cwd) {

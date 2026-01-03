@@ -1,54 +1,54 @@
 [[plan]]
 name = "simple task by name"
 cwd = "packages/a"
-args = ["build"]
+args = ["run", "build"]
 
 [[plan]]
 name = "under subfolder of package"
 cwd = "packages/a/src"
-args = ["build"]
+args = ["run", "build"]
 
 [[plan]]
 name = "explicit package name under different package"
 cwd = "packages/a"
-args = ["@test/c#build"]
+args = ["run", "@test/c#build"]
 
 [[plan]]
 name = "explicit package name under non-package cwd"
 cwd = ""
-args = ["@test/c#build"]
+args = ["run", "@test/c#build"]
 
 [[plan]]
 name = "ambiguous task name"
 cwd = ""
-args = ["@test/a#build"]
+args = ["run", "@test/a#build"]
 
 [[plan]]
 name = "ignore depends on"
 cwd = "packages/a"
-args = ["--ignore-depends-on", "build"]
+args = ["run", "--ignore-depends-on", "build"]
 
 [[plan]]
 name = "transitive"
 cwd = "packages/a"
-args = ["--transitive", "build"]
+args = ["run", "--transitive", "build"]
 
 [[plan]]
 name = "transitive in package without the task"
 cwd = "packages/a"
-args = ["--transitive", "lint"]
+args = ["run", "--transitive", "lint"]
 
 [[plan]]
 name = "transitive non existent task"
 cwd = "packages/a"
-args = ["--transitive", "non-existent-task"]
+args = ["run", "--transitive", "non-existent-task"]
 
 [[plan]]
 name = "recursive"
 cwd = ""
-args = ["--recursive", "build"]
+args = ["run", "--recursive", "build"]
 
 [[plan]]
 name = "recursive and transitive"
 cwd = ""
-args = ["--recursive", "--transitive", "build"]
+args = ["run", "--recursive", "--transitive", "build"]
