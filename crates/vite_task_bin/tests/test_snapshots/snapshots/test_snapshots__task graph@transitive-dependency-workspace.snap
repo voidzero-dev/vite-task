@@ -1,7 +1,7 @@
 ---
-source: crates/vite_task_bin/tests/snapshots.rs
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
 expression: task_graph_json
-input_file: crates/vite_task_bin/tests/fixtures/transitive-dependency-workspace
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/transitive-dependency-workspace
 ---
 [
   {

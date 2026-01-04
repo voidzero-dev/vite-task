@@ -1,7 +1,7 @@
 ---
-source: crates/vite_task_bin/tests/snapshots.rs
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
 expression: "&plan_json"
-input_file: crates/vite_task_bin/tests/fixtures/cache-keys
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
 ---
 {
   "root_node": {

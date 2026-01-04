@@ -33,12 +33,16 @@ fn visit_json(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json:
     }
 }
 
-fn redact_strs(value: &mut serde_json::Value, redactions: &[(&str, &str)]) {
+fn redact_paths(value: &mut serde_json::Value, redactions: &[(&str, &str)]) {
     use cow_utils::CowUtils as _;
     visit_json(value, &mut |v| {
         if let serde_json::Value::String(s) = v {
             for (from, to) in redactions {
-                if let Cow::Owned(replaced) = s.as_str().cow_replace(from, to) {
+                if let Cow::Owned(mut replaced) = s.as_str().cow_replace(from, to) {
+                    if cfg!(windows) {
+                        // Also replace with backslashes on Windows
+                        replaced = replaced.cow_replace("\\", "/").into_owned();
+                    }
                     *s = replaced;
                 }
             }
@@ -49,7 +53,7 @@ fn redact_strs(value: &mut serde_json::Value, redactions: &[(&str, &str)]) {
 fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut json_value = serde_json::to_value(value).unwrap();
-    redact_strs(
+    redact_paths(
         &mut json_value,
         &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
     );
@@ -98,7 +102,7 @@ struct E2e {
 }
 
 #[derive(serde::Deserialize, Default)]
-struct PlansFile {
+struct SnapshotsFile {
     #[serde(rename = "plan", default)] // toml usually uses singular for arrays
     pub plans: Vec<Plan>,
     #[serde(rename = "e2e", default)] // toml usually uses singular for arrays
@@ -129,7 +133,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
     );
 
     let cases_toml_path = fixture_path.join("snapshots.toml");
-    let cases_file: PlansFile = match std::fs::read(&cases_toml_path) {
+    let cases_file: SnapshotsFile = match std::fs::read(&cases_toml_path) {
         Ok(content) => toml::from_slice(&content).unwrap(),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Default::default(),
         Err(err) => panic!("Failed to read cases.toml for fixture {}: {}", fixture_name, err),
@@ -229,5 +233,11 @@ fn test_snapshots() {
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePath::new(tmp_dir.path()).unwrap();
 
-    insta::glob!("fixtures/*", |case_path| run_case(&tokio_runtime, tmp_dir_path, case_path));
+    let tests_dir = std::env::current_dir().unwrap().join("tests");
+
+    insta::glob!(tests_dir, "test_snapshots/fixtures/*", |case_path| run_case(
+        &tokio_runtime,
+        tmp_dir_path,
+        case_path
+    ));
 }

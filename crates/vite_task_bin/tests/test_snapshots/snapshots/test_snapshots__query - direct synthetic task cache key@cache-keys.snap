@@ -1,7 +1,7 @@
 ---
-source: crates/vite_task_bin/tests/snapshots.rs
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
 expression: "&plan_json"
-input_file: crates/vite_task_bin/tests/fixtures/cache-keys
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
 ---
 {
   "root_node": {
@@ -9,7 +9,7 @@ input_file: crates/vite_task_bin/tests/fixtures/cache-keys
       "Spawn": {
         "cache_metadata": {
           "spawn_fingerprint": {
-            "cwd": "subdir",
+            "cwd": "",
             "program_fingerprint": {
               "OutsideWorkspace": {
                 "program_name": "oxlint"
@@ -32,7 +32,7 @@ input_file: crates/vite_task_bin/tests/fixtures/cache-keys
                 ]
               }
             },
-            "origin_path": "subdir"
+            "origin_path": ""
           }
         },
         "spawn_command": {
@@ -42,7 +42,7 @@ input_file: crates/vite_task_bin/tests/fixtures/cache-keys
             "FORCE_COLOR": "3",
             "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"
           },
-          "cwd": "<workspace>/subdir"
+          "cwd": "<workspace>/"
         }
       }
     }

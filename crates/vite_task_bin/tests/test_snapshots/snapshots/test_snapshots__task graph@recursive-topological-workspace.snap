@@ -1,9 +1,80 @@
 ---
-source: crates/vite_task_bin/tests/snapshots.rs
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
 expression: task_graph_json
-input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/recursive-topological-workspace
 ---
 [
+  {
+    "key": [
+      "<workspace>/apps/web",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/web",
+        "task_name": "build",
+        "package_path": "<workspace>/apps/web"
+      },
+      "resolved_config": {
+        "command": "echo 'Building @test/web'",
+        "resolved_options": {
+          "cwd": "<workspace>/apps/web",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/app",
+          "build"
+        ],
+        "Topological"
+      ],
+      [
+        [
+          "<workspace>/packages/core",
+          "build"
+        ],
+        "Topological"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/apps/web",
+      "dev"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/web",
+        "task_name": "dev",
+        "package_path": "<workspace>/apps/web"
+      },
+      "resolved_config": {
+        "command": "echo 'Running @test/web in dev mode'",
+        "resolved_options": {
+          "cwd": "<workspace>/apps/web",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
   {
     "key": [
       "<workspace>/packages/app",
@@ -39,77 +110,6 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
         "Topological"
       ]
     ]
-  },
-  {
-    "key": [
-      "<workspace>/packages/app",
-      "deploy"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/app",
-        "task_name": "deploy",
-        "package_path": "<workspace>/packages/app"
-      },
-      "resolved_config": {
-        "command": "deploy-script --prod",
-        "resolved_options": {
-          "cwd": "<workspace>/packages/app",
-          "cache_config": null
-        }
-      }
-    },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/app",
-          "build"
-        ],
-        "Explicit"
-      ],
-      [
-        [
-          "<workspace>/packages/app",
-          "test"
-        ],
-        "Explicit"
-      ],
-      [
-        [
-          "<workspace>/packages/utils",
-          "lint"
-        ],
-        "Explicit"
-      ]
-    ]
-  },
-  {
-    "key": [
-      "<workspace>/packages/app",
-      "start"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/app",
-        "task_name": "start",
-        "package_path": "<workspace>/packages/app"
-      },
-      "resolved_config": {
-        "command": "echo 'Starting @test/app'",
-        "resolved_options": {
-          "cwd": "<workspace>/packages/app",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
-        }
-      }
-    },
-    "neighbors": []
   },
   {
     "key": [
@@ -178,70 +178,6 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
   {
     "key": [
       "<workspace>/packages/core",
-      "clean"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/core",
-        "task_name": "clean",
-        "package_path": "<workspace>/packages/core"
-      },
-      "resolved_config": {
-        "command": "echo 'Cleaning @test/core'",
-        "resolved_options": {
-          "cwd": "<workspace>/packages/core",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
-        }
-      }
-    },
-    "neighbors": []
-  },
-  {
-    "key": [
-      "<workspace>/packages/core",
-      "lint"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/core",
-        "task_name": "lint",
-        "package_path": "<workspace>/packages/core"
-      },
-      "resolved_config": {
-        "command": "eslint src",
-        "resolved_options": {
-          "cwd": "<workspace>/packages/core",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
-        }
-      }
-    },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/core",
-          "clean"
-        ],
-        "Explicit"
-      ]
-    ]
-  },
-  {
-    "key": [
-      "<workspace>/packages/core",
       "test"
     ],
     "node": {
@@ -279,7 +215,7 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
         "package_path": "<workspace>/packages/utils"
       },
       "resolved_config": {
-        "command": "echo 'Building @test/utils'",
+        "command": "echo 'Preparing @test/utils' && echo 'Building @test/utils' && echo 'Done @test/utils'",
         "resolved_options": {
           "cwd": "<workspace>/packages/utils",
           "cache_config": {
@@ -300,56 +236,6 @@ input_file: crates/vite_task_bin/tests/fixtures/explicit-deps-workspace
           "build"
         ],
         "Topological"
-      ]
-    ]
-  },
-  {
-    "key": [
-      "<workspace>/packages/utils",
-      "lint"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/utils",
-        "task_name": "lint",
-        "package_path": "<workspace>/packages/utils"
-      },
-      "resolved_config": {
-        "command": "eslint src",
-        "resolved_options": {
-          "cwd": "<workspace>/packages/utils",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
-        }
-      }
-    },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/core",
-          "build"
-        ],
-        "Explicit"
-      ],
-      [
-        [
-          "<workspace>/packages/core",
-          "lint"
-        ],
-        "Topological"
-      ],
-      [
-        [
-          "<workspace>/packages/utils",
-          "build"
-        ],
-        "Explicit"
       ]
     ]
   },
