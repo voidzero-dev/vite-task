@@ -15,7 +15,9 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
                 "program_name": "oxlint"
               }
             },
-            "args": [],
+            "args": [
+              "--fix"
+            ],
             "env_fingerprints": {
               "fingerprinted_envs": {},
               "pass_through_env_config": [
@@ -28,7 +30,8 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
             "kind": {
               "DirectSyntatic": {
                 "direct_execution_cache_key": [
-                  "lint"
+                  "lint",
+                  "--fix"
                 ]
               }
             },
@@ -37,7 +40,9 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
         },
         "spawn_command": {
           "program_path": "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
-          "args": [],
+          "args": [
+            "--fix"
+          ],
           "all_envs": {
             "FORCE_COLOR": "3",
             "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"

@@ -17,4 +17,4 @@ args = ["lint"]
 
 [[plan]]
 name = "direct synthetic task cache key with extra args"
-args = ["lint"]
+args = ["lint", "--fix"]
