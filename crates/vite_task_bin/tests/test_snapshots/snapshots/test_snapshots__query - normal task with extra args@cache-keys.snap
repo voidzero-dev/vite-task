@@ -1,0 +1,86 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: "&plan_json"
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
+---
+{
+  "root_node": {
+    "Expanded": [
+      {
+        "key": [
+          "<workspace>/",
+          "hello"
+        ],
+        "node": {
+          "task_display": {
+            "package_name": "",
+            "task_name": "hello",
+            "package_path": "<workspace>/"
+          },
+          "items": [
+            {
+              "command_span": {
+                "start": 0,
+                "end": 10
+              },
+              "extra_args": [
+                "a.txt"
+              ],
+              "plan_cwd": "<workspace>/",
+              "kind": {
+                "Leaf": {
+                  "Spawn": {
+                    "cache_metadata": {
+                      "spawn_fingerprint": {
+                        "cwd": "",
+                        "program_fingerprint": {
+                          "OutsideWorkspace": {
+                            "program_name": "print-file"
+                          }
+                        },
+                        "args": [
+                          "a.txt"
+                        ],
+                        "env_fingerprints": {
+                          "fingerprinted_envs": {},
+                          "pass_through_env_config": [
+                            "<default pass-through envs>"
+                          ]
+                        },
+                        "fingerprint_ignores": null
+                      },
+                      "execution_cache_key": {
+                        "kind": {
+                          "UserTask": {
+                            "task_name": "hello",
+                            "and_item_index": 0,
+                            "extra_args": [
+                              "a.txt"
+                            ]
+                          }
+                        },
+                        "origin_path": ""
+                      }
+                    },
+                    "spawn_command": {
+                      "program_path": "<manifest_dir>/test_bins/node_modules/.bin/print-file",
+                      "args": [
+                        "a.txt"
+                      ],
+                      "all_envs": {
+                        "FORCE_COLOR": "3",
+                        "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"
+                      },
+                      "cwd": "<workspace>/"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "neighbors": []
+      }
+    ]
+  }
+}

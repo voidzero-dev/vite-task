@@ -1,11 +1,12 @@
 {
-  "name": "vite-task-tests-bins",
+  "name": "vite-task-test-bins",
   "private": true,
   "bin": {
-    "readfile": "./readfile.mjs"
+    "print-file": "./src/print-file.ts",
+    "json-edit": "./src/json-edit.ts"
   },
   "dependencies": {
     "oxlint": "catalog:",
-    "vite-task-tests-bins": "link:"
+    "vite-task-test-bins": "link:"
   }
 }

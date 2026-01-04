@@ -20,27 +20,40 @@ fn visit_json(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json:
     }
 }
 
-fn redact_paths(value: &mut serde_json::Value, redactions: &[(&str, &str)]) {
-    use cow_utils::CowUtils as _;
+fn redact_string_in_json(value: &mut serde_json::Value, redactions: &[(&str, &str)]) {
     visit_json(value, &mut |v| {
         if let serde_json::Value::String(s) = v {
-            for (from, to) in redactions {
-                if let Cow::Owned(mut replaced) = s.as_str().cow_replace(from, to) {
-                    if cfg!(windows) {
-                        // Also replace with backslashes on Windows
-                        replaced = replaced.cow_replace("\\", "/").into_owned();
-                    }
-                    *s = replaced;
-                }
-            }
+            redact_string(s, redactions);
         }
     });
+}
+
+fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
+    use cow_utils::CowUtils as _;
+    for (from, to) in redactions {
+        if let Cow::Owned(mut replaced) = s.as_str().cow_replace(from, to) {
+            if cfg!(windows) {
+                // Also replace with backslashes on Windows
+                replaced = replaced.cow_replace("\\", "/").into_owned();
+            }
+            *s = replaced;
+        }
+    }
+}
+
+pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    redact_string(
+        &mut output,
+        &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
+    );
+    output
 }
 
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut json_value = serde_json::to_value(value).unwrap();
-    redact_paths(
+    redact_string_in_json(
         &mut json_value,
         &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
     );

@@ -1,9 +1,18 @@
 mod redact;
 
-use std::{collections::HashMap, convert::Infallible, ffi::OsStr, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    env::{self, join_paths, split_paths},
+    ffi::OsStr,
+    fmt::format,
+    path::Path,
+    process::Command,
+    sync::Arc,
+};
 
 use copy_dir::copy_dir;
-use redact::redact_snapshot;
+use redact::{redact_e2e_output, redact_snapshot};
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
@@ -21,6 +30,9 @@ struct Plan {
 
 #[derive(serde::Deserialize, Debug)]
 struct E2e {
+    pub name: Str,
+    #[serde(default)]
+    pub cwd: RelativePathBuf,
     pub steps: Vec<Str>,
 }
 
@@ -62,26 +74,47 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         Err(err) => panic!("Failed to read cases.toml for fixture {}: {}", fixture_name, err),
     };
 
-    // Add bins to PATH so test programs (such as readfile) in fixtures can be found.
-    let envs: HashMap<Arc<OsStr>, Arc<OsStr>> = [(
-        Arc::<OsStr>::from(OsStr::new("PATH")),
-        Arc::<OsStr>::from(
-            std::env::current_dir()
-                .unwrap()
-                .join("test_bins")
-                .join("node_modules")
-                .join(".bin")
-                .into_os_string(),
+    let test_bin_path = Arc::<OsStr>::from(
+        std::env::current_dir()
+            .unwrap()
+            .join("test_bins")
+            .join("node_modules")
+            .join(".bin")
+            .into_os_string(),
+    );
+
+    // Add test_bins to PATH so test programs (such as print-file) in fixtures can be found.
+    let plan_envs: HashMap<Arc<OsStr>, Arc<OsStr>> =
+        [(Arc::<OsStr>::from(OsStr::new("PATH")), Arc::clone(&test_bin_path))]
+            .into_iter()
+            .collect();
+
+    // Prepare PATH for e2e tests
+    let e2e_env_path = join_paths(
+        [
+            // Include vite binary path to PATH so that e2e tests can run "vite ..." commands.
+            {
+                let vite_path = AbsolutePath::new(env!("CARGO_BIN_EXE_vite")).unwrap();
+                let vite_dir = vite_path.parent().unwrap();
+                vite_dir.as_path().as_os_str().into()
+            },
+            // Include test_bins to PATH so that e2e tests can run utilities such as json-edit.
+            test_bin_path,
+        ]
+        .into_iter()
+        .chain(
+            // the existing PATH
+            split_paths(&env::var_os("PATH").unwrap())
+                .map(|path| Arc::<OsStr>::from(path.into_os_string())),
         ),
-    )]
-    .into_iter()
-    .collect();
+    )
+    .unwrap();
 
     runtime.block_on(async {
         let workspace_root_str = workspace_root.path.as_path().to_str().unwrap();
         let mut owned_callbacks = vite_task_bin::OwnedSessionCallbacks::default();
         let mut session = Session::init_with(
-            envs,
+            plan_envs,
             Arc::clone(&workspace_root.path),
             owned_callbacks.as_callbacks(),
         )
@@ -95,6 +128,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         );
         insta::assert_json_snapshot!("task graph", task_graph_json);
 
+        let mut e2e_count = 0u32;
         for plan in cases_file.plan_cases {
             let snapshot_name = format!("query - {}", plan.name);
 
@@ -126,29 +160,48 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
 
             let plan_json = redact_snapshot(&plan, workspace_root_str);
             insta::assert_json_snapshot!(snapshot_name, &plan_json);
-
-            //     let cwd: Arc<AbsolutePath> = case_stage_path.join(&cli_query.cwd).into();
-            //     let task_query = match cli_task_query.into_task_query(&cwd) {
-            //         Ok(ok) => ok,
-            //         Err(err) => {
-            //             insta::assert_json_snapshot!(snapshot_name, err);
-            //             continue;
-            //         }
-            //     };
-
-            //     let execution_graph = match indexed_task_graph.query_tasks(task_query) {
-            //         Ok(ok) => ok,
-            //         Err(err) => {
-            //             insta::assert_json_snapshot!(snapshot_name, err);
-            //             continue;
-            //         }
-            //     };
-
-            //     let execution_graph_snapshot =
-            //         snapshot_execution_graph(&execution_graph, &indexed_task_graph);
-            //     insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
         }
-        for e2e in cases_file.e2e_cases {}
+        for e2e in cases_file.e2e_cases {
+            let e2e_stage_path = tmpdir.join(format!("e2e_stage_{}", e2e_count));
+            e2e_count += 1;
+            assert!(copy_dir(fixture_path, &e2e_stage_path).unwrap().is_empty());
+
+            let e2e_stage_path_str = e2e_stage_path.as_path().to_str().unwrap();
+
+            let mut e2e_outputs = String::new();
+            for step in e2e.steps {
+                let mut cmd = if cfg!(windows) {
+                    let mut cmd = Command::new("cmd.exe");
+                    // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
+                    cmd.args(["/d", "/s", "/c"]);
+                    cmd
+                } else {
+                    let mut cmd = Command::new("sh");
+                    cmd.args(["-c"]);
+                    cmd
+                };
+                cmd.arg(step.as_str())
+                    .env_clear()
+                    .env("PATH", &e2e_env_path)
+                    .current_dir(e2e_stage_path.join(&e2e.cwd));
+                let output = cmd.output().unwrap();
+
+                let exit_code = output.status.code().unwrap_or(-1);
+                if exit_code != 0 {
+                    e2e_outputs.push_str(format!("[{}]", exit_code).as_str());
+                }
+                e2e_outputs.push_str("> ");
+                e2e_outputs.push_str(step.as_str());
+                e2e_outputs.push('\n');
+
+                let stdout = String::from_utf8(output.stdout).unwrap();
+                let stderr = String::from_utf8(output.stderr).unwrap();
+                e2e_outputs.push_str(&redact_e2e_output(stdout, e2e_stage_path_str));
+                e2e_outputs.push_str(&redact_e2e_output(stderr, e2e_stage_path_str));
+                e2e_outputs.push('\n');
+            }
+            insta::assert_snapshot!(e2e.name.as_str(), e2e_outputs);
+        }
     });
 }
 

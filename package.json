@@ -13,6 +13,7 @@
     "a": "vite foo"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "husky": "catalog:",
     "lint-staged": "catalog:",
     "oxlint": "catalog:",
