@@ -1,5 +1,6 @@
 {
   "name": "vite-task-test-bins",
+  "type": "module",
   "private": true,
   "bin": {
     "print-file": "./src/print-file.ts",

@@ -98,3 +98,7 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
         ),
     ),
 }
+
+[1]> json-edit
+Usage: json-edit <filename> <script>
+Example: json-edit package.json '_.version = "1.2.3"'
