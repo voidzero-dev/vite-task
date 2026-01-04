@@ -7,6 +7,34 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
   {
     "key": [
       "<workspace>/",
+      "echo-and-lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "echo-and-lint",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "echo Linting && vite lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
       "lint"
     ],
     "node": {
@@ -17,6 +45,34 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
       },
       "resolved_config": {
         "command": "vite lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "lint-and-echo"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "lint-and-echo",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vite lint && echo",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

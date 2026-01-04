@@ -134,6 +134,7 @@ async fn plan_task_as_execution_node(
                 kind: ExecutionCacheKeyKind::UserTask {
                     task_name: task_node.task_display.task_name.clone(),
                     and_item_index: index,
+                    extra_args: Arc::clone(&extra_args),
                 },
                 origin_path: strip_prefix_for_cache(package_path, context.workspace_path())
                     .map_err(|kind| {
@@ -235,6 +236,7 @@ async fn plan_task_as_execution_node(
                 kind: ExecutionCacheKeyKind::UserTask {
                     task_name: task_node.task_display.task_name.clone(),
                     and_item_index: 0,
+                    extra_args: Arc::clone(context.extra_args()),
                 },
                 origin_path: strip_prefix_for_cache(package_path, context.workspace_path())
                     .map_err(|kind| {

@@ -25,6 +25,9 @@ pub(crate) enum ExecutionCacheKeyKind {
         /// The index of the execution item in the task's command split by `&&`.
         /// This is to distinguish multiple execution items from the same task.
         and_item_index: usize,
+        /// Extra args provided when invoking the user-defined task (`vite [task_name] [extra_args...]`).
+        /// These args are appended to the last and_item. Non-last and_items don't get extra args.
+        extra_args: Arc<[Str]>,
     },
 }
 

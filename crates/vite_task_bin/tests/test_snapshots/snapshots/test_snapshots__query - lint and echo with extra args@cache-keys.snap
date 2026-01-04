@@ -9,12 +9,12 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
       {
         "key": [
           "<workspace>/",
-          "lint"
+          "lint-and-echo"
         ],
         "node": {
           "task_display": {
             "package_name": "",
-            "task_name": "lint",
+            "task_name": "lint-and-echo",
             "package_path": "<workspace>/"
           },
           "items": [
@@ -23,9 +23,7 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
                 "start": 0,
                 "end": 9
               },
-              "extra_args": [
-                "--fix"
-              ],
+              "extra_args": [],
               "plan_cwd": "<workspace>/",
               "kind": {
                 "Leaf": {
@@ -38,9 +36,7 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
                             "program_name": "oxlint"
                           }
                         },
-                        "args": [
-                          "--fix"
-                        ],
+                        "args": [],
                         "env_fingerprints": {
                           "fingerprinted_envs": {},
                           "pass_through_env_config": [
@@ -52,11 +48,9 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
                       "execution_cache_key": {
                         "kind": {
                           "UserTask": {
-                            "task_name": "lint",
+                            "task_name": "lint-and-echo",
                             "and_item_index": 0,
-                            "extra_args": [
-                              "--fix"
-                            ]
+                            "extra_args": []
                           }
                         },
                         "origin_path": ""
@@ -64,14 +58,36 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
                     },
                     "spawn_command": {
                       "program_path": "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
-                      "args": [
-                        "--fix"
-                      ],
+                      "args": [],
                       "all_envs": {
                         "FORCE_COLOR": "3",
                         "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"
                       },
                       "cwd": "<workspace>/"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "command_span": {
+                "start": 13,
+                "end": 17
+              },
+              "extra_args": [
+                "Linting complete"
+              ],
+              "plan_cwd": "<workspace>/",
+              "kind": {
+                "Leaf": {
+                  "InProcess": {
+                    "kind": {
+                      "Echo": {
+                        "strings": [
+                          "Linting complete"
+                        ],
+                        "trailing_newline": true
+                      }
                     }
                   }
                 }

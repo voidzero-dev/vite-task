@@ -49,7 +49,8 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
                         "kind": {
                           "UserTask": {
                             "task_name": "lint",
-                            "and_item_index": 0
+                            "and_item_index": 0,
+                            "extra_args": []
                           }
                         },
                         "origin_path": ""

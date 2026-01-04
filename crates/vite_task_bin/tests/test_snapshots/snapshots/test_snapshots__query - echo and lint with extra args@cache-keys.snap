@@ -9,19 +9,41 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
       {
         "key": [
           "<workspace>/",
-          "lint"
+          "echo-and-lint"
         ],
         "node": {
           "task_display": {
             "package_name": "",
-            "task_name": "lint",
+            "task_name": "echo-and-lint",
             "package_path": "<workspace>/"
           },
           "items": [
             {
               "command_span": {
                 "start": 0,
-                "end": 9
+                "end": 12
+              },
+              "extra_args": [],
+              "plan_cwd": "<workspace>/",
+              "kind": {
+                "Leaf": {
+                  "InProcess": {
+                    "kind": {
+                      "Echo": {
+                        "strings": [
+                          "Linting"
+                        ],
+                        "trailing_newline": true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "command_span": {
+                "start": 16,
+                "end": 25
               },
               "extra_args": [
                 "--fix"
@@ -52,8 +74,8 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
                       "execution_cache_key": {
                         "kind": {
                           "UserTask": {
-                            "task_name": "lint",
-                            "and_item_index": 0,
+                            "task_name": "echo-and-lint",
+                            "and_item_index": 1,
                             "extra_args": [
                               "--fix"
                             ]
