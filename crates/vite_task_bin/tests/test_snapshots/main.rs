@@ -147,8 +147,9 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
                 CLIArgs::NonTask(never) => match never {},
             };
 
-            let plan_result =
-                session.plan(workspace_root.path.join(plan.cwd).into(), task_cli_args).await;
+            let plan_result = session
+                .plan_from_cli(workspace_root.path.join(plan.cwd).into(), task_cli_args)
+                .await;
 
             let plan = match plan_result {
                 Ok(plan) => plan,

@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut owned_callbacks = OwnedSessionCallbacks::default();
     let mut session = Session::init(owned_callbacks.as_callbacks())?;
-    let plan = session.plan(cwd, task_cli_args).await?;
+    let plan = session.plan_from_cli(cwd, task_cli_args).await?;
     dbg!(plan);
 
     Ok(())

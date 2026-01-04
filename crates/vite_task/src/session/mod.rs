@@ -205,7 +205,23 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
 }
 
 impl<'a, CustomSubcommand: clap::Subcommand> Session<'a, CustomSubcommand> {
-    pub async fn plan(
+    async fn plan_synthetic_task(
+        &mut self,
+        synthetic_plan_request: SyntheticPlanRequest,
+    ) -> Result<ExecutionPlan, vite_task_plan::Error> {
+        let plan = ExecutionPlan::plan(
+            PlanRequest::Synthetic(synthetic_plan_request),
+            &self.workspace_path,
+            &self.cwd,
+            &self.envs,
+            &mut self.plan_request_parser,
+            &mut self.lazy_task_graph,
+        )
+        .await?;
+        Ok(plan)
+    }
+
+    pub async fn plan_from_cli(
         &mut self,
         cwd: Arc<AbsolutePath>,
         cli_args: TaskCLIArgs<CustomSubcommand>,
