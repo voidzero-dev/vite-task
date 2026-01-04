@@ -1,92 +1,15 @@
-use core::panic;
-use std::{
-    borrow::Cow, collections::HashMap, convert::Infallible, ffi::OsStr, path::Path, sync::Arc,
-};
+mod redact;
 
-use clap::Parser;
+use std::{collections::HashMap, convert::Infallible, ffi::OsStr, path::Path, sync::Arc};
+
 use copy_dir::copy_dir;
-use insta::internals::Content;
-use petgraph::visit::EdgeRef as _;
-use serde::Serialize;
+use redact::redact_snapshot;
 use tokio::runtime::Runtime;
-use vite_path::{AbsolutePath, RelativePathBuf, redaction::redact_absolute_paths};
+use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use vite_task::{CLIArgs, Session};
 use vite_task_bin::CustomTaskSubcommand;
-use vite_task_graph::config::DEFAULT_PASSTHROUGH_ENVS;
 use vite_workspace::find_workspace_root;
-
-fn visit_json(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json::Value)) {
-    f(value);
-    match value {
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                visit_json(item, f);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for (_key, val) in map {
-                visit_json(val, f);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn redact_paths(value: &mut serde_json::Value, redactions: &[(&str, &str)]) {
-    use cow_utils::CowUtils as _;
-    visit_json(value, &mut |v| {
-        if let serde_json::Value::String(s) = v {
-            for (from, to) in redactions {
-                if let Cow::Owned(mut replaced) = s.as_str().cow_replace(from, to) {
-                    if cfg!(windows) {
-                        // Also replace with backslashes on Windows
-                        replaced = replaced.cow_replace("\\", "/").into_owned();
-                    }
-                    *s = replaced;
-                }
-            }
-        }
-    });
-}
-
-fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let mut json_value = serde_json::to_value(value).unwrap();
-    redact_paths(
-        &mut json_value,
-        &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
-    );
-
-    visit_json(&mut json_value, &mut |v| {
-        let serde_json::Value::Array(array) = v else {
-            return;
-        };
-        let contains_all_default_pass_through_envs =
-            DEFAULT_PASSTHROUGH_ENVS.iter().all(|default_pass_through_envs| {
-                array.iter().any(|item| {
-                    if let serde_json::Value::String(s) = item {
-                        s == *default_pass_through_envs
-                    } else {
-                        false
-                    }
-                })
-            });
-        // Remove default pass-through envs from snapshots to reduce noise
-        if contains_all_default_pass_through_envs {
-            array.retain(|item| {
-                if let serde_json::Value::String(s) = item {
-                    !DEFAULT_PASSTHROUGH_ENVS.contains(&s.as_str())
-                } else {
-                    true
-                }
-            });
-            array.push(serde_json::Value::String("<default pass-through envs>".to_string()));
-        }
-    });
-
-    json_value
-}
 
 #[derive(serde::Deserialize, Debug)]
 struct Plan {
@@ -104,9 +27,9 @@ struct E2e {
 #[derive(serde::Deserialize, Default)]
 struct SnapshotsFile {
     #[serde(rename = "plan", default)] // toml usually uses singular for arrays
-    pub plans: Vec<Plan>,
+    pub plan_cases: Vec<Plan>,
     #[serde(rename = "e2e", default)] // toml usually uses singular for arrays
-    pub e2es: Vec<E2e>,
+    pub e2e_cases: Vec<E2e>,
 }
 
 fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
@@ -172,18 +95,19 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         );
         insta::assert_json_snapshot!("task graph", task_graph_json);
 
-        for plan in cases_file.plans {
+        for plan in cases_file.plan_cases {
             let snapshot_name = format!("query - {}", plan.name);
 
-            let cli_args = CLIArgs::<CustomTaskSubcommand, Infallible>::try_parse_from(
+            let cli_args = match CLIArgs::<CustomTaskSubcommand, Infallible>::try_parse_from(
                 std::iter::once("vite") // dummy program name
                     .chain(plan.args.iter().map(|s| s.as_str())),
-            )
-            .expect(&format!(
-                "Failed to parse CLI args for plan '{}' in '{}'",
-                plan.name, fixture_name
-            ));
-
+            ) {
+                Ok(ok) => ok,
+                Err(err) => {
+                    insta::assert_snapshot!(snapshot_name, err);
+                    continue;
+                }
+            };
             let task_cli_args = match cli_args {
                 CLIArgs::Task(task_cli_args) => task_cli_args,
                 CLIArgs::NonTask(never) => match never {},
@@ -224,6 +148,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
             //         snapshot_execution_graph(&execution_graph, &indexed_task_graph);
             //     insta::assert_json_snapshot!(snapshot_name, execution_graph_snapshot);
         }
+        for e2e in cases_file.e2e_cases {}
     });
 }
 

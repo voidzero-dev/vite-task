@@ -83,7 +83,7 @@ pub(crate) enum BuiltInCommand {
         ignore_depends_on: bool,
 
         /// Additional arguments to pass to the tasks
-        #[clap(trailing_var_arg = true)]
+        #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
         additional_args: Vec<Str>,
     },
 }

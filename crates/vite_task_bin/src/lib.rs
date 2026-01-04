@@ -15,7 +15,10 @@ use vite_task::{CLIArgs, Session, SessionCallbacks, plan_request::SyntheticPlanR
 #[derive(Debug, Subcommand)]
 pub enum CustomTaskSubcommand {
     /// oxlint
-    Lint { args: Vec<Str> },
+    Lint {
+        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<Str>,
+    },
 }
 
 // These are the subcommands that is not handled by vite-task

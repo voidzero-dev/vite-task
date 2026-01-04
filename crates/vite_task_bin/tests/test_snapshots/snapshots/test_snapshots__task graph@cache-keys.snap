@@ -7,16 +7,16 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
   {
     "key": [
       "<workspace>/",
-      "hello"
+      "lint"
     ],
     "node": {
       "task_display": {
         "package_name": "",
-        "task_name": "hello",
+        "task_name": "lint",
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "readfile hello.txt",
+        "command": "vite lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

@@ -1,6 +1,10 @@
 [[plan]]
 name = "user task cache key"
-args = ["run", "hello"]
+args = ["run", "lint"]
+
+[[plan]]
+name = "user task cache key with extra args"
+args = ["run", "lint", "--fix"]
 
 [[plan]]
 name = "direct synthetic task cache key"
@@ -9,4 +13,8 @@ args = ["lint"]
 [[plan]]
 name = "direct synthetic task cache key with cwd"
 cwd = "subdir"
+args = ["lint"]
+
+[[plan]]
+name = "direct synthetic task cache key with extra args"
 args = ["lint"]
