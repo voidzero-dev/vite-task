@@ -96,20 +96,19 @@ impl vite_graph_ser::GetKey for TaskExecution {
     }
 }
 
-/// An execution item, either expanded from a known vite subcommand, or a spawn execution.
 #[derive(Debug, Serialize)]
-pub struct ExecutionItem {
-    /// The range of the task command that this execution item is resolved from.
-    ///
-    /// This field is for displaying purpose only.
-    /// The actual execution info (if this is spawn) is in `SpawnExecutionItem.command_kind`.
-    pub command_span: Range<usize>,
+pub struct ExecutionItemDisplay {
+    /// Human-readable display for the task this execution item corresponds to.
+    pub task_display: TaskDisplay,
 
-    /// Extra args appended to this execution item from the cli (`vite run task [extra_args...]`).
-    /// This is for computing the cache key along with the associated task.
-    ///
-    /// `kind` already contains the full resolved args for execution. No need to append these again.
-    pub extra_args: Arc<[Str]>,
+    /// The command to be executed, including the extra args.
+    /// For displaying purpose only.
+    /// `SpawnExecution` contains the actual args for execution.
+    pub command: Str,
+
+    /// The index of this execution item among all items in the task's command split by `&&`.
+    /// If the task's command doesn't have `&&`, this will be `None`.
+    pub and_item_index: Option<usize>,
 
     /// The cwd when this execution item is planned.
     /// This is for displaying purpose only.
@@ -119,8 +118,15 @@ pub struct ExecutionItem {
     ///
     /// Hypothetically , if `vite lint-src` under cwd `packages/lib` synthesizes a task spawning `oxlint` under `packages/lib/src`.
     /// The spawned process' cwd will be `packages/lib/src`, while this field will be `packages/lib`,
-    /// which will be displayed like `packages/lib$ vite lint-src``.
-    pub plan_cwd: Arc<AbsolutePath>,
+    /// which will be displayed like `packages/lib$ vite lint-src`
+    pub cwd: Arc<AbsolutePath>,
+}
+
+/// An execution item, either expanded from a known vite subcommand, or a spawn execution.
+#[derive(Debug, Serialize)]
+pub struct ExecutionItem {
+    /// Human-readable display for this execution item.
+    pub execution_item_display: ExecutionItemDisplay,
 
     /// The kind of this execution item
     pub kind: ExecutionItemKind,

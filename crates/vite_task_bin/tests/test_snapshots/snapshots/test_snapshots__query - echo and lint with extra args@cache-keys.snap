@@ -19,12 +19,16 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
           },
           "items": [
             {
-              "command_span": {
-                "start": 0,
-                "end": 12
+              "execution_item_display": {
+                "task_display": {
+                  "package_name": "",
+                  "task_name": "echo-and-lint",
+                  "package_path": "<workspace>/"
+                },
+                "command": "echo Linting",
+                "and_item_index": 0,
+                "cwd": "<workspace>/"
               },
-              "extra_args": [],
-              "plan_cwd": "<workspace>/",
               "kind": {
                 "Leaf": {
                   "InProcess": {
@@ -41,14 +45,16 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
               }
             },
             {
-              "command_span": {
-                "start": 16,
-                "end": 25
+              "execution_item_display": {
+                "task_display": {
+                  "package_name": "",
+                  "task_name": "echo-and-lint",
+                  "package_path": "<workspace>/"
+                },
+                "command": "vite lint --fix",
+                "and_item_index": 1,
+                "cwd": "<workspace>/"
               },
-              "extra_args": [
-                "--fix"
-              ],
-              "plan_cwd": "<workspace>/",
               "kind": {
                 "Leaf": {
                   "Spawn": {

@@ -3,13 +3,13 @@ use std::sync::Arc;
 use bstr::BString;
 use vite_path::AbsolutePath;
 use vite_str::Str;
+use vite_task_graph::display::TaskDisplay;
 
 #[derive(Clone, Debug)]
-pub struct ExecutionStartInfo {
-    /// None if the execution is not associated with a specific task, but directly synthesized from CLI args, like `vite lint`/`vite exec ...`
-    pub task_display_name: Option<Str>,
+pub struct ExecutionItemDisplay {
+    pub task_display: TaskDisplay,
+    pub and_item_index: Option<usize>,
     pub command: Str,
-    pub cwd: Arc<AbsolutePath>,
 }
 
 #[derive(Debug)]
@@ -44,7 +44,7 @@ impl ExecutionId {
 
 pub struct ExecutionStartedEvent {
     pub execution_id: ExecutionId,
-    pub display: ExecutionStartInfo,
+    pub display: ExecutionItemDisplay,
 }
 
 pub struct ExecutionOutputEvent {
@@ -61,7 +61,7 @@ pub struct ExecutionEvent {
 
 #[derive(Debug)]
 pub enum ExecutionEventKind {
-    Start(ExecutionStartInfo),
+    Start(ExecutionItemDisplay),
     Output { kind: OutputKind, content: BString },
     Finish { status: Option<i32>, cache_status: CacheStatus },
 }

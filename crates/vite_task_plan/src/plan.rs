@@ -14,8 +14,8 @@ use vite_str::Str;
 use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskOptions};
 
 use crate::{
-    ExecutionItem, ExecutionItemKind, LeafExecutionKind, PlanContext, SpawnCommand, SpawnExecution,
-    TaskExecution,
+    ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, PlanContext,
+    SpawnCommand, SpawnExecution, TaskExecution,
     cache_metadata::{
         CacheMetadata, ExecutionCacheKey, ExecutionCacheKeyKind, ProgramFingerprint,
         SpawnFingerprint,
@@ -116,14 +116,27 @@ async fn plan_task_as_execution_node(
                 continue;
             }
 
+            // Build execution display
+            let execution_item_display = ExecutionItemDisplay {
+                command: {
+                    let mut command = Str::from(&command_str[add_item_span.clone()]);
+                    for arg in extra_args.iter() {
+                        command.push(' ');
+                        command.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
+                    }
+                    command
+                },
+                and_item_index: if and_item_count > 1 { Some(index) } else { None },
+                cwd: Arc::clone(&cwd),
+                task_display: task_node.task_display.clone(),
+            };
+
             // Check for builtin commands like `echo ...`
             if let Some(builtin_execution) =
                 InProcessExecution::get_builtin_execution(&and_item.program, args.iter(), &cwd)
             {
                 items.push(ExecutionItem {
-                    command_span: add_item_span,
-                    plan_cwd: Arc::clone(&cwd),
-                    extra_args,
+                    execution_item_display,
                     kind: ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(builtin_execution)),
                 });
                 continue;
@@ -200,16 +213,18 @@ async fn plan_task_as_execution_node(
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
             };
-            items.push(ExecutionItem {
-                command_span: add_item_span,
-                plan_cwd: Arc::clone(&cwd),
-                extra_args,
-                kind: execution_item_kind,
-            });
+            items.push(ExecutionItem { execution_item_display, kind: execution_item_kind });
         }
     } else {
         let mut context = context.duplicate();
         context.push_stack_frame(task_node_index, 0..command_str.len());
+
+        let execution_item_display = ExecutionItemDisplay {
+            command: command_str.into(),
+            and_item_index: None,
+            cwd,
+            task_display: task_node.task_display.clone(),
+        };
 
         static SHELL_PROGRAM_PATH: LazyLock<Arc<AbsolutePath>> = LazyLock::new(|| {
             if cfg!(target_os = "windows") {
@@ -255,9 +270,7 @@ async fn plan_task_as_execution_node(
         )
         .with_plan_context(&context)?;
         items.push(ExecutionItem {
-            command_span: 0..command_str.len(),
-            plan_cwd: cwd,
-            extra_args: Arc::clone(context.extra_args()),
+            execution_item_display,
             kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
         });
     }

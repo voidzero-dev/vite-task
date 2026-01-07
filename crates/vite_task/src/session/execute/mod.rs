@@ -18,7 +18,7 @@ use super::{
     cache::{ExecutionCache, ExecutionCacheKey},
     event::{
         CacheDisabledReason, CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId,
-        ExecutionStartInfo, OutputKind,
+        ExecutionItemDisplay, OutputKind,
     },
 };
 use crate::{
@@ -91,7 +91,7 @@ impl ExecutionContext<'_> {
     async fn execute_item_kind(
         &mut self,
         item_kind: &ExecutionItemKind,
-        origin: ExecutionOrigin<'_>,
+        task_display: Option<&TaskDisplay>,
     ) -> Result<(), ExecuteError> {
         match item_kind {
             ExecutionItemKind::Expanded(graph) => {
@@ -120,22 +120,14 @@ impl ExecutionContext<'_> {
                     let indexed_task_graph = self.indexed_task_graph.unwrap();
                     let task_display = task_execution.task_display.clone();
                     for (item_index, item) in task_execution.items.iter().enumerate() {
-                        self.execute_item_kind(
-                            &item.kind,
-                            ExecutionOrigin::UserTask {
-                                item,
-                                item_index,
-                                item_count: task_execution.items.len(),
-                                task_display: task_execution.task_display.clone(),
-                            },
-                        )
-                        .boxed_local()
-                        .await?;
+                        self.execute_item_kind(&item.kind, Some(&task_execution.task_display))
+                            .boxed_local()
+                            .await?;
                     }
                 }
             }
             ExecutionItemKind::Leaf(leaf_execution_kind) => {
-                self.execute_leaf(leaf_execution_kind, origin).await?;
+                self.execute_leaf(leaf_execution_kind, task_display).await?;
             }
         }
         Ok(())
@@ -144,9 +136,9 @@ impl ExecutionContext<'_> {
     async fn execute_leaf(
         &mut self,
         leaf_execution_kind: &LeafExecutionKind,
-        origin: ExecutionOrigin<'_>,
+        task_display: Option<&TaskDisplay>,
     ) -> Result<(), ExecuteError> {
-        let start_info: ExecutionStartInfo = todo!();
+        let start_info: ExecutionItemDisplay = todo!();
 
         let execution_id = self.current_execution_id;
         self.current_execution_id = self.current_execution_id.next();
@@ -176,7 +168,7 @@ impl ExecutionContext<'_> {
                 });
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
-                self.execute_spawn(execution_id, origin, spawn_execution).await?;
+                self.execute_spawn(execution_id, todo!(), spawn_execution).await?;
             }
         }
         Ok(())
