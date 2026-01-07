@@ -93,7 +93,7 @@ impl ExecutionContext<'_> {
                     for item in task_execution.items.iter() {
                         match &item.kind {
                             ExecutionItemKind::Leaf(leaf_kind) => {
-                                self.execute_leaf(&item.execution_item_display, leaf_kind)
+                                self.execute_leaf(Some(&item.execution_item_display), leaf_kind)
                                     .boxed_local()
                                     .await?;
                             }
@@ -110,42 +110,7 @@ impl ExecutionContext<'_> {
                 }
             }
             ExecutionItemKind::Leaf(leaf_execution_kind) => {
-                // Top-level leaf execution (built-in commands like 'vite lint')
-                // These don't have display info since they're not from the task graph
-                let execution_id = self.current_execution_id;
-                self.current_execution_id = self.current_execution_id.next();
-
-                // Emit start event with None display (no task info)
-                self.event_handler.handle_event(ExecutionEvent {
-                    execution_id,
-                    kind: ExecutionEventKind::Start(None),
-                });
-
-                // Execute the leaf directly
-                match leaf_execution_kind {
-                    LeafExecutionKind::InProcess(in_process_execution) => {
-                        let execution_output = in_process_execution.execute().await;
-                        self.event_handler.handle_event(ExecutionEvent {
-                            execution_id,
-                            kind: ExecutionEventKind::Output {
-                                kind: OutputKind::Stdout,
-                                content: execution_output.stdout.into(),
-                            },
-                        });
-                        self.event_handler.handle_event(ExecutionEvent {
-                            execution_id,
-                            kind: ExecutionEventKind::Finish {
-                                status: Some(0),
-                                cache_status: CacheStatus::Disabled(
-                                    CacheDisabledReason::InProcessExecution,
-                                ),
-                            },
-                        });
-                    }
-                    LeafExecutionKind::Spawn(spawn_execution) => {
-                        self.execute_spawn(execution_id, spawn_execution).await?;
-                    }
-                }
+                self.execute_leaf(display, leaf_execution_kind).await?;
             }
         }
         Ok(())
@@ -153,19 +118,19 @@ impl ExecutionContext<'_> {
 
     async fn execute_leaf(
         &mut self,
-        display: &ExecutionItemDisplay,
+        display: Option<&ExecutionItemDisplay>,
         leaf_execution_kind: &LeafExecutionKind,
     ) -> Result<(), ExecutionAborted> {
         let execution_id = self.current_execution_id;
         self.current_execution_id = self.current_execution_id.next();
-        self.event_handler.handle_event(ExecutionEvent {
-            execution_id,
-            kind: ExecutionEventKind::Start(Some(display.clone())),
-        });
 
         match leaf_execution_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 let execution_output = in_process_execution.execute().await;
+                self.event_handler.handle_event(ExecutionEvent {
+                    execution_id,
+                    kind: ExecutionEventKind::Start(display.cloned()),
+                });
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
                     kind: ExecutionEventKind::Output {
@@ -184,7 +149,7 @@ impl ExecutionContext<'_> {
                 });
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
-                self.execute_spawn(execution_id, spawn_execution).await?;
+                self.execute_spawn(execution_id, display, spawn_execution).await?;
             }
         }
         Ok(())
@@ -193,6 +158,7 @@ impl ExecutionContext<'_> {
     async fn execute_spawn(
         &mut self,
         execution_id: ExecutionId,
+        display: Option<&ExecutionItemDisplay>,
         spawn_execution: &SpawnExecution,
     ) -> Result<(), ExecutionAborted> {
         let cache_metadata = spawn_execution.cache_metadata.as_ref();
@@ -237,6 +203,11 @@ impl ExecutionContext<'_> {
                 }
             }
         }
+
+        self.event_handler.handle_event(ExecutionEvent {
+            execution_id,
+            kind: ExecutionEventKind::Start(display.cloned()),
+        });
 
         // Track spawned child if caching is enabled, also remebers the cache metadata for update later
         let mut track_result_with_cache_metadata = if let Some(cache_metadata) = cache_metadata {
