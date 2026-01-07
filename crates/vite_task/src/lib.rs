@@ -8,7 +8,7 @@ mod fingerprint;
 mod fs;
 mod maybe_str;
 mod schedule;
-mod session;
+pub mod session;
 mod types;
 mod ui;
 

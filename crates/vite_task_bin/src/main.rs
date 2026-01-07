@@ -1,7 +1,7 @@
 use std::{env, sync::Arc};
 
 use vite_path::{AbsolutePath, current_dir};
-use vite_task::{CLIArgs, Session, SessionCallbacks};
+use vite_task::{CLIArgs, Session, SessionCallbacks, session::reporter::LabeledReporter};
 use vite_task_bin::{
     CustomTaskSubcommand, NonTaskSubcommand, OwnedSessionCallbacks, TaskSynthesizer,
 };
@@ -29,7 +29,11 @@ async fn main() -> anyhow::Result<()> {
     let mut owned_callbacks = OwnedSessionCallbacks::default();
     let mut session = Session::init(owned_callbacks.as_callbacks())?;
     let plan = session.plan_from_cli(cwd, task_cli_args).await?;
-    dbg!(plan);
+
+    // Create reporter and execute
+    let mut reporter = LabeledReporter::new(std::io::stdout(), session.workspace_path());
+    session.execute(plan, &mut |event| reporter.handle_event(event, None)).await?;
+    reporter.print_summary();
 
     Ok(())
 }

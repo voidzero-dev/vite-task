@@ -70,7 +70,6 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
                         "--fix"
                       ],
                       "all_envs": {
-                        "FORCE_COLOR": "3",
                         "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"
                       },
                       "cwd": "<workspace>/"

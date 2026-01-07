@@ -1,24 +1,21 @@
-pub mod fingerprint;
+//! Execution cache for storing and retrieving cached command results.
 
 use std::{fmt::Display, io::Write, sync::Arc, time::Duration};
 
-// use bincode::config::{Configuration, standard};
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use rusqlite::{Connection, OptionalExtension as _, config::DbConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
-use vite_str::Str;
+use vite_path::{AbsolutePath, AbsolutePathBuf};
+use vite_task_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
 
-use crate::{
-    Error,
-    config::{CommandFingerprint, ResolvedTask},
-    execute::{ExecutedTask, StdOutput},
+use super::execute::{
     fingerprint::{PostRunFingerprint, PostRunFingerprintMismatch},
-    fs::FileSystem,
+    spawn::StdOutput,
 };
+use crate::Error;
 
-/// Command cache value, for validating post-run fingerprint after the command fingerprint is matched,
+/// Command cache value, for validating post-run fingerprint after the spawn fingerprint is matched,
 /// and replaying the std outputs if validated.
 #[derive(Debug, Encode, Decode, Serialize)]
 pub struct CommandCacheValue {
@@ -27,84 +24,34 @@ pub struct CommandCacheValue {
     pub duration: Duration,
 }
 
-impl CommandCacheValue {
-    pub fn create(
-        executed_task: ExecutedTask,
-        fs: &impl FileSystem,
-        base_dir: &AbsolutePath,
-        fingerprint_ignores: Option<&[Str]>,
-    ) -> Result<Self, Error> {
-        let post_run_fingerprint =
-            PostRunFingerprint::create(&executed_task, fs, base_dir, fingerprint_ignores)?;
-        Ok(Self {
-            post_run_fingerprint,
-            std_outputs: executed_task.std_outputs,
-            duration: executed_task.duration,
-        })
-    }
-}
-
 #[derive(Debug)]
 pub struct ExecutionCache {
     conn: Mutex<Connection>,
 }
 
-/// Cache key to associate an execution with a custom vite-task subcommand (like `vite lint`) directly run by the user.
-#[derive(Debug, Encode, Decode, Serialize)]
-pub struct DirectExecutionCacheKey {
-    /// The args after the program name, including the subcommand name. (like `["lint", "--fix"]` for `vite lint --fix`)
-    pub args_without_program: Arc<[Str]>,
-
-    /// The cwd where the `vite [custom subcommand] ...` is run.
-    ///
-    /// This is not necessarily the actual cwd that the synthesized task runs in.
-    pub plan_cwd: RelativePathBuf,
-}
-
-/// Cache key to associate an execution with a user-defined task  (like `"lint-task": "vite lint" in package.json scripts`).
-#[derive(Debug, Encode, Decode, Serialize)]
-pub struct UserTaskExecutionCacheKey {
-    pub task_name: Str,
-    pub package_path: RelativePathBuf,
-    pub and_item_index: usize,
-}
-
-/// Key to identify an execution.
-#[derive(Debug, Encode, Decode, Serialize)]
-pub enum ExecutionCacheKey {
-    /// This execution is directly from a custom vite-task subcommand (like `vite lint`).
-    ///
-    /// Note that this is only for the case where the subcommand is directly typed in the cli,
-    /// not from a task script (like `"lint-task": "vite lint"`), which is covered by the `Task` variant.
-    Direct(DirectExecutionCacheKey),
-
-    /// This execution is from a task script.
-    UserTask(UserTaskExecutionCacheKey),
-}
-
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum CacheMiss {
     NotFound,
     FingerprintMismatch(FingerprintMismatch),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum FingerprintMismatch {
-    /// Found the cache entry of the same task run, but the command fingerprint mismatches
+    /// Found the cache entry of the same task run, but the spawn fingerprint mismatches
     /// this happens when the command itself or an env changes.
-    CommandFingerprintMismatch(CommandFingerprint),
-    /// Found the cache entry with the same command fingerprint, but the post-run fingerprint mismatches
+    SpawnFingerprintMismatch(SpawnFingerprint),
+    /// Found the cache entry with the same spawn fingerprint, but the post-run fingerprint mismatches
     PostRunFingerprintMismatch(PostRunFingerprintMismatch),
 }
 
 impl Display for FingerprintMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CommandFingerprintMismatch(diff) => {
-                // TODO: improve the display of command fingerprint diff
-                write!(f, "Command fingerprint changed: {diff:?}")
+            Self::SpawnFingerprintMismatch(old_fingerprint) => {
+                // TODO: improve the display of spawn fingerprint diff
+                write!(f, "Spawn fingerprint changed: {old_fingerprint:?}")
             }
             Self::PostRunFingerprintMismatch(diff) => Display::fmt(diff, f),
         }
@@ -126,25 +73,23 @@ impl ExecutionCache {
                 0 => {
                     // fresh new db
                     conn.execute(
-                        "CREATE TABLE command_cache (key BLOB PRIMARY KEY, value BLOB);",
+                        "CREATE TABLE spawn_fingerprint_cache (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
                     conn.execute(
-                        "CREATE TABLE taskrun_to_command (key BLOB PRIMARY KEY, value BLOB);",
+                        "CREATE TABLE execution_key_to_fingerprint (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    // Bump to version 3 to invalidate cache entries due to a change in the serialized cache key content
-                    // (addition of the `fingerprint_ignores` field). No schema change was made.
-                    conn.execute("PRAGMA user_version = 3", ())?;
+                    conn.execute("PRAGMA user_version = 4", ())?;
                 }
-                1..=2 => {
+                1..=3 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                3 => break, // current version
-                4.. => return Err(Error::UnrecognizedDbVersion(user_version)),
+                4 => break, // current version
+                5.. => return Err(Error::UnrecognizedDbVersion(user_version)),
             }
         }
         Ok(Self { conn: Mutex::new(conn) })
@@ -156,60 +101,65 @@ impl ExecutionCache {
         Ok(())
     }
 
-    pub async fn update(
-        &self,
-        resolved_task: &ResolvedTask,
-        cached_task: CommandCacheValue,
-    ) -> Result<(), Error> {
-        let task_run_key: ExecutionCacheKey = todo!();
-        let command_fingerprint = &resolved_task.resolved_command.fingerprint;
-        self.upsert_command_cache(command_fingerprint, &cached_task).await?;
-        self.upsert_taskrun_to_command(&task_run_key, command_fingerprint).await?;
-        Ok(())
-    }
-
-    /// Tries to get the task cache if the fingerprint matches, otherwise returns why the cache misses
+    /// Try to hit cache with spawn fingerprint.
+    /// Returns `Ok(Ok(cache_value))` on cache hit, `Ok(Err(cache_miss))` on miss.
     pub async fn try_hit(
         &self,
-        task: &ResolvedTask,
-        fs: &impl FileSystem,
+        cache_metadata: &CacheMetadata,
         base_dir: &AbsolutePath,
     ) -> Result<Result<CommandCacheValue, CacheMiss>, Error> {
-        let task_run_key: ExecutionCacheKey = todo!();
-        let command_fingerprint = &task.resolved_command.fingerprint;
-        // Try to directly find the command cache by command fingerprint first, ignoring the task run key
-        if let Some(cache_value) =
-            self.get_command_cache_by_command_fingerprint(command_fingerprint).await?
-        {
+        let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
+        let execution_cache_key = &cache_metadata.execution_cache_key;
+
+        // Try to directly find the cache by spawn fingerprint first
+        if let Some(cache_value) = self.get_by_spawn_fingerprint(spawn_fingerprint).await? {
+            // Validate post-run fingerprint
             if let Some(post_run_fingerprint_mismatch) =
-                cache_value.post_run_fingerprint.validate(fs, base_dir)?
+                cache_value.post_run_fingerprint.validate(base_dir)?
             {
-                // Found the command cache with the same command fingerprint, but the post-run fingerprint mismatches
-                Ok(Err(CacheMiss::FingerprintMismatch(
+                // Found the cache with the same spawn fingerprint, but the post-run fingerprint mismatches
+                return Ok(Err(CacheMiss::FingerprintMismatch(
                     FingerprintMismatch::PostRunFingerprintMismatch(post_run_fingerprint_mismatch),
-                )))
-            } else {
-                // Associate the task run key to the command fingerprint if not already,
-                // so that next time we can find it and report command fingerprint mismatch
-                self.upsert_taskrun_to_command(&task_run_key, command_fingerprint).await?;
-                Ok(Ok(cache_value))
+                )));
             }
-        } else if let Some(command_fingerprint_in_cache) =
-            self.get_command_fingerprint_by_task_run_key(&task_run_key).await?
-        {
-            // No command cache found with the current command fingerprint,
-            // but found a command fingerprint associated with the same task run key,
-            // meaning the command or env has changed since last run
-            Ok(Err(CacheMiss::FingerprintMismatch(
-                FingerprintMismatch::CommandFingerprintMismatch(command_fingerprint_in_cache),
-            )))
-        } else {
-            Ok(Err(CacheMiss::NotFound))
+            // Associate the execution key to the spawn fingerprint if not already,
+            // so that next time we can find it and report spawn fingerprint mismatch
+            self.upsert_execution_key_to_fingerprint(execution_cache_key, spawn_fingerprint)
+                .await?;
+            return Ok(Ok(cache_value));
         }
+
+        // No cache found with the current spawn fingerprint,
+        // check if execution key maps to different fingerprint
+        if let Some(old_spawn_fingerprint) =
+            self.get_fingerprint_by_execution_key(execution_cache_key).await?
+        {
+            // Found a spawn fingerprint associated with the same execution key,
+            // meaning the command or env has changed since last run
+            return Ok(Err(CacheMiss::FingerprintMismatch(
+                FingerprintMismatch::SpawnFingerprintMismatch(old_spawn_fingerprint),
+            )));
+        }
+
+        Ok(Err(CacheMiss::NotFound))
+    }
+
+    /// Update cache after successful execution.
+    pub async fn update(
+        &self,
+        cache_metadata: &CacheMetadata,
+        cache_value: CommandCacheValue,
+    ) -> Result<(), Error> {
+        let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
+        let execution_cache_key = &cache_metadata.execution_cache_key;
+
+        self.upsert_spawn_fingerprint_cache(spawn_fingerprint, &cache_value).await?;
+        self.upsert_execution_key_to_fingerprint(execution_cache_key, spawn_fingerprint).await?;
+        Ok(())
     }
 }
 
-// basic database operations
+// Basic database operations
 impl ExecutionCache {
     async fn get_key_by_value<K: Encode, V: Decode<()>>(
         &self,
@@ -229,18 +179,18 @@ impl ExecutionCache {
         Ok(Some(value))
     }
 
-    async fn get_command_cache_by_command_fingerprint(
+    async fn get_by_spawn_fingerprint(
         &self,
-        command_fingerprint: &CommandFingerprint,
+        spawn_fingerprint: &SpawnFingerprint,
     ) -> Result<Option<CommandCacheValue>, Error> {
-        self.get_key_by_value("command_cache", command_fingerprint).await
+        self.get_key_by_value("spawn_fingerprint_cache", spawn_fingerprint).await
     }
 
-    async fn get_command_fingerprint_by_task_run_key(
+    async fn get_fingerprint_by_execution_key(
         &self,
-        task_run_key: &ExecutionCacheKey,
-    ) -> Result<Option<CommandFingerprint>, Error> {
-        self.get_key_by_value("taskrun_to_command", task_run_key).await
+        execution_cache_key: &ExecutionCacheKey,
+    ) -> Result<Option<SpawnFingerprint>, Error> {
+        self.get_key_by_value("execution_key_to_fingerprint", execution_cache_key).await
     }
 
     async fn upsert<K: Encode, V: Encode>(
@@ -259,20 +209,20 @@ impl ExecutionCache {
         Ok(())
     }
 
-    async fn upsert_command_cache(
+    async fn upsert_spawn_fingerprint_cache(
         &self,
-        command_fingerprint: &CommandFingerprint,
-        cached_task: &CommandCacheValue,
+        spawn_fingerprint: &SpawnFingerprint,
+        cache_value: &CommandCacheValue,
     ) -> Result<(), Error> {
-        self.upsert("command_cache", command_fingerprint, cached_task).await
+        self.upsert("spawn_fingerprint_cache", spawn_fingerprint, cache_value).await
     }
 
-    async fn upsert_taskrun_to_command(
+    async fn upsert_execution_key_to_fingerprint(
         &self,
-        task_run_key: &ExecutionCacheKey,
-        command_fingerprint: &CommandFingerprint,
+        execution_cache_key: &ExecutionCacheKey,
+        spawn_fingerprint: &SpawnFingerprint,
     ) -> Result<(), Error> {
-        self.upsert("taskrun_to_command", task_run_key, command_fingerprint).await
+        self.upsert("execution_key_to_fingerprint", execution_cache_key, spawn_fingerprint).await
     }
 
     async fn list_table<K: Decode<()> + Serialize, V: Decode<()> + Serialize>(
@@ -299,11 +249,15 @@ impl ExecutionCache {
     }
 
     pub async fn list(&self, mut out: impl Write) -> Result<(), Error> {
-        out.write_all(b"------- taskrun_to_command -------\n")?;
-        self.list_table::<ExecutionCacheKey, CommandFingerprint>("taskrun_to_command", &mut out)
+        out.write_all(b"------- execution_key_to_fingerprint -------\n")?;
+        self.list_table::<ExecutionCacheKey, SpawnFingerprint>(
+            "execution_key_to_fingerprint",
+            &mut out,
+        )
+        .await?;
+        out.write_all(b"------- spawn_fingerprint_cache -------\n")?;
+        self.list_table::<SpawnFingerprint, CommandCacheValue>("spawn_fingerprint_cache", &mut out)
             .await?;
-        out.write_all(b"------- command_cache -------\n")?;
-        self.list_table::<CommandFingerprint, CommandCacheValue>("command_cache", &mut out).await?;
         Ok(())
     }
 }

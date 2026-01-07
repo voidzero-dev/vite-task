@@ -4,7 +4,8 @@
   "private": true,
   "bin": {
     "print-file": "./src/print-file.ts",
-    "json-edit": "./src/json-edit.ts"
+    "json-edit": "./src/json-edit.ts",
+    "replace-file-content": "./src/replace-file-content.ts"
   },
   "dependencies": {
     "oxlint": "catalog:",

@@ -1,5 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/test_snapshots/main.rs
+assertion_line: 204
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
 ---

@@ -1,16 +1,8 @@
-use std::sync::Arc;
+use std::time::Duration;
 
 use bstr::BString;
-use vite_path::AbsolutePath;
-use vite_str::Str;
-use vite_task_graph::display::TaskDisplay;
-
-#[derive(Clone, Debug)]
-pub struct ExecutionItemDisplay {
-    pub task_display: TaskDisplay,
-    pub and_item_index: Option<usize>,
-    pub command: Str,
-}
+// Re-export ExecutionItemDisplay from vite_task_plan since it's the canonical definition
+pub use vite_task_plan::ExecutionItemDisplay;
 
 #[derive(Debug)]
 pub enum OutputKind {
@@ -27,6 +19,7 @@ pub enum CacheDisabledReason {
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss,
+    Hit { replayed_duration: Duration },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

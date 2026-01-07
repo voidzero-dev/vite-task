@@ -1,4 +1,7 @@
-use std::{borrow::Cow, path::Path, sync::Arc};
+pub mod fingerprint;
+pub mod spawn;
+
+use std::{path::Path, sync::Arc};
 
 use futures_util::FutureExt;
 use petgraph::{
@@ -7,24 +10,25 @@ use petgraph::{
 };
 use vite_path::{AbsolutePath, RelativePathBuf, relative::InvalidPathDataError};
 use vite_str::Str;
-use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, display::TaskDisplay};
+use vite_task_graph::{IndexedTaskGraph, display::TaskDisplay};
 use vite_task_plan::{
     ExecutionItem, ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnExecution,
     TaskExecution,
     execution_graph::{ExecutionIx, ExecutionNodeIndex},
 };
 
+use self::{
+    fingerprint::PostRunFingerprint,
+    spawn::{OutputKind as SpawnOutputKind, spawn_with_tracking},
+};
 use super::{
-    cache::{ExecutionCache, ExecutionCacheKey},
+    cache::{CommandCacheValue, ExecutionCache},
     event::{
         CacheDisabledReason, CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId,
         ExecutionItemDisplay, OutputKind,
     },
 };
-use crate::{
-    Session,
-    session::cache::{DirectExecutionCacheKey, UserTaskExecutionCacheKey},
-};
+use crate::Session;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PathError {
@@ -45,6 +49,11 @@ pub enum ExecuteError {
 
     #[error(transparent)]
     PathError(#[from] PathError),
+
+    #[error(
+        "Leaf execution item missing display information - execution items should be wrapped with ExecutionItem"
+    )]
+    MissingDisplayInfo,
 }
 
 struct ExecutionContext<'a> {
@@ -91,7 +100,6 @@ impl ExecutionContext<'_> {
     async fn execute_item_kind(
         &mut self,
         item_kind: &ExecutionItemKind,
-        task_display: Option<&TaskDisplay>,
     ) -> Result<(), ExecuteError> {
         match item_kind {
             ExecutionItemKind::Expanded(graph) => {
@@ -117,17 +125,25 @@ impl ExecutionContext<'_> {
                 let ordered_executions =
                     node_indices.into_iter().map(|id| graph.remove_node(id).unwrap());
                 for task_execution in ordered_executions {
-                    let indexed_task_graph = self.indexed_task_graph.unwrap();
-                    let task_display = task_execution.task_display.clone();
-                    for (item_index, item) in task_execution.items.iter().enumerate() {
-                        self.execute_item_kind(&item.kind, Some(&task_execution.task_display))
-                            .boxed_local()
-                            .await?;
+                    for item in task_execution.items.iter() {
+                        match &item.kind {
+                            ExecutionItemKind::Leaf(leaf_kind) => {
+                                self.execute_leaf(&item.execution_item_display, leaf_kind)
+                                    .boxed_local()
+                                    .await?;
+                            }
+                            ExecutionItemKind::Expanded(_) => {
+                                self.execute_item_kind(&item.kind).boxed_local().await?;
+                            }
+                        }
                     }
                 }
             }
             ExecutionItemKind::Leaf(leaf_execution_kind) => {
-                self.execute_leaf(leaf_execution_kind, task_display).await?;
+                // This case should not happen in practice since we always wrap leaf items
+                // in an ExecutionItem with display info. Log a warning if it does.
+                tracing::warn!("execute_item_kind called with bare Leaf - missing display info");
+                return Err(ExecuteError::MissingDisplayInfo);
             }
         }
         Ok(())
@@ -135,16 +151,14 @@ impl ExecutionContext<'_> {
 
     async fn execute_leaf(
         &mut self,
+        display: &ExecutionItemDisplay,
         leaf_execution_kind: &LeafExecutionKind,
-        task_display: Option<&TaskDisplay>,
     ) -> Result<(), ExecuteError> {
-        let start_info: ExecutionItemDisplay = todo!();
-
         let execution_id = self.current_execution_id;
         self.current_execution_id = self.current_execution_id.next();
         (self.event_handler)(ExecutionEvent {
             execution_id,
-            kind: ExecutionEventKind::Start(start_info),
+            kind: ExecutionEventKind::Start(display.clone()),
         });
 
         match leaf_execution_kind {
@@ -168,7 +182,7 @@ impl ExecutionContext<'_> {
                 });
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
-                self.execute_spawn(execution_id, todo!(), spawn_execution).await?;
+                self.execute_spawn(execution_id, spawn_execution).await?;
             }
         }
         Ok(())
@@ -177,40 +191,122 @@ impl ExecutionContext<'_> {
     async fn execute_spawn(
         &mut self,
         execution_id: ExecutionId,
-        origin: ExecutionOrigin<'_>,
         spawn_execution: &SpawnExecution,
     ) -> Result<(), ExecuteError> {
-        let execution_cache_key: ExecutionCacheKey = todo!();
+        let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
-        // let mut cmd = match &spawn_execution.command_kind {
-        //     SpawnCommandKind::Program { program_path, args } => {
-        //         let mut cmd = fspy::Command::new(program_path.as_path());
-        //         cmd.args(args.iter().map(|arg| arg.as_str()));
-        //         cmd
-        //     }
-        //     SpawnCommandKind::ShellScript { script, args } => {
-        //         let mut cmd = if cfg!(windows) {
-        //             let mut cmd = fspy::Command::new("cmd.exe");
-        //             // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
-        //             cmd.args(["/d", "/s", "/c"]);
-        //             cmd
-        //         } else {
-        //             let mut cmd = fspy::Command::new("sh");
-        //             cmd.args(["-c"]);
-        //             cmd
-        //         };
+        // 1. Try cache hit
+        if let Some(cache_metadata) = cache_metadata {
+            match self.cache.try_hit(cache_metadata, &*self.cache_base_path).await {
+                Ok(Ok(cached)) => {
+                    // Replay cached outputs
+                    for output in cached.std_outputs.iter() {
+                        (self.event_handler)(ExecutionEvent {
+                            execution_id,
+                            kind: ExecutionEventKind::Output {
+                                kind: match output.kind {
+                                    SpawnOutputKind::StdOut => OutputKind::Stdout,
+                                    SpawnOutputKind::StdErr => OutputKind::Stderr,
+                                },
+                                content: output.content.clone().into(),
+                            },
+                        });
+                    }
+                    (self.event_handler)(ExecutionEvent {
+                        execution_id,
+                        kind: ExecutionEventKind::Finish {
+                            status: Some(0),
+                            cache_status: CacheStatus::Hit { replayed_duration: cached.duration },
+                        },
+                    });
+                    return Ok(());
+                }
+                Ok(Err(_cache_miss)) => {
+                    // Continue to execute
+                }
+                Err(err) => {
+                    tracing::warn!("Cache lookup failed: {:?}", err);
+                    // Continue to execute on cache error
+                }
+            }
+        }
 
-        //         let mut script = script.clone();
-        //         for arg in args.iter() {
-        //             script.push(' ');
-        //             script.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
-        //         }
-        //         cmd.arg(script);
-        //         cmd
-        //     }
-        // };
-        // cmd.envs(spawn_execution.all_envs.iter()).current_dir(&*spawn_execution.cwd);
-        todo!()
+        // 2. Execute command with tracking
+        let result =
+            match spawn_with_tracking(&spawn_execution.spawn_command, &*self.cache_base_path).await
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    // Emit error output and finish
+                    (self.event_handler)(ExecutionEvent {
+                        execution_id,
+                        kind: ExecutionEventKind::Output {
+                            kind: OutputKind::Stderr,
+                            content: format!("Failed to spawn: {err}").into(),
+                        },
+                    });
+                    (self.event_handler)(ExecutionEvent {
+                        execution_id,
+                        kind: ExecutionEventKind::Finish {
+                            status: None,
+                            cache_status: CacheStatus::Miss,
+                        },
+                    });
+                    return Ok(());
+                }
+            };
+
+        // 3. Emit outputs
+        for output in result.std_outputs.iter() {
+            (self.event_handler)(ExecutionEvent {
+                execution_id,
+                kind: ExecutionEventKind::Output {
+                    kind: match output.kind {
+                        SpawnOutputKind::StdOut => OutputKind::Stdout,
+                        SpawnOutputKind::StdErr => OutputKind::Stderr,
+                    },
+                    content: output.content.clone().into(),
+                },
+            });
+        }
+
+        // 4. Update cache if successful
+        if let Some(cache_metadata) = cache_metadata
+            && result.exit_status.success()
+        {
+            let fingerprint_ignores =
+                cache_metadata.spawn_fingerprint.fingerprint_ignores().map(|v| v.as_slice());
+            match PostRunFingerprint::create(
+                &result.path_reads,
+                &*self.cache_base_path,
+                fingerprint_ignores,
+            ) {
+                Ok(post_run_fingerprint) => {
+                    let cache_value = CommandCacheValue {
+                        post_run_fingerprint,
+                        std_outputs: result.std_outputs.clone(),
+                        duration: result.duration,
+                    };
+                    if let Err(err) = self.cache.update(cache_metadata, cache_value).await {
+                        tracing::warn!("Failed to update cache: {:?}", err);
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!("Failed to create post-run fingerprint: {:?}", err);
+                }
+            }
+        }
+
+        // 5. Emit finish
+        (self.event_handler)(ExecutionEvent {
+            execution_id,
+            kind: ExecutionEventKind::Finish {
+                status: result.exit_status.code(),
+                cache_status: CacheStatus::Miss,
+            },
+        });
+
+        Ok(())
     }
 }
 
@@ -227,15 +323,6 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
             cache: &self.cache,
             cache_base_path: &self.workspace_path,
         };
-        Ok(())
-        // execution_context
-        //     .execute_item_kind(
-        //         plan.plan.root_node(),
-        //         ExecutionOrigin::CLIArgs {
-        //             args_without_program: &plan.cli_args_without_program,
-        //             cwd: &plan.cwd,
-        //         },
-        //     )
-        //     .await
+        execution_context.execute_item_kind(plan.root_node()).await
     }
 }

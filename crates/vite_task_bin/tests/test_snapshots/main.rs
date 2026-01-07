@@ -163,7 +163,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
             insta::assert_json_snapshot!(snapshot_name, &plan_json);
         }
         for e2e in cases_file.e2e_cases {
-            let e2e_stage_path = tmpdir.join(format!("e2e_stage_{}", e2e_count));
+            let e2e_stage_path = tmpdir.join(format!("{}_e2e_stage_{}", fixture_name, e2e_count));
             e2e_count += 1;
             assert!(copy_dir(fixture_path, &e2e_stage_path).unwrap().is_empty());
 

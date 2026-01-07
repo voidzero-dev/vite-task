@@ -54,7 +54,7 @@ pub struct CacheMetadata {
     /// Fingerprint for spawn execution that affects caching.
     pub spawn_fingerprint: SpawnFingerprint,
 
-    /// Key to identify an execution.
+    /// Key to identify an execution across sessions.
     pub execution_cache_key: ExecutionCacheKey,
 }
 
@@ -94,6 +94,13 @@ pub struct SpawnFingerprint {
     /// Glob patterns for fingerprint filtering. Order matters (last match wins).
     /// Changes to this config invalidate the cache to ensure correct fingerprint tracking.
     pub(crate) fingerprint_ignores: Option<Vec<Str>>,
+}
+
+impl SpawnFingerprint {
+    /// Get the fingerprint ignores patterns.
+    pub fn fingerprint_ignores(&self) -> Option<&Vec<Str>> {
+        self.fingerprint_ignores.as_ref()
+    }
 }
 
 /// The program fingerprint used in `SpawnFingerprint`

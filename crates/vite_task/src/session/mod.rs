@@ -1,11 +1,16 @@
 mod cache;
 mod event;
 mod execute;
+pub mod reporter;
 
+// Re-export types that are part of the public API
 use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
 use cache::ExecutionCache;
+pub use cache::{CacheMiss, FingerprintMismatch};
 use clap::{Parser, Subcommand};
+pub use event::ExecutionEvent;
+pub use execute::ExecuteError;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
@@ -194,6 +199,10 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
 
     pub fn cache(&self) -> &ExecutionCache {
         &self.cache
+    }
+
+    pub fn workspace_path(&self) -> Arc<AbsolutePath> {
+        Arc::clone(&self.workspace_path)
     }
 
     pub fn task_graph(&self) -> Option<&TaskGraph> {

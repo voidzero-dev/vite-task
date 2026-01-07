@@ -1,0 +1,7 @@
+[[e2e]]
+name = "cache hit after file modification"
+steps = [
+  "vite run test-task",
+  "replace-file-content main.js foo bar",
+  "vite run test-task",
+]

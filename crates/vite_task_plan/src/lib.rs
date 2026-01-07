@@ -96,7 +96,7 @@ impl vite_graph_ser::GetKey for TaskExecution {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ExecutionItemDisplay {
     /// Human-readable display for the task this execution item corresponds to.
     pub task_display: TaskDisplay,
