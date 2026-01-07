@@ -1,6 +1,7 @@
 //! LabeledReporter event handler for rendering execution events.
 
 use std::{
+    collections::HashSet,
     io::Write,
     sync::{Arc, LazyLock},
     time::Duration,
@@ -65,6 +66,9 @@ pub struct LabeledReporter<W: Write> {
     executions: Vec<ExecutionInfo>,
     stats: ExecutionStats,
     first_error: Option<String>,
+    silent_if_cache_hit: bool,
+    hide_summary: bool,
+    cache_hit_executions: HashSet<ExecutionId>,
 }
 
 impl<W: Write> LabeledReporter<W> {
@@ -75,13 +79,37 @@ impl<W: Write> LabeledReporter<W> {
             executions: Vec::new(),
             stats: ExecutionStats::default(),
             first_error: None,
+            silent_if_cache_hit: false,
+            hide_summary: false,
+            cache_hit_executions: HashSet::new(),
         }
     }
 
-    fn handle_start(&mut self, display: Option<ExecutionItemDisplay>, cache_status: CacheStatus) {
+    /// Set the silent_if_cache_hit option
+    pub fn set_silent_if_cache_hit(&mut self, silent_if_cache_hit: bool) {
+        self.silent_if_cache_hit = silent_if_cache_hit;
+    }
+
+    /// Set the hide_summary option
+    pub fn set_hide_summary(&mut self, hide_summary: bool) {
+        self.hide_summary = hide_summary;
+    }
+
+    fn handle_start(
+        &mut self,
+        execution_id: ExecutionId,
+        display: Option<ExecutionItemDisplay>,
+        cache_status: CacheStatus,
+    ) {
         // Update statistics immediately based on cache status
         match &cache_status {
-            CacheStatus::Hit { .. } => self.stats.cache_hits += 1,
+            CacheStatus::Hit { .. } => {
+                self.stats.cache_hits += 1;
+                // Track cache hit executions for silent mode
+                if self.silent_if_cache_hit {
+                    self.cache_hit_executions.insert(execution_id);
+                }
+            }
             CacheStatus::Miss(_) => self.stats.cache_misses += 1,
             CacheStatus::Disabled(_) => self.stats.cache_disabled += 1,
         }
@@ -109,18 +137,25 @@ impl<W: Write> LabeledReporter<W> {
             if cwd_relative.is_empty() { String::new() } else { format!("{cwd_relative}/") };
         let command_str = format!("{cwd_str}$ {}", display.command);
 
-        // Print command with optional inline cache status
-        // Use display module for plain text, apply styling here
-        if let Some(inline_status) = format_cache_status_inline(&cache_status) {
-            // Apply styling based on cache status type
-            let styled_status = match &cache_status {
-                CacheStatus::Hit { .. } => inline_status.style(Style::new().green().dimmed()),
-                CacheStatus::Miss(_) => inline_status.style(CACHE_MISS_STYLE.dimmed()),
-                CacheStatus::Disabled(_) => inline_status.style(Style::new().bright_black()),
-            };
-            let _ = writeln!(self.writer, "{} {}", command_str.style(COMMAND_STYLE), styled_status);
-        } else {
-            let _ = writeln!(self.writer, "{}", command_str.style(COMMAND_STYLE));
+        // Skip printing if silent_if_cache_hit is enabled and this is a cache hit
+        let should_print =
+            !self.silent_if_cache_hit || !matches!(cache_status, CacheStatus::Hit { .. });
+
+        if should_print {
+            // Print command with optional inline cache status
+            // Use display module for plain text, apply styling here
+            if let Some(inline_status) = format_cache_status_inline(&cache_status) {
+                // Apply styling based on cache status type
+                let styled_status = match &cache_status {
+                    CacheStatus::Hit { .. } => inline_status.style(Style::new().green().dimmed()),
+                    CacheStatus::Miss(_) => inline_status.style(CACHE_MISS_STYLE.dimmed()),
+                    CacheStatus::Disabled(_) => inline_status.style(Style::new().bright_black()),
+                };
+                let _ =
+                    writeln!(self.writer, "{} {}", command_str.style(COMMAND_STYLE), styled_status);
+            } else {
+                let _ = writeln!(self.writer, "{}", command_str.style(COMMAND_STYLE));
+            }
         }
 
         // Store execution info for summary
@@ -352,9 +387,15 @@ impl<W: Write> Reporter for LabeledReporter<W> {
     fn handle_event(&mut self, event: ExecutionEvent) {
         match event.kind {
             ExecutionEventKind::Start { display, cache_status } => {
-                self.handle_start(display, cache_status);
+                self.handle_start(event.execution_id, display, cache_status);
             }
             ExecutionEventKind::Output { content, .. } => {
+                // Skip output if silent_if_cache_hit is enabled and this execution is a cache hit
+                if self.silent_if_cache_hit
+                    && self.cache_hit_executions.contains(&event.execution_id)
+                {
+                    return;
+                }
                 let _ = self.writer.write_all(&content);
                 let _ = self.writer.flush();
             }
@@ -397,8 +438,10 @@ impl<W: Write> Reporter for LabeledReporter<W> {
             return Err(anyhow::anyhow!("Execution aborted: {}", error_msg));
         }
 
-        // No errors - print summary
-        self.print_summary();
+        // No errors - print summary if not hidden
+        if !self.hide_summary {
+            self.print_summary();
+        }
         Ok(())
     }
 }
