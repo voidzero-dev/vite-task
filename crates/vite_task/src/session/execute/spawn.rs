@@ -84,47 +84,34 @@ where
 
     let start = Instant::now();
 
+    // Helper closure to process output chunks
+    let mut process_output = |kind: OutputKind, content: Vec<u8>| {
+        // Emit event immediately
+        on_output(kind, content.clone().into());
+
+        // Merge consecutive outputs of the same kind for caching
+        if let Some(last) = outputs.last_mut()
+            && last.kind == kind
+        {
+            last.content.extend(&content);
+        } else {
+            outputs.push(StdOutput { kind, content });
+        }
+    };
+
     // Read from both stdout and stderr concurrently using select!
     loop {
         tokio::select! {
             result = child_stdout.read(&mut stdout_buf), if !stdout_done => {
-                let n = result?;
-                if n == 0 {
-                    stdout_done = true;
-                } else {
-                    let content = stdout_buf[..n].to_vec();
-
-                    // Emit event immediately
-                    on_output(OutputKind::StdOut, content.clone().into());
-
-                    // Merge consecutive outputs of the same kind for caching
-                    if let Some(last) = outputs.last_mut()
-                        && last.kind == OutputKind::StdOut
-                    {
-                        last.content.extend(&content);
-                    } else {
-                        outputs.push(StdOutput { kind: OutputKind::StdOut, content });
-                    }
+                match result? {
+                    0 => stdout_done = true,
+                    n => process_output(OutputKind::StdOut, stdout_buf[..n].to_vec()),
                 }
             }
             result = child_stderr.read(&mut stderr_buf), if !stderr_done => {
-                let n = result?;
-                if n == 0 {
-                    stderr_done = true;
-                } else {
-                    let content = stderr_buf[..n].to_vec();
-
-                    // Emit event immediately
-                    on_output(OutputKind::StdErr, content.clone().into());
-
-                    // Merge consecutive outputs of the same kind for caching
-                    if let Some(last) = outputs.last_mut()
-                        && last.kind == OutputKind::StdErr
-                    {
-                        last.content.extend(&content);
-                    } else {
-                        outputs.push(StdOutput { kind: OutputKind::StdErr, content });
-                    }
+                match result? {
+                    0 => stderr_done = true,
+                    n => process_output(OutputKind::StdErr, stderr_buf[..n].to_vec()),
                 }
             }
             else => break,
