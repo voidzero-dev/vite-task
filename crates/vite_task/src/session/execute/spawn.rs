@@ -11,7 +11,7 @@ use bincode::{Decode, Encode};
 use fspy::AccessMode;
 use futures_util::future::try_join3;
 use serde::Serialize;
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use tokio::io::{AsyncRead, AsyncReadExt as _};
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 
@@ -51,25 +51,19 @@ pub struct SpawnResult {
     pub duration: Duration,
 }
 
-/// Collects stdout/stderr into `outputs` and simultaneously writes to real stdout/stderr
+/// Collects stdout/stderr into `outputs` for event-based reporting
 async fn collect_std_outputs(
     outputs: &Mutex<Vec<StdOutput>>,
     mut stream: impl AsyncRead + Unpin,
     kind: OutputKind,
 ) -> Result<(), Error> {
     let mut buf = [0u8; 8192];
-    let mut parent_output_handle: Box<dyn AsyncWrite + Unpin + Send> = match kind {
-        OutputKind::StdOut => Box::new(tokio::io::stdout()),
-        OutputKind::StdErr => Box::new(tokio::io::stderr()),
-    };
     loop {
         let n = stream.read(&mut buf).await?;
         if n == 0 {
             return Ok(());
         }
         let content = &buf[..n];
-        parent_output_handle.write_all(content).await?;
-        parent_output_handle.flush().await?;
 
         // Merge consecutive outputs of the same kind
         let mut outputs = outputs.lock().unwrap();

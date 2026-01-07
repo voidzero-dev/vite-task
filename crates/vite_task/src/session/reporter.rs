@@ -77,26 +77,6 @@ impl<W: Write> LabeledReporter<W> {
         }
     }
 
-    /// Handle an execution event - called by Session::execute()
-    pub fn handle_event(&mut self, event: ExecutionEvent) {
-        match event.kind {
-            ExecutionEventKind::Start(display) => {
-                self.handle_start(display);
-            }
-            ExecutionEventKind::Output { content, .. } => {
-                // Stream output directly to writer
-                let _ = self.writer.write_all(&content);
-                let _ = self.writer.flush();
-            }
-            ExecutionEventKind::Error { message } => {
-                self.handle_error(event.execution_id, message);
-            }
-            ExecutionEventKind::Finish { status, cache_status } => {
-                self.handle_finish(event.execution_id, status, cache_status);
-            }
-        }
-    }
-
     fn handle_start(&mut self, display: Option<ExecutionItemDisplay>) {
         // Handle None case - just store minimal info
         let Some(display) = display else {
