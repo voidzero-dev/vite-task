@@ -14,7 +14,7 @@ use tokio::io::AsyncReadExt as _;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 
-use crate::{Error, collections::HashMap};
+use crate::collections::HashMap;
 
 /// Path read access info
 #[derive(Debug, Clone, Copy)]
@@ -72,7 +72,7 @@ pub async fn spawn_with_tracking<F>(
     workspace_root: &AbsolutePath,
     mut on_output: F,
     track_result: Option<&mut SpawnTrackResult>,
-) -> Result<SpawnResult, Error>
+) -> anyhow::Result<SpawnResult>
 where
     F: FnMut(OutputKind, BString),
 {
@@ -181,7 +181,7 @@ where
                     return None;
                 };
                 Some(RelativePathBuf::new(stripped_path).map_err(|err| {
-                    Error::InvalidRelativePath { path: stripped_path.into(), reason: err }
+                    anyhow::anyhow!("Invalid relative path '{}': {}", stripped_path.display(), err)
                 }))
             })
             .transpose()?;

@@ -77,7 +77,7 @@ impl PostRunFingerprint {
         path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
         fingerprint_ignores: Option<&[Str]>,
-    ) -> Result<Self, crate::Error> {
+    ) -> anyhow::Result<Self> {
         // Build ignore matcher from patterns if provided
         let ignore_matcher = fingerprint_ignores
             .filter(|patterns| !patterns.is_empty())
@@ -99,7 +99,7 @@ impl PostRunFingerprint {
                 let fingerprint = fingerprint_path(&full_path, *path_read)?;
                 Ok((relative_path.clone(), fingerprint))
             })
-            .collect::<Result<HashMap<_, _>, crate::Error>>()?;
+            .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
         Ok(Self { inputs })
     }
@@ -109,7 +109,7 @@ impl PostRunFingerprint {
     pub fn validate(
         &self,
         base_dir: &AbsolutePath,
-    ) -> Result<Option<PostRunFingerprintMismatch>, crate::Error> {
+    ) -> anyhow::Result<Option<PostRunFingerprintMismatch>> {
         let input_mismatch =
             self.inputs.par_iter().find_map_any(|(input_relative_path, path_fingerprint)| {
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
@@ -155,7 +155,7 @@ fn should_ignore_entry(name: &[u8]) -> bool {
 pub fn fingerprint_path(
     path: &Arc<AbsolutePath>,
     path_read: PathRead,
-) -> Result<PathFingerprint, crate::Error> {
+) -> anyhow::Result<PathFingerprint> {
     let std_path = path.as_path();
 
     let file = match File::open(std_path) {
@@ -205,7 +205,7 @@ pub fn fingerprint_path(
 fn process_directory(
     path: &std::path::Path,
     path_read: PathRead,
-) -> Result<PathFingerprint, crate::Error> {
+) -> anyhow::Result<PathFingerprint> {
     if !path_read.read_dir_entries {
         return Ok(PathFingerprint::Folder(None));
     }
@@ -238,10 +238,7 @@ fn process_directory(
 
 /// Process a directory on Unix using nix for efficiency
 #[cfg(unix)]
-fn process_directory_unix(
-    file: File,
-    path_read: PathRead,
-) -> Result<PathFingerprint, crate::Error> {
+fn process_directory_unix(file: File, path_read: PathRead) -> anyhow::Result<PathFingerprint> {
     use std::os::fd::AsFd;
 
     if !path_read.read_dir_entries {

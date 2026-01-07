@@ -17,7 +17,6 @@ use super::execute::{
     fingerprint::{PostRunFingerprint, PostRunFingerprintMismatch},
     spawn::StdOutput,
 };
-use crate::Error;
 
 /// Command cache value, for validating post-run fingerprint after the spawn fingerprint is matched,
 /// and replaying the std outputs if validated.
@@ -63,7 +62,7 @@ impl Display for FingerprintMismatch {
 }
 
 impl ExecutionCache {
-    pub fn load_from_path(cache_path: AbsolutePathBuf) -> Result<Self, Error> {
+    pub fn load_from_path(cache_path: AbsolutePathBuf) -> anyhow::Result<Self> {
         let path: &AbsolutePath = cache_path.as_ref();
         tracing::info!("Creating task cache directory at {:?}", path);
         std::fs::create_dir_all(path)?;
@@ -93,14 +92,16 @@ impl ExecutionCache {
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
                 4 => break, // current version
-                5.. => return Err(Error::UnrecognizedDbVersion(user_version)),
+                5.. => {
+                    return Err(anyhow::anyhow!("Unrecognized database version: {}", user_version));
+                }
             }
         }
         Ok(Self { conn: Mutex::new(conn) })
     }
 
     #[tracing::instrument]
-    pub async fn save(self) -> Result<(), Error> {
+    pub async fn save(self) -> anyhow::Result<()> {
         // do some cleanup in the future
         Ok(())
     }
@@ -111,7 +112,7 @@ impl ExecutionCache {
         &self,
         cache_metadata: &CacheMetadata,
         base_dir: &AbsolutePath,
-    ) -> Result<Result<CommandCacheValue, CacheMiss>, Error> {
+    ) -> anyhow::Result<Result<CommandCacheValue, CacheMiss>> {
         let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
@@ -153,7 +154,7 @@ impl ExecutionCache {
         &self,
         cache_metadata: &CacheMetadata,
         cache_value: CommandCacheValue,
-    ) -> Result<(), Error> {
+    ) -> anyhow::Result<()> {
         let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
@@ -169,7 +170,7 @@ impl ExecutionCache {
         &self,
         table: &str,
         key: &K,
-    ) -> Result<Option<V>, Error> {
+    ) -> anyhow::Result<Option<V>> {
         let conn = self.conn.lock().await;
         let mut select_stmt =
             conn.prepare_cached(&format!("SELECT value FROM {table} WHERE key=?"))?;
@@ -186,14 +187,14 @@ impl ExecutionCache {
     async fn get_by_spawn_fingerprint(
         &self,
         spawn_fingerprint: &SpawnFingerprint,
-    ) -> Result<Option<CommandCacheValue>, Error> {
+    ) -> anyhow::Result<Option<CommandCacheValue>> {
         self.get_key_by_value("spawn_fingerprint_cache", spawn_fingerprint).await
     }
 
     async fn get_fingerprint_by_execution_key(
         &self,
         execution_cache_key: &ExecutionCacheKey,
-    ) -> Result<Option<SpawnFingerprint>, Error> {
+    ) -> anyhow::Result<Option<SpawnFingerprint>> {
         self.get_key_by_value("execution_key_to_fingerprint", execution_cache_key).await
     }
 
@@ -202,7 +203,7 @@ impl ExecutionCache {
         table: &str,
         key: &K,
         value: &V,
-    ) -> Result<(), Error> {
+    ) -> anyhow::Result<()> {
         let conn = self.conn.lock().await;
         let key_blob = encode_to_vec(key, BINCODE_CONFIG)?;
         let value_blob = encode_to_vec(value, BINCODE_CONFIG)?;
@@ -217,7 +218,7 @@ impl ExecutionCache {
         &self,
         spawn_fingerprint: &SpawnFingerprint,
         cache_value: &CommandCacheValue,
-    ) -> Result<(), Error> {
+    ) -> anyhow::Result<()> {
         self.upsert("spawn_fingerprint_cache", spawn_fingerprint, cache_value).await
     }
 
@@ -225,7 +226,7 @@ impl ExecutionCache {
         &self,
         execution_cache_key: &ExecutionCacheKey,
         spawn_fingerprint: &SpawnFingerprint,
-    ) -> Result<(), Error> {
+    ) -> anyhow::Result<()> {
         self.upsert("execution_key_to_fingerprint", execution_cache_key, spawn_fingerprint).await
     }
 
@@ -233,7 +234,7 @@ impl ExecutionCache {
         &self,
         table: &str,
         out: &mut impl Write,
-    ) -> Result<(), Error> {
+    ) -> anyhow::Result<()> {
         let conn = self.conn.lock().await;
         let mut select_stmt = conn.prepare_cached(&format!("SELECT key, value FROM {table}"))?;
         let mut rows = select_stmt.query([])?;
@@ -252,7 +253,7 @@ impl ExecutionCache {
         Ok(())
     }
 
-    pub async fn list(&self, mut out: impl Write) -> Result<(), Error> {
+    pub async fn list(&self, mut out: impl Write) -> anyhow::Result<()> {
         out.write_all(b"------- execution_key_to_fingerprint -------\n")?;
         self.list_table::<ExecutionCacheKey, SpawnFingerprint>(
             "execution_key_to_fingerprint",
