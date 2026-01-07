@@ -238,35 +238,36 @@ impl ExecutionContext<'_> {
             }
         }
 
-        // 2. Execute command with tracking
-        let result =
-            match spawn_with_tracking(&spawn_execution.spawn_command, &*self.cache_base_path).await
-            {
-                Ok(result) => result,
-                Err(err) => {
-                    self.event_handler.handle_event(ExecutionEvent {
-                        execution_id,
-                        kind: ExecutionEventKind::Error {
-                            message: format!("Failed to spawn process: {err}"),
+        // 2. Execute command with tracking, emitting output events in real-time
+        let result = match spawn_with_tracking(
+            &spawn_execution.spawn_command,
+            &*self.cache_base_path,
+            Some(|kind, content| {
+                self.event_handler.handle_event(ExecutionEvent {
+                    execution_id,
+                    kind: ExecutionEventKind::Output {
+                        kind: match kind {
+                            SpawnOutputKind::StdOut => OutputKind::Stdout,
+                            SpawnOutputKind::StdErr => OutputKind::Stderr,
                         },
-                    });
-                    return Err(ExecutionAborted);
-                }
-            };
-
-        // 3. Emit outputs
-        for output in result.std_outputs.iter() {
-            self.event_handler.handle_event(ExecutionEvent {
-                execution_id,
-                kind: ExecutionEventKind::Output {
-                    kind: match output.kind {
-                        SpawnOutputKind::StdOut => OutputKind::Stdout,
-                        SpawnOutputKind::StdErr => OutputKind::Stderr,
+                        content,
                     },
-                    content: output.content.clone().into(),
-                },
-            });
-        }
+                });
+            }),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                self.event_handler.handle_event(ExecutionEvent {
+                    execution_id,
+                    kind: ExecutionEventKind::Error {
+                        message: format!("Failed to spawn process: {err}"),
+                    },
+                });
+                return Err(ExecutionAborted);
+            }
+        };
 
         // 4. Update cache if successful
         if let Some(cache_metadata) = cache_metadata

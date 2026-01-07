@@ -8,6 +8,7 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
+use bstr::BString;
 use fspy::AccessMode;
 use futures_util::future::try_join3;
 use serde::Serialize;
@@ -51,28 +52,35 @@ pub struct SpawnResult {
     pub duration: Duration,
 }
 
-/// Collects stdout/stderr into `outputs` for event-based reporting
-async fn collect_std_outputs(
+/// Collects stdout/stderr into `outputs` and emits events in real-time
+async fn collect_std_outputs<F>(
     outputs: &Mutex<Vec<StdOutput>>,
     mut stream: impl AsyncRead + Unpin,
     kind: OutputKind,
-) -> Result<(), Error> {
+    on_output: &Mutex<F>,
+) -> Result<(), Error>
+where
+    F: FnMut(OutputKind, BString),
+{
     let mut buf = [0u8; 8192];
     loop {
         let n = stream.read(&mut buf).await?;
         if n == 0 {
             return Ok(());
         }
-        let content = &buf[..n];
+        let content = buf[..n].to_vec();
 
-        // Merge consecutive outputs of the same kind
+        // Emit event immediately via callback
+        on_output.lock().unwrap()(kind, content.clone().into());
+
+        // Merge consecutive outputs of the same kind for caching
         let mut outputs = outputs.lock().unwrap();
         if let Some(last) = outputs.last_mut()
             && last.kind == kind
         {
-            last.content.extend_from_slice(content);
+            last.content.extend(&content);
         } else {
-            outputs.push(StdOutput { kind, content: content.to_vec() });
+            outputs.push(StdOutput { kind, content });
         }
     }
 }
@@ -81,10 +89,16 @@ async fn collect_std_outputs(
 ///
 /// Returns the execution result including captured outputs, exit status,
 /// and tracked file accesses.
-pub async fn spawn_with_tracking(
+///
+/// If `on_output` is provided, it will be called in real-time as stdout/stderr data arrives.
+pub async fn spawn_with_tracking<F>(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
-) -> Result<SpawnResult, Error> {
+    on_output: Option<F>,
+) -> Result<SpawnResult, Error>
+where
+    F: FnMut(OutputKind, BString),
+{
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
     cmd.args(spawn_command.args.iter().map(|arg| arg.as_str()));
     cmd.envs(spawn_command.all_envs.iter());
@@ -98,16 +112,31 @@ pub async fn spawn_with_tracking(
 
     let outputs = Mutex::new(Vec::<StdOutput>::new());
 
-    let ((), (), (termination, duration)) = try_join3(
-        collect_std_outputs(&outputs, child_stdout, OutputKind::StdOut),
-        collect_std_outputs(&outputs, child_stderr, OutputKind::StdErr),
-        async {
-            let start = Instant::now();
-            let exit_status = child.wait_handle.await?;
-            Ok((exit_status, start.elapsed()))
-        },
-    )
-    .await?;
+    let ((), (), (termination, duration)) = if let Some(on_output) = on_output {
+        let on_output = Mutex::new(on_output);
+        try_join3(
+            collect_std_outputs(&outputs, child_stdout, OutputKind::StdOut, &on_output),
+            collect_std_outputs(&outputs, child_stderr, OutputKind::StdErr, &on_output),
+            async {
+                let start = Instant::now();
+                let exit_status = child.wait_handle.await?;
+                Ok((exit_status, start.elapsed()))
+            },
+        )
+        .await?
+    } else {
+        let noop = Mutex::new(|_, _| {});
+        try_join3(
+            collect_std_outputs(&outputs, child_stdout, OutputKind::StdOut, &noop),
+            collect_std_outputs(&outputs, child_stderr, OutputKind::StdErr, &noop),
+            async {
+                let start = Instant::now();
+                let exit_status = child.wait_handle.await?;
+                Ok((exit_status, start.elapsed()))
+            },
+        )
+        .await?
+    };
 
     // Process path accesses
     let mut path_reads = HashMap::<RelativePathBuf, PathRead>::new();
