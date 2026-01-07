@@ -60,14 +60,42 @@ struct ExecutionStats {
 }
 
 /// Event handler that renders execution events in labeled format.
+///
+/// # Output Modes
+///
+/// The reporter has different output modes based on configuration and execution context:
+///
+/// ## Normal Mode (default)
+/// - Prints command lines with cache status indicators during execution
+/// - Shows full summary with Statistics and Task Details at the end
+///
+/// ## Silent Cache Hit Mode (`silent_if_cache_hit = true`)
+/// - Suppresses command lines and output for cache hit executions
+/// - Useful for faster, cleaner output when many tasks are cached
+///
+/// ## Hidden Summary Mode (`hide_summary = true`)
+/// - Skips printing the execution summary entirely
+/// - Useful for programmatic usage or when summary is not needed
+///
+/// ## Simplified Summary for Built-in Commands
+/// - When a single built-in command (e.g., `vite lint`) is executed:
+///   - Skips full summary (no Statistics/Task Details sections)
+///   - Shows only cache status (except for "NotFound" which is hidden for clean first-run output)
+///   - Results in clean output showing just the command's stdout/stderr
 pub struct LabeledReporter<W: Write> {
     writer: W,
     workspace_path: Arc<AbsolutePath>,
     executions: Vec<ExecutionInfo>,
     stats: ExecutionStats,
     first_error: Option<String>,
+
+    /// When true, suppresses command line and output for cache hit executions
     silent_if_cache_hit: bool,
+
+    /// When true, skips printing the execution summary at the end
     hide_summary: bool,
+
+    /// Tracks which executions are cache hits (for silent_if_cache_hit mode)
     cache_hit_executions: HashSet<ExecutionId>,
 }
 
@@ -383,11 +411,20 @@ impl<W: Write> LabeledReporter<W> {
     }
 
     /// Print simplified cache status for single built-in commands
+    ///
+    /// Shows cache status for built-in commands, but hides "no previous cache entry found"
+    /// to keep first-run output clean (just shows the command's stdout/stderr).
     fn print_simple_cache_status(&mut self) {
         if let Some(exec) = self.executions.first() {
+            // Skip printing for "NotFound" cache miss - keeps first-run output clean
+            use super::cache::CacheMiss;
+            if matches!(&exec.cache_status, CacheStatus::Miss(CacheMiss::NotFound)) {
+                return;
+            }
+
             let _ = writeln!(self.writer);
 
-            // Just show the cache status summary
+            // Show cache status for hits, meaningful misses, and disabled cache
             let cache_summary = format_cache_status_summary(&exec.cache_status);
             let styled_summary = match &exec.cache_status {
                 CacheStatus::Hit { .. } => cache_summary.style(Style::new().green()),

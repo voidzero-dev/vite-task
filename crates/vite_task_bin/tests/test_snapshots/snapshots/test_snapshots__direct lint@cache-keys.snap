@@ -7,8 +7,6 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
 Found 0 warnings and 0 errors.
 Finished in <duration>ms on 0 files with 90 rules using 10 threads.
 
-→ Cache miss: no previous cache entry found
-
 > echo debugger > main.js
 
 > vite lint
