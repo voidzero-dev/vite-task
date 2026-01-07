@@ -7,16 +7,7 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
 Found 0 warnings and 0 errors.
 Finished in <duration>ms on 0 files with 90 rules using 10 threads.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses  
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+→ Cache miss: no previous cache entry found
 
 > echo debugger > main.js
 
@@ -32,13 +23,4 @@ Task Details:
 Found 1 warning and 0 errors.
 Finished in <duration>ms on 1 file with 90 rules using 10 threads.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses  
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+→ Cache miss: content of input '' changed

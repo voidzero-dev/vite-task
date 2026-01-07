@@ -381,6 +381,22 @@ impl<W: Write> LabeledReporter<W> {
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".style(Style::new().bright_black())
         );
     }
+
+    /// Print simplified cache status for single built-in commands
+    fn print_simple_cache_status(&mut self) {
+        if let Some(exec) = self.executions.first() {
+            let _ = writeln!(self.writer);
+
+            // Just show the cache status summary
+            let cache_summary = format_cache_status_summary(&exec.cache_status);
+            let styled_summary = match &exec.cache_status {
+                CacheStatus::Hit { .. } => cache_summary.style(Style::new().green()),
+                CacheStatus::Miss(_) => cache_summary.style(CACHE_MISS_STYLE),
+                CacheStatus::Disabled(_) => cache_summary.style(Style::new().bright_black()),
+            };
+            let _ = writeln!(self.writer, "{}", styled_summary);
+        }
+    }
 }
 
 impl<W: Write> Reporter for LabeledReporter<W> {
@@ -440,7 +456,12 @@ impl<W: Write> Reporter for LabeledReporter<W> {
 
         // No errors - print summary if not hidden
         if !self.hide_summary {
-            self.print_summary();
+            // Special case: single built-in command (no display info)
+            if self.executions.len() == 1 && self.executions[0].display.is_none() {
+                self.print_simple_cache_status();
+            } else {
+                self.print_summary();
+            }
         }
         Ok(())
     }
