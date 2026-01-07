@@ -4,49 +4,49 @@ expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/vite-task-smoke
 ---
 > vite run test-task
-[36m$ echo hello[0m
+$ echo hello
 hello
-[36m$ print-file main.js[0m
+$ print-file main.js
 console.log('foo');
 console.log('foo');
 
-[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[97;1m    Vite+ Task Runner • Execution Summary[0m
-[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[1mStatistics:[0m  [97m 2 tasks[0m [32m• 0 cache hits[0m [35m• 1 cache misses[0m 
-[1mPerformance:[0m  [31m0%[0m cache hit rate
+Statistics:   2 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
 
-[1mTask Details:[0m
-[90m────────────────────────────────────────────────[0m
-  [90m[1][0m [97;1mtest-task[0m: [36mecho hello[0m [32;1m✓[0m
-      [90m→ Cache disabled: InProcessExecution[0m
-  [90m·······················································[0m
-  [90m[2][0m [97;1mtest-task[0m: [36mprint-file main.js[0m [32;1m✓[0m
-      [35m→ Cache miss[0m
-[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+Task Details:
+────────────────────────────────────────────────
+  [1] test-task: echo hello ✓
+      → Cache disabled: InProcessExecution
+  ·······················································
+  [2] test-task: print-file main.js ✓
+      → Cache miss
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 > replace-file-content main.js foo bar
 
 > vite run test-task
-[36m$ echo hello[0m
+$ echo hello
 hello
-[36m$ print-file main.js[0m
+$ print-file main.js
 console.log('bar');
 console.log('bar');
 
-[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[97;1m    Vite+ Task Runner • Execution Summary[0m
-[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[1mStatistics:[0m  [97m 2 tasks[0m [32m• 0 cache hits[0m [35m• 1 cache misses[0m 
-[1mPerformance:[0m  [31m0%[0m cache hit rate
+Statistics:   2 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
 
-[1mTask Details:[0m
-[90m────────────────────────────────────────────────[0m
-  [90m[1][0m [97;1mtest-task[0m: [36mecho hello[0m [32;1m✓[0m
-      [90m→ Cache disabled: InProcessExecution[0m
-  [90m·······················································[0m
-  [90m[2][0m [97;1mtest-task[0m: [36mprint-file main.js[0m [32;1m✓[0m
-      [35m→ Cache miss[0m
-[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+Task Details:
+────────────────────────────────────────────────
+  [1] test-task: echo hello ✓
+      → Cache disabled: InProcessExecution
+  ·······················································
+  [2] test-task: print-file main.js ✓
+      → Cache miss
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
