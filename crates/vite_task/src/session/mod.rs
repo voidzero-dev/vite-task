@@ -214,7 +214,7 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
 }
 
 impl<'a, CustomSubcommand: clap::Subcommand> Session<'a, CustomSubcommand> {
-    async fn plan_synthetic_task(
+    pub async fn plan_synthetic_task(
         &mut self,
         synthetic_plan_request: SyntheticPlanRequest,
     ) -> Result<ExecutionPlan, vite_task_plan::Error> {
