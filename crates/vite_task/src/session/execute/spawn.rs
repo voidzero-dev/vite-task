@@ -3,14 +3,12 @@
 use std::{
     collections::hash_map::Entry,
     process::{ExitStatus, Stdio},
-    sync::Arc,
     time::{Duration, Instant},
 };
 
 use bincode::{Decode, Encode};
 use bstr::BString;
 use fspy::AccessMode;
-use futures_util::future::Either;
 use serde::Serialize;
 use tokio::io::AsyncReadExt as _;
 use vite_path::{AbsolutePath, RelativePathBuf};
@@ -59,7 +57,6 @@ pub struct SpawnTrackResult {
     pub path_reads: HashMap<RelativePathBuf, PathRead>,
 
     /// Tracked path writes
-    #[expect(dead_code)]
     pub path_writes: HashMap<RelativePathBuf, PathWrite>,
 }
 

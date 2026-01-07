@@ -1,0 +1,56 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: task_graph_json
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-disabled
+---
+[
+  {
+    "key": [
+      "<workspace>/",
+      "cached-task"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "cache-disabled-test",
+        "task_name": "cached-task",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "print-file test.txt",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "no-cache-task"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "cache-disabled-test",
+        "task_name": "no-cache-task",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "print-file test.txt",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": null
+        }
+      }
+    },
+    "neighbors": []
+  }
+]
