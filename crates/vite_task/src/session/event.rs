@@ -54,7 +54,8 @@ pub struct ExecutionEvent {
 
 #[derive(Debug)]
 pub enum ExecutionEventKind {
-    Start(ExecutionItemDisplay),
+    Start(Option<ExecutionItemDisplay>),
     Output { kind: OutputKind, content: BString },
+    Error { message: String },
     Finish { status: Option<i32>, cache_status: CacheStatus },
 }

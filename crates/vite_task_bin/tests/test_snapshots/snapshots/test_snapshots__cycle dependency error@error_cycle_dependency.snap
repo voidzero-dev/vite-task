@@ -1,0 +1,12 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/error_cycle_dependency
+---
+[1]> vite run task-a
+[31;1m✗[0m [31mCycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))[0m
+
+[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[31;1mExecution aborted due to error:[0m [31mCycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))[0m
+[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+Error: Execution aborted: Cycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))

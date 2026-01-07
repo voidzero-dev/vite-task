@@ -3,8 +3,22 @@ source: crates/vite_task_bin/tests/test_snapshots/main.rs
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
 ---
-[1]> vite lint
-Error: Leaf execution item missing display information - execution items should be wrapped with ExecutionItem
+> vite lint
+Found 0 warnings and 0 errors.
+Finished in <duration>ms on 0 files with 90 rules using 10 threads.
+Found 0 warnings and 0 errors.
+Finished in <duration>ms on 0 files with 90 rules using 10 threads.
+
+[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[97;1m    Vite+ Task Runner • Execution Summary[0m
+[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+[1mStatistics:[0m  [97m 1 tasks[0m [32m• 0 cache hits[0m [35m• 1 cache misses[0m 
+[1mPerformance:[0m  [31m0%[0m cache hit rate
+
+[1mTask Details:[0m
+[90m────────────────────────────────────────────────[0m
+[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
 
 [1]> json-edit
 Usage: json-edit <filename> <script>

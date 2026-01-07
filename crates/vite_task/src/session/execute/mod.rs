@@ -1,20 +1,15 @@
 pub mod fingerprint;
 pub mod spawn;
 
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use futures_util::FutureExt;
-use petgraph::{
-    algo::{Cycle, toposort},
-    graph::DiGraph,
-};
-use vite_path::{AbsolutePath, RelativePathBuf, relative::InvalidPathDataError};
-use vite_str::Str;
-use vite_task_graph::{IndexedTaskGraph, display::TaskDisplay};
+use petgraph::{algo::toposort, graph::DiGraph};
+use vite_path::AbsolutePath;
+use vite_task_graph::IndexedTaskGraph;
 use vite_task_plan::{
-    ExecutionItem, ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnExecution,
-    TaskExecution,
-    execution_graph::{ExecutionIx, ExecutionNodeIndex},
+    ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnExecution, TaskExecution,
+    execution_graph::ExecutionIx,
 };
 
 use self::{
@@ -27,80 +22,30 @@ use super::{
         CacheDisabledReason, CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId,
         ExecutionItemDisplay, OutputKind,
     },
+    reporter::Reporter,
 };
 use crate::Session;
 
-#[derive(Debug, thiserror::Error)]
-pub enum PathError {
-    #[error("Path {path:?} is outside of the workspace {workspace_path:?}")]
-    PathOutsideWorkspace { path: Arc<AbsolutePath>, workspace_path: Arc<AbsolutePath> },
-    #[error("Path {path:?} contains characters that make it non-portable")]
-    NonPortableRelativePath {
-        path: Arc<Path>,
-        #[source]
-        error: InvalidPathDataError,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ExecuteError {
-    #[error("Cycle dependencies detected: {0:?}")]
-    CycleDependencies(Cycle<ExecutionNodeIndex>),
-
-    #[error(transparent)]
-    PathError(#[from] PathError),
-
-    #[error(
-        "Leaf execution item missing display information - execution items should be wrapped with ExecutionItem"
-    )]
-    MissingDisplayInfo,
-}
+/// Internal error type used to abort execution when errors occur.
+/// This error is swallowed in Session::execute and never exposed externally.
+#[derive(Debug)]
+struct ExecutionAborted;
 
 struct ExecutionContext<'a> {
     indexed_task_graph: Option<&'a IndexedTaskGraph>,
-    event_handler: &'a mut (dyn FnMut(ExecutionEvent) + 'a),
+    event_handler: &'a mut dyn Reporter,
     current_execution_id: ExecutionId,
     cache: &'a ExecutionCache,
     /// All relative paths in cache are relative to this base path
     cache_base_path: &'a Arc<AbsolutePath>,
 }
 
-/// The origin of the current execution item, either directly from CLI args, or from a task in the task graph
-enum ExecutionOrigin<'a> {
-    CLIArgs {
-        args_without_program: &'a Arc<[Str]>,
-        cwd: &'a Arc<AbsolutePath>,
-    },
-    UserTask {
-        task_display: TaskDisplay,
-        item: &'a ExecutionItem,
-        item_index: usize,
-        item_count: usize,
-    },
-}
-
 impl ExecutionContext<'_> {
-    fn strip_prefix_for_cache(
-        &self,
-        path: &Arc<AbsolutePath>,
-    ) -> Result<RelativePathBuf, PathError> {
-        match path.strip_prefix(&*self.cache_base_path) {
-            Ok(Some(rel_path)) => Ok(rel_path),
-            Ok(None) => Err(PathError::PathOutsideWorkspace {
-                path: Arc::clone(path),
-                workspace_path: Arc::clone(self.cache_base_path),
-            }),
-            Err(err) => Err(PathError::NonPortableRelativePath {
-                path: err.stripped_path.into(),
-                error: err.invalid_path_data_error,
-            }),
-        }
-    }
-
     async fn execute_item_kind(
         &mut self,
+        display: Option<&ExecutionItemDisplay>,
         item_kind: &ExecutionItemKind,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), ExecutionAborted> {
         match item_kind {
             ExecutionItemKind::Expanded(graph) => {
                 // clone for reversing edges and removing nodes
@@ -119,7 +64,27 @@ impl ExecutionContext<'_> {
                 // or the task dependencies declaration is meaningless
                 let node_indices = match toposort(&graph, None) {
                     Ok(ok) => ok,
-                    Err(err) => return Err(ExecuteError::CycleDependencies(err)),
+                    Err(cycle) => {
+                        // Follow standard error pattern: Start event, then Error event
+                        let execution_id = self.current_execution_id;
+                        self.current_execution_id = self.current_execution_id.next();
+
+                        // display is None for top-level execution (no parent task)
+                        // display is Some for nested execution (within a parent task)
+                        self.event_handler.handle_event(ExecutionEvent {
+                            execution_id,
+                            kind: ExecutionEventKind::Start(display.cloned()),
+                        });
+
+                        self.event_handler.handle_event(ExecutionEvent {
+                            execution_id,
+                            kind: ExecutionEventKind::Error {
+                                message: format!("Cycle dependencies detected: {cycle:?}"),
+                            },
+                        });
+
+                        return Err(ExecutionAborted);
+                    }
                 };
 
                 let ordered_executions =
@@ -133,17 +98,54 @@ impl ExecutionContext<'_> {
                                     .await?;
                             }
                             ExecutionItemKind::Expanded(_) => {
-                                self.execute_item_kind(&item.kind).boxed_local().await?;
+                                self.execute_item_kind(
+                                    Some(&item.execution_item_display),
+                                    &item.kind,
+                                )
+                                .boxed_local()
+                                .await?;
                             }
                         }
                     }
                 }
             }
             ExecutionItemKind::Leaf(leaf_execution_kind) => {
-                // This case should not happen in practice since we always wrap leaf items
-                // in an ExecutionItem with display info. Log a warning if it does.
-                tracing::warn!("execute_item_kind called with bare Leaf - missing display info");
-                return Err(ExecuteError::MissingDisplayInfo);
+                // Top-level leaf execution (built-in commands like 'vite lint')
+                // These don't have display info since they're not from the task graph
+                let execution_id = self.current_execution_id;
+                self.current_execution_id = self.current_execution_id.next();
+
+                // Emit start event with None display (no task info)
+                self.event_handler.handle_event(ExecutionEvent {
+                    execution_id,
+                    kind: ExecutionEventKind::Start(None),
+                });
+
+                // Execute the leaf directly
+                match leaf_execution_kind {
+                    LeafExecutionKind::InProcess(in_process_execution) => {
+                        let execution_output = in_process_execution.execute().await;
+                        self.event_handler.handle_event(ExecutionEvent {
+                            execution_id,
+                            kind: ExecutionEventKind::Output {
+                                kind: OutputKind::Stdout,
+                                content: execution_output.stdout.into(),
+                            },
+                        });
+                        self.event_handler.handle_event(ExecutionEvent {
+                            execution_id,
+                            kind: ExecutionEventKind::Finish {
+                                status: Some(0),
+                                cache_status: CacheStatus::Disabled(
+                                    CacheDisabledReason::InProcessExecution,
+                                ),
+                            },
+                        });
+                    }
+                    LeafExecutionKind::Spawn(spawn_execution) => {
+                        self.execute_spawn(execution_id, spawn_execution).await?;
+                    }
+                }
             }
         }
         Ok(())
@@ -153,25 +155,25 @@ impl ExecutionContext<'_> {
         &mut self,
         display: &ExecutionItemDisplay,
         leaf_execution_kind: &LeafExecutionKind,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), ExecutionAborted> {
         let execution_id = self.current_execution_id;
         self.current_execution_id = self.current_execution_id.next();
-        (self.event_handler)(ExecutionEvent {
+        self.event_handler.handle_event(ExecutionEvent {
             execution_id,
-            kind: ExecutionEventKind::Start(display.clone()),
+            kind: ExecutionEventKind::Start(Some(display.clone())),
         });
 
         match leaf_execution_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 let execution_output = in_process_execution.execute().await;
-                (self.event_handler)(ExecutionEvent {
+                self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
                     kind: ExecutionEventKind::Output {
                         kind: OutputKind::Stdout,
                         content: execution_output.stdout.into(),
                     },
                 });
-                (self.event_handler)(ExecutionEvent {
+                self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
                     kind: ExecutionEventKind::Finish {
                         status: Some(0),
@@ -192,7 +194,7 @@ impl ExecutionContext<'_> {
         &mut self,
         execution_id: ExecutionId,
         spawn_execution: &SpawnExecution,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), ExecutionAborted> {
         let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
         // 1. Try cache hit
@@ -201,7 +203,7 @@ impl ExecutionContext<'_> {
                 Ok(Ok(cached)) => {
                     // Replay cached outputs
                     for output in cached.std_outputs.iter() {
-                        (self.event_handler)(ExecutionEvent {
+                        self.event_handler.handle_event(ExecutionEvent {
                             execution_id,
                             kind: ExecutionEventKind::Output {
                                 kind: match output.kind {
@@ -212,7 +214,7 @@ impl ExecutionContext<'_> {
                             },
                         });
                     }
-                    (self.event_handler)(ExecutionEvent {
+                    self.event_handler.handle_event(ExecutionEvent {
                         execution_id,
                         kind: ExecutionEventKind::Finish {
                             status: Some(0),
@@ -225,8 +227,13 @@ impl ExecutionContext<'_> {
                     // Continue to execute
                 }
                 Err(err) => {
-                    tracing::warn!("Cache lookup failed: {:?}", err);
-                    // Continue to execute on cache error
+                    self.event_handler.handle_event(ExecutionEvent {
+                        execution_id,
+                        kind: ExecutionEventKind::Error {
+                            message: format!("Cache lookup failed: {err}"),
+                        },
+                    });
+                    return Err(ExecutionAborted);
                 }
             }
         }
@@ -237,28 +244,19 @@ impl ExecutionContext<'_> {
             {
                 Ok(result) => result,
                 Err(err) => {
-                    // Emit error output and finish
-                    (self.event_handler)(ExecutionEvent {
+                    self.event_handler.handle_event(ExecutionEvent {
                         execution_id,
-                        kind: ExecutionEventKind::Output {
-                            kind: OutputKind::Stderr,
-                            content: format!("Failed to spawn: {err}").into(),
+                        kind: ExecutionEventKind::Error {
+                            message: format!("Failed to spawn process: {err}"),
                         },
                     });
-                    (self.event_handler)(ExecutionEvent {
-                        execution_id,
-                        kind: ExecutionEventKind::Finish {
-                            status: None,
-                            cache_status: CacheStatus::Miss,
-                        },
-                    });
-                    return Ok(());
+                    return Err(ExecutionAborted);
                 }
             };
 
         // 3. Emit outputs
         for output in result.std_outputs.iter() {
-            (self.event_handler)(ExecutionEvent {
+            self.event_handler.handle_event(ExecutionEvent {
                 execution_id,
                 kind: ExecutionEventKind::Output {
                     kind: match output.kind {
@@ -288,17 +286,29 @@ impl ExecutionContext<'_> {
                         duration: result.duration,
                     };
                     if let Err(err) = self.cache.update(cache_metadata, cache_value).await {
-                        tracing::warn!("Failed to update cache: {:?}", err);
+                        self.event_handler.handle_event(ExecutionEvent {
+                            execution_id,
+                            kind: ExecutionEventKind::Error {
+                                message: format!("Failed to update cache: {err}"),
+                            },
+                        });
+                        return Err(ExecutionAborted);
                     }
                 }
                 Err(err) => {
-                    tracing::warn!("Failed to create post-run fingerprint: {:?}", err);
+                    self.event_handler.handle_event(ExecutionEvent {
+                        execution_id,
+                        kind: ExecutionEventKind::Error {
+                            message: format!("Failed to create post-run fingerprint: {err}"),
+                        },
+                    });
+                    return Err(ExecutionAborted);
                 }
             }
         }
 
         // 5. Emit finish
-        (self.event_handler)(ExecutionEvent {
+        self.event_handler.handle_event(ExecutionEvent {
             execution_id,
             kind: ExecutionEventKind::Finish {
                 status: result.exit_status.code(),
@@ -314,15 +324,21 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     pub async fn execute(
         &self,
         plan: ExecutionPlan,
-        event_handler: &mut (dyn FnMut(ExecutionEvent) + '_),
-    ) -> Result<(), ExecuteError> {
+        mut reporter: Box<dyn Reporter>,
+    ) -> anyhow::Result<()> {
         let mut execution_context = ExecutionContext {
             indexed_task_graph: self.lazy_task_graph.try_get(),
-            event_handler,
+            event_handler: &mut *reporter,
             current_execution_id: ExecutionId::zero(),
             cache: &self.cache,
             cache_base_path: &self.workspace_path,
         };
-        execution_context.execute_item_kind(plan.root_node()).await
+
+        // Execute and swallow ExecutionAborted error
+        // display is None for top-level execution
+        let _ = execution_context.execute_item_kind(None, plan.root_node()).await;
+
+        // Always call post_execution, whether execution succeeded or failed
+        reporter.post_execution()
     }
 }

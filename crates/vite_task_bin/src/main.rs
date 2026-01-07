@@ -31,9 +31,8 @@ async fn main() -> anyhow::Result<()> {
     let plan = session.plan_from_cli(cwd, task_cli_args).await?;
 
     // Create reporter and execute
-    let mut reporter = LabeledReporter::new(std::io::stdout(), session.workspace_path());
-    session.execute(plan, &mut |event| reporter.handle_event(event, None)).await?;
-    reporter.print_summary();
+    let reporter = LabeledReporter::new(std::io::stdout(), session.workspace_path());
+    session.execute(plan, Box::new(reporter)).await?;
 
     Ok(())
 }

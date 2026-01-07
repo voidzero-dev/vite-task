@@ -10,7 +10,7 @@ use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
 use clap::{Parser, Subcommand};
 pub use event::ExecutionEvent;
-pub use execute::ExecuteError;
+pub use reporter::{LabeledReporter, Reporter};
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};

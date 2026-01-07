@@ -9,10 +9,8 @@ use std::{
 use owo_colors::{Style, Styled};
 use vite_path::AbsolutePath;
 
-use super::{
-    cache::{CacheMiss, FingerprintMismatch},
-    event::{CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionItemDisplay},
-    execute::fingerprint::PostRunFingerprintMismatch,
+use super::event::{
+    CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionItemDisplay,
 };
 
 /// Wrap of `OwoColorize` that ignores style if `NO_COLOR` is set.
@@ -28,15 +26,26 @@ impl<T: owo_colors::OwoColorize> ColorizeExt for T {
     }
 }
 
+/// Trait for handling execution events and reporting results
+pub trait Reporter {
+    /// Handle an execution event (start, output, error, finish)
+    fn handle_event(&mut self, event: ExecutionEvent);
+
+    /// Called after execution completes (whether successful or not)
+    /// Returns Err if execution failed due to errors
+    fn post_execution(self: Box<Self>) -> anyhow::Result<()>;
+}
+
 const COMMAND_STYLE: Style = Style::new().cyan();
 const CACHE_MISS_STYLE: Style = Style::new().purple();
 
 /// Information tracked for each execution
 #[derive(Debug)]
 struct ExecutionInfo {
-    display: ExecutionItemDisplay,
+    display: Option<ExecutionItemDisplay>,
     cache_status: Option<CacheStatus>,
     exit_status: Option<i32>,
+    error_message: Option<String>,
 }
 
 /// Statistics for the execution summary
@@ -54,23 +63,33 @@ pub struct LabeledReporter<W: Write> {
     workspace_path: Arc<AbsolutePath>,
     executions: Vec<ExecutionInfo>,
     stats: ExecutionStats,
+    first_error: Option<String>,
 }
 
 impl<W: Write> LabeledReporter<W> {
     pub fn new(writer: W, workspace_path: Arc<AbsolutePath>) -> Self {
-        Self { writer, workspace_path, executions: Vec::new(), stats: ExecutionStats::default() }
+        Self {
+            writer,
+            workspace_path,
+            executions: Vec::new(),
+            stats: ExecutionStats::default(),
+            first_error: None,
+        }
     }
 
     /// Handle an execution event - called by Session::execute()
-    pub fn handle_event(&mut self, event: ExecutionEvent, cache_miss: Option<&CacheMiss>) {
+    pub fn handle_event(&mut self, event: ExecutionEvent) {
         match event.kind {
             ExecutionEventKind::Start(display) => {
-                self.handle_start(display, cache_miss);
+                self.handle_start(display);
             }
             ExecutionEventKind::Output { content, .. } => {
                 // Stream output directly to writer
                 let _ = self.writer.write_all(&content);
                 let _ = self.writer.flush();
+            }
+            ExecutionEventKind::Error { message } => {
+                self.handle_error(event.execution_id, message);
             }
             ExecutionEventKind::Finish { status, cache_status } => {
                 self.handle_finish(event.execution_id, status, cache_status);
@@ -78,7 +97,18 @@ impl<W: Write> LabeledReporter<W> {
         }
     }
 
-    fn handle_start(&mut self, display: ExecutionItemDisplay, cache_miss: Option<&CacheMiss>) {
+    fn handle_start(&mut self, display: Option<ExecutionItemDisplay>) {
+        // Handle None case - just store minimal info
+        let Some(display) = display else {
+            self.executions.push(ExecutionInfo {
+                display: None,
+                cache_status: None,
+                exit_status: None,
+                error_message: None,
+            });
+            return;
+        };
+
         // Compute cwd relative to workspace root
         let cwd_relative = if let Ok(Some(rel)) = display.cwd.strip_prefix(&self.workspace_path) {
             rel.as_str().to_string()
@@ -90,40 +120,38 @@ impl<W: Write> LabeledReporter<W> {
             if cwd_relative.is_empty() { String::new() } else { format!("{cwd_relative}/") };
         let command_str = format!("{cwd_str}$ {}", display.command);
 
-        // Print command with cache status
-        match cache_miss {
-            None => {
-                // Cache miss: not found - just print command
-                let _ = writeln!(self.writer, "{}", command_str.style(COMMAND_STYLE));
-            }
-            Some(CacheMiss::NotFound) => {
-                // Cache miss: not found - just print command
-                let _ = writeln!(self.writer, "{}", command_str.style(COMMAND_STYLE));
-            }
-            Some(CacheMiss::FingerprintMismatch(mismatch)) => {
-                // Cache miss: fingerprint mismatch
-                let reason = match mismatch {
-                    FingerprintMismatch::SpawnFingerprintMismatch(_) => {
-                        "command configuration changed".to_string()
-                    }
-                    FingerprintMismatch::PostRunFingerprintMismatch(
-                        PostRunFingerprintMismatch::InputContentChanged { path },
-                    ) => {
-                        format!("content of input '{path}' changed")
-                    }
-                };
-                let _ = write!(self.writer, "{} ", command_str.style(COMMAND_STYLE));
-                let _ = writeln!(
-                    self.writer,
-                    "{}",
-                    format_args!("(✗ cache miss: {reason}, executing)")
-                        .style(CACHE_MISS_STYLE.dimmed())
-                );
-            }
-        }
+        // Print command
+        let _ = writeln!(self.writer, "{}", command_str.style(COMMAND_STYLE));
 
         // Store execution info for summary
-        self.executions.push(ExecutionInfo { display, cache_status: None, exit_status: None });
+        self.executions.push(ExecutionInfo {
+            display: Some(display),
+            cache_status: None,
+            exit_status: None,
+            error_message: None,
+        });
+    }
+
+    fn handle_error(&mut self, _execution_id: ExecutionId, message: String) {
+        // Display error inline (in red, with error icon)
+        let _ = writeln!(
+            self.writer,
+            "{} {}",
+            "✗".style(Style::new().red().bold()),
+            message.style(Style::new().red())
+        );
+
+        // Track first error
+        if self.first_error.is_none() {
+            self.first_error = Some(message.clone());
+        }
+
+        // Track error for summary
+        if let Some(exec) = self.executions.last_mut() {
+            exec.error_message = Some(message);
+        }
+
+        self.stats.failed += 1;
     }
 
     fn handle_finish(
@@ -150,36 +178,6 @@ impl<W: Write> LabeledReporter<W> {
             exec.cache_status = Some(cache_status);
             exec.exit_status = status;
         }
-    }
-
-    /// Handle a cache hit event - prints replay message and outputs
-    pub fn handle_cache_hit(&mut self, display: ExecutionItemDisplay, duration: Duration) {
-        // Compute cwd relative to workspace root
-        let cwd_relative = if let Ok(Some(rel)) = display.cwd.strip_prefix(&self.workspace_path) {
-            rel.as_str().to_string()
-        } else {
-            String::new()
-        };
-
-        let cwd_str =
-            if cwd_relative.is_empty() { String::new() } else { format!("{cwd_relative}/") };
-        let command_str = format!("{cwd_str}$ {}", display.command);
-
-        let _ = write!(self.writer, "{} ", command_str.style(COMMAND_STYLE));
-        let _ = writeln!(
-            self.writer,
-            "{}",
-            "(✓ cache hit, replaying)".style(Style::new().green().dimmed())
-        );
-
-        // Store execution info
-        self.executions.push(ExecutionInfo {
-            display,
-            cache_status: Some(CacheStatus::Hit { replayed_duration: duration }),
-            exit_status: Some(0),
-        });
-
-        self.stats.cache_hits += 1;
     }
 
     /// Print execution summary after all events
@@ -277,7 +275,12 @@ impl<W: Write> LabeledReporter<W> {
         );
 
         for (idx, exec) in self.executions.iter().enumerate() {
-            let task_name = &exec.display.task_display.task_name;
+            // Skip if no display info
+            let Some(ref display) = exec.display else {
+                continue;
+            };
+
+            let task_name = &display.task_display.task_name;
 
             // Task name and index
             let _ = write!(
@@ -288,7 +291,7 @@ impl<W: Write> LabeledReporter<W> {
             );
 
             // Command
-            let _ = write!(self.writer, ": {}", exec.display.command.style(COMMAND_STYLE));
+            let _ = write!(self.writer, ": {}", display.command.style(COMMAND_STYLE));
 
             // Execution result icon
             match exec.exit_status {
@@ -333,6 +336,16 @@ impl<W: Write> LabeledReporter<W> {
                 None => {}
             }
 
+            // Error message if present
+            if let Some(ref error_msg) = exec.error_message {
+                let _ = writeln!(
+                    self.writer,
+                    "      {} {}",
+                    "✗ Error:".style(Style::new().red().bold()),
+                    error_msg.style(Style::new().red())
+                );
+            }
+
             // Add spacing between tasks except for the last one
             if idx < self.executions.len() - 1 {
                 let _ = writeln!(
@@ -349,5 +362,60 @@ impl<W: Write> LabeledReporter<W> {
             "{}",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".style(Style::new().bright_black())
         );
+    }
+}
+
+impl<W: Write> Reporter for LabeledReporter<W> {
+    fn handle_event(&mut self, event: ExecutionEvent) {
+        match event.kind {
+            ExecutionEventKind::Start(display) => {
+                self.handle_start(display);
+            }
+            ExecutionEventKind::Output { content, .. } => {
+                let _ = self.writer.write_all(&content);
+                let _ = self.writer.flush();
+            }
+            ExecutionEventKind::Error { message } => {
+                self.handle_error(event.execution_id, message);
+            }
+            ExecutionEventKind::Finish { status, cache_status } => {
+                self.handle_finish(event.execution_id, status, cache_status);
+            }
+        }
+    }
+
+    fn post_execution(mut self: Box<Self>) -> anyhow::Result<()> {
+        // Check if execution was aborted due to error
+        if let Some(error_msg) = &self.first_error {
+            // Print separator
+            let _ = writeln!(self.writer);
+            let _ = writeln!(
+                self.writer,
+                "{}",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    .style(Style::new().bright_black())
+            );
+
+            // Print error abort message
+            let _ = writeln!(
+                self.writer,
+                "{} {}",
+                "Execution aborted due to error:".style(Style::new().red().bold()),
+                error_msg.style(Style::new().red())
+            );
+
+            let _ = writeln!(
+                self.writer,
+                "{}",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    .style(Style::new().bright_black())
+            );
+
+            return Err(anyhow::anyhow!("Execution aborted: {}", error_msg));
+        }
+
+        // No errors - print summary
+        self.print_summary();
+        Ok(())
     }
 }
