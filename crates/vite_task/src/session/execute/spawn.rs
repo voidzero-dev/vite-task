@@ -3,16 +3,15 @@
 use std::{
     collections::hash_map::Entry,
     process::{ExitStatus, Stdio},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use bincode::{Decode, Encode};
 use bstr::BString;
 use fspy::AccessMode;
-use futures_util::future::try_join3;
 use serde::Serialize;
-use tokio::io::{AsyncRead, AsyncReadExt as _};
+use tokio::io::AsyncReadExt as _;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 
@@ -52,49 +51,16 @@ pub struct SpawnResult {
     pub duration: Duration,
 }
 
-/// Collects stdout/stderr into `outputs` and emits events in real-time
-async fn collect_std_outputs<F>(
-    outputs: &Mutex<Vec<StdOutput>>,
-    mut stream: impl AsyncRead + Unpin,
-    kind: OutputKind,
-    on_output: &Mutex<F>,
-) -> Result<(), Error>
-where
-    F: FnMut(OutputKind, BString),
-{
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = stream.read(&mut buf).await?;
-        if n == 0 {
-            return Ok(());
-        }
-        let content = buf[..n].to_vec();
-
-        // Emit event immediately via callback
-        on_output.lock().unwrap()(kind, content.clone().into());
-
-        // Merge consecutive outputs of the same kind for caching
-        let mut outputs = outputs.lock().unwrap();
-        if let Some(last) = outputs.last_mut()
-            && last.kind == kind
-        {
-            last.content.extend(&content);
-        } else {
-            outputs.push(StdOutput { kind, content });
-        }
-    }
-}
-
 /// Spawn a command with file system tracking via fspy.
 ///
 /// Returns the execution result including captured outputs, exit status,
 /// and tracked file accesses.
 ///
-/// If `on_output` is provided, it will be called in real-time as stdout/stderr data arrives.
+/// `on_output` is called in real-time as stdout/stderr data arrives.
 pub async fn spawn_with_tracking<F>(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
-    on_output: Option<F>,
+    mut on_output: F,
 ) -> Result<SpawnResult, Error>
 where
     F: FnMut(OutputKind, BString),
@@ -107,36 +73,66 @@ where
 
     let mut child = cmd.spawn().await?;
 
-    let child_stdout = child.stdout.take().unwrap();
-    let child_stderr = child.stderr.take().unwrap();
+    let mut child_stdout = child.stdout.take().unwrap();
+    let mut child_stderr = child.stderr.take().unwrap();
 
-    let outputs = Mutex::new(Vec::<StdOutput>::new());
+    let mut outputs = Vec::<StdOutput>::new();
+    let mut stdout_buf = [0u8; 8192];
+    let mut stderr_buf = [0u8; 8192];
+    let mut stdout_done = false;
+    let mut stderr_done = false;
 
-    let ((), (), (termination, duration)) = if let Some(on_output) = on_output {
-        let on_output = Mutex::new(on_output);
-        try_join3(
-            collect_std_outputs(&outputs, child_stdout, OutputKind::StdOut, &on_output),
-            collect_std_outputs(&outputs, child_stderr, OutputKind::StdErr, &on_output),
-            async {
-                let start = Instant::now();
-                let exit_status = child.wait_handle.await?;
-                Ok((exit_status, start.elapsed()))
-            },
-        )
-        .await?
-    } else {
-        let noop = Mutex::new(|_, _| {});
-        try_join3(
-            collect_std_outputs(&outputs, child_stdout, OutputKind::StdOut, &noop),
-            collect_std_outputs(&outputs, child_stderr, OutputKind::StdErr, &noop),
-            async {
-                let start = Instant::now();
-                let exit_status = child.wait_handle.await?;
-                Ok((exit_status, start.elapsed()))
-            },
-        )
-        .await?
-    };
+    let start = Instant::now();
+
+    // Read from both stdout and stderr concurrently using select!
+    loop {
+        tokio::select! {
+            result = child_stdout.read(&mut stdout_buf), if !stdout_done => {
+                let n = result?;
+                if n == 0 {
+                    stdout_done = true;
+                } else {
+                    let content = stdout_buf[..n].to_vec();
+
+                    // Emit event immediately
+                    on_output(OutputKind::StdOut, content.clone().into());
+
+                    // Merge consecutive outputs of the same kind for caching
+                    if let Some(last) = outputs.last_mut()
+                        && last.kind == OutputKind::StdOut
+                    {
+                        last.content.extend(&content);
+                    } else {
+                        outputs.push(StdOutput { kind: OutputKind::StdOut, content });
+                    }
+                }
+            }
+            result = child_stderr.read(&mut stderr_buf), if !stderr_done => {
+                let n = result?;
+                if n == 0 {
+                    stderr_done = true;
+                } else {
+                    let content = stderr_buf[..n].to_vec();
+
+                    // Emit event immediately
+                    on_output(OutputKind::StdErr, content.clone().into());
+
+                    // Merge consecutive outputs of the same kind for caching
+                    if let Some(last) = outputs.last_mut()
+                        && last.kind == OutputKind::StdErr
+                    {
+                        last.content.extend(&content);
+                    } else {
+                        outputs.push(StdOutput { kind: OutputKind::StdErr, content });
+                    }
+                }
+            }
+            else => break,
+        }
+    }
+
+    let termination = child.wait_handle.await?;
+    let duration = start.elapsed();
 
     // Process path accesses
     let mut path_reads = HashMap::<RelativePathBuf, PathRead>::new();
@@ -181,7 +177,6 @@ where
         }
     }
 
-    let outputs = outputs.into_inner().unwrap();
     tracing::debug!(
         "spawn finished, path_reads: {}, path_writes: {}, outputs: {}, exit_status: {}",
         path_reads.len(),

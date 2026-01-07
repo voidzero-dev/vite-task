@@ -242,7 +242,7 @@ impl ExecutionContext<'_> {
         let result = match spawn_with_tracking(
             &spawn_execution.spawn_command,
             &*self.cache_base_path,
-            Some(|kind, content| {
+            |kind, content| {
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
                     kind: ExecutionEventKind::Output {
@@ -253,7 +253,7 @@ impl ExecutionContext<'_> {
                         content,
                     },
                 });
-            }),
+            },
         )
         .await
         {
