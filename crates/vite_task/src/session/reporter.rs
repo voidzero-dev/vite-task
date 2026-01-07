@@ -173,6 +173,7 @@ impl<W: Write> LabeledReporter<W> {
         let total = self.executions.len();
         let cache_hits = self.stats.cache_hits;
         let cache_misses = self.stats.cache_misses;
+        let cache_disabled = self.stats.cache_disabled;
         let failed = self.stats.failed;
 
         // Print summary header with decorative line
@@ -195,6 +196,14 @@ impl<W: Write> LabeledReporter<W> {
         let _ = writeln!(self.writer);
 
         // Print statistics
+        let cache_disabled_str = if cache_disabled > 0 {
+            format!("• {cache_disabled} cache disabled")
+                .style(Style::new().bright_black())
+                .to_string()
+        } else {
+            String::new()
+        };
+
         let failed_str = if failed > 0 {
             format!("• {failed} failed").style(Style::new().red()).to_string()
         } else {
@@ -203,11 +212,12 @@ impl<W: Write> LabeledReporter<W> {
 
         let _ = writeln!(
             self.writer,
-            "{}  {} {} {} {}",
+            "{}  {} {} {} {} {}",
             "Statistics:".style(Style::new().bold()),
             format!(" {total} tasks").style(Style::new().bright_white()),
             format!("• {cache_hits} cache hits").style(Style::new().green()),
             format!("• {cache_misses} cache misses").style(CACHE_MISS_STYLE),
+            cache_disabled_str,
             failed_str
         );
 

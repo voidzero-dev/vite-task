@@ -91,7 +91,7 @@ pub fn format_cache_status_summary(cache_status: &CacheStatus) -> String {
             // Display user-friendly message for each disabled reason
             let message = match reason {
                 CacheDisabledReason::InProcessExecution => "Cache disabled for Built-In Command",
-                CacheDisabledReason::NoCacheMetadata => "Cache disabled: no cache metadata",
+                CacheDisabledReason::NoCacheMetadata => "Cache disabled in task configuration",
                 CacheDisabledReason::CycleDetected => "Cache disabled: cycle detected",
             };
             format!("→ {message}")

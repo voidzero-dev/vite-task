@@ -13,7 +13,7 @@ console.log('foo');
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   2 tasks • 0 cache hits • 1 cache misses 
+Statistics:   2 tasks • 0 cache hits • 1 cache misses • 1 cache disabled 
 Performance:  0% cache hit rate
 
 Task Details:
@@ -37,7 +37,7 @@ console.log('bar');
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   2 tasks • 0 cache hits • 1 cache misses 
+Statistics:   2 tasks • 0 cache hits • 1 cache misses • 1 cache disabled 
 Performance:  0% cache hit rate
 
 Task Details:
