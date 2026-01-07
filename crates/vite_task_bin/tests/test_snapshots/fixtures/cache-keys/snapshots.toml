@@ -35,5 +35,6 @@ args = ["run", "echo-and-lint", "--fix"]
 name = "direct lint"
 steps = [
   "vite lint",
-  "json-edit",
+  "echo debugger > main.js",
+  "vite lint",
 ]

@@ -18,6 +18,27 @@ Task Details:
 ────────────────────────────────────────────────
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[1]> json-edit
-Usage: json-edit <filename> <script>
-Example: json-edit package.json '_.version = "1.2.3"'
+> echo debugger > main.js
+
+> vite lint
+
+  ! eslint(no-debugger): `debugger` statement is not allowed
+   ,-[main.js:1:1]
+ 1 | debugger
+   : ^^^^^^^^
+   `----
+  help: Remove the debugger statement
+
+Found 1 warning and 0 errors.
+Finished in <duration>ms on 1 file with 90 rules using 10 threads.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses  
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
