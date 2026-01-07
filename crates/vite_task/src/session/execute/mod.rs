@@ -24,7 +24,7 @@ use super::{
     },
     reporter::Reporter,
 };
-use crate::Session;
+use crate::{Session, session::execute::spawn::SpawnTrackResult};
 
 /// Internal error type used to abort execution when errors occur.
 /// This error is swallowed in Session::execute and never exposed externally.
@@ -238,6 +238,13 @@ impl ExecutionContext<'_> {
             }
         }
 
+        // Track spawned child if caching is enabled, also remebers the cache metadata for update later
+        let mut track_result_with_cache_metadata = if let Some(cache_metadata) = cache_metadata {
+            Some((SpawnTrackResult::default(), cache_metadata))
+        } else {
+            None
+        };
+
         // 2. Execute command with tracking, emitting output events in real-time
         let result = match spawn_with_tracking(
             &spawn_execution.spawn_command,
@@ -254,6 +261,7 @@ impl ExecutionContext<'_> {
                     },
                 });
             },
+            track_result_with_cache_metadata.as_mut().map(|(track_result, _)| track_result),
         )
         .await
         {
@@ -270,20 +278,20 @@ impl ExecutionContext<'_> {
         };
 
         // 4. Update cache if successful
-        if let Some(cache_metadata) = cache_metadata
+        if let Some((track_result, cache_metadata)) = track_result_with_cache_metadata
             && result.exit_status.success()
         {
             let fingerprint_ignores =
                 cache_metadata.spawn_fingerprint.fingerprint_ignores().map(|v| v.as_slice());
             match PostRunFingerprint::create(
-                &result.path_reads,
+                &track_result.path_reads,
                 &*self.cache_base_path,
                 fingerprint_ignores,
             ) {
                 Ok(post_run_fingerprint) => {
                     let cache_value = CommandCacheValue {
                         post_run_fingerprint,
-                        std_outputs: result.std_outputs.clone(),
+                        std_outputs: track_result.std_outputs.clone().into(),
                         duration: result.duration,
                     };
                     if let Err(err) = self.cache.update(cache_metadata, cache_value).await {

@@ -84,10 +84,12 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
     );
 
     // Add test_bins to PATH so test programs (such as print-file) in fixtures can be found.
-    let plan_envs: HashMap<Arc<OsStr>, Arc<OsStr>> =
-        [(Arc::<OsStr>::from(OsStr::new("PATH")), Arc::clone(&test_bin_path))]
-            .into_iter()
-            .collect();
+    let plan_envs: HashMap<Arc<OsStr>, Arc<OsStr>> = [
+        (Arc::<OsStr>::from(OsStr::new("PATH")), Arc::clone(&test_bin_path)),
+        (Arc::<OsStr>::from(OsStr::new("NO_COLOR")), Arc::<OsStr>::from(OsStr::new("1"))),
+    ]
+    .into_iter()
+    .collect();
 
     // Prepare PATH for e2e tests
     let e2e_env_path = join_paths(

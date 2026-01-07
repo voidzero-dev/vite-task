@@ -10,6 +10,7 @@ use std::{
 use bincode::{Decode, Encode};
 use bstr::BString;
 use fspy::AccessMode;
+use futures_util::future::Either;
 use serde::Serialize;
 use tokio::io::AsyncReadExt as _;
 use vite_path::{AbsolutePath, RelativePathBuf};
@@ -44,11 +45,22 @@ pub struct StdOutput {
 /// Result of spawning a process with file tracking
 #[derive(Debug)]
 pub struct SpawnResult {
-    pub std_outputs: Arc<[StdOutput]>,
     pub exit_status: ExitStatus,
-    pub path_reads: HashMap<RelativePathBuf, PathRead>,
-    pub path_writes: HashMap<RelativePathBuf, PathWrite>,
     pub duration: Duration,
+}
+
+/// Tracking result from a spawned process for caching
+#[derive(Default, Debug)]
+pub struct SpawnTrackResult {
+    /// captured stdout/stderr
+    pub std_outputs: Vec<StdOutput>,
+
+    /// Tracked path reads
+    pub path_reads: HashMap<RelativePathBuf, PathRead>,
+
+    /// Tracked path writes
+    #[expect(dead_code)]
+    pub path_writes: HashMap<RelativePathBuf, PathWrite>,
 }
 
 /// Spawn a command with file system tracking via fspy.
@@ -56,11 +68,13 @@ pub struct SpawnResult {
 /// Returns the execution result including captured outputs, exit status,
 /// and tracked file accesses.
 ///
-/// `on_output` is called in real-time as stdout/stderr data arrives.
+/// - `on_output` is called in real-time as stdout/stderr data arrives.
+/// - `track_result` if provided, will be populated with captured outputs and path accesses for caching. If `None`, tracking is disabled.
 pub async fn spawn_with_tracking<F>(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
     mut on_output: F,
+    track_result: Option<&mut SpawnTrackResult>,
 ) -> Result<SpawnResult, Error>
 where
     F: FnMut(OutputKind, BString),
@@ -71,12 +85,36 @@ where
     cmd.current_dir(&*spawn_command.cwd);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let mut child = cmd.spawn().await?;
+    /// The tracking state of the spawned process
+    enum TrackingState<'a> {
+        /// Tacking is enabled, with the tracked child and result reference
+        Enabled(fspy::TrackedChild, &'a mut SpawnTrackResult),
 
-    let mut child_stdout = child.stdout.take().unwrap();
-    let mut child_stderr = child.stderr.take().unwrap();
+        /// Tracking is disabled, with the tokio child process
+        Disabled(tokio::process::Child),
+    }
 
-    let mut outputs = Vec::<StdOutput>::new();
+    let mut tracking_state = if let Some(track_result) = track_result {
+        // track_result is Some. Spawn with tracking enabled
+        TrackingState::Enabled(cmd.spawn().await?, track_result)
+    } else {
+        // Spawn without tracking
+        TrackingState::Disabled(cmd.into_tokio_command().spawn()?)
+    };
+
+    let mut child_stdout = match &mut tracking_state {
+        TrackingState::Enabled(tracked_child, _) => tracked_child.stdout.take().unwrap(),
+        TrackingState::Disabled(tokio_child) => tokio_child.stdout.take().unwrap(),
+    };
+    let mut child_stderr = match &mut tracking_state {
+        TrackingState::Enabled(tracked_child, _) => tracked_child.stderr.take().unwrap(),
+        TrackingState::Disabled(tokio_child) => tokio_child.stderr.take().unwrap(),
+    };
+
+    let mut outputs = match &mut tracking_state {
+        TrackingState::Enabled(_, track_result) => Some(&mut track_result.std_outputs),
+        TrackingState::Disabled(_) => None,
+    };
     let mut stdout_buf = [0u8; 8192];
     let mut stderr_buf = [0u8; 8192];
     let mut stdout_done = false;
@@ -89,13 +127,16 @@ where
         // Emit event immediately
         on_output(kind, content.clone().into());
 
-        // Merge consecutive outputs of the same kind for caching
-        if let Some(last) = outputs.last_mut()
-            && last.kind == kind
-        {
-            last.content.extend(&content);
-        } else {
-            outputs.push(StdOutput { kind, content });
+        // Store outputs for caching
+        if let Some(outputs) = &mut outputs {
+            // Merge consecutive outputs of the same kind for caching
+            if let Some(last) = outputs.last_mut()
+                && last.kind == kind
+            {
+                last.content.extend(&content);
+            } else {
+                outputs.push(StdOutput { kind, content });
+            }
         }
     };
 
@@ -118,12 +159,22 @@ where
         }
     }
 
-    let termination = child.wait_handle.await?;
+    let (termination, track_result) = match tracking_state {
+        TrackingState::Enabled(tracked_child, track_result) => {
+            (tracked_child.wait_handle.await?, track_result)
+        }
+        TrackingState::Disabled(mut tokio_child) => {
+            return Ok(SpawnResult {
+                exit_status: tokio_child.wait().await?,
+                duration: start.elapsed(),
+            });
+        }
+    };
     let duration = start.elapsed();
 
     // Process path accesses
-    let mut path_reads = HashMap::<RelativePathBuf, PathRead>::new();
-    let mut path_writes = HashMap::<RelativePathBuf, PathWrite>::new();
+    let path_reads = &mut track_result.path_reads;
+    let path_writes = &mut track_result.path_writes;
 
     for access in termination.path_accesses.iter() {
         let relative_path = access
@@ -165,18 +216,11 @@ where
     }
 
     tracing::debug!(
-        "spawn finished, path_reads: {}, path_writes: {}, outputs: {}, exit_status: {}",
+        "spawn finished, path_reads: {}, path_writes: {}, exit_status: {}",
         path_reads.len(),
         path_writes.len(),
-        outputs.len(),
         termination.status,
     );
 
-    Ok(SpawnResult {
-        std_outputs: outputs.into(),
-        exit_status: termination.status,
-        path_reads,
-        path_writes,
-        duration,
-    })
+    Ok(SpawnResult { exit_status: termination.status, duration })
 }

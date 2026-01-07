@@ -65,8 +65,8 @@ impl EnvFingerprints {
             // Automatically add FORCE_COLOR environment variable if not already set
             // This enables color output in subprocesses when color is supported
             // TODO: will remove this temporarily until we have a better solution
-            if !new_all_envs.contains_key(OsStr::new("FORCE_COLOR"))
-                && !new_all_envs.contains_key(OsStr::new("NO_COLOR"))
+            if !all_envs.contains_key(OsStr::new("FORCE_COLOR"))
+                && !all_envs.contains_key(OsStr::new("NO_COLOR"))
                 && let Some(support) = on(Stream::Stdout)
             {
                 let force_color_value = if support.has_16m {
