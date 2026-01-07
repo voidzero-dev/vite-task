@@ -4,6 +4,8 @@ use bstr::BString;
 // Re-export ExecutionItemDisplay from vite_task_plan since it's the canonical definition
 pub use vite_task_plan::ExecutionItemDisplay;
 
+use super::cache::CacheMiss;
+
 #[derive(Debug)]
 pub enum OutputKind {
     Stdout,
@@ -13,12 +15,14 @@ pub enum OutputKind {
 #[derive(Debug)]
 pub enum CacheDisabledReason {
     InProcessExecution,
+    NoCacheMetadata,
+    CycleDetected,
 }
 
 #[derive(Debug)]
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
-    Miss,
+    Miss(CacheMiss),
     Hit { replayed_duration: Duration },
 }
 
@@ -54,8 +58,8 @@ pub struct ExecutionEvent {
 
 #[derive(Debug)]
 pub enum ExecutionEventKind {
-    Start(Option<ExecutionItemDisplay>),
+    Start { display: Option<ExecutionItemDisplay>, cache_status: CacheStatus },
     Output { kind: OutputKind, content: BString },
     Error { message: String },
-    Finish { status: Option<i32>, cache_status: CacheStatus },
+    Finish { status: Option<i32> },
 }

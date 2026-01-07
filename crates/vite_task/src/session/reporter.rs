@@ -9,8 +9,9 @@ use std::{
 use owo_colors::{Style, Styled};
 use vite_path::AbsolutePath;
 
-use super::event::{
-    CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionItemDisplay,
+use super::{
+    cache::{format_cache_status_inline, format_cache_status_summary},
+    event::{CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionItemDisplay},
 };
 
 /// Wrap of `OwoColorize` that ignores style if `NO_COLOR` is set.
@@ -43,7 +44,7 @@ const CACHE_MISS_STYLE: Style = Style::new().purple();
 #[derive(Debug)]
 struct ExecutionInfo {
     display: Option<ExecutionItemDisplay>,
-    cache_status: Option<CacheStatus>,
+    cache_status: CacheStatus, // Non-optional, determined at Start
     exit_status: Option<i32>,
     error_message: Option<String>,
 }
@@ -77,12 +78,20 @@ impl<W: Write> LabeledReporter<W> {
         }
     }
 
-    fn handle_start(&mut self, display: Option<ExecutionItemDisplay>) {
-        // Handle None case - just store minimal info
+    fn handle_start(&mut self, display: Option<ExecutionItemDisplay>, cache_status: CacheStatus) {
+        // Update statistics immediately based on cache status
+        match &cache_status {
+            CacheStatus::Hit { .. } => self.stats.cache_hits += 1,
+            CacheStatus::Miss(_) => self.stats.cache_misses += 1,
+            CacheStatus::Disabled(_) => self.stats.cache_disabled += 1,
+        }
+
+        // Handle None display case - just store minimal info
+        // This occurs for top-level execution (no parent task)
         let Some(display) = display else {
             self.executions.push(ExecutionInfo {
                 display: None,
-                cache_status: None,
+                cache_status,
                 exit_status: None,
                 error_message: None,
             });
@@ -100,13 +109,24 @@ impl<W: Write> LabeledReporter<W> {
             if cwd_relative.is_empty() { String::new() } else { format!("{cwd_relative}/") };
         let command_str = format!("{cwd_str}$ {}", display.command);
 
-        // Print command
-        let _ = writeln!(self.writer, "{}", command_str.style(COMMAND_STYLE));
+        // Print command with optional inline cache status
+        // Use display module for plain text, apply styling here
+        if let Some(inline_status) = format_cache_status_inline(&cache_status) {
+            // Apply styling based on cache status type
+            let styled_status = match &cache_status {
+                CacheStatus::Hit { .. } => inline_status.style(Style::new().green().dimmed()),
+                CacheStatus::Miss(_) => inline_status.style(CACHE_MISS_STYLE.dimmed()),
+                CacheStatus::Disabled(_) => inline_status.style(Style::new().bright_black()),
+            };
+            let _ = writeln!(self.writer, "{} {}", command_str.style(COMMAND_STYLE), styled_status);
+        } else {
+            let _ = writeln!(self.writer, "{}", command_str.style(COMMAND_STYLE));
+        }
 
         // Store execution info for summary
         self.executions.push(ExecutionInfo {
             display: Some(display),
-            cache_status: None,
+            cache_status,
             exit_status: None,
             error_message: None,
         });
@@ -134,28 +154,16 @@ impl<W: Write> LabeledReporter<W> {
         self.stats.failed += 1;
     }
 
-    fn handle_finish(
-        &mut self,
-        _execution_id: ExecutionId,
-        status: Option<i32>,
-        cache_status: CacheStatus,
-    ) {
-        // Update statistics
-        match &cache_status {
-            CacheStatus::Hit { .. } => self.stats.cache_hits += 1,
-            CacheStatus::Miss => self.stats.cache_misses += 1,
-            CacheStatus::Disabled(_) => self.stats.cache_disabled += 1,
-        }
-
+    fn handle_finish(&mut self, _execution_id: ExecutionId, status: Option<i32>) {
+        // Update failure statistics
         if let Some(s) = status {
             if s != 0 {
                 self.stats.failed += 1;
             }
         }
 
-        // Update execution info if we have it
+        // Update execution info exit status
         if let Some(exec) = self.executions.last_mut() {
-            exec.cache_status = Some(cache_status);
             exec.exit_status = status;
         }
     }
@@ -215,7 +223,7 @@ impl<W: Write> LabeledReporter<W> {
             .executions
             .iter()
             .filter_map(|exec| {
-                if let Some(CacheStatus::Hit { replayed_duration }) = &exec.cache_status {
+                if let CacheStatus::Hit { replayed_duration } = &exec.cache_status {
                     Some(*replayed_duration)
                 } else {
                     None
@@ -292,29 +300,14 @@ impl<W: Write> LabeledReporter<W> {
             }
             let _ = writeln!(self.writer);
 
-            // Cache status details
-            match &exec.cache_status {
-                Some(CacheStatus::Hit { replayed_duration }) => {
-                    let _ = writeln!(
-                        self.writer,
-                        "      {} {}",
-                        "→ Cache hit - output replayed".style(Style::new().green()),
-                        format!("- {replayed_duration:.2?} saved").style(Style::new().green())
-                    );
-                }
-                Some(CacheStatus::Miss) => {
-                    let _ =
-                        writeln!(self.writer, "      {}", "→ Cache miss".style(CACHE_MISS_STYLE));
-                }
-                Some(CacheStatus::Disabled(reason)) => {
-                    let _ = writeln!(
-                        self.writer,
-                        "      {}",
-                        format!("→ Cache disabled: {reason:?}").style(Style::new().bright_black())
-                    );
-                }
-                None => {}
-            }
+            // Cache status details - use display module for plain text, apply styling here
+            let cache_summary = format_cache_status_summary(&exec.cache_status);
+            let styled_summary = match &exec.cache_status {
+                CacheStatus::Hit { .. } => cache_summary.style(Style::new().green()),
+                CacheStatus::Miss(_) => cache_summary.style(CACHE_MISS_STYLE),
+                CacheStatus::Disabled(_) => cache_summary.style(Style::new().bright_black()),
+            };
+            let _ = writeln!(self.writer, "      {}", styled_summary);
 
             // Error message if present
             if let Some(ref error_msg) = exec.error_message {
@@ -348,8 +341,8 @@ impl<W: Write> LabeledReporter<W> {
 impl<W: Write> Reporter for LabeledReporter<W> {
     fn handle_event(&mut self, event: ExecutionEvent) {
         match event.kind {
-            ExecutionEventKind::Start(display) => {
-                self.handle_start(display);
+            ExecutionEventKind::Start { display, cache_status } => {
+                self.handle_start(display, cache_status);
             }
             ExecutionEventKind::Output { content, .. } => {
                 let _ = self.writer.write_all(&content);
@@ -358,8 +351,8 @@ impl<W: Write> Reporter for LabeledReporter<W> {
             ExecutionEventKind::Error { message } => {
                 self.handle_error(event.execution_id, message);
             }
-            ExecutionEventKind::Finish { status, cache_status } => {
-                self.handle_finish(event.execution_id, status, cache_status);
+            ExecutionEventKind::Finish { status } => {
+                self.handle_finish(event.execution_id, status);
             }
         }
     }

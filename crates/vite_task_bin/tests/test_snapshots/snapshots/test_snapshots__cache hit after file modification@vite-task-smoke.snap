@@ -19,10 +19,10 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] test-task: echo hello ✓
-      → Cache disabled: InProcessExecution
+      → Cache disabled for Built-In Command
   ·······················································
   [2] test-task: print-file main.js ✓
-      → Cache miss
+      → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 > replace-file-content main.js foo bar
@@ -30,7 +30,7 @@ Task Details:
 > vite run test-task
 $ echo hello
 hello
-$ print-file main.js
+$ print-file main.js (✗ cache miss: input files changed, executing)
 console.log('bar');
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -43,8 +43,8 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] test-task: echo hello ✓
-      → Cache disabled: InProcessExecution
+      → Cache disabled for Built-In Command
   ·······················································
   [2] test-task: print-file main.js ✓
-      → Cache miss
+      → Cache miss: content of input 'main.js' changed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

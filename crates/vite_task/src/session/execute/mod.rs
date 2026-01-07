@@ -69,11 +69,18 @@ impl ExecutionContext<'_> {
                         let execution_id = self.current_execution_id;
                         self.current_execution_id = self.current_execution_id.next();
 
+                        // Emit Start event for cycle detection error
                         // display is None for top-level execution (no parent task)
                         // display is Some for nested execution (within a parent task)
+                        // Caching is disabled when cycle dependencies are detected
                         self.event_handler.handle_event(ExecutionEvent {
                             execution_id,
-                            kind: ExecutionEventKind::Start(display.cloned()),
+                            kind: ExecutionEventKind::Start {
+                                display: display.cloned(),
+                                cache_status: CacheStatus::Disabled(
+                                    CacheDisabledReason::CycleDetected,
+                                ),
+                            },
                         });
 
                         self.event_handler.handle_event(ExecutionEvent {
@@ -126,11 +133,20 @@ impl ExecutionContext<'_> {
 
         match leaf_execution_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
-                let execution_output = in_process_execution.execute().await;
+                // Emit Start event with cache_status for in-process (built-in) commands
+                // Caching is disabled for built-in commands
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
-                    kind: ExecutionEventKind::Start(display.cloned()),
+                    kind: ExecutionEventKind::Start {
+                        display: display.cloned(),
+                        cache_status: CacheStatus::Disabled(
+                            CacheDisabledReason::InProcessExecution,
+                        ),
+                    },
                 });
+
+                // Execute the in-process command
+                let execution_output = in_process_execution.execute().await;
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
                     kind: ExecutionEventKind::Output {
@@ -138,14 +154,11 @@ impl ExecutionContext<'_> {
                         content: execution_output.stdout.into(),
                     },
                 });
+
+                // Emit Finish WITHOUT cache_status (already in Start event)
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
-                    kind: ExecutionEventKind::Finish {
-                        status: Some(0),
-                        cache_status: CacheStatus::Disabled(
-                            CacheDisabledReason::InProcessExecution,
-                        ),
-                    },
+                    kind: ExecutionEventKind::Finish { status: Some(0) },
                 });
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
@@ -163,36 +176,23 @@ impl ExecutionContext<'_> {
     ) -> Result<(), ExecutionAborted> {
         let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
-        // 1. Try cache hit
-        if let Some(cache_metadata) = cache_metadata {
+        // 1. Determine cache status FIRST by trying cache hit
+        //    We need to know the status before emitting Start event so users
+        //    see cache status immediately when execution begins
+        let (cache_status, cached_value) = if let Some(cache_metadata) = cache_metadata {
             match self.cache.try_hit(cache_metadata, &*self.cache_base_path).await {
-                Ok(Ok(cached)) => {
-                    // Replay cached outputs
-                    for output in cached.std_outputs.iter() {
-                        self.event_handler.handle_event(ExecutionEvent {
-                            execution_id,
-                            kind: ExecutionEventKind::Output {
-                                kind: match output.kind {
-                                    SpawnOutputKind::StdOut => OutputKind::Stdout,
-                                    SpawnOutputKind::StdErr => OutputKind::Stderr,
-                                },
-                                content: output.content.clone().into(),
-                            },
-                        });
-                    }
-                    self.event_handler.handle_event(ExecutionEvent {
-                        execution_id,
-                        kind: ExecutionEventKind::Finish {
-                            status: Some(0),
-                            cache_status: CacheStatus::Hit { replayed_duration: cached.duration },
-                        },
-                    });
-                    return Ok(());
-                }
-                Ok(Err(_cache_miss)) => {
-                    // Continue to execute
-                }
+                Ok(Ok(cached)) => (
+                    // Cache hit - we can replay the cached outputs
+                    CacheStatus::Hit { replayed_duration: cached.duration },
+                    Some(cached),
+                ),
+                Ok(Err(cache_miss)) => (
+                    // Cache miss - includes detailed reason (NotFound or FingerprintMismatch)
+                    CacheStatus::Miss(cache_miss),
+                    None,
+                ),
                 Err(err) => {
+                    // Cache lookup error - emit error and abort
                     self.event_handler.handle_event(ExecutionEvent {
                         execution_id,
                         kind: ExecutionEventKind::Error {
@@ -202,21 +202,51 @@ impl ExecutionContext<'_> {
                     return Err(ExecutionAborted);
                 }
             }
-        }
+        } else {
+            // No cache metadata provided - caching is disabled for this task
+            (CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata), None)
+        };
 
+        // 2. NOW emit Start event with cache_status (ALWAYS emit Start)
+        //    This ensures all spawn executions emit Start, including cache hits
+        //    (previously cache hits didn't emit Start at all)
         self.event_handler.handle_event(ExecutionEvent {
             execution_id,
-            kind: ExecutionEventKind::Start(display.cloned()),
+            kind: ExecutionEventKind::Start { display: display.cloned(), cache_status },
         });
 
-        // Track spawned child if caching is enabled, also remebers the cache metadata for update later
+        // 3. If cache hit, replay outputs and return early
+        //    No need to actually execute the command - just replay what was cached
+        if let Some(cached) = cached_value {
+            for output in cached.std_outputs.iter() {
+                self.event_handler.handle_event(ExecutionEvent {
+                    execution_id,
+                    kind: ExecutionEventKind::Output {
+                        kind: match output.kind {
+                            SpawnOutputKind::StdOut => OutputKind::Stdout,
+                            SpawnOutputKind::StdErr => OutputKind::Stderr,
+                        },
+                        content: output.content.clone().into(),
+                    },
+                });
+            }
+            // Emit Finish without cache_status (status already in Start event)
+            self.event_handler.handle_event(ExecutionEvent {
+                execution_id,
+                kind: ExecutionEventKind::Finish { status: Some(0) },
+            });
+            return Ok(());
+        }
+
+        // 4. Execute spawn (cache miss or disabled)
+        //    Track file system access if caching is enabled (for future cache updates)
         let mut track_result_with_cache_metadata = if let Some(cache_metadata) = cache_metadata {
             Some((SpawnTrackResult::default(), cache_metadata))
         } else {
             None
         };
 
-        // 2. Execute command with tracking, emitting output events in real-time
+        // Execute command with tracking, emitting output events in real-time
         let result = match spawn_with_tracking(
             &spawn_execution.spawn_command,
             &*self.cache_base_path,
@@ -248,7 +278,8 @@ impl ExecutionContext<'_> {
             }
         };
 
-        // 4. Update cache if successful
+        // 5. Update cache if successful
+        //    Only update cache if: (a) tracking was enabled, and (b) execution succeeded
         if let Some((track_result, cache_metadata)) = track_result_with_cache_metadata
             && result.exit_status.success()
         {
@@ -287,13 +318,11 @@ impl ExecutionContext<'_> {
             }
         }
 
-        // 5. Emit finish
+        // 6. Emit finish WITHOUT cache_status
+        //    Cache status was already emitted in Start event
         self.event_handler.handle_event(ExecutionEvent {
             execution_id,
-            kind: ExecutionEventKind::Finish {
-                status: result.exit_status.code(),
-                cache_status: CacheStatus::Miss,
-            },
+            kind: ExecutionEventKind::Finish { status: result.exit_status.code() },
         });
 
         Ok(())

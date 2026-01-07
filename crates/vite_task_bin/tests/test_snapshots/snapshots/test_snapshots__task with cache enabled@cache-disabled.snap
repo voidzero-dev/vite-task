@@ -17,19 +17,22 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] cached-task: print-file test.txt ✓
-      → Cache miss
+      → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 > vite run cached-task
+$ print-file test.txt (✓ cache hit, replaying)
 test content
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   0 tasks • 1 cache hits • 0 cache misses 
-Performance:  0% cache hit rate
+Statistics:   1 tasks • 1 cache hits • 0 cache misses 
+Performance:  100% cache hit rate, <duration>ms saved in total
 
 Task Details:
 ────────────────────────────────────────────────
+  [1] cached-task: print-file test.txt ✓
+      → Cache hit - output replayed - <duration>ms saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

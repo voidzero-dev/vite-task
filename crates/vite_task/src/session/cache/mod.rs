@@ -1,8 +1,12 @@
 //! Execution cache for storing and retrieving cached command results.
 
+pub mod display;
+
 use std::{fmt::Display, io::Write, sync::Arc, time::Duration};
 
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
+// Re-export display functions for convenience
+pub use display::{format_cache_status_inline, format_cache_status_summary};
 use rusqlite::{Connection, OptionalExtension as _, config::DbConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
