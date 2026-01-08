@@ -18,8 +18,12 @@ pub struct TaskDisplay {
 
 impl Display for TaskDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO: give an option to display package path as well
-        write!(f, "{}#{}", self.package_name, self.task_name,)
+        // Only include package name and # separator if package name is not empty
+        if self.package_name.is_empty() {
+            write!(f, "{}", self.task_name)
+        } else {
+            write!(f, "{}#{}", self.package_name, self.task_name)
+        }
     }
 }
 

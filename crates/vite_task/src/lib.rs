@@ -7,7 +7,7 @@ pub mod session;
 pub use cli::CLIArgs;
 pub use session::{LabeledReporter, Reporter, Session, SessionCallbacks, TaskSynthesizer};
 pub use vite_task_graph::{
-    config::user::{UserCacheConfig, UserTaskOptions},
+    config::user::{EnabledCacheConfig, UserCacheConfig, UserTaskOptions},
     loader,
 };
 pub use vite_task_plan::plan_request;
