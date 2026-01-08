@@ -217,7 +217,7 @@ impl<W: Write> LabeledReporter<W> {
         self.stats.failed += 1;
     }
 
-    fn handle_finish(&mut self, _execution_id: ExecutionId, status: Option<i32>) {
+    fn handle_finish(&mut self, execution_id: ExecutionId, status: Option<i32>) {
         // Update failure statistics
         if let Some(s) = status {
             if s != 0 {
@@ -228,6 +228,12 @@ impl<W: Write> LabeledReporter<W> {
         // Update execution info exit status
         if let Some(exec) = self.executions.last_mut() {
             exec.exit_status = status;
+        }
+
+        // Add a line break after each task's output for better readability
+        // Skip if silent_if_cache_hit is enabled and this execution is a cache hit
+        if !self.silent_if_cache_hit || !self.cache_hit_executions.contains(&execution_id) {
+            let _ = writeln!(self.writer);
         }
     }
 
@@ -240,7 +246,7 @@ impl<W: Write> LabeledReporter<W> {
         let failed = self.stats.failed;
 
         // Print summary header with decorative line
-        let _ = writeln!(self.writer);
+        // Note: handle_finish already adds a trailing newline after each task's output
         let _ = writeln!(
             self.writer,
             "{}",
@@ -422,7 +428,7 @@ impl<W: Write> LabeledReporter<W> {
                 return;
             }
 
-            let _ = writeln!(self.writer);
+            // Note: handle_finish already adds a trailing newline after the task's output
 
             // Show cache status for hits, meaningful misses, and disabled cache
             let cache_summary = format_cache_status_summary(&exec.cache_status);

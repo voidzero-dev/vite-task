@@ -6,6 +6,7 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/vite-task-smoke
 > vite run test-task
 $ echo hello
 hello
+
 $ print-file main.js
 console.log('foo');
 
@@ -19,7 +20,7 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] vite-task-smoke#test-task: echo hello ✓
-      → Cache disabled for Built-In Command
+      → Cache disabled for built-in command
   ·······················································
   [2] vite-task-smoke#test-task: print-file main.js ✓
       → Cache miss: no previous cache entry found
@@ -30,6 +31,7 @@ Task Details:
 > vite run test-task
 $ echo hello
 hello
+
 $ print-file main.js (✗ cache miss: input files changed, executing)
 console.log('bar');
 
@@ -43,7 +45,7 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] vite-task-smoke#test-task: echo hello ✓
-      → Cache disabled for Built-In Command
+      → Cache disabled for built-in command
   ·······················································
   [2] vite-task-smoke#test-task: print-file main.js ✓
       → Cache miss: content of input 'main.js' changed
