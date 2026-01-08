@@ -16,7 +16,7 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] no-cache-task: print-file test.txt ✓
+  [1] cache-disabled-test#no-cache-task: print-file test.txt ✓
       → Cache disabled in task configuration
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -33,6 +33,6 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] no-cache-task: print-file test.txt ✓
+  [1] cache-disabled-test#no-cache-task: print-file test.txt ✓
       → Cache disabled in task configuration
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

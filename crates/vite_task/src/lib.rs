@@ -6,5 +6,8 @@ pub mod session;
 // Public exports for vite_task_bin
 pub use cli::CLIArgs;
 pub use session::{LabeledReporter, Reporter, Session, SessionCallbacks, TaskSynthesizer};
-pub use vite_task_graph::loader;
+pub use vite_task_graph::{
+    config::user::{UserCacheConfig, UserTaskOptions},
+    loader,
+};
 pub use vite_task_plan::plan_request;

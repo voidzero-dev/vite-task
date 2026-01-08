@@ -48,12 +48,14 @@ impl ResolvedTaskOptions {
         };
         let cache_config = match user_options.cache_config {
             UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
-            UserCacheConfig::Enabled { cache: MustBe!(true), envs, mut pass_through_envs } => {
-                pass_through_envs.extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
+            UserCacheConfig::Enabled { cache: MustBe!(true), mut enabled_cache_config } => {
+                enabled_cache_config
+                    .pass_through_envs
+                    .extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
                 Some(CacheConfig {
                     env_config: EnvConfig {
-                        fingerprinted_envs: envs.into_iter().collect(),
-                        pass_through_envs: pass_through_envs.into(),
+                        fingerprinted_envs: enabled_cache_config.envs.into_iter().collect(),
+                        pass_through_envs: enabled_cache_config.pass_through_envs.into(),
                     },
                 })
             }

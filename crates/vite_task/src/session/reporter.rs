@@ -341,14 +341,14 @@ impl<W: Write> LabeledReporter<W> {
                 continue;
             };
 
-            let task_name = &display.task_display.task_name;
+            let task_display = &display.task_display;
 
             // Task name and index
             let _ = write!(
                 self.writer,
                 "  {} {}",
                 format!("[{}]", idx + 1).style(Style::new().bright_black()),
-                task_name.style(Style::new().bright_white().bold())
+                task_display.to_string().style(Style::new().bright_white().bold())
             );
 
             // Command
