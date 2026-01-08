@@ -287,8 +287,21 @@ pub fn plan_synthetic_request(
     cwd: &Arc<AbsolutePath>,
     envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
-    let SyntheticPlanRequest { program, args, task_options, direct_execution_cache_key } =
-        synthetic_plan_request;
+    let SyntheticPlanRequest {
+        program,
+        args,
+        task_options,
+        direct_execution_cache_key,
+        additional_envs,
+    } = synthetic_plan_request;
+
+    let mut envs = Cow::Borrowed(envs);
+    if !additional_envs.is_empty() {
+        envs.to_mut().extend(additional_envs.iter().cloned());
+    }
+
+    let envs = envs.as_ref();
+
     let program_path = which(&program, envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
     let resolved_options = ResolvedTaskOptions::resolve(task_options, &cwd);
 

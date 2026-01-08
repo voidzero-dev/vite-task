@@ -18,7 +18,6 @@ use petgraph::{
     visit::{Control, DfsEvent, depth_first_search},
 };
 use serde::Serialize;
-use serde_json::map::Keys;
 pub use specifier::TaskSpecifier;
 use vec1::smallvec_v1::SmallVec1;
 use vite_path::AbsolutePath;

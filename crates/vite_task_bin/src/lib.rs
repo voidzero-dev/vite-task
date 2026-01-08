@@ -7,9 +7,13 @@ use std::{
 };
 
 use clap::Subcommand;
-use vite_path::{AbsolutePath, current_dir};
+use monostate::MustBe;
+use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task::{CLIArgs, Session, SessionCallbacks, plan_request::SyntheticPlanRequest};
+use vite_task::{
+    EnabledCacheConfig, SessionCallbacks, UserCacheConfig, UserTaskOptions,
+    plan_request::SyntheticPlanRequest,
+};
 
 /// Theses are the custom subcommands that synthesize tasks for vite-task
 #[derive(Debug, Subcommand)]
@@ -18,6 +22,13 @@ pub enum CustomTaskSubcommand {
     Lint {
         #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
         args: Vec<Str>,
+    },
+    /// Test command for testing additional_envs feature
+    EnvTest {
+        /// Environment variable name
+        name: Str,
+        /// Environment variable value
+        value: Str,
     },
 }
 
@@ -72,6 +83,31 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
                     args: args.into(),
                     task_options: Default::default(),
                     direct_execution_cache_key,
+                    additional_envs: Arc::new([]),
+                })
+            }
+            CustomTaskSubcommand::EnvTest { name, value } => {
+                let direct_execution_cache_key: Arc<[Str]> =
+                    [Str::from("env-test"), name.clone(), value.clone()].into();
+                // Set the env var via additional_envs and configure pass_through_envs
+                let additional_envs: Arc<[(Arc<OsStr>, Arc<OsStr>)]> =
+                    [(Arc::from(OsStr::new(name.as_str())), Arc::from(OsStr::new(value.as_str())))]
+                        .into();
+                Ok(SyntheticPlanRequest {
+                    program: find_executable(path_env, &*cwd, "print-env")?,
+                    args: [name.clone()].into(),
+                    task_options: UserTaskOptions {
+                        cache_config: UserCacheConfig::Enabled {
+                            cache: MustBe!(true),
+                            enabled_cache_config: EnabledCacheConfig {
+                                envs: Box::new([]),
+                                pass_through_envs: vec![name],
+                            },
+                        },
+                        ..Default::default()
+                    },
+                    direct_execution_cache_key,
+                    additional_envs,
                 })
             }
         }

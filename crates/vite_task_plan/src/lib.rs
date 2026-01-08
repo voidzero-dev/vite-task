@@ -12,7 +12,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
     fmt::Debug,
-    ops::Range,
     sync::Arc,
 };
 
@@ -28,7 +27,7 @@ use serde::{Serialize, ser::SerializeMap as _};
 use vite_graph_ser::serialize_by_key;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{TaskGraphLoadError, TaskNodeIndex, display::TaskDisplay};
+use vite_task_graph::{TaskGraphLoadError, display::TaskDisplay};
 
 use crate::path_env::prepend_path_env;
 
