@@ -173,17 +173,21 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
             let mut e2e_outputs = String::new();
             for step in e2e.steps {
                 let mut cmd = if cfg!(windows) {
-                    // Use PowerShell on Windows for better argument handling
-                    let mut cmd = Command::new("powershell.exe");
-                    cmd.args(["-NoProfile", "-NonInteractive", "-Command"]);
+                    let mut cmd = Command::new("cmd.exe");
+                    // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
+                    cmd.args(["/d", "/s", "/c"]);
                     cmd
                 } else {
                     let mut cmd = Command::new("sh");
                     cmd.args(["-c"]);
                     cmd
                 };
+                // On Windows, env_clear() would break cmd.exe, so only set PATH
+                // On Unix, clear all envs for reproducibility
+                if !cfg!(windows) {
+                    cmd.env_clear();
+                }
                 cmd.arg(step.as_str())
-                    .env_clear()
                     .env("PATH", &e2e_env_path)
                     .env("NO_COLOR", "1")
                     .current_dir(e2e_stage_path.join(&e2e.cwd));
