@@ -84,7 +84,7 @@ pub struct CacheMetadata {
 /// - Changes to this config must invalidate the cache
 /// - Vec maintains insertion order (pattern order matters for last-match-wins semantics)
 /// - Even though ignore patterns only affect `PostRunFingerprint`, the config itself is part of the cache key
-#[derive(Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct SpawnFingerprint {
     pub(crate) cwd: RelativePathBuf,
     pub(crate) program_fingerprint: ProgramFingerprint,
@@ -101,10 +101,30 @@ impl SpawnFingerprint {
     pub fn fingerprint_ignores(&self) -> Option<&Vec<Str>> {
         self.fingerprint_ignores.as_ref()
     }
+
+    /// Get the environment fingerprints.
+    pub fn env_fingerprints(&self) -> &EnvFingerprints {
+        &self.env_fingerprints
+    }
+
+    /// Get the program fingerprint as a debug string.
+    pub fn program_fingerprint_debug(&self) -> String {
+        format!("{:?}", self.program_fingerprint)
+    }
+
+    /// Get the command args.
+    pub fn args(&self) -> &Arc<[Str]> {
+        &self.args
+    }
+
+    /// Get the working directory.
+    pub fn cwd(&self) -> &RelativePathBuf {
+        &self.cwd
+    }
 }
 
 /// The program fingerprint used in `SpawnFingerprint`
-#[derive(Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub(crate) enum ProgramFingerprint {
     /// If the program is outside the workspace, fingerprint by its name only (like `node`, `npm`, etc)
     OutsideWorkspace { program_name: Str },

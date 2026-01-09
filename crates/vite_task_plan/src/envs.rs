@@ -16,7 +16,7 @@ use vite_task_graph::config::EnvConfig;
 ///
 /// Contents of this struct are only for fingerprinting and cache key computation (some of envs may be hashed for security).
 /// The actual environment variables to be passed to the execution are in `LeafExecutionItem.all_envs`.
-#[derive(Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct EnvFingerprints {
     /// Environment variables that should be fingerprinted for this execution.
     ///

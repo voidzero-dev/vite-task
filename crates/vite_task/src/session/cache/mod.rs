@@ -44,7 +44,12 @@ pub enum CacheMiss {
 pub enum FingerprintMismatch {
     /// Found the cache entry of the same task run, but the spawn fingerprint mismatches
     /// this happens when the command itself or an env changes.
-    SpawnFingerprintMismatch(SpawnFingerprint),
+    SpawnFingerprintMismatch {
+        /// The fingerprint from the cached entry
+        old: SpawnFingerprint,
+        /// The fingerprint of the current execution
+        new: SpawnFingerprint,
+    },
     /// Found the cache entry with the same spawn fingerprint, but the post-run fingerprint mismatches
     PostRunFingerprintMismatch(PostRunFingerprintMismatch),
 }
@@ -52,9 +57,8 @@ pub enum FingerprintMismatch {
 impl Display for FingerprintMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SpawnFingerprintMismatch(old_fingerprint) => {
-                // TODO: improve the display of spawn fingerprint diff
-                write!(f, "Spawn fingerprint changed: {old_fingerprint:?}")
+            Self::SpawnFingerprintMismatch { old, new } => {
+                write!(f, "Spawn fingerprint changed: old={old:?}, new={new:?}")
             }
             Self::PostRunFingerprintMismatch(diff) => Display::fmt(diff, f),
         }
@@ -142,7 +146,10 @@ impl ExecutionCache {
             // Found a spawn fingerprint associated with the same execution key,
             // meaning the command or env has changed since last run
             return Ok(Err(CacheMiss::FingerprintMismatch(
-                FingerprintMismatch::SpawnFingerprintMismatch(old_spawn_fingerprint),
+                FingerprintMismatch::SpawnFingerprintMismatch {
+                    old: old_spawn_fingerprint,
+                    new: spawn_fingerprint.clone(),
+                },
             )));
         }
 

@@ -142,9 +142,27 @@ impl<W: Write> LabeledReporter<W> {
             CacheStatus::Disabled(_) => self.stats.cache_disabled += 1,
         }
 
-        // Handle None display case - just store minimal info
-        // This occurs for top-level execution (no parent task)
+        // Handle None display case - direct synthetic execution (e.g., `vite lint`)
+        // Print inline cache status before command output for consistency
         let Some(display) = display else {
+            // Print inline cache status (e.g., "✓ cache hit, replaying") before output
+            // Skip if silent_if_cache_hit is enabled and this is a cache hit
+            let should_print =
+                !self.silent_if_cache_hit || !matches!(cache_status, CacheStatus::Hit { .. });
+            if should_print {
+                if let Some(inline_status) = format_cache_status_inline(&cache_status) {
+                    let styled_status = match &cache_status {
+                        CacheStatus::Hit { .. } => {
+                            inline_status.style(Style::new().green().dimmed())
+                        }
+                        CacheStatus::Miss(_) => inline_status.style(CACHE_MISS_STYLE.dimmed()),
+                        CacheStatus::Disabled(_) => {
+                            inline_status.style(Style::new().bright_black())
+                        }
+                    };
+                    let _ = writeln!(self.writer, "{}", styled_status);
+                }
+            }
             self.executions.push(ExecutionInfo {
                 display: None,
                 cache_status,
@@ -418,27 +436,10 @@ impl<W: Write> LabeledReporter<W> {
 
     /// Print simplified cache status for single built-in commands
     ///
-    /// Shows cache status for built-in commands, but hides "no previous cache entry found"
-    /// to keep first-run output clean (just shows the command's stdout/stderr).
+    /// Note: Inline cache status is now printed at Start event in handle_start(),
+    /// so this function is a no-op to avoid duplicate output.
     fn print_simple_cache_status(&mut self) {
-        if let Some(exec) = self.executions.first() {
-            // Skip printing for "NotFound" cache miss - keeps first-run output clean
-            use super::cache::CacheMiss;
-            if matches!(&exec.cache_status, CacheStatus::Miss(CacheMiss::NotFound)) {
-                return;
-            }
-
-            // Note: handle_finish already adds a trailing newline after the task's output
-
-            // Show cache status for hits, meaningful misses, and disabled cache
-            let cache_summary = format_cache_status_summary(&exec.cache_status);
-            let styled_summary = match &exec.cache_status {
-                CacheStatus::Hit { .. } => cache_summary.style(Style::new().green()),
-                CacheStatus::Miss(_) => cache_summary.style(CACHE_MISS_STYLE),
-                CacheStatus::Disabled(_) => cache_summary.style(Style::new().bright_black()),
-            };
-            let _ = writeln!(self.writer, "{}", styled_summary);
-        }
+        // Inline cache status already printed at Start event - nothing to do here
     }
 }
 
