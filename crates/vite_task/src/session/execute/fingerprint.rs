@@ -169,6 +169,11 @@ pub fn fingerprint_path(
                     // This might be a directory - try reading it as such
                     return process_directory(std_path, path_read);
                 }
+                // On Windows, paths with trailing backslash (from joining empty path)
+                // fail with NotFound (error code 3). Try as directory in this case.
+                if err.raw_os_error() == Some(3) && std_path.to_string_lossy().ends_with('\\') {
+                    return process_directory(std_path, path_read);
+                }
             }
             if err.kind() != io::ErrorKind::NotFound {
                 tracing::trace!(
