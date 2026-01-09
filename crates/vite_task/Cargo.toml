@@ -11,60 +11,32 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
-[package.metadata.cargo-shear]
-ignored = [
-  "wax",
-  "compact_str",
-  "uuid",
-  "futures-core",
-  "dashmap",
-  "itertools",
-  "supports-color",
-  "shell-escape",
-  "tokio-stream",
-  "sha2",
-  "tempfile",
-  "vite_shell",
-]
-
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bincode = { workspace = true, features = ["derive"] }
 bstr = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-compact_str = { workspace = true, features = ["serde"] }
-dashmap = { workspace = true }
 derive_more = { workspace = true, features = ["from"] }
 diff-struct = { workspace = true }
 fspy = { workspace = true }
-futures-core = { workspace = true }
 futures-util = { workspace = true }
-itertools = { workspace = true }
 owo-colors = { workspace = true }
 petgraph = { workspace = true }
 rayon = { workspace = true }
 rusqlite = { workspace = true, features = ["bundled"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
-shell-escape = { workspace = true }
-supports-color = { workspace = true }
-tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "io-std", "macros", "sync"] }
-tokio-stream = { workspace = true }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
 vite_glob = { workspace = true }
 vite_path = { workspace = true }
-vite_shell = { workspace = true }
 vite_str = { workspace = true }
 vite_task_graph = { workspace = true }
 vite_task_plan = { workspace = true }
 vite_workspace = { workspace = true }
-wax = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }

@@ -797,20 +797,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dashmap"
-version = "6.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
-dependencies = [
- "cfg-if",
- "crossbeam-utils",
- "hashbrown 0.14.5",
- "lock_api",
- "once_cell",
- "parking_lot_core",
-]
-
-[[package]]
 name = "derive_more"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1374,12 +1360,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
-
-[[package]]
-name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
@@ -1502,15 +1482,6 @@ name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -3271,14 +3242,10 @@ dependencies = [
  "bincode",
  "bstr",
  "clap",
- "compact_str 0.9.0",
- "dashmap",
  "derive_more",
  "diff-struct",
  "fspy",
- "futures-core",
  "futures-util",
- "itertools 0.14.0",
  "nix 0.30.1",
  "owo-colors",
  "petgraph",
@@ -3286,24 +3253,16 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "sha2",
- "shell-escape",
- "supports-color",
- "tempfile",
  "thiserror 2.0.17",
  "tokio",
- "tokio-stream",
  "tracing",
  "twox-hash",
- "uuid",
  "vite_glob",
  "vite_path",
- "vite_shell",
  "vite_str",
  "vite_task_graph",
  "vite_task_plan",
  "vite_workspace",
- "wax",
 ]
 
 [[package]]
