@@ -298,7 +298,7 @@ pub fn plan_synthetic_request(
     } else {
         // Otherwise, use direct execution cache key
         ExecutionCacheKey {
-            kind: ExecutionCacheKeyKind::DirectSyntatic { direct_execution_cache_key },
+            kind: ExecutionCacheKeyKind::DirectSyntactic { direct_execution_cache_key },
             origin_path: strip_prefix_for_cache(cwd, workspace_path)
                 .map_err(|kind| PathFingerprintError { kind, path_type: PathType::Cwd })?,
         }

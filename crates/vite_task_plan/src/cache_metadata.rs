@@ -10,11 +10,11 @@ use crate::envs::EnvFingerprints;
 /// The kind of a key to identify an execution.
 #[derive(Debug, Encode, bincode::Decode, Serialize)]
 pub(crate) enum ExecutionCacheKeyKind {
-    /// This execution is directly from a custom syntatic vite-task subcommand (like `vite lint`).
+    /// This execution is directly from a custom syntactic vite-task subcommand (like `vite lint`).
     ///
     /// Note that this is only for the case where the subcommand is directly typed in the cli,
     /// not from a task script (like `"lint-task": "vite lint"`), which is covered by the `UserTask` variant.
-    DirectSyntatic {
+    DirectSyntactic {
         /// Provided in `SyntheticPlanRequest.direct_execution_cache_key` by task synthezier
         direct_execution_cache_key: Arc<[Str]>,
     },
@@ -34,12 +34,12 @@ pub(crate) enum ExecutionCacheKeyKind {
 /// Key to identify an execution
 #[derive(Debug, Encode, Decode, Serialize)]
 pub struct ExecutionCacheKey {
-    /// The kind of the execution cache key (DirectSyntatic or UserTask)
+    /// The kind of the execution cache key (DirectSyntactic or UserTask)
     pub(crate) kind: ExecutionCacheKeyKind,
     /// The origin path where this execution is planned from.
     /// It's relative to the workspace root.
     ///
-    /// - For DirectSyntatic, it's the cwd where the command `vite [custom subcommand] ...` is run.
+    /// - For DirectSyntactic, it's the cwd where the command `vite [custom subcommand] ...` is run.
     ///   It's not necessarily the actual cwd that the synthesized task runs in.
     /// - For UserTask, it's the package path where the user-defined task is defined.
     pub(crate) origin_path: RelativePathBuf,

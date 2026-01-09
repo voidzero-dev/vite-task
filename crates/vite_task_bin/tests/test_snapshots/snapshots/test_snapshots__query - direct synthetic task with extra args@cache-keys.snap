@@ -28,7 +28,7 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
           },
           "execution_cache_key": {
             "kind": {
-              "DirectSyntatic": {
+              "DirectSyntactic": {
                 "direct_execution_cache_key": [
                   "lint",
                   "--fix"
