@@ -28,6 +28,17 @@ fn redact_string_in_json(value: &mut serde_json::Value, redactions: &[(&str, &st
     });
 }
 
+/// Strip Windows executable extensions (case-insensitive) for cross-platform consistency
+fn strip_windows_executable_extension(s: &mut String) {
+    let lower = s.to_lowercase();
+    for ext in [".cmd", ".bat", ".exe", ".com"] {
+        if lower.ends_with(ext) {
+            s.truncate(s.len() - ext.len());
+            break;
+        }
+    }
+}
+
 fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     use cow_utils::CowUtils as _;
     for (from, to) in redactions {
@@ -67,20 +78,18 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
         &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
     );
 
-    // Normalize Windows program names by stripping common extensions for cross-platform consistency
+    // Normalize Windows program names and paths by stripping common extensions for cross-platform consistency
     visit_json(&mut json_value, &mut |v| {
         let serde_json::Value::Object(map) = v else {
             return;
         };
+        // Normalize program_name field
         if let Some(serde_json::Value::String(program_name)) = map.get_mut("program_name") {
-            // Strip Windows executable extensions (case-insensitive)
-            let lower = program_name.to_lowercase();
-            for ext in [".cmd", ".bat", ".exe", ".com"] {
-                if lower.ends_with(ext) {
-                    program_name.truncate(program_name.len() - ext.len());
-                    break;
-                }
-            }
+            strip_windows_executable_extension(program_name);
+        }
+        // Normalize program_path field
+        if let Some(serde_json::Value::String(program_path)) = map.get_mut("program_path") {
+            strip_windows_executable_extension(program_path);
         }
     });
 
