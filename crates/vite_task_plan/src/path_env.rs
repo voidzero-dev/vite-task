@@ -8,6 +8,9 @@ use std::{
 
 use vite_path::AbsolutePath;
 
+/// Get the PATH environment variable from the given envs map.
+/// On Windows, this function performs a case-insensitive search for "PATH".
+/// On Unix, it performs a case-sensitive search.
 pub fn get_path_env(envs: &HashMap<Arc<OsStr>, Arc<OsStr>>) -> Option<&Arc<OsStr>> {
     if cfg!(windows) {
         // On Windows, environment variable names are case-insensitive (e.g., "PATH", "Path", "path" are all the same)

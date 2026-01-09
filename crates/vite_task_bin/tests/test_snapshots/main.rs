@@ -116,7 +116,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         let workspace_root_str = workspace_root.path.as_path().to_str().unwrap();
         let mut owned_callbacks = vite_task_bin::OwnedSessionCallbacks::default();
         let mut session = Session::init_with(
-            plan_envs,
+            plan_envs.into(),
             Arc::clone(&workspace_root.path),
             owned_callbacks.as_callbacks(),
         )

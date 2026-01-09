@@ -10,4 +10,6 @@ pub use vite_task_graph::{
     config::user::{EnabledCacheConfig, UserCacheConfig, UserTaskOptions},
     loader,
 };
+/// get_path_env is useful for TaskSynthesizer implementations. Re-export it here.
+pub use vite_task_plan::get_path_env;
 pub use vite_task_plan::plan_request;

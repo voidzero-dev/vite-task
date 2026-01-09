@@ -67,10 +67,18 @@ pub struct SessionCallbacks<'a, CustomSubcommand> {
 #[async_trait::async_trait(?Send)]
 pub trait TaskSynthesizer<CustomSubcommand>: Debug {
     fn should_synthesize_for_program(&self, program: &str) -> bool;
+
+    /// Synthesize a synthetic task plan request for the given parsed custom subcommand.
+    ///
+    /// - `envs` is the current environment variables where the task is being planned.
+    /// - `cwd` is the current working directory where the task is being planned.
+    ///
+    /// The implementor can return a different `envs` in `SyntheticPlanRequest` to customize
+    /// environment variables for the synthetic task.
     async fn synthesize_task(
         &mut self,
         subcommand: CustomSubcommand,
-        path_env: Option<&Arc<OsStr>>,
+        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<SyntheticPlanRequest>;
 }
@@ -85,7 +93,7 @@ impl<CustomSubcommand: clap::Subcommand> PlanRequestParser<'_, CustomSubcommand>
     async fn get_plan_request_from_cli_args(
         &mut self,
         cli_args: ParsedTaskCLIArgs<CustomSubcommand>,
-        path_env: Option<&Arc<OsStr>>,
+        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<PlanRequest> {
         match cli_args {
@@ -94,7 +102,7 @@ impl<CustomSubcommand: clap::Subcommand> PlanRequestParser<'_, CustomSubcommand>
             }
             ParsedTaskCLIArgs::Custom(custom_subcommand) => {
                 let synthetic_plan_request =
-                    self.task_synthesizer.synthesize_task(custom_subcommand, path_env, cwd).await?;
+                    self.task_synthesizer.synthesize_task(custom_subcommand, envs, cwd).await?;
                 Ok(PlanRequest::Synthetic(synthetic_plan_request))
             }
         }
@@ -109,7 +117,7 @@ impl<CustomSubcommand: clap::Subcommand> vite_task_plan::PlanRequestParser
         &mut self,
         program: &str,
         args: &[Str],
-        path_env: Option<&Arc<OsStr>>,
+        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<Option<PlanRequest>> {
         Ok(
@@ -120,7 +128,7 @@ impl<CustomSubcommand: clap::Subcommand> vite_task_plan::PlanRequestParser
                 let cli_args = ParsedTaskCLIArgs::<CustomSubcommand>::try_parse_from(
                     std::iter::once(program).chain(args.iter().map(Str::as_str)),
                 )?;
-                Some(self.get_plan_request_from_cli_args(cli_args, path_env, cwd).await?)
+                Some(self.get_plan_request_from_cli_args(cli_args, envs, cwd).await?)
             } else {
                 None
             },
@@ -137,7 +145,7 @@ pub struct Session<'a, CustomSubcommand> {
     /// The task graph is loaded on-demand and cached for future use.
     lazy_task_graph: LazyTaskGraph<'a>,
 
-    envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
     cwd: Arc<AbsolutePath>,
 
     plan_request_parser: PlanRequestParser<'a, CustomSubcommand>,
@@ -156,9 +164,13 @@ fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf
 impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     /// Initialize a session with real environment variables and cwd
     pub fn init(callbacks: SessionCallbacks<'a, CustomSubcommand>) -> anyhow::Result<Self> {
-        let envs = std::env::vars_os()
-            .map(|(k, v)| (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str())))
-            .collect();
+        let envs = Arc::new(
+            std::env::vars_os()
+                .map(|(k, v)| {
+                    (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str()))
+                })
+                .collect(),
+        );
         Self::init_with(envs, vite_path::current_dir()?.into(), callbacks)
     }
 
@@ -170,7 +182,7 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
 
     /// Initialize a session with custom cwd, environment variables. Useful for testing.
     pub fn init_with(
-        envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
+        envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: Arc<AbsolutePath>,
         callbacks: SessionCallbacks<'a, CustomSubcommand>,
     ) -> anyhow::Result<Self> {
@@ -235,10 +247,9 @@ impl<'a, CustomSubcommand: clap::Subcommand> Session<'a, CustomSubcommand> {
         cwd: Arc<AbsolutePath>,
         cli_args: TaskCLIArgs<CustomSubcommand>,
     ) -> Result<ExecutionPlan, vite_task_plan::Error> {
-        let path_env = get_path_env(&self.envs);
         let plan_request = self
             .plan_request_parser
-            .get_plan_request_from_cli_args(cli_args.parsed, path_env, &cwd)
+            .get_plan_request_from_cli_args(cli_args.parsed, &self.envs, &cwd)
             .await
             .map_err(|error| {
                 TaskPlanErrorKind::ParsePlanRequestError {

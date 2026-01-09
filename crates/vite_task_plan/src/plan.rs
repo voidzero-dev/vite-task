@@ -160,10 +160,10 @@ async fn plan_task_as_execution_node(
             };
 
             // Try to parse the args of an and_item to a plan request like `run -r build`
-            let path_env = get_path_env(context.envs()).cloned();
+            let envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>> = context.envs().clone().into();
             let plan_request = context
                 .callbacks()
-                .get_plan_request(&and_item.program, &args, path_env.as_ref(), &cwd)
+                .get_plan_request(&and_item.program, &args, &envs, &cwd)
                 .await
                 .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError {
                     program: and_item.program.clone(),
@@ -189,7 +189,6 @@ async fn plan_task_as_execution_node(
                         synthetic_plan_request,
                         Some(task_execution_cache_key),
                         context.cwd(),
-                        context.envs(),
                     )
                     .with_plan_context(&context)?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
@@ -285,24 +284,11 @@ pub fn plan_synthetic_request(
     // generated from the task, overrides `synthetic_plan_request.direct_execution_cache_key`
     task_execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
-    envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
-    let SyntheticPlanRequest {
-        program,
-        args,
-        task_options,
-        direct_execution_cache_key,
-        additional_envs,
-    } = synthetic_plan_request;
+    let SyntheticPlanRequest { program, args, task_options, direct_execution_cache_key, envs } =
+        synthetic_plan_request;
 
-    let mut envs = Cow::Borrowed(envs);
-    if !additional_envs.is_empty() {
-        envs.to_mut().extend(additional_envs.iter().cloned());
-    }
-
-    let envs = envs.as_ref();
-
-    let program_path = which(&program, envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
+    let program_path = which(&program, &envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
     let resolved_options = ResolvedTaskOptions::resolve(task_options, &cwd);
 
     let execution_cache_key = if let Some(task_execution_cache_key) = task_execution_cache_key {
@@ -322,7 +308,7 @@ pub fn plan_synthetic_request(
         execution_cache_key,
         prefix_envs,
         &resolved_options,
-        envs,
+        &envs,
         program_path,
         args,
     )

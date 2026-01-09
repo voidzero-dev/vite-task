@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, sync::Arc};
+use std::{collections::HashMap, ffi::OsStr, sync::Arc};
 
 use vite_str::Str;
 use vite_task_graph::{config::user::UserTaskOptions, query::TaskQuery};
@@ -36,7 +36,7 @@ pub struct SyntheticPlanRequest {
     /// It typically includes the subcommand name and all args after it. (e.g. `["lint", "--fix"]` for `vite lint --fix`)
     pub direct_execution_cache_key: Arc<[Str]>,
 
-    /// Additional environment variables to set for the synthetic task.
+    /// All environment variables to set for the synthetic task.
     ///
     /// This is set in the plan stage before resolving envs for caching.
     /// Therefore, these envs are subject to env configurations in `UserTaskOptions`.
@@ -44,7 +44,7 @@ pub struct SyntheticPlanRequest {
     /// - To set envs that are not subject to caching but still passed to the spawned child, use `task_options` to configure `pass_through_envs`.
     /// - To set envs that should be fingerprinted, use `task_options` to configure `envs`.
     /// - If neither is set, and caching is enabled, these envs will have not effect.
-    pub additional_envs: Arc<[(Arc<OsStr>, Arc<OsStr>)]>,
+    pub envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
 }
 
 #[derive(Debug)]

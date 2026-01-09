@@ -1,8 +1,9 @@
 use std::{
+    collections::HashMap,
     env::{self, join_paths},
     ffi::OsStr,
     iter,
-    path::PathBuf,
+    path::{self, PathBuf},
     sync::Arc,
 };
 
@@ -11,7 +12,7 @@ use monostate::MustBe;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
-    EnabledCacheConfig, SessionCallbacks, UserCacheConfig, UserTaskOptions,
+    EnabledCacheConfig, SessionCallbacks, UserCacheConfig, UserTaskOptions, get_path_env,
     plan_request::SyntheticPlanRequest,
 };
 
@@ -71,7 +72,8 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
     async fn synthesize_task(
         &mut self,
         subcommand: CustomTaskSubcommand,
-        path_env: Option<&Arc<OsStr>>,
+
+        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<SyntheticPlanRequest> {
         match subcommand {
@@ -79,22 +81,26 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
                 let direct_execution_cache_key: Arc<[Str]> =
                     iter::once(Str::from("lint")).chain(args.iter().cloned()).collect();
                 Ok(SyntheticPlanRequest {
-                    program: find_executable(path_env, &*cwd, "oxlint")?,
+                    program: find_executable(get_path_env(envs), &*cwd, "oxlint")?,
                     args: args.into(),
                     task_options: Default::default(),
                     direct_execution_cache_key,
-                    additional_envs: Arc::new([]),
+                    envs: Arc::clone(envs),
                 })
             }
             CustomTaskSubcommand::EnvTest { name, value } => {
                 let direct_execution_cache_key: Arc<[Str]> =
                     [Str::from("env-test"), name.clone(), value.clone()].into();
-                // Set the env var via additional_envs and configure pass_through_envs
-                let additional_envs: Arc<[(Arc<OsStr>, Arc<OsStr>)]> =
-                    [(Arc::from(OsStr::new(name.as_str())), Arc::from(OsStr::new(value.as_str())))]
-                        .into();
+
+                let mut envs = HashMap::clone(&envs);
+                // Update the env var for testing
+                envs.insert(
+                    Arc::from(OsStr::new(name.as_str())),
+                    Arc::from(OsStr::new(value.as_str())),
+                );
+
                 Ok(SyntheticPlanRequest {
-                    program: find_executable(path_env, &*cwd, "print-env")?,
+                    program: find_executable(get_path_env(&envs), &*cwd, "print-env")?,
                     args: [name.clone()].into(),
                     task_options: UserTaskOptions {
                         cache_config: UserCacheConfig::Enabled {
@@ -107,7 +113,7 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
                         ..Default::default()
                     },
                     direct_execution_cache_key,
-                    additional_envs,
+                    envs: Arc::new(envs),
                 })
             }
         }

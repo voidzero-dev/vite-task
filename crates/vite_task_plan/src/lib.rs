@@ -165,7 +165,7 @@ pub trait PlanRequestParser: Debug {
         &mut self,
         program: &str,
         args: &[Str],
-        path_env: Option<&Arc<OsStr>>,
+        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<Option<PlanRequest>>;
 }
@@ -227,7 +227,6 @@ impl ExecutionPlan {
                     synthetic_plan_request,
                     None,
                     cwd,
-                    &envs,
                 )
                 .with_empty_call_stack()?;
                 ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution))
