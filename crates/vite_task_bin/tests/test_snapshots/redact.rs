@@ -73,10 +73,31 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut json_value = serde_json::to_value(value).unwrap();
+
+    // On Windows, paths might use either backslashes or forward slashes
+    // Try both variants for workspace_root and manifest_dir
+    let workspace_root_forward = workspace_root.replace('\\', "/");
+    let manifest_dir_forward = manifest_dir.replace('\\', "/");
+
     redact_string_in_json(
         &mut json_value,
-        &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
+        &[
+            (workspace_root, "<workspace>"),
+            (workspace_root_forward.as_str(), "<workspace>"),
+            (manifest_dir.as_str(), "<manifest_dir>"),
+            (manifest_dir_forward.as_str(), "<manifest_dir>"),
+        ],
     );
+
+    // Normalize PATH separators for cross-platform consistency (Windows uses ; Unix uses :)
+    visit_json(&mut json_value, &mut |v| {
+        let serde_json::Value::Object(map) = v else {
+            return;
+        };
+        if let Some(serde_json::Value::String(path)) = map.get_mut("PATH") {
+            *path = path.replace(';', ":");
+        }
+    });
 
     // Normalize Windows program names and paths by stripping common extensions for cross-platform consistency
     visit_json(&mut json_value, &mut |v| {
