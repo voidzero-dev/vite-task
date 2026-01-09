@@ -17,6 +17,7 @@ use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::U
 use vite_task_plan::{
     ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind, get_path_env,
     plan_request::{PlanRequest, SyntheticPlanRequest},
+    prepend_path_env,
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
@@ -164,13 +165,9 @@ fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf
 impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     /// Initialize a session with real environment variables and cwd
     pub fn init(callbacks: SessionCallbacks<'a, CustomSubcommand>) -> anyhow::Result<Self> {
-        let envs = Arc::new(
-            std::env::vars_os()
-                .map(|(k, v)| {
-                    (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str()))
-                })
-                .collect(),
-        );
+        let envs = std::env::vars_os()
+            .map(|(k, v)| (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str())))
+            .collect();
         Self::init_with(envs, vite_path::current_dir()?.into(), callbacks)
     }
 
@@ -182,12 +179,16 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
 
     /// Initialize a session with custom cwd, environment variables. Useful for testing.
     pub fn init_with(
-        envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
+        mut envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
         cwd: Arc<AbsolutePath>,
         callbacks: SessionCallbacks<'a, CustomSubcommand>,
     ) -> anyhow::Result<Self> {
         let (workspace_root, _) = find_workspace_root(&cwd)?;
         let cache_path = get_cache_path_of_workspace(&workspace_root.path);
+
+        // Prepend workspace's node_modules/.bin to PATH
+        let workspace_node_modules_bin = workspace_root.path.join("node_modules").join(".bin");
+        prepend_path_env(&mut envs, &workspace_node_modules_bin)?;
 
         if !cache_path.as_path().exists()
             && let Some(cache_dir) = cache_path.as_path().parent()
@@ -202,7 +203,7 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
                 workspace_root,
                 config_loader: callbacks.user_config_loader,
             },
-            envs,
+            envs: Arc::new(envs),
             cwd,
             plan_request_parser: PlanRequestParser { task_synthesizer: callbacks.task_synthesizer },
             cache,

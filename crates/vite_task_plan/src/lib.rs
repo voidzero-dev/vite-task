@@ -20,7 +20,7 @@ use error::TaskPlanErrorKindResultExt;
 pub use error::{Error, TaskPlanErrorKind};
 use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
-pub use path_env::get_path_env;
+pub use path_env::{get_path_env, prepend_path_env};
 use plan::{plan_query_request, plan_synthetic_request};
 use plan_request::PlanRequest;
 use serde::{Serialize, ser::SerializeMap as _};
@@ -28,8 +28,6 @@ use vite_graph_ser::serialize_by_key;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskGraphLoadError, display::TaskDisplay};
-
-use crate::path_env::prepend_path_env;
 
 /// A resolved spawn execution.
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,
@@ -195,13 +193,6 @@ impl ExecutionPlan {
         plan_request_parser: &mut (dyn PlanRequestParser + '_),
         task_graph_loader: &mut (dyn TaskGraphLoader + '_),
     ) -> Result<Self, Error> {
-        let workspace_node_modules_bin = workspace_path.join("node_modules").join(".bin");
-        let mut envs = envs.clone();
-        prepend_path_env(&mut envs, &workspace_node_modules_bin)
-            .map_err(|join_paths_error| TaskPlanErrorKind::AddNodeModulesBinPathError {
-                join_paths_error,
-            })
-            .with_empty_call_stack()?;
         let root_node = match plan_request {
             PlanRequest::Query(query_plan_request) => {
                 let indexed_task_graph = task_graph_loader
