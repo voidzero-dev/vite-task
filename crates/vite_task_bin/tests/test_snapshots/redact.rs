@@ -52,6 +52,10 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let duration_regex = regex::Regex::new(r"\d+(\.\d+)?(ms|s)").unwrap();
     output = duration_regex.replace_all(&output, "<duration>$2").into_owned();
 
+    // Redact thread counts like "using 10 threads" to "using <n> threads"
+    let thread_regex = regex::Regex::new(r"using \d+ threads").unwrap();
+    output = thread_regex.replace_all(&output, "using <n> threads").into_owned();
+
     output
 }
 

@@ -63,16 +63,20 @@ jobs:
         env:
           RUSTFLAGS: '-D warnings --cfg tokio_unstable' # also update .cargo/config.toml
 
-      # `pnpm install` prepares test bins used in snapshot tests
-      - run: pnpm install
-
-      # fspy contains tests for Node.js fs accesses.
-      # use x86_64 node for x86_64-apple-darwin target.
+      # Set up node and pnpm for running tests
+      # For x86_64-apple-darwin, use x64 node for fspy tests that verify Node.js fs accesses
       - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
         with:
           node-version-file: .node-version
           architecture: x64
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+
+      - uses: oxc-project/setup-node@fdbf0dfd334c4e6d56ceeb77d91c76339c2a0885 # v1.0.4
+        if: ${{ matrix.target != 'x86_64-apple-darwin' }}
+
+      # `pnpm install` prepares test bins used in snapshot tests
+      # Must run after setup-node so correct native binaries are installed
+      - run: pnpm install
 
       - run: cargo test --target ${{ matrix.target }}
         if: ${{ matrix.os != 'ubuntu-latest' }}
