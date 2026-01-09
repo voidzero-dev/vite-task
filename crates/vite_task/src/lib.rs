@@ -7,7 +7,10 @@ pub mod session;
 pub use cli::CLIArgs;
 pub use session::{LabeledReporter, Reporter, Session, SessionCallbacks, TaskSynthesizer};
 pub use vite_task_graph::{
-    config::user::{EnabledCacheConfig, UserCacheConfig, UserTaskOptions},
+    config::{
+        self,
+        user::{EnabledCacheConfig, UserCacheConfig, UserTaskConfig, UserTaskOptions},
+    },
     loader,
 };
 /// get_path_env is useful for TaskSynthesizer implementations. Re-export it here.
