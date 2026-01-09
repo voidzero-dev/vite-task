@@ -67,6 +67,16 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let thread_regex = regex::Regex::new(r"using \d+ threads").unwrap();
     output = thread_regex.replace_all(&output, "using <n> threads").into_owned();
 
+    // Remove Node.js experimental warnings (e.g., Type Stripping warnings)
+    let node_warning_regex =
+        regex::Regex::new(r"(?m)^\(node:\d+\) ExperimentalWarning:.*\n?").unwrap();
+    output = node_warning_regex.replace_all(&output, "").into_owned();
+    let node_trace_warning_regex = regex::Regex::new(
+        r"(?m)^\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n?",
+    )
+    .unwrap();
+    output = node_trace_warning_regex.replace_all(&output, "").into_owned();
+
     output
 }
 

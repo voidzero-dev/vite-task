@@ -82,6 +82,10 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
             .into_os_string(),
     );
 
+    // Find @yarnpkg/shell executable in test_bins
+    let shell_exe = which::which_in("shell", Some(&*test_bin_path), std::env::current_dir().unwrap())
+        .expect("shell executable not found in test_bins/node_modules/.bin");
+
     // Add test_bins to PATH so test programs (such as print-file) in fixtures can be found.
     let plan_envs: HashMap<Arc<OsStr>, Arc<OsStr>> = [
         (Arc::<OsStr>::from(OsStr::new("PATH")), Arc::clone(&test_bin_path)),
@@ -172,21 +176,8 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
 
             let mut e2e_outputs = String::new();
             for step in e2e.steps {
-                let mut cmd = if cfg!(windows) {
-                    let mut cmd = Command::new("cmd.exe");
-                    // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
-                    cmd.args(["/d", "/s", "/c"]);
-                    cmd
-                } else {
-                    let mut cmd = Command::new("sh");
-                    cmd.args(["-c"]);
-                    cmd
-                };
-                // On Windows, env_clear() would break cmd.exe, so only set PATH
-                // On Unix, clear all envs for reproducibility
-                if !cfg!(windows) {
-                    cmd.env_clear();
-                }
+                // Use @yarnpkg/shell for cross-platform shell execution
+                let mut cmd = Command::new(&shell_exe);
                 cmd.arg(step.as_str())
                     .env("PATH", &e2e_env_path)
                     .env("NO_COLOR", "1")
