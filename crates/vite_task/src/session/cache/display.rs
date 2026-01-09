@@ -3,95 +3,124 @@
 //! This module provides plain text formatting for cache status.
 //! Coloring is handled by the reporter to respect NO_COLOR environment variable.
 
+use std::collections::HashSet;
+
 use vite_task_plan::cache_metadata::SpawnFingerprint;
 
 use super::{CacheMiss, FingerprintMismatch};
 use crate::session::event::{CacheDisabledReason, CacheStatus};
 
-/// Describes what changed between two spawn fingerprints
+/// Describes a single atomic change between two spawn fingerprints
 enum SpawnFingerprintChange {
+    // Environment variable changes
+    /// Environment variable added
+    EnvAdded { key: String, value: String },
+    /// Environment variable removed
+    EnvRemoved { key: String, value: String },
     /// Environment variable value changed
     EnvValueChanged { key: String, old_value: String, new_value: String },
-    /// Pass-through environment configuration changed
-    PassThroughEnvConfigChanged { old_config: String, new_config: String },
-    /// Command changed (program or args)
-    CommandChanged,
+
+    // Pass-through env config changes
+    /// Pass-through env pattern added
+    PassThroughEnvAdded { name: String },
+    /// Pass-through env pattern removed
+    PassThroughEnvRemoved { name: String },
+
+    // Command changes
+    /// Program changed
+    ProgramChanged,
+    /// Args changed
+    ArgsChanged,
+
+    // Working directory change
     /// Working directory changed
     CwdChanged,
-    /// Fingerprint ignores configuration changed
-    FingerprintIgnoresChanged,
-    /// Multiple changes or couldn't determine specific change
-    MultipleChanges,
+
+    // Fingerprint ignores changes
+    /// Fingerprint ignore pattern added
+    FingerprintIgnoreAdded { pattern: String },
+    /// Fingerprint ignore pattern removed
+    FingerprintIgnoreRemoved { pattern: String },
 }
 
-/// Compare two spawn fingerprints and determine what changed
-fn detect_spawn_fingerprint_change(
+/// Compare two spawn fingerprints and return all changes
+fn detect_spawn_fingerprint_changes(
     old: &SpawnFingerprint,
     new: &SpawnFingerprint,
-) -> SpawnFingerprintChange {
+) -> Vec<SpawnFingerprintChange> {
+    let mut changes = Vec::new();
     let old_env = old.env_fingerprints();
     let new_env = new.env_fingerprints();
 
-    // Check for env value changes
-    let mut env_changes = Vec::new();
+    // Check for removed or changed envs
     for (key, old_value) in &old_env.fingerprinted_envs {
         if let Some(new_value) = new_env.fingerprinted_envs.get(key) {
             if old_value != new_value {
-                env_changes.push((key.to_string(), old_value.to_string(), new_value.to_string()));
+                changes.push(SpawnFingerprintChange::EnvValueChanged {
+                    key: key.to_string(),
+                    old_value: old_value.to_string(),
+                    new_value: new_value.to_string(),
+                });
             }
         } else {
-            // Key was removed
-            env_changes.push((key.to_string(), old_value.to_string(), "<removed>".to_string()));
+            changes.push(SpawnFingerprintChange::EnvRemoved {
+                key: key.to_string(),
+                value: old_value.to_string(),
+            });
         }
     }
-    // Check for new keys
+
+    // Check for added envs
     for (key, new_value) in &new_env.fingerprinted_envs {
         if !old_env.fingerprinted_envs.contains_key(key) {
-            env_changes.push((key.to_string(), "<not set>".to_string(), new_value.to_string()));
+            changes.push(SpawnFingerprintChange::EnvAdded {
+                key: key.to_string(),
+                value: new_value.to_string(),
+            });
         }
     }
 
-    // Check for pass-through env config changes
-    let pass_through_changed = old_env.pass_through_env_config != new_env.pass_through_env_config;
-
-    // Check for command changes (program or args)
-    let command_changed = old.program_fingerprint_debug() != new.program_fingerprint_debug()
-        || old.args() != new.args();
-
-    // Check for cwd changes
-    let cwd_changed = old.cwd() != new.cwd();
-
-    // Check for fingerprint ignores changes
-    let fingerprint_ignores_changed = old.fingerprint_ignores() != new.fingerprint_ignores();
-
-    // Determine the most specific change
-    let change_count = (if env_changes.is_empty() { 0 } else { 1 })
-        + pass_through_changed as usize
-        + command_changed as usize
-        + cwd_changed as usize
-        + fingerprint_ignores_changed as usize;
-
-    if change_count == 0 {
-        // Shouldn't happen, but handle gracefully
-        SpawnFingerprintChange::MultipleChanges
-    } else if !env_changes.is_empty() && change_count == 1 {
-        // Only env changes - report the first one
-        let (key, old_val, new_val) = env_changes.into_iter().next().unwrap();
-        SpawnFingerprintChange::EnvValueChanged { key, old_value: old_val, new_value: new_val }
-    } else if pass_through_changed && change_count == 1 {
-        SpawnFingerprintChange::PassThroughEnvConfigChanged {
-            old_config: format!("{:?}", old_env.pass_through_env_config),
-            new_config: format!("{:?}", new_env.pass_through_env_config),
-        }
-    } else if command_changed && change_count == 1 {
-        SpawnFingerprintChange::CommandChanged
-    } else if cwd_changed && change_count == 1 {
-        SpawnFingerprintChange::CwdChanged
-    } else if fingerprint_ignores_changed && change_count == 1 {
-        SpawnFingerprintChange::FingerprintIgnoresChanged
-    } else {
-        SpawnFingerprintChange::MultipleChanges
+    // Check pass-through env config changes
+    let old_pass_through: HashSet<_> = old_env.pass_through_env_config.iter().collect();
+    let new_pass_through: HashSet<_> = new_env.pass_through_env_config.iter().collect();
+    for name in old_pass_through.difference(&new_pass_through) {
+        changes.push(SpawnFingerprintChange::PassThroughEnvRemoved { name: name.to_string() });
     }
+    for name in new_pass_through.difference(&old_pass_through) {
+        changes.push(SpawnFingerprintChange::PassThroughEnvAdded { name: name.to_string() });
+    }
+
+    // Check program changes
+    if old.program_fingerprint_debug() != new.program_fingerprint_debug() {
+        changes.push(SpawnFingerprintChange::ProgramChanged);
+    }
+
+    // Check args changes
+    if old.args() != new.args() {
+        changes.push(SpawnFingerprintChange::ArgsChanged);
+    }
+
+    // Check cwd changes
+    if old.cwd() != new.cwd() {
+        changes.push(SpawnFingerprintChange::CwdChanged);
+    }
+
+    // Check fingerprint ignores changes
+    let old_ignores: HashSet<_> =
+        old.fingerprint_ignores().map(|v| v.iter().collect()).unwrap_or_default();
+    let new_ignores: HashSet<_> =
+        new.fingerprint_ignores().map(|v| v.iter().collect()).unwrap_or_default();
+    for pattern in old_ignores.difference(&new_ignores) {
+        changes.push(SpawnFingerprintChange::FingerprintIgnoreRemoved {
+            pattern: pattern.to_string(),
+        });
+    }
+    for pattern in new_ignores.difference(&old_ignores) {
+        changes
+            .push(SpawnFingerprintChange::FingerprintIgnoreAdded { pattern: pattern.to_string() });
+    }
+
+    changes
 }
 
 /// Format cache status for inline display (during Start event).
@@ -118,30 +147,34 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<String> 
             // Show "cache miss" with reason why cache couldn't be used
             let reason = match mismatch {
                 FingerprintMismatch::SpawnFingerprintMismatch { old, new } => {
-                    match detect_spawn_fingerprint_change(old, new) {
-                        SpawnFingerprintChange::EnvValueChanged { .. } => {
-                            "envs changed".to_string()
-                        }
-                        SpawnFingerprintChange::PassThroughEnvConfigChanged { .. } => {
-                            "pass-through env config changed".to_string()
-                        }
-                        SpawnFingerprintChange::CommandChanged => "command changed".to_string(),
-                        SpawnFingerprintChange::CwdChanged => {
-                            "working directory changed".to_string()
-                        }
-                        SpawnFingerprintChange::FingerprintIgnoresChanged => {
-                            "fingerprint ignores changed".to_string()
-                        }
-                        SpawnFingerprintChange::MultipleChanges => {
-                            "configuration changed".to_string()
-                        }
+                    let changes = detect_spawn_fingerprint_changes(old, new);
+                    match changes.first() {
+                        Some(
+                            SpawnFingerprintChange::EnvAdded { .. }
+                            | SpawnFingerprintChange::EnvRemoved { .. }
+                            | SpawnFingerprintChange::EnvValueChanged { .. },
+                        ) => "envs changed",
+                        Some(
+                            SpawnFingerprintChange::PassThroughEnvAdded { .. }
+                            | SpawnFingerprintChange::PassThroughEnvRemoved { .. },
+                        ) => "pass-through env config changed",
+                        Some(SpawnFingerprintChange::ProgramChanged) => "program changed",
+                        Some(SpawnFingerprintChange::ArgsChanged) => "args changed",
+                        Some(SpawnFingerprintChange::CwdChanged) => "working directory changed",
+                        Some(
+                            SpawnFingerprintChange::FingerprintIgnoreAdded { .. }
+                            | SpawnFingerprintChange::FingerprintIgnoreRemoved { .. },
+                        ) => "fingerprint ignores changed",
+                        None => "configuration changed",
                     }
                 }
                 FingerprintMismatch::PostRunFingerprintMismatch(diff) => {
                     use crate::session::execute::fingerprint::PostRunFingerprintMismatch;
                     match diff {
                         PostRunFingerprintMismatch::InputContentChanged { path } => {
-                            format!("content of input '{path}' changed")
+                            return Some(format!(
+                                "✗ cache miss: content of input '{path}' changed, executing"
+                            ));
                         }
                     }
                 }
@@ -183,27 +216,49 @@ pub fn format_cache_status_summary(cache_status: &CacheStatus) -> String {
             // Show specific reason why cache was invalidated
             match mismatch {
                 FingerprintMismatch::SpawnFingerprintMismatch { old, new } => {
-                    match detect_spawn_fingerprint_change(old, new) {
-                        SpawnFingerprintChange::EnvValueChanged { key, old_value, new_value } => {
-                            format!(
-                                "→ Cache miss: env {key} value changed from '{old_value}' to '{new_value}'"
-                            )
-                        }
-                        SpawnFingerprintChange::PassThroughEnvConfigChanged { .. } => {
-                            "→ Cache miss: pass-through env configuration changed".to_string()
-                        }
-                        SpawnFingerprintChange::CommandChanged => {
-                            "→ Cache miss: command changed".to_string()
-                        }
-                        SpawnFingerprintChange::CwdChanged => {
-                            "→ Cache miss: working directory changed".to_string()
-                        }
-                        SpawnFingerprintChange::FingerprintIgnoresChanged => {
-                            "→ Cache miss: fingerprint ignores configuration changed".to_string()
-                        }
-                        SpawnFingerprintChange::MultipleChanges => {
-                            "→ Cache miss: configuration changed".to_string()
-                        }
+                    let changes = detect_spawn_fingerprint_changes(old, new);
+                    let formatted: Vec<String> = changes
+                        .iter()
+                        .map(|c| match c {
+                            SpawnFingerprintChange::EnvAdded { key, value } => {
+                                format!("env {key}={value} added")
+                            }
+                            SpawnFingerprintChange::EnvRemoved { key, value } => {
+                                format!("env {key}={value} removed")
+                            }
+                            SpawnFingerprintChange::EnvValueChanged {
+                                key,
+                                old_value,
+                                new_value,
+                            } => {
+                                format!(
+                                    "env {key} value changed from '{old_value}' to '{new_value}'"
+                                )
+                            }
+                            SpawnFingerprintChange::PassThroughEnvAdded { name } => {
+                                format!("pass-through env '{name}' added")
+                            }
+                            SpawnFingerprintChange::PassThroughEnvRemoved { name } => {
+                                format!("pass-through env '{name}' removed")
+                            }
+                            SpawnFingerprintChange::ProgramChanged => "program changed".to_string(),
+                            SpawnFingerprintChange::ArgsChanged => "args changed".to_string(),
+                            SpawnFingerprintChange::CwdChanged => {
+                                "working directory changed".to_string()
+                            }
+                            SpawnFingerprintChange::FingerprintIgnoreAdded { pattern } => {
+                                format!("fingerprint ignore '{pattern}' added")
+                            }
+                            SpawnFingerprintChange::FingerprintIgnoreRemoved { pattern } => {
+                                format!("fingerprint ignore '{pattern}' removed")
+                            }
+                        })
+                        .collect();
+
+                    if formatted.is_empty() {
+                        "→ Cache miss: configuration changed".to_string()
+                    } else {
+                        format!("→ Cache miss: {}", formatted.join("; "))
                     }
                 }
                 FingerprintMismatch::PostRunFingerprintMismatch(diff) => {

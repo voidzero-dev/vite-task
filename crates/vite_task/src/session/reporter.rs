@@ -180,7 +180,7 @@ impl<W: Write> LabeledReporter<W> {
         };
 
         let cwd_str =
-            if cwd_relative.is_empty() { String::new() } else { format!("{cwd_relative}/") };
+            if cwd_relative.is_empty() { String::new() } else { format!("~/{cwd_relative}") };
         let command_str = format!("{cwd_str}$ {}", display.command);
 
         // Skip printing if silent_if_cache_hit is enabled and this is a cache hit
@@ -265,6 +265,8 @@ impl<W: Write> LabeledReporter<W> {
 
         // Print summary header with decorative line
         // Note: handle_finish already adds a trailing newline after each task's output
+        // Add an extra blank line before the summary for visual separation
+        let _ = writeln!(self.writer);
         let _ = writeln!(
             self.writer,
             "{}",
@@ -297,16 +299,23 @@ impl<W: Write> LabeledReporter<W> {
             String::new()
         };
 
-        let _ = writeln!(
+        // Build statistics line, only including non-empty parts
+        // Note: trailing space after "cache misses" is intentional for consistent formatting
+        let _ = write!(
             self.writer,
-            "{}  {} {} {} {} {}",
+            "{}  {} {} {} ",
             "Statistics:".style(Style::new().bold()),
             format!(" {total} tasks").style(Style::new().bright_white()),
             format!("• {cache_hits} cache hits").style(Style::new().green()),
             format!("• {cache_misses} cache misses").style(CACHE_MISS_STYLE),
-            cache_disabled_str,
-            failed_str
         );
+        if !cache_disabled_str.is_empty() {
+            let _ = write!(self.writer, "{} ", cache_disabled_str);
+        }
+        if !failed_str.is_empty() {
+            let _ = write!(self.writer, "{} ", failed_str);
+        }
+        let _ = writeln!(self.writer);
 
         // Calculate cache hit rate
         let cache_rate = if total > 0 {
@@ -375,8 +384,17 @@ impl<W: Write> LabeledReporter<W> {
                 task_display.to_string().style(Style::new().bright_white().bold())
             );
 
-            // Command
-            let _ = write!(self.writer, ": {}", display.command.style(COMMAND_STYLE));
+            // Command with cwd prefix
+            let cwd_relative = if let Ok(Some(rel)) = display.cwd.strip_prefix(&self.workspace_path)
+            {
+                rel.as_str().to_string()
+            } else {
+                String::new()
+            };
+            let cwd_str =
+                if cwd_relative.is_empty() { String::new() } else { format!("~/{cwd_relative}") };
+            let command_display = format!("{cwd_str}$ {}", display.command);
+            let _ = write!(self.writer, ": {}", command_display.style(COMMAND_STYLE));
 
             // Execution result icon
             match exec.exit_status {

@@ -4,11 +4,12 @@ expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/vite-task-smoke
 ---
 > vite run test-task
-$ echo hello
+$ echo hello ⊘ cache disabled: built-in command
 hello
 
 $ print-file main.js
 console.log('foo');
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Vite+ Task Runner • Execution Summary
@@ -19,21 +20,22 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] vite-task-smoke#test-task: echo hello ✓
+  [1] vite-task-smoke#test-task: $ echo hello ✓
       → Cache disabled for built-in command
   ·······················································
-  [2] vite-task-smoke#test-task: print-file main.js ✓
+  [2] vite-task-smoke#test-task: $ print-file main.js ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 > replace-file-content main.js foo bar
 
 > vite run test-task
-$ echo hello
+$ echo hello ⊘ cache disabled: built-in command
 hello
 
-$ print-file main.js (✗ cache miss: input files changed, executing)
+$ print-file main.js ✗ cache miss: content of input 'main.js' changed, executing
 console.log('bar');
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Vite+ Task Runner • Execution Summary
@@ -44,9 +46,9 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] vite-task-smoke#test-task: echo hello ✓
+  [1] vite-task-smoke#test-task: $ echo hello ✓
       → Cache disabled for built-in command
   ·······················································
-  [2] vite-task-smoke#test-task: print-file main.js ✓
+  [2] vite-task-smoke#test-task: $ print-file main.js ✓
       → Cache miss: content of input 'main.js' changed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

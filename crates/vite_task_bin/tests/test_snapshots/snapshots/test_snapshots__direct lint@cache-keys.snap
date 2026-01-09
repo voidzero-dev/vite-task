@@ -11,6 +11,7 @@ Finished in <duration>ms on 0 files with 90 rules using 10 threads.
 > echo debugger > main.js
 
 > vite lint
+✗ cache miss: content of input '' changed, executing
 
   ! eslint(no-debugger): `debugger` statement is not allowed
    ,-[main.js:1:1]
@@ -21,5 +22,3 @@ Finished in <duration>ms on 0 files with 90 rules using 10 threads.
 
 Found 1 warning and 0 errors.
 Finished in <duration>ms on 1 file with 90 rules using 10 threads.
-
-→ Cache miss: content of input '' changed

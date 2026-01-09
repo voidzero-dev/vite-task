@@ -9,6 +9,7 @@
     "replace-file-content": "./src/replace-file-content.ts"
   },
   "dependencies": {
+    "cross-env": "^10.1.0",
     "oxlint": "catalog:",
     "vite-task-test-bins": "link:"
   }

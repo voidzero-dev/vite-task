@@ -76,7 +76,8 @@ async fn plan_task_as_execution_node(
 
     let mut items = Vec::<ExecutionItem>::new();
 
-    let mut cwd = Arc::clone(context.cwd());
+    // Use task's resolved cwd for display (from task config's cwd option)
+    let mut cwd = Arc::clone(&task_node.resolved_config.resolved_options.cwd);
 
     // TODO: variable expansion (https://crates.io/crates/shellexpand) BEFORE parsing
     // Try to parse the command string as a list of subcommands separated by `&&`
