@@ -67,6 +67,23 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
         &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
     );
 
+    // Normalize Windows program names by stripping common extensions for cross-platform consistency
+    visit_json(&mut json_value, &mut |v| {
+        let serde_json::Value::Object(map) = v else {
+            return;
+        };
+        if let Some(serde_json::Value::String(program_name)) = map.get_mut("program_name") {
+            // Strip Windows executable extensions (case-insensitive)
+            let lower = program_name.to_lowercase();
+            for ext in [".cmd", ".bat", ".exe", ".com"] {
+                if lower.ends_with(ext) {
+                    program_name.truncate(program_name.len() - ext.len());
+                    break;
+                }
+            }
+        }
+    });
+
     visit_json(&mut json_value, &mut |v| {
         let serde_json::Value::Array(array) = v else {
             return;
