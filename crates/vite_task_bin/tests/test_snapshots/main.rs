@@ -173,9 +173,9 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
             let mut e2e_outputs = String::new();
             for step in e2e.steps {
                 let mut cmd = if cfg!(windows) {
-                    let mut cmd = Command::new("cmd.exe");
-                    // https://github.com/nodejs/node/blob/dbd24b165128affb7468ca42f69edaf7e0d85a9a/lib/child_process.js#L633
-                    cmd.args(["/d", "/s", "/c"]);
+                    // Use PowerShell on Windows for better argument handling
+                    let mut cmd = Command::new("powershell.exe");
+                    cmd.args(["-NoProfile", "-NonInteractive", "-Command"]);
                     cmd
                 } else {
                     let mut cmd = Command::new("sh");
