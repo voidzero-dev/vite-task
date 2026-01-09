@@ -3,7 +3,7 @@ use std::{
     env::{self, join_paths},
     ffi::OsStr,
     iter,
-    path::{self, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
 

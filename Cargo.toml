@@ -145,6 +145,11 @@ ignored = [
   "fspy_test_bin",
   # used in a macro in crates/fspy_test_utils/src/lib.rs
   "ctor",
+  # Workspace-level dependencies that may be used indirectly
+  "futures-core",
+  "itertools",
+  "dashmap",
+  "tokio-stream",
 ]
 
 [profile.dev]

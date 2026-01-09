@@ -39,17 +39,6 @@ impl ExecutionId {
     }
 }
 
-pub struct ExecutionStartedEvent {
-    pub execution_id: ExecutionId,
-    pub display: ExecutionItemDisplay,
-}
-
-pub struct ExecutionOutputEvent {
-    pub execution_id: ExecutionId,
-    pub kind: OutputKind,
-    pub content: BString,
-}
-
 #[derive(Debug)]
 pub struct ExecutionEvent {
     pub execution_id: ExecutionId,

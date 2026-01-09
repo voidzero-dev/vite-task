@@ -6,7 +6,6 @@ use std::sync::Arc;
 use futures_util::FutureExt;
 use petgraph::{algo::toposort, graph::DiGraph};
 use vite_path::AbsolutePath;
-use vite_task_graph::IndexedTaskGraph;
 use vite_task_plan::{
     ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnExecution, TaskExecution,
     execution_graph::ExecutionIx,
@@ -32,7 +31,6 @@ use crate::{Session, session::execute::spawn::SpawnTrackResult};
 struct ExecutionAborted;
 
 struct ExecutionContext<'a> {
-    indexed_task_graph: Option<&'a IndexedTaskGraph>,
     event_handler: &'a mut dyn Reporter,
     current_execution_id: ExecutionId,
     cache: &'a ExecutionCache,
@@ -336,7 +334,6 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
         mut reporter: Box<dyn Reporter>,
     ) -> anyhow::Result<()> {
         let mut execution_context = ExecutionContext {
-            indexed_task_graph: self.lazy_task_graph.try_get(),
             event_handler: &mut *reporter,
             current_execution_id: ExecutionId::zero(),
             cache: &self.cache,

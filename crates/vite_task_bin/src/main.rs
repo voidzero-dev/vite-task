@@ -1,10 +1,8 @@
 use std::{env, sync::Arc};
 
 use vite_path::{AbsolutePath, current_dir};
-use vite_task::{CLIArgs, Session, SessionCallbacks, session::reporter::LabeledReporter};
-use vite_task_bin::{
-    CustomTaskSubcommand, NonTaskSubcommand, OwnedSessionCallbacks, TaskSynthesizer,
-};
+use vite_task::{CLIArgs, Session, session::reporter::LabeledReporter};
+use vite_task_bin::{CustomTaskSubcommand, NonTaskSubcommand, OwnedSessionCallbacks};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

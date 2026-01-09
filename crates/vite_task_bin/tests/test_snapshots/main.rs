@@ -5,7 +5,6 @@ use std::{
     convert::Infallible,
     env::{self, join_paths, split_paths},
     ffi::OsStr,
-    fmt::format,
     path::Path,
     process::Command,
     sync::Arc,

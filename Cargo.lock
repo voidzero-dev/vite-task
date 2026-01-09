@@ -3317,7 +3317,6 @@ dependencies = [
  "cow-utils",
  "insta",
  "monostate",
- "petgraph",
  "regex",
  "serde",
  "serde_json",

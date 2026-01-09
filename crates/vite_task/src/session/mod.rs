@@ -15,7 +15,7 @@ use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
 use vite_task_plan::{
-    ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind, get_path_env,
+    ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind,
     plan_request::{PlanRequest, SyntheticPlanRequest},
     prepend_path_env,
 };
@@ -30,15 +30,6 @@ use crate::{
 enum LazyTaskGraph<'a> {
     Uninitialized { workspace_root: WorkspaceRoot, config_loader: &'a dyn UserConfigLoader },
     Initialized(IndexedTaskGraph),
-}
-
-impl LazyTaskGraph<'_> {
-    fn try_get(&self) -> Option<&IndexedTaskGraph> {
-        match self {
-            Self::Initialized(graph) => Some(graph),
-            _ => None,
-        }
-    }
 }
 
 #[async_trait::async_trait(?Send)]
