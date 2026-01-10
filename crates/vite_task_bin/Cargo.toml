@@ -24,7 +24,6 @@ which = { workspace = true }
 [dev-dependencies]
 copy_dir = { workspace = true }
 cow-utils = { workspace = true }
-which = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
 regex = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
@@ -35,6 +34,7 @@ vite_graph_ser = { workspace = true }
 vite_path = { workspace = true, features = ["absolute-redaction"] }
 vite_task_graph = { workspace = true }
 vite_workspace = { workspace = true }
+which = { workspace = true }
 
 [lints]
 workspace = true
