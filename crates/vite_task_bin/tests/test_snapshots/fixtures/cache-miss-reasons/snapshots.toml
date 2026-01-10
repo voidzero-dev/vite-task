@@ -1,0 +1,73 @@
+# Test all cache miss reason variants
+
+[[e2e]]
+name = "env value changed"
+steps = [
+  # Initial run
+  "cross-env MY_ENV=1 vite run test",
+  # Cache miss: env value changed
+  "cross-env MY_ENV=2 vite run test",
+]
+
+[[e2e]]
+name = "env added"
+steps = [
+  # Initial run without env
+  "vite run test",
+  # Cache miss: env added
+  "cross-env MY_ENV=1 vite run test",
+]
+
+[[e2e]]
+name = "env removed"
+steps = [
+  # Initial run with env
+  "cross-env MY_ENV=1 vite run test",
+  # Cache miss: env removed
+  "vite run test",
+]
+
+[[e2e]]
+name = "pass-through env added"
+steps = [
+  "vite run test",
+  # Add pass-through env
+  "json-edit vite.config.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\"",
+  # Cache miss: pass-through env added
+  "vite run test",
+]
+
+[[e2e]]
+name = "pass-through env removed"
+steps = [
+  # Setup: task with pass-through env
+  "json-edit vite.config.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\"",
+  "vite run test",
+  # Remove pass-through env
+  "json-edit vite.config.json \"delete _.tasks.test.passThroughEnvs\"",
+  # Cache miss: pass-through env removed
+  "vite run test",
+]
+
+[[e2e]]
+name = "cwd changed"
+steps = [
+  "vite run test",
+  # Create subfolder and copy test.txt there
+  "mkdir -p subfolder",
+  "cp test.txt subfolder/test.txt",
+  # Change cwd to subfolder
+  "json-edit vite.config.json \"_.tasks.test.cwd = 'subfolder'\"",
+  # Cache miss: working directory changed
+  "vite run test",
+]
+
+[[e2e]]
+name = "input content changed"
+steps = [
+  "vite run test",
+  # Modify input file
+  "replace-file-content test.txt initial modified",
+  # Cache miss: input content changed
+  "vite run test",
+]

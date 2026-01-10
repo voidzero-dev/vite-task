@@ -13,14 +13,19 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+bincode = { workspace = true }
 futures-util = { workspace = true }
 petgraph = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 sha2 = { workspace = true }
+shell-escape = { workspace = true }
 supports-color = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 vite_glob = { workspace = true }
+vite_graph_ser = { workspace = true }
 vite_path = { workspace = true }
 vite_shell = { workspace = true }
 vite_str = { workspace = true }
 vite_task_graph = { workspace = true }
+which = { workspace = true }

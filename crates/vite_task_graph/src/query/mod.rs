@@ -130,7 +130,8 @@ impl IndexedTaskGraph {
             TaskQueryKind::Recursive { task_names } => {
                 // Add all tasks matching the names across all packages
                 for task_index in self.task_graph.node_indices() {
-                    let current_task_name = self.task_graph[task_index].task_id.task_name.as_str();
+                    let current_task_name =
+                        self.task_graph[task_index].task_display.task_name.as_str();
                     if task_names.contains(current_task_name) {
                         execution_graph.add_node(task_index);
                     }

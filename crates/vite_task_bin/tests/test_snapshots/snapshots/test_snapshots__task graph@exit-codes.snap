@@ -1,0 +1,64 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+assertion_line: 135
+expression: task_graph_json
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/exit-codes
+---
+[
+  {
+    "key": [
+      "<workspace>/packages/pkg-a",
+      "fail"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "pkg-a",
+        "task_name": "fail",
+        "package_path": "<workspace>/packages/pkg-a"
+      },
+      "resolved_config": {
+        "command": "node -e \"process.exit(42)\"",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/pkg-a",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/pkg-b",
+      "fail"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "pkg-b",
+        "task_name": "fail",
+        "package_path": "<workspace>/packages/pkg-b"
+      },
+      "resolved_config": {
+        "command": "node -e \"process.exit(7)\"",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/pkg-b",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  }
+]

@@ -3,7 +3,7 @@ pub mod redaction;
 
 use std::{
     ffi::OsStr,
-    fmt::Display,
+    fmt::{Debug, Display},
     hash::Hash,
     ops::Deref,
     path::{Path, PathBuf},
@@ -16,12 +16,25 @@ use serde::Serialize;
 use crate::relative::{FromPathError, InvalidPathDataError, RelativePathBuf};
 
 /// A path that is guaranteed to be absolute
-#[derive(RefCastCustom, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(RefCastCustom, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct AbsolutePath(Path);
 impl AsRef<Self> for AbsolutePath {
     fn as_ref(&self) -> &Self {
         self
+    }
+}
+
+impl Debug for AbsolutePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug_tuple = f.debug_tuple("AbsolutePath");
+        #[cfg(feature = "absolute-redaction")]
+        if let Some(redacted_path) = self.try_redact().unwrap() {
+            debug_tuple.field(&redacted_path);
+            return debug_tuple.finish();
+        }
+        debug_tuple.field(&&self.0);
+        debug_tuple.finish()
     }
 }
 
@@ -31,24 +44,8 @@ impl Serialize for AbsolutePath {
         S: serde::Serializer,
     {
         #[cfg(feature = "absolute-redaction")]
-        {
-            use redaction::REDACTION_PREFIX;
-
-            if let Some(redaction_prefix) = REDACTION_PREFIX
-                .with(|redaction_prefix| redaction_prefix.borrow().as_ref().map(Arc::clone))
-            {
-                match self.strip_prefix(redaction_prefix) {
-                    Ok(Some(stripped_path)) => return stripped_path.serialize(serializer),
-                    Err(strip_error) => {
-                        return Err(serde::ser::Error::custom(format!(
-                            "Failed to redact absolute path '{}': {}",
-                            self.as_path().display(),
-                            strip_error
-                        )));
-                    }
-                    Ok(None) => { /* continue to serialize full path */ }
-                }
-            }
+        if let Some(redacted_path) = self.try_redact().map_err(serde::ser::Error::custom)? {
+            return serializer.serialize_str(&redacted_path);
         }
         self.as_path().serialize(serializer)
     }
@@ -92,6 +89,30 @@ impl AbsolutePath {
     pub fn new<P: AsRef<Path> + ?Sized>(path: &P) -> Option<&Self> {
         let path = path.as_ref();
         if path.is_absolute() { Some(unsafe { Self::assume_absolute(path) }) } else { None }
+    }
+
+    #[cfg(feature = "absolute-redaction")]
+    fn try_redact(&self) -> Result<Option<String>, String> {
+        use redaction::REDACTION_PREFIX;
+
+        if let Some(redaction_prefix) = REDACTION_PREFIX
+            .with(|redaction_prefix| redaction_prefix.borrow().as_ref().map(Arc::clone))
+        {
+            match self.strip_prefix(redaction_prefix) {
+                Ok(Some(stripped_path)) => {
+                    return Ok(Some(format!("<redacted>/{}", stripped_path.as_str())));
+                }
+                Err(strip_error) => {
+                    return Err(format!(
+                        "Failed to redact absolute path '{}': {}",
+                        self.as_path().display(),
+                        strip_error
+                    ));
+                }
+                Ok(None) => { /* continue to serialize full path */ }
+            }
+        }
+        Ok(None)
     }
 
     #[ref_cast_custom]
@@ -188,7 +209,7 @@ impl AsRef<Path> for AbsolutePath {
 }
 
 /// An owned path buf that is guaranteed to be absolute
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AbsolutePathBuf(PathBuf);
 
 impl From<AbsolutePathBuf> for Arc<AbsolutePath> {

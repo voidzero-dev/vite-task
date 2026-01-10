@@ -1,0 +1,13 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+assertion_line: 203
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/error_cycle_dependency
+---
+[1]> vite run task-a
+⊘ cache disabled: cycle detected
+✗ Cycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Execution aborted due to error: Cycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

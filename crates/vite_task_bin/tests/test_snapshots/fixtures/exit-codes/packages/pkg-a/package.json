@@ -1,0 +1,6 @@
+{
+  "name": "pkg-a",
+  "scripts": {
+    "fail": "node -e \"process.exit(42)\""
+  }
+}

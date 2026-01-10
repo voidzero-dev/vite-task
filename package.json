@@ -8,11 +8,16 @@
   },
   "type": "module",
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "hello": "echo Hello, Vite Task Monorepo!",
+    "a": "vite foo"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "husky": "catalog:",
-    "lint-staged": "catalog:"
+    "lint-staged": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:"
   },
   "lint-staged": {
     "*.@(js|ts|tsx|yml|yaml|md|json|html|toml)": [

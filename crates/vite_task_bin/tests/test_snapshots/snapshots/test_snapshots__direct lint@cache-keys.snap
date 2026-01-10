@@ -1,0 +1,24 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
+---
+> vite lint
+Found 0 warnings and 0 errors.
+Finished in <duration>ms on 0 files with 90 rules using <n> threads.
+
+
+> echo debugger > main.js
+
+> vite lint
+✗ cache miss: content of input '' changed, executing
+
+  ! eslint(no-debugger): `debugger` statement is not allowed
+   ,-[main.js:1:1]
+ 1 | debugger
+   : ^^^^^^^^
+   `----
+  help: Remove the debugger statement
+
+Found 1 warning and 0 errors.
+Finished in <duration>ms on 1 file with 90 rules using <n> threads.

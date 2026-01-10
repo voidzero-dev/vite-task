@@ -1,0 +1,71 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: task_graph_json
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/dependency-both-topo-and-explicit
+---
+[
+  {
+    "key": [
+      "<workspace>/packages/a",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/a",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/a"
+      },
+      "resolved_config": {
+        "command": "build a",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/a",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": [
+      [
+        [
+          "<workspace>/packages/b",
+          "build"
+        ],
+        "Both"
+      ]
+    ]
+  },
+  {
+    "key": [
+      "<workspace>/packages/b",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/b",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/b"
+      },
+      "resolved_config": {
+        "command": "build b",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/b",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  }
+]

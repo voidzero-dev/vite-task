@@ -1,0 +1,40 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-disabled
+---
+> vite run no-cache-task
+$ print-file test.txt ⊘ cache disabled: no cache config
+test content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] cache-disabled-test#no-cache-task: $ print-file test.txt ✓
+      → Cache disabled in task configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> vite run no-cache-task
+$ print-file test.txt ⊘ cache disabled: no cache config
+test content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] cache-disabled-test#no-cache-task: $ print-file test.txt ✓
+      → Cache disabled in task configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

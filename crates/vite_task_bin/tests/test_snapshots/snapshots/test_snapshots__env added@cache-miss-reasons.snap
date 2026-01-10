@@ -1,0 +1,40 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-miss-reasons
+---
+> vite run test
+$ print-file test.txt
+initial content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] cache-miss-reasons#test: $ print-file test.txt ✓
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> cross-env MY_ENV=1 vite run test
+$ print-file test.txt ✗ cache miss: envs changed, executing
+initial content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] cache-miss-reasons#test: $ print-file test.txt ✓
+      → Cache miss: env MY_ENV=1 added
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

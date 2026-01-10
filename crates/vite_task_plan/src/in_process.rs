@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use serde::Serialize;
+use vite_path::AbsolutePath;
 use vite_str::Str;
 
 /// The output of an in-process execution.
@@ -9,7 +13,7 @@ pub struct InProcessExecutionOutput {
 }
 
 /// An in-process execution item
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct InProcessExecution {
     kind: InProcessExecutionKind,
 }
@@ -35,7 +39,7 @@ impl InProcessExecution {
 }
 
 /// The kind of an in-process execution.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 enum InProcessExecutionKind {
     /// echo command
     Echo {
@@ -50,6 +54,7 @@ impl InProcessExecution {
     pub fn get_builtin_execution(
         name: &str,
         mut args: impl Iterator<Item = impl AsRef<str>>,
+        _cwd: &Arc<AbsolutePath>,
     ) -> Option<Self> {
         match name {
             "echo" => {

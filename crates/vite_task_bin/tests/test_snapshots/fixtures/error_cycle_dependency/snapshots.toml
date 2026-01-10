@@ -1,0 +1,5 @@
+[[e2e]]
+name = "cycle dependency error"
+steps = [
+  "vite run task-a",
+]

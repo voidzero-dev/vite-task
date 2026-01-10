@@ -1,0 +1,22 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+assertion_line: 203
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/exit-codes
+---
+[42]> vite run pkg-a#fail
+~/packages/pkg-a$ node -e "process.exit(42)"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses • 1 failed 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] pkg-a#fail: ~/packages/pkg-a$ node -e "process.exit(42)" ✗ (exit code: 42)
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

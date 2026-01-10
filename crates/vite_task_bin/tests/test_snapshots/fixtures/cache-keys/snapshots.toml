@@ -1,0 +1,40 @@
+[[plan]]
+name = "synthetic task in user task"
+args = ["run", "lint"]
+
+[[plan]]
+name = "synthetic task with extra args in user task"
+args = ["run", "lint", "--fix"]
+
+[[plan]]
+name = "normal task with extra args"
+args = ["run", "hello", "a.txt"]
+
+[[plan]]
+name = "direct synthetic task"
+args = ["lint"]
+
+[[plan]]
+name = "direct synthetic task with cwd"
+cwd = "subdir"
+args = ["lint"]
+
+[[plan]]
+name = "direct synthetic task with extra args"
+args = ["lint", "--fix"]
+
+[[plan]]
+name = "lint and echo with extra args"
+args = ["run", "lint-and-echo", "Linting complete"]
+
+[[plan]]
+name = "echo and lint with extra args"
+args = ["run", "echo-and-lint", "--fix"]
+
+[[e2e]]
+name = "direct lint"
+steps = [
+  "vite lint",
+  "echo debugger > main.js",
+  "vite lint",
+]

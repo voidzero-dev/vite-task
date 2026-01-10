@@ -1,0 +1,7 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/additional-envs
+---
+> vite env-test SYNTHETIC_ENV_VAR test_value_from_synthesizer
+test_value_from_synthesizer

@@ -4,18 +4,20 @@ use std::{
     sync::Arc,
 };
 
+use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use supports_color::{Stream, on};
 use vite_glob::GlobPatternSet;
 use vite_str::Str;
 use vite_task_graph::config::EnvConfig;
 
-/// Resolved environment variables for a task to be fingerprinted.
+/// Environment variable fingerprints for a task execution.
 ///
 /// Contents of this struct are only for fingerprinting and cache key computation (some of envs may be hashed for security).
 /// The actual environment variables to be passed to the execution are in `LeafExecutionItem.all_envs`.
-#[derive(Debug)]
-pub struct ResolvedEnvs {
+#[derive(Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub struct EnvFingerprints {
     /// Environment variables that should be fingerprinted for this execution.
     ///
     /// Use `BTreeMap` to ensure stable order.
@@ -24,7 +26,7 @@ pub struct ResolvedEnvs {
     /// Environment variable names that should be passed through without values being fingerprinted.
     ///
     /// Names are still included in the fingerprint so that changes to these names can invalidate the cache.
-    pub pass_through_envs: Arc<[Str]>,
+    pub pass_through_env_config: Arc<[Str]>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -39,7 +41,7 @@ pub enum ResolveEnvError {
     #[error("Env value is not valid unicode: {key} = {value:?}")]
     EnvValueIsNotValidUnicode { key: Str, value: Arc<OsStr> },
 }
-impl ResolvedEnvs {
+impl EnvFingerprints {
     /// Resolves from all available envs and env config.
     ///
     /// Before the call, `all_envs` is expected to contain all available envs.
@@ -63,8 +65,8 @@ impl ResolvedEnvs {
             // Automatically add FORCE_COLOR environment variable if not already set
             // This enables color output in subprocesses when color is supported
             // TODO: will remove this temporarily until we have a better solution
-            if !new_all_envs.contains_key(OsStr::new("FORCE_COLOR"))
-                && !new_all_envs.contains_key(OsStr::new("NO_COLOR"))
+            if !all_envs.contains_key(OsStr::new("FORCE_COLOR"))
+                && !all_envs.contains_key(OsStr::new("NO_COLOR"))
                 && let Some(support) = on(Stream::Stdout)
             {
                 let force_color_value = if support.has_16m {
@@ -119,7 +121,7 @@ impl ResolvedEnvs {
         Ok(Self {
             fingerprinted_envs,
             // Save pass_through_envs names as-is, so any changes to it will invalidate the cache
-            pass_through_envs: Arc::clone(&env_config.pass_through_envs),
+            pass_through_env_config: Arc::clone(&env_config.pass_through_envs),
         })
     }
 }
@@ -208,7 +210,7 @@ mod tests {
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin")]);
         let env_config = create_env_config(&[], &["PATH"]);
 
-        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
         // FORCE_COLOR should be automatically added if color is supported
         // Note: This test might vary based on the test environment
@@ -224,7 +226,7 @@ mod tests {
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin"), ("FORCE_COLOR", "2")]);
         let env_config = create_env_config(&[], &["PATH", "FORCE_COLOR"]);
 
-        let _result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
+        let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
         // Should contain the original FORCE_COLOR value
         assert!(all_envs.contains_key(OsStr::new("FORCE_COLOR")));
@@ -238,7 +240,7 @@ mod tests {
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin"), ("NO_COLOR", "1")]);
         let env_config = create_env_config(&[], &["PATH", "NO_COLOR"]);
 
-        let _result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
+        let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
         assert!(all_envs.contains_key(OsStr::new("NO_COLOR")));
         let no_color_value = all_envs.get(OsStr::new("NO_COLOR")).unwrap();
@@ -278,9 +280,9 @@ mod tests {
         let mut all_envs2 = create_test_envs(mock_envs.clone());
         let mut all_envs3 = create_test_envs(mock_envs.clone());
 
-        let result1 = ResolvedEnvs::resolve(&mut all_envs1, &env_config).unwrap();
-        let result2 = ResolvedEnvs::resolve(&mut all_envs2, &env_config).unwrap();
-        let result3 = ResolvedEnvs::resolve(&mut all_envs3, &env_config).unwrap();
+        let result1 = EnvFingerprints::resolve(&mut all_envs1, &env_config).unwrap();
+        let result2 = EnvFingerprints::resolve(&mut all_envs2, &env_config).unwrap();
+        let result3 = EnvFingerprints::resolve(&mut all_envs3, &env_config).unwrap();
 
         // Convert to vecs for comparison (BTreeMap already maintains stable ordering)
         let envs1: Vec<_> = result1.fingerprinted_envs.iter().collect();
@@ -331,7 +333,7 @@ mod tests {
             ("Test_Var", "mixed"),
         ]);
 
-        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
         let fingerprinted_envs = &result.fingerprinted_envs;
 
         // On Unix, all three should be treated as separate variables
@@ -369,9 +371,9 @@ mod tests {
         let mut all_envs2 = create_test_envs(mock_envs.clone());
         let mut all_envs3 = create_test_envs(mock_envs.clone());
 
-        let result1 = ResolvedEnvs::resolve(&mut all_envs1, &env_config).unwrap();
-        let result2 = ResolvedEnvs::resolve(&mut all_envs2, &env_config).unwrap();
-        let result3 = ResolvedEnvs::resolve(&mut all_envs3, &env_config).unwrap();
+        let result1 = EnvFingerprints::resolve(&mut all_envs1, &env_config).unwrap();
+        let result2 = EnvFingerprints::resolve(&mut all_envs2, &env_config).unwrap();
+        let result3 = EnvFingerprints::resolve(&mut all_envs3, &env_config).unwrap();
 
         let envs1: Vec<_> = result1.fingerprinted_envs.iter().collect();
         let envs2: Vec<_> = result2.fingerprinted_envs.iter().collect();
@@ -411,8 +413,8 @@ mod tests {
         let mut all_envs2 =
             create_test_envs(vec![("ZZZ", "z"), ("BBB", "b"), ("AAA", "a"), ("MMM", "m")]);
 
-        let result1 = ResolvedEnvs::resolve(&mut all_envs1, &env_config).unwrap();
-        let result2 = ResolvedEnvs::resolve(&mut all_envs2, &env_config).unwrap();
+        let result1 = EnvFingerprints::resolve(&mut all_envs1, &env_config).unwrap();
+        let result2 = EnvFingerprints::resolve(&mut all_envs2, &env_config).unwrap();
 
         // Both should produce identical iteration order due to BTreeMap
         let keys1: Vec<_> = result1.fingerprinted_envs.keys().collect();
@@ -434,13 +436,13 @@ mod tests {
             ("CI", "true"),
         ]);
 
-        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
         // Verify pass_through_envs names are stored
-        assert_eq!(result.pass_through_envs.len(), 3);
-        assert!(result.pass_through_envs.iter().any(|s| s.as_str() == "PATH"));
-        assert!(result.pass_through_envs.iter().any(|s| s.as_str() == "HOME"));
-        assert!(result.pass_through_envs.iter().any(|s| s.as_str() == "CI"));
+        assert_eq!(result.pass_through_env_config.len(), 3);
+        assert!(result.pass_through_env_config.iter().any(|s| s.as_str() == "PATH"));
+        assert!(result.pass_through_env_config.iter().any(|s| s.as_str() == "HOME"));
+        assert!(result.pass_through_env_config.iter().any(|s| s.as_str() == "CI"));
     }
 
     #[test]
@@ -455,7 +457,7 @@ mod tests {
             ("ANOTHER_FILTERED", "also filtered"),
         ]);
 
-        let _result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
+        let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
         // all_envs should only contain fingerprinted + pass_through envs (plus auto-added ones)
         assert!(all_envs.contains_key(OsStr::new("KEEP_THIS")));
@@ -478,7 +480,7 @@ mod tests {
                 .into_iter()
                 .collect();
 
-        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config);
+        let result = EnvFingerprints::resolve(&mut all_envs, &env_config);
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -505,7 +507,7 @@ mod tests {
             ("NORMAL_VAR", "normal_value"),
         ]);
 
-        let result = ResolvedEnvs::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
         // Sensitive envs should be hashed
         assert!(result.fingerprinted_envs.get("API_KEY").unwrap().starts_with("sha256:"));

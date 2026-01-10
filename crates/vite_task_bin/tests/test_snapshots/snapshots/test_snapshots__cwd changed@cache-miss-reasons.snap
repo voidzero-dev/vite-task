@@ -1,0 +1,46 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-miss-reasons
+---
+> vite run test
+$ print-file test.txt
+initial content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] cache-miss-reasons#test: $ print-file test.txt ✓
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> mkdir -p subfolder
+
+> cp test.txt subfolder/test.txt
+
+> json-edit vite.config.json "_.tasks.test.cwd = 'subfolder'"
+
+> vite run test
+~/subfolder$ print-file test.txt ✗ cache miss: working directory changed, executing
+initial content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] cache-miss-reasons#test: ~/subfolder$ print-file test.txt ✓
+      → Cache miss: working directory changed
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

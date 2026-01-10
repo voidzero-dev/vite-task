@@ -8,6 +8,25 @@ use std::{
 
 use vite_path::AbsolutePath;
 
+/// Get the PATH environment variable from the given envs map.
+/// On Windows, this function performs a case-insensitive search for "PATH".
+/// On Unix, it performs a case-sensitive search.
+pub fn get_path_env(envs: &HashMap<Arc<OsStr>, Arc<OsStr>>) -> Option<&Arc<OsStr>> {
+    if cfg!(windows) {
+        // On Windows, environment variable names are case-insensitive (e.g., "PATH", "Path", "path" are all the same)
+        // However, Rust's HashMap keys are case-sensitive, so we need to find the existing PATH variable
+        // regardless of its casing.
+        envs.iter().find_map(
+            |(name, value)| {
+                if name.eq_ignore_ascii_case("path") { Some(value) } else { None }
+            },
+        )
+    } else {
+        // On Unix, environment variable names are case-sensitive
+        envs.get(OsStr::new("PATH"))
+    }
+}
+
 pub fn prepend_path_env(
     envs: &mut HashMap<Arc<OsStr>, Arc<OsStr>>,
     path_to_prepend: &AbsolutePath,

@@ -1,0 +1,37 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: task_graph_json
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-miss-reasons
+---
+[
+  {
+    "key": [
+      "<workspace>/",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "cache-miss-reasons",
+        "task_name": "test",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "print-file test.txt",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [
+                "MY_ENV"
+              ],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  }
+]

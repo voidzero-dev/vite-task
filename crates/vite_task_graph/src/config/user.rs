@@ -17,20 +17,27 @@ pub enum UserCacheConfig {
         #[serde(default)]
         cache: MustBe!(true),
 
-        // Fields only relevant when cache is enabled
-        /// Environment variable names to be fingerprinted and passed to the task.
-        #[serde(default)] // default to empty if omitted
-        envs: Box<[Str]>,
-
-        /// Environment variable names to be passed to the task without fingerprinting.
-        #[serde(default)] // default to empty if omitted
-        pass_through_envs: Vec<Str>,
+        #[serde(flatten)]
+        enabled_cache_config: EnabledCacheConfig,
     },
     /// Cache is disabled
     Disabled {
         /// The `cache` field must be false
         cache: MustBe!(false),
     },
+}
+
+/// Cache configuration fields when caching is enabled
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnabledCacheConfig {
+    /// Environment variable names to be fingerprinted and passed to the task.
+    #[serde(default)] // default to empty if omitted
+    pub envs: Box<[Str]>,
+
+    /// Environment variable names to be passed to the task without fingerprinting.
+    #[serde(default)] // default to empty if omitted
+    pub pass_through_envs: Vec<Str>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -62,8 +69,10 @@ impl Default for UserTaskOptions {
             // Caching enabled with no fingerprinted envs
             cache_config: UserCacheConfig::Enabled {
                 cache: MustBe!(true),
-                envs: Box::new([]),
-                pass_through_envs: Vec::new(),
+                enabled_cache_config: EnabledCacheConfig {
+                    envs: Box::new([]),
+                    pass_through_envs: Vec::new(),
+                },
             },
         }
     }
@@ -133,13 +142,16 @@ mod tests {
         let user_config_json = json!({
             "cache": true,
             "envs": ["NODE_ENV"],
+            "passThroughEnvs": ["FOO"],
         });
         assert_eq!(
             serde_json::from_value::<UserCacheConfig>(user_config_json).unwrap(),
             UserCacheConfig::Enabled {
                 cache: MustBe!(true),
-                envs: ["NODE_ENV".into()].into_iter().collect(),
-                pass_through_envs: Default::default(),
+                enabled_cache_config: EnabledCacheConfig {
+                    envs: ["NODE_ENV".into()].into_iter().collect(),
+                    pass_through_envs: ["FOO".into()].into_iter().collect(),
+                }
             },
         );
     }

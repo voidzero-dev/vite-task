@@ -1,0 +1,11 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/additional-envs
+---
+> vite env-test FOO bar
+bar
+
+
+> vite env-test BAZ qux
+qux

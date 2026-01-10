@@ -1,0 +1,88 @@
+---
+source: crates/vite_task_bin/tests/test_snapshots/main.rs
+expression: "&plan_json"
+input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
+---
+{
+  "root_node": {
+    "Expanded": [
+      {
+        "key": [
+          "<workspace>/",
+          "lint"
+        ],
+        "node": {
+          "task_display": {
+            "package_name": "",
+            "task_name": "lint",
+            "package_path": "<workspace>/"
+          },
+          "items": [
+            {
+              "execution_item_display": {
+                "task_display": {
+                  "package_name": "",
+                  "task_name": "lint",
+                  "package_path": "<workspace>/"
+                },
+                "command": "vite lint --fix",
+                "and_item_index": null,
+                "cwd": "<workspace>/"
+              },
+              "kind": {
+                "Leaf": {
+                  "Spawn": {
+                    "cache_metadata": {
+                      "spawn_fingerprint": {
+                        "cwd": "",
+                        "program_fingerprint": {
+                          "OutsideWorkspace": {
+                            "program_name": "oxlint"
+                          }
+                        },
+                        "args": [
+                          "--fix"
+                        ],
+                        "env_fingerprints": {
+                          "fingerprinted_envs": {},
+                          "pass_through_env_config": [
+                            "<default pass-through envs>"
+                          ]
+                        },
+                        "fingerprint_ignores": null
+                      },
+                      "execution_cache_key": {
+                        "kind": {
+                          "UserTask": {
+                            "task_name": "lint",
+                            "and_item_index": 0,
+                            "extra_args": [
+                              "--fix"
+                            ]
+                          }
+                        },
+                        "origin_path": ""
+                      }
+                    },
+                    "spawn_command": {
+                      "program_path": "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+                      "args": [
+                        "--fix"
+                      ],
+                      "all_envs": {
+                        "NO_COLOR": "1",
+                        "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"
+                      },
+                      "cwd": "<workspace>/"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "neighbors": []
+      }
+    ]
+  }
+}
