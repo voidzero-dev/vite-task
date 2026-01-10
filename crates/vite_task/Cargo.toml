@@ -21,6 +21,7 @@ derive_more = { workspace = true, features = ["from"] }
 diff-struct = { workspace = true }
 fspy = { workspace = true }
 futures-util = { workspace = true }
+once_cell = "1.19"
 owo-colors = { workspace = true }
 petgraph = { workspace = true }
 rayon = { workspace = true }

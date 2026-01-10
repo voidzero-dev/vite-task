@@ -339,10 +339,24 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
         plan: ExecutionPlan,
         mut reporter: Box<dyn Reporter>,
     ) -> Result<(), ExitStatus> {
+        // Lazily initialize the cache on first execution
+        let cache = match self.cache() {
+            Ok(cache) => cache,
+            Err(err) => {
+                reporter.handle_event(ExecutionEvent {
+                    execution_id: ExecutionId::zero(),
+                    kind: ExecutionEventKind::Error {
+                        message: format!("Failed to initialize cache: {err}"),
+                    },
+                });
+                return Err(ExitStatus(1));
+            }
+        };
+
         let mut execution_context = ExecutionContext {
             event_handler: &mut *reporter,
             current_execution_id: ExecutionId::zero(),
-            cache: &self.cache,
+            cache,
             cache_base_path: &self.workspace_path,
         };
 
