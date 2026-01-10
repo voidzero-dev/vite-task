@@ -182,7 +182,6 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
                 cmd.arg(step.as_str())
                     .env("PATH", &e2e_env_path)
                     .env("NO_COLOR", "1")
-                    .env("FORCE_COLOR", "0")
                     .current_dir(e2e_stage_path.join(&e2e.cwd));
                 let output = cmd.output().unwrap();
 
