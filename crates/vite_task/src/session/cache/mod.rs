@@ -2,7 +2,7 @@
 
 pub mod display;
 
-use std::{fmt::Display, io::Write, sync::Arc, time::Duration};
+use std::{fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
 
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 // Re-export display functions for convenience
@@ -71,6 +71,11 @@ impl ExecutionCache {
         tracing::info!("Creating task cache directory at {:?}", path);
         std::fs::create_dir_all(path)?;
 
+        // Use file lock to prevent race conditions when multiple processes initialize the database
+        let lock_path = path.join("db_open.lock");
+        let lock_file = File::create(lock_path.as_path())?;
+        lock_file.lock()?;
+
         let db_path = path.join("cache.db");
         let conn = Connection::open(db_path.as_path())?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
@@ -101,6 +106,7 @@ impl ExecutionCache {
                 }
             }
         }
+        // Lock is released when lock_file is dropped
         Ok(Self { conn: Mutex::new(conn) })
     }
 
