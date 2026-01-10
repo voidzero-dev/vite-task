@@ -180,6 +180,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
                 // Use @yarnpkg/shell for cross-platform shell execution
                 let mut cmd = Command::new(&shell_exe);
                 cmd.arg(step.as_str())
+                    .env_clear()
                     .env("PATH", &e2e_env_path)
                     .env("NO_COLOR", "1")
                     .current_dir(e2e_stage_path.join(&e2e.cwd));
