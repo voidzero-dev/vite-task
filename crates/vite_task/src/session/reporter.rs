@@ -15,16 +15,29 @@ use super::{
     event::{CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionItemDisplay},
 };
 
-/// Wrap of `OwoColorize` that ignores style if `NO_COLOR` is set.
+/// Wrap of `OwoColorize` that ignores style if colors are disabled.
+///
+/// Colors are disabled if:
+/// - `NO_COLOR` environment variable is set and non-empty
+/// - `FORCE_COLOR` environment variable is set to "0"
 trait ColorizeExt {
     fn style(&self, style: Style) -> Styled<&Self>;
 }
 
 impl<T: owo_colors::OwoColorize> ColorizeExt for T {
     fn style(&self, style: Style) -> Styled<&Self> {
-        static NO_COLOR: LazyLock<bool> =
-            LazyLock::new(|| std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()));
-        owo_colors::OwoColorize::style(self, if *NO_COLOR { Style::new() } else { style })
+        static DISABLE_COLOR: LazyLock<bool> = LazyLock::new(|| {
+            // NO_COLOR takes precedence per https://no-color.org/
+            if std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) {
+                return true;
+            }
+            // FORCE_COLOR=0 explicitly disables colors
+            if std::env::var_os("FORCE_COLOR").is_some_and(|v| v == "0") {
+                return true;
+            }
+            false
+        });
+        owo_colors::OwoColorize::style(self, if *DISABLE_COLOR { Style::new() } else { style })
     }
 }
 
