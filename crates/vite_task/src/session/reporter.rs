@@ -3,7 +3,6 @@
 use std::{
     collections::HashSet,
     io::Write,
-    process::ExitCode,
     sync::{Arc, LazyLock},
     time::Duration,
 };
@@ -29,14 +28,23 @@ impl<T: owo_colors::OwoColorize> ColorizeExt for T {
     }
 }
 
+/// Exit status code for task execution
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExitStatus(pub u8);
+
+impl ExitStatus {
+    pub const FAILURE: Self = Self(1);
+    pub const SUCCESS: Self = Self(0);
+}
+
 /// Trait for handling execution events and reporting results
 pub trait Reporter {
     /// Handle an execution event (start, output, error, finish)
     fn handle_event(&mut self, event: ExecutionEvent);
 
     /// Called after execution completes (whether successful or not)
-    /// Returns Ok(()) on success, or Err(ExitCode) on failure
-    fn post_execution(self: Box<Self>) -> Result<(), ExitCode>;
+    /// Returns Ok(()) on success, or Err(ExitStatus) on failure
+    fn post_execution(self: Box<Self>) -> Result<(), ExitStatus>;
 }
 
 const COMMAND_STYLE: Style = Style::new().cyan();
@@ -487,7 +495,7 @@ impl<W: Write> Reporter for LabeledReporter<W> {
         }
     }
 
-    fn post_execution(mut self: Box<Self>) -> Result<(), ExitCode> {
+    fn post_execution(mut self: Box<Self>) -> Result<(), ExitStatus> {
         // Check if execution was aborted due to error
         if let Some(error_msg) = &self.first_error {
             // Print separator
@@ -514,7 +522,7 @@ impl<W: Write> Reporter for LabeledReporter<W> {
                     .style(Style::new().bright_black())
             );
 
-            return Err(ExitCode::FAILURE);
+            return Err(ExitStatus::FAILURE);
         }
 
         // No errors - print summary if not hidden
@@ -538,14 +546,13 @@ impl<W: Write> Reporter for LabeledReporter<W> {
             .filter(|&status| status != 0)
             .collect();
 
-        match failed_exit_codes.len() {
-            0 => Ok(()),
-            1 => {
+        match failed_exit_codes.as_slice() {
+            [] => Ok(()),
+            [code] => {
                 // Return the single failed task's exit code (clamped to u8 range)
-                let code = failed_exit_codes[0];
-                Err(ExitCode::from(code.clamp(1, 255) as u8))
+                Err(ExitStatus((*code).clamp(1, 255) as u8))
             }
-            _ => Err(ExitCode::FAILURE),
+            _ => Err(ExitStatus::FAILURE),
         }
     }
 }

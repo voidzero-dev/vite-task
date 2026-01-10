@@ -1,7 +1,7 @@
 pub mod fingerprint;
 pub mod spawn;
 
-use std::{process::ExitCode, sync::Arc};
+use std::sync::Arc;
 
 use futures_util::FutureExt;
 use petgraph::{algo::toposort, graph::DiGraph};
@@ -21,7 +21,7 @@ use super::{
         CacheDisabledReason, CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId,
         ExecutionItemDisplay, OutputKind,
     },
-    reporter::Reporter,
+    reporter::{ExitStatus, Reporter},
 };
 use crate::{Session, session::execute::spawn::SpawnTrackResult};
 
@@ -330,12 +330,15 @@ impl ExecutionContext<'_> {
 impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     /// Execute an execution plan, reporting events to the provided reporter.
     ///
-    /// Returns Ok(()) on success, or Err(ExitCode) on failure.
+    /// Returns Err(ExitStatus) to suggest the caller to abort and exit the process with the given exit status.
+    ///
+    /// The return type isn't just ExitStatus because we want to distinguish between normal successful execution,
+    /// and execution that failed and needs to exit with a specific code which can be zero.
     pub async fn execute(
         &self,
         plan: ExecutionPlan,
         mut reporter: Box<dyn Reporter>,
-    ) -> Result<(), ExitCode> {
+    ) -> Result<(), ExitStatus> {
         let mut execution_context = ExecutionContext {
             event_handler: &mut *reporter,
             current_execution_id: ExecutionId::zero(),

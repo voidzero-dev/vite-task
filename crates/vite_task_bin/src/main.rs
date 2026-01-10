@@ -1,13 +1,16 @@
 use std::{env, process::ExitCode, sync::Arc};
 
 use vite_path::{AbsolutePath, current_dir};
-use vite_task::{CLIArgs, Session, session::reporter::LabeledReporter};
+use vite_task::{
+    CLIArgs, Session,
+    session::reporter::{ExitStatus, LabeledReporter},
+};
 use vite_task_bin::{CustomTaskSubcommand, NonTaskSubcommand, OwnedSessionCallbacks};
 
 #[tokio::main]
 async fn main() -> ExitCode {
     match run().await {
-        Ok(exit_code) => exit_code,
+        Ok(exit_status) => exit_status.0.into(),
         Err(err) => {
             eprintln!("Error: {err}");
             ExitCode::FAILURE
@@ -15,7 +18,7 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> anyhow::Result<ExitCode> {
+async fn run() -> anyhow::Result<ExitStatus> {
     let cwd: Arc<AbsolutePath> = current_dir()?.into();
     // Parse the CLI arguments and see if they are for vite-task or not
     let args = match CLIArgs::<CustomTaskSubcommand, NonTaskSubcommand>::try_parse_from(env::args())
@@ -30,7 +33,7 @@ async fn run() -> anyhow::Result<ExitCode> {
         CLIArgs::NonTask(NonTaskSubcommand::Version) => {
             // Non-task subcommands are not handled by vite-task's session.
             println!("{}", env!("CARGO_PKG_VERSION"));
-            return Ok(ExitCode::SUCCESS);
+            return Ok(ExitStatus::SUCCESS);
         }
     };
 
@@ -40,5 +43,5 @@ async fn run() -> anyhow::Result<ExitCode> {
 
     // Create reporter and execute
     let reporter = LabeledReporter::new(std::io::stdout(), session.workspace_path());
-    Ok(session.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitCode::SUCCESS))
+    Ok(session.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitStatus::SUCCESS))
 }
