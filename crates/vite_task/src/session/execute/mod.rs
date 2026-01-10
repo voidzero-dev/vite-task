@@ -330,8 +330,12 @@ impl ExecutionContext<'_> {
 impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     /// Execute an execution plan, reporting events to the provided reporter.
     ///
-    /// Returns the ExitCode from the reporter's post_execution method.
-    pub async fn execute(&self, plan: ExecutionPlan, mut reporter: Box<dyn Reporter>) -> ExitCode {
+    /// Returns Ok(()) on success, or Err(ExitCode) on failure.
+    pub async fn execute(
+        &self,
+        plan: ExecutionPlan,
+        mut reporter: Box<dyn Reporter>,
+    ) -> Result<(), ExitCode> {
         let mut execution_context = ExecutionContext {
             event_handler: &mut *reporter,
             current_execution_id: ExecutionId::zero(),

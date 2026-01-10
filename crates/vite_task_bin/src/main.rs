@@ -40,7 +40,5 @@ async fn run() -> anyhow::Result<ExitCode> {
 
     // Create reporter and execute
     let reporter = LabeledReporter::new(std::io::stdout(), session.workspace_path());
-    let exit_code = session.execute(plan, Box::new(reporter)).await;
-
-    Ok(exit_code)
+    Ok(session.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitCode::SUCCESS))
 }
