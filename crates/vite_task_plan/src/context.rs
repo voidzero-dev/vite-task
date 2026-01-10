@@ -95,10 +95,6 @@ impl<'a> PlanContext<'a> {
         }
     }
 
-    pub fn cwd(&self) -> &Arc<AbsolutePath> {
-        &self.cwd
-    }
-
     pub fn envs(&self) -> &HashMap<Arc<OsStr>, Arc<OsStr>> {
         &self.envs
     }

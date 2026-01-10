@@ -189,7 +189,7 @@ async fn plan_task_as_execution_node(
                         &and_item.envs,
                         synthetic_plan_request,
                         Some(task_execution_cache_key),
-                        context.cwd(),
+                        &cwd,
                     )
                     .with_plan_context(&context)?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
