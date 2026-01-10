@@ -4,7 +4,7 @@ pub mod spawn;
 use std::sync::Arc;
 
 use futures_util::FutureExt;
-use petgraph::{algo::toposort, graph::DiGraph};
+use petgraph::{algo::toposort, stable_graph::StableGraph};
 use vite_path::AbsolutePath;
 use vite_task_plan::{
     ExecutionItemKind, ExecutionPlan, LeafExecutionKind, SpawnExecution, TaskExecution,
@@ -46,9 +46,9 @@ impl ExecutionContext<'_> {
     ) -> Result<(), ExecutionAborted> {
         match item_kind {
             ExecutionItemKind::Expanded(graph) => {
-                // clone for reversing edges and removing nodes
-                let mut graph: DiGraph<&TaskExecution, (), ExecutionIx> =
-                    graph.map(|_, task_execution| task_execution, |_, ()| ());
+                // Use StableGraph to preserve node indices during removal
+                let mut graph: StableGraph<&TaskExecution, (), _, ExecutionIx> =
+                    graph.map(|_, task_execution| task_execution, |_, ()| ()).into();
 
                 // To be consistent with the package graph in vite_package_manager and the dependency graph definition in Wikipedia
                 // https://en.wikipedia.org/wiki/Dependency_graph, we construct the graph with edges from dependents to dependencies
