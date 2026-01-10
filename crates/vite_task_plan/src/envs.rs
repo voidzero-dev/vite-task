@@ -65,15 +65,8 @@ impl EnvFingerprints {
             // Automatically add FORCE_COLOR environment variable if not already set
             // This enables color output in subprocesses when color is supported
             // TODO: will remove this temporarily until we have a better solution
-            //
-            // Only add FORCE_COLOR if:
-            // 1. FORCE_COLOR is not already set (including FORCE_COLOR=0)
-            // 2. NO_COLOR is not set
-            // 3. stdout is a terminal (not just supports colors)
-            // 4. Terminal supports colors
             if !all_envs.contains_key(OsStr::new("FORCE_COLOR"))
                 && !all_envs.contains_key(OsStr::new("NO_COLOR"))
-                && std::io::IsTerminal::is_terminal(&std::io::stdout())
                 && let Some(support) = on(Stream::Stdout)
             {
                 let force_color_value = if support.has_16m {
