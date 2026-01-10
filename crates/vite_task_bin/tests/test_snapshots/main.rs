@@ -83,8 +83,9 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
     );
 
     // Find @yarnpkg/shell executable in test_bins
-    let shell_exe = which::which_in("shell", Some(&*test_bin_path), std::env::current_dir().unwrap())
-        .expect("shell executable not found in test_bins/node_modules/.bin");
+    let shell_exe =
+        which::which_in("shell", Some(&*test_bin_path), std::env::current_dir().unwrap())
+            .expect("shell executable not found in test_bins/node_modules/.bin");
 
     // Add test_bins to PATH so test programs (such as print-file) in fixtures can be found.
     let plan_envs: HashMap<Arc<OsStr>, Arc<OsStr>> = [
