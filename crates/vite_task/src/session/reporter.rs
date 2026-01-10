@@ -3,6 +3,7 @@
 use std::{
     collections::HashSet,
     io::Write,
+    process::ExitCode,
     sync::{Arc, LazyLock},
     time::Duration,
 };
@@ -34,8 +35,8 @@ pub trait Reporter {
     fn handle_event(&mut self, event: ExecutionEvent);
 
     /// Called after execution completes (whether successful or not)
-    /// Returns Err if execution failed due to errors
-    fn post_execution(self: Box<Self>) -> anyhow::Result<()>;
+    /// Returns an ExitCode that is a suggestion for process exit
+    fn post_execution(self: Box<Self>) -> ExitCode;
 }
 
 const COMMAND_STYLE: Style = Style::new().cyan();
@@ -486,7 +487,7 @@ impl<W: Write> Reporter for LabeledReporter<W> {
         }
     }
 
-    fn post_execution(mut self: Box<Self>) -> anyhow::Result<()> {
+    fn post_execution(mut self: Box<Self>) -> ExitCode {
         // Check if execution was aborted due to error
         if let Some(error_msg) = &self.first_error {
             // Print separator
@@ -513,7 +514,7 @@ impl<W: Write> Reporter for LabeledReporter<W> {
                     .style(Style::new().bright_black())
             );
 
-            return Err(anyhow::anyhow!("Execution aborted: {}", error_msg));
+            return ExitCode::FAILURE;
         }
 
         // No errors - print summary if not hidden
@@ -525,6 +526,26 @@ impl<W: Write> Reporter for LabeledReporter<W> {
                 self.print_summary();
             }
         }
-        Ok(())
+
+        // Determine exit code based on failed tasks:
+        // 1. All tasks succeed → return 0
+        // 2. Exactly one task failed → return that task's exit code
+        // 3. More than one task failed → return 1
+        let failed_exit_codes: Vec<i32> = self
+            .executions
+            .iter()
+            .filter_map(|exec| exec.exit_status)
+            .filter(|&status| status != 0)
+            .collect();
+
+        match failed_exit_codes.len() {
+            0 => ExitCode::SUCCESS,
+            1 => {
+                // Return the single failed task's exit code (clamped to u8 range)
+                let code = failed_exit_codes[0];
+                ExitCode::from(code.clamp(1, 255) as u8)
+            }
+            _ => ExitCode::FAILURE,
+        }
     }
 }

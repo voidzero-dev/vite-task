@@ -1,7 +1,7 @@
 pub mod fingerprint;
 pub mod spawn;
 
-use std::sync::Arc;
+use std::{process::ExitCode, sync::Arc};
 
 use futures_util::FutureExt;
 use petgraph::{algo::toposort, graph::DiGraph};
@@ -328,11 +328,10 @@ impl ExecutionContext<'_> {
 }
 
 impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
-    pub async fn execute(
-        &self,
-        plan: ExecutionPlan,
-        mut reporter: Box<dyn Reporter>,
-    ) -> anyhow::Result<()> {
+    /// Execute an execution plan, reporting events to the provided reporter.
+    ///
+    /// Returns the ExitCode from the reporter's post_execution method.
+    pub async fn execute(&self, plan: ExecutionPlan, mut reporter: Box<dyn Reporter>) -> ExitCode {
         let mut execution_context = ExecutionContext {
             event_handler: &mut *reporter,
             current_execution_id: ExecutionId::zero(),

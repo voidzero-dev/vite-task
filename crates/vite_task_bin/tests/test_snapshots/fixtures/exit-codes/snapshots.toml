@@ -1,0 +1,11 @@
+[[e2e]]
+name = "single task failure returns task exit code"
+steps = [
+  "vite run pkg-a#fail",
+]
+
+[[e2e]]
+name = "multiple task failures returns exit code 1"
+steps = [
+  "vite run -r fail",
+]
