@@ -14,7 +14,7 @@ fspy_shared = { workspace = true }
 ntapi = { workspace = true }
 smallvec = { workspace = true }
 widestring = { workspace = true }
-winapi = { workspace = true, features = ["winerror", "winbase", "namedpipeapi", "memoryapi", "std", "processenv"] }
+winapi = { workspace = true, features = ["winerror", "winbase", "namedpipeapi", "memoryapi", "std"] }
 winsafe = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]
