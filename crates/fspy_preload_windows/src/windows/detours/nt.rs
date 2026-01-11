@@ -286,6 +286,55 @@ static DETOUR_NT_QUERY_DIRECTORY_FILE: Detour<
     })
 };
 
+// NtQueryDirectoryFileEx is not in ntapi crate, so we define it here.
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerydirectoryfileex
+type NtQueryDirectoryFileExFn = unsafe extern "system" fn(
+    file_handle: HANDLE,
+    event: HANDLE,
+    apc_routine: PIO_APC_ROUTINE,
+    apc_context: PVOID,
+    io_status_block: PIO_STATUS_BLOCK,
+    file_information: PVOID,
+    length: ULONG,
+    file_information_class: FILE_INFORMATION_CLASS,
+    query_flags: ULONG,
+    file_name: PUNICODE_STRING,
+) -> NTSTATUS;
+
+static DETOUR_NT_QUERY_DIRECTORY_FILE_EX: Detour<NtQueryDirectoryFileExFn> = unsafe {
+    Detour::dynamic(c"NtQueryDirectoryFileEx", {
+        unsafe extern "system" fn new_fn(
+            file_handle: HANDLE,
+            event: HANDLE,
+            apc_routine: PIO_APC_ROUTINE,
+            apc_context: PVOID,
+            io_status_block: PIO_STATUS_BLOCK,
+            file_information: PVOID,
+            length: ULONG,
+            file_information_class: FILE_INFORMATION_CLASS,
+            query_flags: ULONG,
+            file_name: PUNICODE_STRING,
+        ) -> NTSTATUS {
+            unsafe { handle_open(AccessMode::READ_DIR, file_handle) };
+            unsafe {
+                (DETOUR_NT_QUERY_DIRECTORY_FILE_EX.real())(
+                    file_handle,
+                    event,
+                    apc_routine,
+                    apc_context,
+                    io_status_block,
+                    file_information,
+                    length,
+                    file_information_class,
+                    query_flags,
+                    file_name,
+                )
+            }
+        }
+        new_fn
+    })
+};
+
 pub const DETOURS: &[DetourAny] = &[
     DETOUR_NT_CREATE_FILE.as_any(),
     DETOUR_NT_OPEN_FILE.as_any(),
@@ -294,4 +343,5 @@ pub const DETOURS: &[DetourAny] = &[
     DETOUR_NT_OPEN_SYMBOLIC_LINK_OBJECT.as_any(),
     DETOUR_NT_QUERY_INFORMATION_BY_NAME.as_any(),
     DETOUR_NT_QUERY_DIRECTORY_FILE.as_any(),
+    DETOUR_NT_QUERY_DIRECTORY_FILE_EX.as_any(),
 ];
