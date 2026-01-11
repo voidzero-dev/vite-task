@@ -16,11 +16,11 @@ pub struct TaskCLIArgs<CustomSubcommand: Subcommand> {
 impl<CustomSubcommand: Subcommand> TaskCLIArgs<CustomSubcommand> {
     /// Inspect the custom subcommand (like lint/install). Returns `None` if it's built-in subcommand
     /// The caller should not use this method to actually handle the custom subcommand. Instead, it should
-    /// private TaskSynthesizer to Session so that vite-task can handle custom subcommands consistenly from
+    /// private TaskSynthesizer to Session so that vite-task can handle custom subcommands consistently from
     /// both direct CLI invocations and invocations in task scripts.
     ///
     /// This method is provided only to make it possible for the caller to behave differently BEFORE and AFTER the session.
-    /// For example, vite+ needs this method to skip auto-install when the custom subcommand is alreay `install`.
+    /// For example, vite+ needs this method to skip auto-install when the custom subcommand is already `install`.
     pub fn custom_subcommand(&self) -> Option<&CustomSubcommand> {
         match &self.parsed {
             ParsedTaskCLIArgs::BuiltIn(_) => None,
