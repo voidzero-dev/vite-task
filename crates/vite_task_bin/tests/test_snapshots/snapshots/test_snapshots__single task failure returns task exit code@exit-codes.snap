@@ -19,105 +19,19 @@ Task Details:
   [1] pkg-a#fail: ~/packages/pkg-a$ node -e "process.exit(42)" ✗ (exit code: 42)
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "packages/pkg-a",
+    ),
+    AccessMode(
         READ,
     ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "packages/pkg-a",
+    ),
+    AccessMode(
         READ,
     ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/System/Library/OpenSSL//openssl.cnf",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/System/Library/OpenSSL/openssl.cnf",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/packages/pkg-a",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/packages/pkg-a",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
+)

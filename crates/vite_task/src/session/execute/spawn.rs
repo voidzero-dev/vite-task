@@ -174,7 +174,6 @@ where
     let path_writes = &mut track_result.path_writes;
 
     for access in termination.path_accesses.iter() {
-        dbg!(&access);
         let relative_path = access
             .path
             .strip_path_prefix(workspace_root, |strip_result| {
@@ -191,6 +190,8 @@ where
             // Ignore accesses outside the workspace
             continue;
         };
+
+        dbg!((&relative_path, &access.mode));
 
         // Skip .git directory accesses (workaround for tools like oxlint)
         if relative_path.as_path().strip_prefix(".git").is_ok() {

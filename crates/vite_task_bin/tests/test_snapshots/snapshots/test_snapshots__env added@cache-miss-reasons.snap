@@ -20,1044 +20,134 @@ Task Details:
   [1] cache-miss-reasons#test: $ print-file test.txt ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/.",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/etc/localtime",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/db/timezone/tz/2025b.1.0/zoneinfo/Asia/Shanghai",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/db/timezone/tz/2025b.1.0/zoneinfo/posixrules",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/print-file",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/print-file",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/print-file",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/node_modules/.bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.cargo/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.nix-profile/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/etc/profiles/per-user/patr0nus/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/run/current-system/sw/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/nix/var/nix/profiles/default/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/opt/homebrew/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/local/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/node_modules/.bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.cargo/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.nix-profile/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/etc/profiles/per-user/patr0nus/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/run/current-system/sw/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/nix/var/nix/profiles/default/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/opt/homebrew/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/local/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<workspace>/node_modules/.bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.cargo/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.nix-profile/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/etc/profiles/per-user/patr0nus/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/run/current-system/sw/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/nix/var/nix/profiles/default/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/opt/homebrew/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/local/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/node_modules/.bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.cargo/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "/System/Library/OpenSSL//openssl.cnf",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/System/Library/OpenSSL/openssl.cnf",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/vite-task-test-bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/crates",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/vite-task-test-bins",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/node_modules/vite-task-test-bins",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src/package.json",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/package.json",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "node_modules/.bin/sed",
     ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "node_modules/.bin/dirname",
     ),
-    path: "/Volumes",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/Volumes/code",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "node_modules/.bin/uname",
     ),
-    path: "/Volumes/code/vite-plus-workspace",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "node_modules/.bin/node",
     ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/crates",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src/package.json",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "test.txt",
     ),
-    path: "<workspace>/test.txt",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<workspace>/test.txt",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "test.txt",
     ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/print-file",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/bin/sh",
-}
+)
 
 > cross-env MY_ENV=1 vite run test
 $ print-file test.txt ✗ cache miss: envs changed, executing
@@ -1076,1041 +166,131 @@ Task Details:
   [1] cache-miss-reasons#test: $ print-file test.txt ✓
       → Cache miss: env MY_ENV=1 added
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/.",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/etc/localtime",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/db/timezone/tz/2025b.1.0/zoneinfo/Asia/Shanghai",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/db/timezone/tz/2025b.1.0/zoneinfo/posixrules",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/print-file",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/print-file",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/print-file",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/node_modules/.bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.cargo/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.nix-profile/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/etc/profiles/per-user/patr0nus/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/run/current-system/sw/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/nix/var/nix/profiles/default/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/opt/homebrew/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/local/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/sed",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/node_modules/.bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.cargo/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.nix-profile/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/etc/profiles/per-user/patr0nus/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/run/current-system/sw/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/nix/var/nix/profiles/default/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/opt/homebrew/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/local/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/dirname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<workspace>/node_modules/.bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.cargo/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.nix-profile/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/etc/profiles/per-user/patr0nus/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/run/current-system/sw/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/nix/var/nix/profiles/default/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/opt/homebrew/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/local/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/usr/bin/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/uname",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<workspace>/node_modules/.bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.cargo/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/Info.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Users/patr0nus/.CFUserTextEncoding",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "/System/Library/OpenSSL//openssl.cnf",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/System/Library/OpenSSL/openssl.cnf",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/vite-task-test-bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/crates",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
-    ),
-    path: "<manifest_dir>/test_bins/node_modules/vite-task-test-bins",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/node_modules/vite-task-test-bins",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src/package.json",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/package.json",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "node_modules/.bin/sed",
     ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "node_modules/.bin/dirname",
     ),
-    path: "/Volumes",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/Volumes/code",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "node_modules/.bin/uname",
     ),
-    path: "/Volumes/code/vite-plus-workspace",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "node_modules/.bin/node",
     ),
-    path: "/Volumes/code/vite-plus-workspace/vite-task/crates",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src/package.json",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<manifest_dir>/test_bins/src/print-file.ts",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "",
     ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<workspace>",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "test.txt",
     ),
-    path: "<workspace>/test.txt",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "<workspace>/test.txt",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
-        READ,
+)
+[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
+    RelativePathBuf(
+        "test.txt",
     ),
-    path: "<manifest_dir>/test_bins/node_modules/.bin/print-file",
-}
-[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
-    mode: AccessMode(
+    AccessMode(
         READ,
     ),
-    path: "/bin/sh",
-}
+)
