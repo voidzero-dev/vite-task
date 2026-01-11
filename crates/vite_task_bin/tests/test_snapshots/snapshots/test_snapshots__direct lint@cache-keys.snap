@@ -10,9 +10,6 @@ Finished in <duration> on 0 files with 90 rules using <n> threads.
 
 > echo debugger > main.js
 
-> print-file main.js
-debugger
-
 > vite lint
 ✗ cache miss: content of input '' changed, executing
 

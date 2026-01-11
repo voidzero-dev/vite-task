@@ -36,6 +36,5 @@ name = "direct lint"
 steps = [
   "vite lint",
   "echo debugger > main.js",
-  "print-file main.js",
   "vite lint",
 ]
