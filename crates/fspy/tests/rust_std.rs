@@ -37,11 +37,25 @@ async fn open_write() -> anyhow::Result<()> {
 
 #[test(tokio::test)]
 async fn readdir() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let tmpdir = tempfile::tempdir()?;
+    let tmpdir_path = std::fs::canonicalize(tmpdir.path())?;
+    // Reading a non-existent directory results in different tracked accesses on different platforms:
+    // - Windows: READ, because the NT APIs open the directory as handle just like files (NtCreateFile/NtOpenFile),
+    //   and if that fails, not read dir call (NtQueryDirectoryFile/NtQueryDirectoryFileEx) is made.
+    // - macOS/Linux:
+    //   - opendir results in a read_dir access. This call is directly made without trying to open the directory as a fd first.
+    //   - open + fopendir results in READ access, because open would fail with ENOENT, and fopendir is not called.
+    //
+    // This difference is acceptable because both will result in a "not found" fingerprint in vite-task.
+    // To keep the test consistent across platforms, we create the directory first.
+    std::fs::create_dir(tmpdir.path().join("hello_dir"))?;
+
+    let accesses = track_child!(tmpdir_path.to_str().unwrap().to_owned(), |tmpdir_path: String| {
+        std::env::set_current_dir(tmpdir_path).unwrap();
         let _ = std::fs::read_dir("hello_dir");
     })
     .await?;
-    assert_contains(&accesses, current_dir()?.join("hello_dir").as_path(), AccessMode::READ_DIR);
+    assert_contains(&accesses, tmpdir_path.join("hello_dir").as_path(), AccessMode::READ_DIR);
 
     Ok(())
 }

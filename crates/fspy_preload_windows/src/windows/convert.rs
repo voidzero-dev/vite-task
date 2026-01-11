@@ -50,16 +50,26 @@ impl ToAbsolutePath for POBJECT_ATTRIBUTES {
         self,
         f: F,
     ) -> winsafe::SysResult<R> {
-        let filename_str = unsafe { get_u16_str(&*(*self).ObjectName) };
+        let filename_str = if let Some(object_name) = unsafe { (*self).ObjectName.as_ref() } {
+            unsafe { get_u16_str(object_name) }
+        } else {
+            U16Str::from_slice(&[])
+        };
         let filename_slice = filename_str.as_slice();
-        let is_absolute = (filename_slice.get(0) == Some(&b'\\'.into())
-        && filename_slice.get(1) == Some(&b'\\'.into())) // \\...
+        let is_absolute = filename_slice.get(0) == Some(&b'\\'.into()) // \...
         || filename_slice.get(1) == Some(&b':'.into()); // C:...
 
-        if is_absolute {
+        if !is_absolute {
             let Ok(mut root_dir) = (unsafe { get_path_name((*self).RootDirectory) }) else {
                 return f(None);
             };
+            
+            // If filename is empty, just use root_dir directly
+            if filename_slice.is_empty() {
+                let root_dir_str = U16Str::from_slice(&root_dir);
+                return f(Some(root_dir_str));
+            }
+            
             let root_dir_cstr = {
                 root_dir.push(0);
                 unsafe { U16CStr::from_ptr_str(root_dir.as_ptr()) }

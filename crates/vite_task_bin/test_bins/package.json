@@ -12,6 +12,7 @@
     "@yarnpkg/shell": "catalog:",
     "cross-env": "^10.1.0",
     "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
     "vite-task-test-bins": "link:"
   }
 }

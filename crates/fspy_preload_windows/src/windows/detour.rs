@@ -21,7 +21,6 @@ impl<T: Copy> Detour<T> {
         Detour { symbol_name, target: UnsafeCell::new(unsafe { transmute_copy(&target) }), new }
     }
 
-    #[expect(dead_code)]
     pub const unsafe fn dynamic(symbol_name: &'static CStr, new: T) -> Self {
         Detour { symbol_name, target: UnsafeCell::new(null_mut()), new }
     }
@@ -52,15 +51,18 @@ pub struct DetourAny {
 pub struct AttachContext {
     kernelbase: HMODULE,
     kernel32: HMODULE,
+    ntdll: HMODULE,
 }
 
 impl AttachContext {
     pub fn new() -> Self {
         let kernelbase = unsafe { LoadLibraryA(c"kernelbase".as_ptr()) };
         let kernel32 = unsafe { LoadLibraryA(c"kernel32".as_ptr()) };
+        let ntdll = unsafe { LoadLibraryA(c"ntdll".as_ptr()) };
         assert_ne!(kernelbase, null_mut());
         assert_ne!(kernel32, null_mut());
-        Self { kernelbase, kernel32 }
+        assert_ne!(ntdll, null_mut());
+        Self { kernelbase, kernel32, ntdll }
     }
 }
 
@@ -74,9 +76,14 @@ impl DetourAny {
             unsafe { *self.target = symbol_in_kernelbase.cast() };
         } else {
             if unsafe { *self.target }.is_null() {
-                // dynamic symbol
+                // dynamic symbol - look up from kernel32 or ntdll
                 let symbol_in_kernel32 = unsafe { GetProcAddress(ctx.kernel32, symbol_name) };
-                unsafe { *self.target = symbol_in_kernel32.cast() };
+                if !symbol_in_kernel32.is_null() {
+                    unsafe { *self.target = symbol_in_kernel32.cast() };
+                } else {
+                    let symbol_in_ntdll = unsafe { GetProcAddress(ctx.ntdll, symbol_name) };
+                    unsafe { *self.target = symbol_in_ntdll.cast() };
+                }
             }
         }
         if unsafe { *self.target }.is_null() {

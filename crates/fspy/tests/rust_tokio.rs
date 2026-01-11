@@ -42,7 +42,13 @@ async fn open_write() -> anyhow::Result<()> {
 
 #[test(tokio::test)]
 async fn readdir() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let tmpdir = tempfile::tempdir()?;
+    let tmpdir_path = std::fs::canonicalize(tmpdir.path())?;
+
+    std::fs::create_dir(tmpdir.path().join("hello_dir"))?;
+
+    let accesses = track_child!(tmpdir_path.to_str().unwrap().to_owned(), |tmpdir_path: String| {
+        std::env::set_current_dir(tmpdir_path).unwrap();
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
                 let _ = tokio::fs::read_dir("hello_dir").await;
@@ -50,7 +56,7 @@ async fn readdir() -> anyhow::Result<()> {
         );
     })
     .await?;
-    assert_contains(&accesses, current_dir()?.join("hello_dir").as_path(), AccessMode::READ_DIR);
+    assert_contains(&accesses, tmpdir_path.join("hello_dir").as_path(), AccessMode::READ_DIR);
 
     Ok(())
 }

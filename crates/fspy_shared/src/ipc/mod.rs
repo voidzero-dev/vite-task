@@ -32,7 +32,7 @@ impl Debug for AccessMode {
     }
 }
 
-#[derive(Encode, BorrowDecode, Debug, Clone, Copy)]
+#[derive(Encode, BorrowDecode, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathAccess<'a> {
     pub mode: AccessMode,
     pub path: &'a NativeStr,

@@ -29,8 +29,16 @@ pub fn ck_long(val: c_long) -> winsafe::SysResult<()> {
 }
 
 pub unsafe fn get_u16_str(ustring: &UNICODE_STRING) -> &U16Str {
-    let chars =
-        unsafe { slice::from_raw_parts((*ustring).Buffer, (*ustring).Length.try_into().unwrap()) };
+    // https://learn.microsoft.com/en-us/windows/win32/api/subauth/ns-subauth-unicode_string
+    // UNICODE_STRING.Length is in bytes
+    let u16_count = ustring.Length / 2;
+    let chars: &[u16] = if u16_count == 0 {
+        // If length is zero, we can't use slice::from_raw_parts as it requires a non-null pointer but
+        // Buffer may be null in that case.
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts((*ustring).Buffer, u16_count.try_into().unwrap()) }
+    };
     match U16CStr::from_slice_truncate(chars) {
         Ok(ok) => ok.as_ustr(),
         Err(_) => chars.into(),
