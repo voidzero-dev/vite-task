@@ -56,11 +56,10 @@ impl ToAbsolutePath for POBJECT_ATTRIBUTES {
             U16Str::from_slice(&[])
         };
         let filename_slice = filename_str.as_slice();
-        let is_absolute = (filename_slice.get(0) == Some(&b'\\'.into())
-        && filename_slice.get(1) == Some(&b'\\'.into())) // \\...
+        let is_absolute = filename_slice.get(0) == Some(&b'\\'.into()) // \...
         || filename_slice.get(1) == Some(&b':'.into()); // C:...
 
-        if is_absolute {
+        if !is_absolute {
             let Ok(mut root_dir) = (unsafe { get_path_name((*self).RootDirectory) }) else {
                 return f(None);
             };
