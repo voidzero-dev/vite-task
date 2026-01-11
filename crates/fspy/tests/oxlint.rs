@@ -1,20 +1,24 @@
 mod test_utils;
 
-use std::{env::vars_os, process::Stdio};
+use std::{env::vars_os, ffi::OsString};
 
 use fspy::{AccessMode, PathAccessIterable};
 use test_log::test;
 
-/// Find the oxlint executable in test_bins
-fn find_oxlint() -> std::path::PathBuf {
-    let test_bins_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+/// Get the test_bins/.bin directory path
+fn test_bins_bin_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .join("vite_task_bin")
         .join("test_bins")
         .join("node_modules")
-        .join(".bin");
+        .join(".bin")
+}
 
+/// Find the oxlint executable in test_bins
+fn find_oxlint() -> std::path::PathBuf {
+    let test_bins_dir = test_bins_bin_dir();
     which::which_in("oxlint", Some(&test_bins_dir), std::env::current_dir().unwrap())
         .expect("oxlint not found in test_bins/node_modules/.bin")
 }
@@ -22,7 +26,22 @@ fn find_oxlint() -> std::path::PathBuf {
 async fn track_oxlint(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<PathAccessIterable> {
     let oxlint_path = find_oxlint();
     let mut command = fspy::Command::new(&oxlint_path);
-    command.args(args).stdout(Stdio::null()).stderr(Stdio::null()).envs(vars_os()).current_dir(dir);
+
+    // Build PATH with test_bins/.bin prepended so oxlint can find tsgolint
+    let test_bins_dir = test_bins_bin_dir();
+    let new_path = if let Some(existing_path) = std::env::var_os("PATH") {
+        let mut paths = vec![test_bins_dir.as_os_str().to_owned()];
+        paths.extend(std::env::split_paths(&existing_path).map(|p| p.into_os_string()));
+        std::env::join_paths(paths)?
+    } else {
+        OsString::from(&test_bins_dir)
+    };
+
+    command
+        .args(args)
+        .envs(vars_os().filter(|(k, _)| !k.eq_ignore_ascii_case("PATH")))
+        .env("PATH", new_path)
+        .current_dir(dir);
 
     let child = command.spawn().await?;
     let termination = child.wait_handle.await?;
@@ -62,5 +81,42 @@ async fn oxlint_reads_directory() -> anyhow::Result<()> {
     // Check that oxlint read the directory to find JS files
     // This is the key check - if READ_DIR is not tracked, cache won't detect new files
     test_utils::assert_contains(&accesses, &tmpdir_path, AccessMode::READ_DIR);
+    Ok(())
+}
+
+/// Test oxlint with TypeScript type-aware linting (--tsconfig)
+/// This reproduces a crash in fspy_preload_windows on Windows:
+/// "unsafe precondition(s) violated: slice::from_raw_parts requires the pointer to be aligned and non-null"
+#[test(tokio::test)]
+async fn oxlint_type_aware() -> anyhow::Result<()> {
+    let tmpdir = tempfile::tempdir()?;
+    // on macOS, tmpdir.path() may be a symlink, so we need to canonicalize it
+    let tmpdir_path = std::fs::canonicalize(tmpdir.path())?;
+
+    // Create a simple TypeScript file
+    let ts_file = tmpdir_path.join("index.ts");
+    std::fs::write(
+        &ts_file,
+        r#"
+import type { Foo } from './types';
+declare const _foo: Foo;
+"#,
+    )?;
+
+    // Run oxlint without --type-aware first
+    let accesses = track_oxlint(&tmpdir_path, &[""]).await?;
+    let access_to_types_ts = accesses.iter().find(|access| {
+        let os_str = access.path.to_cow_os_str();
+        os_str.as_encoded_bytes().ends_with(b"\\types.ts")
+            || os_str.as_encoded_bytes().ends_with(b"/types.ts")
+    });
+    assert_eq!(access_to_types_ts, None, "oxlint should not read types.ts without --type-aware");
+
+    // Run oxlint with --type-aware to enable type-aware linting
+    let accesses = track_oxlint(&tmpdir_path, &["--type-aware"]).await?;
+
+    // Check that oxlint read types.ts
+    test_utils::assert_contains(&accesses, &tmpdir_path.join("types.ts"), AccessMode::READ);
+
     Ok(())
 }
