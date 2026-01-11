@@ -24,35 +24,3 @@ Task Details:
   [2] pkg-a#fail: ~/packages/pkg-a$ node -e "process.exit(42)" ✗ (exit code: 42)
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
-    RelativePathBuf(
-        "packages/pkg-b",
-    ),
-    AccessMode(
-        READ,
-    ),
-)
-[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
-    RelativePathBuf(
-        "packages/pkg-b",
-    ),
-    AccessMode(
-        READ,
-    ),
-)
-[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
-    RelativePathBuf(
-        "packages/pkg-a",
-    ),
-    AccessMode(
-        READ,
-    ),
-)
-[crates/vite_task/src/session/execute/spawn.rs:194:9] (&relative_path, &access.mode) = (
-    RelativePathBuf(
-        "packages/pkg-a",
-    ),
-    AccessMode(
-        READ,
-    ),
-)

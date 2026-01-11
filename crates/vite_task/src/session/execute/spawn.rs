@@ -191,8 +191,6 @@ where
             continue;
         };
 
-        dbg!((&relative_path, &access.mode));
-
         // Skip .git directory accesses (workaround for tools like oxlint)
         if relative_path.as_path().strip_prefix(".git").is_ok() {
             continue;
