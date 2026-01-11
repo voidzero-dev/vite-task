@@ -10,7 +10,7 @@ rust-version.workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-monostate = "1.0.2"
+monostate = { workspace = true }
 petgraph = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

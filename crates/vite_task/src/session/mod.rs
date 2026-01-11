@@ -10,6 +10,7 @@ use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
 use clap::{Parser, Subcommand};
 pub use event::ExecutionEvent;
+use once_cell::sync::OnceCell;
 pub use reporter::{LabeledReporter, Reporter};
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
@@ -142,7 +143,10 @@ pub struct Session<'a, CustomSubcommand> {
 
     plan_request_parser: PlanRequestParser<'a, CustomSubcommand>,
 
-    cache: ExecutionCache,
+    /// Cache is lazily initialized to avoid SQLite race conditions when multiple
+    /// processes (e.g., parallel `vite lib` commands) start simultaneously.
+    cache: OnceCell<ExecutionCache>,
+    cache_path: AbsolutePathBuf,
 }
 
 fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf {
@@ -181,13 +185,7 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
         let workspace_node_modules_bin = workspace_root.path.join("node_modules").join(".bin");
         prepend_path_env(&mut envs, &workspace_node_modules_bin)?;
 
-        if !cache_path.as_path().exists()
-            && let Some(cache_dir) = cache_path.as_path().parent()
-        {
-            tracing::info!("Creating task cache directory at {}", cache_dir.display());
-            std::fs::create_dir_all(cache_dir)?;
-        }
-        let cache = ExecutionCache::load_from_path(cache_path)?;
+        // Cache is lazily initialized on first access to avoid SQLite race conditions
         Ok(Self {
             workspace_path: Arc::clone(&workspace_root.path),
             lazy_task_graph: LazyTaskGraph::Uninitialized {
@@ -197,12 +195,16 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
             envs: Arc::new(envs),
             cwd,
             plan_request_parser: PlanRequestParser { task_synthesizer: callbacks.task_synthesizer },
-            cache,
+            cache: OnceCell::new(),
+            cache_path,
         })
     }
 
-    pub fn cache(&self) -> &ExecutionCache {
-        &self.cache
+    /// Lazily initializes and returns the execution cache.
+    /// The cache is only created when first accessed to avoid SQLite race conditions
+    /// when multiple processes start simultaneously.
+    pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
+        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(self.cache_path.clone()))
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {

@@ -6,17 +6,37 @@ use vite_str::Str;
 use vite_task_graph::{TaskSpecifier, query::TaskQueryKind};
 use vite_task_plan::plan_request::{PlanOptions, PlanRequest, QueryPlanRequest};
 
-/// Represents the CLI arguments handled by vite-task, including both built-in and custom subcommands.
+/// Represents the CLI arguments handled by vite-task, including both built-in (like run) and custom subcommands (like lint).
 #[derive(Debug)]
 pub struct TaskCLIArgs<CustomSubcommand: Subcommand> {
     pub(crate) original: Arc<[Str]>,
     pub(crate) parsed: ParsedTaskCLIArgs<CustomSubcommand>,
 }
 
+impl<CustomSubcommand: Subcommand> TaskCLIArgs<CustomSubcommand> {
+    /// Inspect the custom subcommand (like lint/install). Returns `None` if it's built-in subcommand
+    /// The caller should not use this method to actually handle the custom subcommand. Instead, it should
+    /// private TaskSynthesizer to Session so that vite-task can handle custom subcommands consistently from
+    /// both direct CLI invocations and invocations in task scripts.
+    ///
+    /// This method is provided only to make it possible for the caller to behave differently BEFORE and AFTER the session.
+    /// For example, vite+ needs this method to skip auto-install when the custom subcommand is already `install`.
+    pub fn custom_subcommand(&self) -> Option<&CustomSubcommand> {
+        match &self.parsed {
+            ParsedTaskCLIArgs::BuiltIn(_) => None,
+            ParsedTaskCLIArgs::Custom(custom) => Some(custom),
+        }
+    }
+}
+
+/// Represents the overall CLI arguments, containing three kinds of subcommands:
+/// 1. Built-in subcommands handled by vite-task (like run)
+/// 2. Custom subcommands handled by vite-task with the help of TaskSyntheizer (like lint)
+/// 3. Custom subcommands not handled by vite-task (like vite+ commands without cache)
 pub enum CLIArgs<CustomSubcommand: Subcommand, NonTaskSubcommand: Subcommand> {
-    /// vite-task's own built-in subcommands
+    /// Subcommands handled by vite task, including built-in (like run) and custom (like lint)
     Task(TaskCLIArgs<CustomSubcommand>),
-    /// custom subcommands provided by vite+
+    /// Custom subcommands not handled by vite task (like vite+ commands without cache)
     NonTask(NonTaskSubcommand),
 }
 

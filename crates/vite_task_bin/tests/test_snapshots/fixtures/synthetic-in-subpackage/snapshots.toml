@@ -1,0 +1,3 @@
+[[plan]]
+name = "synthetic-in-subpackage"
+args = ["run", "lint"]
