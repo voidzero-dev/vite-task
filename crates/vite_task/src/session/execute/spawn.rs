@@ -174,17 +174,14 @@ where
     let path_writes = &mut track_result.path_writes;
 
     for access in termination.path_accesses.iter() {
-        let relative_path = access
-            .path
-            .strip_path_prefix(workspace_root, |strip_result| {
-                let Ok(stripped_path) = strip_result else {
-                    return None;
-                };
-                Some(RelativePathBuf::new(stripped_path).map_err(|err| {
-                    anyhow::anyhow!("Invalid relative path '{}': {}", stripped_path.display(), err)
-                }))
-            })
-            .transpose()?;
+        let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {
+            let Ok(stripped_path) = strip_result else {
+                return None;
+            };
+            // On Windows, path stripping may fail due to case sensitivity or path format
+            // differences. Treat these as outside workspace rather than failing.
+            RelativePathBuf::new(stripped_path).ok()
+        });
 
         let Some(relative_path) = relative_path else {
             // Ignore accesses outside the workspace
