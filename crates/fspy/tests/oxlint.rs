@@ -73,9 +73,6 @@ async fn oxlint_reads_directory() -> anyhow::Result<()> {
     // on macOS, tmpdir.path() may be a symlink, so we need to canonicalize it
     let tmpdir_path = std::fs::canonicalize(tmpdir.path())?;
 
-    let js_file = tmpdir.path().join("test.js");
-    std::fs::write(&js_file, "console.log('hello');")?;
-
     let accesses = track_oxlint(&tmpdir_path, &[]).await?;
 
     // Check that oxlint read the directory to find JS files

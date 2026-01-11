@@ -63,6 +63,11 @@ impl ToAbsolutePath for POBJECT_ATTRIBUTES {
             let Ok(mut root_dir) = (unsafe { get_path_name((*self).RootDirectory) }) else {
                 return f(None);
             };
+            // If filename is empty, just use root_dir directly
+            if filename_str.is_empty() {
+                let root_dir_str = U16Str::from_slice(&root_dir);
+                return f(Some(root_dir_str));
+            }
             let root_dir_cstr = {
                 root_dir.push(0);
                 unsafe { U16CStr::from_ptr_str(root_dir.as_ptr()) }
