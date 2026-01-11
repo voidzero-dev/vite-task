@@ -204,16 +204,7 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     /// The cache is only created when first accessed to avoid SQLite race conditions
     /// when multiple processes start simultaneously.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
-        self.cache.get_or_try_init(|| {
-            // Create cache directory if needed
-            if !self.cache_path.as_path().exists() {
-                if let Some(cache_dir) = self.cache_path.as_path().parent() {
-                    tracing::info!("Creating task cache directory at {}", cache_dir.display());
-                    std::fs::create_dir_all(cache_dir)?;
-                }
-            }
-            ExecutionCache::load_from_path(self.cache_path.clone())
-        })
+        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(self.cache_path.clone()))
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {
