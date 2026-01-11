@@ -33,7 +33,7 @@ pub unsafe fn get_u16_str(ustring: &UNICODE_STRING) -> &U16Str {
     // UNICODE_STRING.Length is in bytes
     let u16_count = ustring.Length / 2;
     let chars: &[u16] = if u16_count == 0 {
-        // If length is zero, we cann't use slice::from_raw_parts as it requires a non-null pointer but
+        // If length is zero, we can't use slice::from_raw_parts as it requires a non-null pointer but
         // Buffer may be null in that case.
         &[]
     } else {

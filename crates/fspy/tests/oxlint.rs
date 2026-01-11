@@ -84,9 +84,6 @@ async fn oxlint_reads_directory() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Test oxlint with TypeScript type-aware linting (--tsconfig)
-/// This reproduces a crash in fspy_preload_windows on Windows:
-/// "unsafe precondition(s) violated: slice::from_raw_parts requires the pointer to be aligned and non-null"
 #[test(tokio::test)]
 async fn oxlint_type_aware() -> anyhow::Result<()> {
     let tmpdir = tempfile::tempdir()?;
