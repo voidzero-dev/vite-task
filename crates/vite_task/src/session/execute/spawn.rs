@@ -174,6 +174,7 @@ where
     let path_writes = &mut track_result.path_writes;
 
     for access in termination.path_accesses.iter() {
+        dbg!(&access);
         let relative_path = access
             .path
             .strip_path_prefix(workspace_root, |strip_result| {

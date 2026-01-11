@@ -54,6 +54,7 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
 
 pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+
     redact_string(
         &mut output,
         &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],

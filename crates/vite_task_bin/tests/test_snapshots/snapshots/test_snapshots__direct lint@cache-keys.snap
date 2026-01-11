@@ -7,8 +7,2027 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-keys
 Found 0 warnings and 0 errors.
 Finished in <duration> on 0 files with 90 rules using <n> threads.
 
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/etc/localtime",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/db/timezone/tz/2025b.1.0/zoneinfo/Asia/Shanghai",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/db/timezone/tz/2025b.1.0/zoneinfo/posixrules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.cargo/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.nix-profile/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/etc/profiles/per-user/patr0nus/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/run/current-system/sw/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/nix/var/nix/profiles/default/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/opt/homebrew/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/local/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.cargo/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.nix-profile/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/etc/profiles/per-user/patr0nus/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/run/current-system/sw/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/nix/var/nix/profiles/default/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/opt/homebrew/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/local/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.cargo/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.nix-profile/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/etc/profiles/per-user/patr0nus/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/run/current-system/sw/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/nix/var/nix/profiles/default/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/opt/homebrew/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/local/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.cargo/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/Info.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/System/Library/OpenSSL//openssl.cnf",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/System/Library/OpenSSL/openssl.cnf",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/crates",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/cli.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/cli.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/cli.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/cli.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/bindings.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/bindings.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/bindings.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/bindings.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-universal.node.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-universal.node.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-universal.node.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/lib/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-arm64.node.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-arm64.node.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-arm64.node.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64/oxlint.darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint/darwin-arm64/oxlint.darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.tmpQKPc8H/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.tmpQKPc8H/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.tmpQKPc8H/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ_DIR,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ_DIR,
+    ),
+    path: "<workspace>/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ_DIR,
+    ),
+    path: "<workspace>/node_modules/.vite",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ_DIR,
+    ),
+    path: "<workspace>/node_modules/.vite/task-cache",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/task-cache/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/task-cache/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/task-cache/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/bin/sh",
+}
 
 > echo debugger > main.js
+
+> print-file main.js
+debugger
 
 > vite lint
 ✗ cache miss: content of input '' changed, executing
@@ -22,3 +2041,2086 @@ Finished in <duration> on 0 files with 90 rules using <n> threads.
 
 Found 1 warning and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
+
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/etc/localtime",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/db/timezone/tz/2025b.1.0/zoneinfo/Asia/Shanghai",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/db/timezone/tz/2025b.1.0/zoneinfo/posixrules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.cargo/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.nix-profile/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/etc/profiles/per-user/patr0nus/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/run/current-system/sw/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/nix/var/nix/profiles/default/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/opt/homebrew/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/local/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/sed",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.cargo/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.nix-profile/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/etc/profiles/per-user/patr0nus/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/run/current-system/sw/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/nix/var/nix/profiles/default/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/opt/homebrew/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/local/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/dirname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.cargo/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/npm-corepack/0.34.5/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.nix-profile/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/etc/profiles/per-user/patr0nus/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/run/current-system/sw/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/nix/var/nix/profiles/default/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/opt/homebrew/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/local/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/usr/bin/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/Info.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/locales/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/share/locales/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/fspy/uname",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/target/debug/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.cargo/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/claude/2.1.2/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/gh/2.83.2/gh_2.83.2_macOS_arm64/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/bin/Info.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Library/Preferences/Logging/com.apple.diagnosticd.filter.plist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.CFUserTextEncoding",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/System/Library/OpenSSL//openssl.cnf",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/System/Library/OpenSSL/openssl.cnf",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/crates",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/cli.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/cli.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/cli.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/cli.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/bindings.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/bindings.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/bindings.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/bindings.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-universal.node.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-universal.node.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-universal.node.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/bin/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/node_modules/@oxlint/darwin-universal.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Users/patr0nus/.local/share/mise/installs/node/25.2.1/lib/node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-arm64.node.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-arm64.node.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/oxlint.darwin-arm64.node.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64/oxlint.darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint/darwin-arm64",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint/darwin-arm64/oxlint.darwin-arm64.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/dist/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/oxlint/node_modules/@oxlint/darwin-arm64/package.json.node",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/oxlint@1.38.0_oxlint-tsgolint@0.10.1/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/Volumes/code/vite-plus-workspace/vite-task/node_modules/.pnpm/@oxlint+darwin-arm64@1.38.0/node_modules/@oxlint/darwin-arm64/package.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.tmpQKPc8H/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.tmpQKPc8H/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.tmpQKPc8H/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ_DIR,
+    ),
+    path: "<workspace>",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ_DIR,
+    ),
+    path: "<workspace>/node_modules",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ_DIR,
+    ),
+    path: "<workspace>/node_modules/.vite",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ_DIR,
+    ),
+    path: "<workspace>/node_modules/.vite/task-cache",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/task-cache/.eslintignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/task-cache/.gitignore",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/node_modules/.vite/task-cache/.git/info/exclude",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.tmpQKPc8H/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/T/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/bp3pvg2x2n1g07k3q9mv4nb40000gn/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/var/folders/v7/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/private/.oxlintrc.json",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/main.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<workspace>/main.js",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+}
+[crates/vite_task/src/session/execute/spawn.rs:177:9] &access = PathAccess {
+    mode: AccessMode(
+        READ,
+    ),
+    path: "/bin/sh",
+}
