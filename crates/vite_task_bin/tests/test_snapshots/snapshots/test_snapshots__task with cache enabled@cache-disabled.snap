@@ -31,10 +31,10 @@ test content
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Statistics:   1 tasks • 1 cache hits • 0 cache misses 
-Performance:  100% cache hit rate, <duration>ms saved in total
+Performance:  100% cache hit rate, <duration> saved in total
 
 Task Details:
 ────────────────────────────────────────────────
   [1] cache-disabled-test#cached-task: $ print-file test.txt ✓
-      → Cache hit - output replayed - <duration>ms saved
+      → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
