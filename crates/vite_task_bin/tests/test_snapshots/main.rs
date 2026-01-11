@@ -13,7 +13,7 @@ use std::{
 use copy_dir::copy_dir;
 use redact::{redact_e2e_output, redact_snapshot};
 use tokio::runtime::Runtime;
-use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use vite_task::{CLIArgs, Session};
 use vite_task_bin::CustomTaskSubcommand;
@@ -209,13 +209,13 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
 fn test_snapshots() {
     let tokio_runtime = Runtime::new().unwrap();
     let tmp_dir = tempfile::tempdir().unwrap();
-    let tmp_dir_path = AbsolutePath::new(tmp_dir.path()).unwrap();
+    let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
     let tests_dir = std::env::current_dir().unwrap().join("tests");
 
     insta::glob!(tests_dir, "test_snapshots/fixtures/*", |case_path| run_case(
         &tokio_runtime,
-        tmp_dir_path,
+        &tmp_dir_path,
         case_path
     ));
 }
