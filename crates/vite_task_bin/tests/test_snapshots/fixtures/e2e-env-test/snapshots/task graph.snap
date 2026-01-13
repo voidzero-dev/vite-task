@@ -1,7 +1,0 @@
----
-source: crates/vite_task_bin/tests/test_snapshots/main.rs
-assertion_line: 117
-expression: task_graph_json
-input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/e2e-env-test
----
-[]

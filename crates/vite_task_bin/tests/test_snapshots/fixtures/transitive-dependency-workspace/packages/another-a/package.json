@@ -1,7 +1,0 @@
-{
-  "name": "@test/a",
-  "version": "1.0.0",
-  "scripts": {
-    "build": "echo Building another A"
-  }
-}
