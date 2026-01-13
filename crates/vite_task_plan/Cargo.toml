@@ -34,7 +34,6 @@ which = { workspace = true }
 copy_dir = { workspace = true }
 cow-utils = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
-regex = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }

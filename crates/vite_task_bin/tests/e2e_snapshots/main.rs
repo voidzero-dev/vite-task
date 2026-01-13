@@ -19,13 +19,7 @@ use vite_workspace::find_workspace_root;
 /// On Unix, uses /bin/sh.
 /// On Windows, uses BASH env var or falls back to Git Bash.
 fn get_shell_exe() -> PathBuf {
-    #[cfg(unix)]
-    {
-        PathBuf::from("/bin/sh")
-    }
-
-    #[cfg(windows)]
-    {
+    if cfg!(windows) {
         if let Some(bash) = std::env::var_os("BASH") {
             PathBuf::from(bash)
         } else {
@@ -41,6 +35,8 @@ fn get_shell_exe() -> PathBuf {
                 );
             }
         }
+    } else {
+        PathBuf::from("/bin/sh")
     }
 }
 
