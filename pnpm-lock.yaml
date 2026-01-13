@@ -45,7 +45,7 @@ importers:
         specifier: 'catalog:'
         version: 0.10.1
 
-  crates/vite_task_bin/test_bins:
+  packages/tools:
     dependencies:
       '@yarnpkg/shell':
         specifier: 'catalog:'
@@ -59,7 +59,7 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.10.1
-      vite-task-test-bins:
+      tools:
         specifier: 'link:'
         version: 'link:'
 

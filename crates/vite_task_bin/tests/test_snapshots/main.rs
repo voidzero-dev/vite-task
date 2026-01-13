@@ -73,21 +73,19 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         Err(err) => panic!("Failed to read cases.toml for fixture {}: {}", fixture_name, err),
     };
 
+    // Navigate from CARGO_MANIFEST_DIR to packages/tools at the repo root
+    let repo_root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let test_bin_path = Arc::<OsStr>::from(
-        std::env::current_dir()
-            .unwrap()
-            .join("test_bins")
-            .join("node_modules")
-            .join(".bin")
-            .into_os_string(),
+        repo_root.join("packages").join("tools").join("node_modules").join(".bin").into_os_string(),
     );
 
-    // Find @yarnpkg/shell executable in test_bins
+    // Find @yarnpkg/shell executable in packages/tools
     let shell_exe =
         which::which_in("shell", Some(&*test_bin_path), std::env::current_dir().unwrap())
-            .expect("shell executable not found in test_bins/node_modules/.bin");
+            .expect("shell executable not found in packages/tools/node_modules/.bin");
 
-    // Add test_bins to PATH so test programs (such as print-file) in fixtures can be found.
+    // Add packages/tools to PATH so test programs (such as print-file) in fixtures can be found.
     let plan_envs: HashMap<Arc<OsStr>, Arc<OsStr>> = [
         (Arc::<OsStr>::from(OsStr::new("PATH")), Arc::clone(&test_bin_path)),
         (Arc::<OsStr>::from(OsStr::new("NO_COLOR")), Arc::<OsStr>::from(OsStr::new("1"))),
@@ -104,7 +102,7 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
                 let vite_dir = vite_path.parent().unwrap();
                 vite_dir.as_path().as_os_str().into()
             },
-            // Include test_bins to PATH so that e2e tests can run utilities such as json-edit.
+            // Include packages/tools to PATH so that e2e tests can run utilities such as json-edit.
             test_bin_path,
         ]
         .into_iter()

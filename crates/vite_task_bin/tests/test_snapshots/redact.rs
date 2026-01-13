@@ -54,10 +54,23 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
 
 pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    // Get the packages/tools directory path
+    let tools_dir = std::path::Path::new(&manifest_dir)
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("packages")
+        .join("tools");
+    let tools_dir_str = tools_dir.to_str().unwrap();
 
     redact_string(
         &mut output,
-        &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
+        &[
+            (workspace_root, "<workspace>"),
+            (manifest_dir.as_str(), "<manifest_dir>"),
+            (tools_dir_str, "<tools>"),
+        ],
     );
 
     // Redact durations like "123ms" or "1.23s" to "<duration>ms" or "<duration>s"
@@ -83,12 +96,22 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
 
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    // Get the packages/tools directory path
+    let tools_dir = std::path::Path::new(&manifest_dir)
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("packages")
+        .join("tools");
+    let tools_dir_str = tools_dir.to_str().unwrap().to_owned();
     let mut json_value = serde_json::to_value(value).unwrap();
 
     // On Windows, paths might use either backslashes or forward slashes
-    // Try both variants for workspace_root and manifest_dir
+    // Try both variants for workspace_root, manifest_dir, and tools_dir
     let workspace_root_forward = workspace_root.replace('\\', "/");
     let manifest_dir_forward = manifest_dir.replace('\\', "/");
+    let tools_dir_forward = tools_dir_str.replace('\\', "/");
 
     redact_string_in_json(
         &mut json_value,
@@ -97,6 +120,8 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
             (workspace_root_forward.as_str(), "<workspace>"),
             (manifest_dir.as_str(), "<manifest_dir>"),
             (manifest_dir_forward.as_str(), "<manifest_dir>"),
+            (tools_dir_str.as_str(), "<tools>"),
+            (tools_dir_forward.as_str(), "<tools>"),
         ],
     );
 

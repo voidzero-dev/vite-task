@@ -5,36 +5,38 @@ use std::{env::vars_os, ffi::OsString};
 use fspy::{AccessMode, PathAccessIterable};
 use test_log::test;
 
-/// Get the test_bins/.bin directory path
-fn test_bins_bin_dir() -> std::path::PathBuf {
+/// Get the packages/tools/.bin directory path
+fn tools_bin_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("vite_task_bin")
-        .join("test_bins")
+        .parent()
+        .unwrap()
+        .join("packages")
+        .join("tools")
         .join("node_modules")
         .join(".bin")
 }
 
-/// Find the oxlint executable in test_bins
+/// Find the oxlint executable in packages/tools
 fn find_oxlint() -> std::path::PathBuf {
-    let test_bins_dir = test_bins_bin_dir();
-    which::which_in("oxlint", Some(&test_bins_dir), std::env::current_dir().unwrap())
-        .expect("oxlint not found in test_bins/node_modules/.bin")
+    let tools_dir = tools_bin_dir();
+    which::which_in("oxlint", Some(&tools_dir), std::env::current_dir().unwrap())
+        .expect("oxlint not found in packages/tools/node_modules/.bin")
 }
 
 async fn track_oxlint(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<PathAccessIterable> {
     let oxlint_path = find_oxlint();
     let mut command = fspy::Command::new(&oxlint_path);
 
-    // Build PATH with test_bins/.bin prepended so oxlint can find tsgolint
-    let test_bins_dir = test_bins_bin_dir();
+    // Build PATH with packages/tools/.bin prepended so oxlint can find tsgolint
+    let tools_dir = tools_bin_dir();
     let new_path = if let Some(existing_path) = std::env::var_os("PATH") {
-        let mut paths = vec![test_bins_dir.as_os_str().to_owned()];
+        let mut paths = vec![tools_dir.as_os_str().to_owned()];
         paths.extend(std::env::split_paths(&existing_path).map(|p| p.into_os_string()));
         std::env::join_paths(paths)?
     } else {
-        OsString::from(&test_bins_dir)
+        OsString::from(&tools_dir)
     };
 
     command

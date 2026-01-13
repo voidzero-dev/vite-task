@@ -86,11 +86,11 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/synthetic-in-subp
                                   }
                                 },
                                 "spawn_command": {
-                                  "program_path": "<manifest_dir>/test_bins/node_modules/.bin/oxlint",
+                                  "program_path": "<tools>/node_modules/.bin/oxlint",
                                   "args": [],
                                   "all_envs": {
                                     "NO_COLOR": "1",
-                                    "PATH": "<workspace>/packages/a/node_modules/.bin:<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin"
+                                    "PATH": "<workspace>/packages/a/node_modules/.bin:<workspace>/node_modules/.bin:<tools>/node_modules/.bin"
                                   },
                                   "cwd": "<workspace>/packages/a"
                                 }

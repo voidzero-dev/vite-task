@@ -41,13 +41,13 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/additional-envs
           }
         },
         "spawn_command": {
-          "program_path": "<manifest_dir>/test_bins/node_modules/.bin/print-env",
+          "program_path": "<tools>/node_modules/.bin/print-env",
           "args": [
             "TEST_VAR"
           ],
           "all_envs": {
             "NO_COLOR": "1",
-            "PATH": "<workspace>/node_modules/.bin:<manifest_dir>/test_bins/node_modules/.bin",
+            "PATH": "<workspace>/node_modules/.bin:<tools>/node_modules/.bin",
             "TEST_VAR": "hello_world"
           },
           "cwd": "<workspace>/"

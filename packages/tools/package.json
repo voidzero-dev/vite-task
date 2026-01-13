@@ -1,5 +1,5 @@
 {
-  "name": "vite-task-test-bins",
+  "name": "vite-task-tools",
   "type": "module",
   "private": true,
   "bin": {
@@ -13,6 +13,6 @@
     "cross-env": "^10.1.0",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "vite-task-test-bins": "link:"
+    "vite-task-tools": "link:"
   }
 }

@@ -1,6 +1,6 @@
 packages:
   - .
-  - crates/vite_task_bin/test_bins
+  - packages/tools
 
 catalog:
   '@types/node': 25.0.3
