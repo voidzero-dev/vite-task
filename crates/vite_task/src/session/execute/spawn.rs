@@ -178,8 +178,9 @@ where
             let Ok(stripped_path) = strip_result else {
                 return None;
             };
-            // On Windows, path stripping may fail due to case sensitivity or path format
-            // differences. Treat these as outside workspace rather than failing.
+            // On Windows, paths are possible to be still absolute after stripping the workspace root.
+            // For example: c:\workspace\subdir\c:\workspace\subdir
+            // Just ignore those accesses.
             RelativePathBuf::new(stripped_path).ok()
         });
 
