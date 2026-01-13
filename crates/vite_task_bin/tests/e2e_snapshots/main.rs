@@ -89,7 +89,7 @@ fn run_case(tmpdir: &AbsolutePath, fixture_path: &Path, filter: Option<&str>) {
             return;
         }
     }
-
+    println!("{}", fixture_name);
     // Configure insta to write snapshots to fixture directory
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_path(fixture_path.join("snapshots"));
