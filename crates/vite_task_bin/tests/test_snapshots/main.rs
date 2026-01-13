@@ -37,6 +37,21 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
         return; // skip hidden files like .DS_Store
     }
 
+    // Configure insta to write snapshots to fixture directory
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_path(fixture_path.join("snapshots"));
+    settings.set_prepend_module_to_snapshot(false);
+    settings.remove_snapshot_suffix();
+
+    settings.bind(|| run_case_inner(runtime, tmpdir, fixture_path, fixture_name));
+}
+
+fn run_case_inner(
+    runtime: &Runtime,
+    tmpdir: &AbsolutePath,
+    fixture_path: &Path,
+    fixture_name: &str,
+) {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
     copy_dir(fixture_path, &stage_path).unwrap();
