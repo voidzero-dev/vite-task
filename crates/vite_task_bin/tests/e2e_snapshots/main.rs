@@ -4,7 +4,7 @@ use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
 };
@@ -14,6 +14,35 @@ use redact::redact_e2e_output;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use vite_workspace::find_workspace_root;
+
+/// Get the shell executable for running e2e test steps.
+/// On Unix, uses /bin/sh.
+/// On Windows, uses BASH env var or falls back to Git Bash.
+fn get_shell_exe() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("/bin/sh")
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(bash) = std::env::var_os("BASH") {
+            PathBuf::from(bash)
+        } else {
+            let git_bash = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
+            if git_bash.exists() {
+                git_bash
+            } else {
+                panic!(
+                    "Could not find bash executable for e2e tests.\n\
+                     Please set the BASH environment variable to point to a bash executable,\n\
+                     or install Git for Windows which provides bash at:\n\
+                     C:\\Program Files\\Git\\bin\\bash.exe"
+                );
+            }
+        }
+    }
+}
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(untagged)]
@@ -101,10 +130,8 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str
         repo_root.join("packages").join("tools").join("node_modules").join(".bin").into_os_string(),
     );
 
-    // Find @yarnpkg/shell executable in packages/tools
-    let shell_exe =
-        which::which_in("shell", Some(&*test_bin_path), std::env::current_dir().unwrap())
-            .expect("shell executable not found in packages/tools/node_modules/.bin");
+    // Get shell executable for running steps
+    let shell_exe = get_shell_exe();
 
     // Prepare PATH for e2e tests
     let e2e_env_path = join_paths(
@@ -115,7 +142,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str
                 let vite_dir = vite_path.parent().unwrap();
                 vite_dir.as_path().as_os_str().into()
             },
-            // Include packages/tools to PATH so that e2e tests can run utilities such as json-edit.
+            // Include packages/tools to PATH so that e2e tests can run utilities such as replace-file-content.
             test_bin_path,
         ]
         .into_iter()
@@ -137,9 +164,9 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str
 
         let mut e2e_outputs = String::new();
         for step in e2e.steps {
-            // Use @yarnpkg/shell for cross-platform shell execution
             let mut cmd = Command::new(&shell_exe);
-            cmd.arg(step.cmd())
+            cmd.arg("-c")
+                .arg(step.cmd())
                 .env_clear()
                 .env("PATH", &e2e_env_path)
                 .env("NO_COLOR", "1")

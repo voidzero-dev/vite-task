@@ -25,7 +25,7 @@ steps = [
 The test runner:
 
 1. Copies the fixture to a temp directory
-2. Executes each step using `@yarnpkg/shell`
+2. Executes each step using `/bin/sh` (Unix) or `bash` (Windows)
 3. Captures stdout/stderr and exit codes
 4. Compares against snapshot in `fixtures/<name>/snapshots/`
 

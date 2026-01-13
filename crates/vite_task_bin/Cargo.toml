@@ -34,7 +34,6 @@ vite_graph_ser = { workspace = true }
 vite_path = { workspace = true, features = ["absolute-redaction"] }
 vite_task_graph = { workspace = true }
 vite_workspace = { workspace = true }
-which = { workspace = true }
 
 [lints]
 workspace = true

@@ -9,7 +9,6 @@
     "replace-file-content": "./src/replace-file-content.ts"
   },
   "dependencies": {
-    "@yarnpkg/shell": "catalog:",
     "cross-env": "^10.1.0",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
