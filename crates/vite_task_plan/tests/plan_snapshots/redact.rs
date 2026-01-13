@@ -99,7 +99,13 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
     let os_shell_args: &[&str] = if cfg!(windows) { &["/d", "/s", "/c"] } else { &["-c"] };
     visit_json(&mut json_value, &mut |v| {
         if let serde_json::Value::String(s) = v {
-            if s == os_shell_path {
+            // Use case-insensitive comparison on Windows since path casing can vary
+            let matches_shell_path = if cfg!(windows) {
+                s.eq_ignore_ascii_case(os_shell_path)
+            } else {
+                s == os_shell_path
+            };
+            if matches_shell_path {
                 *s = "<os_shell_path>".to_string();
             } else if s == os_shell_name {
                 *s = "<os_shell_name>".to_string();
