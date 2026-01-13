@@ -18,8 +18,8 @@ use self::{
 use super::{
     cache::{CommandCacheValue, ExecutionCache},
     event::{
-        CacheDisabledReason, CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId,
-        ExecutionItemDisplay, OutputKind,
+        CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, ExecutionEvent,
+        ExecutionEventKind, ExecutionId, ExecutionItemDisplay, OutputKind,
     },
     reporter::{ExitStatus, Reporter},
 };
@@ -153,10 +153,15 @@ impl ExecutionContext<'_> {
                     },
                 });
 
-                // Emit Finish WITHOUT cache_status (already in Start event)
+                // Emit Finish with CacheDisabled status (in-process executions don't cache)
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
-                    kind: ExecutionEventKind::Finish { status: Some(0) },
+                    kind: ExecutionEventKind::Finish {
+                        status: Some(0),
+                        cache_update_status: CacheUpdateStatus::NotUpdated(
+                            CacheNotUpdatedReason::CacheDisabled,
+                        ),
+                    },
                 });
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
@@ -228,10 +233,15 @@ impl ExecutionContext<'_> {
                     },
                 });
             }
-            // Emit Finish without cache_status (status already in Start event)
+            // Emit Finish with CacheHit status (no cache update needed)
             self.event_handler.handle_event(ExecutionEvent {
                 execution_id,
-                kind: ExecutionEventKind::Finish { status: Some(0) },
+                kind: ExecutionEventKind::Finish {
+                    status: Some(0),
+                    cache_update_status: CacheUpdateStatus::NotUpdated(
+                        CacheNotUpdatedReason::CacheHit,
+                    ),
+                },
             });
             return Ok(());
         }
@@ -276,51 +286,62 @@ impl ExecutionContext<'_> {
             }
         };
 
-        // 5. Update cache if successful
-        //    Only update cache if: (a) tracking was enabled, and (b) execution succeeded
-        if let Some((track_result, cache_metadata)) = track_result_with_cache_metadata
-            && result.exit_status.success()
+        // 5. Update cache if successful and determine cache update status
+        let cache_update_status = if let Some((track_result, cache_metadata)) =
+            track_result_with_cache_metadata
         {
-            let fingerprint_ignores =
-                cache_metadata.spawn_fingerprint.fingerprint_ignores().map(|v| v.as_slice());
-            match PostRunFingerprint::create(
-                &track_result.path_reads,
-                &*self.cache_base_path,
-                fingerprint_ignores,
-            ) {
-                Ok(post_run_fingerprint) => {
-                    let cache_value = CommandCacheValue {
-                        post_run_fingerprint,
-                        std_outputs: track_result.std_outputs.clone().into(),
-                        duration: result.duration,
-                    };
-                    if let Err(err) = self.cache.update(cache_metadata, cache_value).await {
+            if result.exit_status.success() {
+                // Execution succeeded, attempt cache update
+                let fingerprint_ignores =
+                    cache_metadata.spawn_fingerprint.fingerprint_ignores().map(|v| v.as_slice());
+                match PostRunFingerprint::create(
+                    &track_result.path_reads,
+                    &*self.cache_base_path,
+                    fingerprint_ignores,
+                ) {
+                    Ok(post_run_fingerprint) => {
+                        let cache_value = CommandCacheValue {
+                            post_run_fingerprint,
+                            std_outputs: track_result.std_outputs.clone().into(),
+                            duration: result.duration,
+                        };
+                        if let Err(err) = self.cache.update(cache_metadata, cache_value).await {
+                            self.event_handler.handle_event(ExecutionEvent {
+                                execution_id,
+                                kind: ExecutionEventKind::Error {
+                                    message: format!("Failed to update cache: {err}"),
+                                },
+                            });
+                            return Err(ExecutionAborted);
+                        }
+                        CacheUpdateStatus::Updated
+                    }
+                    Err(err) => {
                         self.event_handler.handle_event(ExecutionEvent {
                             execution_id,
                             kind: ExecutionEventKind::Error {
-                                message: format!("Failed to update cache: {err}"),
+                                message: format!("Failed to create post-run fingerprint: {err}"),
                             },
                         });
                         return Err(ExecutionAborted);
                     }
                 }
-                Err(err) => {
-                    self.event_handler.handle_event(ExecutionEvent {
-                        execution_id,
-                        kind: ExecutionEventKind::Error {
-                            message: format!("Failed to create post-run fingerprint: {err}"),
-                        },
-                    });
-                    return Err(ExecutionAborted);
-                }
+            } else {
+                // Execution failed with non-zero exit status, don't update cache
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus)
             }
-        }
+        } else {
+            // Caching was disabled for this task
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled)
+        };
 
-        // 6. Emit finish WITHOUT cache_status
-        //    Cache status was already emitted in Start event
+        // 6. Emit finish with cache_update_status
         self.event_handler.handle_event(ExecutionEvent {
             execution_id,
-            kind: ExecutionEventKind::Finish { status: result.exit_status.code() },
+            kind: ExecutionEventKind::Finish {
+                status: result.exit_status.code(),
+                cache_update_status,
+            },
         });
 
         Ok(())

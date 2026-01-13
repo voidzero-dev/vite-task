@@ -489,7 +489,7 @@ impl<W: Write> Reporter for LabeledReporter<W> {
             ExecutionEventKind::Error { message } => {
                 self.handle_error(event.execution_id, message);
             }
-            ExecutionEventKind::Finish { status } => {
+            ExecutionEventKind::Finish { status, cache_update_status: _ } => {
                 self.handle_finish(event.execution_id, status);
             }
         }
