@@ -153,13 +153,13 @@ impl ExecutionContext<'_> {
                     },
                 });
 
-                // Emit Finish with CacheDisabled status (in-process executions don't cache)
+                // Emit Finish with BuiltInCommand status (built-in commands don't cache)
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
                     kind: ExecutionEventKind::Finish {
                         status: Some(0),
                         cache_update_status: CacheUpdateStatus::NotUpdated(
-                            CacheNotUpdatedReason::CacheDisabled,
+                            CacheNotUpdatedReason::BuiltInCommand,
                         ),
                     },
                 });

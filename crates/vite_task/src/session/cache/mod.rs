@@ -6,7 +6,9 @@ use std::{fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
 
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 // Re-export display functions for convenience
-pub use display::{format_cache_status_inline, format_cache_status_summary};
+pub use display::{
+    format_cache_status_inline, format_cache_status_summary, format_cache_update_status,
+};
 use rusqlite::{Connection, OptionalExtension as _, config::DbConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;

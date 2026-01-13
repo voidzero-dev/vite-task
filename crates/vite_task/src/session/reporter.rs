@@ -11,8 +11,11 @@ use owo_colors::{Style, Styled};
 use vite_path::AbsolutePath;
 
 use super::{
-    cache::{format_cache_status_inline, format_cache_status_summary},
-    event::{CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionItemDisplay},
+    cache::{format_cache_status_inline, format_cache_status_summary, format_cache_update_status},
+    event::{
+        CacheStatus, CacheUpdateStatus, ExecutionEvent, ExecutionEventKind, ExecutionId,
+        ExecutionItemDisplay,
+    },
 };
 
 /// Wrap of `OwoColorize` that ignores style if `NO_COLOR` is set.
@@ -55,6 +58,7 @@ const CACHE_MISS_STYLE: Style = Style::new().purple();
 struct ExecutionInfo {
     display: Option<ExecutionItemDisplay>,
     cache_status: CacheStatus, // Non-optional, determined at Start
+    cache_update_status: Option<CacheUpdateStatus>, // Set at Finish
     exit_status: Option<i32>,
     error_message: Option<String>,
 }
@@ -157,6 +161,7 @@ impl<W: Write> LabeledReporter<W> {
             self.executions.push(ExecutionInfo {
                 display: None,
                 cache_status,
+                cache_update_status: None,
                 exit_status: None,
                 error_message: None,
             });
@@ -199,6 +204,7 @@ impl<W: Write> LabeledReporter<W> {
         self.executions.push(ExecutionInfo {
             display: Some(display),
             cache_status,
+            cache_update_status: None,
             exit_status: None,
             error_message: None,
         });
@@ -226,7 +232,12 @@ impl<W: Write> LabeledReporter<W> {
         self.stats.failed += 1;
     }
 
-    fn handle_finish(&mut self, execution_id: ExecutionId, status: Option<i32>) {
+    fn handle_finish(
+        &mut self,
+        execution_id: ExecutionId,
+        status: Option<i32>,
+        cache_update_status: CacheUpdateStatus,
+    ) {
         // Update failure statistics
         if let Some(s) = status {
             if s != 0 {
@@ -234,9 +245,10 @@ impl<W: Write> LabeledReporter<W> {
             }
         }
 
-        // Update execution info exit status
+        // Update execution info
         if let Some(exec) = self.executions.last_mut() {
             exec.exit_status = status;
+            exec.cache_update_status = Some(cache_update_status);
         }
 
         // For direct synthetic execution with cache hit, print message at the bottom
@@ -430,6 +442,14 @@ impl<W: Write> LabeledReporter<W> {
             };
             let _ = writeln!(self.writer, "      {}", styled_summary);
 
+            // Cache update status (only shown for NonZeroExitStatus)
+            if let Some(ref cache_update_status) = exec.cache_update_status {
+                if let Some(update_msg) = format_cache_update_status(cache_update_status) {
+                    let _ =
+                        writeln!(self.writer, "      {}", update_msg.style(Style::new().yellow()));
+                }
+            }
+
             // Error message if present
             if let Some(ref error_msg) = exec.error_message {
                 let _ = writeln!(
@@ -486,8 +506,8 @@ impl<W: Write> Reporter for LabeledReporter<W> {
             ExecutionEventKind::Error { message } => {
                 self.handle_error(event.execution_id, message);
             }
-            ExecutionEventKind::Finish { status, cache_update_status: _ } => {
-                self.handle_finish(event.execution_id, status);
+            ExecutionEventKind::Finish { status, cache_update_status } => {
+                self.handle_finish(event.execution_id, status, cache_update_status);
             }
         }
     }

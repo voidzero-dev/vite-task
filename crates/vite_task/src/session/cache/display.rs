@@ -8,7 +8,9 @@ use std::collections::HashSet;
 use vite_task_plan::cache_metadata::SpawnFingerprint;
 
 use super::{CacheMiss, FingerprintMismatch};
-use crate::session::event::{CacheDisabledReason, CacheStatus};
+use crate::session::event::{
+    CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
+};
 
 /// Describes a single atomic change between two spawn fingerprints
 enum SpawnFingerprintChange {
@@ -281,5 +283,31 @@ pub fn format_cache_status_summary(cache_status: &CacheStatus) -> String {
             };
             format!("→ {message}")
         }
+    }
+}
+
+/// Format cache update status for summary display (post-execution).
+///
+/// Returns Some(formatted_string) only when the reason is not already clear from CacheStatus.
+/// - Updated: No message needed (success is implied)
+/// - CacheHit: No message needed (already shown in CacheStatus::Hit)
+/// - CacheDisabled: No message needed (already shown in CacheStatus::Disabled)
+/// - BuiltInCommand: No message needed (already shown in CacheStatus::Disabled(InProcessExecution))
+/// - NonZeroExitStatus: Shows message that cache wasn't updated due to failure
+///
+/// Note: Returns plain text without styling. The reporter applies colors.
+pub fn format_cache_update_status(status: &CacheUpdateStatus) -> Option<String> {
+    match status {
+        CacheUpdateStatus::Updated => None,
+        CacheUpdateStatus::NotUpdated(reason) => match reason {
+            // These are already clear from CacheStatus in the Start event
+            CacheNotUpdatedReason::CacheHit => None,
+            CacheNotUpdatedReason::CacheDisabled => None,
+            CacheNotUpdatedReason::BuiltInCommand => None,
+            // This needs to be shown - task failed so cache wasn't updated
+            CacheNotUpdatedReason::NonZeroExitStatus => {
+                Some("→ Cache not updated: task failed".to_string())
+            }
+        },
     }
 }

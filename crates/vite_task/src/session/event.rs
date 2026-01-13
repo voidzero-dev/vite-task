@@ -27,6 +27,8 @@ pub enum CacheNotUpdatedReason {
     CacheDisabled,
     /// Execution exited with non-zero status
     NonZeroExitStatus,
+    /// Built-in command doesn't support caching
+    BuiltInCommand,
 }
 
 #[derive(Debug)]

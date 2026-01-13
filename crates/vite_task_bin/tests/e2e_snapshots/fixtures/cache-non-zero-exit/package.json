@@ -1,0 +1,6 @@
+{
+  "name": "cache-non-zero-exit-test",
+  "scripts": {
+    "test": "node -e \"process.exit(1)\""
+  }
+}

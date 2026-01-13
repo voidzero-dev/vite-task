@@ -19,4 +19,5 @@ Task Details:
 ────────────────────────────────────────────────
   [1] pkg-a#fail: ~/packages/pkg-a$ node -e "process.exit(42)" ✗ (exit code: 42)
       → Cache miss: no previous cache entry found
+      → Cache not updated: task failed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

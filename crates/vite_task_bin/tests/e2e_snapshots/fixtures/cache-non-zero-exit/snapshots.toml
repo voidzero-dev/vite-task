@@ -1,0 +1,6 @@
+[[e2e]]
+name = "failed task does not update cache"
+steps = [
+  "vite run test",
+  "vite run test",
+]
