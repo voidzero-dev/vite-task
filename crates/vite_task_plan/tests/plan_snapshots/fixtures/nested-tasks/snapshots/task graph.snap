@@ -1,0 +1,64 @@
+---
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
+assertion_line: 106
+expression: task_graph_json
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-tasks
+---
+[
+  {
+    "key": [
+      "<workspace>/",
+      "script1"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "script1",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "echo hello",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "script2"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "script2",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vite run script1",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  }
+]

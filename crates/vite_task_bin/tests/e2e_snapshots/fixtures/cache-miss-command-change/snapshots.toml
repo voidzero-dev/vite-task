@@ -1,0 +1,9 @@
+[[e2e]]
+name = "cache miss command change"
+steps = [
+  "vite run task",
+  "json-edit package.json '_.scripts.task = \"print baz && print bar\"'",
+  "vite run task",
+  "json-edit package.json '_.scripts.task = \"print bar\"'",
+  "vite run task",
+]

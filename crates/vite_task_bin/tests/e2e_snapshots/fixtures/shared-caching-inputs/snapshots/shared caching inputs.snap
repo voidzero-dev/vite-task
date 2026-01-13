@@ -1,0 +1,79 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+assertion_line: 203
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/shared-caching-inputs
+---
+> vite run script1
+$ print-file foo.txt
+initial content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] script1: $ print-file foo.txt ✓
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> vite run script2
+$ print-file foo.txt ✓ cache hit, replaying
+initial content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 1 cache hits • 0 cache misses 
+Performance:  100% cache hit rate, <duration> saved in total
+
+Task Details:
+────────────────────────────────────────────────
+  [1] script2: $ print-file foo.txt ✓
+      → Cache hit - output replayed - <duration> saved
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> replace-file-content foo.txt initial modified
+
+> vite run script2
+$ print-file foo.txt ✗ cache miss: content of input 'foo.txt' changed, executing
+modified content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] script2: $ print-file foo.txt ✓
+      → Cache miss: content of input 'foo.txt' changed
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> vite run script1
+$ print-file foo.txt ✓ cache hit, replaying
+modified content
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 1 cache hits • 0 cache misses 
+Performance:  100% cache hit rate, <duration> saved in total
+
+Task Details:
+────────────────────────────────────────────────
+  [1] script1: $ print-file foo.txt ✓
+      → Cache hit - output replayed - <duration> saved
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

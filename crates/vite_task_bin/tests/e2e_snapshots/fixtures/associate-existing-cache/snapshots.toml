@@ -1,0 +1,8 @@
+[[e2e]]
+name = "associate existing cache"
+steps = [
+  "vite run script1",
+  "vite run script2",
+  "json-edit package.json '_.scripts.script2 = \"print world\"'",
+  "vite run script2",
+]

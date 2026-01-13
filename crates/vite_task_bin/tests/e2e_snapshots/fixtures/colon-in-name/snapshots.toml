@@ -1,0 +1,6 @@
+[[e2e]]
+name = "task with underscore in name"
+steps = [
+  "vite run read_colon_in_name",
+  "vite run read_colon_in_name",
+]

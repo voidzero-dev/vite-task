@@ -1,0 +1,8 @@
+[[e2e]]
+name = "lint dot git"
+steps = [
+  "mkdir .git",
+  "vite lint",
+  "echo hello > .git/foo.txt",
+  "vite lint",
+]

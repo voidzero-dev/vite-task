@@ -1,0 +1,3 @@
+[[plan]]
+name = "nested vite run"
+args = ["run", "script2"]

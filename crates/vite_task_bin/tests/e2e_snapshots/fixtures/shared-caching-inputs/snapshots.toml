@@ -1,0 +1,9 @@
+[[e2e]]
+name = "shared caching inputs"
+steps = [
+  "vite run script1",
+  "vite run script2",
+  "replace-file-content foo.txt initial modified",
+  "vite run script2",
+  "vite run script1",
+]

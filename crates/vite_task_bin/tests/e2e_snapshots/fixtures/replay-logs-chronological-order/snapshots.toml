@@ -1,0 +1,7 @@
+[[e2e]]
+name = "replay logs chronological order"
+steps = [
+  "vite run build",
+  "vite run build",
+  "vite run build",
+]

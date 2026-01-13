@@ -1,0 +1,9 @@
+[[e2e]]
+name = "same name as builtin"
+steps = [
+  "vite lint",
+  "vite run lint",
+  "echo 'console.log(1);' > a.js",
+  "vite lint",
+  "vite run lint",
+]

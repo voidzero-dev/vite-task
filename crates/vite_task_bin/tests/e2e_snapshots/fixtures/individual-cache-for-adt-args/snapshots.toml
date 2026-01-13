@@ -1,0 +1,8 @@
+[[e2e]]
+name = "individual cache for extra args"
+steps = [
+  "vite run say a",
+  "vite run say b",
+  "vite run say a",
+  "vite run say b",
+]

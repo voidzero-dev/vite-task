@@ -1,0 +1,5 @@
+[[e2e]]
+name = "no trailing newline"
+steps = [
+  "vite run hello",
+]

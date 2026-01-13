@@ -1,0 +1,8 @@
+[[e2e]]
+name = "individual cache for envs"
+steps = [
+  "FOO=1 vite run hello",
+  "FOO=2 vite run hello",
+  "FOO=1 vite run hello",
+  "FOO=2 vite run hello",
+]
