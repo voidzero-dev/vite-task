@@ -3,8 +3,9 @@ mod redact;
 use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
+    io::Write,
     path::Path,
-    process::Command,
+    process::{Command, Stdio},
     sync::Arc,
 };
 
@@ -15,11 +16,34 @@ use vite_str::Str;
 use vite_workspace::find_workspace_root;
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(untagged)]
+enum Step {
+    Simple(Str),
+    WithStdin { cmd: Str, stdin: Str },
+}
+
+impl Step {
+    fn cmd(&self) -> &str {
+        match self {
+            Step::Simple(s) => s.as_str(),
+            Step::WithStdin { cmd, .. } => cmd.as_str(),
+        }
+    }
+
+    fn stdin(&self) -> Option<&str> {
+        match self {
+            Step::Simple(_) => None,
+            Step::WithStdin { stdin, .. } => Some(stdin.as_str()),
+        }
+    }
+}
+
+#[derive(serde::Deserialize, Debug)]
 struct E2e {
     pub name: Str,
     #[serde(default)]
     pub cwd: RelativePathBuf,
-    pub steps: Vec<Str>,
+    pub steps: Vec<Step>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -108,19 +132,29 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str
         for step in e2e.steps {
             // Use @yarnpkg/shell for cross-platform shell execution
             let mut cmd = Command::new(&shell_exe);
-            cmd.arg(step.as_str())
+            cmd.arg(step.cmd())
                 .env_clear()
                 .env("PATH", &e2e_env_path)
                 .env("NO_COLOR", "1")
                 .current_dir(e2e_stage_path.join(&e2e.cwd));
-            let output = cmd.output().unwrap();
+
+            let output = if let Some(stdin_content) = step.stdin() {
+                cmd.stdin(Stdio::piped());
+                cmd.stdout(Stdio::piped());
+                cmd.stderr(Stdio::piped());
+                let mut child = cmd.spawn().unwrap();
+                child.stdin.take().unwrap().write_all(stdin_content.as_bytes()).unwrap();
+                child.wait_with_output().unwrap()
+            } else {
+                cmd.output().unwrap()
+            };
 
             let exit_code = output.status.code().unwrap_or(-1);
             if exit_code != 0 {
                 e2e_outputs.push_str(format!("[{}]", exit_code).as_str());
             }
             e2e_outputs.push_str("> ");
-            e2e_outputs.push_str(step.as_str());
+            e2e_outputs.push_str(step.cmd());
             e2e_outputs.push('\n');
 
             let stdout = String::from_utf8(output.stdout).unwrap();

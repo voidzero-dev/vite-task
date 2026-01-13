@@ -1,0 +1,6 @@
+{
+  "name": "stdin-passthrough",
+  "scripts": {
+    "echo-stdin": "cat"
+  }
+}
