@@ -134,13 +134,13 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str
 }
 
 #[test]
-fn test_snapshots() {
+fn e2e_snapshots() {
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
     let tests_dir = std::env::current_dir().unwrap().join("tests");
 
-    insta::glob!(tests_dir, "test_snapshots/fixtures/*", |case_path| run_case(
+    insta::glob!(tests_dir, "e2e_snapshots/fixtures/*", |case_path| run_case(
         &tmp_dir_path,
         case_path
     ));

@@ -135,14 +135,14 @@ fn run_case_inner(
 }
 
 #[test]
-fn test_plan_snapshots() {
+fn plan_snapshots() {
     let tokio_runtime = Runtime::new().unwrap();
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
     let tests_dir = std::env::current_dir().unwrap().join("tests");
 
-    insta::glob!(tests_dir, "test_plan_snapshots/fixtures/*", |case_path| run_case(
+    insta::glob!(tests_dir, "plan_snapshots/fixtures/*", |case_path| run_case(
         &tokio_runtime,
         &tmp_dir_path,
         case_path
