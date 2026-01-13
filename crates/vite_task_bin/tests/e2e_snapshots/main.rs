@@ -52,10 +52,17 @@ struct SnapshotsFile {
     pub e2e_cases: Vec<E2e>,
 }
 
-fn run_case(tmpdir: &AbsolutePath, fixture_path: &Path) {
+fn run_case(tmpdir: &AbsolutePath, fixture_path: &Path, filter: Option<&str>) {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
     if fixture_name.starts_with(".") {
         return; // skip hidden files like .DS_Store
+    }
+
+    // Skip if filter doesn't match
+    if let Some(f) = filter {
+        if !fixture_name.contains(f) {
+            return;
+        }
     }
 
     // Configure insta to write snapshots to fixture directory
@@ -168,6 +175,8 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str
 }
 
 fn main() {
+    let filter = std::env::args().nth(1);
+
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
@@ -175,6 +184,7 @@ fn main() {
 
     insta::glob!(tests_dir, "e2e_snapshots/fixtures/*", |case_path| run_case(
         &tmp_dir_path,
-        case_path
+        case_path,
+        filter.as_deref()
     ));
 }

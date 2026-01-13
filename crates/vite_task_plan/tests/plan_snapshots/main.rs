@@ -25,10 +25,17 @@ struct SnapshotsFile {
     pub plan_cases: Vec<Plan>,
 }
 
-fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path) {
+fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path, filter: Option<&str>) {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
     if fixture_name.starts_with(".") {
         return; // skip hidden files like .DS_Store
+    }
+
+    // Skip if filter doesn't match
+    if let Some(f) = filter {
+        if !fixture_name.contains(f) {
+            return;
+        }
     }
 
     // Configure insta to write snapshots to fixture directory
@@ -135,6 +142,8 @@ fn run_case_inner(
 }
 
 fn main() {
+    let filter = std::env::args().nth(1);
+
     let tokio_runtime = Runtime::new().unwrap();
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
@@ -144,6 +153,7 @@ fn main() {
     insta::glob!(tests_dir, "plan_snapshots/fixtures/*", |case_path| run_case(
         &tokio_runtime,
         &tmp_dir_path,
-        case_path
+        case_path,
+        filter.as_deref()
     ));
 }
