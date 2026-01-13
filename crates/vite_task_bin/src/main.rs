@@ -8,14 +8,9 @@ use vite_task::{
 use vite_task_bin::{CustomTaskSubcommand, NonTaskSubcommand, OwnedSessionCallbacks};
 
 #[tokio::main]
-async fn main() -> ExitCode {
-    match run().await {
-        Ok(exit_status) => exit_status.0.into(),
-        Err(err) => {
-            eprintln!("Error: {err}");
-            ExitCode::FAILURE
-        }
-    }
+async fn main() -> anyhow::Result<ExitCode> {
+    let exit_status = run().await?;
+    Ok(exit_status.0.into())
 }
 
 async fn run() -> anyhow::Result<ExitStatus> {

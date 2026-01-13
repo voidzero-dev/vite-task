@@ -20,7 +20,14 @@ use vite_task::{
 #[derive(Debug, Subcommand)]
 pub enum CustomTaskSubcommand {
     /// oxlint
+    #[clap(disable_help_flag = true)]
     Lint {
+        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<Str>,
+    },
+    /// vitest
+    #[clap(disable_help_flag = true)]
+    Test {
         #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
         args: Vec<Str>,
     },
@@ -72,21 +79,30 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
     async fn synthesize_task(
         &mut self,
         subcommand: CustomTaskSubcommand,
-
         envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<SyntheticPlanRequest> {
+        let synthesize_node_modules_bin_task = |subcommand_name: &str,
+                                                executable_name: &str,
+                                                args: Vec<Str>|
+         -> anyhow::Result<SyntheticPlanRequest> {
+            let direct_execution_cache_key: Arc<[Str]> =
+                iter::once(Str::from(subcommand_name)).chain(args.iter().cloned()).collect();
+            Ok(SyntheticPlanRequest {
+                program: find_executable(get_path_env(envs), &*cwd, executable_name)?,
+                args: args.into(),
+                task_options: Default::default(),
+                direct_execution_cache_key,
+                envs: Arc::clone(envs),
+            })
+        };
+
         match subcommand {
             CustomTaskSubcommand::Lint { args } => {
-                let direct_execution_cache_key: Arc<[Str]> =
-                    iter::once(Str::from("lint")).chain(args.iter().cloned()).collect();
-                Ok(SyntheticPlanRequest {
-                    program: find_executable(get_path_env(envs), &*cwd, "oxlint")?,
-                    args: args.into(),
-                    task_options: Default::default(),
-                    direct_execution_cache_key,
-                    envs: Arc::clone(envs),
-                })
+                synthesize_node_modules_bin_task("lint", "oxlint", args)
+            }
+            CustomTaskSubcommand::Test { args } => {
+                synthesize_node_modules_bin_task("test", "vitest", args)
             }
             CustomTaskSubcommand::EnvTest { name, value } => {
                 let direct_execution_cache_key: Arc<[Str]> =
