@@ -38,3 +38,7 @@ which = { workspace = true }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "e2e_snapshots"
+harness = false

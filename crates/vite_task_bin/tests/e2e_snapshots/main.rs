@@ -133,8 +133,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str
     }
 }
 
-#[test]
-fn e2e_snapshots() {
+fn main() {
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 

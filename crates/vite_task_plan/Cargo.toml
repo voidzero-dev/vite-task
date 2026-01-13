@@ -42,3 +42,7 @@ toml = { workspace = true }
 vite_task = { workspace = true }
 vite_task_bin = { path = "../vite_task_bin" }
 vite_workspace = { workspace = true }
+
+[[test]]
+name = "plan_snapshots"
+harness = false

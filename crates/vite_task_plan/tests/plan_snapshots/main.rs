@@ -134,8 +134,7 @@ fn run_case_inner(
     });
 }
 
-#[test]
-fn plan_snapshots() {
+fn main() {
     let tokio_runtime = Runtime::new().unwrap();
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
