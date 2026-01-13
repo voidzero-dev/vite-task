@@ -1,12 +1,12 @@
 ---
-source: crates/vite_task_bin/tests/test_snapshots/main.rs
-assertion_line: 152
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+assertion_line: 203
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/e2e-env-test
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/e2e-env-test
 ---
-> vite env-test FOO bar
+> vite env-test FOO bar # sets FOO=bar
 bar
 
 
-> vite env-test BAZ qux
+> vite env-test BAZ qux # sets BAZ=qux
 qux

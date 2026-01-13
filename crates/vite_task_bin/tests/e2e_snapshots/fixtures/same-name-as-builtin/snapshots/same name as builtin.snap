@@ -4,7 +4,7 @@ assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/same-name-as-builtin
 ---
-> vite lint
+> vite lint # runs builtin oxlint
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[a.js:1:1]
@@ -17,7 +17,7 @@ Found 1 warning and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
 
 
-> vite run lint
+> vite run lint # runs user-defined lint script
 $ echo custom lint script ⊘ cache disabled: built-in command
 custom lint script
 
@@ -35,15 +35,15 @@ Task Details:
       → Cache disabled for built-in command
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> echo 'console.log(1);' > a.js
+> echo 'console.log(1);' > a.js # add valid JS file
 
-> vite lint
+> vite lint # builtin lint: cache miss
 ✗ cache miss: content of input 'a.js' changed, executing
 Found 0 warnings and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
 
 
-> vite run lint
+> vite run lint # user lint: cache miss
 $ echo custom lint script ⊘ cache disabled: built-in command
 custom lint script
 

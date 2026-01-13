@@ -1,7 +1,9 @@
+# Tests that replayed logs maintain chronological order
+
 [[e2e]]
 name = "replay logs chronological order"
 steps = [
-  "vite run build",
-  "vite run build",
-  "vite run build",
+  "vite run build # cache miss",
+  "vite run build # cache hit",
+  "vite run build # cache hit",
 ]

@@ -1,8 +1,8 @@
 ---
-source: crates/vite_task_bin/tests/test_snapshots/main.rs
-assertion_line: 152
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+assertion_line: 203
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/e2e-env-test
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/e2e-env-test
 ---
-> vite env-test SYNTHETIC_ENV_VAR test_value_from_synthesizer
+> vite env-test SYNTHETIC_ENV_VAR test_value_from_synthesizer # prints env value
 test_value_from_synthesizer

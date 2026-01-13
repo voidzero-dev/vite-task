@@ -1,8 +1,10 @@
+# Tests that .git directory is ignored by lint
+
 [[e2e]]
 name = "lint dot git"
 steps = [
   "mkdir .git",
-  "vite lint",
-  "echo hello > .git/foo.txt",
-  "vite lint",
+  "vite lint # cache miss",
+  "echo hello > .git/foo.txt # add file inside .git",
+  "vite lint # cache hit, .git is ignored",
 ]

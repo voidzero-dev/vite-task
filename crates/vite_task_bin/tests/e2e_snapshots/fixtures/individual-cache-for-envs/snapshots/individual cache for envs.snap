@@ -4,9 +4,9 @@ assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/individual-cache-for-envs
 ---
-> FOO=1 vite run hello
+> FOO=1 vite run hello # cache miss
 $ print-env FOO
-(undefined)
+1
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -22,9 +22,27 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> FOO=2 vite run hello
+> FOO=2 vite run hello # cache miss, different env
+$ print-env FOO ✗ cache miss: envs changed, executing
+2
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] hello: $ print-env FOO ✓
+      → Cache miss: env FOO value changed from '1' to '2'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> FOO=1 vite run hello # cache hit
 $ print-env FOO ✓ cache hit, replaying
-(undefined)
+1
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -40,27 +58,9 @@ Task Details:
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> FOO=1 vite run hello
+> FOO=2 vite run hello # cache hit
 $ print-env FOO ✓ cache hit, replaying
-(undefined)
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 1 cache hits • 0 cache misses 
-Performance:  100% cache hit rate, <duration> saved in total
-
-Task Details:
-────────────────────────────────────────────────
-  [1] hello: $ print-env FOO ✓
-      → Cache hit - output replayed - <duration> saved
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-> FOO=2 vite run hello
-$ print-env FOO ✓ cache hit, replaying
-(undefined)
+2
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

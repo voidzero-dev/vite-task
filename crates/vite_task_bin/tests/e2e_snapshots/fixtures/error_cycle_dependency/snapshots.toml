@@ -1,5 +1,7 @@
+# Tests error message for cyclic task dependencies
+
 [[e2e]]
 name = "cycle dependency error"
 steps = [
-  "vite run task-a",
+  "vite run task-a # task-a -> task-b -> task-a cycle",
 ]

@@ -1,3 +1,5 @@
+# Tests cache key generation for various task configurations
+
 [[plan]]
 name = "synthetic task in user task"
 args = ["run", "lint"]
@@ -34,7 +36,7 @@ args = ["run", "echo-and-lint", "--fix"]
 [[e2e]]
 name = "direct lint"
 steps = [
-  "vite lint",
-  "echo debugger > main.js",
-  "vite lint",
+  "vite lint # cache miss",
+  "echo debugger > main.js # add lint error",
+  "vite lint # cache miss, lint fails",
 ]

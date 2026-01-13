@@ -4,7 +4,7 @@ assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/shared-caching-inputs
 ---
-> vite run script1
+> vite run script1 # cache miss
 $ print-file foo.txt
 initial content
 
@@ -22,7 +22,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> vite run script2
+> vite run script2 # cache hit, same command as script1
 $ print-file foo.txt ✓ cache hit, replaying
 initial content
 
@@ -40,9 +40,9 @@ Task Details:
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> replace-file-content foo.txt initial modified
+> replace-file-content foo.txt initial modified # modify shared input
 
-> vite run script2
+> vite run script2 # cache miss, input changed
 $ print-file foo.txt ✗ cache miss: content of input 'foo.txt' changed, executing
 modified content
 
@@ -60,7 +60,7 @@ Task Details:
       → Cache miss: content of input 'foo.txt' changed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> vite run script1
+> vite run script1 # cache hit, script2 already warmed cache
 $ print-file foo.txt ✓ cache hit, replaying
 modified content
 
