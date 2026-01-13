@@ -1,7 +1,7 @@
 ---
-source: crates/vite_task_bin/tests/test_snapshots/main.rs
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
 expression: task_graph_json
-input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-sharing
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-sharing
 ---
 [
   {

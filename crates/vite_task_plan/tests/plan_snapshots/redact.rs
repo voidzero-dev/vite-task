@@ -108,6 +108,30 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
         }
     });
 
+    // Redact shell program and arguments for cross-platform consistency
+    let os_shell_path = if cfg!(windows) { "C:\\Windows\\System32\\cmd.exe" } else { "/bin/sh" };
+    let os_shell_name = if cfg!(windows) { "cmd" } else { "sh" };
+    let os_shell_args: &[&str] = if cfg!(windows) { &["/d", "/s", "/c"] } else { &["-c"] };
+    visit_json(&mut json_value, &mut |v| {
+        if let serde_json::Value::String(s) = v {
+            if s == os_shell_path {
+                *s = "<os_shell_path>".to_string();
+            } else if s == os_shell_name {
+                *s = "<os_shell_name>".to_string();
+            }
+        } else if let serde_json::Value::Array(array) = v {
+            // Check if the beginning of the array matches the shell args
+            for (n, arg) in os_shell_args.iter().enumerate() {
+                if !matches!(array.get(n), Some(serde_json::Value::String(s)) if s == *arg) {
+                    return;
+                }
+            }
+            // Redact the shell args
+            array.drain(0..os_shell_args.len());
+            array.insert(0, serde_json::Value::String("<os_shell_args>".to_string()));
+        }
+    });
+
     visit_json(&mut json_value, &mut |v| {
         let serde_json::Value::Array(array) = v else {
             return;

@@ -1,0 +1,3 @@
+[[plan]]
+name = "shell fallback for pipe command"
+args = ["run", "pipe-test"]

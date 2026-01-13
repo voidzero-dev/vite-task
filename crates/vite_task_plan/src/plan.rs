@@ -239,6 +239,9 @@ async fn plan_task_as_execution_node(
             }
         });
 
+        static SHELL_ARGS: &[&str] =
+            if cfg!(target_os = "windows") { &["/d", "/s", "/c"] } else { &["-c"] };
+
         let mut script = Str::from(command_str);
         for arg in context.extra_args().iter() {
             script.push(' ');
@@ -266,7 +269,7 @@ async fn plan_task_as_execution_node(
             &task_node.resolved_config.resolved_options,
             context.envs(),
             Arc::clone(&*SHELL_PROGRAM_PATH),
-            Arc::new([script]),
+            Arc::from_iter(SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script))),
         )
         .with_plan_context(&context)?;
         items.push(ExecutionItem {
