@@ -1,7 +1,8 @@
 pub mod fingerprint;
+pub mod glob_inputs;
 pub mod spawn;
 
-use std::{process::Stdio, sync::Arc};
+use std::{collections::BTreeMap, process::Stdio, sync::Arc};
 
 use futures_util::FutureExt;
 use tokio::io::AsyncWriteExt as _;
@@ -13,10 +14,11 @@ use vite_task_plan::{
 
 use self::{
     fingerprint::PostRunFingerprint,
-    spawn::{SpawnResult, spawn_with_tracking},
+    glob_inputs::compute_globbed_inputs,
+    spawn::{SpawnResult, TrackedPathAccesses, spawn_with_tracking},
 };
 use super::{
-    cache::{CommandCacheValue, ExecutionCache},
+    cache::{CacheEntryValue, ExecutionCache},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError,
@@ -26,7 +28,7 @@ use super::{
         StdioSuggestion,
     },
 };
-use crate::{Session, session::execute::spawn::SpawnTrackResult};
+use crate::{Session, collections::HashMap};
 
 /// Outcome of a spawned execution.
 ///
@@ -193,17 +195,40 @@ pub async fn execute_spawn(
     // 1. Determine cache status FIRST by trying cache hit.
     //    We need to know the status before calling start() so the reporter
     //    can display cache status immediately when execution begins.
-    let (cache_status, cached_value) = if let Some(cache_metadata) = cache_metadata {
-        match cache.try_hit(cache_metadata, cache_base_path).await {
+    let (cache_status, cached_value, globbed_inputs) = if let Some(cache_metadata) = cache_metadata
+    {
+        // Compute globbed inputs from positive globs at execution time
+        let globbed_inputs = match compute_globbed_inputs(
+            &cache_metadata.glob_base,
+            cache_base_path,
+            &cache_metadata.input_config.positive_globs,
+            &cache_metadata.input_config.negative_globs,
+        ) {
+            Ok(inputs) => inputs,
+            Err(err) => {
+                leaf_reporter
+                    .finish(
+                        None,
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                        Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
+                    )
+                    .await;
+                return SpawnOutcome::Failed;
+            }
+        };
+
+        match cache.try_hit(cache_metadata, &globbed_inputs, cache_base_path).await {
             Ok(Ok(cached)) => (
                 // Cache hit — we can replay the cached outputs
                 CacheStatus::Hit { replayed_duration: cached.duration },
                 Some(cached),
+                globbed_inputs,
             ),
             Ok(Err(cache_miss)) => (
                 // Cache miss — includes detailed reason (NotFound or FingerprintMismatch)
                 CacheStatus::Miss(cache_miss),
                 None,
+                globbed_inputs,
             ),
             Err(err) => {
                 // Cache lookup error — report through finish.
@@ -220,7 +245,7 @@ pub async fn execute_spawn(
         }
     } else {
         // No cache metadata provided — caching is disabled for this task
-        (CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata), None)
+        (CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata), None, BTreeMap::new())
     };
 
     // 2. Report execution start with the determined cache status.
@@ -283,8 +308,17 @@ pub async fn execute_spawn(
     }
 
     // 5. Piped mode: execute spawn with tracking, streaming output to writers.
-    let mut track_result_with_cache_metadata =
-        cache_metadata.map(|cache_metadata| (SpawnTrackResult::default(), cache_metadata));
+    //    - std_outputs: always captured when caching is enabled (for cache replay)
+    //    - path_accesses: only tracked when includes_auto is true (fspy inference)
+    let (mut std_outputs, mut path_accesses, cache_metadata_and_inputs) =
+        cache_metadata.map_or((None, None, None), |cache_metadata| {
+            let path_accesses = if cache_metadata.input_config.includes_auto {
+                Some(TrackedPathAccesses::default())
+            } else {
+                None // Skip fspy when inference is disabled
+            };
+            (Some(Vec::new()), path_accesses, Some((cache_metadata, globbed_inputs)))
+        });
 
     #[expect(
         clippy::large_futures,
@@ -295,7 +329,8 @@ pub async fn execute_spawn(
         cache_base_path,
         &mut stdio_config.stdout_writer,
         &mut stdio_config.stderr_writer,
-        track_result_with_cache_metadata.as_mut().map(|(track_result, _)| track_result),
+        std_outputs.as_mut(),
+        path_accesses.as_mut(),
     )
     .await
     {
@@ -314,25 +349,29 @@ pub async fn execute_spawn(
 
     // 6. Update cache if successful and determine cache update status.
     //    Errors during cache update are terminal (reported through finish).
-    let (cache_update_status, cache_error) = if let Some((track_result, cache_metadata)) =
-        track_result_with_cache_metadata
+    let (cache_update_status, cache_error) = if let Some((cache_metadata, globbed_inputs)) =
+        cache_metadata_and_inputs
     {
         if result.exit_status.success() {
+            // path_reads is empty when inference is disabled (path_accesses is None)
+            let empty_path_reads = HashMap::default();
+            let path_reads = path_accesses.as_ref().map_or(&empty_path_reads, |pa| &pa.path_reads);
+
             // Execution succeeded — attempt to create fingerprint and update cache
-            let fingerprint_ignores =
-                cache_metadata.spawn_fingerprint.fingerprint_ignores().map(std::vec::Vec::as_slice);
             match PostRunFingerprint::create(
-                &track_result.path_reads,
+                path_reads,
                 cache_base_path,
-                fingerprint_ignores,
+                &cache_metadata.glob_base,
+                &cache_metadata.input_config,
             ) {
                 Ok(post_run_fingerprint) => {
-                    let new_cache_value = CommandCacheValue {
+                    let new_cache_value = CacheEntryValue {
                         post_run_fingerprint,
-                        std_outputs: track_result.std_outputs.clone().into(),
+                        std_outputs: std_outputs.unwrap_or_default().into(),
                         duration: result.duration,
+                        globbed_inputs,
                     };
-                    match cache.update(cache_metadata, new_cache_value).await {
+                    match cache.update(cache_metadata, cache_base_path, new_cache_value).await {
                         Ok(()) => (CacheUpdateStatus::Updated, None),
                         Err(err) => (
                             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),

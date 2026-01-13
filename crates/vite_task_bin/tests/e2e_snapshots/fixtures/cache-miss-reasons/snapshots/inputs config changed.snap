@@ -1,0 +1,12 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vp run test # cache miss
+$ print-file test.txt
+initial content
+> json-edit vite-task.json "_.tasks.test.inputs = ['test.txt']" # change inputs config
+
+> vp run test # cache miss: configuration changed
+$ print-file test.txt ✗ cache miss: configuration changed, executing
+initial content

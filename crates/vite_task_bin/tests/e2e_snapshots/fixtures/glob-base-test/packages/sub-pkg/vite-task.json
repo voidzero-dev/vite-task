@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "sub-glob-test": {
+      "command": "print-file src/sub.ts",
+      "inputs": ["src/**/*.ts"],
+      "cache": true
+    },
+    "sub-glob-with-cwd": {
+      "command": "print-file sub.ts",
+      "cwd": "src",
+      "inputs": ["src/**/*.ts"],
+      "cache": true
+    }
+  }
+}

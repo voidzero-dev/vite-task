@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "root-glob-test": {
+      "command": "print-file src/root.ts",
+      "inputs": ["src/**/*.ts"],
+      "cache": true
+    },
+    "root-glob-with-cwd": {
+      "command": "print-file root.ts",
+      "cwd": "src",
+      "inputs": ["src/**/*.ts"],
+      "cache": true
+    }
+  }
+}

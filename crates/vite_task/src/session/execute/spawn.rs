@@ -43,12 +43,10 @@ pub struct SpawnResult {
     pub duration: Duration,
 }
 
-/// Tracking result from a spawned process for caching
+/// Tracked file accesses from fspy.
+/// Only populated when fspy tracking is enabled (`includes_auto` is true).
 #[derive(Default, Debug)]
-pub struct SpawnTrackResult {
-    /// captured stdout/stderr
-    pub std_outputs: Vec<StdOutput>,
-
+pub struct TrackedPathAccesses {
     /// Tracked path reads
     pub path_reads: HashMap<RelativePathBuf, PathRead>,
 
@@ -56,14 +54,14 @@ pub struct SpawnTrackResult {
     pub path_writes: FxHashSet<RelativePathBuf>,
 }
 
-/// Spawn a command with file system tracking via fspy, using piped stdio.
+/// Spawn a command with optional file system tracking via fspy, using piped stdio.
 ///
-/// Returns the execution result including captured outputs, exit status,
-/// and tracked file accesses.
+/// Returns the execution result including exit status and duration.
 ///
 /// - stdin is always `/dev/null` (piped mode is for non-interactive execution).
 /// - `stdout_writer`/`stderr_writer` receive the child's stdout/stderr output in real-time.
-/// - `track_result` if provided, will be populated with captured outputs and path accesses for caching. If `None`, tracking is disabled.
+/// - `std_outputs` if provided, will be populated with captured outputs for cache replay.
+/// - `path_accesses` if provided, fspy will be used to track file accesses. If `None`, fspy is disabled.
 #[tracing::instrument(level = "debug", skip_all)]
 #[expect(clippy::future_not_send, reason = "uses !Send dyn AsyncWrite writers internally")]
 #[expect(
@@ -75,15 +73,17 @@ pub async fn spawn_with_tracking(
     workspace_root: &AbsolutePath,
     stdout_writer: &mut (dyn AsyncWrite + Unpin),
     stderr_writer: &mut (dyn AsyncWrite + Unpin),
-    track_result: Option<&mut SpawnTrackResult>,
+    std_outputs: Option<&mut Vec<StdOutput>>,
+    path_accesses: Option<&mut TrackedPathAccesses>,
 ) -> anyhow::Result<SpawnResult> {
-    /// The tracking state of the spawned process
-    enum TrackingState<'a> {
-        /// Tacking is enabled, with the tracked child and result reference
-        Enabled(fspy::TrackedChild, &'a mut SpawnTrackResult),
+    /// The tracking state of the spawned process.
+    /// Determined by whether `path_accesses` is `Some` (fspy enabled) or `None` (fspy disabled).
+    enum TrackingState {
+        /// fspy tracking is enabled
+        FspyEnabled(fspy::TrackedChild),
 
-        /// Tracking is disabled, with the tokio child process
-        Disabled(tokio::process::Child),
+        /// fspy tracking is disabled, using plain tokio process
+        FspyDisabled(tokio::process::Child),
     }
 
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
@@ -92,27 +92,25 @@ pub async fn spawn_with_tracking(
     cmd.current_dir(&*spawn_command.cwd);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let mut tracking_state = if let Some(track_result) = track_result {
-        // track_result is Some. Spawn with tracking enabled
-        TrackingState::Enabled(cmd.spawn().await?, track_result)
+    let mut tracking_state = if path_accesses.is_some() {
+        // path_accesses is Some, spawn with fspy tracking enabled
+        TrackingState::FspyEnabled(cmd.spawn().await?)
     } else {
-        // Spawn without tracking
-        TrackingState::Disabled(cmd.into_tokio_command().spawn()?)
+        // path_accesses is None, spawn without fspy
+        TrackingState::FspyDisabled(cmd.into_tokio_command().spawn()?)
     };
 
     let mut child_stdout = match &mut tracking_state {
-        TrackingState::Enabled(tracked_child, _) => tracked_child.stdout.take().unwrap(),
-        TrackingState::Disabled(tokio_child) => tokio_child.stdout.take().unwrap(),
+        TrackingState::FspyEnabled(tracked_child) => tracked_child.stdout.take().unwrap(),
+        TrackingState::FspyDisabled(tokio_child) => tokio_child.stdout.take().unwrap(),
     };
     let mut child_stderr = match &mut tracking_state {
-        TrackingState::Enabled(tracked_child, _) => tracked_child.stderr.take().unwrap(),
-        TrackingState::Disabled(tokio_child) => tokio_child.stderr.take().unwrap(),
+        TrackingState::FspyEnabled(tracked_child) => tracked_child.stderr.take().unwrap(),
+        TrackingState::FspyDisabled(tokio_child) => tokio_child.stderr.take().unwrap(),
     };
 
-    let mut outputs = match &mut tracking_state {
-        TrackingState::Enabled(_, track_result) => Some(&mut track_result.std_outputs),
-        TrackingState::Disabled(_) => None,
-    };
+    // Output capturing is independent of fspy tracking
+    let mut outputs = std_outputs;
     let mut stdout_buf = [0u8; 8192];
     let mut stderr_buf = [0u8; 8192];
     let mut stdout_done = false;
@@ -169,22 +167,24 @@ pub async fn spawn_with_tracking(
         }
     }
 
-    let (termination, track_result) = match tracking_state {
-        TrackingState::Enabled(tracked_child, track_result) => {
-            (tracked_child.wait_handle.await?, track_result)
+    // Wait for process termination and process path accesses if fspy was enabled
+    let (termination, path_accesses) = match tracking_state {
+        TrackingState::FspyEnabled(tracked_child) => {
+            let termination = tracked_child.wait_handle.await?;
+            // path_accesses must be Some when fspy is enabled (they're set together)
+            let path_accesses = path_accesses.ok_or_else(|| {
+                anyhow::anyhow!("internal error: fspy enabled but path_accesses is None")
+            })?;
+            (termination, path_accesses)
         }
-        TrackingState::Disabled(mut tokio_child) => {
-            return Ok(SpawnResult {
-                exit_status: tokio_child.wait().await?,
-                duration: start.elapsed(),
-            });
+        TrackingState::FspyDisabled(mut tokio_child) => {
+            let exit_status = tokio_child.wait().await?;
+            return Ok(SpawnResult { exit_status, duration: start.elapsed() });
         }
     };
     let duration = start.elapsed();
-
-    // Process path accesses
-    let path_reads = &mut track_result.path_reads;
-    let path_writes = &mut track_result.path_writes;
+    let path_reads = &mut path_accesses.path_reads;
+    let path_writes = &mut path_accesses.path_writes;
 
     for access in termination.path_accesses.iter() {
         let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {

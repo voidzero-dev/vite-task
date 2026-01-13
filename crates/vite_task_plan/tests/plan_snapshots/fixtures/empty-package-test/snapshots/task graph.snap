@@ -25,6 +25,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
               "pass_through_envs": [
                 "<default pass-through envs>"
               ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -94,6 +99,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
               "pass_through_envs": [
                 "<default pass-through envs>"
               ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -123,6 +133,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
               "pass_through_envs": [
                 "<default pass-through envs>"
               ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -152,6 +167,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
               "pass_through_envs": [
                 "<default pass-through envs>"
               ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -186,6 +206,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
               "pass_through_envs": [
                 "<default pass-through envs>"
               ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -215,6 +240,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
               "pass_through_envs": [
                 "<default pass-through envs>"
               ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -244,6 +274,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
               "pass_through_envs": [
                 "<default pass-through envs>"
               ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -273,6 +308,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
               "pass_through_envs": [
                 "<default pass-through envs>"
               ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }

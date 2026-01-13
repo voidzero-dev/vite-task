@@ -29,6 +29,26 @@ export type Task = {
        * Environment variable names to be passed to the task without fingerprinting.
        */
       passThroughEnvs?: Array<string>;
+      /**
+       * Input patterns for cache fingerprinting.
+       *
+       * - Omitted: defaults to `[{auto: true}]` - infer from file accesses
+       * - Empty array: no inputs, inference disabled
+       * - Glob strings: explicit files to fingerprint
+       * - `{auto: true}`: enable automatic inference via fspy
+       * - Negative globs: exclude files (prefix with `!`)
+       *
+       * Globs are relative to the package directory where the task is defined.
+       */
+      inputs?: Array<
+        | string
+        | {
+            /**
+             * Whether automatic file access inference (via fspy) is enabled
+             */
+            auto: boolean;
+          }
+      >;
     }
   | {
       /**

@@ -1,0 +1,202 @@
+# Test all input configuration combinations for cache behavior
+
+# 1. Positive globs only: inputs: ["src/**/*.ts"]
+# - Files matching the glob trigger cache invalidation
+# - Files outside the glob do NOT trigger cache invalidation
+[[e2e]]
+name = "positive globs only - cache hit on second run"
+steps = [
+  # First run - cache miss
+  "vp run positive-globs-only",
+  # Second run - cache hit
+  "vp run positive-globs-only",
+]
+
+[[e2e]]
+name = "positive globs only - miss on matched file change"
+steps = [
+  # Initial run
+  "vp run positive-globs-only",
+  # Modify a file that matches the glob
+  "replace-file-content src/main.ts initial modified",
+  # Cache miss: matched file changed
+  "vp run positive-globs-only",
+]
+
+[[e2e]]
+name = "positive globs only - hit on unmatched file change"
+steps = [
+  # Initial run
+  "vp run positive-globs-only",
+  # Modify a file that does NOT match the glob (test/ is outside src/)
+  "replace-file-content test/main.test.ts outside modified",
+  # Cache hit: file not in inputs
+  "vp run positive-globs-only",
+]
+
+# 1b. Positive globs reads unmatched file: inputs: ["src/main.ts"], command reads src/utils.ts too
+# - File read by command but NOT matched by glob should NOT be fingerprinted
+# - This tests that inference is truly disabled when only explicit globs are used
+[[e2e]]
+name = "positive globs - hit on read but unmatched file"
+steps = [
+  # Initial run - reads both src/main.ts and src/utils.ts
+  "vp run positive-globs-reads-unmatched",
+  # Modify utils.ts - read by command but NOT in glob
+  "replace-file-content src/utils.ts initial modified",
+  # Cache hit: file was read but not matched by glob, inference is off
+  "vp run positive-globs-reads-unmatched",
+]
+
+# 2. Positive + negative globs: inputs: ["src/**", "!src/**/*.test.ts"]
+# - Files matching positive but NOT negative trigger invalidation
+# - Files matching negative glob are excluded
+[[e2e]]
+name = "positive negative globs - miss on non-excluded file"
+steps = [
+  # Initial run
+  "vp run positive-negative-globs",
+  # Modify a file that matches positive but NOT negative
+  "replace-file-content src/main.ts initial modified",
+  # Cache miss: file changed
+  "vp run positive-negative-globs",
+]
+
+[[e2e]]
+name = "positive negative globs - hit on excluded file"
+steps = [
+  # Initial run
+  "vp run positive-negative-globs",
+  # Modify a file that matches the negative glob (excluded)
+  "replace-file-content src/main.test.ts main modified",
+  # Cache hit: file excluded by negative glob
+  "vp run positive-negative-globs",
+]
+
+# 3. Auto only: inputs: [{ "auto": true }]
+# - Files read by the command trigger invalidation (fspy inference)
+# - Files NOT read by the command do NOT trigger invalidation
+[[e2e]]
+name = "auto only - miss on inferred file change"
+steps = [
+  # Initial run - reads src/main.ts
+  "vp run auto-only",
+  # Modify the file that was read
+  "replace-file-content src/main.ts initial modified",
+  # Cache miss: inferred input changed
+  "vp run auto-only",
+]
+
+[[e2e]]
+name = "auto only - hit on non-inferred file change"
+steps = [
+  # Initial run - reads src/main.ts (NOT utils.ts)
+  "vp run auto-only",
+  # Modify a file that was NOT read by the command
+  "replace-file-content src/utils.ts initial modified",
+  # Cache hit: file not in inferred inputs
+  "vp run auto-only",
+]
+
+# 4. Auto + negative: inputs: [{ "auto": true }, "!dist/**"]
+# - Inferred files are tracked, but negative globs filter them out
+# - Files in excluded directories don't trigger invalidation even if read
+[[e2e]]
+name = "auto with negative - hit on excluded inferred file"
+steps = [
+  # Initial run - reads both src/main.ts and dist/output.js
+  "vp run auto-with-negative",
+  # Modify file in excluded directory (dist/)
+  "replace-file-content dist/output.js initial modified",
+  # Cache hit: dist/ is excluded by negative glob
+  "vp run auto-with-negative",
+]
+
+[[e2e]]
+name = "auto with negative - miss on non-excluded inferred file"
+steps = [
+  # Initial run
+  "vp run auto-with-negative",
+  # Modify file NOT in excluded directory
+  "replace-file-content src/main.ts initial modified",
+  # Cache miss: inferred input changed
+  "vp run auto-with-negative",
+]
+
+# 5. Positive + auto + negative: inputs: ["package.json", { "auto": true }, "!src/**/*.test.ts"]
+# - Explicit globs AND inferred files are both tracked
+# - Negative globs apply to both explicit and inferred inputs
+[[e2e]]
+name = "positive auto negative - miss on explicit glob file"
+steps = [
+  # Initial run
+  "vp run positive-auto-negative",
+  # Modify explicit input file
+  "replace-file-content package.json inputs-cache-test modified-pkg",
+  # Cache miss: explicit input changed
+  "vp run positive-auto-negative",
+]
+
+[[e2e]]
+name = "positive auto negative - miss on inferred file"
+steps = [
+  # Initial run
+  "vp run positive-auto-negative",
+  # Modify inferred input file (read by command)
+  "replace-file-content src/main.ts initial modified",
+  # Cache miss: inferred input changed
+  "vp run positive-auto-negative",
+]
+
+[[e2e]]
+name = "positive auto negative - hit on excluded file"
+steps = [
+  # Initial run
+  "vp run positive-auto-negative",
+  # Modify file excluded by negative glob
+  "replace-file-content src/main.test.ts main modified",
+  # Cache hit: file excluded by negative glob
+  "vp run positive-auto-negative",
+]
+
+# 6. Empty inputs: inputs: []
+# - No file changes affect the cache
+# - Only command/env changes trigger cache invalidation
+[[e2e]]
+name = "empty inputs - hit despite file changes"
+steps = [
+  # Initial run
+  "vp run empty-inputs",
+  # Modify any file - should NOT affect cache
+  "replace-file-content src/main.ts initial modified",
+  # Cache hit: no inputs configured
+  "vp run empty-inputs",
+]
+
+[[e2e]]
+name = "empty inputs - miss on command change"
+steps = [
+  # Initial run
+  "vp run empty-inputs",
+  # Change the command
+  "json-edit vite-task.json \"_.tasks['empty-inputs'].command = 'print-file src/utils.ts'\"",
+  # Cache miss: command changed
+  "vp run empty-inputs",
+]
+
+# 7. FSPY environment variable
+# - FSPY=1 is set when fspy is enabled (includes_auto is true)
+# - FSPY is NOT set when fspy is disabled (explicit globs only)
+[[e2e]]
+name = "fspy env - set when auto inference enabled"
+steps = [
+  # Run task with auto inference - should see FSPY=1
+  "vp run check-fspy-env-with-auto",
+]
+
+[[e2e]]
+name = "fspy env - not set when auto inference disabled"
+steps = [
+  # Run task without auto inference - should see (undefined)
+  "vp run check-fspy-env-without-auto",
+]

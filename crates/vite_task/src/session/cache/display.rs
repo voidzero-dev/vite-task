@@ -39,12 +39,6 @@ pub enum SpawnFingerprintChange {
     // Working directory change
     /// Working directory changed
     CwdChanged,
-
-    // Fingerprint ignores changes
-    /// Fingerprint ignore pattern added
-    FingerprintIgnoreAdded { pattern: Str },
-    /// Fingerprint ignore pattern removed
-    FingerprintIgnoreRemoved { pattern: Str },
 }
 
 /// Format a single spawn fingerprint change as human-readable text.
@@ -70,12 +64,6 @@ pub fn format_spawn_change(change: &SpawnFingerprintChange) -> Str {
         SpawnFingerprintChange::ProgramChanged => Str::from("program changed"),
         SpawnFingerprintChange::ArgsChanged => Str::from("args changed"),
         SpawnFingerprintChange::CwdChanged => Str::from("working directory changed"),
-        SpawnFingerprintChange::FingerprintIgnoreAdded { pattern } => {
-            vite_str::format!("fingerprint ignore '{pattern}' added")
-        }
-        SpawnFingerprintChange::FingerprintIgnoreRemoved { pattern } => {
-            vite_str::format!("fingerprint ignore '{pattern}' removed")
-        }
     }
 }
 
@@ -141,20 +129,6 @@ pub fn detect_spawn_fingerprint_changes(
         changes.push(SpawnFingerprintChange::CwdChanged);
     }
 
-    // Check fingerprint ignores changes
-    let old_ignores: FxHashSet<_> =
-        old.fingerprint_ignores().map(|v| v.iter().collect()).unwrap_or_default();
-    let new_ignores: FxHashSet<_> =
-        new.fingerprint_ignores().map(|v| v.iter().collect()).unwrap_or_default();
-    for pattern in old_ignores.difference(&new_ignores) {
-        changes
-            .push(SpawnFingerprintChange::FingerprintIgnoreRemoved { pattern: (*pattern).clone() });
-    }
-    for pattern in new_ignores.difference(&old_ignores) {
-        changes
-            .push(SpawnFingerprintChange::FingerprintIgnoreAdded { pattern: (*pattern).clone() });
-    }
-
     changes
 }
 
@@ -196,12 +170,14 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                         Some(SpawnFingerprintChange::ProgramChanged) => "program changed",
                         Some(SpawnFingerprintChange::ArgsChanged) => "args changed",
                         Some(SpawnFingerprintChange::CwdChanged) => "working directory changed",
-                        Some(
-                            SpawnFingerprintChange::FingerprintIgnoreAdded { .. }
-                            | SpawnFingerprintChange::FingerprintIgnoreRemoved { .. },
-                        ) => "fingerprint ignores changed",
                         None => "configuration changed",
                     }
+                }
+                FingerprintMismatch::ConfigChanged => "configuration changed",
+                FingerprintMismatch::GlobbedInputChanged { path } => {
+                    return Some(vite_str::format!(
+                        "✗ cache miss: content of input '{path}' changed, executing"
+                    ));
                 }
                 FingerprintMismatch::PostRunFingerprintMismatch(diff) => {
                     use crate::session::execute::fingerprint::PostRunFingerprintMismatch;

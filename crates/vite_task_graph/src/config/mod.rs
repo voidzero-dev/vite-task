@@ -1,13 +1,14 @@
 pub mod user;
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
+use bincode::{Decode, Encode};
 use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
     EnabledCacheConfig, ResolvedGlobalCacheConfig, UserCacheConfig, UserGlobalCacheConfig,
-    UserRunConfig, UserTaskConfig,
+    UserInputEntry, UserInputsConfig, UserRunConfig, UserTaskConfig,
 };
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -60,6 +61,10 @@ impl ResolvedTaskOptions {
                     .into_iter()
                     .collect();
                 pass_through_envs.extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
+
+                let input_config =
+                    ResolvedInputConfig::from_user_config(enabled_cache_config.inputs.as_ref());
+
                 Some(CacheConfig {
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
@@ -68,6 +73,7 @@ impl ResolvedTaskOptions {
                             .unwrap_or_default(),
                         pass_through_envs,
                     },
+                    input_config,
                 })
             }
         };
@@ -78,6 +84,81 @@ impl ResolvedTaskOptions {
 #[derive(Debug, Clone, Serialize)]
 pub struct CacheConfig {
     pub env_config: EnvConfig,
+    pub input_config: ResolvedInputConfig,
+}
+
+/// Resolved input configuration for cache fingerprinting.
+///
+/// This is the normalized form after parsing user config.
+/// - `includes_auto`: Whether automatic inference from fspy is enabled
+/// - `positive_globs`: Glob patterns for files to include (without `!` prefix)
+/// - `negative_globs`: Glob patterns for files to exclude (without `!` prefix)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Encode, Decode)]
+pub struct ResolvedInputConfig {
+    /// Whether automatic file access inference (via fspy) is enabled
+    pub includes_auto: bool,
+
+    /// Positive glob patterns (files to include).
+    /// Sorted for deterministic cache keys.
+    pub positive_globs: BTreeSet<Str>,
+
+    /// Negative glob patterns (files to exclude, without the `!` prefix).
+    /// Sorted for deterministic cache keys.
+    pub negative_globs: BTreeSet<Str>,
+}
+
+impl ResolvedInputConfig {
+    /// Default configuration: auto-inference enabled, no explicit patterns
+    #[must_use]
+    pub const fn default_auto() -> Self {
+        Self {
+            includes_auto: true,
+            positive_globs: BTreeSet::new(),
+            negative_globs: BTreeSet::new(),
+        }
+    }
+
+    /// Resolve from user configuration.
+    ///
+    /// - `None`: defaults to auto-inference (`[{auto: true}]`)
+    /// - `Some([])`: no inputs, inference disabled
+    /// - `Some([...])`: explicit patterns
+    #[must_use]
+    pub fn from_user_config(user_inputs: Option<&UserInputsConfig>) -> Self {
+        let Some(entries) = user_inputs else {
+            // None means default to auto-inference
+            return Self::default_auto();
+        };
+
+        let mut includes_auto = false;
+        let mut positive_globs = BTreeSet::new();
+        let mut negative_globs = BTreeSet::new();
+
+        for entry in entries {
+            match entry {
+                UserInputEntry::Auto { auto: true } => includes_auto = true,
+                UserInputEntry::Auto { auto: false } => {} // Ignore {auto: false}
+                UserInputEntry::Glob(pattern) => {
+                    if let Some(negated) = pattern.strip_prefix('!') {
+                        negative_globs.insert(Str::from(negated));
+                    } else {
+                        positive_globs.insert(pattern.clone());
+                    }
+                }
+            }
+        }
+
+        Self { includes_auto, positive_globs, negative_globs }
+    }
+
+    /// Returns true if inference should be disabled.
+    ///
+    /// Inference is disabled when `includes_auto` is false.
+    #[inline]
+    #[must_use]
+    pub const fn inference_disabled(&self) -> bool {
+        !self.includes_auto
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,3 +284,111 @@ pub const DEFAULT_PASSTHROUGH_ENVS: &[&str] = &[
     // Token patterns
     "*_TOKEN",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolved_input_config_default_auto() {
+        let config = ResolvedInputConfig::default_auto();
+        assert!(config.includes_auto);
+        assert!(config.positive_globs.is_empty());
+        assert!(config.negative_globs.is_empty());
+        assert!(!config.inference_disabled());
+    }
+
+    #[test]
+    fn test_resolved_input_config_from_none() {
+        // None means default to auto-inference
+        let config = ResolvedInputConfig::from_user_config(None);
+        assert!(config.includes_auto);
+        assert!(config.positive_globs.is_empty());
+        assert!(config.negative_globs.is_empty());
+    }
+
+    #[test]
+    fn test_resolved_input_config_empty_array() {
+        // Empty array means no inputs, inference disabled
+        let user_inputs = vec![];
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        assert!(!config.includes_auto);
+        assert!(config.positive_globs.is_empty());
+        assert!(config.negative_globs.is_empty());
+        assert!(config.inference_disabled());
+    }
+
+    #[test]
+    fn test_resolved_input_config_auto_only() {
+        let user_inputs = vec![UserInputEntry::Auto { auto: true }];
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        assert!(config.includes_auto);
+        assert!(config.positive_globs.is_empty());
+        assert!(config.negative_globs.is_empty());
+    }
+
+    #[test]
+    fn test_resolved_input_config_auto_false_ignored() {
+        let user_inputs = vec![UserInputEntry::Auto { auto: false }];
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        assert!(!config.includes_auto);
+        assert!(config.positive_globs.is_empty());
+        assert!(config.negative_globs.is_empty());
+    }
+
+    #[test]
+    fn test_resolved_input_config_globs_only() {
+        // Globs without auto means inference disabled
+        let user_inputs = vec![
+            UserInputEntry::Glob("src/**/*.ts".into()),
+            UserInputEntry::Glob("package.json".into()),
+        ];
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        assert!(!config.includes_auto);
+        assert_eq!(config.positive_globs.len(), 2);
+        assert!(config.positive_globs.contains("src/**/*.ts"));
+        assert!(config.positive_globs.contains("package.json"));
+        assert!(config.negative_globs.is_empty());
+        assert!(config.inference_disabled());
+    }
+
+    #[test]
+    fn test_resolved_input_config_negative_globs() {
+        let user_inputs = vec![
+            UserInputEntry::Glob("src/**".into()),
+            UserInputEntry::Glob("!src/**/*.test.ts".into()),
+        ];
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        assert!(!config.includes_auto);
+        assert_eq!(config.positive_globs.len(), 1);
+        assert!(config.positive_globs.contains("src/**"));
+        assert_eq!(config.negative_globs.len(), 1);
+        assert!(config.negative_globs.contains("src/**/*.test.ts")); // Without ! prefix
+    }
+
+    #[test]
+    fn test_resolved_input_config_mixed() {
+        let user_inputs = vec![
+            UserInputEntry::Glob("package.json".into()),
+            UserInputEntry::Auto { auto: true },
+            UserInputEntry::Glob("!node_modules/**".into()),
+        ];
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        assert!(config.includes_auto);
+        assert_eq!(config.positive_globs.len(), 1);
+        assert!(config.positive_globs.contains("package.json"));
+        assert_eq!(config.negative_globs.len(), 1);
+        assert!(config.negative_globs.contains("node_modules/**"));
+        assert!(!config.inference_disabled());
+    }
+
+    #[test]
+    fn test_resolved_input_config_globs_with_auto() {
+        // Globs with auto keeps inference enabled
+        let user_inputs =
+            vec![UserInputEntry::Glob("src/**/*.ts".into()), UserInputEntry::Auto { auto: true }];
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        assert!(config.includes_auto);
+        assert!(!config.inference_disabled());
+    }
+}

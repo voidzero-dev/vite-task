@@ -73,8 +73,9 @@ impl SpyImpl {
     }
 
     #[expect(clippy::unused_async, reason = "async signature required by SpyImpl trait")]
-    pub(crate) async fn spawn(&self, command: Command) -> Result<TrackedChild, SpawnError> {
+    pub(crate) async fn spawn(&self, mut command: Command) -> Result<TrackedChild, SpawnError> {
         let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
+        command.env("FSPY", "1");
         let mut command = command.into_tokio_command();
 
         command.creation_flags(CREATE_SUSPENDED);

@@ -10,6 +10,28 @@ use ts_rs::TS;
 use vite_path::RelativePathBuf;
 use vite_str::Str;
 
+/// A single input entry in the `inputs` array.
+///
+/// Inputs can be either glob patterns (strings) or auto-inference directives (`{auto: true}`).
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(untagged)]
+pub enum UserInputEntry {
+    /// Glob pattern (positive or negative starting with `!`)
+    Glob(Str),
+    /// Auto-inference directive
+    Auto {
+        /// Whether automatic file access inference (via fspy) is enabled
+        auto: bool,
+    },
+}
+
+/// The inputs configuration for cache fingerprinting.
+///
+/// Default (when field omitted): `[{auto: true}]` - infer from file accesses.
+pub type UserInputsConfig = Vec<UserInputEntry>;
+
 /// Cache-related fields of a task defined by user in `vite.config.*`
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
@@ -58,6 +80,19 @@ pub struct EnabledCacheConfig {
 
     /// Environment variable names to be passed to the task without fingerprinting.
     pub pass_through_envs: Option<Vec<Str>>,
+
+    /// Input patterns for cache fingerprinting.
+    ///
+    /// - Omitted: defaults to `[{auto: true}]` - infer from file accesses
+    /// - Empty array: no inputs, inference disabled
+    /// - Glob strings: explicit files to fingerprint
+    /// - `{auto: true}`: enable automatic inference via fspy
+    /// - Negative globs: exclude files (prefix with `!`)
+    ///
+    /// Globs are relative to the package directory where the task is defined.
+    #[serde(default)]
+    #[cfg_attr(all(test, not(clippy)), ts(inline))]
+    pub inputs: Option<UserInputsConfig>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -89,7 +124,11 @@ impl Default for UserTaskOptions {
             // Caching enabled with no fingerprinted envs
             cache_config: UserCacheConfig::Enabled {
                 cache: None,
-                enabled_cache_config: EnabledCacheConfig { envs: None, pass_through_envs: None },
+                enabled_cache_config: EnabledCacheConfig {
+                    envs: None,
+                    pass_through_envs: None,
+                    inputs: None,
+                },
             },
         }
     }
@@ -374,9 +413,93 @@ mod tests {
                 enabled_cache_config: EnabledCacheConfig {
                     envs: Some(std::iter::once("NODE_ENV".into()).collect()),
                     pass_through_envs: Some(std::iter::once("FOO".into()).collect()),
+                    inputs: None,
                 }
             },
         );
+    }
+
+    #[test]
+    fn test_inputs_empty_array() {
+        let user_config_json = json!({
+            "inputs": []
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(config.inputs, Some(vec![]));
+    }
+
+    #[test]
+    fn test_inputs_auto_true() {
+        let user_config_json = json!({
+            "inputs": [{ "auto": true }]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(config.inputs, Some(vec![UserInputEntry::Auto { auto: true }]));
+    }
+
+    #[test]
+    fn test_inputs_auto_false() {
+        let user_config_json = json!({
+            "inputs": [{ "auto": false }]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(config.inputs, Some(vec![UserInputEntry::Auto { auto: false }]));
+    }
+
+    #[test]
+    fn test_inputs_globs() {
+        let user_config_json = json!({
+            "inputs": ["src/**/*.ts", "package.json"]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            config.inputs,
+            Some(vec![
+                UserInputEntry::Glob("src/**/*.ts".into()),
+                UserInputEntry::Glob("package.json".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_inputs_negative_globs() {
+        let user_config_json = json!({
+            "inputs": ["src/**", "!src/**/*.test.ts"]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            config.inputs,
+            Some(vec![
+                UserInputEntry::Glob("src/**".into()),
+                UserInputEntry::Glob("!src/**/*.test.ts".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_inputs_mixed() {
+        let user_config_json = json!({
+            "inputs": ["package.json", { "auto": true }, "!node_modules/**"]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            config.inputs,
+            Some(vec![
+                UserInputEntry::Glob("package.json".into()),
+                UserInputEntry::Auto { auto: true },
+                UserInputEntry::Glob("!node_modules/**".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_inputs_with_cache_false_error() {
+        // inputs with cache: false should produce a serde error due to deny_unknown_fields
+        let user_config_json = json!({
+            "cache": false,
+            "inputs": ["src/**"]
+        });
+        assert!(serde_json::from_value::<UserCacheConfig>(user_config_json).is_err());
     }
 
     #[test]

@@ -73,8 +73,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-in-sub
                                   "pass_through_env_config": [
                                     "<default pass-through envs>"
                                   ]
-                                },
-                                "fingerprint_ignores": null
+                                }
                               },
                               "execution_cache_key": {
                                 "UserTask": {
@@ -83,7 +82,13 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-in-sub
                                   "extra_args": [],
                                   "package_path": "packages/a"
                                 }
-                              }
+                              },
+                              "input_config": {
+                                "includes_auto": true,
+                                "positive_globs": [],
+                                "negative_globs": []
+                              },
+                              "glob_base": "<workspace>/packages/a"
                             },
                             "spawn_command": {
                               "program_path": "<tools>/node_modules/.bin/oxlint",

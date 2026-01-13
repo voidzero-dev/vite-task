@@ -55,3 +55,11 @@ steps = [
   "replace-file-content test.txt initial modified # modify input",
   "vp run test # cache miss: input changed",
 ]
+
+[[e2e]]
+name = "inputs config changed"
+steps = [
+  "vp run test # cache miss",
+  "json-edit vite-task.json \"_.tasks.test.inputs = ['test.txt']\" # change inputs config",
+  "vp run test # cache miss: configuration changed",
+]

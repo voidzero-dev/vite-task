@@ -100,6 +100,7 @@ impl SpyImpl {
         )
         .map_err(|err| SpawnError::Injection(err.into()))?;
         command.set_exec(exec);
+        command.env("FSPY", "1");
 
         let mut tokio_command = command.into_tokio_command();
 

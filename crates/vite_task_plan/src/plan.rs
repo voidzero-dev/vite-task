@@ -285,6 +285,7 @@ async fn plan_task_as_execution_node(
                         &script_command.envs,
                         program_path,
                         script_command.args,
+                        package_path,
                     )?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
@@ -350,6 +351,7 @@ async fn plan_task_as_execution_node(
             context.envs(),
             Arc::clone(&*SHELL_PROGRAM_PATH),
             SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
+            package_path,
         )?;
         items.push(ExecutionItem {
             execution_item_display,
@@ -454,6 +456,7 @@ pub fn plan_synthetic_request(
         &envs,
         program_path,
         args,
+        cwd, // For synthetic requests, the package path is the cwd
     )
 }
 
@@ -479,6 +482,7 @@ fn strip_prefix_for_cache(
     clippy::needless_pass_by_value,
     reason = "program_path ownership is needed for Arc construction"
 )]
+#[expect(clippy::too_many_arguments, reason = "internal function with closely-related parameters")]
 fn plan_spawn_execution(
     workspace_path: &Arc<AbsolutePath>,
     execution_cache_key: Option<ExecutionCacheKey>,
@@ -487,6 +491,7 @@ fn plan_spawn_execution(
     envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
     program_path: Arc<AbsolutePath>,
     args: Arc<[Str]>,
+    package_path: &Arc<AbsolutePath>,
 ) -> Result<SpawnExecution, Error> {
     // all envs available in the current context
     let mut all_envs = envs.clone();
@@ -544,11 +549,14 @@ fn plan_spawn_execution(
             program_fingerprint,
             args: Arc::clone(&args),
             env_fingerprints,
-            fingerprint_ignores: None,
         };
         if let Some(execution_cache_key) = execution_cache_key {
-            resolved_cache_metadata =
-                Some(CacheMetadata { spawn_fingerprint, execution_cache_key });
+            resolved_cache_metadata = Some(CacheMetadata {
+                spawn_fingerprint,
+                execution_cache_key,
+                input_config: cache_config.input_config.clone(),
+                glob_base: Arc::clone(package_path),
+            });
         }
     }
 

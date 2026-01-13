@@ -1,0 +1,12 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vp run sub-pkg#sub-glob-test
+~/packages/sub-pkg$ print-file src/sub.ts
+export const sub = 'initial';
+> replace-file-content packages/sub-pkg/src/sub.ts initial modified
+
+> vp run sub-pkg#sub-glob-test
+~/packages/sub-pkg$ print-file src/sub.ts ✗ cache miss: content of input 'packages/sub-pkg/src/sub.ts' changed, executing
+export const sub = 'modified';

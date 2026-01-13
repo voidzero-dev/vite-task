@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use vite_path::RelativePathBuf;
+use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::{self, Str};
+use vite_task_graph::config::ResolvedInputConfig;
 
 use crate::envs::EnvFingerprints;
 
@@ -34,13 +35,21 @@ pub enum ExecutionCacheKey {
 /// It only contains information needed for hitting existing cache entries pre-execution.
 /// It doesn't contain any post-execution information like file fingerprints
 /// (which needs actual execution and is out of scope for planning).
-#[derive(Debug, Encode, Decode, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CacheMetadata {
     /// Fingerprint for spawn execution that affects caching.
     pub spawn_fingerprint: SpawnFingerprint,
 
     /// Key to identify an execution across sessions.
     pub execution_cache_key: ExecutionCacheKey,
+
+    /// Resolved input configuration for cache fingerprinting.
+    /// Used at execution time to determine what files to track.
+    pub input_config: ResolvedInputConfig,
+
+    /// Absolute base directory for glob patterns.
+    /// This is the package path where the task is defined.
+    pub glob_base: Arc<AbsolutePath>,
 }
 
 /// Fingerprint for spawn execution that affects caching.
@@ -62,32 +71,15 @@ pub struct CacheMetadata {
 /// - The resolver provides envs which become part of the fingerprint
 /// - If resolver provides different envs between runs, cache breaks
 /// - Each built-in task type must have unique task name to avoid cache collision
-///
-/// # Fingerprint Ignores Impact on Cache
-///
-/// The `fingerprint_ignores` field controls which files are tracked in `PostRunFingerprint`:
-/// - Changes to this config must invalidate the cache
-/// - Vec maintains insertion order (pattern order matters for last-match-wins semantics)
-/// - Even though ignore patterns only affect `PostRunFingerprint`, the config itself is part of the cache key
 #[derive(Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct SpawnFingerprint {
     pub(crate) cwd: RelativePathBuf,
     pub(crate) program_fingerprint: ProgramFingerprint,
     pub(crate) args: Arc<[Str]>,
     pub(crate) env_fingerprints: EnvFingerprints,
-
-    /// Glob patterns for fingerprint filtering. Order matters (last match wins).
-    /// Changes to this config invalidate the cache to ensure correct fingerprint tracking.
-    pub(crate) fingerprint_ignores: Option<Vec<Str>>,
 }
 
 impl SpawnFingerprint {
-    /// Get the fingerprint ignores patterns.
-    #[must_use]
-    pub const fn fingerprint_ignores(&self) -> Option<&Vec<Str>> {
-        self.fingerprint_ignores.as_ref()
-    }
-
     /// Get the environment fingerprints.
     #[must_use]
     pub const fn env_fingerprints(&self) -> &EnvFingerprints {

@@ -2,5 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 
-const content = readFileSync(process.argv[2]);
-process.stdout.write(content);
+for (const file of process.argv.slice(2)) {
+  const content = readFileSync(file);
+  process.stdout.write(content);
+}

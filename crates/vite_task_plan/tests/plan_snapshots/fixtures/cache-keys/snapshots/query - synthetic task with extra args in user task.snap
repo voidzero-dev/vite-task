@@ -51,8 +51,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
                       "pass_through_env_config": [
                         "<default pass-through envs>"
                       ]
-                    },
-                    "fingerprint_ignores": null
+                    }
                   },
                   "execution_cache_key": {
                     "UserTask": {
@@ -63,7 +62,13 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
                       ],
                       "package_path": ""
                     }
-                  }
+                  },
+                  "input_config": {
+                    "includes_auto": true,
+                    "positive_globs": [],
+                    "negative_globs": []
+                  },
+                  "glob_base": "<workspace>/"
                 },
                 "spawn_command": {
                   "program_path": "<tools>/node_modules/.bin/oxlint",
