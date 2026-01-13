@@ -1,0 +1,29 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/builtin-non-zero-exit
+---
+[1]> vite lint -D no-debugger
+
+  x eslint(no-debugger): `debugger` statement is not allowed
+   ,-[bad.js:1:1]
+ 1 | debugger;
+   : ^^^^^^^^^
+   `----
+  help: Remove the debugger statement
+
+Found 0 warnings and 1 error.
+Finished in <duration> on 1 file with 90 rules using <n> threads.
+
+
+[1]> vite lint -D no-debugger
+
+  x eslint(no-debugger): `debugger` statement is not allowed
+   ,-[bad.js:1:1]
+ 1 | debugger;
+   : ^^^^^^^^^
+   `----
+  help: Remove the debugger statement
+
+Found 0 warnings and 1 error.
+Finished in <duration> on 1 file with 90 rules using <n> threads.
