@@ -1,0 +1,7 @@
+[[e2e]]
+name = "direct lint"
+steps = [
+  "vite lint",
+  "echo debugger > main.js",
+  "vite lint",
+]
