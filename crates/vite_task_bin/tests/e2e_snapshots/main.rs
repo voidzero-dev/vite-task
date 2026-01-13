@@ -168,6 +168,13 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str
                 .env("NO_COLOR", "1")
                 .current_dir(e2e_stage_path.join(&e2e.cwd));
 
+            // On Windows, inherit PATHEXT for executable lookup
+            if cfg!(windows) {
+                if let Ok(pathext) = std::env::var("PATHEXT") {
+                    cmd.env("PATHEXT", pathext);
+                }
+            }
+
             let output = if let Some(stdin_content) = step.stdin() {
                 cmd.stdin(Stdio::piped());
                 cmd.stdout(Stdio::piped());
