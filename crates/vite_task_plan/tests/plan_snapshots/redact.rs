@@ -93,8 +93,25 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
         }
     });
 
+    // Normalize Windows program names and paths by stripping common extensions for cross-platform consistency
+    // This must happen BEFORE shell redaction so that "cmd.exe" becomes "cmd" before comparison
+    visit_json(&mut json_value, &mut |v| {
+        let serde_json::Value::Object(map) = v else {
+            return;
+        };
+        // Normalize program_name field
+        if let Some(serde_json::Value::String(program_name)) = map.get_mut("program_name") {
+            strip_windows_executable_extension(program_name);
+        }
+        // Normalize program_path field
+        if let Some(serde_json::Value::String(program_path)) = map.get_mut("program_path") {
+            strip_windows_executable_extension(program_path);
+        }
+    });
+
     // Redact shell program and arguments for cross-platform consistency
-    let os_shell_path = if cfg!(windows) { "C:\\Windows\\System32\\cmd.exe" } else { "/bin/sh" };
+    // Note: os_shell_path still includes .exe because we compare against program_path before extension stripping
+    let os_shell_path = if cfg!(windows) { "C:\\Windows\\System32\\cmd" } else { "/bin/sh" };
     let os_shell_name = if cfg!(windows) { "cmd" } else { "sh" };
     let os_shell_args: &[&str] = if cfg!(windows) { &["/d", "/s", "/c"] } else { &["-c"] };
     visit_json(&mut json_value, &mut |v| {
@@ -120,21 +137,6 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
             // Redact the shell args
             array.drain(0..os_shell_args.len());
             array.insert(0, serde_json::Value::String("<os_shell_args>".to_string()));
-        }
-    });
-
-    // Normalize Windows program names and paths by stripping common extensions for cross-platform consistency
-    visit_json(&mut json_value, &mut |v| {
-        let serde_json::Value::Object(map) = v else {
-            return;
-        };
-        // Normalize program_name field
-        if let Some(serde_json::Value::String(program_name)) = map.get_mut("program_name") {
-            strip_windows_executable_extension(program_name);
-        }
-        // Normalize program_path field
-        if let Some(serde_json::Value::String(program_path)) = map.get_mut("program_path") {
-            strip_windows_executable_extension(program_path);
         }
     });
 
