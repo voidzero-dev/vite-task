@@ -152,26 +152,8 @@ impl<W: Write> LabeledReporter<W> {
         }
 
         // Handle None display case - direct synthetic execution (e.g., `vite lint`)
-        // Print inline cache status before command output for consistency
+        // Don't print cache status here - will be printed at finish for cache hits only
         let Some(display) = display else {
-            // Print inline cache status (e.g., "✓ cache hit, replaying") before output
-            // Skip if silent_if_cache_hit is enabled and this is a cache hit
-            let should_print =
-                !self.silent_if_cache_hit || !matches!(cache_status, CacheStatus::Hit { .. });
-            if should_print {
-                if let Some(inline_status) = format_cache_status_inline(&cache_status) {
-                    let styled_status = match &cache_status {
-                        CacheStatus::Hit { .. } => {
-                            inline_status.style(Style::new().green().dimmed())
-                        }
-                        CacheStatus::Miss(_) => inline_status.style(CACHE_MISS_STYLE.dimmed()),
-                        CacheStatus::Disabled(_) => {
-                            inline_status.style(Style::new().bright_black())
-                        }
-                    };
-                    let _ = writeln!(self.writer, "{}", styled_status);
-                }
-            }
             self.executions.push(ExecutionInfo {
                 display: None,
                 cache_status,
@@ -255,6 +237,21 @@ impl<W: Write> LabeledReporter<W> {
         // Update execution info exit status
         if let Some(exec) = self.executions.last_mut() {
             exec.exit_status = status;
+        }
+
+        // For direct synthetic execution with cache hit, print message at the bottom
+        if let Some(exec) = self.executions.last() {
+            if exec.display.is_none() && matches!(exec.cache_status, CacheStatus::Hit { .. }) {
+                let should_print =
+                    !self.silent_if_cache_hit || !self.cache_hit_executions.contains(&execution_id);
+                if should_print {
+                    let _ = writeln!(
+                        self.writer,
+                        "{}",
+                        "✓ cache hit, logs replayed".style(Style::new().green().dimmed())
+                    );
+                }
+            }
         }
 
         // Add a line break after each task's output for better readability

@@ -5,7 +5,6 @@ expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/error_cycle_dependency
 ---
 [1]> vite run task-a # task-a -> task-b -> task-a cycle
-⊘ cache disabled: cycle detected
 ✗ Cycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

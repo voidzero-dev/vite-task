@@ -22,7 +22,6 @@ Finished in <duration> on 1 file with 90 rules using <n> threads.
 > echo hello > .git/foo.txt # add file inside .git
 
 > vite lint # cache hit, .git is ignored
-✓ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[a.js:1:1]
@@ -33,3 +32,4 @@ Finished in <duration> on 1 file with 90 rules using <n> threads.
 
 Found 1 warning and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
+✓ cache hit, logs replayed

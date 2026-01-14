@@ -38,7 +38,6 @@ Task Details:
 > echo 'console.log(1);' > a.js # add valid JS file
 
 > vite lint # builtin lint: cache miss
-✗ cache miss: content of input 'a.js' changed, executing
 Found 0 warnings and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
 

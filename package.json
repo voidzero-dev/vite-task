@@ -10,7 +10,7 @@
   "scripts": {
     "prepare": "husky",
     "hello": "echo Hello, Vite Task Monorepo!",
-    "a": "vite foo"
+    "lint": "vite lint"
   },
   "devDependencies": {
     "@types/node": "catalog:",

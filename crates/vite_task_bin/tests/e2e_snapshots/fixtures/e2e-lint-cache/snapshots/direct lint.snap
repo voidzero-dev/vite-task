@@ -12,7 +12,6 @@ Finished in <duration> on 0 files with 90 rules using <n> threads.
 > echo debugger > main.js # add lint error
 
 > vite lint # cache miss, lint fails
-✗ cache miss: content of input '' changed, executing
 
   ! eslint(no-debugger): `debugger` statement is not allowed
    ,-[main.js:1:1]
