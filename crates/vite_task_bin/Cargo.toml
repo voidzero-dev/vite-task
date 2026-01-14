@@ -26,6 +26,7 @@ copy_dir = { workspace = true }
 cow-utils = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
 regex = { workspace = true }
+send_ctrlc = { version = "0.6.0", features = ["tokio"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 tempfile = { workspace = true }
 toml = { workspace = true }

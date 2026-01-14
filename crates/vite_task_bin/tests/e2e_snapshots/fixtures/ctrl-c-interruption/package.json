@@ -1,0 +1,6 @@
+{
+  "name": "ctrl-c-interruption",
+  "scripts": {
+    "interrupt-test": "node interrupt-test.js"
+  }
+}

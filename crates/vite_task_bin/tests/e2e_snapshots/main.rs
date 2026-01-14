@@ -11,6 +11,7 @@ use std::{
 
 use copy_dir::copy_dir;
 use redact::redact_e2e_output;
+use send_ctrlc::{Interruptible as _, InterruptibleCommand as _};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::Command,
@@ -193,7 +194,7 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
             cmd.stdout(Stdio::piped());
             cmd.stderr(Stdio::piped());
 
-            let mut child = cmd.spawn().unwrap();
+            let mut child = cmd.spawn_interruptible().unwrap();
 
             // Write stdin if provided, then close it
             if let Some(stdin_content) = step.stdin() {
@@ -209,6 +210,10 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
             // Buffers for accumulating output
             let mut stdout_buf = Vec::new();
             let mut stderr_buf = Vec::new();
+
+            // Magic string detection
+            const MAGIC_STRING: &[u8] = b"[send-me-ctrl-c]";
+            let mut ctrl_c_sent = false;
 
             // Read chunks concurrently with process wait, using select! with timeout
             let mut stdout_done = false;
@@ -232,7 +237,16 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
                     result = stdout_handle.read(&mut stdout_chunk), if !stdout_done => {
                         match result {
                             Ok(0) => stdout_done = true,
-                            Ok(n) => stdout_buf.extend_from_slice(&stdout_chunk[..n]),
+                            Ok(n) => {
+                                let chunk = &stdout_chunk[..n];
+                                stdout_buf.extend_from_slice(chunk);
+
+                                // Check if accumulated stdout buffer contains magic string
+                                if !ctrl_c_sent && stdout_buf.windows(MAGIC_STRING.len()).any(|w| w == MAGIC_STRING) {
+                                    ctrl_c_sent = true;
+                                    let _ = child.interrupt();
+                                }
+                            }
                             Err(_) => stdout_done = true,
                         }
                     }

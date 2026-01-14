@@ -1,0 +1,6 @@
+[[e2e]]
+name = "interrupted task does not update cache"
+steps = [
+  "vite run interrupt-test",
+  "vite run interrupt-test",
+]
