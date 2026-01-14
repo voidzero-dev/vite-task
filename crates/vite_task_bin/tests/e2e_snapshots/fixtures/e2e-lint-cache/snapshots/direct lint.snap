@@ -1,17 +1,17 @@
 ---
-source: crates/vite_task_bin/tests/test_snapshots/main.rs
-assertion_line: 152
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+assertion_line: 203
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/e2e-lint-cache
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/e2e-lint-cache
 ---
-> vite lint
+> vite lint # cache miss
 Found 0 warnings and 0 errors.
 Finished in <duration> on 0 files with 90 rules using <n> threads.
 
 
-> echo debugger > main.js
+> echo debugger > main.js # add lint error
 
-> vite lint
+> vite lint # cache miss, lint fails
 ✗ cache miss: content of input '' changed, executing
 
   ! eslint(no-debugger): `debugger` statement is not allowed

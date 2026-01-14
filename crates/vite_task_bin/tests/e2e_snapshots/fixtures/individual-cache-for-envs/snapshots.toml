@@ -1,0 +1,10 @@
+# Tests that different env values get separate cache entries
+
+[[e2e]]
+name = "individual cache for envs"
+steps = [
+  "FOO=1 vite run hello # cache miss",
+  "FOO=2 vite run hello # cache miss, different env",
+  "FOO=1 vite run hello # cache hit",
+  "FOO=2 vite run hello # cache hit",
+]

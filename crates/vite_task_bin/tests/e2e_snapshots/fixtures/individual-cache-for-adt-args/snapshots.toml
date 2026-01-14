@@ -1,0 +1,10 @@
+# Tests that different extra args get separate cache entries
+
+[[e2e]]
+name = "individual cache for extra args"
+steps = [
+  "vite run say a # cache miss",
+  "vite run say b # cache miss, different args",
+  "vite run say a # cache hit",
+  "vite run say b # cache hit",
+]

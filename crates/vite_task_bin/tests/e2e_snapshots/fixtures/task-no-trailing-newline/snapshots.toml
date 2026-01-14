@@ -1,0 +1,7 @@
+# Tests output handling when task has no trailing newline
+
+[[e2e]]
+name = "no trailing newline"
+steps = [
+  "vite run hello # runs echo -n hello",
+]

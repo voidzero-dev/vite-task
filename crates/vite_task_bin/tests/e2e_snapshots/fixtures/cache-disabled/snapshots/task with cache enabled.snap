@@ -1,9 +1,10 @@
 ---
-source: crates/vite_task_bin/tests/test_snapshots/main.rs
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+assertion_line: 203
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/cache-disabled
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/cache-disabled
 ---
-> vite run cached-task
+> vite run cached-task # cache miss
 $ print-file test.txt
 test content
 
@@ -21,7 +22,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> vite run cached-task
+> vite run cached-task # cache hit
 $ print-file test.txt ✓ cache hit, replaying
 test content
 

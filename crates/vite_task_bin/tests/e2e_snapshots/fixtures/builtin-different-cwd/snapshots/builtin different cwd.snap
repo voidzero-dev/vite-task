@@ -1,0 +1,52 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+assertion_line: 203
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/builtin-different-cwd
+---
+> cd folder1 && vite lint # cache miss in folder1
+
+  ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
+   ,-[a.js:1:1]
+ 1 | // Empty JS file for oxlint
+   : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   `----
+  help: Delete this file or add some code to it.
+
+Found 1 warning and 0 errors.
+Finished in <duration> on 1 file with 90 rules using <n> threads.
+
+
+> cd folder2 && vite lint # cache miss in folder2
+
+  ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
+   ,-[a.js:1:1]
+ 1 | // Empty JS file for oxlint
+   : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   `----
+  help: Delete this file or add some code to it.
+
+Found 1 warning and 0 errors.
+Finished in <duration> on 1 file with 90 rules using <n> threads.
+
+
+> echo 'console.log(1);' > folder2/a.js # modify folder2
+
+> cd folder1 && vite lint # cache hit
+✓ cache hit, replaying
+
+  ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
+   ,-[a.js:1:1]
+ 1 | // Empty JS file for oxlint
+   : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   `----
+  help: Delete this file or add some code to it.
+
+Found 1 warning and 0 errors.
+Finished in <duration> on 1 file with 90 rules using <n> threads.
+
+
+> cd folder2 && vite lint # cache miss
+✗ cache miss: content of input 'folder2/a.js' changed, executing
+Found 0 warnings and 0 errors.
+Finished in <duration> on 1 file with 90 rules using <n> threads.
