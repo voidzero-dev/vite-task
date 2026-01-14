@@ -20,6 +20,24 @@ pub enum CacheDisabledReason {
 }
 
 #[derive(Debug)]
+pub enum CacheNotUpdatedReason {
+    /// Cache was hit - task was replayed from cache, no update needed
+    CacheHit,
+    /// Caching was disabled for this task
+    CacheDisabled,
+    /// Execution exited with non-zero status
+    NonZeroExitStatus,
+}
+
+#[derive(Debug)]
+pub enum CacheUpdateStatus {
+    /// Cache was successfully updated with new fingerprint and outputs
+    Updated,
+    /// Cache was not updated (with reason)
+    NotUpdated(CacheNotUpdatedReason),
+}
+
+#[derive(Debug)]
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss(CacheMiss),
@@ -50,5 +68,5 @@ pub enum ExecutionEventKind {
     Start { display: Option<ExecutionItemDisplay>, cache_status: CacheStatus },
     Output { kind: OutputKind, content: BString },
     Error { message: String },
-    Finish { status: Option<i32> },
+    Finish { status: Option<i32>, cache_update_status: CacheUpdateStatus },
 }
