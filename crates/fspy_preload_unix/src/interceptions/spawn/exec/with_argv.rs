@@ -1,5 +1,5 @@
 use std::{
-    ffi::VaListImpl,
+    ffi::VaList,
     mem::{self, MaybeUninit, transmute},
     slice,
 };
@@ -9,19 +9,19 @@ use nix::Error;
 
 // https://github.com/redox-os/relibc/blob/710911febb07a43716a6236cc9e5b864e227e36e/src/header/unistd/mod.rs#L1094
 pub unsafe fn with_argv(
-    mut va: VaListImpl,
+    mut va: VaList,
     arg0: *const c_char,
-    f: impl FnOnce(&[*const c_char], VaListImpl) -> c_int,
+    f: impl FnOnce(&[*const c_char], VaList) -> c_int,
 ) -> c_int {
-    let argc = 1 + unsafe {
-        va.with_copy(|mut copy| {
-            core::iter::from_fn(|| Some(copy.arg::<*const c_char>()))
-                .position(|s| {
-                    // Find the NULL terminator
-                    s.is_null()
-                })
-                .unwrap()
-        })
+    let argc = 1 + {
+        let mut va = va.clone();
+        // Safety: argv is guaranteed to be NULL-terminated
+        core::iter::from_fn(|| Some(unsafe { va.arg::<*const c_char>() }))
+            .position(|s| {
+                // Find the NULL terminator
+                s.is_null()
+            })
+            .unwrap()
     };
 
     let mut stack: [MaybeUninit<*const c_char>; 32] = [MaybeUninit::uninit(); 32];
