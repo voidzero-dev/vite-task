@@ -213,13 +213,18 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
             // Read chunks concurrently with process wait, using select! with timeout
             let mut stdout_done = false;
             let mut stderr_done = false;
-            let mut timed_out = false;
-            let mut exit_status: Option<std::process::ExitStatus> = None;
+
+            enum TerminationState {
+                Exited(std::process::ExitStatus),
+                TimedOut,
+            }
+            // Initial state is running
+            let mut termination_state: Option<TerminationState> = None;
 
             let timeout = tokio::time::sleep(STEP_TIMEOUT);
             tokio::pin!(timeout);
 
-            loop {
+            let termination_state = loop {
                 let mut stdout_chunk = [0u8; 8192];
                 let mut stderr_chunk = [0u8; 8192];
 
@@ -238,31 +243,37 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
                             Err(_) => stderr_done = true,
                         }
                     }
-                    result = child.wait(), if exit_status.is_none() => {
-                        exit_status = Some(result.unwrap());
+                    result = child.wait(), if termination_state.is_none() => {
+                        termination_state = Some(TerminationState::Exited(result.unwrap()));
                     }
-                    _ = &mut timeout, if !timed_out => {
+                    _ = &mut timeout, if termination_state.is_none() => {
                         // Timeout - kill the process
                         let _ = child.kill().await;
-                        timed_out = true;
+                        termination_state = Some(TerminationState::TimedOut);
                     }
                 }
 
                 // Exit conditions:
                 // 1. Process exited and all output drained
                 // 2. Timed out and all output drained (after kill, pipes close)
-                if (exit_status.is_some() || timed_out) && stdout_done && stderr_done {
-                    break;
+                if let Some(termination_state) = &termination_state
+                    && stdout_done
+                    && stderr_done
+                {
+                    break termination_state;
                 }
-            }
+            };
 
             // Format output
-            if timed_out {
-                e2e_outputs.push_str("[timeout]");
-            } else if let Some(status) = exit_status {
-                let exit_code = status.code().unwrap_or(-1);
-                if exit_code != 0 {
-                    e2e_outputs.push_str(format!("[{}]", exit_code).as_str());
+            match termination_state {
+                TerminationState::TimedOut => {
+                    e2e_outputs.push_str("[timeout]");
+                }
+                TerminationState::Exited(status) => {
+                    let exit_code = status.code().unwrap_or(-1);
+                    if exit_code != 0 {
+                        e2e_outputs.push_str(format!("[{}]", exit_code).as_str());
+                    }
                 }
             }
 
@@ -277,7 +288,7 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
             e2e_outputs.push('\n');
 
             // Skip remaining steps if timed out
-            if timed_out {
+            if matches!(termination_state, TerminationState::TimedOut) {
                 break;
             }
         }
