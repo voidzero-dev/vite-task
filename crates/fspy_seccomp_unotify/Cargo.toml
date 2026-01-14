@@ -26,3 +26,6 @@ tokio = { workspace = true, features = ["macros", "time"] }
 [features]
 supervisor = ["dep:passfd", "passfd/async"]
 target = ["dep:passfd"]
+
+[lints]
+workspace = true

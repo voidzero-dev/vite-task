@@ -25,3 +25,6 @@ assert2 = { workspace = true }
 ctor = { workspace = true }
 fspy_test_utils = { workspace = true }
 shared_memory = { workspace = true, features = ["logging"] }
+
+[lints]
+workspace = true

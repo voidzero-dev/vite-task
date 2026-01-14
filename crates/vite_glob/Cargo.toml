@@ -13,3 +13,6 @@ wax = { workspace = true }
 
 [dev-dependencies]
 vite_str = { workspace = true }
+
+[lints]
+workspace = true

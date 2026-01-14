@@ -60,3 +60,6 @@ anyhow = { workspace = true }
 flate2 = { workspace = true }
 tar = { workspace = true }
 xxhash-rust = { workspace = true, features = ["xxh3"] }
+
+[lints]
+workspace = true

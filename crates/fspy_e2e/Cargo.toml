@@ -9,3 +9,6 @@ fspy = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["full"] }
 toml = { workspace = true }
+
+[lints]
+workspace = true
