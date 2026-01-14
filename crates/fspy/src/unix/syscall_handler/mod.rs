@@ -53,7 +53,7 @@ impl SyscallHandler {
         let mut path = Cow::Borrowed(Path::new(OsStr::from_bytes(&self.path_read_buf[..path_len])));
         if !path.is_absolute() {
             let mut resolved_path = PathBuf::from(dir_fd.get_path(caller)?);
-            if !path.is_empty() {
+            if !nix::NixPath::is_empty(path.as_ref()) {
                 resolved_path.push(&path);
             }
             path = Cow::Owned(resolved_path);

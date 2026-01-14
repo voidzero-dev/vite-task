@@ -16,6 +16,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(coverage_
 tail_expr_drop_order = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_unsafe = "warn"
+long_running_const_eval = "allow"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
