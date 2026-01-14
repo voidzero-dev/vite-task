@@ -16,7 +16,6 @@ use fspy_seccomp_unotify::{
     supervisor::handler::arg::{CStrPtr, Caller, Fd},
 };
 use fspy_shared::ipc::{AccessMode, NativeStr, PathAccess};
-use nix::NixPath;
 
 use crate::arena::PathAccessArena;
 
