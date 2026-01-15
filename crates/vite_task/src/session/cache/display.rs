@@ -304,9 +304,12 @@ pub fn format_cache_update_status(status: &CacheUpdateStatus) -> Option<String> 
             CacheNotUpdatedReason::CacheHit => None,
             CacheNotUpdatedReason::CacheDisabled => None,
             CacheNotUpdatedReason::BuiltInCommand => None,
-            // This needs to be shown - task failed so cache wasn't updated
+            // These need to be shown - they explain why cache wasn't updated
             CacheNotUpdatedReason::NonZeroExitStatus => {
                 Some("→ Cache not updated: task failed".to_string())
+            }
+            CacheNotUpdatedReason::StdinDataExists => {
+                Some("→ Cache not updated: stdin had data".to_string())
             }
         },
     }

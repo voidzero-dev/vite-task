@@ -19,4 +19,5 @@ Task Details:
 ────────────────────────────────────────────────
   [1] stdin-passthrough#echo-stdin: $ node -e "process.stdin.pipe(process.stdout)" ✓
       → Cache miss: no previous cache entry found
+      → Cache not updated: stdin had data
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

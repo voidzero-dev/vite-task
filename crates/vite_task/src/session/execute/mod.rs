@@ -287,11 +287,18 @@ impl ExecutionContext<'_> {
         };
 
         // 5. Update cache if successful and determine cache update status
+        // Priority: NonZeroExitStatus > StdinDataExists > Success
         let cache_update_status = if let Some((track_result, cache_metadata)) =
             track_result_with_cache_metadata
         {
-            if result.exit_status.success() {
-                // Execution succeeded, attempt cache update
+            if !result.exit_status.success() {
+                // Priority 1: Non-zero exit status - don't update cache
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus)
+            } else if result.stdin_had_data {
+                // Priority 2: Stdin had data - output may depend on input, unsafe to cache
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::StdinDataExists)
+            } else {
+                // Success: attempt cache update
                 let fingerprint_ignores =
                     cache_metadata.spawn_fingerprint.fingerprint_ignores().map(|v| v.as_slice());
                 match PostRunFingerprint::create(
@@ -326,9 +333,6 @@ impl ExecutionContext<'_> {
                         return Err(ExecutionAborted);
                     }
                 }
-            } else {
-                // Execution failed with non-zero exit status, don't update cache
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus)
             }
         } else {
             // Caching was disabled for this task

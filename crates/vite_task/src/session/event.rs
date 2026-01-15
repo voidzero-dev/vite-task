@@ -29,6 +29,8 @@ pub enum CacheNotUpdatedReason {
     NonZeroExitStatus,
     /// Built-in command doesn't support caching
     BuiltInCommand,
+    /// Stdin had data - output may depend on input, unsafe to cache
+    StdinDataExists,
 }
 
 #[derive(Debug)]
