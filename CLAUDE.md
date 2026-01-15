@@ -1,81 +1,119 @@
-# Vite-Plus
+# CLAUDE.md
+
+## Project Overview
 
 A monorepo task runner (like nx/turbo) with intelligent caching and dependency resolution.
 
-## Core Concept
-
-**Task Execution**: Run tasks across monorepo packages with automatic dependency ordering.
+## Build Commands
 
 ```bash
-# Built-in commands
-vite build                           # Run Vite build (dedicated command)
-vite test                            # Run Vite test (dedicated command)
-vite lint                            # Run oxlint (dedicated command)
+just init          # Install build tools and dependencies
+just ready         # Full quality check (fmt, check, test, lint, doc)
+just fmt           # Format code (cargo fmt, cargo shear, dprint)
+just check         # Check compilation with all features
+just test          # Run all tests
+just lint          # Clippy linting
+just doc           # Documentation generation
+```
 
-# Run tasks across packages (explicit mode)
-vite run build -r                    # recursive with topological ordering
-vite run app#build web#build         # specific packages
-vite run build -r --no-topological   # recursive without implicit deps
+## Tests
 
-# Run task in current package (implicit mode - for non-built-in tasks)
-vite dev                             # runs dev script from package.json
+```bash
+cargo test                                              # All tests
+cargo test -p vite_task_bin --test e2e_snapshots        # E2E snapshot tests
+cargo test -p vite_task_plan --test plan_snapshots      # Plan snapshot tests
+cargo test --test e2e_snapshots -- stdin                # Filter by test name
+INSTA_UPDATE=always cargo test                          # Update snapshots
+```
+
+Integration tests (e2e, plan, fspy) require `pnpm install` in `packages/tools` first. You don't need `pnpm install` in test fixture directories.
+
+Test fixtures and snapshots:
+
+- **Plan**: `crates/vite_task_plan/tests/plan_snapshots/fixtures/` - quicker, sufficient for testing behaviour before actual execution:
+  - task graph
+  - resolved configurations
+  - resolved program paths, cwd, and env vars
+- **E2E**: `crates/vite_task_bin/tests/e2e_snapshots/fixtures/` - needed for testing execution and beyond: caching, output styling
+
+## CLI Usage
+
+```bash
+# Run a task defined in vite.config.json
+vite run <task>                      # run task in current package
+vite run <package>#<task>            # run task in specific package
+vite run <task> -r                   # run task in all packages (recursive)
+vite run <task> -t                   # run task in current package + transitive deps
+vite run <task> --extra --args       # pass extra args to the task command
+
+# Built-in commands (run tools from node_modules/.bin)
+vite test [args...]                  # run vitest
+vite lint [args...]                  # run oxlint
+
+# Flags
+-r, --recursive                      # run across all packages
+-t, --transitive                     # run in current package and its dependencies
+--ignore-depends-on                  # skip explicit dependsOn dependencies
 ```
 
 ## Key Architecture
 
-- **Entry**: `crates/vite_task/src/lib.rs` - CLI parsing and main logic
-- **Workspace**: `crates/vite_task/src/config/workspace.rs` - Loads packages, creates task graph
-- **Task Graph**: `crates/vite_task/src/config/task_graph_builder.rs` - Builds dependency graph
-- **Execution**: `crates/vite_task/src/schedule.rs` - Executes tasks in dependency order
+- **vite_task** - Main task runner with caching and session management
+- **vite_task_bin** - CLI binary (`vite` command) and task synthesizer
+- **vite_task_graph** - Task dependency graph construction and config loading
+- **vite_task_plan** - Execution planning (resolves env vars, working dirs, commands)
+- **vite_workspace** - Workspace detection and package dependency graph
+- **fspy** - File system access tracking for precise cache invalidation
+
+## Task Configuration
+
+Tasks are defined in `vite.config.json`:
+
+```json
+{
+  "tasks": {
+    "test": {
+      "command": "vitest run",
+      "dependsOn": ["build", "lint"],
+      "cache": true
+    }
+  }
+}
+```
 
 ## Task Dependencies
 
-1. **Explicit** (always applied): Defined in `vite-task.json`
-   ```json
-   {
-     "tasks": {
-       "test": {
-         "command": "jest",
-         "dependsOn": ["build", "lint"]
-       }
-     }
-   }
-   ```
+1. **Explicit**: Defined via `dependsOn` in `vite.config.json` (skip with `--ignore-depends-on`)
+2. **Topological**: Based on package.json dependencies
+   - With `-r/--recursive`: runs task across all packages in dependency order
+   - With `-t/--transitive`: runs task in current package and its dependencies
 
-2. **Implicit** (when `--topological`): Based on package.json dependencies
-   - If A depends on B, then A#build depends on B#build automatically
+## Code Constraints
 
-## Key Features
+These patterns are enforced by `.clippy.toml`:
 
-- **Topological Flag**: Controls implicit dependencies from package relationships
-  - Default: ON for `--recursive`, OFF otherwise
-  - Toggle with `--no-topological` to disable
-
-- **Boolean Flags**: All support `--no-*` pattern for explicit disable
-  - Example: `--recursive` vs `--no-recursive`
-  - Conflicts handled by clap
-  - If you want to add a new boolean flag, follow this pattern
+| Instead of                          | Use                                      |
+| ----------------------------------- | ---------------------------------------- |
+| `HashMap`/`HashSet`                 | `FxHashMap`/`FxHashSet` from rustc-hash  |
+| `std::path::Path`/`PathBuf`         | `vite_path::AbsolutePath`/`RelativePath` |
+| `std::format!`                      | `vite_str::format!`                      |
+| `String` (for small strings)        | `vite_str::Str`                          |
+| `std::env::current_dir`             | `vite_path::current_dir`                 |
+| `.to_lowercase()`/`.to_uppercase()` | `cow_utils` methods                      |
 
 ## Path Type System
 
-- **Type Safety**: All paths use typed `vite_path` instead of `std::path` for better safety
+- **Type Safety**: All paths use typed `vite_path` instead of `std::path`
   - **Absolute Paths**: `vite_path::AbsolutePath` / `AbsolutePathBuf`
   - **Relative Paths**: `vite_path::RelativePath` / `RelativePathBuf`
 
 - **Usage Guidelines**:
-  - Use methods such as `strip_prefix`/`join` provided in `vite_path` for path operations instead of converting to std paths
-  - Only convert to std paths when interfacing with std library functions, and this should be implicit in most cases thanks to `AsRef<Path>` implementations
+  - Use `AbsolutePath` for internal data flow; only convert to `RelativePath` when saving to cache
+  - Use methods like `strip_prefix`/`join` from `vite_path` instead of converting to std paths
+  - Only convert to std paths when interfacing with std library functions
   - Add necessary methods in `vite_path` instead of falling back to std path types
 
 ## Quick Reference
 
-- **Compound Commands**: `"build": "tsc && rollup"` splits into subtasks
-- **Task Format**: `package#task` (e.g., `app#build`)
-- **Path Types**: Use `vite_path` types instead of `std::path` types for type safety
-- **Tests**: Run `cargo test -p vite_task` to verify changes
-- **Debug**: Use `--debug` to see cache operations
-
-## Tests
-
-- Run `cargo test` to execute all tests
-- You never need to run `pnpm install` in the test fixtures dir, vite-plus should able to load and parse the workspace without `pnpm install`.
+- **Task Format**: `package#task` (e.g., `app#build`, `@test/utils#lint`)
+- **Config File**: `vite.config.json` in each package
