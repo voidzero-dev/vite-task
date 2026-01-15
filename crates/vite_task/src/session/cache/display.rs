@@ -308,6 +308,9 @@ pub fn format_cache_update_status(status: &CacheUpdateStatus) -> Option<String> 
             CacheNotUpdatedReason::NonZeroExitStatus => {
                 Some("→ Cache not updated: task failed".to_string())
             }
+            CacheNotUpdatedReason::ReceivedCtrlC => {
+                Some("→ Cache not updated: execution interrupted".to_string())
+            }
             CacheNotUpdatedReason::StdinDataExists => {
                 Some("→ Cache not updated: stdin had data".to_string())
             }

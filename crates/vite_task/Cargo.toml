@@ -29,7 +29,7 @@ rusqlite = { workspace = true, features = ["bundled"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "io-std", "macros", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "io-std", "macros", "sync", "signal"] }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
 vite_glob = { workspace = true }

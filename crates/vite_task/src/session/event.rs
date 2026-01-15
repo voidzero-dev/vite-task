@@ -29,6 +29,8 @@ pub enum CacheNotUpdatedReason {
     NonZeroExitStatus,
     /// Built-in command doesn't support caching
     BuiltInCommand,
+    /// Ctrl+C was received during execution - cache invalidated for safety
+    ReceivedCtrlC,
     /// Stdin had data - output may depend on input, unsafe to cache
     StdinDataExists,
 }

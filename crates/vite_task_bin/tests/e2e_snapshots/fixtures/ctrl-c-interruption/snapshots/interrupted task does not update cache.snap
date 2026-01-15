@@ -1,0 +1,45 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+assertion_line: 309
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/ctrl-c-interruption
+---
+> vite run interrupt-test
+$ node interrupt-test.js
+[send-me-ctrl-c]
+Received SIGINT, exiting gracefully
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] ctrl-c-interruption#interrupt-test: $ node interrupt-test.js ✓
+      → Cache miss: no previous cache entry found
+      → Cache not updated: execution interrupted
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> vite run interrupt-test
+$ node interrupt-test.js
+[send-me-ctrl-c]
+Received SIGINT, exiting gracefully
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] ctrl-c-interruption#interrupt-test: $ node interrupt-test.js ✓
+      → Cache miss: no previous cache entry found
+      → Cache not updated: execution interrupted
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -287,15 +287,18 @@ impl ExecutionContext<'_> {
         };
 
         // 5. Update cache if successful and determine cache update status
-        // Priority: NonZeroExitStatus > StdinDataExists > Success
+        // Priority: NonZeroExitStatus > ReceivedCtrlC > StdinDataExists > Success
         let cache_update_status = if let Some((track_result, cache_metadata)) =
             track_result_with_cache_metadata
         {
             if !result.exit_status.success() {
                 // Priority 1: Non-zero exit status - don't update cache
                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus)
+            } else if result.received_ctrl_c {
+                // Priority 2: Received Ctrl+C - execution was interrupted, unsafe to cache
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ReceivedCtrlC)
             } else if result.stdin_had_data {
-                // Priority 2: Stdin had data - output may depend on input, unsafe to cache
+                // Priority 3: Stdin had data - output may depend on input, unsafe to cache
                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::StdinDataExists)
             } else {
                 // Success: attempt cache update

@@ -120,7 +120,11 @@ impl SpyImpl {
             .map_err(|err| SpawnError::OsSpawnError(err.into()))?
             .map_err(SpawnError::OsSpawnError)?;
 
+        // Get the PID before moving child into the wait_handle future
+        let pid = child.id().expect("child process should have a pid");
+
         Ok(TrackedChild {
+            pid,
             stdin: child.stdin.take(),
             stdout: child.stdout.take(),
             stderr: child.stderr.take(),

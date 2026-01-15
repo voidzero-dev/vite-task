@@ -38,6 +38,9 @@ pub struct ChildTermination {
 }
 
 pub struct TrackedChild {
+    /// The process ID of the child.
+    pub pid: u32,
+
     /// The handle for writing to the child's standard input (stdin), if it has
     /// been captured.
     pub stdin: Option<ChildStdin>,

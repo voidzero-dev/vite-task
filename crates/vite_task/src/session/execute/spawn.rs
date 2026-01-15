@@ -45,6 +45,8 @@ pub struct StdOutput {
 pub struct SpawnResult {
     pub exit_status: ExitStatus,
     pub duration: Duration,
+    /// Whether Ctrl+C was received during execution
+    pub received_ctrl_c: bool,
     /// Whether stdin had data forwarded to the child
     pub stdin_had_data: bool,
 }
@@ -62,6 +64,31 @@ pub struct SpawnTrackResult {
     pub path_writes: HashMap<RelativePathBuf, PathWrite>,
 }
 
+/// Waits for Ctrl+C and forwards SIGINT to the child process.
+///
+/// This function completes once when Ctrl+C is received. After forwarding the signal,
+/// the caller should continue waiting for the child to exit naturally - we don't
+/// forcibly kill the child, allowing it to perform cleanup if needed.
+///
+/// # Platform behavior
+/// - **Unix**: Manually forwards SIGINT to the child process using `kill()`.
+/// - **Windows**: Ctrl+C is automatically forwarded to child processes in the same
+///   console group, so no manual forwarding is needed.
+async fn wait_for_ctrl_c(child_pid: Option<u32>) {
+    let _ = tokio::signal::ctrl_c().await;
+
+    #[cfg(unix)]
+    if let Some(pid) = child_pid {
+        // Forward SIGINT to child process on Unix.
+        // The child may handle this signal and exit gracefully.
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid as i32),
+            nix::sys::signal::Signal::SIGINT,
+        );
+    }
+    // On Windows, Ctrl+C is automatically forwarded to child processes in the same console group.
+}
+
 /// Spawn a command with file system tracking via fspy.
 ///
 /// Returns the execution result including captured outputs, exit status,
@@ -76,10 +103,11 @@ pub struct SpawnTrackResult {
 ///
 /// # Concurrent I/O Architecture
 ///
-/// This function manages three concurrent I/O operations:
+/// This function manages four concurrent I/O operations:
 /// 1. **drain_outputs**: Reads stdout and stderr until both reach EOF
 /// 2. **forward_stdin**: Forwards parent's stdin to child until EOF
-/// 3. **wait_for_exit**: Waits for child process to terminate
+/// 3. **ctrl_c**: Waits for Ctrl+C and forwards SIGINT to child
+/// 4. **wait_for_exit**: Waits for child process to terminate
 ///
 /// Each operation is a separate future with its own internal loop. This design avoids
 /// a single large `select!` loop with many condition flags, making the code easier to
@@ -87,15 +115,17 @@ pub struct SpawnTrackResult {
 ///
 /// # Deadlock Avoidance
 ///
-/// All three operations run concurrently. This is critical for commands that depend on
+/// All four operations run concurrently. This is critical for commands that depend on
 /// stdin, like `node -e "process.stdin.pipe(process.stdout)"`. If we waited for stdout
 /// to close before forwarding stdin, we would deadlock because stdout won't close until
 /// stdin closes.
 ///
 /// # Cancellation
 ///
-/// When the child exits, `forward_stdin` is implicitly cancelled by breaking out of
-/// the coordination loop. This is safe because stdin data after child exit is meaningless.
+/// When the child exits, `forward_stdin` and `ctrl_c` are implicitly cancelled by
+/// breaking out of the coordination loop. This is safe because:
+/// - stdin data after child exit is meaningless
+/// - Ctrl+C after child exit has no target to forward to
 pub async fn spawn_with_tracking<F>(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
@@ -125,6 +155,7 @@ where
     }
 
     let (
+        child_pid,
         mut child_stdout,
         mut child_stderr,
         child_stdin,
@@ -133,16 +164,26 @@ where
         track_enabled,
     ) = if let Some(track_result) = track_result {
         let mut tracked = cmd.spawn().await?;
+        let pid = Some(tracked.pid);
         let stdout = tracked.stdout.take().unwrap();
         let stderr = tracked.stderr.take().unwrap();
         let stdin = tracked.stdin.take();
-        (stdout, stderr, stdin, WaitHandle::Tracked(tracked.wait_handle), Some(track_result), true)
+        (
+            pid,
+            stdout,
+            stderr,
+            stdin,
+            WaitHandle::Tracked(tracked.wait_handle),
+            Some(track_result),
+            true,
+        )
     } else {
         let mut child = cmd.into_tokio_command().spawn()?;
+        let pid = child.id();
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
         let stdin = child.stdin.take();
-        (stdout, stderr, stdin, WaitHandle::Untracked(child), None, false)
+        (pid, stdout, stderr, stdin, WaitHandle::Untracked(child), None, false)
     };
 
     // Local buffer for captured outputs. This is separate from track_result to allow
@@ -248,27 +289,32 @@ where
         }
     };
 
+    // Ctrl+C handler - forwards SIGINT to child and records that we received it
+    let ctrl_c = wait_for_ctrl_c(child_pid);
+
     // Pin all futures for use in the coordination loop.
     // We can't use join!/select! macros directly because:
     // 1. drain_outputs must complete before wait_for_exit (child won't exit until we drain pipes)
-    // 2. forward_stdin should be cancelled when child exits (not waited on)
-    // 3. We need to track intermediate state (stdin_result)
-    futures_util::pin_mut!(drain_outputs, forward_stdin, wait_for_exit);
+    // 2. forward_stdin and ctrl_c should be cancelled when child exits (not waited on)
+    // 3. We need to track intermediate state (received_ctrl_c, stdin_result)
+    futures_util::pin_mut!(drain_outputs, forward_stdin, ctrl_c, wait_for_exit);
 
     // State flags for the coordination loop
     let mut drain_done = false;
     let mut stdin_result: Option<Result<bool, std::io::Error>> = None;
+    let mut received_ctrl_c = false;
     let termination: Option<fspy::ChildTermination>;
 
-    // Coordination loop: orchestrates the three concurrent operations.
+    // Coordination loop: orchestrates the four concurrent operations.
     //
     // The select! conditions ensure correct ordering:
     // - drain_outputs runs unconditionally until done
     // - forward_stdin runs until it completes or child exits (whichever first)
+    // - ctrl_c runs until Ctrl+C received or child exits (whichever first)
     // - wait_for_exit only runs after drain_outputs is done (we must drain pipes first)
     //
     // When wait_for_exit completes, we break out of the loop. This implicitly cancels
-    // any pending stdin read, which is safe and intentional.
+    // any pending stdin read or ctrl_c wait, which is safe and intentional.
     loop {
         tokio::select! {
             // Drain stdout/stderr - must complete before we can wait for exit
@@ -279,6 +325,10 @@ where
             // Forward stdin - record result but don't block child exit
             result = &mut forward_stdin, if stdin_result.is_none() => {
                 stdin_result = Some(result);
+            }
+            // Ctrl+C - record that we received it, continue waiting for child
+            () = &mut ctrl_c, if !received_ctrl_c => {
+                received_ctrl_c = true;
             }
             // Wait for child exit - only after drain is done
             result = &mut wait_for_exit, if drain_done => {
@@ -302,7 +352,7 @@ where
 
     // If tracking was disabled, return early without processing file accesses
     let Some(track_result) = track_result else {
-        return Ok(SpawnResult { exit_status, duration, stdin_had_data });
+        return Ok(SpawnResult { exit_status, duration, received_ctrl_c, stdin_had_data });
     };
 
     // Copy captured outputs from local buffer to track_result for caching
@@ -360,5 +410,5 @@ where
         exit_status,
     );
 
-    Ok(SpawnResult { exit_status, duration, stdin_had_data })
+    Ok(SpawnResult { exit_status, duration, received_ctrl_c, stdin_had_data })
 }
