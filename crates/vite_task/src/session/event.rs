@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{process::ExitStatus, time::Duration};
 
 use bstr::BString;
 // Re-export ExecutionItemDisplay from vite_task_plan since it's the canonical definition
@@ -44,6 +44,24 @@ pub enum CacheStatus {
     Hit { replayed_duration: Duration },
 }
 
+/// Convert ExitStatus to an i32 exit code.
+/// On Unix, if terminated by signal, returns 128 + signal_number.
+pub fn exit_status_to_code(status: &ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.code().unwrap_or_else(|| {
+            // Process was terminated by signal, use Unix convention: 128 + signal
+            status.signal().map(|sig| 128 + sig).unwrap_or(1)
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows always has an exit code
+        status.code().unwrap_or(1)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExecutionId(u32);
 
@@ -68,5 +86,5 @@ pub enum ExecutionEventKind {
     Start { display: Option<ExecutionItemDisplay>, cache_status: CacheStatus },
     Output { kind: OutputKind, content: BString },
     Error { message: String },
-    Finish { status: Option<i32>, cache_update_status: CacheUpdateStatus },
+    Finish { status: Option<ExitStatus>, cache_update_status: CacheUpdateStatus },
 }

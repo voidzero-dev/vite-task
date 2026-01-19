@@ -76,6 +76,9 @@ struct E2e {
     #[serde(default)]
     pub cwd: RelativePathBuf,
     pub steps: Vec<Step>,
+    /// Optional platform filter: "unix" or "windows". If set, test only runs on that platform.
+    #[serde(default)]
+    pub platform: Option<Str>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -165,6 +168,18 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
 
     let mut e2e_count = 0u32;
     for e2e in cases_file.e2e_cases {
+        // Skip test if platform doesn't match
+        if let Some(platform) = &e2e.platform {
+            let should_run = match platform.as_str() {
+                "unix" => cfg!(unix),
+                "windows" => cfg!(windows),
+                other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
+            };
+            if !should_run {
+                continue;
+            }
+        }
+
         let e2e_stage_path = tmpdir.join(format!("{}_e2e_stage_{}", fixture_name, e2e_count));
         e2e_count += 1;
         assert!(copy_dir(fixture_path, &e2e_stage_path).unwrap().is_empty());

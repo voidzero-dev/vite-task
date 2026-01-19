@@ -3,6 +3,7 @@
 use std::{
     collections::HashSet,
     io::Write,
+    process::ExitStatus as StdExitStatus,
     sync::{Arc, LazyLock},
     time::Duration,
 };
@@ -12,7 +13,10 @@ use vite_path::AbsolutePath;
 
 use super::{
     cache::{format_cache_status_inline, format_cache_status_summary},
-    event::{CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionItemDisplay},
+    event::{
+        CacheStatus, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionItemDisplay,
+        exit_status_to_code,
+    },
 };
 
 /// Wrap of `OwoColorize` that ignores style if `NO_COLOR` is set.
@@ -55,7 +59,8 @@ const CACHE_MISS_STYLE: Style = Style::new().purple();
 struct ExecutionInfo {
     display: Option<ExecutionItemDisplay>,
     cache_status: CacheStatus, // Non-optional, determined at Start
-    exit_status: Option<i32>,
+    /// Exit status from the process. None means no process was spawned (cache hit or in-process).
+    exit_status: Option<StdExitStatus>,
     error_message: Option<String>,
 }
 
@@ -226,12 +231,11 @@ impl<W: Write> LabeledReporter<W> {
         self.stats.failed += 1;
     }
 
-    fn handle_finish(&mut self, execution_id: ExecutionId, status: Option<i32>) {
+    fn handle_finish(&mut self, execution_id: ExecutionId, status: Option<StdExitStatus>) {
         // Update failure statistics
-        if let Some(s) = status {
-            if s != 0 {
-                self.stats.failed += 1;
-            }
+        // None means success (cache hit or in-process), Some checks the actual exit status
+        if status.is_some_and(|s| !s.success()) {
+            self.stats.failed += 1;
         }
 
         // Update execution info exit status
@@ -403,20 +407,22 @@ impl<W: Write> LabeledReporter<W> {
             let _ = write!(self.writer, ": {}", command_display.style(COMMAND_STYLE));
 
             // Execution result icon
-            match exec.exit_status {
-                Some(0) => {
+            // None means success (cache hit or in-process), Some checks actual status
+            match &exec.exit_status {
+                None => {
                     let _ = write!(self.writer, " {}", "✓".style(Style::new().green().bold()));
                 }
-                Some(code) => {
+                Some(status) if status.success() => {
+                    let _ = write!(self.writer, " {}", "✓".style(Style::new().green().bold()));
+                }
+                Some(status) => {
+                    let code = exit_status_to_code(status);
                     let _ = write!(
                         self.writer,
                         " {} {}",
                         "✗".style(Style::new().red().bold()),
                         format!("(exit code: {code})").style(Style::new().red())
                     );
-                }
-                None => {
-                    let _ = write!(self.writer, " {}", "?".style(Style::new().bright_black()));
                 }
             }
             let _ = writeln!(self.writer);
@@ -536,11 +542,13 @@ impl<W: Write> Reporter for LabeledReporter<W> {
         // 1. All tasks succeed → return Ok(())
         // 2. Exactly one task failed → return Err with that task's exit code
         // 3. More than one task failed → return Err(1)
+        // Note: None means success (cache hit or in-process)
         let failed_exit_codes: Vec<i32> = self
             .executions
             .iter()
-            .filter_map(|exec| exec.exit_status)
-            .filter(|&status| status != 0)
+            .filter_map(|exec| exec.exit_status.as_ref())
+            .filter(|status| !status.success())
+            .map(exit_status_to_code)
             .collect();
 
         match failed_exit_codes.as_slice() {

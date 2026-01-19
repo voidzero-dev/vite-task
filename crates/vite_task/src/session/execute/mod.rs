@@ -157,7 +157,7 @@ impl ExecutionContext<'_> {
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
                     kind: ExecutionEventKind::Finish {
-                        status: Some(0),
+                        status: None,
                         cache_update_status: CacheUpdateStatus::NotUpdated(
                             CacheNotUpdatedReason::CacheDisabled,
                         ),
@@ -237,7 +237,7 @@ impl ExecutionContext<'_> {
             self.event_handler.handle_event(ExecutionEvent {
                 execution_id,
                 kind: ExecutionEventKind::Finish {
-                    status: Some(0),
+                    status: None,
                     cache_update_status: CacheUpdateStatus::NotUpdated(
                         CacheNotUpdatedReason::CacheHit,
                     ),
@@ -339,7 +339,7 @@ impl ExecutionContext<'_> {
         self.event_handler.handle_event(ExecutionEvent {
             execution_id,
             kind: ExecutionEventKind::Finish {
-                status: result.exit_status.code(),
+                status: Some(result.exit_status),
                 cache_update_status,
             },
         });
