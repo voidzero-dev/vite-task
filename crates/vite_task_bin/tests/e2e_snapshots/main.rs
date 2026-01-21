@@ -3,6 +3,7 @@ mod redact;
 use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
+    mem::ManuallyDrop,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -130,9 +131,6 @@ async fn run_interactive_step(
         let mut session = expectrl::session::Session::spawn(command)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        // Set a timeout for expect operations (8 seconds to leave buffer for outer timeout)
-        session.set_expect_timeout(Some(std::time::Duration::from_secs(8)));
-
         let mut output = String::new();
         let write_stdin_pattern = expectrl::Regex(r"\[write-stdin:([^\]]*)\]");
 
@@ -157,8 +155,6 @@ async fn run_interactive_step(
                         .unwrap_or_default();
 
                     if content.is_empty() {
-                        // Small delay to let the PTY process any pending data before EOF
-                        std::thread::sleep(std::time::Duration::from_millis(50));
                         // EOF signal - send Ctrl-D (EOF character) to close stdin
                         session
                             .send(&[4]) // ASCII 4 = Ctrl-D = EOF
@@ -494,7 +490,9 @@ fn main() {
     let tests_dir = std::env::current_dir().unwrap().join("tests");
 
     // Create tokio runtime for async operations
-    let runtime = tokio::runtime::Runtime::new().unwrap();
+    // tokio Runtime's drop blocks until all spawned steps complete. It could lead to infinite wait if some step hangs.
+    // So we use `ManuallyDrop` here to avoid the drop (the process will exit anyway).
+    let runtime = ManuallyDrop::new(tokio::runtime::Runtime::new().unwrap());
 
     insta::glob!(tests_dir, "e2e_snapshots/fixtures/*", |case_path| {
         run_case(&runtime, &tmp_dir_path, case_path, filter.as_deref())
