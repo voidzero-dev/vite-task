@@ -1,7 +1,7 @@
-# Tests that stdin is passed through to tasks
+# Tests that stdin is passed through to tasks with interactive TTY
 
 [[e2e]]
 name = "stdin passthrough to single task"
 steps = [
-  { cmd = "vite run echo-stdin", stdin = "hello from stdin" },
+  { cmd = "vite run echo-stdin", interactive = true },
 ]

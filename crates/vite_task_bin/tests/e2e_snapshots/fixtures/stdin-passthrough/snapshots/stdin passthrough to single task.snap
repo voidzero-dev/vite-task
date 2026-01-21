@@ -1,12 +1,16 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/stdin-passthrough
 ---
 > vite run echo-stdin
-$ node -e "process.stdin.pipe(process.stdout)"
-hello from stdin
+$ node echo-stdin.js
+TTY: true
+$ node echo-stdin.js
+TTY: true
+[write-stdin:hello from stdin][write-stdin:]hello from stdin
+Done
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Vite+ Task Runner • Execution Summary
@@ -17,6 +21,6 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] stdin-passthrough#echo-stdin: $ node -e "process.stdin.pipe(process.stdout)" ✓
+  [1] stdin-passthrough#echo-stdin: $ node echo-stdin.js ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -10,11 +10,9 @@ use std::{
 };
 
 use copy_dir::copy_dir;
+use expectrl::Expect;
 use redact::redact_e2e_output;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::Command,
-};
+use tokio::{io::AsyncReadExt, process::Command};
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use vite_workspace::find_workspace_root;
@@ -51,21 +49,21 @@ fn get_shell_exe() -> PathBuf {
 #[serde(untagged)]
 enum Step {
     Simple(Str),
-    WithStdin { cmd: Str, stdin: Str },
+    Interactive { cmd: Str, interactive: bool },
 }
 
 impl Step {
     fn cmd(&self) -> &str {
         match self {
             Step::Simple(s) => s.as_str(),
-            Step::WithStdin { cmd, .. } => cmd.as_str(),
+            Step::Interactive { cmd, .. } => cmd.as_str(),
         }
     }
 
-    fn stdin(&self) -> Option<&str> {
+    fn is_interactive(&self) -> bool {
         match self {
-            Step::Simple(_) => None,
-            Step::WithStdin { stdin, .. } => Some(stdin.as_str()),
+            Step::Simple(_) => false,
+            Step::Interactive { interactive, .. } => *interactive,
         }
     }
 }
@@ -85,6 +83,155 @@ struct E2e {
 struct SnapshotsFile {
     #[serde(rename = "e2e", default)] // toml usually uses singular for arrays
     pub e2e_cases: Vec<E2e>,
+}
+
+struct InteractiveResult {
+    output: String,
+    exit_code: Option<i32>,
+}
+
+/// Run a step interactively using expectrl with PTY.
+///
+/// Watches for `[write-stdin:...]` patterns in stdout:
+/// - `[write-stdin:content]` - writes "content\n" to stdin
+/// - `[write-stdin:]` - signals EOF (closes stdin)
+async fn run_interactive_step(
+    #[cfg_attr(windows, allow(unused_variables))] shell_exe: &Path,
+    cmd: &str,
+    cwd: &Path,
+    env_path: &OsStr,
+) -> std::io::Result<InteractiveResult> {
+    // Build the command - use PowerShell on Windows for ConPTY support and UNC path handling
+    #[cfg(windows)]
+    let command = {
+        let mut ps = std::process::Command::new("powershell.exe");
+        // -NoProfile: don't load user profile (faster startup)
+        // -NonInteractive: no interactive prompts
+        // -Command: run the specified command
+        ps.args(["-NoProfile", "-NonInteractive", "-Command", cmd]).current_dir(cwd);
+        ps.env_clear().env("PATH", env_path).env("NO_COLOR", "1");
+        if let Ok(pathext) = std::env::var("PATHEXT") {
+            ps.env("PATHEXT", pathext);
+        }
+        ps
+    };
+
+    #[cfg(unix)]
+    let command = {
+        let mut bash = std::process::Command::new(shell_exe);
+        bash.arg("-c").arg(cmd).current_dir(cwd);
+        bash.env_clear().env("PATH", env_path).env("NO_COLOR", "1");
+        bash
+    };
+
+    // Run the synchronous expectrl code in a blocking task
+    tokio::task::spawn_blocking(move || {
+        // Spawn with PTY using expectrl's sync API
+        let mut session = expectrl::session::Session::spawn(command)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        // Set a timeout for expect operations (8 seconds to leave buffer for outer timeout)
+        session.set_expect_timeout(Some(std::time::Duration::from_secs(8)));
+
+        let mut output = String::new();
+        let write_stdin_pattern = expectrl::Regex(r"\[write-stdin:([^\]]*)\]");
+
+        loop {
+            // Use expectrl's expect() to wait for the pattern
+            let expect_result = session.expect(&write_stdin_pattern);
+
+            match expect_result {
+                Ok(found) => {
+                    // Append any output before the match
+                    let before = String::from_utf8_lossy(found.before());
+                    output.push_str(&before);
+
+                    // Append the matched pattern itself (keep it visible in output)
+                    let matched = String::from_utf8_lossy(found.as_bytes());
+                    output.push_str(&matched);
+
+                    // Extract the content from the capture group
+                    let content = found
+                        .get(1)
+                        .map(|m| String::from_utf8_lossy(m).to_string())
+                        .unwrap_or_default();
+
+                    if content.is_empty() {
+                        // Small delay to let the PTY process any pending data before EOF
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        // EOF signal - send Ctrl-D (EOF character) to close stdin
+                        session
+                            .send(&[4]) // ASCII 4 = Ctrl-D = EOF
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                        // Read any remaining output until process ends
+                        let remaining = session.expect(expectrl::Eof);
+                        if let Ok(eof_found) = remaining {
+                            output.push_str(&String::from_utf8_lossy(eof_found.before()));
+                        }
+                        break;
+                    } else {
+                        // Write content to stdin
+                        let to_write = format!("{}\n", content);
+                        session
+                            .send(to_write.as_bytes())
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                        // Small delay to let the PTY process the input
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                }
+                Err(expectrl::Error::Eof) => {
+                    // Process ended without matching pattern - collect what we have
+                    use std::io::Read;
+                    let mut remaining = Vec::new();
+                    let _ = session.read_to_end(&mut remaining);
+                    output.push_str(&String::from_utf8_lossy(&remaining));
+                    break;
+                }
+                Err(expectrl::Error::ExpectTimeout) => {
+                    // Timeout waiting for pattern - collect what we have
+                    use std::io::Read;
+                    let mut remaining = Vec::new();
+                    let _ = session.read_to_end(&mut remaining);
+                    let remaining_str = String::from_utf8_lossy(&remaining);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!(
+                            "expectrl timeout waiting for [write-stdin:] pattern. Output so far: '{}'. Remaining: '{}'",
+                            output, remaining_str
+                        ),
+                    ));
+                }
+                Err(e) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, e));
+                }
+            }
+        }
+
+        // Get exit status (platform-specific)
+        #[cfg(unix)]
+        let exit_code = {
+            use expectrl::process::unix::WaitStatus;
+            session.get_process().wait().ok().and_then(|status| match status {
+                WaitStatus::Exited(_, code) => Some(code),
+                WaitStatus::Signaled(_, _, _) => None,
+                _ => None,
+            })
+        };
+
+        #[cfg(windows)]
+        let exit_code = {
+            // conpty's wait(timeout) returns Result<u32> directly
+            session
+                .get_process()
+                .wait(None)
+                .ok()
+                .map(|code| code as i32)
+        };
+
+        Ok(InteractiveResult { output, exit_code })
+    })
+    .await
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
 }
 
 fn run_case(
@@ -188,106 +335,135 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
 
         let mut e2e_outputs = String::new();
         for step in e2e.steps {
-            let mut cmd = Command::new(&shell_exe);
-            cmd.arg("-c")
-                .arg(step.cmd())
-                .env_clear()
-                .env("PATH", &e2e_env_path)
-                .env("NO_COLOR", "1")
-                .current_dir(e2e_stage_path.join(&e2e.cwd));
-
-            // On Windows, inherit PATHEXT for executable lookup
-            if cfg!(windows) {
-                if let Ok(pathext) = std::env::var("PATHEXT") {
-                    cmd.env("PATHEXT", pathext);
-                }
-            }
-
-            // Spawn the child process
-            cmd.stdin(if step.stdin().is_some() { Stdio::piped() } else { Stdio::null() });
-            cmd.stdout(Stdio::piped());
-            cmd.stderr(Stdio::piped());
-
-            let mut child = cmd.spawn().unwrap();
-
-            // Write stdin if provided, then close it
-            if let Some(stdin_content) = step.stdin() {
-                let mut stdin = child.stdin.take().unwrap();
-                stdin.write_all(stdin_content.as_bytes()).await.unwrap();
-                drop(stdin); // Close stdin to signal EOF
-            }
-
-            // Take stdout/stderr handles
-            let mut stdout_handle = child.stdout.take().unwrap();
-            let mut stderr_handle = child.stderr.take().unwrap();
-
-            // Buffers for accumulating output
-            let mut stdout_buf = Vec::new();
-            let mut stderr_buf = Vec::new();
-
-            // Read chunks concurrently with process wait, using select! with timeout
-            let mut stdout_done = false;
-            let mut stderr_done = false;
-
             enum TerminationState {
-                Exited(std::process::ExitStatus),
+                Exited { exit_code: Option<i32> },
                 TimedOut,
             }
-            // Initial state is running
-            let mut termination_state: Option<TerminationState> = None;
 
-            let timeout = tokio::time::sleep(STEP_TIMEOUT);
-            tokio::pin!(timeout);
+            let (termination_state, stdout, stderr) = if step.is_interactive() {
+                // Interactive mode: use expectrl with PTY
+                let timeout = tokio::time::sleep(STEP_TIMEOUT);
+                tokio::pin!(timeout);
 
-            let termination_state = loop {
-                let mut stdout_chunk = [0u8; 8192];
-                let mut stderr_chunk = [0u8; 8192];
+                let step_cwd = e2e_stage_path.join(&e2e.cwd);
+                let interactive_fut =
+                    run_interactive_step(&shell_exe, step.cmd(), step_cwd.as_path(), &e2e_env_path);
 
                 tokio::select! {
-                    result = stdout_handle.read(&mut stdout_chunk), if !stdout_done => {
+                    result = interactive_fut => {
                         match result {
-                            Ok(0) => stdout_done = true,
-                            Ok(n) => stdout_buf.extend_from_slice(&stdout_chunk[..n]),
-                            Err(_) => stdout_done = true,
+                            Ok(interactive_result) => {
+                                (
+                                    TerminationState::Exited { exit_code: interactive_result.exit_code },
+                                    interactive_result.output,
+                                    String::new(), // PTY combines stdout/stderr
+                                )
+                            }
+                            Err(e) => {
+                                panic!("Interactive step failed: {}", e);
+                            }
                         }
                     }
-                    result = stderr_handle.read(&mut stderr_chunk), if !stderr_done => {
-                        match result {
-                            Ok(0) => stderr_done = true,
-                            Ok(n) => stderr_buf.extend_from_slice(&stderr_chunk[..n]),
-                            Err(_) => stderr_done = true,
-                        }
+                    _ = &mut timeout => {
+                        (TerminationState::TimedOut, String::new(), String::new())
                     }
-                    result = child.wait(), if termination_state.is_none() => {
-                        termination_state = Some(TerminationState::Exited(result.unwrap()));
-                    }
-                    _ = &mut timeout, if termination_state.is_none() => {
-                        // Timeout - kill the process
-                        let _ = child.kill().await;
-                        termination_state = Some(TerminationState::TimedOut);
+                }
+            } else {
+                // Non-interactive mode: use tokio::process::Command
+                let mut cmd = Command::new(&shell_exe);
+                cmd.arg("-c")
+                    .arg(step.cmd())
+                    .env_clear()
+                    .env("PATH", &e2e_env_path)
+                    .env("NO_COLOR", "1")
+                    .current_dir(e2e_stage_path.join(&e2e.cwd));
+
+                // On Windows, inherit PATHEXT for executable lookup
+                if cfg!(windows) {
+                    if let Ok(pathext) = std::env::var("PATHEXT") {
+                        cmd.env("PATHEXT", pathext);
                     }
                 }
 
-                // Exit conditions:
-                // 1. Process exited and all output drained
-                // 2. Timed out and all output drained (after kill, pipes close)
-                if let Some(termination_state) = &termination_state
-                    && stdout_done
-                    && stderr_done
-                {
-                    break termination_state;
+                // Spawn the child process
+                cmd.stdin(Stdio::null());
+                cmd.stdout(Stdio::piped());
+                cmd.stderr(Stdio::piped());
+
+                let mut child = cmd.spawn().unwrap();
+
+                // Take stdout/stderr handles
+                let mut stdout_handle = child.stdout.take().unwrap();
+                let mut stderr_handle = child.stderr.take().unwrap();
+
+                // Buffers for accumulating output
+                let mut stdout_buf = Vec::new();
+                let mut stderr_buf = Vec::new();
+
+                // Read chunks concurrently with process wait, using select! with timeout
+                let mut stdout_done = false;
+                let mut stderr_done = false;
+
+                // Initial state is running
+                let mut term_state: Option<TerminationState> = None;
+
+                let timeout = tokio::time::sleep(STEP_TIMEOUT);
+                tokio::pin!(timeout);
+
+                loop {
+                    let mut stdout_chunk = [0u8; 8192];
+                    let mut stderr_chunk = [0u8; 8192];
+
+                    tokio::select! {
+                        result = stdout_handle.read(&mut stdout_chunk), if !stdout_done => {
+                            match result {
+                                Ok(0) => stdout_done = true,
+                                Ok(n) => stdout_buf.extend_from_slice(&stdout_chunk[..n]),
+                                Err(_) => stdout_done = true,
+                            }
+                        }
+                        result = stderr_handle.read(&mut stderr_chunk), if !stderr_done => {
+                            match result {
+                                Ok(0) => stderr_done = true,
+                                Ok(n) => stderr_buf.extend_from_slice(&stderr_chunk[..n]),
+                                Err(_) => stderr_done = true,
+                            }
+                        }
+                        result = child.wait(), if term_state.is_none() => {
+                            let status = result.unwrap();
+                            term_state = Some(TerminationState::Exited { exit_code: status.code() });
+                        }
+                        _ = &mut timeout, if term_state.is_none() => {
+                            // Timeout - kill the process
+                            let _ = child.kill().await;
+                            term_state = Some(TerminationState::TimedOut);
+                        }
+                    }
+
+                    // Exit conditions:
+                    // 1. Process exited and all output drained
+                    // 2. Timed out and all output drained (after kill, pipes close)
+                    if term_state.is_some() && stdout_done && stderr_done {
+                        break;
+                    }
                 }
+
+                let stdout = String::from_utf8_lossy(&stdout_buf).into_owned();
+                let stderr = String::from_utf8_lossy(&stderr_buf).into_owned();
+
+                // term_state is guaranteed to be Some here due to the break condition
+                (term_state.unwrap(), stdout, stderr)
             };
 
             // Format output
-            match termination_state {
+            match &termination_state {
                 TerminationState::TimedOut => {
                     e2e_outputs.push_str("[timeout]");
                 }
-                TerminationState::Exited(status) => {
-                    let exit_code = status.code().unwrap_or(-1);
-                    if exit_code != 0 {
-                        e2e_outputs.push_str(format!("[{}]", exit_code).as_str());
+                TerminationState::Exited { exit_code } => {
+                    let code = exit_code.unwrap_or(-1);
+                    if code != 0 {
+                        e2e_outputs.push_str(format!("[{}]", code).as_str());
                     }
                 }
             }
@@ -296,8 +472,6 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
             e2e_outputs.push_str(step.cmd());
             e2e_outputs.push('\n');
 
-            let stdout = String::from_utf8_lossy(&stdout_buf).into_owned();
-            let stderr = String::from_utf8_lossy(&stderr_buf).into_owned();
             e2e_outputs.push_str(&redact_e2e_output(stdout, e2e_stage_path_str));
             e2e_outputs.push_str(&redact_e2e_output(stderr, e2e_stage_path_str));
             e2e_outputs.push('\n');

@@ -1,0 +1,7 @@
+{
+  "tasks": {
+    "echo-stdin": {
+      "command": "node echo-stdin.js"
+    }
+  }
+}

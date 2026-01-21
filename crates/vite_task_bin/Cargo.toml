@@ -24,6 +24,7 @@ which = { workspace = true }
 [dev-dependencies]
 copy_dir = { workspace = true }
 cow-utils = { workspace = true }
+expectrl = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
 regex = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
