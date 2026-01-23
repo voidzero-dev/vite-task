@@ -3,3 +3,14 @@ rustflags = ["--cfg", "tokio_unstable"] # also update .github/workflows/ci.yml
 
 [unstable]
 bindeps = true
+
+# Windows static CRT linking for portable binaries
+# Note: must include --cfg tokio_unstable since target-specific rustflags override [build] rustflags
+[target.x86_64-pc-windows-msvc]
+rustflags = ["--cfg", "tokio_unstable", "-C", "target-feature=+crt-static"]
+
+[target.i686-pc-windows-msvc]
+rustflags = ["--cfg", "tokio_unstable", "-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["--cfg", "tokio_unstable", "-C", "target-feature=+crt-static"]
