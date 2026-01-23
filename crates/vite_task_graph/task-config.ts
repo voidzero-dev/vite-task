@@ -1,4 +1,4 @@
-type Task = {
+export type Task = {
   /**
    * The command to run for the task.
    *

@@ -142,7 +142,14 @@ impl UserConfigTasks {
 
         let mut collector = DeclCollector(Vec::new());
         Self::visit_dependencies(&mut collector);
-        let mut types = collector.0.join("\n\n");
+
+        // Export all types
+        let mut types: String = collector
+            .0
+            .iter()
+            .map(|decl| vite_str::format!("export {decl}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
         // Export the main type
         types.push_str("\n\nexport ");
