@@ -121,9 +121,11 @@ impl UserConfigTasks {
     /// Generates TypeScript type definitions for user task configuration.
     #[cfg(test)]
     pub fn generate_ts_definition() -> String {
-        use dprint_plugin_typescript::{
-            FormatTextOptions, configuration::ConfigurationBuilder, format_text,
+        use std::{
+            io::Write,
+            process::{Command, Stdio},
         };
+
         use ts_rs::TypeVisitor;
 
         struct DeclCollector(Vec<String>);
@@ -146,16 +148,29 @@ impl UserConfigTasks {
         types.push_str("\n\nexport ");
         types.push_str(&Self::decl());
 
-        // Format
-        let fmt_cfg = ConfigurationBuilder::new().build();
-        let options = FormatTextOptions {
-            config: &fmt_cfg,
-            path: std::path::Path::new("task-config.ts"),
-            text: types.clone(),
-            extension: None,
-            external_formatter: None,
-        };
-        format_text(options).unwrap().unwrap()
+        // Format using oxfmt from packages/tools
+        let workspace_root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let oxfmt = workspace_root.join("packages/tools/node_modules/.bin/oxfmt");
+
+        let mut child = Command::new(oxfmt)
+            .arg("--stdin-filepath=task-config.ts")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn oxfmt");
+
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(types.as_bytes())
+            .expect("failed to write to oxfmt stdin");
+
+        let output = child.wait_with_output().expect("failed to read oxfmt output");
+        assert!(output.status.success(), "oxfmt failed");
+
+        String::from_utf8(output.stdout).expect("oxfmt output is not valid UTF-8")
     }
 }
 

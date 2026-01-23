@@ -62,7 +62,6 @@ ctor = "0.6"
 derive_more = "2.0.1"
 diff-struct = "0.5.3"
 directories = "6.0.0"
-dprint-plugin-typescript = "0.95"
 elf = { version = "0.8.0", default-features = false }
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
