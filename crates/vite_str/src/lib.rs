@@ -176,6 +176,38 @@ impl PartialEq<str> for Str {
     }
 }
 
+#[cfg(feature = "ts-types")]
+mod ts_impl {
+    use ts_rs::TS;
+
+    use super::Str;
+
+    impl TS for Str {
+        type OptionInnerType = Self;
+        type WithoutGenerics = Self;
+
+        fn name() -> String {
+            "string".to_owned()
+        }
+
+        fn inline() -> String {
+            "string".to_owned()
+        }
+
+        fn inline_flattened() -> String {
+            panic!("Str cannot be flattened")
+        }
+
+        fn decl() -> String {
+            panic!("Str is a primitive type")
+        }
+
+        fn decl_concrete() -> String {
+            panic!("Str is a primitive type")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bincode::{config::standard, decode_from_slice, encode_to_vec};

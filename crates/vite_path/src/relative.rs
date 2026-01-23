@@ -263,6 +263,38 @@ pub enum FromPathError {
     InvalidPathData(#[from] InvalidPathDataError),
 }
 
+#[cfg(feature = "ts-types")]
+mod ts_impl {
+    use ts_rs::TS;
+
+    use super::RelativePathBuf;
+
+    impl TS for RelativePathBuf {
+        type OptionInnerType = Self;
+        type WithoutGenerics = Self;
+
+        fn name() -> String {
+            "string".to_owned()
+        }
+
+        fn inline() -> String {
+            "string".to_owned()
+        }
+
+        fn inline_flattened() -> String {
+            panic!("RelativePathBuf cannot be flattened")
+        }
+
+        fn decl() -> String {
+            panic!("RelativePathBuf is a primitive type")
+        }
+
+        fn decl_concrete() -> String {
+            panic!("RelativePathBuf is a primitive type")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 

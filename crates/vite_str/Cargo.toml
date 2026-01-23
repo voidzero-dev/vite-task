@@ -11,6 +11,10 @@ bincode = { workspace = true }
 compact_str = { workspace = true, features = ["serde"] }
 diff-struct = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+ts-rs = { workspace = true, optional = true }
+
+[features]
+ts-types = ["dep:ts-rs"]
 
 [lints]
 workspace = true

@@ -2804,6 +2804,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "termcolor"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
 name = "test-log"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3038,6 +3047,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ts-rs"
+version = "11.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4994acea2522cd2b3b85c1d9529a55991e3ad5e25cdcd3de9d505972c4379424"
+dependencies = [
+ "thiserror 2.0.17",
+ "ts-rs-macros",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "11.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee6ff59666c9cbaec3533964505d39154dc4e0a56151fdea30a09ed0301f62e2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+ "termcolor",
+]
+
+[[package]]
 name = "tui-term"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3208,6 +3239,7 @@ dependencies = [
  "ref-cast",
  "serde",
  "thiserror 2.0.17",
+ "ts-rs",
  "vite_str",
 ]
 
@@ -3231,6 +3263,7 @@ dependencies = [
  "compact_str 0.9.0",
  "diff-struct",
  "serde",
+ "ts-rs",
 ]
 
 [[package]]
@@ -3285,6 +3318,7 @@ dependencies = [
  "vite_path",
  "vite_str",
  "vite_task",
+ "vite_task_graph",
  "vite_workspace",
  "which",
 ]
@@ -3302,6 +3336,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
+ "ts-rs",
  "vec1",
  "vite_graph_ser",
  "vite_path",

@@ -30,6 +30,22 @@ async fn run() -> anyhow::Result<ExitStatus> {
             println!("{}", env!("CARGO_PKG_VERSION"));
             return Ok(ExitStatus::SUCCESS);
         }
+        CLIArgs::NonTask(NonTaskSubcommand::ConfigTypes) => {
+            #[cfg(feature = "ts-types")]
+            {
+                println!(
+                    "{}",
+                    vite_task_graph::config::user::UserConfigTasks::typescript_definition()
+                );
+                return Ok(ExitStatus::SUCCESS);
+            }
+            #[cfg(not(feature = "ts-types"))]
+            {
+                eprintln!("TypeScript type generation requires the 'ts-types' feature.");
+                eprintln!("Rebuild with: cargo build --features ts-types");
+                return Ok(ExitStatus::FAILURE);
+            }
+        }
     };
 
     let mut owned_callbacks = OwnedSessionCallbacks::default();

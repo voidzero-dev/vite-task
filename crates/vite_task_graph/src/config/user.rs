@@ -4,17 +4,21 @@ use std::{collections::HashMap, sync::Arc};
 
 use monostate::MustBe;
 use serde::Deserialize;
+#[cfg(feature = "ts-types")]
+use ts_rs::TS;
 use vite_path::RelativePathBuf;
 use vite_str::Str;
 
 /// Cache-related fields of a task defined by user in `vite.config.*`
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-types", derive(TS))]
 #[serde(untagged, deny_unknown_fields, rename_all = "camelCase")]
 pub enum UserCacheConfig {
     /// Cache is enabled
     Enabled {
         /// The `cache` field must be true or omitted
         #[serde(default)]
+        #[cfg_attr(feature = "ts-types", ts(type = "true"))]
         cache: MustBe!(true),
 
         #[serde(flatten)]
@@ -23,12 +27,14 @@ pub enum UserCacheConfig {
     /// Cache is disabled
     Disabled {
         /// The `cache` field must be false
+        #[cfg_attr(feature = "ts-types", ts(type = "false"))]
         cache: MustBe!(false),
     },
 }
 
 /// Cache configuration fields when caching is enabled
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-types", derive(TS))]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledCacheConfig {
     /// Environment variable names to be fingerprinted and passed to the task.
@@ -42,6 +48,7 @@ pub struct EnabledCacheConfig {
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-types", derive(TS))]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
@@ -80,6 +87,7 @@ impl Default for UserTaskOptions {
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-types", derive(TS))]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskConfig {
     /// If None, the script from `package.json` with the same name will be used
@@ -97,7 +105,54 @@ pub struct UserConfigFile {
 }
 
 /// Type of the `tasks` field in `vite.config.*`
-pub type UserConfigTasks = HashMap<Str, UserTaskConfig>;
+#[derive(Debug, Default, Deserialize)]
+#[serde(transparent)]
+#[cfg_attr(feature = "ts-types", derive(TS))]
+pub struct UserConfigTasks(pub HashMap<Str, UserTaskConfig>);
+
+#[cfg(feature = "ts-types")]
+impl UserConfigTasks {
+    /// Returns the TypeScript type definitions for user task configuration.
+    pub fn typescript_definition() -> String {
+        use ts_rs::TypeVisitor;
+
+        struct DeclCollector(Vec<String>);
+
+        impl TypeVisitor for DeclCollector {
+            fn visit<T: TS + 'static + ?Sized>(&mut self) {
+                // Only collect declarations from types that are exportable
+                // (i.e., have an output path - built-in types like HashMap don't)
+                if T::output_path().is_some() {
+                    self.0.push(T::decl());
+                }
+            }
+        }
+
+        let mut collector = DeclCollector(Vec::new());
+        Self::visit_dependencies(&mut collector);
+        collector.0.push(Self::decl());
+        collector.0.join("\n\n")
+    }
+}
+
+#[cfg(all(test, feature = "ts-types"))]
+mod ts_tests {
+    use super::*;
+
+    #[test]
+    fn test_typescript_generation() {
+        let ts = UserConfigTasks::typescript_definition();
+        eprintln!("Generated TypeScript:\n{ts}");
+        // Check for key type definitions
+        assert!(ts.contains("type UserTaskConfig"), "Missing UserTaskConfig in:\n{ts}");
+        assert!(ts.contains("type UserConfigTasks"), "Missing UserConfigTasks in:\n{ts}");
+        // Check for key fields (flattened types are inlined)
+        assert!(ts.contains("cache: true"), "Missing cache: true in:\n{ts}");
+        assert!(ts.contains("cache: false"), "Missing cache: false in:\n{ts}");
+        assert!(ts.contains("cwd:"), "Missing cwd field in:\n{ts}");
+        assert!(ts.contains("dependsOn:"), "Missing dependsOn field in:\n{ts}");
+    }
+}
 
 #[cfg(test)]
 mod tests {

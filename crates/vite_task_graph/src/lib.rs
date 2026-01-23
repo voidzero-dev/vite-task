@@ -217,7 +217,7 @@ impl IndexedTaskGraph {
                     TaskGraphLoadError::ConfigLoadError { error, package_path: package_dir.clone() }
                 })?;
 
-            for (task_name, task_user_config) in user_config.tasks {
+            for (task_name, task_user_config) in user_config.tasks.0 {
                 // For each task defined in vite.config.*, look up the corresponding package.json script (if any)
                 let package_json_script = package_json_scripts.remove(task_name.as_str());
 

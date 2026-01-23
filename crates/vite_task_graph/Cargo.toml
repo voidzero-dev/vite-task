@@ -16,11 +16,15 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
+ts-rs = { workspace = true, optional = true }
 vec1 = { workspace = true, features = ["smallvec-v1"] }
 vite_graph_ser = { workspace = true }
 vite_path = { workspace = true }
 vite_str = { workspace = true }
 vite_workspace = { workspace = true }
+
+[features]
+ts-types = ["dep:ts-rs", "vite_str/ts-types", "vite_path/ts-types"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["fs", "rt-multi-thread"] }

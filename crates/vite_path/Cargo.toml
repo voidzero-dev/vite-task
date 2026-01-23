@@ -12,10 +12,12 @@ diff-struct = { workspace = true }
 ref-cast = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 thiserror = { workspace = true }
+ts-rs = { workspace = true, optional = true }
 vite_str = { workspace = true }
 
 [features]
 absolute-redaction = []
+ts-types = ["dep:ts-rs", "vite_str/ts-types"]
 
 [lints]
 workspace = true

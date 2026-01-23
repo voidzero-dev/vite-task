@@ -44,6 +44,9 @@ pub enum CustomTaskSubcommand {
 #[derive(Debug, Subcommand)]
 pub enum NonTaskSubcommand {
     Version,
+    /// Print the generated TypeScript type definitions for the config file schema.
+    /// This is useful for debugging the ts-rs type generation.
+    ConfigTypes,
 }
 
 #[derive(Debug, Default)]

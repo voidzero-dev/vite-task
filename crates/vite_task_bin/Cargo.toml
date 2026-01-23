@@ -19,7 +19,11 @@ tokio = { workspace = true, features = ["full"] }
 vite_path = { workspace = true }
 vite_str = { workspace = true }
 vite_task = { workspace = true }
+vite_task_graph = { workspace = true, optional = true }
 which = { workspace = true }
+
+[features]
+ts-types = ["dep:vite_task_graph", "vite_task_graph/ts-types"]
 
 [dev-dependencies]
 copy_dir = { workspace = true }
