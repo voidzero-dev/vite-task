@@ -8,7 +8,6 @@ use std::{
 };
 
 use clap::Subcommand;
-use monostate::MustBe;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
@@ -120,10 +119,10 @@ impl vite_task::TaskSynthesizer<CustomTaskSubcommand> for TaskSynthesizer {
                     args: [name.clone()].into(),
                     task_options: UserTaskOptions {
                         cache_config: UserCacheConfig::Enabled {
-                            cache: MustBe!(true),
+                            cache: None,
                             enabled_cache_config: EnabledCacheConfig {
-                                envs: Box::new([]),
-                                pass_through_envs: vec![name],
+                                envs: None,
+                                pass_through_envs: Some(vec![name]),
                             },
                         },
                         ..Default::default()

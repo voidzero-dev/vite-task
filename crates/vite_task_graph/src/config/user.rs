@@ -11,15 +11,14 @@ use vite_str::Str;
 
 /// Cache-related fields of a task defined by user in `vite.config.*`
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, derive(TS), ts(optional_fields))]
 #[serde(untagged, deny_unknown_fields, rename_all = "camelCase")]
 pub enum UserCacheConfig {
     /// Cache is enabled
     Enabled {
         /// Whether to cache the task
-        #[serde(default)]
-        #[cfg_attr(test, ts(type = "true"))]
-        cache: MustBe!(true),
+        #[cfg_attr(test, ts(type = "true", optional))]
+        cache: Option<MustBe!(true)>,
 
         #[serde(flatten)]
         enabled_cache_config: EnabledCacheConfig,
@@ -34,31 +33,27 @@ pub enum UserCacheConfig {
 
 /// Cache configuration fields when caching is enabled
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, derive(TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledCacheConfig {
     /// Environment variable names to be fingerprinted and passed to the task.
-    #[serde(default)] // default to empty if omitted
-    pub envs: Box<[Str]>,
+    pub envs: Option<Box<[Str]>>,
 
     /// Environment variable names to be passed to the task without fingerprinting.
-    #[serde(default)] // default to empty if omitted
-    pub pass_through_envs: Vec<Str>,
+    pub pass_through_envs: Option<Vec<Str>>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, derive(TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
-    #[serde(default)] // default to empty if omitted
     #[serde(rename = "cwd")]
-    pub cwd_relative_to_package: RelativePathBuf,
+    pub cwd_relative_to_package: Option<RelativePathBuf>,
 
     /// Dependencies of this task. Use `package-name#task-name` to refer to tasks in other packages.
-    #[serde(default)] // default to empty if omitted
-    pub depends_on: Arc<[Str]>,
+    pub depends_on: Option<Arc<[Str]>>,
 
     /// Cache-related fields
     #[serde(flatten)]
@@ -70,16 +65,13 @@ impl Default for UserTaskOptions {
     fn default() -> Self {
         Self {
             // Runs in the package root
-            cwd_relative_to_package: RelativePathBuf::default(),
+            cwd_relative_to_package: None,
             // No dependencies
-            depends_on: Arc::new([]),
+            depends_on: None,
             // Caching enabled with no fingerprinted envs
             cache_config: UserCacheConfig::Enabled {
-                cache: MustBe!(true),
-                enabled_cache_config: EnabledCacheConfig {
-                    envs: Box::new([]),
-                    pass_through_envs: Vec::new(),
-                },
+                cache: None,
+                enabled_cache_config: EnabledCacheConfig { envs: None, pass_through_envs: None },
             },
         }
     }
@@ -87,9 +79,8 @@ impl Default for UserTaskOptions {
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, derive(TS), ts(optional_fields, rename = "Task"))]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(test, ts(rename = "Task"))]
 pub struct UserTaskConfig {
     /// The command to run for the task.
     ///
@@ -236,7 +227,7 @@ mod tests {
             "cwd": "src"
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(user_config.options.cwd_relative_to_package.as_str(), "src");
+        assert_eq!(user_config.options.cwd_relative_to_package.as_ref().unwrap().as_str(), "src");
     }
 
     #[test]
@@ -261,10 +252,10 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<UserCacheConfig>(user_config_json).unwrap(),
             UserCacheConfig::Enabled {
-                cache: MustBe!(true),
+                cache: Some(MustBe!(true)),
                 enabled_cache_config: EnabledCacheConfig {
-                    envs: ["NODE_ENV".into()].into_iter().collect(),
-                    pass_through_envs: ["FOO".into()].into_iter().collect(),
+                    envs: Some(["NODE_ENV".into()].into_iter().collect()),
+                    pass_through_envs: Some(["FOO".into()].into_iter().collect()),
                 }
             },
         );

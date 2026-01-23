@@ -41,21 +41,23 @@ pub struct ResolvedTaskOptions {
 impl ResolvedTaskOptions {
     /// Resolves from user-defined options and the directory path where the options are defined.
     pub fn resolve(user_options: UserTaskOptions, dir: &Arc<AbsolutePath>) -> Self {
-        let cwd: Arc<AbsolutePath> = if user_options.cwd_relative_to_package.as_str().is_empty() {
-            Arc::clone(dir)
-        } else {
-            dir.join(user_options.cwd_relative_to_package).into()
+        let cwd: Arc<AbsolutePath> = match user_options.cwd_relative_to_package {
+            Some(ref cwd) if !cwd.as_str().is_empty() => dir.join(cwd).into(),
+            _ => Arc::clone(dir),
         };
         let cache_config = match user_options.cache_config {
             UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
-            UserCacheConfig::Enabled { cache: MustBe!(true), mut enabled_cache_config } => {
-                enabled_cache_config
-                    .pass_through_envs
-                    .extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
+            UserCacheConfig::Enabled { cache: _, enabled_cache_config } => {
+                let mut pass_through_envs =
+                    enabled_cache_config.pass_through_envs.unwrap_or_default();
+                pass_through_envs.extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
                 Some(CacheConfig {
                     env_config: EnvConfig {
-                        fingerprinted_envs: enabled_cache_config.envs.into_iter().collect(),
-                        pass_through_envs: enabled_cache_config.pass_through_envs.into(),
+                        fingerprinted_envs: enabled_cache_config
+                            .envs
+                            .map(|e| e.into_vec().into_iter().collect())
+                            .unwrap_or_default(),
+                        pass_through_envs: pass_through_envs.into(),
                     },
                 })
             }

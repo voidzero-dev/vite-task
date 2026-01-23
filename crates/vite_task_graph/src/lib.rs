@@ -192,7 +192,7 @@ impl IndexedTaskGraph {
         let package_graph = vite_workspace::load_package_graph(workspace_root)?;
 
         // Record dependency specifiers for each task node to add explicit dependencies later
-        let mut task_ids_with_dependency_specifiers: Vec<(TaskId, Arc<[Str]>)> = Vec::new();
+        let mut task_ids_with_dependency_specifiers: Vec<(TaskId, Option<Arc<[Str]>>)> = Vec::new();
 
         // index tasks by ids
         let mut node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex> =
@@ -223,7 +223,7 @@ impl IndexedTaskGraph {
 
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
-                let dependency_specifiers = Arc::clone(&task_user_config.options.depends_on);
+                let dependency_specifiers = task_user_config.options.depends_on.clone();
 
                 // Resolve the task configuration combining vite.config.* and package.json script
                 let resolved_config = ResolvedTaskConfig::resolve(
@@ -298,7 +298,7 @@ impl IndexedTaskGraph {
         // Add explicit dependencies
         for (from_task_id, dependency_specifiers) in task_ids_with_dependency_specifiers {
             let from_node_index = me.node_indices_by_task_id[&from_task_id];
-            for specifier in dependency_specifiers.iter().cloned() {
+            for specifier in dependency_specifiers.iter().flat_map(|s| s.iter()).cloned() {
                 let to_node_index = me
                     .get_task_index_by_specifier::<Infallible>(
                         TaskSpecifier::parse_raw(&specifier),
