@@ -3319,7 +3319,6 @@ dependencies = [
  "copy_dir",
  "cow-utils",
  "insta",
- "monostate",
  "regex",
  "serde",
  "tempfile",

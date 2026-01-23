@@ -14,7 +14,6 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-monostate = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 vite_path = { workspace = true }
 vite_str = { workspace = true }
