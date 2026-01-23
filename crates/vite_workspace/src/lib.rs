@@ -25,6 +25,7 @@ struct PnpmWorkspace {
     /// The packages to include in the workspace.
     ///
     /// <https://pnpm.io/pnpm-workspace_yaml>
+    #[serde(default)]
     packages: Vec<Str>,
 }
 
