@@ -263,6 +263,7 @@ pub enum FromPathError {
     InvalidPathData(#[from] InvalidPathDataError),
 }
 
+#[cfg(feature = "ts-rs")]
 mod ts_impl {
     use ts_rs::TS;
 

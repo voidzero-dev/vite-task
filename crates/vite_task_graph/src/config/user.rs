@@ -4,19 +4,21 @@ use std::{collections::HashMap, sync::Arc};
 
 use monostate::MustBe;
 use serde::Deserialize;
+#[cfg(test)]
 use ts_rs::TS;
 use vite_path::RelativePathBuf;
 use vite_str::Str;
 
 /// Cache-related fields of a task defined by user in `vite.config.*`
-#[derive(Debug, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(TS))]
 #[serde(untagged, deny_unknown_fields, rename_all = "camelCase")]
 pub enum UserCacheConfig {
     /// Cache is enabled
     Enabled {
         /// Whether to cache the task
         #[serde(default)]
-        #[ts(type = "true")]
+        #[cfg_attr(test, ts(type = "true"))]
         cache: MustBe!(true),
 
         #[serde(flatten)]
@@ -25,13 +27,14 @@ pub enum UserCacheConfig {
     /// Cache is disabled
     Disabled {
         /// Whether to cache the task
-        #[ts(type = "false")]
+        #[cfg_attr(test, ts(type = "false"))]
         cache: MustBe!(false),
     },
 }
 
 /// Cache configuration fields when caching is enabled
-#[derive(Debug, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(TS))]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledCacheConfig {
     /// Environment variable names to be fingerprinted and passed to the task.
@@ -44,7 +47,8 @@ pub struct EnabledCacheConfig {
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
-#[derive(Debug, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(TS))]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
@@ -82,9 +86,10 @@ impl Default for UserTaskOptions {
 }
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
-#[derive(Debug, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(TS))]
 #[serde(rename_all = "camelCase")]
-#[ts(rename = "Task")]
+#[cfg_attr(test, ts(rename = "Task"))]
 pub struct UserTaskConfig {
     /// The command to run for the task.
     ///
@@ -103,9 +108,10 @@ pub struct UserConfigFile {
 }
 
 /// Type of the `tasks` field in `vite.config.*`
-#[derive(Debug, Default, Deserialize, TS)]
+#[derive(Debug, Default, Deserialize)]
+#[cfg_attr(test, derive(TS))]
 #[serde(transparent)]
-#[ts(rename = "Tasks")]
+#[cfg_attr(test, ts(rename = "Tasks"))]
 pub struct UserConfigTasks(pub HashMap<Str, UserTaskConfig>);
 
 impl UserConfigTasks {
