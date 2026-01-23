@@ -169,12 +169,13 @@ mod ts_tests {
     fn typescript_generation() {
         let file_path =
             PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("task-config.ts");
-        let ts = UserConfigTasks::generate_ts_definition();
+        let ts = UserConfigTasks::generate_ts_definition().replace("\r", "");
 
         if env::var("VT_UPDATE_TS_TYPES").unwrap_or_default() == "1" {
             std::fs::write(&file_path, ts).unwrap();
         } else {
-            let existing_ts = std::fs::read_to_string(&file_path).unwrap_or_default();
+            let existing_ts =
+                std::fs::read_to_string(&file_path).unwrap_or_default().replace('\r', "");
             pretty_assertions::assert_eq!(
                 ts,
                 existing_ts,
