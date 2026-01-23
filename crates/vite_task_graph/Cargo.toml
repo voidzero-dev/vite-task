@@ -17,7 +17,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
-ts-rs = { workspace = true }
+ts-rs = { workspace = true, features = ["format"] }
 vec1 = { workspace = true, features = ["smallvec-v1"] }
 vite_graph_ser = { workspace = true }
 vite_path = { workspace = true }
@@ -25,6 +25,8 @@ vite_str = { workspace = true }
 vite_workspace = { workspace = true }
 
 [dev-dependencies]
+pretty_assertions = "1.4.1"
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["fs", "rt-multi-thread"] }
 
 [lints]

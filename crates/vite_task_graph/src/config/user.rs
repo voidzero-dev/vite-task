@@ -14,7 +14,7 @@ use vite_str::Str;
 pub enum UserCacheConfig {
     /// Cache is enabled
     Enabled {
-        /// The `cache` field must be true or omitted
+        /// Whether to cache the task
         #[serde(default)]
         #[ts(type = "true")]
         cache: MustBe!(true),
@@ -24,7 +24,7 @@ pub enum UserCacheConfig {
     },
     /// Cache is disabled
     Disabled {
-        /// The `cache` field must be false
+        /// Whether to cache the task
         #[ts(type = "false")]
         cache: MustBe!(false),
     },
@@ -52,7 +52,7 @@ pub struct UserTaskOptions {
     #[serde(rename = "cwd")]
     pub cwd_relative_to_package: RelativePathBuf,
 
-    /// Explicit dependencies of this task.
+    /// Dependencies of this task. Use `package-name#task-name` to refer to tasks in other packages.
     #[serde(default)] // default to empty if omitted
     pub depends_on: Arc<[Str]>,
 
@@ -84,8 +84,11 @@ impl Default for UserTaskOptions {
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
 #[derive(Debug, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename = "Task")]
 pub struct UserTaskConfig {
-    /// If None, the script from `package.json` with the same name will be used
+    /// The command to run for the task.
+    ///
+    /// If omitted, the script from `package.json` with the same name will be used
     pub command: Option<Box<str>>,
 
     /// Fields other than the command
@@ -102,11 +105,16 @@ pub struct UserConfigFile {
 /// Type of the `tasks` field in `vite.config.*`
 #[derive(Debug, Default, Deserialize, TS)]
 #[serde(transparent)]
+#[ts(rename = "Tasks")]
 pub struct UserConfigTasks(pub HashMap<Str, UserTaskConfig>);
 
 impl UserConfigTasks {
-    /// Returns the TypeScript type definitions for user task configuration.
-    pub fn typescript_definition() -> String {
+    /// TypeScript type definitions for user task configuration.
+    pub const TS_TYPE: &str = include_str!("../../task-config.ts");
+
+    /// Generates TypeScript type definitions for user task configuration.
+    #[cfg(test)]
+    pub fn generate_ts_definition() -> String {
         use dprint_plugin_typescript::{
             FormatTextOptions, configuration::ConfigurationBuilder, format_text,
         };
@@ -126,38 +134,47 @@ impl UserConfigTasks {
 
         let mut collector = DeclCollector(Vec::new());
         Self::visit_dependencies(&mut collector);
-        collector.0.push(Self::decl());
-        let unformatted = collector.0.join("\n\n");
+        let mut types = collector.0.join("\n\n");
 
-        // Format with dprint
-        let fmt_cfg = ConfigurationBuilder::new().deno().build();
+        // Export the main type
+        types.push_str("\n\nexport ");
+        types.push_str(&Self::decl());
+
+        // Format
+        let fmt_cfg = ConfigurationBuilder::new().build();
         let options = FormatTextOptions {
             config: &fmt_cfg,
-            path: std::path::Path::new("user_config.d.ts"),
-            text: unformatted.clone(),
+            path: std::path::Path::new("task-config.ts"),
+            text: types.clone(),
             extension: None,
             external_formatter: None,
         };
-        format_text(options).ok().flatten().unwrap_or(unformatted)
+        format_text(options).unwrap().unwrap()
     }
 }
 
 #[cfg(test)]
 mod ts_tests {
-    use super::*;
+    use std::{env, path::PathBuf};
+
+    use super::UserConfigTasks;
 
     #[test]
-    fn test_typescript_generation() {
-        let ts = UserConfigTasks::typescript_definition();
-        eprintln!("Generated TypeScript:\n{ts}");
-        // Check for key type definitions
-        assert!(ts.contains("type UserTaskConfig"), "Missing UserTaskConfig in:\n{ts}");
-        assert!(ts.contains("type UserConfigTasks"), "Missing UserConfigTasks in:\n{ts}");
-        // Check for key fields (flattened types are inlined)
-        assert!(ts.contains("cache: true"), "Missing cache: true in:\n{ts}");
-        assert!(ts.contains("cache: false"), "Missing cache: false in:\n{ts}");
-        assert!(ts.contains("cwd:"), "Missing cwd field in:\n{ts}");
-        assert!(ts.contains("dependsOn:"), "Missing dependsOn field in:\n{ts}");
+    fn typescript_generation() {
+        let file_path =
+            PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("task-config.ts");
+        let ts = UserConfigTasks::generate_ts_definition();
+
+        if env::var("VT_UPDATE_TS_TYPES").unwrap_or_default() == "1" {
+            std::fs::write(&file_path, ts).unwrap();
+        } else {
+            let existing_ts = std::fs::read_to_string(&file_path).unwrap_or_default();
+            pretty_assertions::assert_eq!(
+                ts,
+                existing_ts,
+                "Generated TypeScript types do not match the existing ones. If you made changes to the types, please set VT_UPDATE_TS_TYPES=1 and run the tests again to update the TypeScript definitions."
+            );
+        }
     }
 }
 

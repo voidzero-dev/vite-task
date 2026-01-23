@@ -30,10 +30,6 @@ async fn run() -> anyhow::Result<ExitStatus> {
             println!("{}", env!("CARGO_PKG_VERSION"));
             return Ok(ExitStatus::SUCCESS);
         }
-        CLIArgs::NonTask(NonTaskSubcommand::ConfigTypes) => {
-            println!("{}", vite_task_graph::config::user::UserConfigTasks::typescript_definition());
-            return Ok(ExitStatus::SUCCESS);
-        }
     };
 
     let mut owned_callbacks = OwnedSessionCallbacks::default();
