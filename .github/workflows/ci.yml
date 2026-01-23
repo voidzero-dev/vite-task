@@ -100,12 +100,11 @@ jobs:
           tools: dprint,cargo-shear
           components: clippy rust-docs rustfmt
 
-      - run: |
-          dprint check
-          cargo shear
-          cargo fmt --check
-          # cargo clippy --all-targets --all-features -- -D warnings
-          RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --document-private-items
+      - run: dprint check
+      - run: cargo shear
+      - run: cargo fmt --check
+      # - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --document-private-items
 
       - uses: crate-ci/typos@85f62a8a84f939ae994ab3763f01a0296d61a7ee # v1.36.2
         with:
