@@ -27,14 +27,7 @@ impl AsRef<Self> for AbsolutePath {
 
 impl Debug for AbsolutePath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug_tuple = f.debug_tuple("AbsolutePath");
-        #[cfg(feature = "absolute-redaction")]
-        if let Some(redacted_path) = self.try_redact().unwrap() {
-            debug_tuple.field(&redacted_path);
-            return debug_tuple.finish();
-        }
-        debug_tuple.field(&&self.0);
-        debug_tuple.finish()
+        Debug::fmt(&self.0, f)
     }
 }
 

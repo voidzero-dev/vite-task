@@ -16,7 +16,9 @@ use wax::Glob;
 pub use crate::{
     error::Error,
     package::{DependencyType, PackageJson},
-    package_manager::{WorkspaceFile, WorkspaceRoot, find_package_root, find_workspace_root},
+    package_manager::{
+        FileWithPath, WorkspaceFile, WorkspaceRoot, find_package_root, find_workspace_root,
+    },
 };
 
 /// The workspace configuration for pnpm.
@@ -202,17 +204,29 @@ pub fn load_package_graph(
 ) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
     let mut graph_builder = PackageGraphBuilder::default();
     let workspaces = match &workspace_root.workspace_file {
-        WorkspaceFile::PnpmWorkspaceYaml(file) => {
-            let workspace: PnpmWorkspace = serde_yml::from_reader(file)?;
+        WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
+            let workspace: PnpmWorkspace =
+                serde_yml::from_reader(file_with_path.file()).map_err(|e| Error::SerdeYml {
+                    file_path: Arc::clone(file_with_path.path()),
+                    serde_yml_error: e,
+                })?;
             workspace.packages
         }
-        WorkspaceFile::NpmWorkspaceJson(file) => {
-            let workspace: NpmWorkspace = serde_json::from_reader(file)?;
+        WorkspaceFile::NpmWorkspaceJson(file_with_path) => {
+            let workspace: NpmWorkspace =
+                serde_json::from_reader(file_with_path.file()).map_err(|e| Error::SerdeJson {
+                    file_path: Arc::clone(file_with_path.path()),
+                    serde_json_error: e,
+                })?;
             workspace.workspaces
         }
-        WorkspaceFile::NonWorkspacePackage(file) => {
+        WorkspaceFile::NonWorkspacePackage(file_with_path) => {
             // For non-workspace packages, add the package.json to the graph as a root package
-            let package_json: PackageJson = serde_json::from_reader(file)?;
+            let package_json: PackageJson = serde_json::from_reader(file_with_path.file())
+                .map_err(|e| Error::SerdeJson {
+                    file_path: Arc::clone(file_with_path.path()),
+                    serde_json_error: e,
+                })?;
             graph_builder.add_package(
                 RelativePathBuf::default(),
                 Arc::clone(&workspace_root.path),
@@ -226,12 +240,16 @@ pub fn load_package_graph(
     let member_globs = WorkspaceMemberGlobs::new(workspaces);
     let mut has_root_package = false;
     for package_json_path in member_globs.get_package_json_paths(&*workspace_root.path)? {
-        let package_json: PackageJson = serde_json::from_slice(&fs::read(&package_json_path)?)?;
+        let package_json_path: Arc<AbsolutePath> = package_json_path.clone().into();
+        let package_json: PackageJson =
+            serde_json::from_slice(&fs::read(&*package_json_path)?).map_err(|e| {
+                Error::SerdeJson { file_path: Arc::clone(&package_json_path), serde_json_error: e }
+            })?;
         let absolute_path = package_json_path.parent().unwrap();
         let Some(package_path) = absolute_path.strip_prefix(&*workspace_root.path)? else {
             return Err(Error::PackageOutsideWorkspace {
                 package_path: package_json_path,
-                workspace_root: workspace_root.path.to_absolute_path_buf(),
+                workspace_root: Arc::clone(&workspace_root.path),
             });
         };
 
@@ -242,8 +260,11 @@ pub fn load_package_graph(
     if !has_root_package {
         let package_json_path = workspace_root.path.join("package.json");
         match fs::read(&package_json_path) {
-            Ok(package_json) => {
-                let package_json: PackageJson = serde_json::from_slice(&package_json)?;
+            Ok(content) => {
+                let package_json_path: Arc<AbsolutePath> = package_json_path.into();
+                let package_json: PackageJson = serde_json::from_slice(&content).map_err(|e| {
+                    Error::SerdeJson { file_path: package_json_path, serde_json_error: e }
+                })?;
                 graph_builder.add_package(
                     RelativePathBuf::default(),
                     Arc::clone(&workspace_root.path),

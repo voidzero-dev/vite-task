@@ -1,7 +1,8 @@
-use std::{io, path::Path};
+use std::{io, path::Path, sync::Arc};
 
 use vite_path::{
-    AbsolutePathBuf, RelativePathBuf, absolute::StripPrefixError, relative::InvalidPathDataError,
+    AbsolutePath, AbsolutePathBuf, RelativePathBuf, absolute::StripPrefixError,
+    relative::InvalidPathDataError,
 };
 use vite_str::Str;
 
@@ -14,7 +15,7 @@ pub enum Error {
     PackageJsonNotFound(AbsolutePathBuf),
 
     #[error("Package at `{package_path:?}` is outside workspace root `{workspace_root:?}`")]
-    PackageOutsideWorkspace { package_path: AbsolutePathBuf, workspace_root: AbsolutePathBuf },
+    PackageOutsideWorkspace { package_path: Arc<AbsolutePath>, workspace_root: Arc<AbsolutePath> },
 
     #[error(
         "The stripped path ({stripped_path:?}) is not a valid relative path because: {invalid_path_data_error}"
@@ -25,11 +26,19 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] io::Error),
 
-    #[error(transparent)]
-    Serde(#[from] serde_json::Error),
+    #[error("Failed to parse JSON file at {file_path:?}")]
+    SerdeJson {
+        file_path: Arc<AbsolutePath>,
+        #[source]
+        serde_json_error: serde_json::Error,
+    },
 
-    #[error(transparent)]
-    SerdeYml(#[from] serde_yml::Error),
+    #[error("Failed to parse YAML file at {file_path:?}")]
+    SerdeYml {
+        file_path: Arc<AbsolutePath>,
+        #[source]
+        serde_yml_error: serde_yml::Error,
+    },
 
     #[error(transparent)]
     WaxBuild(#[from] wax::BuildError),

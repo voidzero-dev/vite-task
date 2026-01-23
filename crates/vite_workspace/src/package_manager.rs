@@ -1,7 +1,6 @@
 use std::{
     fs::File,
     io::{BufReader, Seek, SeekFrom},
-    path::Path,
     sync::Arc,
 };
 
@@ -9,12 +8,51 @@ use vite_path::{AbsolutePath, RelativePathBuf};
 
 use crate::Error;
 
+/// A file handle bundled with its absolute path for error context.
+#[derive(Debug)]
+pub struct FileWithPath {
+    file: File,
+    path: Arc<AbsolutePath>,
+}
+
+impl FileWithPath {
+    /// Open a file at the given path.
+    pub fn open(path: Arc<AbsolutePath>) -> Result<Self, Error> {
+        let file = File::open(&*path)?;
+        Ok(Self { file, path })
+    }
+
+    /// Try to open a file, returning None if it doesn't exist.
+    pub fn open_if_exists(path: Arc<AbsolutePath>) -> Result<Option<Self>, Error> {
+        match File::open(&*path) {
+            Ok(file) => Ok(Some(Self { file, path })),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Get a reference to the file handle.
+    pub fn file(&self) -> &File {
+        &self.file
+    }
+
+    /// Get a mutable reference to the file handle.
+    pub fn file_mut(&mut self) -> &mut File {
+        &mut self.file
+    }
+
+    /// Get the file path.
+    pub fn path(&self) -> &Arc<AbsolutePath> {
+        &self.path
+    }
+}
+
 /// The package root directory and its package.json file.
 #[derive(Debug)]
 pub struct PackageRoot<'a> {
     pub path: &'a AbsolutePath,
     pub cwd: RelativePathBuf,
-    pub package_json: File,
+    pub package_json: FileWithPath,
 }
 
 /// Find the package root directory from the current working directory. `original_cwd` must be absolute.
@@ -24,11 +62,12 @@ pub fn find_package_root(original_cwd: &AbsolutePath) -> Result<PackageRoot<'_>,
     let mut cwd = original_cwd;
     loop {
         // Check for package.json
-        if let Some(file) = open_exists_file(cwd.join("package.json"))? {
+        let package_json_path: Arc<AbsolutePath> = cwd.join("package.json").into();
+        if let Some(file_with_path) = FileWithPath::open_if_exists(package_json_path)? {
             return Ok(PackageRoot {
                 path: cwd,
                 cwd: original_cwd.strip_prefix(cwd)?.expect("cwd must be within the package root"),
-                package_json: file,
+                package_json: file_with_path,
             });
         }
 
@@ -50,11 +89,11 @@ pub fn find_package_root(original_cwd: &AbsolutePath) -> Result<PackageRoot<'_>,
 #[derive(Debug)]
 pub enum WorkspaceFile {
     /// The pnpm-workspace.yaml file of a pnpm workspace.
-    PnpmWorkspaceYaml(File),
+    PnpmWorkspaceYaml(FileWithPath),
     /// The package.json file of a yarn/npm workspace.
-    NpmWorkspaceJson(File),
+    NpmWorkspaceJson(FileWithPath),
     /// The package.json file of a non-workspace package.
-    NonWorkspacePackage(File),
+    NonWorkspacePackage(FileWithPath),
 }
 
 /// The workspace root directory and its workspace file.
@@ -82,31 +121,38 @@ pub fn find_workspace_root(
 
     loop {
         // Check for pnpm-workspace.yaml for pnpm workspace
-        if let Some(file) = open_exists_file(cwd.join("pnpm-workspace.yaml"))? {
+        let pnpm_workspace_path: Arc<AbsolutePath> = cwd.join("pnpm-workspace.yaml").into();
+        if let Some(file_with_path) = FileWithPath::open_if_exists(pnpm_workspace_path)? {
             let relative_cwd =
                 original_cwd.strip_prefix(cwd)?.expect("cwd must be within the pnpm workspace");
             return Ok((
                 WorkspaceRoot {
                     path: Arc::from(cwd),
-                    workspace_file: WorkspaceFile::PnpmWorkspaceYaml(file),
+                    workspace_file: WorkspaceFile::PnpmWorkspaceYaml(file_with_path),
                 },
                 relative_cwd,
             ));
         }
 
         // Check for package.json with workspaces field for npm/yarn workspace
-        let package_json_path = cwd.join("package.json");
-        if let Some(mut file) = open_exists_file(&package_json_path)? {
-            let package_json: serde_json::Value = serde_json::from_reader(BufReader::new(&file))?;
+        let package_json_path: Arc<AbsolutePath> = cwd.join("package.json").into();
+        if let Some(mut file_with_path) = FileWithPath::open_if_exists(package_json_path)? {
+            let package_json: serde_json::Value =
+                serde_json::from_reader(BufReader::new(file_with_path.file())).map_err(|e| {
+                    Error::SerdeJson {
+                        file_path: Arc::clone(file_with_path.path()),
+                        serde_json_error: e,
+                    }
+                })?;
             if package_json.get("workspaces").is_some() {
                 // Reset the file cursor since we consumed it reading
-                file.seek(SeekFrom::Start(0))?;
+                file_with_path.file_mut().seek(SeekFrom::Start(0))?;
                 let relative_cwd =
                     original_cwd.strip_prefix(cwd)?.expect("cwd must be within the workspace");
                 return Ok((
                     WorkspaceRoot {
                         path: Arc::from(cwd),
-                        workspace_file: WorkspaceFile::NpmWorkspaceJson(file),
+                        workspace_file: WorkspaceFile::NpmWorkspaceJson(file_with_path),
                     },
                     relative_cwd,
                 ));
@@ -127,14 +173,5 @@ pub fn find_workspace_root(
                 package_root.cwd,
             ));
         }
-    }
-}
-
-fn open_exists_file(path: impl AsRef<Path>) -> Result<Option<File>, Error> {
-    match File::open(path) {
-        Ok(file) => Ok(Some(file)),
-        // if the file does not exist, return None
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.into()),
     }
 }
