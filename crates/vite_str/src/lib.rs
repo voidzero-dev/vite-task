@@ -176,7 +176,6 @@ impl PartialEq<str> for Str {
     }
 }
 
-#[cfg(feature = "ts-types")]
 mod ts_impl {
     use ts_rs::TS;
 

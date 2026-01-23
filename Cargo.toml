@@ -116,7 +116,7 @@ toml = "0.9.5"
 tracing = "0.1.43"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "serde"] }
-ts-rs = "11.1.0"
+ts-rs = { version = "11.1.0", features = ["format"] }
 tui-term = "0.2.0"
 twox-hash = "2.1.1"
 uuid = "1.18.1"

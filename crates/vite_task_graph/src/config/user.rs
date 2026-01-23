@@ -4,21 +4,19 @@ use std::{collections::HashMap, sync::Arc};
 
 use monostate::MustBe;
 use serde::Deserialize;
-#[cfg(feature = "ts-types")]
 use ts_rs::TS;
 use vite_path::RelativePathBuf;
 use vite_str::Str;
 
 /// Cache-related fields of a task defined by user in `vite.config.*`
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts-types", derive(TS))]
+#[derive(Debug, Deserialize, PartialEq, Eq, TS)]
 #[serde(untagged, deny_unknown_fields, rename_all = "camelCase")]
 pub enum UserCacheConfig {
     /// Cache is enabled
     Enabled {
         /// The `cache` field must be true or omitted
         #[serde(default)]
-        #[cfg_attr(feature = "ts-types", ts(type = "true"))]
+        #[ts(type = "true")]
         cache: MustBe!(true),
 
         #[serde(flatten)]
@@ -27,14 +25,13 @@ pub enum UserCacheConfig {
     /// Cache is disabled
     Disabled {
         /// The `cache` field must be false
-        #[cfg_attr(feature = "ts-types", ts(type = "false"))]
+        #[ts(type = "false")]
         cache: MustBe!(false),
     },
 }
 
 /// Cache configuration fields when caching is enabled
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts-types", derive(TS))]
+#[derive(Debug, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledCacheConfig {
     /// Environment variable names to be fingerprinted and passed to the task.
@@ -47,8 +44,7 @@ pub struct EnabledCacheConfig {
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts-types", derive(TS))]
+#[derive(Debug, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
@@ -86,8 +82,7 @@ impl Default for UserTaskOptions {
 }
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts-types", derive(TS))]
+#[derive(Debug, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskConfig {
     /// If None, the script from `package.json` with the same name will be used
@@ -105,15 +100,16 @@ pub struct UserConfigFile {
 }
 
 /// Type of the `tasks` field in `vite.config.*`
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, TS)]
 #[serde(transparent)]
-#[cfg_attr(feature = "ts-types", derive(TS))]
 pub struct UserConfigTasks(pub HashMap<Str, UserTaskConfig>);
 
-#[cfg(feature = "ts-types")]
 impl UserConfigTasks {
     /// Returns the TypeScript type definitions for user task configuration.
     pub fn typescript_definition() -> String {
+        use dprint_plugin_typescript::{
+            FormatTextOptions, configuration::ConfigurationBuilder, format_text,
+        };
         use ts_rs::TypeVisitor;
 
         struct DeclCollector(Vec<String>);
@@ -131,11 +127,22 @@ impl UserConfigTasks {
         let mut collector = DeclCollector(Vec::new());
         Self::visit_dependencies(&mut collector);
         collector.0.push(Self::decl());
-        collector.0.join("\n\n")
+        let unformatted = collector.0.join("\n\n");
+
+        // Format with dprint
+        let fmt_cfg = ConfigurationBuilder::new().deno().build();
+        let options = FormatTextOptions {
+            config: &fmt_cfg,
+            path: std::path::Path::new("user_config.d.ts"),
+            text: unformatted.clone(),
+            extension: None,
+            external_formatter: None,
+        };
+        format_text(options).ok().flatten().unwrap_or(unformatted)
     }
 }
 
-#[cfg(all(test, feature = "ts-types"))]
+#[cfg(test)]
 mod ts_tests {
     use super::*;
 
