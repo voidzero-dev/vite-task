@@ -93,8 +93,11 @@ pub struct UserTaskConfig {
 /// User configuration file structure for `vite.config.*`
 #[derive(Debug, Deserialize)]
 pub struct UserConfigFile {
-    pub tasks: HashMap<Str, UserTaskConfig>,
+    pub tasks: UserConfigTasks,
 }
+
+/// Type of the `tasks` field in `vite.config.*`
+pub type UserConfigTasks = HashMap<Str, UserTaskConfig>;
 
 #[cfg(test)]
 mod tests {
