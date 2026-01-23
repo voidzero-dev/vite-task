@@ -88,7 +88,7 @@ impl vite_graph_ser::GetKey for TaskNode {
 
 #[derive(Debug, thiserror::Error)]
 pub enum TaskGraphLoadError {
-    #[error("Failed to load package graph: {0}")]
+    #[error("Failed to load package graph")]
     PackageGraphLoadError(#[from] vite_workspace::Error),
 
     #[error("Failed to load task config file for package at {package_path:?}")]

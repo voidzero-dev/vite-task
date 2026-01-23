@@ -64,12 +64,14 @@ pub struct TaskCallStackDisplay {
     frames: Arc<[TaskCallStackFrameDisplay]>,
 }
 
+impl TaskCallStackDisplay {
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+}
+
 impl Display for TaskCallStackDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.frames.is_empty() {
-            write!(f, "<empty>")?;
-            return Ok(());
-        }
         for (i, frame) in self.frames.iter().enumerate() {
             if i > 0 {
                 write!(f, " -> ")?;

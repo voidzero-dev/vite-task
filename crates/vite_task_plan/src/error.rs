@@ -126,12 +126,21 @@ pub enum TaskPlanErrorKind {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to plan execution, task call stack: {task_call_stack}")]
 pub struct Error {
     task_call_stack: TaskCallStackDisplay,
 
     #[source]
     kind: TaskPlanErrorKind,
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Failed to plan execution")?;
+        if !self.task_call_stack.is_empty() {
+            write!(f, ", task call stack: {}", self.task_call_stack)?
+        }
+        Ok(())
+    }
 }
 
 impl TaskPlanErrorKind {
