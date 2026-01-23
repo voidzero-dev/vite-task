@@ -10,7 +10,7 @@ rust-version.workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-dprint-plugin-typescript = "0.95"
+dprint-plugin-typescript = { workspace = true }
 monostate = { workspace = true }
 petgraph = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -24,10 +24,9 @@ vite_str = { workspace = true }
 vite_workspace = { workspace = true }
 
 [dev-dependencies]
-pretty_assertions = "1.4.1"
-tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
 tokio = { workspace = true, features = ["fs", "rt-multi-thread"] }
-ts-rs = { workspace = true, features = ["format"] }
+ts-rs = { workspace = true }
 vite_path = { workspace = true, features = ["ts-rs"] }
 vite_str = { workspace = true, features = ["ts-rs"] }
 

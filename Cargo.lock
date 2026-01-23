@@ -3696,7 +3696,6 @@ version = "11.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4994acea2522cd2b3b85c1d9529a55991e3ad5e25cdcd3de9d505972c4379424"
 dependencies = [
- "dprint-plugin-typescript",
  "thiserror 2.0.17",
  "ts-rs-macros",
 ]
@@ -3988,7 +3987,6 @@ dependencies = [
  "vite_path",
  "vite_str",
  "vite_task",
- "vite_task_graph",
  "vite_workspace",
  "which",
 ]
@@ -4006,7 +4004,6 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "ts-rs",
