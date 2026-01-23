@@ -158,9 +158,12 @@ impl UserConfigTasks {
         // Format using oxfmt from packages/tools
         let workspace_root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-        let oxfmt = workspace_root.join("packages/tools/node_modules/.bin/oxfmt");
+        let tools_path = workspace_root.join("packages/tools/node_modules/.bin");
 
-        let mut child = Command::new(oxfmt)
+        let oxfmt_path = which::which_in("oxfmt", Some(&tools_path), &tools_path)
+            .expect("oxfmt not found in packages/tools");
+
+        let mut child = Command::new(oxfmt_path)
             .arg("--stdin-filepath=task-config.ts")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
