@@ -180,6 +180,8 @@ pub const DEFAULT_PASSTHROUGH_ENVS: &[&str] = &[
     "DOCKER_*",
     "BUILDKIT_*",
     "COMPOSE_*",
+    // Playwright specific
+    "PLAYWRIGHT_*",
     // Token patterns
     "*_TOKEN",
 ];

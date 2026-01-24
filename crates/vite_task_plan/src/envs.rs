@@ -518,4 +518,26 @@ mod tests {
         // Non-sensitive env should NOT be hashed
         assert_eq!(result.fingerprinted_envs.get("NORMAL_VAR").unwrap().as_ref(), "normal_value");
     }
+
+    #[test]
+    fn test_playwright_env_passthrough() {
+        // Verify PLAYWRIGHT_* pattern matches Playwright environment variables
+        let env_config = create_env_config(&[], &["PLAYWRIGHT_*"]);
+
+        let mut all_envs = create_test_envs(vec![
+            ("PLAYWRIGHT_BROWSERS_PATH", "/custom/browsers"),
+            ("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1"),
+            ("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "/path/to/chromium"),
+            ("OTHER_VAR", "should_be_filtered"),
+        ]);
+
+        let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+
+        // PLAYWRIGHT_* envs should be passed through
+        assert!(all_envs.contains_key(OsStr::new("PLAYWRIGHT_BROWSERS_PATH")));
+        assert!(all_envs.contains_key(OsStr::new("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD")));
+        assert!(all_envs.contains_key(OsStr::new("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")));
+        // Non-matching env should be filtered out
+        assert!(!all_envs.contains_key(OsStr::new("OTHER_VAR")));
+    }
 }
