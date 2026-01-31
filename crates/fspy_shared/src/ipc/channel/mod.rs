@@ -188,14 +188,14 @@ mod tests {
     use std::{num::NonZeroUsize, str::from_utf8};
 
     use bstr::B;
-    use fspy_test_utils::command_executing;
+    use subprocess_test::command_for_fn;
 
     use super::*;
 
     #[test]
     fn smoke() {
         let (conf, receiver) = channel(100).unwrap();
-        let mut cmd = command_executing!(conf, |conf: ChannelConf| {
+        let mut cmd = command_for_fn!(conf, |conf: ChannelConf| {
             let sender = conf.sender().unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
             let mut frame = sender.claim_frame(frame_size).unwrap();
@@ -218,7 +218,7 @@ mod tests {
         let (conf, receiver) = channel(42).unwrap();
         let _lock = receiver.lock().unwrap();
 
-        let mut cmd = command_executing!(conf, |conf: ChannelConf| {
+        let mut cmd = command_for_fn!(conf, |conf: ChannelConf| {
             print!("{}", conf.sender().is_ok());
         });
         let output = cmd.output().unwrap();
@@ -231,7 +231,7 @@ mod tests {
         let (conf, receiver) = channel(42).unwrap();
         drop(receiver);
 
-        let mut cmd = command_executing!(conf, |conf: ChannelConf| {
+        let mut cmd = command_for_fn!(conf, |conf: ChannelConf| {
             print!("{}", conf.sender().is_ok());
         });
         let output = cmd.output().unwrap();
@@ -242,7 +242,7 @@ mod tests {
     fn concurrent_senders() {
         let (conf, receiver) = channel(8192).unwrap();
         for i in 0u16..200 {
-            let mut cmd = command_executing!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
+            let mut cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
                 let sender = conf.sender().unwrap();
                 let data_to_send = i.to_string();
                 sender

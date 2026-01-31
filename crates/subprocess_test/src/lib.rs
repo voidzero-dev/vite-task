@@ -8,7 +8,7 @@ use bincode::{Decode, Encode, config};
 /// - $arg: The argument to pass to the function, must implement `Encode` and `Decode`.
 /// - $f: The function to run in the separate process, takes one argument of the type of $arg.
 #[macro_export]
-macro_rules! command_executing {
+macro_rules! command_for_fn {
     ($arg: expr, $f: expr) => {{
         // Generate a unique ID for every invocation of this macro.
         const ID: &str =
@@ -66,8 +66,8 @@ mod tests {
 
     #[test]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
-    fn test_command_executing() {
-        let mut command = command_executing!(42u32, |arg: u32| {
+    fn test_command_for_fn() {
+        let mut command = command_for_fn!(42u32, |arg: u32| {
             print!("{arg}");
         });
         let output = command.output().unwrap();

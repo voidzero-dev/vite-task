@@ -12,11 +12,11 @@ bumpalo = { workspace = true }
 const_format = { workspace = true, features = ["fmt"] }
 derive_more = { workspace = true, features = ["debug"] }
 fspy_shared = { workspace = true }
-fspy_test_utils = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
 ouroboros = { workspace = true }
 rand = { workspace = true }
+subprocess_test = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "process", "io-util", "sync", "rt"] }

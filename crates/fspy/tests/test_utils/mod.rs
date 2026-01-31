@@ -15,7 +15,7 @@ use fspy::{AccessMode, PathAccessIterable};
     unused_imports,
     reason = "used by track_child! macro; not all test files use this macro"
 )]
-pub use fspy_test_utils::command_executing;
+pub use subprocess_test::command_for_fn;
 
 /// # Panics
 ///
@@ -59,7 +59,7 @@ pub fn assert_contains(
 #[macro_export]
 macro_rules! track_child {
     ($arg: expr, $body: expr) => {{
-        let std_cmd = $crate::test_utils::command_executing!($arg, $body);
+        let std_cmd = $crate::test_utils::command_for_fn!($arg, $body);
         $crate::test_utils::spawn_std(std_cmd)
     }};
 }
