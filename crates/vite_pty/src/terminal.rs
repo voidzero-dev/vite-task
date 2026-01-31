@@ -142,8 +142,10 @@ impl Terminal {
             }
         }
 
-        // Clear buffer as all data has been processed
-        self.buffer.clear();
+        // Note: We keep the buffer intact. All data has been processed through
+        // the parser, but keeping the buffer allows searching in it later if needed.
+        // Since EOF is reached, subsequent read_until calls can still search the
+        // buffer but won't be able to read more data.
 
         Ok(self.parser.screen().contents())
     }
