@@ -84,23 +84,15 @@ impl Terminal {
         })
     }
 
-    /// Read data from buffer and reader as a unified stream.
-    /// Returns (bytes_read, is_eof) where bytes_read is the number of new bytes added to buffer.
-    fn read(&mut self) -> anyhow::Result<(usize, bool)> {
-        let mut buffer = [0u8; 4096];
-        let n = self.reader.read(&mut buffer)?;
+    /// Read data into the internal buffer `self.buffer`
+    /// Returns the number of new bytes added to buffer. If EOF is reached, returns 0.
+    fn read_to_buffer(&mut self) -> anyhow::Result<usize> {
+        todo!()
+    }
 
-        if n == 0 {
-            return Ok((0, true));
-        }
-
-        // Process data through parser immediately (important for Windows)
-        self.parser.process(&buffer[..n]);
-
-        // Append to persistent buffer
-        self.buffer.extend_from_slice(&buffer[..n]);
-
-        Ok((n, false))
+    /// Consume `n` bytes from the internal buffer, processing them through the parser.
+    fn consume(&mut self, n: usize) -> anyhow::Result<()> {
+        todo!()
     }
 
     /// Read until the expected string is found in the terminal output.
@@ -121,7 +113,7 @@ impl Terminal {
             }
 
             // Read more data
-            let (_, is_eof) = self.read()?;
+            let (_, is_eof) = self.read_to_buffer()?;
             if is_eof {
                 return Err(anyhow::anyhow!("Expected string not found: {}", expected));
             }
@@ -136,16 +128,14 @@ impl Terminal {
     pub fn read_to_end(&mut self) -> anyhow::Result<String> {
         // Read all remaining data until EOF
         loop {
-            let (_, is_eof) = self.read()?;
+            let (_, is_eof) = self.read_to_buffer()?;
             if is_eof {
                 break;
             }
         }
 
-        // Note: We keep the buffer intact. All data has been processed through
-        // the parser, but keeping the buffer allows searching in it later if needed.
-        // Since EOF is reached, subsequent read_until calls can still search the
-        // buffer but won't be able to read more data.
+        // Clear buffer as all data has been processed
+        self.buffer.clear();
 
         Ok(self.parser.screen().contents())
     }
