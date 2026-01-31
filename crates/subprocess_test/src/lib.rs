@@ -36,6 +36,20 @@ impl From<Command> for fspy::Command {
     }
 }
 
+#[cfg(feature = "portable-pty")]
+impl From<Command> for portable_pty::CommandBuilder {
+    fn from(cmd: Command) -> Self {
+        let mut cmd_builder = portable_pty::CommandBuilder::new(cmd.program);
+        cmd_builder.args(cmd.args);
+        cmd_builder.env_clear();
+        for (key, value) in cmd.envs {
+            cmd_builder.env(key, value);
+        }
+        cmd_builder.cwd(cmd.cwd);
+        cmd_builder
+    }
+}
+
 /// Creates a `subprocess_test::Command` that only executes the provided function.
 ///
 /// - $arg: The argument to pass to the function, must implement `Encode` and `Decode`.
