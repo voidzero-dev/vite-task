@@ -137,6 +137,7 @@ impl Terminal {
         // Read all remaining data until EOF
         loop {
             let n = self.reader.read(&mut buf)?;
+            self.parser.process(&buf[..n]);
             if n == 0 {
                 break;
             }
