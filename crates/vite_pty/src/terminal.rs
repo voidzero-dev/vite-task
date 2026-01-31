@@ -14,6 +14,8 @@ pub struct Terminal {
     pty_pair: PtyPair,
     parser: vt100::Parser<Vt100Callbacks>,
     child_killer: Box<dyn ChildKiller + Send + Sync>,
+    reader: Box<dyn Read + Send>,
+    buffer: Vec<u8>,
 }
 
 struct Vt100Callbacks {
@@ -53,6 +55,8 @@ impl Terminal {
             pixel_width: 0,
             pixel_height: 0,
         })?;
+        // Create reader BEFORE spawning child to ensure it's ready for data
+        let reader = pty_pair.master.try_clone_reader()?;
         let mut child = pty_pair.slave.spawn_command(cmd)?;
         let child_killer = child.clone_killer();
         let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
@@ -75,27 +79,51 @@ impl Terminal {
                 Vt100Callbacks { writer },
             ),
             child_killer,
+            reader,
+            buffer: Vec::new(),
         })
     }
 
     /// Read until the expected string is found in the terminal output.
     pub fn read_until(&mut self, expected: &str) -> anyhow::Result<()> {
-        let mut reader = self.pty_pair.master.try_clone_reader()?;
-        let mut buffer = [0u8; 4096];
-        let mut collected = Vec::<u8>::new();
+        let expected_bytes = expected.as_bytes();
+        let mut read_buffer = [0u8; 4096];
+
+        // First, check if expected string is already in buffer
+        if let Some(pos) =
+            self.buffer.windows(expected_bytes.len()).position(|window| window == expected_bytes)
+        {
+            let split_pos = pos + expected_bytes.len();
+            self.parser.process(&self.buffer[..split_pos]);
+            self.buffer = self.buffer[split_pos..].to_vec();
+            return Ok(());
+        }
+
+        // Read more data until we find the expected string
         loop {
-            let n = reader.read(&mut buffer)?;
+            let n = self.reader.read(&mut read_buffer)?;
             if n == 0 {
                 return Err(anyhow::anyhow!("Expected string not found: {}", expected));
             }
-            let data = &buffer[..n];
-            self.parser.process(data);
-            collected.extend_from_slice(&data);
 
-            if collected
-                .windows(expected.as_bytes().len())
-                .any(|window| window == expected.as_bytes())
+            // Append new data to buffer
+            self.buffer.extend_from_slice(&read_buffer[..n]);
+
+            // Check if expected string is now in buffer
+            if let Some(pos) = self
+                .buffer
+                .windows(expected_bytes.len())
+                .position(|window| window == expected_bytes)
             {
+                // Found! Calculate split position (after expected string)
+                let split_pos = pos + expected_bytes.len();
+
+                // Process only data up to and including expected
+                self.parser.process(&self.buffer[..split_pos]);
+
+                // Keep remaining data in buffer for next call
+                self.buffer = self.buffer[split_pos..].to_vec();
+
                 return Ok(());
             }
         }
@@ -107,11 +135,16 @@ impl Terminal {
     }
 
     pub fn read_to_end(&mut self) -> anyhow::Result<String> {
-        let mut reader = self.pty_pair.master.try_clone_reader()?;
-        let mut buffer = [0u8; 4096];
+        // Process any buffered data first
+        if !self.buffer.is_empty() {
+            self.parser.process(&self.buffer);
+            self.buffer.clear();
+        }
 
+        // Continue reading from PTY until EOF
+        let mut buffer = [0u8; 4096];
         loop {
-            let n = reader.read(&mut buffer)?;
+            let n = self.reader.read(&mut buffer)?;
             if n == 0 {
                 break;
             }

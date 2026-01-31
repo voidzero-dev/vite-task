@@ -14,6 +14,7 @@ vt100 = { workspace = true }
 
 [dev-dependencies]
 ctor = { workspace = true }
+ntest = "0.9.5"
 subprocess_test = { workspace = true, features = ["portable-pty"] }
 
 [lints]
