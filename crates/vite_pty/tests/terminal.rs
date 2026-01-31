@@ -145,23 +145,22 @@ fn read_until_exact_boundary() {
 #[test]
 #[timeout(5000)]
 fn read_until_after_read_to_end() {
-    // Test that buffer is preserved after read_to_end, allowing searches
+    // Test that read_until works with data that comes after EOF
     let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
         println!("hello world foo bar");
     }));
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
-    // Read everything first
+    // Use read_until first to consume part of the data
+    terminal.read_until("world").unwrap();
+
+    // Read everything else
     let output = terminal.read_to_end().unwrap();
     assert!(output.contains("hello world foo bar"));
 
-    // Now search in the buffered data (already at EOF)
-    // This should succeed because buffer is preserved
-    terminal.read_until("foo").unwrap();
-
-    // The buffer should now only contain "bar" (and newline)
-    // Since we're at EOF, trying to find something not in buffer should fail
-    let result = terminal.read_until("nonexistent");
+    // After read_to_end, buffer is empty and we're at EOF
+    // Trying to find anything should fail
+    let result = terminal.read_until("bar");
     assert!(result.is_err());
 }

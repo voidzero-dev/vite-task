@@ -117,32 +117,68 @@ impl Terminal {
         Ok(())
     }
 
-    /// Read until the expected string is found in the terminal output.
     pub fn read_until(&mut self, expected: &str) -> anyhow::Result<()> {
         let expected_bytes = expected.as_bytes();
 
         loop {
-            // Check if expected string is in buffer
+            // Check buffer before reading if it has data (from previous iteration)
+            if !self.buffer.is_empty() {
+                if let Some(pos) = self
+                    .buffer
+                    .windows(expected_bytes.len())
+                    .position(|window| window == expected_bytes)
+                {
+                    let split_pos = pos + expected_bytes.len();
+                    self.consume(split_pos)?;
+                    return Ok(());
+                }
+            }
+
+            // 1. read_to_buffer
+            let n = self.read_to_buffer()?;
+
+            // 2. look for the expected str in buffer (after reading)
             if let Some(pos) = self
                 .buffer
                 .windows(expected_bytes.len())
                 .position(|window| window == expected_bytes)
             {
+                // 3. Found: consume data before and including the expected str, then return
                 let split_pos = pos + expected_bytes.len();
-                // Consume bytes up to and including expected
                 self.consume(split_pos)?;
                 return Ok(());
             }
 
-            // Read more data
-            let old_len = self.buffer.len();
-            let n = self.read_to_buffer()?;
             if n == 0 {
+                // EOF - consume any remaining buffer before returning error
+                if !self.buffer.is_empty() {
+                    let buffer_len = self.buffer.len();
+                    self.consume(buffer_len)?;
+                }
                 return Err(anyhow::anyhow!("Expected string not found: {}", expected));
             }
 
-            // Process only the newly read data (important for Windows)
-            self.parser.process(&self.buffer[old_len..]);
+            // 4. Not found: check how much of the buffer end is a prefix of expected
+            // Keep that tail, consume the rest
+            let consume_amount = if self.buffer.len() >= expected_bytes.len() {
+                // Buffer is large enough to contain the full expected string but doesn't
+                // Consume everything to make progress
+                self.buffer.len()
+            } else {
+                // Buffer is smaller - check for prefix match for boundary spanning
+                let mut keep_len = 0;
+                for len in (1..=self.buffer.len()).rev() {
+                    if &self.buffer[self.buffer.len() - len..] == &expected_bytes[..len] {
+                        keep_len = len;
+                        break;
+                    }
+                }
+                self.buffer.len() - keep_len
+            };
+
+            if consume_amount > 0 {
+                self.consume(consume_amount)?;
+            }
         }
     }
 
@@ -154,14 +190,20 @@ impl Terminal {
     pub fn read_to_end(&mut self) -> anyhow::Result<String> {
         // Read all remaining data until EOF
         loop {
-            let old_len = self.buffer.len();
             let n = self.read_to_buffer()?;
             if n == 0 {
                 break;
             }
 
-            // Process only the newly read data (important for Windows)
-            self.parser.process(&self.buffer[old_len..]);
+            // Consume all buffered data (process and remove)
+            let buffer_len = self.buffer.len();
+            self.consume(buffer_len)?;
+        }
+
+        // Consume any remaining buffer after EOF
+        if !self.buffer.is_empty() {
+            let buffer_len = self.buffer.len();
+            self.consume(buffer_len)?;
         }
 
         Ok(self.parser.screen().contents())
