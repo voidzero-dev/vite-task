@@ -3570,6 +3570,7 @@ name = "vite_pty"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "ctor",
  "portable-pty",
  "subprocess_test",
  "vt100",
