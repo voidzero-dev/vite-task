@@ -15,6 +15,7 @@ pub struct Terminal {
     parser: vt100::Parser<Vt100Callbacks>,
     child_killer: Box<dyn ChildKiller + Send + Sync>,
     reader: Box<dyn Read + Send>,
+    writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
 
     /// Unprocessed data buffer for read_until
     read_until_buffer: Vec<u8>,
@@ -65,11 +66,13 @@ impl Terminal {
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
 
         // Background thread: wait for child to exit, then close writer to trigger EOF
-        let writer_clone = Arc::clone(&writer);
-        thread::spawn(move || {
-            let _ = child.wait();
-            // Close writer to signal EOF to the reader
-            *writer_clone.lock().unwrap() = None;
+        thread::spawn({
+            let writer = Arc::clone(&writer);
+            move || {
+                let _ = child.wait();
+                // Close writer to signal EOF to the reader
+                *writer.lock().unwrap() = None;
+            }
         });
 
         Ok(Self {
@@ -78,11 +81,12 @@ impl Terminal {
                 size.rows,
                 size.cols,
                 0,
-                Vt100Callbacks { writer },
+                Vt100Callbacks { writer: Arc::clone(&writer) },
             ),
             child_killer,
             reader,
             read_until_buffer: Vec::new(),
+            writer,
         })
     }
 
@@ -150,7 +154,55 @@ impl Terminal {
         Ok(())
     }
 
+    pub fn write(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        // On Windows ConPTY, convert LF to CRLF for proper line handling
+        #[cfg(target_os = "windows")]
+        let data_to_write: Vec<u8> = {
+            let mut result = Vec::new();
+            for &byte in data {
+                if byte == b'\n' {
+                    result.push(b'\r');
+                    result.push(b'\n');
+                } else {
+                    result.push(byte);
+                }
+            }
+            result
+        };
+
+        #[cfg(not(target_os = "windows"))]
+        let data_to_write = data;
+
+        let mut writer_guard = self
+            .writer
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire writer lock: {}", e))?;
+
+        if let Some(writer) = writer_guard.as_mut() {
+            writer.write_all(&data_to_write)?;
+            writer.flush()?;
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Cannot write: child process has exited"))
+        }
+    }
+
     pub fn screen_contents(&self) -> String {
         self.parser.screen().contents()
+    }
+
+    pub fn resize(&mut self, size: ScreenSize) -> anyhow::Result<()> {
+        // Resize the underlying PTY via portable-pty's MasterPty::resize
+        self.pty_pair.master.resize(portable_pty::PtySize {
+            rows: size.rows,
+            cols: size.cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+
+        // Update the vt100 parser's internal screen dimensions
+        self.parser.screen_mut().set_size(size.rows, size.cols);
+
+        Ok(())
     }
 }

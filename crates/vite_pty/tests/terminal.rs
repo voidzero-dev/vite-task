@@ -171,3 +171,202 @@ fn read_until_after_read_to_end() {
     let result = terminal.read_until("bar");
     assert!(result.is_err());
 }
+
+#[test]
+#[timeout(5000)]
+fn write_basic_echo() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        use std::io::{BufRead, Write, stdin, stdout};
+        let stdin = stdin();
+        let mut stdout = stdout();
+        for line in stdin.lock().lines() {
+            if let Ok(line) = line {
+                print!("{}", line);
+                stdout.flush().unwrap();
+                break; // Exit after one line
+            }
+        }
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+
+    // Write data to the terminal
+    terminal.write(b"hello world\n").unwrap();
+
+    // Read until we see the echo
+    terminal.read_until("hello world").unwrap();
+    terminal.read_to_end().unwrap();
+
+    let output = terminal.screen_contents();
+    // PTY echoes the input, so we see "hello world\nhello world"
+    assert_eq!(output.trim(), "hello world\nhello world");
+}
+
+#[test]
+#[timeout(5000)]
+fn write_multiple_lines() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        use std::io::{BufRead, Write, stdin, stdout};
+        let stdin = stdin();
+        let mut stdout = stdout();
+        for line in stdin.lock().lines() {
+            if let Ok(line) = line {
+                print!("Echo: {}", line);
+                stdout.flush().unwrap();
+                if line == "third" {
+                    break; // Exit after third line
+                }
+            }
+        }
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+
+    terminal.write(b"first\n").unwrap();
+    terminal.read_until("Echo: first").unwrap();
+
+    terminal.write(b"second\n").unwrap();
+    terminal.read_until("Echo: second").unwrap();
+
+    terminal.write(b"third\n").unwrap();
+    terminal.read_until("Echo: third").unwrap();
+
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
+    // PTY echoes input, so we see both the typed input and the echo response
+    assert_eq!(output.trim(), "first\nEcho: firstsecond\nEcho: secondthird\nEcho: third");
+}
+
+#[test]
+#[timeout(5000)]
+fn write_after_exit() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        print!("exiting");
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+
+    // Read all output - this blocks until child exits and EOF is reached
+    terminal.read_to_end().unwrap();
+
+    // The background thread should have set writer to None by now
+    // since read_to_end only returns after EOF (child exit)
+    // Writing should fail with either our custom error or an I/O error
+    let result = terminal.write(b"too late\n");
+    assert!(result.is_err());
+}
+
+#[test]
+#[timeout(5000)]
+fn write_interactive_prompt() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        use std::io::{Write, stdin, stdout};
+        let mut stdout = stdout();
+        print!("Name: ");
+        stdout.flush().unwrap();
+
+        let mut input = String::new();
+        stdin().read_line(&mut input).unwrap();
+        print!("Hello, {}", input.trim());
+        stdout.flush().unwrap();
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+
+    // Wait for prompt
+    terminal.read_until("Name:").unwrap();
+
+    // Send response
+    terminal.write(b"Alice\n").unwrap();
+
+    // Wait for greeting
+    terminal.read_until("Hello, Alice").unwrap();
+
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
+    assert_eq!(output.trim(), "Name: Alice\nHello, Alice");
+}
+
+#[test]
+#[timeout(5000)]
+fn resize_terminal() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        use std::io::{Write, stdin, stdout};
+        #[cfg(unix)]
+        use std::sync::Arc;
+        #[cfg(unix)]
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        #[cfg(unix)]
+        let resized = Arc::new(AtomicBool::new(false));
+        #[cfg(unix)]
+        let resized_clone = Arc::clone(&resized);
+
+        // Install SIGWINCH handler on Unix
+        #[cfg(unix)]
+        unsafe {
+            signal_hook::low_level::register(signal_hook::consts::SIGWINCH, move || {
+                resized_clone.store(true, Ordering::SeqCst);
+            })
+            .unwrap();
+        }
+
+        // Cross-platform function to get terminal size
+        fn get_size() -> (u16, u16) {
+            if let Some((terminal_size::Width(w), terminal_size::Height(h))) =
+                terminal_size::terminal_size()
+            {
+                (h, w)
+            } else {
+                (0, 0)
+            }
+        }
+
+        // Print initial size
+        let (rows, cols) = get_size();
+        println!("initial: {} {}", rows, cols);
+        stdout().flush().unwrap();
+
+        // Wait for input to synchronize
+        let mut input = String::new();
+        stdin().read_line(&mut input).unwrap();
+
+        // On Unix, check if resize signal was detected
+        #[cfg(unix)]
+        {
+            if resized.load(Ordering::SeqCst) {
+                println!("RESIZE_DETECTED");
+            }
+        }
+
+        // On Windows, resize happens synchronously via ConPTY
+        #[cfg(windows)]
+        {
+            println!("RESIZE_DETECTED");
+        }
+
+        // Print new size
+        let (rows, cols) = get_size();
+        println!("resized: {} {}", rows, cols);
+        stdout().flush().unwrap();
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+
+    // Read initial size
+    terminal.read_until("initial: 80 80").unwrap();
+
+    // Perform resize
+    terminal.resize(ScreenSize { rows: 40, cols: 40 }).unwrap();
+
+    // Signal the process to continue and check resize
+    terminal.write(b"\n").unwrap();
+
+    // Verify resize was detected (SIGWINCH on Unix, synchronous on Windows)
+    terminal.read_until("RESIZE_DETECTED").unwrap();
+
+    // Verify new size is correct
+    terminal.read_until("resized: 40 40").unwrap();
+
+    terminal.read_to_end().unwrap();
+}
