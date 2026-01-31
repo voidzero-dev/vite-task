@@ -89,3 +89,55 @@ fn read_until_with_read_to_end() {
     assert!(output.contains("middle"));
     assert!(output.contains("suffix"));
 }
+
+#[test]
+#[timeout(5000)]
+fn read_until_boundary_spanning() {
+    // Test case where expected string might span across read boundaries
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        // Write in small chunks to increase chance of boundary spanning
+        print!("a");
+        let _ = stdout().flush();
+        thread::sleep(Duration::from_millis(5));
+        print!("b");
+        let _ = stdout().flush();
+        thread::sleep(Duration::from_millis(5));
+        print!("c");
+        let _ = stdout().flush();
+        thread::sleep(Duration::from_millis(5));
+        print!("d");
+        let _ = stdout().flush();
+        thread::sleep(Duration::from_millis(5));
+        print!("e");
+        let _ = stdout().flush();
+        thread::sleep(Duration::from_millis(5));
+        print!("f");
+        let _ = stdout().flush();
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    // Search for a pattern that's likely to span boundaries
+    terminal.read_until("abcd").unwrap();
+    let output = terminal.read_to_end().unwrap();
+    assert!(output.contains("abcdef"));
+}
+
+#[test]
+#[timeout(5000)]
+fn read_until_exact_boundary() {
+    // Test where we search for something at the exact boundary
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        print!("first");
+        let _ = stdout().flush();
+        thread::sleep(Duration::from_millis(10));
+        print!("second");
+        let _ = stdout().flush();
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    // This should find "second" even if "first" was in a previous read
+    terminal.read_until("second").unwrap();
+    let output = terminal.read_to_end().unwrap();
+    assert!(output.contains("first"));
+    assert!(output.contains("second"));
+}

@@ -84,48 +84,46 @@ impl Terminal {
         })
     }
 
+    /// Read data from buffer and reader as a unified stream.
+    /// Returns (bytes_read, is_eof) where bytes_read is the number of new bytes added to buffer.
+    fn read(&mut self) -> anyhow::Result<(usize, bool)> {
+        let mut buffer = [0u8; 4096];
+        let n = self.reader.read(&mut buffer)?;
+
+        if n == 0 {
+            return Ok((0, true));
+        }
+
+        // Process data through parser immediately (important for Windows)
+        self.parser.process(&buffer[..n]);
+
+        // Append to persistent buffer
+        self.buffer.extend_from_slice(&buffer[..n]);
+
+        Ok((n, false))
+    }
+
     /// Read until the expected string is found in the terminal output.
     pub fn read_until(&mut self, expected: &str) -> anyhow::Result<()> {
         let expected_bytes = expected.as_bytes();
 
-        // First, check if expected string is already in buffer
-        if let Some(pos) =
-            self.buffer.windows(expected_bytes.len()).position(|window| window == expected_bytes)
-        {
-            let split_pos = pos + expected_bytes.len();
-            self.parser.process(&self.buffer[..split_pos]);
-            self.buffer = self.buffer[split_pos..].to_vec();
-            return Ok(());
-        }
-
-        // Read more data until we find the expected string
-        // Process data immediately through parser like read_to_end does (important for Windows)
-        let mut buffer = [0u8; 4096];
         loop {
-            let n = self.reader.read(&mut buffer)?;
-            if n == 0 {
-                return Err(anyhow::anyhow!("Expected string not found: {}", expected));
-            }
-
-            // Process data through parser immediately (like read_to_end)
-            self.parser.process(&buffer[..n]);
-
-            // Also append to persistent buffer for searching
-            self.buffer.extend_from_slice(&buffer[..n]);
-
-            // Check if expected string is now in buffer
+            // Check if expected string is in buffer
             if let Some(pos) = self
                 .buffer
                 .windows(expected_bytes.len())
                 .position(|window| window == expected_bytes)
             {
-                // Found! Calculate split position (after expected string)
                 let split_pos = pos + expected_bytes.len();
-
                 // Keep only the unprocessed remainder in buffer
                 self.buffer = self.buffer[split_pos..].to_vec();
-
                 return Ok(());
+            }
+
+            // Read more data
+            let (_, is_eof) = self.read()?;
+            if is_eof {
+                return Err(anyhow::anyhow!("Expected string not found: {}", expected));
             }
         }
     }
@@ -136,21 +134,16 @@ impl Terminal {
     }
 
     pub fn read_to_end(&mut self) -> anyhow::Result<String> {
-        // Process any buffered data first
-        if !self.buffer.is_empty() {
-            self.parser.process(&self.buffer);
-            self.buffer.clear();
-        }
-
-        // Continue reading from PTY until EOF
-        let mut buffer = [0u8; 4096];
+        // Read all remaining data until EOF
         loop {
-            let n = self.reader.read(&mut buffer)?;
-            if n == 0 {
+            let (_, is_eof) = self.read()?;
+            if is_eof {
                 break;
             }
-            self.parser.process(&buffer[..n]);
         }
+
+        // Clear buffer as all data has been processed
+        self.buffer.clear();
 
         Ok(self.parser.screen().contents())
     }
