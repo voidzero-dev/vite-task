@@ -15,7 +15,9 @@ pub struct Terminal {
     parser: vt100::Parser<Vt100Callbacks>,
     child_killer: Box<dyn ChildKiller + Send + Sync>,
     reader: Box<dyn Read + Send>,
-    buffer: Vec<u8>,
+
+    /// Unprocessed data buffer for read_until
+    read_until_buffer: Vec<u8>,
 }
 
 struct Vt100Callbacks {
@@ -80,105 +82,45 @@ impl Terminal {
             ),
             child_killer,
             reader,
-            buffer: Vec::new(),
+            read_until_buffer: Vec::new(),
         })
     }
 
-    /// Read data into the internal buffer `self.buffer`
-    /// Returns the number of new bytes added to buffer. If EOF is reached, returns 0.
-    fn read_to_buffer(&mut self) -> anyhow::Result<usize> {
-        let mut buffer = [0u8; 4096];
-        let n = self.reader.read(&mut buffer)?;
-
-        if n == 0 {
-            return Ok(0); // EOF
-        }
-
-        self.buffer.extend_from_slice(&buffer[..n]);
-        Ok(n)
-    }
-
-    /// Consume `n` bytes from the internal buffer, processing them through the parser.
-    fn consume(&mut self, n: usize) -> anyhow::Result<()> {
-        if n > self.buffer.len() {
-            return Err(anyhow::anyhow!(
-                "Cannot consume {} bytes, only {} available",
-                n,
-                self.buffer.len()
-            ));
-        }
-
-        // Process first n bytes through parser (important for Windows)
-        self.parser.process(&self.buffer[..n]);
-
-        // Remove first n bytes from buffer
-        self.buffer = self.buffer[n..].to_vec();
-
-        Ok(())
-    }
-
+    /// Read until the first occurrence of the expected string is found.
+    /// Multiple occurrences may be buffered internally. Keep calling with the same string to
+    /// find subsequent occurrences.
+    ///
+    /// However, `screen_contents` will reflect all data, including subsequent occurrences,
+    /// even before they are consumed by `read_until`. It is designed this way because the
+    /// screen must always have latest data for proper query responses.
     pub fn read_until(&mut self, expected: &str) -> anyhow::Result<()> {
         let expected_bytes = expected.as_bytes();
 
+        let mut buf = [0u8; 8192];
+
         loop {
-            // Check buffer before reading if it has data (from previous iteration)
-            if !self.buffer.is_empty() {
-                if let Some(pos) = self
-                    .buffer
-                    .windows(expected_bytes.len())
-                    .position(|window| window == expected_bytes)
-                {
-                    let split_pos = pos + expected_bytes.len();
-                    self.consume(split_pos)?;
-                    return Ok(());
-                }
-            }
-
-            // 1. read_to_buffer
-            let n = self.read_to_buffer()?;
-
-            // 2. look for the expected str in buffer (after reading)
+            // look for the expected str in buffer
+            // There could be buffered occurrences in the first iteration,
+            // or new data read from the previous iteration.
             if let Some(pos) = self
-                .buffer
+                .read_until_buffer
                 .windows(expected_bytes.len())
                 .position(|window| window == expected_bytes)
             {
-                // 3. Found: consume data before and including the expected str, then return
+                // Consume data in read_until_buffer before and including the expected str
                 let split_pos = pos + expected_bytes.len();
-                self.consume(split_pos)?;
+                self.read_until_buffer.drain(0..split_pos);
                 return Ok(());
             }
 
-            if n == 0 {
-                // EOF - consume any remaining buffer before returning error
-                if !self.buffer.is_empty() {
-                    let buffer_len = self.buffer.len();
-                    self.consume(buffer_len)?;
-                }
-                return Err(anyhow::anyhow!("Expected string not found: {}", expected));
-            }
+            // Not found yet - read more data
+            let n = self.reader.read(&mut buf)?;
 
-            // 4. Not found: check how much of the buffer end is a prefix of expected
-            // Keep that tail, consume the rest
-            let consume_amount = if self.buffer.len() >= expected_bytes.len() {
-                // Buffer is large enough to contain the full expected string but doesn't
-                // Consume everything to make progress
-                self.buffer.len()
-            } else {
-                // Buffer is smaller - check for prefix match for boundary spanning
-                let mut keep_len = 0;
-                for len in (1..=self.buffer.len()).rev() {
-                    if &self.buffer[self.buffer.len() - len..] == &expected_bytes[..len] {
-                        keep_len = len;
-                        break;
-                    }
-                }
-                self.buffer.len() - keep_len
-            };
+            let data = &buf[..n];
+            // Feed data to parser, which updates screen state and handles control sequence queries.
+            self.parser.process(data);
 
-            if consume_amount > 0 {
-                self.consume(consume_amount)?;
-            }
+            self.read_until_buffer.extend_from_slice(data);
         }
     }
 
@@ -188,24 +130,21 @@ impl Terminal {
     }
 
     pub fn read_to_end(&mut self) -> anyhow::Result<String> {
+        // `read_to_end` will move cursor to the end, so clear any buffered data for `read_until`
+        self.read_until_buffer.clear();
+
+        let mut buf = [0u8; 8192];
         // Read all remaining data until EOF
         loop {
-            let n = self.read_to_buffer()?;
+            let n = self.reader.read(&mut buf)?;
             if n == 0 {
                 break;
             }
-
-            // Consume all buffered data (process and remove)
-            let buffer_len = self.buffer.len();
-            self.consume(buffer_len)?;
         }
+        Ok(self.screen_contents())
+    }
 
-        // Consume any remaining buffer after EOF
-        if !self.buffer.is_empty() {
-            let buffer_len = self.buffer.len();
-            self.consume(buffer_len)?;
-        }
-
-        Ok(self.parser.screen().contents())
+    pub fn screen_contents(&self) -> String {
+        self.parser.screen().contents()
     }
 }
