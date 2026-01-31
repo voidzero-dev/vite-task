@@ -87,12 +87,34 @@ impl Terminal {
     /// Read data into the internal buffer `self.buffer`
     /// Returns the number of new bytes added to buffer. If EOF is reached, returns 0.
     fn read_to_buffer(&mut self) -> anyhow::Result<usize> {
-        todo!()
+        let mut buffer = [0u8; 4096];
+        let n = self.reader.read(&mut buffer)?;
+
+        if n == 0 {
+            return Ok(0); // EOF
+        }
+
+        self.buffer.extend_from_slice(&buffer[..n]);
+        Ok(n)
     }
 
     /// Consume `n` bytes from the internal buffer, processing them through the parser.
     fn consume(&mut self, n: usize) -> anyhow::Result<()> {
-        todo!()
+        if n > self.buffer.len() {
+            return Err(anyhow::anyhow!(
+                "Cannot consume {} bytes, only {} available",
+                n,
+                self.buffer.len()
+            ));
+        }
+
+        // Process first n bytes through parser (important for Windows)
+        self.parser.process(&self.buffer[..n]);
+
+        // Remove first n bytes from buffer
+        self.buffer = self.buffer[n..].to_vec();
+
+        Ok(())
     }
 
     /// Read until the expected string is found in the terminal output.
@@ -107,16 +129,20 @@ impl Terminal {
                 .position(|window| window == expected_bytes)
             {
                 let split_pos = pos + expected_bytes.len();
-                // Keep only the unprocessed remainder in buffer
-                self.buffer = self.buffer[split_pos..].to_vec();
+                // Consume bytes up to and including expected
+                self.consume(split_pos)?;
                 return Ok(());
             }
 
             // Read more data
-            let (_, is_eof) = self.read_to_buffer()?;
-            if is_eof {
+            let old_len = self.buffer.len();
+            let n = self.read_to_buffer()?;
+            if n == 0 {
                 return Err(anyhow::anyhow!("Expected string not found: {}", expected));
             }
+
+            // Process only the newly read data (important for Windows)
+            self.parser.process(&self.buffer[old_len..]);
         }
     }
 
@@ -128,14 +154,15 @@ impl Terminal {
     pub fn read_to_end(&mut self) -> anyhow::Result<String> {
         // Read all remaining data until EOF
         loop {
-            let (_, is_eof) = self.read_to_buffer()?;
-            if is_eof {
+            let old_len = self.buffer.len();
+            let n = self.read_to_buffer()?;
+            if n == 0 {
                 break;
             }
-        }
 
-        // Clear buffer as all data has been processed
-        self.buffer.clear();
+            // Process only the newly read data (important for Windows)
+            self.parser.process(&self.buffer[old_len..]);
+        }
 
         Ok(self.parser.screen().contents())
     }
