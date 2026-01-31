@@ -134,7 +134,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn read_to_end(&mut self) -> anyhow::Result<String> {
+    pub fn read_to_end(&mut self) -> anyhow::Result<()> {
         // `read_to_end` will move cursor to the end, so clear any buffered data for `read_until`
         self.read_until_buffer.clear();
 
@@ -147,7 +147,7 @@ impl Terminal {
                 break;
             }
         }
-        Ok(self.screen_contents())
+        Ok(())
     }
 
     pub fn screen_contents(&self) -> String {

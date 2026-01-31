@@ -17,7 +17,8 @@ fn is_terminal() {
     }));
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    let output = terminal.read_to_end().unwrap();
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
     assert_eq!(output.trim(), "true true true");
 }
 
@@ -30,7 +31,8 @@ fn read_until_single() {
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     terminal.read_until("hello").unwrap();
-    let output = terminal.read_to_end().unwrap();
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
     // After reading until "hello", the buffer should contain " world"
     // read_to_end should process the buffered data and continue reading
     assert!(output.contains("world"));
@@ -49,7 +51,8 @@ fn read_until_multiple_sequential() {
     terminal.read_until("first").unwrap();
     terminal.read_until("second").unwrap();
     terminal.read_until("third").unwrap();
-    let output = terminal.read_to_end().unwrap();
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
     // All three words should be in the screen
     assert!(output.contains("first"));
     assert!(output.contains("second"));
@@ -83,7 +86,8 @@ fn read_until_with_read_to_end() {
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     terminal.read_until("middle").unwrap();
     // At this point, " suffix" should be buffered
-    let output = terminal.read_to_end().unwrap();
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
     // The full output should include everything
     assert!(output.contains("prefix"));
     assert!(output.contains("middle"));
@@ -118,7 +122,8 @@ fn read_until_boundary_spanning() {
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     // Search for a pattern that's likely to span boundaries
     terminal.read_until("abcd").unwrap();
-    let output = terminal.read_to_end().unwrap();
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
     assert!(output.contains("abcdef"));
 }
 
@@ -137,7 +142,8 @@ fn read_until_exact_boundary() {
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     // This should find "second" even if "first" was in a previous read
     terminal.read_until("second").unwrap();
-    let output = terminal.read_to_end().unwrap();
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
     assert!(output.contains("first"));
     assert!(output.contains("second"));
 }
@@ -156,7 +162,8 @@ fn read_until_after_read_to_end() {
     terminal.read_until("world").unwrap();
 
     // Read everything else
-    let output = terminal.read_to_end().unwrap();
+    terminal.read_to_end().unwrap();
+    let output = terminal.screen_contents();
     assert!(output.contains("hello world foo bar"));
 
     // After read_to_end, buffer is empty and we're at EOF
