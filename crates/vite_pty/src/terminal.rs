@@ -87,7 +87,6 @@ impl Terminal {
     /// Read until the expected string is found in the terminal output.
     pub fn read_until(&mut self, expected: &str) -> anyhow::Result<()> {
         let expected_bytes = expected.as_bytes();
-        let mut read_buffer = [0u8; 4096];
 
         // First, check if expected string is already in buffer
         if let Some(pos) =
@@ -100,14 +99,19 @@ impl Terminal {
         }
 
         // Read more data until we find the expected string
+        // Process data immediately through parser like read_to_end does (important for Windows)
+        let mut buffer = [0u8; 4096];
         loop {
-            let n = self.reader.read(&mut read_buffer)?;
+            let n = self.reader.read(&mut buffer)?;
             if n == 0 {
                 return Err(anyhow::anyhow!("Expected string not found: {}", expected));
             }
 
-            // Append new data to buffer
-            self.buffer.extend_from_slice(&read_buffer[..n]);
+            // Process data through parser immediately (like read_to_end)
+            self.parser.process(&buffer[..n]);
+
+            // Also append to persistent buffer for searching
+            self.buffer.extend_from_slice(&buffer[..n]);
 
             // Check if expected string is now in buffer
             if let Some(pos) = self
@@ -118,10 +122,7 @@ impl Terminal {
                 // Found! Calculate split position (after expected string)
                 let split_pos = pos + expected_bytes.len();
 
-                // Process only data up to and including expected
-                self.parser.process(&self.buffer[..split_pos]);
-
-                // Keep remaining data in buffer for next call
+                // Keep only the unprocessed remainder in buffer
                 self.buffer = self.buffer[split_pos..].to_vec();
 
                 return Ok(());
