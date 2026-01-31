@@ -32,7 +32,7 @@ async fn spawn_sh_shebang() -> anyhow::Result<()> {
     perms.set_mode(0o755);
     fs::set_permissions(&shebang_script_path, perms).await?;
 
-    let accesses = track_child!(shebang_script_path.clone(), |shebang_script_path: String| {
+    let accesses = track_fn!(shebang_script_path.clone(), |shebang_script_path: String| {
         let _ignored = Command::new(&shebang_script_path)
             .current_dir("/")
             .stdin(Stdio::null())

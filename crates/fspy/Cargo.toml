@@ -16,7 +16,6 @@ futures-util = { workspace = true }
 libc = { workspace = true }
 ouroboros = { workspace = true }
 rand = { workspace = true }
-subprocess_test = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "process", "io-util", "sync", "rt"] }
@@ -46,6 +45,7 @@ tempfile = { workspace = true }
 anyhow = { workspace = true }
 csv-async = { workspace = true }
 ctor = { workspace = true }
+subprocess_test = { workspace = true, features = ["fspy"] }
 test-log = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "io-std"] }
 

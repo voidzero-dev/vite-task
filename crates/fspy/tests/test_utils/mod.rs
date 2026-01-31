@@ -56,11 +56,17 @@ pub fn assert_contains(
     );
 }
 
+/// Spawns a subprocess that executes the given function with file access tracking.
+///
+/// - $arg: The argument to pass to the function
+/// - $body: The function to run in the subprocess
+///
+/// Returns the tracked file accesses from the subprocess.
 #[macro_export]
-macro_rules! track_child {
+macro_rules! track_fn {
     ($arg: expr, $body: expr) => {{
-        let std_cmd = $crate::test_utils::command_for_fn!($arg, $body);
-        $crate::test_utils::spawn_std(std_cmd)
+        let cmd = $crate::test_utils::command_for_fn!($arg, $body);
+        $crate::test_utils::spawn_command(cmd)
     }};
 }
 
@@ -70,14 +76,9 @@ macro_rules! track_child {
     clippy::allow_attributes,
     reason = "allow attribute required for conditionally-used helper"
 )]
-#[allow(dead_code, reason = "used by track_child! macro; not all test files use this macro")]
-pub async fn spawn_std(std_cmd: std::process::Command) -> anyhow::Result<PathAccessIterable> {
-    let mut command = fspy::Command::new(std_cmd.get_program());
-    command
-        .args(std_cmd.get_args())
-        .envs(std_cmd.get_envs().filter_map(|(name, value)| Some((name, value?))));
-
-    let termination = command.spawn().await?.wait_handle.await?;
+#[allow(dead_code, reason = "used by track_fn! macro; not all test files use this macro")]
+pub async fn spawn_command(cmd: subprocess_test::Command) -> anyhow::Result<PathAccessIterable> {
+    let termination = fspy::Command::from(cmd).spawn().await?.wait_handle.await?;
     assert!(termination.status.success());
     Ok(termination.path_accesses)
 }

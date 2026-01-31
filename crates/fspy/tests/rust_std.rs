@@ -19,7 +19,7 @@ use test_utils::assert_contains;
 
 #[test(tokio::test)]
 async fn open_read() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let accesses = track_fn!((), |(): ()| {
         let _ = File::open("hello");
     })
     .await?;
@@ -33,7 +33,7 @@ async fn open_write() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     let tmp_path = tmp_dir.path().join("hello");
     let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
-    let accesses = track_child!(tmp_path_str, |tmp_path_str: String| {
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
         let _ = OpenOptions::new().write(true).open(tmp_path_str);
     })
     .await?;
@@ -57,7 +57,7 @@ async fn readdir() -> anyhow::Result<()> {
     // To keep the test consistent across platforms, we create the directory first.
     std::fs::create_dir(tmpdir.path().join("hello_dir"))?;
 
-    let accesses = track_child!(tmpdir_path.to_str().unwrap().to_owned(), |tmpdir_path: String| {
+    let accesses = track_fn!(tmpdir_path.to_str().unwrap().to_owned(), |tmpdir_path: String| {
         std::env::set_current_dir(tmpdir_path).unwrap();
         let _ = std::fs::read_dir("hello_dir");
     })
@@ -69,7 +69,7 @@ async fn readdir() -> anyhow::Result<()> {
 
 #[test(tokio::test)]
 async fn read_in_subprocess() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let accesses = track_fn!((), |(): ()| {
         let mut command = if cfg!(windows) {
             let mut command = std::process::Command::new("cmd");
             command.arg("/c").arg("type hello");
@@ -96,7 +96,7 @@ async fn read_in_subprocess() -> anyhow::Result<()> {
 
 #[test(tokio::test)]
 async fn read_program() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let accesses = track_fn!((), |(): ()| {
         let _ = std::process::Command::new("./not_exist.exe").spawn();
     })
     .await?;

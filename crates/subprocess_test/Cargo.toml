@@ -11,6 +11,11 @@ rust-version.workspace = true
 base64 = { workspace = true }
 bincode = { workspace = true }
 ctor = { workspace = true }
+fspy = { workspace = true, optional = true }
+
+[features]
+default = []
+fspy = ["dep:fspy"]
 
 [lints]
 workspace = true

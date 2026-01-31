@@ -16,7 +16,7 @@ use tokio::fs::OpenOptions;
 
 #[test(tokio::test)]
 async fn open_read() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let accesses = track_fn!((), |(): ()| {
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
                 let _ = tokio::fs::File::open("hello").await;
@@ -34,7 +34,7 @@ async fn open_write() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     let tmp_path = tmp_dir.path().join("hello");
     let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
-    let accesses = track_child!(tmp_path_str, |tmp_path_str: String| {
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
                 let _ = OpenOptions::new().write(true).open(tmp_path_str).await;
@@ -54,7 +54,7 @@ async fn readdir() -> anyhow::Result<()> {
 
     std::fs::create_dir(tmpdir.path().join("hello_dir"))?;
 
-    let accesses = track_child!(tmpdir_path.to_str().unwrap().to_owned(), |tmpdir_path: String| {
+    let accesses = track_fn!(tmpdir_path.to_str().unwrap().to_owned(), |tmpdir_path: String| {
         std::env::set_current_dir(tmpdir_path).unwrap();
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
@@ -70,7 +70,7 @@ async fn readdir() -> anyhow::Result<()> {
 
 #[test(tokio::test)]
 async fn subprocess() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let accesses = track_fn!((), |(): ()| {
         tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap().block_on(
             async {
                 let mut command = if cfg!(windows) {

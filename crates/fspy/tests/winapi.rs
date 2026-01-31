@@ -19,7 +19,7 @@ use winapi::um::processthreadsapi::{
 
 #[test(tokio::test)]
 async fn create_process_a() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let accesses = track_fn!((), |(): ()| {
         // SAFETY: zeroing STARTUPINFOA is valid for the Windows API
         let mut si: STARTUPINFOA = unsafe { std::mem::zeroed() };
         // SAFETY: zeroing PROCESS_INFORMATION is valid for the Windows API
@@ -48,7 +48,7 @@ async fn create_process_a() -> anyhow::Result<()> {
 
 #[test(tokio::test)]
 async fn create_process_w() -> anyhow::Result<()> {
-    let accesses = track_child!((), |(): ()| {
+    let accesses = track_fn!((), |(): ()| {
         // SAFETY: zeroing STARTUPINFOW is valid for the Windows API
         let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
         // SAFETY: zeroing PROCESS_INFORMATION is valid for the Windows API
