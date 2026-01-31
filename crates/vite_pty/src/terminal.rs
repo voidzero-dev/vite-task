@@ -116,6 +116,11 @@ impl Terminal {
             // Not found yet - read more data
             let n = self.reader.read(&mut buf)?;
 
+            if n == 0 {
+                // EOF - expected string not found
+                return Err(anyhow::anyhow!("Expected string not found: {}", expected));
+            }
+
             let data = &buf[..n];
             // Feed data to parser, which updates screen state and handles control sequence queries.
             self.parser.process(data);
