@@ -12,5 +12,8 @@ anyhow = { workspace = true }
 portable-pty = { workspace = true }
 vt100 = { workspace = true }
 
+[dev-dependencies]
+subprocess_test = { workspace = true, features = ["portable-pty"] }
+
 [lints]
 workspace = true
