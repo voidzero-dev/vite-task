@@ -93,7 +93,7 @@ phf = { version = "0.11.3", features = ["macros"] }
 portable-pty = "0.9.0"
 pretty_assertions = "1.4.1"
 rand = "0.9.1"
-ratatui = "0.29.0"
+ratatui = "0.30.0"
 rayon = "1.10.0"
 ref-cast = "1.0.24"
 regex = "1.11.3"
@@ -122,13 +122,14 @@ tracing = "0.1.43"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "serde"] }
 ts-rs = { version = "11.1.0" }
-tui-term = "0.2.0"
+tui-term = "0.3.1"
 twox-hash = "2.1.1"
 uuid = "1.18.1"
 vec1 = "1.12.1"
 vite_glob = { path = "crates/vite_glob" }
 vite_graph_ser = { path = "crates/vite_graph_ser" }
 vite_path = { path = "crates/vite_path" }
+vite_pty = { path = "crates/vite_pty" }
 vite_shell = { path = "crates/vite_shell" }
 vite_str = { path = "crates/vite_str" }
 vite_task = { path = "crates/vite_task" }
@@ -136,6 +137,7 @@ vite_task_bin = { path = "crates/vite_task_bin" }
 vite_task_graph = { path = "crates/vite_task_graph" }
 vite_task_plan = { path = "crates/vite_task_plan" }
 vite_workspace = { path = "crates/vite_workspace" }
+vt100 = "0.16.2"
 wax = "0.6.0"
 which = "8.0.0"
 widestring = "1.2.0"
