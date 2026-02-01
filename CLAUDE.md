@@ -36,6 +36,40 @@ Test fixtures and snapshots:
   - resolved program paths, cwd, and env vars
 - **E2E**: `crates/vite_task_bin/tests/e2e_snapshots/fixtures/` - needed for testing execution and beyond: caching, output styling
 
+### Cross-Platform Testing
+
+**CRITICAL**: This project must work on both Unix (macOS/Linux) and Windows. For any cross-platform features:
+
+1. **No Platform Skipping**: Skipping tests on either platform is **UNACCEPTABLE**
+   - Use `#[cfg(unix)]` and `#[cfg(windows)]` for platform-specific code within tests
+   - Both platforms must execute the test and verify the feature works correctly
+   - If a feature can't work on a platform, it shouldn't be added
+
+2. **Windows Cross-Testing from macOS**:
+   ```bash
+   # Test on Windows (aarch64) from macOS via cross-compilation
+   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p <package> --test <test>
+
+   # Examples:
+   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p vite_pty --test terminal
+   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p vite_pty --test terminal -- resize_terminal
+   ```
+
+3. **Shared Folder Setup**: The repo is configured to install node_modules for both macOS and Windows ARM64 via `supportedArchitectures` in `pnpm-workspace.yaml`. After `pnpm install`, the node_modules can be shared with a Windows VM.
+
+4. **Cross-Platform Test Design Patterns**:
+   - Use conditional compilation for platform-specific setup/assertions
+   - Use cross-platform libraries for common operations (e.g., `terminal_size` for terminal dimensions)
+   - Verify platform-specific behavior works as expected:
+     - **Unix**: SIGWINCH signals, ioctl, /dev/null, etc.
+     - **Windows**: ConPTY, GetConsoleScreenBufferInfo, NUL, etc.
+
+5. **Example**: The `vite_pty::resize_terminal` test demonstrates proper cross-platform testing:
+   - Unix: Installs SIGWINCH handler to verify signal delivery
+   - Windows: Acknowledges synchronous ConPTY resize behavior
+   - Both: Query terminal size using cross-platform `terminal_size` crate
+   - Both: Verify resize actually works and returns correct dimensions
+
 ## CLI Usage
 
 ```bash
@@ -90,6 +124,8 @@ Tasks are defined in `vite.config.json`:
 
 ## Code Constraints
 
+### Required Patterns
+
 These patterns are enforced by `.clippy.toml`:
 
 | Instead of                          | Use                                      |
@@ -100,6 +136,15 @@ These patterns are enforced by `.clippy.toml`:
 | `String` (for small strings)        | `vite_str::Str`                          |
 | `std::env::current_dir`             | `vite_path::current_dir`                 |
 | `.to_lowercase()`/`.to_uppercase()` | `cow_utils` methods                      |
+
+### Cross-Platform Requirements
+
+**All code must work on both Unix and Windows without platform skipping:**
+
+- Use `#[cfg(unix)]` / `#[cfg(windows)]` for platform-specific implementations
+- Always test on both platforms (use `cargo xtest` for Windows cross-compilation)
+- Platform differences should be handled gracefully, not skipped
+- Document platform-specific behavior in code comments
 
 ## Path Type System
 

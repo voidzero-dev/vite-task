@@ -2,6 +2,15 @@ packages:
   - .
   - packages/tools
 
+# Support both macOS and Windows ARM64 for shared folder usage
+supportedArchitectures:
+  os:
+    - current
+    - win32
+  cpu:
+    - current
+    - arm64
+
 catalog:
   '@types/node': 25.0.3
   husky: ^9.1.7
