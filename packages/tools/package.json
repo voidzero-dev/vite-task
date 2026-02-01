@@ -15,5 +15,11 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "vite-task-tools": "link:"
+  },
+  "optionalDependencies": {
+    "@oxlint/darwin-arm64": "1.42.0",
+    "@oxlint/win32-arm64": "1.42.0",
+    "@oxlint-tsgolint/darwin-arm64": "0.10.1",
+    "@oxlint-tsgolint/win32-arm64": "0.10.1"
   }
 }

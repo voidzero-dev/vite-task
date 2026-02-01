@@ -59,6 +59,19 @@ importers:
       vite-task-tools:
         specifier: 'link:'
         version: 'link:'
+    optionalDependencies:
+      '@oxlint-tsgolint/darwin-arm64':
+        specifier: 0.10.1
+        version: 0.10.1
+      '@oxlint-tsgolint/win32-arm64':
+        specifier: 0.10.1
+        version: 0.10.1
+      '@oxlint/darwin-arm64':
+        specifier: 1.42.0
+        version: 1.42.0
+      '@oxlint/win32-arm64':
+        specifier: 1.42.0
+        version: 1.42.0
 
 packages:
 
