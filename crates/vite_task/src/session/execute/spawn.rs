@@ -173,16 +173,27 @@ where
     let path_reads = &mut track_result.path_reads;
     let path_writes = &mut track_result.path_writes;
 
+    // Canonicalize the workspace root once for comparison.
+    // On Windows, this converts to extended-length path format (\\?\...).
+    #[cfg(windows)]
+    let canonical_workspace_root = {
+        use fspy_shared::ipc::NativeStr;
+        let native: Box<NativeStr> = workspace_root.as_path().into();
+        native.canonicalize_path()
+    };
+    #[cfg(unix)]
+    let canonical_workspace_root = workspace_root.as_path().to_path_buf();
+
     for access in termination.path_accesses.iter() {
-        let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {
-            let Ok(stripped_path) = strip_result else {
-                return None;
-            };
-            // On Windows, paths are possible to be still absolute after stripping the workspace root.
-            // For example: c:\workspace\subdir\c:\workspace\subdir
-            // Just ignore those accesses.
-            RelativePathBuf::new(stripped_path).ok()
-        });
+        // Canonicalize the access path to match the workspace root format
+        let canonical_path = access.path.canonicalize_path();
+        let relative_path =
+            canonical_path.strip_prefix(&canonical_workspace_root).ok().and_then(|stripped_path| {
+                // On Windows, paths are possible to be still absolute after stripping the workspace root.
+                // For example: c:\workspace\subdir\c:\workspace\subdir
+                // Just ignore those accesses.
+                RelativePathBuf::new(stripped_path).ok()
+            });
 
         let Some(relative_path) = relative_path else {
             // Ignore accesses outside the workspace

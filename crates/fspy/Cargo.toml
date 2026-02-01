@@ -42,6 +42,9 @@ winsafe = { workspace = true }
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 tempfile = { workspace = true }
 
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+winapi = { workspace = true, features = ["fileapi"] }
+
 [dev-dependencies]
 anyhow = { workspace = true }
 csv-async = { workspace = true }

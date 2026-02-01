@@ -6,12 +6,7 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::windows::ffi::OsStrExt as _;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStringExt as _;
-use std::{
-    borrow::Cow,
-    ffi::OsStr,
-    fmt::Debug,
-    path::{Path, StripPrefixError},
-};
+use std::{borrow::Cow, ffi::OsStr, fmt::Debug};
 
 use allocator_api2::alloc::Allocator;
 use bincode::{
@@ -140,39 +135,78 @@ impl NativeStr {
         NativeStr::wrap_ref(data)
     }
 
-    pub fn strip_path_prefix<P: AsRef<Path>, R, F: FnOnce(Result<&Path, StripPrefixError>) -> R>(
-        &self,
-        base: P,
-        f: F,
-    ) -> R {
-        /// Strip the `\\?\`, `\\.\`, `\??\` prefix from a Windows path, if present.
-        /// Does nothing on non-Windows platforms.
-        ///
-        /// \\?\ and \\.\ are used to enable long paths and access to device paths.
-        /// \??\ is used in Nt* calls.
-        /// The resulting path is not necessarily valid or points to the same location,
-        /// but it's good enough for sanitizing paths in `NativeStr::strip_path_prefix`.
-        fn strip_windows_path_prefix(p: &OsStr) -> &OsStr {
-            #[cfg(windows)]
-            {
-                use os_str_bytes::OsStrBytesExt as _;
-                for prefix in [r"\\?\", r"\\.\", r"\??\"] {
-                    if let Some(stripped) = p.strip_prefix(prefix) {
-                        return stripped;
-                    }
-                }
-                p
-            }
-            #[cfg(not(windows))]
-            {
-                p
-            }
+    /// Canonicalize the path to extended-length path format.
+    ///
+    /// On Unix, this is a no-op that returns a clone of the path.
+    ///
+    /// On Windows, this converts various path formats to extended-length paths (`\\?\...`):
+    /// - Regular paths: `C:\foo\bar` → `\\?\C:\foo\bar`
+    /// - Extended-length paths: `\\?\C:\foo\bar` → unchanged
+    /// - Device paths: `\\.\C:\foo\bar` → `\\?\C:\foo\bar`
+    /// - NT paths: `\??\C:\foo\bar` → `\\?\C:\foo\bar`
+    /// - UNC paths: `\\server\share\foo` → `\\?\UNC\server\share\foo`
+    /// - Extended UNC paths: `\\?\UNC\server\share\foo` → unchanged
+    ///
+    /// This does NOT perform any I/O. It only normalizes the path format.
+    #[cfg(unix)]
+    pub fn canonicalize_path(&self) -> std::path::PathBuf {
+        self.as_os_str().into()
+    }
+
+    /// Canonicalize the path to extended-length path format.
+    ///
+    /// On Unix, this is a no-op that returns a clone of the path.
+    ///
+    /// On Windows, this converts various path formats to extended-length paths (`\\?\...`):
+    /// - Regular paths: `C:\foo\bar` → `\\?\C:\foo\bar`
+    /// - Extended-length paths: `\\?\C:\foo\bar` → unchanged
+    /// - Device paths: `\\.\C:\foo\bar` → `\\?\C:\foo\bar`
+    /// - NT paths: `\??\C:\foo\bar` → `\\?\C:\foo\bar`
+    /// - NT UNC paths: `\??\UNC\server\share\foo` → `\\?\UNC\server\share\foo`
+    /// - UNC paths: `\\server\share\foo` → `\\?\UNC\server\share\foo`
+    /// - Extended UNC paths: `\\?\UNC\server\share\foo` → unchanged
+    ///
+    /// This does NOT perform any I/O. It only normalizes the path format.
+    #[cfg(windows)]
+    pub fn canonicalize_path(&self) -> std::path::PathBuf {
+        use os_str_bytes::OsStrBytesExt as _;
+
+        let path = self.to_os_string();
+
+        // Already an extended-length path
+        if path.starts_with(r"\\?\") {
+            return path.into();
         }
 
-        let me = self.to_cow_os_str();
-        let me = strip_windows_path_prefix(&me);
-        let base = strip_windows_path_prefix(base.as_ref().as_os_str());
-        f(Path::new(me).strip_prefix(base))
+        // Device path: \\.\C:\foo -> \\?\C:\foo
+        if let Some(rest) = path.strip_prefix(r"\\.\") {
+            let mut result = std::ffi::OsString::from(r"\\?\");
+            result.push(rest);
+            return result.into();
+        }
+
+        // NT path: \??\C:\foo -> \\?\C:\foo
+        // Also handles NT UNC path: \??\UNC\server\share -> \\?\UNC\server\share
+        if let Some(rest) = path.strip_prefix(r"\??\") {
+            let mut result = std::ffi::OsString::from(r"\\?\");
+            result.push(rest);
+            return result.into();
+        }
+
+        // UNC path: \\server\share\foo -> \\?\UNC\server\share\foo
+        if path.starts_with(r"\\") {
+            let mut result = std::ffi::OsString::from(r"\\?\UNC\");
+            // Skip the leading \\
+            if let Some(rest) = path.strip_prefix(r"\\") {
+                result.push(rest);
+            }
+            return result.into();
+        }
+
+        // Regular absolute path: C:\foo -> \\?\C:\foo
+        let mut result = std::ffi::OsString::from(r"\\?\");
+        result.push(&path);
+        result.into()
     }
 }
 

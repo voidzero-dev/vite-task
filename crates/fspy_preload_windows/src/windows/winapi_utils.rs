@@ -11,6 +11,7 @@ use winapi::{
         winerror::{NO_ERROR, S_OK},
     },
     um::{
+        debugapi::OutputDebugStringW,
         fileapi::GetFinalPathNameByHandleW,
         winnt::{
             ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_DATA, FILE_WRITE_DATA, GENERIC_READ,
@@ -19,6 +20,13 @@ use winapi::{
     },
 };
 use winsafe::{GetLastError, co};
+
+/// Debug output helper - writes to Windows debug output (visible in DebugView or debugger)
+#[allow(dead_code)]
+pub fn debug_log(msg: &str) {
+    let wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe { OutputDebugStringW(wide.as_ptr()) };
+}
 
 pub fn ck(b: BOOL) -> winsafe::SysResult<()> {
     if b == FALSE { Err(GetLastError()) } else { Ok(()) }
@@ -45,18 +53,40 @@ pub unsafe fn get_u16_str(ustring: &UNICODE_STRING) -> &U16Str {
     }
 }
 
+/// Flags for GetFinalPathNameByHandleW
+const FILE_NAME_OPENED: u32 = 0x8;
+
 pub unsafe fn get_path_name(handle: HANDLE) -> winsafe::SysResult<SmallVec<u16, MAX_PATH>> {
     let mut path = SmallVec::<u16, MAX_PATH>::new();
+    // Try FILE_NAME_OPENED first - this works better on network shares (including WebDAV)
+    // because it doesn't try to normalize the path through SMB which can fail.
+    // Fall back to FILE_NAME_NORMALIZED (0) if FILE_NAME_OPENED fails.
+    let flags = FILE_NAME_OPENED;
     let len = unsafe {
         GetFinalPathNameByHandleW(
             handle,
             path.as_mut_ptr(),
             path.capacity().try_into().unwrap(),
-            0, /*FILE_NAME_NORMALIZED*/
+            flags,
         )
     };
     if len == 0 {
-        return Err(winsafe::GetLastError());
+        let err = winsafe::GetLastError();
+        // Try with FILE_NAME_NORMALIZED as fallback
+        let len = unsafe {
+            GetFinalPathNameByHandleW(
+                handle,
+                path.as_mut_ptr(),
+                path.capacity().try_into().unwrap(),
+                0, /*FILE_NAME_NORMALIZED*/
+            )
+        };
+        if len == 0 {
+            return Err(err);
+        }
+        let len = usize::try_from(len).unwrap();
+        unsafe { path.set_len(len.min(path.capacity())) };
+        return Ok(path);
     }
     let len = usize::try_from(len).unwrap();
     if len <= path.capacity() {
@@ -68,7 +98,7 @@ pub unsafe fn get_path_name(handle: HANDLE) -> winsafe::SysResult<SmallVec<u16, 
                 handle,
                 path.as_mut_ptr(),
                 path.capacity().try_into().unwrap(),
-                0, /*FILE_NAME_NORMALIZED*/
+                flags,
             )
         };
         let len = usize::try_from(len).unwrap();
