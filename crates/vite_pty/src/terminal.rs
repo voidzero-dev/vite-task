@@ -1,11 +1,11 @@
 use std::{
     io::{Read, Write},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     thread,
 };
 
 pub use portable_pty::CommandBuilder;
-use portable_pty::{ChildKiller, PtyPair};
+use portable_pty::{ChildKiller, ExitStatus, PtyPair};
 
 use crate::geo::ScreenSize;
 
@@ -19,6 +19,9 @@ pub struct Terminal {
 
     /// Unprocessed data buffer for read_until
     read_until_buffer: Vec<u8>,
+
+    /// Exit status from the child process, set once by background thread
+    exit_status: Arc<OnceLock<ExitStatus>>,
 }
 
 struct Vt100Callbacks {
@@ -64,12 +67,17 @@ impl Terminal {
         let child_killer = child.clone_killer();
         let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
+        let exit_status: Arc<OnceLock<ExitStatus>> = Arc::new(OnceLock::new());
 
-        // Background thread: wait for child to exit, then close writer to trigger EOF
+        // Background thread: wait for child to exit, set exit status, then close writer to trigger EOF
         thread::spawn({
             let writer = Arc::clone(&writer);
+            let exit_status = Arc::clone(&exit_status);
             move || {
-                let _ = child.wait();
+                // Wait for child and set exit status
+                if let Ok(status) = child.wait() {
+                    let _ = exit_status.set(status);
+                }
                 // Close writer to signal EOF to the reader
                 *writer.lock().unwrap() = None;
             }
@@ -87,6 +95,7 @@ impl Terminal {
             reader,
             read_until_buffer: Vec::new(),
             writer,
+            exit_status,
         })
     }
 
@@ -138,7 +147,16 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn read_to_end(&mut self) -> anyhow::Result<()> {
+    /// Reads all remaining output until the child process exits.
+    ///
+    /// Returns the exit status of the child process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Reading from the PTY fails
+    /// - The exit status is not available (should not happen in normal operation)
+    pub fn read_to_end(&mut self) -> anyhow::Result<ExitStatus> {
         // `read_to_end` will move cursor to the end, so clear any buffered data for `read_until`
         self.read_until_buffer.clear();
 
@@ -151,7 +169,11 @@ impl Terminal {
                 break;
             }
         }
-        Ok(())
+
+        // Wait for exit status to be set by background thread
+        let status = self.exit_status.wait().clone();
+
+        Ok(status)
     }
 
     pub fn write(&mut self, data: &[u8]) -> anyhow::Result<()> {

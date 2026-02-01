@@ -17,7 +17,7 @@ fn is_terminal() {
     }));
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     assert_eq!(output.trim(), "true true true");
 }
@@ -31,7 +31,7 @@ fn read_until_single() {
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     terminal.read_until("hello").unwrap();
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     // After reading until "hello", the buffer should contain " world"
     // read_to_end should process the buffered data and continue reading
@@ -51,7 +51,7 @@ fn read_until_multiple_sequential() {
     terminal.read_until("first").unwrap();
     terminal.read_until("second").unwrap();
     terminal.read_until("third").unwrap();
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     // All three words should be in the screen
     assert!(output.contains("first"));
@@ -86,7 +86,7 @@ fn read_until_with_read_to_end() {
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     terminal.read_until("middle").unwrap();
     // At this point, " suffix" should be buffered
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     // The full output should include everything
     assert!(output.contains("prefix"));
@@ -122,7 +122,7 @@ fn read_until_boundary_spanning() {
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     // Search for a pattern that's likely to span boundaries
     terminal.read_until("abcd").unwrap();
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     assert!(output.contains("abcdef"));
 }
@@ -142,7 +142,7 @@ fn read_until_exact_boundary() {
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     // This should find "second" even if "first" was in a previous read
     terminal.read_until("second").unwrap();
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     assert!(output.contains("first"));
     assert!(output.contains("second"));
@@ -162,7 +162,7 @@ fn read_until_after_read_to_end() {
     terminal.read_until("world").unwrap();
 
     // Read everything else
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     assert!(output.contains("hello world foo bar"));
 
@@ -195,7 +195,7 @@ fn write_basic_echo() {
 
     // Read until we see the echo
     terminal.read_until("hello world").unwrap();
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
 
     let output = terminal.screen_contents();
     // PTY echoes the input, so we see "hello world\nhello world"
@@ -231,7 +231,7 @@ fn write_multiple_lines() {
     terminal.write(b"third\n").unwrap();
     terminal.read_until("Echo: third").unwrap();
 
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     // PTY echoes input, so we see both the typed input and the echo response
     assert_eq!(output.trim(), "first\nEcho: firstsecond\nEcho: secondthird\nEcho: third");
@@ -247,7 +247,7 @@ fn write_after_exit() {
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Read all output - this blocks until child exits and EOF is reached
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
 
     // The background thread should have set writer to None by now
     // since read_to_end only returns after EOF (child exit)
@@ -282,7 +282,7 @@ fn write_interactive_prompt() {
     // Wait for greeting
     terminal.read_until("Hello, Alice").unwrap();
 
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
     let output = terminal.screen_contents();
     assert_eq!(output.trim(), "Name: Alice\nHello, Alice");
 }
@@ -368,7 +368,7 @@ fn resize_terminal() {
     // Verify new size is correct
     terminal.read_until("resized: 40 40").unwrap();
 
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
 }
 
 #[test]
@@ -430,5 +430,31 @@ fn send_ctrl_c_interrupts_process() {
     // Verify interruption was detected
     terminal.read_until("INTERRUPTED").unwrap();
 
-    terminal.read_to_end().unwrap();
+    let _ = terminal.read_to_end().unwrap();
+}
+
+#[test]
+#[timeout(5000)]
+fn read_to_end_returns_exit_status_success() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        println!("success");
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let status = terminal.read_to_end().unwrap();
+    assert!(status.success());
+    assert_eq!(status.exit_code(), 0);
+}
+
+#[test]
+#[timeout(5000)]
+fn read_to_end_returns_exit_status_nonzero() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+        std::process::exit(42);
+    }));
+
+    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let status = terminal.read_to_end().unwrap();
+    assert!(!status.success());
+    assert_eq!(status.exit_code(), 42);
 }
