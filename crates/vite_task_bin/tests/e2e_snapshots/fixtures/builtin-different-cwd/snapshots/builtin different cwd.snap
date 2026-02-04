@@ -1,51 +1,128 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/builtin-different-cwd
 ---
-> cd folder1 && vite lint # cache miss in folder1
+> cd folder1 && vite run lint # cache miss in folder1
+$ vite lint
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
-   ,-[a.js:1:1]
+   ,-[folder1/a.js:1:1]
  1 | // Empty JS file for oxlint
    : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    `----
   help: Delete this file or add some code to it.
 
-Found 1 warning and 0 errors.
-Finished in <duration> on 1 file with 90 rules using <n> threads.
-
-
-> cd folder2 && vite lint # cache miss in folder2
-
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
-   ,-[a.js:1:1]
+   ,-[folder2/a.js:1:1]
  1 | // Empty JS file for oxlint
    : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    `----
   help: Delete this file or add some code to it.
 
-Found 1 warning and 0 errors.
-Finished in <duration> on 1 file with 90 rules using <n> threads.
+Found 2 warnings and 0 errors.
+Finished in <duration> on 2 files with 90 rules using <n> threads.
 
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] lint: $ vite lint ✓
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> cd folder2 && vite run lint # cache miss in folder2
+$ vite lint ✓ cache hit, replaying
+
+  ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
+   ,-[folder1/a.js:1:1]
+ 1 | // Empty JS file for oxlint
+   : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   `----
+  help: Delete this file or add some code to it.
+
+  ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
+   ,-[folder2/a.js:1:1]
+ 1 | // Empty JS file for oxlint
+   : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   `----
+  help: Delete this file or add some code to it.
+
+Found 2 warnings and 0 errors.
+Finished in <duration> on 2 files with 90 rules using <n> threads.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 1 cache hits • 0 cache misses 
+Performance:  100% cache hit rate, <duration> saved in total
+
+Task Details:
+────────────────────────────────────────────────
+  [1] lint: $ vite lint ✓
+      → Cache hit - output replayed - <duration> saved
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 > echo 'console.log(1);' > folder2/a.js # modify folder2
 
-> cd folder1 && vite lint # cache hit
+> cd folder1 && vite run lint # cache hit
+$ vite lint ✗ cache miss: content of input 'folder2/a.js' changed, executing
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
-   ,-[a.js:1:1]
+   ,-[folder1/a.js:1:1]
  1 | // Empty JS file for oxlint
    : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    `----
   help: Delete this file or add some code to it.
 
 Found 1 warning and 0 errors.
-Finished in <duration> on 1 file with 90 rules using <n> threads.
-✓ cache hit, logs replayed
+Finished in <duration> on 2 files with 90 rules using <n> threads.
 
 
-> cd folder2 && vite lint # cache miss
-Found 0 warnings and 0 errors.
-Finished in <duration> on 1 file with 90 rules using <n> threads.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] lint: $ vite lint ✓
+      → Cache miss: content of input 'folder2/a.js' changed
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> cd folder2 && vite run lint # cache miss
+$ vite lint ✓ cache hit, replaying
+
+  ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
+   ,-[folder1/a.js:1:1]
+ 1 | // Empty JS file for oxlint
+   : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   `----
+  help: Delete this file or add some code to it.
+
+Found 1 warning and 0 errors.
+Finished in <duration> on 2 files with 90 rules using <n> threads.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 1 cache hits • 0 cache misses 
+Performance:  100% cache hit rate, <duration> saved in total
+
+Task Details:
+────────────────────────────────────────────────
+  [1] lint: $ vite lint ✓
+      → Cache hit - output replayed - <duration> saved
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

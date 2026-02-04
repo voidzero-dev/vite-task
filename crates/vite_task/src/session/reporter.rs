@@ -91,8 +91,8 @@ struct ExecutionStats {
 /// - Skips printing the execution summary entirely
 /// - Useful for programmatic usage or when summary is not needed
 ///
-/// ## Simplified Summary for Built-in Commands
-/// - When a single built-in command (e.g., `vite lint`) is executed:
+/// ## Simplified Summary for Single Tasks
+/// - When a single task is executed:
 ///   - Skips full summary (no Statistics/Task Details sections)
 ///   - Shows only cache status (except for "NotFound" which is hidden for clean first-run output)
 ///   - Results in clean output showing just the command's stdout/stderr
@@ -156,7 +156,7 @@ impl<W: Write> LabeledReporter<W> {
             CacheStatus::Disabled(_) => self.stats.cache_disabled += 1,
         }
 
-        // Handle None display case - direct synthetic execution (e.g., `vite lint`)
+        // Handle None display case - direct synthetic execution (e.g., via plan_synthetic_task)
         // Don't print cache status here - will be printed at finish for cache hits only
         let Some(display) = display else {
             self.executions.push(ExecutionInfo {

@@ -141,7 +141,7 @@ pub enum LeafExecutionKind {
 /// An execution item, from a split subcommand in a task's command (`item1 && item2 && ...`).
 #[derive(Debug, Serialize)]
 pub enum ExecutionItemKind {
-    /// Expanded from a known vite subcommand, like `vite run ...` or `vite lint`.
+    /// Expanded from a known vite subcommand, like `vite run ...` or a synthesized task.
     Expanded(#[serde(serialize_with = "serialize_by_key")] ExecutionGraph),
     /// A normal execution that spawns a child process, like `tsc --noEmit`.
     Leaf(LeafExecutionKind),

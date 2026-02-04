@@ -1,17 +1,31 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/e2e-lint-cache
 ---
-> vite lint # cache miss
+> vite run lint # cache miss
+$ vite lint
 Found 0 warnings and 0 errors.
 Finished in <duration> on 0 files with 90 rules using <n> threads.
 
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] e2e-lint-cache#lint: $ vite lint ✓
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 > echo debugger > main.js # add lint error
 
-> vite lint # cache miss, lint fails
+> vite run lint # cache miss, lint fails
+$ vite lint ✗ cache miss: content of input '' changed, executing
 
   ! eslint(no-debugger): `debugger` statement is not allowed
    ,-[main.js:1:1]
@@ -22,3 +36,17 @@ Finished in <duration> on 0 files with 90 rules using <n> threads.
 
 Found 1 warning and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] e2e-lint-cache#lint: $ vite lint ✓
+      → Cache miss: content of input '' changed
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

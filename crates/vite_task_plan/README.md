@@ -31,9 +31,9 @@ There are two types of execution requests:
    - Queries the task graph based on task patterns
    - Builds execution graph with dependency ordering
 
-2. **Synthetic Request** - Execute on-the-fly tasks not in the graph (e.g., `vite lint`)
-   - Generated dynamically with provided configuration
-   - Used for built-in commands
+2. **Synthetic Request** - Execute on-the-fly tasks not in the graph (e.g., `vite lint` in a task script)
+   - Generated dynamically by the TaskSynthesizer
+   - Used for synthesized commands within task scripts
 
 ### Execution Items
 

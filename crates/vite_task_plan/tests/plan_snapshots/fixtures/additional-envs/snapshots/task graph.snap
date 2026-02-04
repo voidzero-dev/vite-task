@@ -1,9 +1,37 @@
 ---
-source: crates/vite_task_bin/tests/test_snapshots/main.rs
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
 expression: task_graph_json
-input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/additional-envs
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-envs
 ---
 [
+  {
+    "key": [
+      "<workspace>/",
+      "env-test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "additional-envs",
+        "task_name": "env-test",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vite env-test TEST_VAR hello_world",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
   {
     "key": [
       "<workspace>/",

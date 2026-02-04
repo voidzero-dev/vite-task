@@ -1,3 +1,6 @@
 {
-  "name": "builtin-non-zero-exit-test"
+  "name": "builtin-non-zero-exit-test",
+  "scripts": {
+    "lint": "vite lint"
+  }
 }

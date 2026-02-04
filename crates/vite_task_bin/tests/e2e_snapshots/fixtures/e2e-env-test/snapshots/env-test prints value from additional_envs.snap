@@ -1,8 +1,22 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/e2e-env-test
 ---
-> vite env-test SYNTHETIC_ENV_VAR test_value_from_synthesizer # prints env value
+> vite run env-test -- SYNTHETIC_ENV_VAR test_value_from_synthesizer # prints env value
+$ vite env-test SYNTHETIC_ENV_VAR test_value_from_synthesizer
 test_value_from_synthesizer
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] e2e-env-test#env-test: $ vite env-test SYNTHETIC_ENV_VAR test_value_from_synthesizer ✓
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

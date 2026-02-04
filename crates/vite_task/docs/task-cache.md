@@ -611,10 +611,10 @@ CommandFingerprint {
 }
 ```
 
-### Example: Built-in Task Cache Key
+### Example: Synthetic Task Cache Key
 
 ```rust
-// Built-in task: vite lint
+// Synthetic task (e.g., "vite lint" in a task script)
 TaskRunKey {
     task_id: TaskId {
         task_group_id: TaskGroupId {
@@ -830,20 +830,20 @@ Cache hit, replaying
 b
 ```
 
-### Example 3: Built-in Task Caching by Working Directory
+### Example 3: Task Caching by Working Directory
 
 ```bash
-# Different directories create separate caches for built-in tasks
-> cd folder1 && vite lint
+# Different directories create separate caches for tasks
+> cd folder1 && vite run lint
 Cache not found
 Found 0 warnings and 0 errors.
 
-> cd folder2 && vite lint
+> cd folder2 && vite run lint
 Cache not found  # Different cwd = different cache
 Found 0 warnings and 0 errors.
 
 # Each directory maintains its own cache
-> cd folder1 && vite lint
+> cd folder1 && vite run lint
 Cache hit, replaying
 Found 0 warnings and 0 errors.
 ```

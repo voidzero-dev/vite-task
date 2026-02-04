@@ -13,17 +13,9 @@ name = "normal task with extra args"
 args = ["run", "hello", "a.txt"]
 
 [[plan]]
-name = "direct synthetic task"
-args = ["lint"]
-
-[[plan]]
-name = "direct synthetic task with cwd"
+name = "synthetic task in user task with cwd"
 cwd = "subdir"
-args = ["lint"]
-
-[[plan]]
-name = "direct synthetic task with extra args"
-args = ["lint", "--fix"]
+args = ["run", "lint"]
 
 [[plan]]
 name = "lint and echo with extra args"
@@ -36,7 +28,7 @@ args = ["run", "echo-and-lint", "--fix"]
 [[e2e]]
 name = "direct lint"
 steps = [
-  "vite lint # cache miss",
+  "vite run lint # cache miss",
   "echo debugger > main.js # add lint error",
-  "vite lint # cache miss, lint fails",
+  "vite run lint # cache miss, lint fails",
 ]

@@ -3,7 +3,8 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/builtin-non-zero-exit
 ---
-[1]> vite lint -D no-debugger
+[1]> vite run lint -- -D no-debugger
+$ vite lint -D no-debugger
 
   x eslint(no-debugger): `debugger` statement is not allowed
    ,-[bad.js:1:1]
@@ -16,7 +17,21 @@ Found 0 warnings and 1 error.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
 
 
-[1]> vite lint -D no-debugger
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses • 1 failed 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] builtin-non-zero-exit-test#lint: $ vite lint -D no-debugger ✗ (exit code: 1)
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[1]> vite run lint -- -D no-debugger
+$ vite lint -D no-debugger
 
   x eslint(no-debugger): `debugger` statement is not allowed
    ,-[bad.js:1:1]
@@ -27,3 +42,17 @@ Finished in <duration> on 1 file with 90 rules using <n> threads.
 
 Found 0 warnings and 1 error.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses • 1 failed 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] builtin-non-zero-exit-test#lint: $ vite lint -D no-debugger ✗ (exit code: 1)
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

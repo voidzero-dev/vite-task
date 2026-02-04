@@ -31,6 +31,7 @@ vite_task_graph = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
+clap = { workspace = true, features = ["derive"] }
 copy_dir = { workspace = true }
 cow-utils = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }

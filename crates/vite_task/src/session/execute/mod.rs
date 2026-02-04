@@ -348,7 +348,7 @@ impl ExecutionContext<'_> {
     }
 }
 
-impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
+impl<'a> Session<'a> {
     /// Execute an execution plan, reporting events to the provided reporter.
     ///
     /// Returns Err(ExitStatus) to suggest the caller to abort and exit the process with the given exit status.

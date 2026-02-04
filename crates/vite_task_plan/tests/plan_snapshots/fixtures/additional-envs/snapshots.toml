@@ -1,18 +1,5 @@
 # Tests env-test synthetic command with additional_envs
 
 [[plan]]
-name = "direct env-test synthetic task"
-args = ["env-test", "TEST_VAR", "hello_world"]
-
-[[e2e]]
-name = "env-test prints value from additional_envs"
-steps = [
-  "vite env-test SYNTHETIC_ENV_VAR test_value_from_synthesizer # prints env value",
-]
-
-[[e2e]]
-name = "env-test with different values"
-steps = [
-  "vite env-test FOO bar # sets FOO=bar",
-  "vite env-test BAZ qux # sets BAZ=qux",
-]
+name = "env-test synthetic task in user task"
+args = ["run", "env-test"]

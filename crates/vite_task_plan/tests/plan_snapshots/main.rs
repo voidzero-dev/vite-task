@@ -1,15 +1,23 @@
 mod redact;
 
-use std::{collections::HashMap, convert::Infallible, ffi::OsStr, path::Path, sync::Arc};
+use std::{collections::HashMap, ffi::OsStr, path::Path, sync::Arc};
 
+use clap::Parser;
 use copy_dir::copy_dir;
 use redact::redact_snapshot;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
-use vite_task::{CLIArgs, Session};
-use vite_task_bin::CustomTaskSubcommand;
+use vite_task::{BuiltInCommand, Session};
 use vite_workspace::find_workspace_root;
+
+/// Local parser wrapper for BuiltInCommand
+#[derive(Parser)]
+#[command(name = "vite")]
+enum Cli {
+    #[clap(flatten)]
+    Command(BuiltInCommand),
+}
 
 #[derive(serde::Deserialize, Debug)]
 struct Plan {
@@ -118,7 +126,7 @@ fn run_case_inner(
         for plan in cases_file.plan_cases {
             let snapshot_name = format!("query - {}", plan.name);
 
-            let cli_args = match CLIArgs::<CustomTaskSubcommand, Infallible>::try_parse_from(
+            let cli = match Cli::try_parse_from(
                 std::iter::once("vite") // dummy program name
                     .chain(plan.args.iter().map(|s| s.as_str())),
             ) {
@@ -128,14 +136,10 @@ fn run_case_inner(
                     continue;
                 }
             };
-            let task_cli_args = match cli_args {
-                CLIArgs::Task(task_cli_args) => task_cli_args,
-                CLIArgs::NonTask(never) => match never {},
-            };
+            let Cli::Command(command) = cli;
 
-            let plan_result = session
-                .plan_from_cli(workspace_root.path.join(plan.cwd).into(), task_cli_args)
-                .await;
+            let plan_result =
+                session.plan_from_cli(workspace_root.path.join(plan.cwd).into(), command).await;
 
             let plan = match plan_result {
                 Ok(plan) => plan,

@@ -1,90 +1,14 @@
-use std::{ffi::OsStr, sync::Arc};
+use std::sync::Arc;
 
-use clap::{Parser, Subcommand};
+use clap::Subcommand;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskSpecifier, query::TaskQueryKind};
 use vite_task_plan::plan_request::{PlanOptions, PlanRequest, QueryPlanRequest};
 
-/// Represents the CLI arguments handled by vite-task, including both built-in (like run) and custom subcommands (like lint).
-#[derive(Debug)]
-pub struct TaskCLIArgs<CustomSubcommand: Subcommand> {
-    pub(crate) original: Arc<[Str]>,
-    pub(crate) parsed: ParsedTaskCLIArgs<CustomSubcommand>,
-}
-
-impl<CustomSubcommand: Subcommand> TaskCLIArgs<CustomSubcommand> {
-    /// Inspect the custom subcommand (like lint/install). Returns `None` if it's built-in subcommand
-    /// The caller should not use this method to actually handle the custom subcommand. Instead, it should
-    /// private TaskSynthesizer to Session so that vite-task can handle custom subcommands consistently from
-    /// both direct CLI invocations and invocations in task scripts.
-    ///
-    /// This method is provided only to make it possible for the caller to behave differently BEFORE and AFTER the session.
-    /// For example, vite+ needs this method to skip auto-install when the custom subcommand is already `install`.
-    pub fn custom_subcommand(&self) -> Option<&CustomSubcommand> {
-        match &self.parsed {
-            ParsedTaskCLIArgs::BuiltIn(_) => None,
-            ParsedTaskCLIArgs::Custom(custom) => Some(custom),
-        }
-    }
-}
-
-/// Represents the overall CLI arguments, containing three kinds of subcommands:
-/// 1. Built-in subcommands handled by vite-task (like run)
-/// 2. Custom subcommands handled by vite-task with the help of TaskSyntheizer (like lint)
-/// 3. Custom subcommands not handled by vite-task (like vite+ commands without cache)
-pub enum CLIArgs<CustomSubcommand: Subcommand, NonTaskSubcommand: Subcommand> {
-    /// Subcommands handled by vite task, including built-in (like run) and custom (like lint)
-    Task(TaskCLIArgs<CustomSubcommand>),
-    /// Custom subcommands not handled by vite task (like vite+ commands without cache)
-    NonTask(NonTaskSubcommand),
-}
-
-impl<CustomSubcommand: Subcommand, NonTaskSubcommand: Subcommand>
-    CLIArgs<CustomSubcommand, NonTaskSubcommand>
-{
-    /// Get the original CLI arguments
-    pub fn try_parse_from(
-        args: impl Iterator<Item = impl AsRef<str>>,
-    ) -> Result<Self, clap::Error> {
-        #[derive(Debug, clap::Parser)]
-        enum ParsedCLIArgs<CustomSubcommand: Subcommand, NonTaskSubcommand: Subcommand> {
-            /// subcommands handled by vite task
-            #[command(flatten)]
-            Task(ParsedTaskCLIArgs<CustomSubcommand>),
-
-            /// subcommands that are not handled by vite task
-            #[command(flatten)]
-            NonTask(NonTaskSubcommand),
-        }
-
-        let args = args.map(|arg| Str::from(arg.as_ref())).collect::<Arc<[Str]>>();
-        let parsed_cli_args = ParsedCLIArgs::<CustomSubcommand, NonTaskSubcommand>::try_parse_from(
-            args.iter().map(|s| OsStr::new(s.as_str())),
-        )?;
-
-        Ok(match parsed_cli_args {
-            ParsedCLIArgs::Task(parsed_task_cli_args) => {
-                Self::Task(TaskCLIArgs { original: args, parsed: parsed_task_cli_args })
-            }
-            ParsedCLIArgs::NonTask(non_task_subcommand) => Self::NonTask(non_task_subcommand),
-        })
-    }
-}
-
-#[derive(Debug, Parser)]
-pub(crate) enum ParsedTaskCLIArgs<CustomSubcommand: Subcommand> {
-    /// subcommands provided by vite task, like `run`
-    #[clap(flatten)]
-    BuiltIn(BuiltInCommand),
-    /// custom subcommands provided by vite+, like `lint`
-    #[clap(flatten)]
-    Custom(CustomSubcommand),
-}
-
 /// vite task CLI subcommands
 #[derive(Debug, Subcommand)]
-pub(crate) enum BuiltInCommand {
+pub enum BuiltInCommand {
     /// Run tasks
     Run {
         /// `packageName#taskName` or `taskName`.
@@ -118,7 +42,7 @@ pub enum CLITaskQueryError {
 }
 
 impl BuiltInCommand {
-    /// Convert to `TaskQuery`, or return an error if invalid.
+    /// Convert to `PlanRequest`, or return an error if invalid.
     pub fn into_plan_request(
         self,
         cwd: &Arc<AbsolutePath>,

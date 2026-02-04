@@ -52,5 +52,53 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     .unwrap();
     output = node_trace_warning_regex.replace_all(&output, "").into_owned();
 
+    // Sort consecutive diagnostic blocks to handle non-deterministic tool output
+    // (e.g., oxlint reports warnings in arbitrary order due to multi-threading).
+    // Each block starts with "  ! " and ends at the next empty line.
+    output = sort_diagnostic_blocks(output);
+
     output
+}
+
+fn sort_diagnostic_blocks(output: String) -> String {
+    let parts: Vec<&str> = output.split('\n').collect();
+    let mut result: Vec<&str> = Vec::new();
+    let mut i = 0;
+
+    while i < parts.len() {
+        if parts[i].starts_with("  ! ") {
+            let mut blocks: Vec<Vec<&str>> = Vec::new();
+
+            loop {
+                if i >= parts.len() || !parts[i].starts_with("  ! ") {
+                    break;
+                }
+                let mut block: Vec<&str> = Vec::new();
+                while i < parts.len() && !parts[i].is_empty() {
+                    block.push(parts[i]);
+                    i += 1;
+                }
+                blocks.push(block);
+                // Skip the empty line separator between blocks
+                if i < parts.len() && parts[i].is_empty() {
+                    i += 1;
+                }
+            }
+
+            blocks.sort();
+
+            for (j, block) in blocks.iter().enumerate() {
+                result.extend_from_slice(block);
+                // Restore empty line separators (between blocks + trailing)
+                if j < blocks.len() - 1 || i <= parts.len() {
+                    result.push("");
+                }
+            }
+        } else {
+            result.push(parts[i]);
+            i += 1;
+        }
+    }
+
+    result.join("\n")
 }

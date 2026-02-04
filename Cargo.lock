@@ -3371,6 +3371,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
+ "clap",
  "copy_dir",
  "cow-utils",
  "futures-util",

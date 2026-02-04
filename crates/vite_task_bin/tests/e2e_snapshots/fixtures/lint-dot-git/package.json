@@ -1,1 +1,5 @@
-{}
+{
+  "scripts": {
+    "lint": "vite lint"
+  }
+}

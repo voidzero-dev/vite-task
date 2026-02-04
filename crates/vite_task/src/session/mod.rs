@@ -8,7 +8,7 @@ use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
-use clap::{Parser, Subcommand};
+use clap::Parser;
 pub use event::ExecutionEvent;
 use once_cell::sync::OnceCell;
 pub use reporter::{LabeledReporter, Reporter};
@@ -22,10 +22,7 @@ use vite_task_plan::{
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
-use crate::{
-    cli::{ParsedTaskCLIArgs, TaskCLIArgs},
-    collections::HashMap,
-};
+use crate::{cli::BuiltInCommand, collections::HashMap};
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
@@ -52,60 +49,42 @@ impl TaskGraphLoader for LazyTaskGraph<'_> {
     }
 }
 
-pub struct SessionCallbacks<'a, CustomSubcommand> {
-    pub task_synthesizer: &'a mut (dyn TaskSynthesizer<CustomSubcommand> + 'a),
+pub struct SessionCallbacks<'a> {
+    pub task_synthesizer: &'a mut (dyn TaskSynthesizer + 'a),
     pub user_config_loader: &'a mut (dyn UserConfigLoader + 'a),
 }
 
+/// Handles synthesizing task plan requests from commands found in task scripts.
+///
+/// When a task's command references a known program (e.g., `vite lint` in a script),
+/// the synthesizer converts it into a `SyntheticPlanRequest` for execution.
 #[async_trait::async_trait(?Send)]
-pub trait TaskSynthesizer<CustomSubcommand>: Debug {
-    fn should_synthesize_for_program(&self, program: &str) -> bool;
-
-    /// Synthesize a synthetic task plan request for the given parsed custom subcommand.
+pub trait TaskSynthesizer: Debug {
+    /// Called for every command in task scripts to determine if it should be synthesized.
     ///
+    /// - `program` is the program name (e.g., `"vite"`).
+    /// - `args` is all arguments after the program (e.g., `["lint", "--fix"]`).
     /// - `envs` is the current environment variables where the task is being planned.
     /// - `cwd` is the current working directory where the task is being planned.
     ///
-    /// The implementor can return a different `envs` in `SyntheticPlanRequest` to customize
-    /// environment variables for the synthetic task.
+    /// Returns `Ok(Some(request))` if the command is recognized and should be synthesized,
+    /// `Ok(None)` if the command should be executed as a normal process.
     async fn synthesize_task(
         &mut self,
-        subcommand: CustomSubcommand,
+        program: &str,
+        args: &[Str],
         envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: &Arc<AbsolutePath>,
-    ) -> anyhow::Result<SyntheticPlanRequest>;
+    ) -> anyhow::Result<Option<SyntheticPlanRequest>>;
 }
 
 #[derive(derive_more::Debug)]
-#[debug(bound())] // Avoid requiring CustomSubcommand: Debug
-struct PlanRequestParser<'a, CustomSubcommand> {
-    task_synthesizer: &'a mut (dyn TaskSynthesizer<CustomSubcommand> + 'a),
-}
-
-impl<CustomSubcommand: clap::Subcommand> PlanRequestParser<'_, CustomSubcommand> {
-    async fn get_plan_request_from_cli_args(
-        &mut self,
-        cli_args: ParsedTaskCLIArgs<CustomSubcommand>,
-        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
-        cwd: &Arc<AbsolutePath>,
-    ) -> anyhow::Result<PlanRequest> {
-        match cli_args {
-            ParsedTaskCLIArgs::BuiltIn(vite_task_subcommand) => {
-                Ok(vite_task_subcommand.into_plan_request(cwd)?)
-            }
-            ParsedTaskCLIArgs::Custom(custom_subcommand) => {
-                let synthetic_plan_request =
-                    self.task_synthesizer.synthesize_task(custom_subcommand, envs, cwd).await?;
-                Ok(PlanRequest::Synthetic(synthetic_plan_request))
-            }
-        }
-    }
+struct PlanRequestParser<'a> {
+    task_synthesizer: &'a mut (dyn TaskSynthesizer + 'a),
 }
 
 #[async_trait::async_trait(?Send)]
-impl<CustomSubcommand: clap::Subcommand> vite_task_plan::PlanRequestParser
-    for PlanRequestParser<'_, CustomSubcommand>
-{
+impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
     async fn get_plan_request(
         &mut self,
         program: &str,
@@ -113,26 +92,33 @@ impl<CustomSubcommand: clap::Subcommand> vite_task_plan::PlanRequestParser
         envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
         cwd: &Arc<AbsolutePath>,
     ) -> anyhow::Result<Option<PlanRequest>> {
-        Ok(
-            if self.task_synthesizer.should_synthesize_for_program(program)
-                && let Some(subcommand) = args.first()
-                && ParsedTaskCLIArgs::<CustomSubcommand>::has_subcommand(subcommand)
-            {
-                let cli_args = ParsedTaskCLIArgs::<CustomSubcommand>::try_parse_from(
-                    std::iter::once(program).chain(args.iter().map(Str::as_str)),
-                )?;
-                Some(self.get_plan_request_from_cli_args(cli_args, envs, cwd).await?)
-            } else {
-                None
-            },
-        )
+        // Try task synthesizer first (handles e.g. "vite lint" in scripts)
+        if let Some(synthetic) =
+            self.task_synthesizer.synthesize_task(program, args, envs, cwd).await?
+        {
+            return Ok(Some(PlanRequest::Synthetic(synthetic)));
+        }
+
+        // Try built-in "run" command (handles "vite run build" in scripts)
+        #[derive(Parser)]
+        enum BuiltInParser {
+            #[clap(flatten)]
+            Command(BuiltInCommand),
+        }
+        if let Ok(BuiltInParser::Command(built_in)) = BuiltInParser::try_parse_from(
+            std::iter::once(program).chain(args.iter().map(Str::as_str)),
+        ) {
+            return Ok(Some(built_in.into_plan_request(cwd)?));
+        }
+
+        Ok(None)
     }
 }
 
 /// Represents a vite task session for planning and executing tasks. A process typically has one session.
 ///
 /// A session manages task graph loading internally and provides non-consuming methods to plan and/or execute tasks (allows multiple plans/executions per session).
-pub struct Session<'a, CustomSubcommand> {
+pub struct Session<'a> {
     workspace_path: Arc<AbsolutePath>,
     /// A session doesn't necessarily load the task graph immediately.
     /// The task graph is loaded on-demand and cached for future use.
@@ -141,7 +127,7 @@ pub struct Session<'a, CustomSubcommand> {
     envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
     cwd: Arc<AbsolutePath>,
 
-    plan_request_parser: PlanRequestParser<'a, CustomSubcommand>,
+    plan_request_parser: PlanRequestParser<'a>,
 
     /// Cache is lazily initialized to avoid SQLite race conditions when multiple
     /// processes (e.g., parallel `vite lib` commands) start simultaneously.
@@ -157,9 +143,9 @@ fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf
     }
 }
 
-impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
+impl<'a> Session<'a> {
     /// Initialize a session with real environment variables and cwd
-    pub fn init(callbacks: SessionCallbacks<'a, CustomSubcommand>) -> anyhow::Result<Self> {
+    pub fn init(callbacks: SessionCallbacks<'a>) -> anyhow::Result<Self> {
         let envs = std::env::vars_os()
             .map(|(k, v)| (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str())))
             .collect();
@@ -176,7 +162,7 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
     pub fn init_with(
         mut envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
         cwd: Arc<AbsolutePath>,
-        callbacks: SessionCallbacks<'a, CustomSubcommand>,
+        callbacks: SessionCallbacks<'a>,
     ) -> anyhow::Result<Self> {
         let (workspace_root, _) = find_workspace_root(&cwd)?;
         let cache_path = get_cache_path_of_workspace(&workspace_root.path);
@@ -217,9 +203,7 @@ impl<'a, CustomSubcommand> Session<'a, CustomSubcommand> {
             _ => None,
         }
     }
-}
 
-impl<'a, CustomSubcommand: clap::Subcommand> Session<'a, CustomSubcommand> {
     pub async fn plan_synthetic_task(
         &mut self,
         synthetic_plan_request: SyntheticPlanRequest,
@@ -239,21 +223,17 @@ impl<'a, CustomSubcommand: clap::Subcommand> Session<'a, CustomSubcommand> {
     pub async fn plan_from_cli(
         &mut self,
         cwd: Arc<AbsolutePath>,
-        cli_args: TaskCLIArgs<CustomSubcommand>,
+        command: BuiltInCommand,
     ) -> Result<ExecutionPlan, vite_task_plan::Error> {
-        let plan_request = self
-            .plan_request_parser
-            .get_plan_request_from_cli_args(cli_args.parsed, &self.envs, &cwd)
-            .await
-            .map_err(|error| {
-                TaskPlanErrorKind::ParsePlanRequestError {
-                    error,
-                    program: cli_args.original[0].clone(),
-                    args: cli_args.original.iter().skip(1).cloned().collect(),
-                    cwd: Arc::clone(&cwd),
-                }
-                .with_empty_call_stack()
-            })?;
+        let plan_request = command.into_plan_request(&cwd).map_err(|error| {
+            TaskPlanErrorKind::ParsePlanRequestError {
+                error: error.into(),
+                program: Str::from("vite"),
+                args: Default::default(),
+                cwd: Arc::clone(&cwd),
+            }
+            .with_empty_call_stack()
+        })?;
         let plan = ExecutionPlan::plan(
             plan_request,
             &self.workspace_path,

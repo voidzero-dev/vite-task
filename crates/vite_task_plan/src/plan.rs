@@ -182,7 +182,7 @@ async fn plan_task_as_execution_node(
                     let execution_graph = plan_query_request(query_plan_request, context).await?;
                     ExecutionItemKind::Expanded(execution_graph)
                 }
-                // Synthetic task, like `vite lint`
+                // Synthetic task (from TaskSynthesizer)
                 Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
                     let spawn_execution = plan_synthetic_request(
                         context.workspace_path(),

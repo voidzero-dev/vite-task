@@ -1,4 +1,7 @@
 {
   "name": "e2e-lint-cache",
-  "private": true
+  "private": true,
+  "scripts": {
+    "lint": "vite lint"
+  }
 }

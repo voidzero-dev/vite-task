@@ -4,7 +4,7 @@
 name = "lint dot git"
 steps = [
   "mkdir .git",
-  "vite lint # cache miss",
+  "vite run lint # cache miss",
   "echo hello > .git/foo.txt # add file inside .git",
-  "vite lint # cache hit, .git is ignored",
+  "vite run lint # cache hit, .git is ignored",
 ]

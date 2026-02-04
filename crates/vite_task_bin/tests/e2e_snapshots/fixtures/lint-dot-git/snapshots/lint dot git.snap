@@ -1,12 +1,12 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/lint-dot-git
 ---
 > mkdir .git
 
-> vite lint # cache miss
+> vite run lint # cache miss
+$ vite lint
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[a.js:1:1]
@@ -18,10 +18,24 @@ input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/lint-dot-git
 Found 1 warning and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
 
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] lint: $ vite lint ✓
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 > echo hello > .git/foo.txt # add file inside .git
 
-> vite lint # cache hit, .git is ignored
+> vite run lint # cache hit, .git is ignored
+$ vite lint ✓ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[a.js:1:1]
@@ -32,4 +46,17 @@ Finished in <duration> on 1 file with 90 rules using <n> threads.
 
 Found 1 warning and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
-✓ cache hit, logs replayed
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 1 cache hits • 0 cache misses 
+Performance:  100% cache hit rate, <duration> saved in total
+
+Task Details:
+────────────────────────────────────────────────
+  [1] lint: $ vite lint ✓
+      → Cache hit - output replayed - <duration> saved
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

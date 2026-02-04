@@ -1,4 +1,7 @@
 {
   "name": "e2e-env-test",
-  "private": true
+  "private": true,
+  "scripts": {
+    "env-test": "vite env-test"
+  }
 }
