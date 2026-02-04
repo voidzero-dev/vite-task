@@ -3,7 +3,7 @@ use std::{process::ExitCode, sync::Arc};
 use clap::Parser;
 use vite_path::{AbsolutePath, current_dir};
 use vite_task::{
-    BuiltInCommand, Session,
+    Command, Session,
     session::reporter::{ExitStatus, LabeledReporter},
 };
 use vite_task_bin::OwnedSessionCallbacks;
@@ -12,7 +12,7 @@ use vite_task_bin::OwnedSessionCallbacks;
 #[command(name = "vite", version)]
 struct Cli {
     #[command(subcommand)]
-    command: BuiltInCommand,
+    command: Command,
 }
 
 #[tokio::main]

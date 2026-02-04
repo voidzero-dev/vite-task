@@ -8,7 +8,7 @@ use redact::redact_snapshot;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
-use vite_task::{BuiltInCommand, Session};
+use vite_task::{Command, Session};
 use vite_workspace::find_workspace_root;
 
 /// Local parser wrapper for BuiltInCommand
@@ -16,7 +16,7 @@ use vite_workspace::find_workspace_root;
 #[command(name = "vite")]
 enum Cli {
     #[clap(flatten)]
-    Command(BuiltInCommand),
+    Command(Command),
 }
 
 #[derive(serde::Deserialize, Debug)]

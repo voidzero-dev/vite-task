@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use clap::Subcommand;
+use clap::Parser;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskSpecifier, query::TaskQueryKind};
 use vite_task_plan::plan_request::{PlanOptions, PlanRequest, QueryPlanRequest};
 
 /// vite task CLI subcommands
-#[derive(Debug, Subcommand)]
-pub enum BuiltInCommand {
+#[derive(Debug, Parser)]
+pub enum Command {
     /// Run tasks
     Run {
         /// `packageName#taskName` or `taskName`.
@@ -41,7 +41,7 @@ pub enum CLITaskQueryError {
     PackageNameSpecifiedWithRecursive { package_name: Str, task_name: Str },
 }
 
-impl BuiltInCommand {
+impl Command {
     /// Convert to `PlanRequest`, or return an error if invalid.
     pub fn into_plan_request(
         self,

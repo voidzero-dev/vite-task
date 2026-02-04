@@ -22,7 +22,7 @@ use vite_task_plan::{
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
-use crate::{cli::BuiltInCommand, collections::HashMap};
+use crate::{cli::Command, collections::HashMap};
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
@@ -100,14 +100,9 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
         }
 
         // Try built-in "run" command (handles "vite run build" in scripts)
-        #[derive(Parser)]
-        enum BuiltInParser {
-            #[clap(flatten)]
-            Command(BuiltInCommand),
-        }
-        if let Ok(BuiltInParser::Command(built_in)) = BuiltInParser::try_parse_from(
-            std::iter::once(program).chain(args.iter().map(Str::as_str)),
-        ) {
+        if let Ok(built_in) =
+            Command::try_parse_from(std::iter::once(program).chain(args.iter().map(Str::as_str)))
+        {
             return Ok(Some(built_in.into_plan_request(cwd)?));
         }
 
@@ -223,7 +218,7 @@ impl<'a> Session<'a> {
     pub async fn plan_from_cli(
         &mut self,
         cwd: Arc<AbsolutePath>,
-        command: BuiltInCommand,
+        command: Command,
     ) -> Result<ExecutionPlan, vite_task_plan::Error> {
         let plan_request = command.into_plan_request(&cwd).map_err(|error| {
             TaskPlanErrorKind::ParsePlanRequestError {
