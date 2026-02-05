@@ -101,7 +101,10 @@ fn run_case_inner(
         let task_graph = match task_graph_result {
             Ok(task_graph) => task_graph,
             Err(err) => {
-                let err_str = format!("{err:#}").replace(workspace_root_str, "<workspace>");
+                let mut err_str = format!("{err:#}").replace(workspace_root_str, "<workspace>");
+                if cfg!(windows) {
+                    err_str = err_str.replace('\\', "/");
+                }
                 insta::assert_snapshot!("task graph load error", err_str);
                 return;
             }

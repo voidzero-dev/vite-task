@@ -114,7 +114,7 @@ pub enum TaskGraphLoadError {
     },
 
     #[error(
-        "`cacheScripts` can only be set in the workspace root config, but found in {package_path:?}"
+        "`cacheScripts` can only be set in the workspace root config, but found in {package_path}"
     )]
     CacheScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
 }
