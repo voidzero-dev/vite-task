@@ -10,7 +10,7 @@ pub trait UserConfigLoader: Debug + Send + Sync {
     async fn load_user_config_file(
         &self,
         package_path: &AbsolutePath,
-    ) -> anyhow::Result<UserRunConfig>;
+    ) -> anyhow::Result<Option<UserRunConfig>>;
 }
 
 /// A `UserConfigLoader` implementation that only loads `vite-task.json`.
@@ -24,16 +24,16 @@ impl UserConfigLoader for JsonUserConfigLoader {
     async fn load_user_config_file(
         &self,
         package_path: &AbsolutePath,
-    ) -> anyhow::Result<UserRunConfig> {
+    ) -> anyhow::Result<Option<UserRunConfig>> {
         let config_path = package_path.join("vite-task.json");
         let config_content = match tokio::fs::read_to_string(&config_path).await {
             Ok(content) => content,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(UserRunConfig::default());
+                return Ok(None);
             }
             Err(err) => return Err(err.into()),
         };
         let user_config: UserRunConfig = serde_json::from_str(&config_content)?;
-        Ok(user_config)
+        Ok(Some(user_config))
     }
 }
