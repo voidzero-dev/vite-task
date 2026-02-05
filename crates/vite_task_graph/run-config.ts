@@ -1,22 +1,20 @@
-export type Task =
-  & {
-    /**
-     * The command to run for the task.
-     *
-     * If omitted, the script from `package.json` with the same name will be used
-     */
-    command?: string;
-    /**
-     * The working directory for the task, relative to the package root (not workspace root).
-     */
-    cwd?: string;
-    /**
-     * Dependencies of this task. Use `package-name#task-name` to refer to tasks in other packages.
-     */
-    dependsOn?: Array<string>;
-  }
-  & (
-    | {
+export type Task = {
+  /**
+   * The command to run for the task.
+   *
+   * If omitted, the script from `package.json` with the same name will be used
+   */
+  command?: string;
+  /**
+   * The working directory for the task, relative to the package root (not workspace root).
+   */
+  cwd?: string;
+  /**
+   * Dependencies of this task. Use `package-name#task-name` to refer to tasks in other packages.
+   */
+  dependsOn?: Array<string>;
+} & (
+  | {
       /**
        * Whether to cache the task
        */
@@ -30,13 +28,13 @@ export type Task =
        */
       passThroughEnvs?: Array<string>;
     }
-    | {
+  | {
       /**
        * Whether to cache the task
        */
       cache: false;
     }
-  );
+);
 
 export type RunConfig = {
   /**

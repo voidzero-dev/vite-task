@@ -15,7 +15,7 @@
   "excludes": [
     "crates/fspy_detours_sys/detours",
     "pnpm-lock.yaml",
-    "crates/vite_task_graph/task-config.ts"
+    "crates/vite_task_graph/run-config.ts"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.94.0.wasm",
