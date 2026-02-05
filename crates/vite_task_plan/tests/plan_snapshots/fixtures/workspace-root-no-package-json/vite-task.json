@@ -1,0 +1,8 @@
+{
+  "cacheScripts": true,
+  "tasks": {
+    "deploy": {
+      "command": "echo deploying workspace"
+    }
+  }
+}

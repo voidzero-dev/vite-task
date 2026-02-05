@@ -257,27 +257,28 @@ pub fn load_package_graph(
         has_root_package = has_root_package || package_path.as_str().is_empty();
         graph_builder.add_package(package_path, absolute_path.into(), package_json);
     }
-    // try add the root package anyway if the member globs do not include it.
+    // Always add the root package if member globs do not include it.
     if !has_root_package {
         let package_json_path = workspace_root.path.join("package.json");
-        match fs::read(&package_json_path) {
+        let package_json = match fs::read(&package_json_path) {
             Ok(content) => {
                 let package_json_path: Arc<AbsolutePath> = package_json_path.into();
-                let package_json: PackageJson = serde_json::from_slice(&content).map_err(|e| {
-                    Error::SerdeJson { file_path: package_json_path, serde_json_error: e }
-                })?;
-                graph_builder.add_package(
-                    RelativePathBuf::default(),
-                    Arc::clone(&workspace_root.path),
-                    package_json,
-                );
+                serde_json::from_slice(&content).map_err(|e| Error::SerdeJson {
+                    file_path: package_json_path,
+                    serde_json_error: e,
+                })?
             }
-            Err(err) => {
-                if err.kind() != io::ErrorKind::NotFound {
-                    return Err(err.into());
-                }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                // No package.json at root - use empty default
+                PackageJson::default()
             }
-        }
+            Err(err) => return Err(err.into()),
+        };
+        graph_builder.add_package(
+            RelativePathBuf::default(),
+            Arc::clone(&workspace_root.path),
+            package_json,
+        );
     }
     graph_builder.build()
 }
@@ -616,8 +617,8 @@ mod tests {
 
         let graph = discover_package_graph(temp_dir_path).unwrap();
 
-        // Should have 2 nodes but no edges (nameless package can't be referenced)
-        assert_eq!(graph.node_count(), 2);
+        // Should have 3 nodes (nameless, pkg-a, root) but no edges (nameless package can't be referenced)
+        assert_eq!(graph.node_count(), 3);
         assert_eq!(graph.edge_count(), 0);
     }
 
@@ -703,8 +704,8 @@ mod tests {
 
         let graph = discover_package_graph(temp_dir_path).unwrap();
 
-        // Should have 2 nodes and 2 edges (circular)
-        assert_eq!(graph.node_count(), 2);
+        // Should have 3 nodes (pkg-a, pkg-b, root) and 2 edges (circular between a and b)
+        assert_eq!(graph.node_count(), 3);
         assert_eq!(graph.edge_count(), 2);
 
         // Verify both edges exist
