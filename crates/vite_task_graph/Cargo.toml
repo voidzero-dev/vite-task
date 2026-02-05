@@ -16,7 +16,6 @@ petgraph = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs"] }
 vec1 = { workspace = true, features = ["smallvec-v1"] }
 vite_graph_ser = { workspace = true }
 vite_path = { workspace = true }
