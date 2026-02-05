@@ -205,7 +205,7 @@ impl IndexedTaskGraph {
 
         // First pass: load all configs, extract cacheScripts from root, validate
         let mut cache_scripts = false; // Default: disabled
-        let mut package_configs: Vec<(PackageNodeIndex, Arc<AbsolutePath>, Option<UserRunConfig>)> =
+        let mut package_configs: Vec<(PackageNodeIndex, Arc<AbsolutePath>, UserRunConfig)> =
             Vec::with_capacity(package_graph.node_count());
 
         for package_index in package_graph.node_indices() {
@@ -213,20 +213,22 @@ impl IndexedTaskGraph {
             let package_dir: Arc<AbsolutePath> = workspace_root.path.join(&package.path).into();
             let is_workspace_root = package.path.as_str().is_empty();
 
-            let user_config =
-                config_loader.load_user_config_file(&package_dir).await.map_err(|error| {
-                    TaskGraphLoadError::ConfigLoadError { error, package_path: package_dir.clone() }
-                })?;
+            let user_config = config_loader
+                .load_user_config_file(&package_dir)
+                .await
+                .map_err(|error| TaskGraphLoadError::ConfigLoadError {
+                    error,
+                    package_path: package_dir.clone(),
+                })?
+                .unwrap_or_default();
 
-            if let Some(ref config) = user_config {
-                if config.cache_scripts.is_some() {
-                    if is_workspace_root {
-                        cache_scripts = config.cache_scripts.unwrap_or(false);
-                    } else {
-                        return Err(TaskGraphLoadError::CacheScriptsInNonRootPackage {
-                            package_path: package_dir.clone(),
-                        });
-                    }
+            if let Some(current_cache_scripts) = user_config.cache_scripts {
+                if is_workspace_root {
+                    cache_scripts = current_cache_scripts;
+                } else {
+                    return Err(TaskGraphLoadError::CacheScriptsInNonRootPackage {
+                        package_path: package_dir.clone(),
+                    });
                 }
             }
 
@@ -245,9 +247,7 @@ impl IndexedTaskGraph {
                 .map(|(name, value)| (name.as_str(), value.as_str()))
                 .collect();
 
-            for (task_name, task_user_config) in
-                user_config.and_then(|c| c.tasks).unwrap_or_default()
-            {
+            for (task_name, task_user_config) in user_config.tasks.unwrap_or_default() {
                 // For each task defined in vite.config.*, look up the corresponding package.json script (if any)
                 let package_json_script = package_json_scripts.remove(task_name.as_str());
 
