@@ -112,6 +112,11 @@ pub enum TaskGraphLoadError {
         #[source]
         error: SpecifierLookupError,
     },
+
+    #[error(
+        "`cacheScripts` can only be set in the workspace root config, but found in {package_path:?}"
+    )]
+    CacheScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
 }
 
 /// Error when looking up a task by its specifier.
@@ -198,10 +203,39 @@ impl IndexedTaskGraph {
         let mut node_indices_by_task_id: HashMap<TaskId, TaskNodeIndex> =
             HashMap::with_capacity(task_graph.node_count());
 
-        // Load task nodes into `task_graph`
+        // First pass: load all configs, extract cacheScripts from root, validate
+        let mut cache_scripts = false; // Default: disabled
+        let mut package_configs: Vec<(PackageNodeIndex, Arc<AbsolutePath>, Option<UserRunConfig>)> =
+            Vec::with_capacity(package_graph.node_count());
+
         for package_index in package_graph.node_indices() {
             let package = &package_graph[package_index];
             let package_dir: Arc<AbsolutePath> = workspace_root.path.join(&package.path).into();
+            let is_workspace_root = package.path.as_str().is_empty();
+
+            let user_config =
+                config_loader.load_user_config_file(&package_dir).await.map_err(|error| {
+                    TaskGraphLoadError::ConfigLoadError { error, package_path: package_dir.clone() }
+                })?;
+
+            if let Some(ref config) = user_config {
+                if config.cache_scripts.is_some() {
+                    if is_workspace_root {
+                        cache_scripts = config.cache_scripts.unwrap_or(false);
+                    } else {
+                        return Err(TaskGraphLoadError::CacheScriptsInNonRootPackage {
+                            package_path: package_dir.clone(),
+                        });
+                    }
+                }
+            }
+
+            package_configs.push((package_index, package_dir, user_config));
+        }
+
+        // Second pass: create task nodes using cache_scripts value
+        for (package_index, package_dir, user_config) in package_configs {
+            let package = &package_graph[package_index];
 
             // Collect package.json scripts into a mutable map for draining lookup.
             let mut package_json_scripts: HashMap<&str, &str> = package
@@ -211,17 +245,9 @@ impl IndexedTaskGraph {
                 .map(|(name, value)| (name.as_str(), value.as_str()))
                 .collect();
 
-            // Load user config for the package
-            let user_config: UserRunConfig = config_loader
-                .load_user_config_file(&package_dir)
-                .await
-                .map_err(|error| TaskGraphLoadError::ConfigLoadError {
-                    error,
-                    package_path: package_dir.clone(),
-                })?
-                .unwrap_or_default();
-
-            for (task_name, task_user_config) in user_config.tasks.unwrap_or_default() {
+            for (task_name, task_user_config) in
+                user_config.and_then(|c| c.tasks).unwrap_or_default()
+            {
                 // For each task defined in vite.config.*, look up the corresponding package.json script (if any)
                 let package_json_script = package_json_scripts.remove(task_name.as_str());
 
@@ -264,6 +290,7 @@ impl IndexedTaskGraph {
                 let resolved_config = ResolvedTaskConfig::resolve_package_json_script(
                     &package_dir,
                     package_json_script,
+                    cache_scripts,
                 );
                 let node_index = task_graph.add_node(TaskNode {
                     task_display: TaskDisplay {

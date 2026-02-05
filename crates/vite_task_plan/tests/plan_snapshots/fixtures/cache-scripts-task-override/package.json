@@ -1,0 +1,7 @@
+{
+  "name": "@test/cache-scripts-task-override",
+  "scripts": {
+    "build": "echo building",
+    "test": "echo testing"
+  }
+}

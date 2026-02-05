@@ -1,4 +1,5 @@
 {
+  "cacheScripts": true,
   "tasks": {
     "task-a": {
       "command": "echo a",

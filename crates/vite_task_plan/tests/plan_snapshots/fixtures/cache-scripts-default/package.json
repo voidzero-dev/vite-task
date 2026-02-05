@@ -1,0 +1,7 @@
+{
+  "name": "@test/cache-scripts-default",
+  "scripts": {
+    "build": "echo building",
+    "test": "echo testing"
+  }
+}

@@ -1,4 +1,5 @@
 {
+  "cacheScripts": true,
   "tasks": {
     "test": {
       "command": "print-file test.txt",

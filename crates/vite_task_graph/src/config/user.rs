@@ -97,7 +97,10 @@ pub struct UserTaskConfig {
 #[cfg_attr(test, derive(TS), ts(optional_fields, rename = "RunConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct UserRunConfig {
-    /// Enable cache for all scripts from package.json
+    /// Enable cache for all scripts from package.json.
+    ///
+    /// This option can only be set in the workspace root's config file.
+    /// Setting it in a package's config will result in an error.
     pub cache_scripts: Option<bool>,
 
     /// Task definitions

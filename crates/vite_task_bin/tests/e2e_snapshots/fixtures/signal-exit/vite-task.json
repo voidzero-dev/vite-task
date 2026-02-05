@@ -1,4 +1,5 @@
 {
+  "cacheScripts": true,
   "tasks": {
     "abort": {
       "command": "node -e \"process.kill(process.pid, 6)\""
