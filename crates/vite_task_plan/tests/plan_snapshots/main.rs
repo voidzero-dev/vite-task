@@ -97,10 +97,17 @@ fn run_case_inner(
         )
         .unwrap();
 
+        let task_graph_result = session.ensure_task_graph_loaded().await;
+        let task_graph = match task_graph_result {
+            Ok(task_graph) => task_graph,
+            Err(err) => {
+                let err_str = format!("{err:#}").replace(workspace_root_str, "<workspace>");
+                insta::assert_snapshot!("task graph load error", err_str);
+                return;
+            }
+        };
         let task_graph_json = redact_snapshot(
-            &vite_graph_ser::SerializeByKey(
-                session.ensure_task_graph_loaded().await.unwrap().task_graph(),
-            ),
+            &vite_graph_ser::SerializeByKey(task_graph.task_graph()),
             workspace_root_str,
         );
         insta::assert_json_snapshot!("task graph", task_graph_json);
