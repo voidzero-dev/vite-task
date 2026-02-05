@@ -25,16 +25,16 @@ steps = [
 name = "pass-through env added"
 steps = [
   "vite run test # cache miss",
-  "json-edit vite.config.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # add pass-through env",
+  "json-edit vite-task.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # add pass-through env",
   "vite run test # cache miss: pass-through env added",
 ]
 
 [[e2e]]
 name = "pass-through env removed"
 steps = [
-  "json-edit vite.config.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # setup",
+  "json-edit vite-task.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # setup",
   "vite run test # cache miss",
-  "json-edit vite.config.json \"delete _.tasks.test.passThroughEnvs\" # remove pass-through env",
+  "json-edit vite-task.json \"delete _.tasks.test.passThroughEnvs\" # remove pass-through env",
   "vite run test # cache miss: pass-through env removed",
 ]
 
@@ -44,7 +44,7 @@ steps = [
   "vite run test # cache miss",
   "mkdir -p subfolder",
   "cp test.txt subfolder/test.txt",
-  "json-edit vite.config.json \"_.tasks.test.cwd = 'subfolder'\" # change cwd",
+  "json-edit vite-task.json \"_.tasks.test.cwd = 'subfolder'\" # change cwd",
   "vite run test # cache miss: cwd changed",
 ]
 

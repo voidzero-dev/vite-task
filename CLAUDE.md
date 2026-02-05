@@ -39,7 +39,7 @@ Test fixtures and snapshots:
 ## CLI Usage
 
 ```bash
-# Run a task defined in vite.config.json
+# Run a task defined in vite-task.json
 vite run <task>                      # run task in current package
 vite run <package>#<task>            # run task in specific package
 vite run <task> -r                   # run task in all packages (recursive)
@@ -67,7 +67,7 @@ vite lint [args...]                  # run oxlint
 
 ## Task Configuration
 
-Tasks are defined in `vite.config.json`:
+Tasks are defined in `vite-task.json`:
 
 ```json
 {
@@ -83,7 +83,7 @@ Tasks are defined in `vite.config.json`:
 
 ## Task Dependencies
 
-1. **Explicit**: Defined via `dependsOn` in `vite.config.json` (skip with `--ignore-depends-on`)
+1. **Explicit**: Defined via `dependsOn` in `vite-task.json` (skip with `--ignore-depends-on`)
 2. **Topological**: Based on package.json dependencies
    - With `-r/--recursive`: runs task across all packages in dependency order
    - With `-t/--transitive`: runs task in current package and its dependencies
@@ -116,4 +116,4 @@ These patterns are enforced by `.clippy.toml`:
 ## Quick Reference
 
 - **Task Format**: `package#task` (e.g., `app#build`, `@test/utils#lint`)
-- **Config File**: `vite.config.json` in each package
+- **Config File**: `vite-task.json` in each package

@@ -22,7 +22,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> json-edit vite.config.json "_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']" # add pass-through env
+> json-edit vite-task.json "_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']" # add pass-through env
 
 > vite run test # cache miss: pass-through env added
 $ print-file test.txt ✗ cache miss: pass-through env config changed, executing

@@ -92,22 +92,21 @@ pub struct UserTaskConfig {
     pub options: UserTaskOptions,
 }
 
-/// User configuration file structure for `vite.config.*`
-#[derive(Debug, Deserialize)]
-pub struct UserConfigFile {
-    pub tasks: UserConfigTasks,
+/// User configuration file structure for `vite-task.json`
+#[derive(Debug, Default, Deserialize)]
+#[cfg_attr(test, derive(TS), ts(optional_fields, rename = "RunConfig"))]
+#[serde(rename_all = "camelCase")]
+pub struct UserRunConfig {
+    /// Cache scripts from package.json (currently unused)
+    pub cache_scripts: Option<bool>,
+
+    /// Task definitions
+    pub tasks: Option<HashMap<Str, UserTaskConfig>>,
 }
 
-/// Type of the `tasks` field in `vite.config.*`
-#[derive(Debug, Default, Deserialize)]
-#[cfg_attr(test, derive(TS))]
-#[serde(transparent)]
-#[cfg_attr(test, ts(rename = "Tasks"))]
-pub struct UserConfigTasks(pub HashMap<Str, UserTaskConfig>);
-
-impl UserConfigTasks {
-    /// TypeScript type definitions for user task configuration.
-    pub const TS_TYPE: &str = include_str!("../../task-config.ts");
+impl UserRunConfig {
+    /// TypeScript type definitions for user run configuration.
+    pub const TS_TYPE: &str = include_str!("../../run-config.ts");
 
     /// Generates TypeScript type definitions for user task configuration.
     #[cfg(test)]
@@ -155,7 +154,7 @@ impl UserConfigTasks {
             .expect("oxfmt not found in packages/tools");
 
         let mut child = Command::new(oxfmt_path)
-            .arg("--stdin-filepath=task-config.ts")
+            .arg("--stdin-filepath=run-config.ts")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -179,13 +178,13 @@ impl UserConfigTasks {
 mod ts_tests {
     use std::{env, path::PathBuf};
 
-    use super::UserConfigTasks;
+    use super::UserRunConfig;
 
     #[test]
     fn typescript_generation() {
         let file_path =
-            PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("task-config.ts");
-        let ts = UserConfigTasks::generate_ts_definition().replace("\r", "");
+            PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("run-config.ts");
+        let ts = UserRunConfig::generate_ts_definition().replace("\r", "");
 
         if env::var("VT_UPDATE_TS_TYPES").unwrap_or_default() == "1" {
             std::fs::write(&file_path, ts).unwrap();

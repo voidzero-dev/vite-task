@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use config::{ResolvedTaskConfig, UserConfigFile};
+use config::{ResolvedTaskConfig, UserRunConfig};
 use package_graph::IndexedPackageGraph;
 use petgraph::{
     graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
@@ -211,13 +211,13 @@ impl IndexedTaskGraph {
                 .map(|(name, value)| (name.as_str(), value.as_str()))
                 .collect();
 
-            // Load vite.config.* for the package
-            let user_config: UserConfigFile =
+            // Load vite-task.json for the package
+            let user_config: UserRunConfig =
                 config_loader.load_user_config_file(&package_dir).await.map_err(|error| {
                     TaskGraphLoadError::ConfigLoadError { error, package_path: package_dir.clone() }
                 })?;
 
-            for (task_name, task_user_config) in user_config.tasks.0 {
+            for (task_name, task_user_config) in user_config.tasks.unwrap_or_default() {
                 // For each task defined in vite.config.*, look up the corresponding package.json script (if any)
                 let package_json_script = package_json_scripts.remove(task_name.as_str());
 

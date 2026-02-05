@@ -4,7 +4,7 @@ assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/cache-miss-reasons
 ---
-> json-edit vite.config.json "_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']" # setup
+> json-edit vite-task.json "_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']" # setup
 
 > vite run test # cache miss
 $ print-file test.txt
@@ -24,7 +24,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> json-edit vite.config.json "delete _.tasks.test.passThroughEnvs" # remove pass-through env
+> json-edit vite-task.json "delete _.tasks.test.passThroughEnvs" # remove pass-through env
 
 > vite run test # cache miss: pass-through env removed
 $ print-file test.txt ✗ cache miss: pass-through env config changed, executing

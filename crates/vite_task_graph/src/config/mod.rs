@@ -4,7 +4,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use monostate::MustBe;
 use serde::Serialize;
-pub use user::{UserCacheConfig, UserConfigFile, UserTaskConfig};
+pub use user::{UserCacheConfig, UserRunConfig, UserTaskConfig};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 

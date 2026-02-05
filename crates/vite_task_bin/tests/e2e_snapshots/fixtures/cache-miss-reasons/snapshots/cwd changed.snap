@@ -26,7 +26,7 @@ Task Details:
 
 > cp test.txt subfolder/test.txt
 
-> json-edit vite.config.json "_.tasks.test.cwd = 'subfolder'" # change cwd
+> json-edit vite-task.json "_.tasks.test.cwd = 'subfolder'" # change cwd
 
 > vite run test # cache miss: cwd changed
 ~/subfolder$ print-file test.txt ✗ cache miss: working directory changed, executing
