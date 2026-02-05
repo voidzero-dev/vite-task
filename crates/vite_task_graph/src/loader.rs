@@ -33,7 +33,9 @@ impl UserConfigLoader for JsonUserConfigLoader {
             }
             Err(err) => return Err(err.into()),
         };
-        let user_config: UserRunConfig = serde_json::from_str(&config_content)?;
+        let json_value = jsonc_parser::parse_to_serde_value(&config_content, &Default::default())?
+            .unwrap_or_default();
+        let user_config: UserRunConfig = serde_json::from_value(json_value)?;
         Ok(Some(user_config))
     }
 }

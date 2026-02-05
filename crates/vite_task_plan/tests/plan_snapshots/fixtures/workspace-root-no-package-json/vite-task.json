@@ -1,4 +1,6 @@
 {
+  // This workspace root has no package.json — only pnpm-workspace.yaml.
+  // vite-task.json should still be loaded and applied.
   "cacheScripts": true,
   "tasks": {
     "deploy": {

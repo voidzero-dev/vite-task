@@ -1503,6 +1503,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonc-parser"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb0774546269185d38da823d8583e94448ba0e158e3f50759d9c79aba946ca5"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "konst"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3338,6 +3347,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
+ "jsonc-parser",
  "monostate",
  "petgraph",
  "pretty_assertions",

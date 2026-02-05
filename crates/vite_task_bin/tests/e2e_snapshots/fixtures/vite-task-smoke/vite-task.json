@@ -1,3 +1,4 @@
 {
+  // Smoke test: enables caching for all package.json scripts.
   "cacheScripts": true
 }
