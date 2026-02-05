@@ -40,7 +40,7 @@ export type Task =
 
 export type RunConfig = {
   /**
-   * Cache scripts from package.json (currently unused)
+   * Enable cache for all scripts from package.json
    */
   cacheScripts?: boolean;
   /**

@@ -92,12 +92,12 @@ pub struct UserTaskConfig {
     pub options: UserTaskOptions,
 }
 
-/// User configuration file structure for `vite-task.json`
+/// User configuration structure for `run` field in `vite.config.*`
 #[derive(Debug, Default, Deserialize)]
 #[cfg_attr(test, derive(TS), ts(optional_fields, rename = "RunConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct UserRunConfig {
-    /// Cache scripts from package.json (currently unused)
+    /// Enable cache for all scripts from package.json
     pub cache_scripts: Option<bool>,
 
     /// Task definitions
