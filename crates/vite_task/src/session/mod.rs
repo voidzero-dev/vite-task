@@ -6,9 +6,10 @@ pub mod reporter;
 // Re-export types that are part of the public API
 use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
+use anyhow::Context;
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
-use clap::Parser;
+use clap::{Parser, Subcommand as _};
 pub use event::ExecutionEvent;
 use once_cell::sync::OnceCell;
 pub use reporter::{LabeledReporter, Reporter};
@@ -17,7 +18,7 @@ use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
 use vite_task_plan::{
     ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind,
-    plan_request::{PlanRequest, SyntheticPlanRequest},
+    plan_request::{PlanRequest, ScriptCommand, SyntheticPlanRequest},
     prepend_path_env,
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
@@ -50,63 +51,79 @@ impl TaskGraphLoader for LazyTaskGraph<'_> {
 }
 
 pub struct SessionCallbacks<'a> {
-    pub task_synthesizer: &'a mut (dyn TaskSynthesizer + 'a),
+    pub command_handler: &'a mut (dyn CommandHandler + 'a),
     pub user_config_loader: &'a mut (dyn UserConfigLoader + 'a),
 }
 
-/// Handles synthesizing task plan requests from commands found in task scripts.
+/// The result of a [`CommandHandler::handle_command`] call.
+#[derive(Debug)]
+pub enum HandledCommand {
+    /// The command was synthesized into a task (e.g., `vite lint` → `oxlint`).
+    Synthesized(SyntheticPlanRequest),
+    /// The command was not synthesized.
+    NotSynthesized {
+        /// Whether this program is the task runner's own entry point.
+        /// If `true`, `get_plan_request` will check if the first arg is a known
+        /// subcommand (via [`Command::has_subcommand`]) and parse it as a CLI command.
+        is_vite_task_entry: bool,
+    },
+}
+
+/// Handles commands found in task scripts to determine how they should be executed.
 ///
-/// When a task's command references a known program (e.g., `vite lint` in a script),
-/// the synthesizer converts it into a `SyntheticPlanRequest` for execution.
+/// Since `vite_task` doesn't know the name of its own binary, it relies on the caller
+/// to identify which commands are vite-task commands. Return [`HandledCommand::NotSynthesized`]
+/// with `is_vite_task_entry: true` to let vite-task check if the args match a CLI subcommand,
+/// or [`HandledCommand::Synthesized`] to provide a synthetic task directly.
 #[async_trait::async_trait(?Send)]
-pub trait TaskSynthesizer: Debug {
-    /// Called for every command in task scripts to determine if it should be synthesized.
+pub trait CommandHandler: Debug {
+    /// Called for every command in task scripts to determine how it should be handled.
     ///
-    /// - `program` is the program name (e.g., `"vite"`).
-    /// - `args` is all arguments after the program (e.g., `["lint", "--fix"]`).
-    /// - `envs` is the current environment variables where the task is being planned.
-    /// - `cwd` is the current working directory where the task is being planned.
+    /// The implementation can either:
+    /// - Return `Synthesized(...)` to replace the command with a synthetic task.
+    /// - Return `NotSynthesized { is_vite_task_entry }` and optionally mutate `command`
+    ///   to modify how the command is executed as a normal process.
     ///
-    /// Returns `Ok(Some(request))` if the command is recognized and should be synthesized,
-    /// `Ok(None)` if the command should be executed as a normal process.
-    async fn synthesize_task(
+    /// If `Synthesized` is returned, any mutations to `command` are discarded.
+    async fn handle_command(
         &mut self,
-        program: &str,
-        args: &[Str],
-        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
-        cwd: &Arc<AbsolutePath>,
-    ) -> anyhow::Result<Option<SyntheticPlanRequest>>;
+        command: &mut ScriptCommand,
+    ) -> anyhow::Result<HandledCommand>;
 }
 
 #[derive(derive_more::Debug)]
 struct PlanRequestParser<'a> {
-    task_synthesizer: &'a mut (dyn TaskSynthesizer + 'a),
+    command_handler: &'a mut (dyn CommandHandler + 'a),
 }
 
 #[async_trait::async_trait(?Send)]
 impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
     async fn get_plan_request(
         &mut self,
-        program: &str,
-        args: &[Str],
-        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
-        cwd: &Arc<AbsolutePath>,
+        command: &mut ScriptCommand,
     ) -> anyhow::Result<Option<PlanRequest>> {
-        // Try task synthesizer first (handles e.g. "vite lint" in scripts)
-        if let Some(synthetic) =
-            self.task_synthesizer.synthesize_task(program, args, envs, cwd).await?
-        {
-            return Ok(Some(PlanRequest::Synthetic(synthetic)));
+        match self.command_handler.handle_command(command).await? {
+            HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
+            HandledCommand::NotSynthesized { is_vite_task_entry: true }
+                if command
+                    .args
+                    .first()
+                    .is_some_and(|arg| Command::has_subcommand(arg.as_str())) =>
+            {
+                let cli_command = Command::try_parse_from(
+                    std::iter::once(command.program.as_str())
+                        .chain(command.args.iter().map(Str::as_str)),
+                )
+                .with_context(|| {
+                    vite_str::format!(
+                        "Failed to parse vite-task command from args: {:?}",
+                        command.args
+                    )
+                })?;
+                Ok(Some(cli_command.into_plan_request(&command.cwd)?))
+            }
+            HandledCommand::NotSynthesized { .. } => Ok(None),
         }
-
-        // Try built-in "run" command (handles "vite run build" in scripts)
-        if let Ok(built_in) =
-            Command::try_parse_from(std::iter::once(program).chain(args.iter().map(Str::as_str)))
-        {
-            return Ok(Some(built_in.into_plan_request(cwd)?));
-        }
-
-        Ok(None)
     }
 }
 
@@ -175,7 +192,7 @@ impl<'a> Session<'a> {
             },
             envs: Arc::new(envs),
             cwd,
-            plan_request_parser: PlanRequestParser { task_synthesizer: callbacks.task_synthesizer },
+            plan_request_parser: PlanRequestParser { command_handler: callbacks.command_handler },
             cache: OnceCell::new(),
             cache_path,
         })

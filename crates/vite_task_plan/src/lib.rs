@@ -147,7 +147,7 @@ pub enum ExecutionItemKind {
     Leaf(LeafExecutionKind),
 }
 
-/// The callback trait for parsing plan requests from cli args.
+/// The callback trait for parsing plan requests from script commands.
 /// See the method for details.
 #[async_trait::async_trait(?Send)]
 pub trait PlanRequestParser: Debug {
@@ -155,16 +155,16 @@ pub trait PlanRequestParser: Debug {
     ///
     /// `vite_task_plan` doesn't have the knowledge of how cli args should be parsed. It relies on this callback.
     ///
+    /// The implementation can either mutate `command` or return a `PlanRequest`:
     /// - If it returns `Err`, the planning will abort with the returned error.
-    /// - If it returns `Ok(None)`, the command will be spawned as a normal process.
-    /// - If it returns `Ok(Some(PlanRequest::Query)`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
-    /// - If it returns `Ok(Some(PlanRequest::Synthetic)`, the command will become a `SpawnExecution` with the synthetic task.
+    /// - If it returns `Ok(None)`, the (potentially mutated) `command` will be spawned as a normal process.
+    /// - If it returns `Ok(Some(PlanRequest::Query))`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
+    /// - If it returns `Ok(Some(PlanRequest::Synthetic))`, the command will become a `SpawnExecution` with the synthetic task.
+    ///
+    /// When a `PlanRequest` is returned, any mutations to `command` are discarded.
     async fn get_plan_request(
         &mut self,
-        program: &str,
-        args: &[Str],
-        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
-        cwd: &Arc<AbsolutePath>,
+        command: &mut plan_request::ScriptCommand,
     ) -> anyhow::Result<Option<PlanRequest>>;
 }
 

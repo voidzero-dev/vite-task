@@ -5,7 +5,9 @@ pub mod session;
 
 // Public exports for vite_task_bin
 pub use cli::Command;
-pub use session::{LabeledReporter, Reporter, Session, SessionCallbacks, TaskSynthesizer};
+pub use session::{
+    CommandHandler, HandledCommand, LabeledReporter, Reporter, Session, SessionCallbacks,
+};
 pub use vite_task_graph::{
     config::{
         self,
@@ -13,6 +15,6 @@ pub use vite_task_graph::{
     },
     loader,
 };
-/// get_path_env is useful for TaskSynthesizer implementations. Re-export it here.
+/// Re-exports useful for CommandHandler implementations.
 pub use vite_task_plan::get_path_env;
-pub use vite_task_plan::plan_request;
+pub use vite_task_plan::{plan_request, plan_request::ScriptCommand};

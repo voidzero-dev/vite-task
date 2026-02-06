@@ -1,0 +1,85 @@
+---
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
+expression: "&plan_json"
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/vpr-shorthand
+---
+{
+  "root_node": {
+    "Expanded": [
+      {
+        "key": [
+          "<workspace>/",
+          "all"
+        ],
+        "node": {
+          "task_display": {
+            "package_name": "",
+            "task_name": "all",
+            "package_path": "<workspace>/"
+          },
+          "items": [
+            {
+              "execution_item_display": {
+                "task_display": {
+                  "package_name": "",
+                  "task_name": "all",
+                  "package_path": "<workspace>/"
+                },
+                "command": "vpr build",
+                "and_item_index": null,
+                "cwd": "<workspace>/"
+              },
+              "kind": {
+                "Expanded": [
+                  {
+                    "key": [
+                      "<workspace>/",
+                      "build"
+                    ],
+                    "node": {
+                      "task_display": {
+                        "package_name": "",
+                        "task_name": "build",
+                        "package_path": "<workspace>/"
+                      },
+                      "items": [
+                        {
+                          "execution_item_display": {
+                            "task_display": {
+                              "package_name": "",
+                              "task_name": "build",
+                              "package_path": "<workspace>/"
+                            },
+                            "command": "echo building",
+                            "and_item_index": null,
+                            "cwd": "<workspace>/"
+                          },
+                          "kind": {
+                            "Leaf": {
+                              "InProcess": {
+                                "kind": {
+                                  "Echo": {
+                                    "strings": [
+                                      "building"
+                                    ],
+                                    "trailing_newline": true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "neighbors": []
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "neighbors": []
+      }
+    ]
+  }
+}

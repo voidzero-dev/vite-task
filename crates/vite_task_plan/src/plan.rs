@@ -28,7 +28,7 @@ use crate::{
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
     in_process::InProcessExecution,
     path_env::get_path_env,
-    plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest},
+    plan_request::{PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest},
 };
 
 /// Locate the executable path for a given program name in the provided envs and cwd.
@@ -162,14 +162,20 @@ async fn plan_task_as_execution_node(
 
             // Try to parse the args of an and_item to a plan request like `run -r build`
             let envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>> = context.envs().clone().into();
+            let mut script_command = ScriptCommand {
+                program: and_item.program.clone(),
+                args: args.into(),
+                envs,
+                cwd: Arc::clone(&cwd),
+            };
             let plan_request = context
                 .callbacks()
-                .get_plan_request(&and_item.program, &args, &envs, &cwd)
+                .get_plan_request(&mut script_command)
                 .await
                 .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError {
-                    program: and_item.program.clone(),
-                    args: args.clone().into(),
-                    cwd: Arc::clone(&cwd),
+                    program: script_command.program.clone(),
+                    args: Arc::clone(&script_command.args),
+                    cwd: Arc::clone(&script_command.cwd),
                     error,
                 })
                 .with_plan_context(&context)?;
@@ -182,7 +188,7 @@ async fn plan_task_as_execution_node(
                     let execution_graph = plan_query_request(query_plan_request, context).await?;
                     ExecutionItemKind::Expanded(execution_graph)
                 }
-                // Synthetic task (from TaskSynthesizer)
+                // Synthetic task (from CommandHandler)
                 Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
                     let spawn_execution = plan_synthetic_request(
                         context.workspace_path(),
@@ -194,20 +200,23 @@ async fn plan_task_as_execution_node(
                     .with_plan_context(&context)?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
-                // Normal 3rd party tool command (like `tsc --noEmit`)
+                // Normal 3rd party tool command (like `tsc --noEmit`), using potentially mutated script_command
                 None => {
-                    let program_path =
-                        which(&OsStr::new(&and_item.program).into(), context.envs(), &cwd)
-                            .map_err(TaskPlanErrorKind::ProgramNotFound)
-                            .with_plan_context(&context)?;
+                    let program_path = which(
+                        &OsStr::new(&script_command.program).into(),
+                        &script_command.envs,
+                        &script_command.cwd,
+                    )
+                    .map_err(TaskPlanErrorKind::ProgramNotFound)
+                    .with_plan_context(&context)?;
                     let spawn_execution = plan_spawn_execution(
                         context.workspace_path(),
                         task_execution_cache_key,
                         &and_item.envs,
                         &task_node.resolved_config.resolved_options,
-                        context.envs(),
+                        &script_command.envs,
                         program_path,
-                        args.into(),
+                        script_command.args,
                     )
                     .with_plan_context(&context)?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))

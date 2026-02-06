@@ -1,0 +1,3 @@
+[[plan]]
+name = "vpr expands to vite run"
+args = ["run", "all"]

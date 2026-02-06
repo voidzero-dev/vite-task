@@ -10,12 +10,12 @@ use std::{
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
-    EnabledCacheConfig, SessionCallbacks, UserCacheConfig, UserTaskOptions, get_path_env,
-    plan_request::SyntheticPlanRequest,
+    EnabledCacheConfig, HandledCommand, ScriptCommand, SessionCallbacks, UserCacheConfig,
+    UserTaskOptions, get_path_env, plan_request::SyntheticPlanRequest,
 };
 
 #[derive(Debug, Default)]
-pub struct TaskSynthesizer(());
+pub struct CommandHandler(());
 
 fn find_executable(
     path_env: Option<&Arc<OsStr>>,
@@ -57,28 +57,40 @@ fn synthesize_node_modules_bin_task(
 }
 
 #[async_trait::async_trait(?Send)]
-impl vite_task::TaskSynthesizer for TaskSynthesizer {
-    async fn synthesize_task(
+impl vite_task::CommandHandler for CommandHandler {
+    async fn handle_command(
         &mut self,
-        program: &str,
-        args: &[Str],
-        envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
-        cwd: &Arc<AbsolutePath>,
-    ) -> anyhow::Result<Option<SyntheticPlanRequest>> {
-        if program != "vite" {
-            return Ok(None);
+        command: &mut ScriptCommand,
+    ) -> anyhow::Result<HandledCommand> {
+        match command.program.as_str() {
+            "vite" => {}
+            // `vpr <args>` is shorthand for `vite run <args>`
+            "vpr" => {
+                command.program = Str::from("vite");
+                command.args =
+                    iter::once(Str::from("run")).chain(command.args.iter().cloned()).collect();
+            }
+            _ => return Ok(HandledCommand::NotSynthesized { is_vite_task_entry: false }),
         }
-        let Some(subcommand) = args.first() else {
-            return Ok(None);
+        let Some(subcommand) = command.args.first().cloned() else {
+            return Ok(HandledCommand::NotSynthesized { is_vite_task_entry: true });
         };
-        let rest = &args[1..];
+        let rest = &command.args[1..];
         match subcommand.as_str() {
-            "lint" => {
-                Ok(Some(synthesize_node_modules_bin_task("lint", "oxlint", rest, envs, cwd)?))
-            }
-            "test" => {
-                Ok(Some(synthesize_node_modules_bin_task("test", "vitest", rest, envs, cwd)?))
-            }
+            "lint" => Ok(HandledCommand::Synthesized(synthesize_node_modules_bin_task(
+                "lint",
+                "oxlint",
+                rest,
+                &command.envs,
+                &command.cwd,
+            )?)),
+            "test" => Ok(HandledCommand::Synthesized(synthesize_node_modules_bin_task(
+                "test",
+                "vitest",
+                rest,
+                &command.envs,
+                &command.cwd,
+            )?)),
             "env-test" => {
                 let name = rest
                     .first()
@@ -92,14 +104,14 @@ impl vite_task::TaskSynthesizer for TaskSynthesizer {
                 let direct_execution_cache_key: Arc<[Str]> =
                     [Str::from("env-test"), name.clone(), value.clone()].into();
 
-                let mut envs = HashMap::clone(&envs);
+                let mut envs = HashMap::clone(&command.envs);
                 envs.insert(
                     Arc::from(OsStr::new(name.as_str())),
                     Arc::from(OsStr::new(value.as_str())),
                 );
 
-                Ok(Some(SyntheticPlanRequest {
-                    program: find_executable(get_path_env(&envs), &*cwd, "print-env")?,
+                Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
+                    program: find_executable(get_path_env(&envs), &*command.cwd, "print-env")?,
                     args: [name.clone()].into(),
                     task_options: UserTaskOptions {
                         cache_config: UserCacheConfig::Enabled {
@@ -115,7 +127,7 @@ impl vite_task::TaskSynthesizer for TaskSynthesizer {
                     envs: Arc::new(envs),
                 }))
             }
-            _ => Ok(None),
+            _ => Ok(HandledCommand::NotSynthesized { is_vite_task_entry: true }),
         }
     }
 }
@@ -149,14 +161,14 @@ impl vite_task::loader::UserConfigLoader for JsonUserConfigLoader {
 
 #[derive(Default)]
 pub struct OwnedSessionCallbacks {
-    task_synthesizer: TaskSynthesizer,
+    command_handler: CommandHandler,
     user_config_loader: JsonUserConfigLoader,
 }
 
 impl OwnedSessionCallbacks {
     pub fn as_callbacks(&mut self) -> SessionCallbacks<'_> {
         SessionCallbacks {
-            task_synthesizer: &mut self.task_synthesizer,
+            command_handler: &mut self.command_handler,
             user_config_loader: &mut self.user_config_loader,
         }
     }

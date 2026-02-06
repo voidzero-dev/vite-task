@@ -1,7 +1,21 @@
 use std::{collections::HashMap, ffi::OsStr, sync::Arc};
 
+use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{config::user::UserTaskOptions, query::TaskQuery};
+
+/// A parsed command from a task script, passed to [`super::PlanRequestParser::get_plan_request`].
+///
+/// All fields use `Arc` for cheap reassignment. The implementation can mutate
+/// these fields to modify how the command is executed when it falls through as a
+/// normal process (i.e., when `get_plan_request` returns `None`).
+#[derive(Debug)]
+pub struct ScriptCommand {
+    pub program: Str,
+    pub args: Arc<[Str]>,
+    pub envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
+    pub cwd: Arc<AbsolutePath>,
+}
 
 #[derive(Debug)]
 pub struct PlanOptions {
