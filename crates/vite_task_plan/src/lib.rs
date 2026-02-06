@@ -22,7 +22,7 @@ use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
 pub use path_env::{get_path_env, prepend_path_env};
 use plan::{plan_query_request, plan_synthetic_request};
-use plan_request::PlanRequest;
+use plan_request::{PlanRequest, SyntheticPlanRequest};
 use serde::{Serialize, ser::SerializeMap as _};
 use vite_graph_ser::serialize_by_key;
 use vite_path::AbsolutePath;
@@ -224,5 +224,23 @@ impl ExecutionPlan {
             }
         };
         Ok(Self { root_node })
+    }
+
+    pub fn plan_exec(
+        workspace_path: &Arc<AbsolutePath>,
+        cwd: &Arc<AbsolutePath>,
+        synthetic_plan_request: SyntheticPlanRequest,
+        cache_key: Arc<[Str]>,
+    ) -> Result<Self, Error> {
+        let execution_cache_key = cache_metadata::ExecutionCacheKey::ExecAPI(cache_key);
+        let execution = plan_synthetic_request(
+            workspace_path,
+            &Default::default(),
+            synthetic_plan_request,
+            Some(execution_cache_key),
+            cwd,
+        )
+        .with_empty_call_stack()?;
+        Ok(Self { root_node: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution)) })
     }
 }

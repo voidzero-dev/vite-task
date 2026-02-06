@@ -206,7 +206,7 @@ async fn plan_task_as_execution_node(
                     .with_plan_context(&context)?;
                     let spawn_execution = plan_spawn_execution(
                         context.workspace_path(),
-                        task_execution_cache_key,
+                        Some(task_execution_cache_key),
                         &and_item.envs,
                         &task_node.resolved_config.resolved_options,
                         &script_command.envs,
@@ -254,7 +254,7 @@ async fn plan_task_as_execution_node(
 
         let spawn_execution = plan_spawn_execution(
             context.workspace_path(),
-            ExecutionCacheKey::UserTask {
+            Some(ExecutionCacheKey::UserTask {
                 task_name: task_node.task_display.task_name.clone(),
                 and_item_index: 0,
                 extra_args: Arc::clone(context.extra_args()),
@@ -266,7 +266,7 @@ async fn plan_task_as_execution_node(
                         })
                     })
                     .with_plan_context(&context)?,
-            },
+            }),
             &BTreeMap::new(),
             &task_node.resolved_config.resolved_options,
             context.envs(),
@@ -287,36 +287,13 @@ pub fn plan_synthetic_request(
     workspace_path: &Arc<AbsolutePath>,
     prefix_envs: &BTreeMap<Str, Str>,
     synthetic_plan_request: SyntheticPlanRequest,
-    // generated from the task, overrides the derived Exec cache key
-    task_execution_cache_key: Option<ExecutionCacheKey>,
+    execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
     let SyntheticPlanRequest { program, args, task_options, envs } = synthetic_plan_request;
 
     let program_path = which(&program, &envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
     let resolved_options = ResolvedTaskOptions::resolve(task_options, &cwd);
-
-    let execution_cache_key = if let Some(task_execution_cache_key) = task_execution_cache_key {
-        // Use task generated cache key if any
-        task_execution_cache_key
-    } else {
-        // Derive Exec cache key from the execution content
-        let program_name_os = program_path.as_path().file_stem().unwrap_or_default();
-        let program_name = program_name_os.to_str().ok_or_else(|| PathFingerprintError {
-            kind: PathFingerprintErrorKind::NonPortableRelativePath {
-                path: Path::new(program_name_os).into(),
-                error: InvalidPathDataError::NonUtf8,
-            },
-            path_type: PathType::Program,
-        })?;
-        let exec_cwd = strip_prefix_for_cache(&resolved_options.cwd, workspace_path)
-            .map_err(|kind| PathFingerprintError { kind, path_type: PathType::Cwd })?;
-        ExecutionCacheKey::Exec {
-            program_name: Str::from(program_name),
-            args: Arc::clone(&args),
-            cwd: exec_cwd,
-        }
-    };
 
     plan_spawn_execution(
         workspace_path,
@@ -348,7 +325,7 @@ fn strip_prefix_for_cache(
 
 fn plan_spawn_execution(
     workspace_path: &Arc<AbsolutePath>,
-    execution_cache_key: ExecutionCacheKey,
+    execution_cache_key: Option<ExecutionCacheKey>,
     prefix_envs: &BTreeMap<Str, Str>,
     resolved_task_options: &ResolvedTaskOptions,
     envs: &HashMap<Arc<OsStr>, Arc<OsStr>>,
@@ -402,7 +379,10 @@ fn plan_spawn_execution(
             env_fingerprints,
             fingerprint_ignores: None,
         };
-        resolved_cache_metadata = Some(CacheMetadata { execution_cache_key, spawn_fingerprint });
+        if let Some(execution_cache_key) = execution_cache_key {
+            resolved_cache_metadata =
+                Some(CacheMetadata { execution_cache_key, spawn_fingerprint });
+        }
     }
 
     // Add prefix envs to all envs

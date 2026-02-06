@@ -216,20 +216,12 @@ impl<'a> Session<'a> {
         }
     }
 
-    pub async fn plan_exec(
-        &mut self,
+    pub fn plan_exec(
+        &self,
         synthetic_plan_request: SyntheticPlanRequest,
+        cache_key: Arc<[Str]>,
     ) -> Result<ExecutionPlan, vite_task_plan::Error> {
-        let plan = ExecutionPlan::plan(
-            PlanRequest::Synthetic(synthetic_plan_request),
-            &self.workspace_path,
-            &self.cwd,
-            &self.envs,
-            &mut self.plan_request_parser,
-            &mut self.lazy_task_graph,
-        )
-        .await?;
-        Ok(plan)
+        ExecutionPlan::plan_exec(&self.workspace_path, &self.cwd, synthetic_plan_request, cache_key)
     }
 
     pub async fn plan_from_cli(

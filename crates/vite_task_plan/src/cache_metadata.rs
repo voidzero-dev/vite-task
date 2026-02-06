@@ -23,18 +23,10 @@ pub enum ExecutionCacheKey {
         /// The package path where the user-defined task is defined, relative to the workspace root.
         package_path: RelativePathBuf,
     },
-    /// This execution is from a synthetic task directly invoked from the command line
-    /// (e.g., `vite lint --fix` expanding to an `oxlint --fix` invocation).
+    /// This execution is from a synthetic task directly invoked from `Session::plan_exec` API.
     ///
-    /// The cache key is derived from the actual execution content.
-    Exec {
-        /// The program name (basename of the resolved program path).
-        program_name: Str,
-        /// The arguments to pass to the program.
-        args: Arc<[Str]>,
-        /// The working directory, relative to the workspace root.
-        cwd: RelativePathBuf,
-    },
+    /// The cache key is an opaque value provided by the caller.
+    ExecAPI(Arc<[Str]>),
 }
 
 /// Cache information for a spawn execution.
