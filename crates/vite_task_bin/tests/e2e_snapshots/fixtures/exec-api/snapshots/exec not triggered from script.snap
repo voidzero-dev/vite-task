@@ -1,0 +1,23 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/exec-api
+---
+> FOO=bar vite run lint-task # no print-env FOO output
+$ vite lint
+Found 0 warnings and 0 errors.
+Finished in <duration> on 0 files with 90 rules using <n> threads.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] @test/exec-api#lint-task: $ vite lint ✓
+      → Cache miss: no previous cache entry found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

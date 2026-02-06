@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use clap::Parser as _;
+use clap::Parser;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
@@ -18,7 +18,7 @@ use vite_task::{
 #[derive(Debug, Default)]
 pub struct CommandHandler(());
 
-fn find_executable(
+pub fn find_executable(
     path_env: Option<&Arc<OsStr>>,
     cwd: &AbsolutePath,
     executable: &str,
@@ -53,8 +53,9 @@ fn synthesize_node_modules_bin_task(
     })
 }
 
-#[derive(clap::Parser)]
-enum Args {
+#[derive(Debug, Parser)]
+#[command(name = "vite", version)]
+pub enum Args {
     Lint {
         #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<Str>,

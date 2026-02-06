@@ -1,0 +1,17 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/exec-api
+---
+> FOO=bar vite lint # cache miss
+bar
+
+Lint { args: [] }
+
+> FOO=bar vite lint # cache hit, silent
+Lint { args: [] }
+
+> FOO=baz vite lint # env changed, cache miss
+baz
+
+Lint { args: [] }

@@ -1,0 +1,13 @@
+[[e2e]]
+name = "exec not triggered from script"
+steps = [
+  "FOO=bar vite run lint-task # no print-env FOO output",
+]
+
+[[e2e]]
+name = "exec caching"
+steps = [
+  "FOO=bar vite lint # cache miss",
+  "FOO=bar vite lint # cache hit, silent",
+  "FOO=baz vite lint # env changed, cache miss",
+]
