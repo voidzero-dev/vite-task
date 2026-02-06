@@ -7,10 +7,11 @@ use std::{
     sync::Arc,
 };
 
+use clap::Parser as _;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
-    EnabledCacheConfig, HandledCommand, ScriptCommand, SessionCallbacks, UserCacheConfig,
+    Command, EnabledCacheConfig, HandledCommand, ScriptCommand, SessionCallbacks, UserCacheConfig,
     UserTaskOptions, get_path_env, plan_request::SyntheticPlanRequest,
 };
 
@@ -52,6 +53,24 @@ fn synthesize_node_modules_bin_task(
     })
 }
 
+#[derive(clap::Parser)]
+enum Args {
+    Lint {
+        #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<Str>,
+    },
+    Test {
+        #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<Str>,
+    },
+    EnvTest {
+        name: Str,
+        value: Str,
+    },
+    #[command(flatten)]
+    Task(Command),
+}
+
 #[async_trait::async_trait(?Send)]
 impl vite_task::CommandHandler for CommandHandler {
     async fn handle_command(
@@ -66,35 +85,19 @@ impl vite_task::CommandHandler for CommandHandler {
                 command.args =
                     iter::once(Str::from("run")).chain(command.args.iter().cloned()).collect();
             }
-            _ => return Ok(HandledCommand::NotSynthesized { is_vite_task_entry: false }),
+            _ => return Ok(HandledCommand::Verbatim),
         }
-        let Some(subcommand) = command.args.first().cloned() else {
-            return Ok(HandledCommand::NotSynthesized { is_vite_task_entry: true });
-        };
-        let rest = &command.args[1..];
-        match subcommand.as_str() {
-            "lint" => Ok(HandledCommand::Synthesized(synthesize_node_modules_bin_task(
-                "oxlint",
-                rest,
-                &command.envs,
-                &command.cwd,
-            )?)),
-            "test" => Ok(HandledCommand::Synthesized(synthesize_node_modules_bin_task(
-                "vitest",
-                rest,
-                &command.envs,
-                &command.cwd,
-            )?)),
-            "env-test" => {
-                let name = rest
-                    .first()
-                    .ok_or_else(|| anyhow::anyhow!("env-test requires a name argument"))?
-                    .clone();
-                let value = rest
-                    .get(1)
-                    .ok_or_else(|| anyhow::anyhow!("env-test requires a value argument"))?
-                    .clone();
-
+        let args = Args::try_parse_from(
+            std::iter::once(command.program.as_str()).chain(command.args.iter().map(Str::as_str)),
+        )?;
+        match args {
+            Args::Lint { args } => Ok(HandledCommand::Synthesized(
+                synthesize_node_modules_bin_task("oxlint", &args, &command.envs, &command.cwd)?,
+            )),
+            Args::Test { args } => Ok(HandledCommand::Synthesized(
+                synthesize_node_modules_bin_task("vitest", &args, &command.envs, &command.cwd)?,
+            )),
+            Args::EnvTest { name, value } => {
                 let mut envs = HashMap::clone(&command.envs);
                 envs.insert(
                     Arc::from(OsStr::new(name.as_str())),
@@ -117,7 +120,7 @@ impl vite_task::CommandHandler for CommandHandler {
                     envs: Arc::new(envs),
                 }))
             }
-            _ => Ok(HandledCommand::NotSynthesized { is_vite_task_entry: true }),
+            Args::Task(cli_command) => Ok(HandledCommand::ViteTaskCommand(cli_command)),
         }
     }
 }

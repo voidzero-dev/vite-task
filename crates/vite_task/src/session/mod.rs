@@ -6,10 +6,8 @@ pub mod reporter;
 // Re-export types that are part of the public API
 use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 
-use anyhow::Context;
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
-use clap::{Parser, Subcommand as _};
 pub use event::ExecutionEvent;
 use once_cell::sync::OnceCell;
 pub use reporter::{LabeledReporter, Reporter};
@@ -60,31 +58,21 @@ pub struct SessionCallbacks<'a> {
 pub enum HandledCommand {
     /// The command was synthesized into a task (e.g., `vite lint` → `oxlint`).
     Synthesized(SyntheticPlanRequest),
-    /// The command was not synthesized.
-    NotSynthesized {
-        /// Whether this program is the task runner's own entry point.
-        /// If `true`, `get_plan_request` will check if the first arg is a known
-        /// subcommand (via [`Command::has_subcommand`]) and parse it as a CLI command.
-        is_vite_task_entry: bool,
-    },
+    /// The command is a vite-task CLI command (e.g., `vite run build`).
+    ViteTaskCommand(Command),
+    /// The command should be executed verbatim as an external process.
+    Verbatim,
 }
 
 /// Handles commands found in task scripts to determine how they should be executed.
 ///
-/// Since `vite_task` doesn't know the name of its own binary, it relies on the caller
-/// to identify which commands are vite-task commands. Return [`HandledCommand::NotSynthesized`]
-/// with `is_vite_task_entry: true` to let vite-task check if the args match a CLI subcommand,
-/// or [`HandledCommand::Synthesized`] to provide a synthetic task directly.
+/// The implementation should return:
+/// - [`HandledCommand::Synthesized`] to replace the command with a synthetic task.
+/// - [`HandledCommand::ViteTaskCommand`] when the command is a vite-task CLI invocation.
+/// - [`HandledCommand::Verbatim`] to execute the command as-is as an external process.
 #[async_trait::async_trait(?Send)]
 pub trait CommandHandler: Debug {
     /// Called for every command in task scripts to determine how it should be handled.
-    ///
-    /// The implementation can either:
-    /// - Return `Synthesized(...)` to replace the command with a synthetic task.
-    /// - Return `NotSynthesized { is_vite_task_entry }` and optionally mutate `command`
-    ///   to modify how the command is executed as a normal process.
-    ///
-    /// If `Synthesized` is returned, any mutations to `command` are discarded.
     async fn handle_command(
         &mut self,
         command: &mut ScriptCommand,
@@ -104,25 +92,10 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
     ) -> anyhow::Result<Option<PlanRequest>> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
-            HandledCommand::NotSynthesized { is_vite_task_entry: true }
-                if command
-                    .args
-                    .first()
-                    .is_some_and(|arg| Command::has_subcommand(arg.as_str())) =>
-            {
-                let cli_command = Command::try_parse_from(
-                    std::iter::once(command.program.as_str())
-                        .chain(command.args.iter().map(Str::as_str)),
-                )
-                .with_context(|| {
-                    vite_str::format!(
-                        "Failed to parse vite-task command from args: {:?}",
-                        command.args
-                    )
-                })?;
+            HandledCommand::ViteTaskCommand(cli_command) => {
                 Ok(Some(cli_command.into_plan_request(&command.cwd)?))
             }
-            HandledCommand::NotSynthesized { .. } => Ok(None),
+            HandledCommand::Verbatim => Ok(None),
         }
     }
 }
