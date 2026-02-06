@@ -1,7 +1,7 @@
 ---
-source: crates/vite_task_bin/tests/test_snapshots/main.rs
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
 expression: "&plan_json"
-input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/synthetic-in-subpackage
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-in-subpackage
 ---
 {
   "root_node": {
@@ -75,14 +75,12 @@ input_file: crates/vite_task_bin/tests/test_snapshots/fixtures/synthetic-in-subp
                                     "fingerprint_ignores": null
                                   },
                                   "execution_cache_key": {
-                                    "kind": {
-                                      "UserTask": {
-                                        "task_name": "lint",
-                                        "and_item_index": 0,
-                                        "extra_args": []
-                                      }
-                                    },
-                                    "origin_path": "packages/a"
+                                    "UserTask": {
+                                      "task_name": "lint",
+                                      "and_item_index": 0,
+                                      "extra_args": [],
+                                      "package_path": "packages/a"
+                                    }
                                   }
                                 },
                                 "spawn_command": {

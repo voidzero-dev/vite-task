@@ -46,10 +46,6 @@ pub struct SyntheticPlanRequest {
     /// The task options as if it's defined in `vite.config.*`
     pub task_options: UserTaskOptions,
 
-    /// The cache key for execution directly issued from user command line.
-    /// It typically includes the subcommand name and all args after it. (e.g. `["lint", "--fix"]` for `vite lint --fix`)
-    pub direct_execution_cache_key: Arc<[Str]>,
-
     /// All environment variables to set for the synthetic task.
     ///
     /// This is set in the plan stage before resolving envs for caching.

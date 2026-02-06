@@ -16,10 +16,7 @@ use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskOptions};
 use crate::{
     ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, PlanContext,
     SpawnCommand, SpawnExecution, TaskExecution,
-    cache_metadata::{
-        CacheMetadata, ExecutionCacheKey, ExecutionCacheKeyKind, ProgramFingerprint,
-        SpawnFingerprint,
-    },
+    cache_metadata::{CacheMetadata, ExecutionCacheKey, ProgramFingerprint, SpawnFingerprint},
     envs::EnvFingerprints,
     error::{
         CdCommandError, Error, PathFingerprintError, PathFingerprintErrorKind, PathType,
@@ -144,13 +141,11 @@ async fn plan_task_as_execution_node(
             }
 
             // Create execution cache key for this and_item
-            let task_execution_cache_key = ExecutionCacheKey {
-                kind: ExecutionCacheKeyKind::UserTask {
-                    task_name: task_node.task_display.task_name.clone(),
-                    and_item_index: index,
-                    extra_args: Arc::clone(&extra_args),
-                },
-                origin_path: strip_prefix_for_cache(package_path, context.workspace_path())
+            let task_execution_cache_key = ExecutionCacheKey::UserTask {
+                task_name: task_node.task_display.task_name.clone(),
+                and_item_index: index,
+                extra_args: Arc::clone(&extra_args),
+                package_path: strip_prefix_for_cache(package_path, context.workspace_path())
                     .map_err(|kind| {
                         TaskPlanErrorKind::PathFingerprintError(PathFingerprintError {
                             kind,
@@ -259,13 +254,11 @@ async fn plan_task_as_execution_node(
 
         let spawn_execution = plan_spawn_execution(
             context.workspace_path(),
-            ExecutionCacheKey {
-                kind: ExecutionCacheKeyKind::UserTask {
-                    task_name: task_node.task_display.task_name.clone(),
-                    and_item_index: 0,
-                    extra_args: Arc::clone(context.extra_args()),
-                },
-                origin_path: strip_prefix_for_cache(package_path, context.workspace_path())
+            ExecutionCacheKey::UserTask {
+                task_name: task_node.task_display.task_name.clone(),
+                and_item_index: 0,
+                extra_args: Arc::clone(context.extra_args()),
+                package_path: strip_prefix_for_cache(package_path, context.workspace_path())
                     .map_err(|kind| {
                         TaskPlanErrorKind::PathFingerprintError(PathFingerprintError {
                             kind,
@@ -294,12 +287,11 @@ pub fn plan_synthetic_request(
     workspace_path: &Arc<AbsolutePath>,
     prefix_envs: &BTreeMap<Str, Str>,
     synthetic_plan_request: SyntheticPlanRequest,
-    // generated from the task, overrides `synthetic_plan_request.direct_execution_cache_key`
+    // generated from the task, overrides the derived Exec cache key
     task_execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
-    let SyntheticPlanRequest { program, args, task_options, direct_execution_cache_key, envs } =
-        synthetic_plan_request;
+    let SyntheticPlanRequest { program, args, task_options, envs } = synthetic_plan_request;
 
     let program_path = which(&program, &envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
     let resolved_options = ResolvedTaskOptions::resolve(task_options, &cwd);
@@ -308,11 +300,21 @@ pub fn plan_synthetic_request(
         // Use task generated cache key if any
         task_execution_cache_key
     } else {
-        // Otherwise, use direct execution cache key
-        ExecutionCacheKey {
-            kind: ExecutionCacheKeyKind::DirectSyntactic { direct_execution_cache_key },
-            origin_path: strip_prefix_for_cache(cwd, workspace_path)
-                .map_err(|kind| PathFingerprintError { kind, path_type: PathType::Cwd })?,
+        // Derive Exec cache key from the execution content
+        let program_name_os = program_path.as_path().file_stem().unwrap_or_default();
+        let program_name = program_name_os.to_str().ok_or_else(|| PathFingerprintError {
+            kind: PathFingerprintErrorKind::NonPortableRelativePath {
+                path: Path::new(program_name_os).into(),
+                error: InvalidPathDataError::NonUtf8,
+            },
+            path_type: PathType::Program,
+        })?;
+        let exec_cwd = strip_prefix_for_cache(&resolved_options.cwd, workspace_path)
+            .map_err(|kind| PathFingerprintError { kind, path_type: PathType::Cwd })?;
+        ExecutionCacheKey::Exec {
+            program_name: Str::from(program_name),
+            args: Arc::clone(&args),
+            cwd: exec_cwd,
         }
     };
 

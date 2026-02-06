@@ -92,16 +92,16 @@ impl ExecutionCache {
                         "CREATE TABLE execution_key_to_fingerprint (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    conn.execute("PRAGMA user_version = 4", ())?;
+                    conn.execute("PRAGMA user_version = 5", ())?;
                 }
-                1..=3 => {
+                1..=4 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                4 => break, // current version
-                5.. => {
+                5 => break, // current version
+                6.. => {
                     return Err(anyhow::anyhow!("Unrecognized database version: {}", user_version));
                 }
             }

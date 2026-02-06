@@ -216,7 +216,7 @@ impl<'a> Session<'a> {
         }
     }
 
-    pub async fn plan_synthetic_task(
+    pub async fn plan_exec(
         &mut self,
         synthetic_plan_request: SyntheticPlanRequest,
     ) -> Result<ExecutionPlan, vite_task_plan::Error> {

@@ -156,7 +156,7 @@ impl<W: Write> LabeledReporter<W> {
             CacheStatus::Disabled(_) => self.stats.cache_disabled += 1,
         }
 
-        // Handle None display case - direct synthetic execution (e.g., via plan_synthetic_task)
+        // Handle None display case - direct synthetic execution (e.g., via plan_exec)
         // Don't print cache status here - will be printed at finish for cache hits only
         let Some(display) = display else {
             self.executions.push(ExecutionInfo {

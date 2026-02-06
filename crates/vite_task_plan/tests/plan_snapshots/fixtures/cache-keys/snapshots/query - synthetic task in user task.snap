@@ -50,14 +50,12 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
                         "fingerprint_ignores": null
                       },
                       "execution_cache_key": {
-                        "kind": {
-                          "UserTask": {
-                            "task_name": "lint",
-                            "and_item_index": 0,
-                            "extra_args": []
-                          }
-                        },
-                        "origin_path": ""
+                        "UserTask": {
+                          "task_name": "lint",
+                          "and_item_index": 0,
+                          "extra_args": [],
+                          "package_path": ""
+                        }
                       }
                     },
                     "spawn_command": {

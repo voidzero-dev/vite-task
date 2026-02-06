@@ -39,19 +39,15 @@ fn find_executable(
 }
 
 fn synthesize_node_modules_bin_task(
-    subcommand_name: &str,
     executable_name: &str,
     args: &[Str],
     envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
     cwd: &Arc<AbsolutePath>,
 ) -> anyhow::Result<SyntheticPlanRequest> {
-    let direct_execution_cache_key: Arc<[Str]> =
-        iter::once(Str::from(subcommand_name)).chain(args.iter().cloned()).collect();
     Ok(SyntheticPlanRequest {
         program: find_executable(get_path_env(envs), &*cwd, executable_name)?,
         args: args.into(),
         task_options: Default::default(),
-        direct_execution_cache_key,
         envs: Arc::clone(envs),
     })
 }
@@ -78,14 +74,12 @@ impl vite_task::CommandHandler for CommandHandler {
         let rest = &command.args[1..];
         match subcommand.as_str() {
             "lint" => Ok(HandledCommand::Synthesized(synthesize_node_modules_bin_task(
-                "lint",
                 "oxlint",
                 rest,
                 &command.envs,
                 &command.cwd,
             )?)),
             "test" => Ok(HandledCommand::Synthesized(synthesize_node_modules_bin_task(
-                "test",
                 "vitest",
                 rest,
                 &command.envs,
@@ -100,9 +94,6 @@ impl vite_task::CommandHandler for CommandHandler {
                     .get(1)
                     .ok_or_else(|| anyhow::anyhow!("env-test requires a value argument"))?
                     .clone();
-
-                let direct_execution_cache_key: Arc<[Str]> =
-                    [Str::from("env-test"), name.clone(), value.clone()].into();
 
                 let mut envs = HashMap::clone(&command.envs);
                 envs.insert(
@@ -123,7 +114,6 @@ impl vite_task::CommandHandler for CommandHandler {
                         },
                         ..Default::default()
                     },
-                    direct_execution_cache_key,
                     envs: Arc::new(envs),
                 }))
             }

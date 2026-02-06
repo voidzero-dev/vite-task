@@ -127,7 +127,7 @@ fn run_case_inner(
             let snapshot_name = format!("query - {}", plan.name);
 
             let cli = match Cli::try_parse_from(
-                std::iter::once("vite-task") // dummy program name
+                std::iter::once("vp") // dummy program name
                     .chain(plan.args.iter().map(|s| s.as_str())),
             ) {
                 Ok(ok) => ok,
