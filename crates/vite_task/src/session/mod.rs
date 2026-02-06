@@ -1,7 +1,7 @@
 mod cache;
 mod event;
 mod execute;
-pub mod reporter;
+pub(crate) mod reporter;
 
 // Re-export types that are part of the public API
 use std::{ffi::OsStr, fmt::Debug, sync::Arc};
@@ -9,11 +9,17 @@ use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
 pub use event::ExecutionEvent;
+use monostate::MustBe;
 use once_cell::sync::OnceCell;
-pub use reporter::{LabeledReporter, Reporter};
+pub use reporter::ExitStatus;
+use reporter::LabeledReporter;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
-use vite_task_graph::{IndexedTaskGraph, TaskGraph, TaskGraphLoadError, loader::UserConfigLoader};
+use vite_task_graph::{
+    IndexedTaskGraph, TaskGraph, TaskGraphLoadError,
+    config::user::{UserCacheConfig, UserTaskOptions},
+    loader::UserConfigLoader,
+};
 use vite_task_plan::{
     ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind,
     plan_request::{PlanRequest, ScriptCommand, SyntheticPlanRequest},
@@ -21,7 +27,10 @@ use vite_task_plan::{
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
-use crate::{cli::Command, collections::HashMap};
+use crate::{
+    cli::{CacheSubcommand, Command, RunCommand},
+    collections::HashMap,
+};
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
@@ -92,9 +101,18 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
     ) -> anyhow::Result<Option<PlanRequest>> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
-            HandledCommand::ViteTaskCommand(cli_command) => {
-                Ok(Some(cli_command.into_plan_request(&command.cwd)?))
-            }
+            HandledCommand::ViteTaskCommand(cli_command) => match cli_command {
+                Command::Cache { .. } => Ok(Some(PlanRequest::Synthetic(SyntheticPlanRequest {
+                    program: Arc::from(OsStr::new(command.program.as_str())),
+                    args: Arc::clone(&command.args),
+                    task_options: UserTaskOptions {
+                        cache_config: UserCacheConfig::Disabled { cache: MustBe!(false) },
+                        ..Default::default()
+                    },
+                    envs: Arc::clone(&command.envs),
+                }))),
+                Command::Run(run_command) => Ok(Some(run_command.into_plan_request(&command.cwd)?)),
+            },
             HandledCommand::Verbatim => Ok(None),
         }
     }
@@ -171,6 +189,34 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Primary entry point for CLI usage. Plans and executes the given command.
+    pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
+        match command {
+            Command::Cache { subcmd } => self.handle_cache_command(subcmd),
+            Command::Run(run_command) => {
+                let cwd = Arc::clone(&self.cwd);
+                let plan = self.plan_from_cli(cwd, run_command).await?;
+                let reporter = LabeledReporter::new(std::io::stdout(), self.workspace_path());
+                Ok(self
+                    .execute(plan, Box::new(reporter))
+                    .await
+                    .err()
+                    .unwrap_or(ExitStatus::SUCCESS))
+            }
+        }
+    }
+
+    fn handle_cache_command(&self, subcmd: CacheSubcommand) -> anyhow::Result<ExitStatus> {
+        match subcmd {
+            CacheSubcommand::Clean => {
+                if self.cache_path.as_path().exists() {
+                    std::fs::remove_dir_all(&self.cache_path)?;
+                }
+                Ok(ExitStatus::SUCCESS)
+            }
+        }
+    }
+
     /// Lazily initializes and returns the execution cache.
     /// The cache is only created when first accessed to avoid SQLite race conditions
     /// when multiple processes start simultaneously.
@@ -200,7 +246,7 @@ impl<'a> Session<'a> {
     pub async fn plan_from_cli(
         &mut self,
         cwd: Arc<AbsolutePath>,
-        command: Command,
+        command: RunCommand,
     ) -> Result<ExecutionPlan, vite_task_plan::Error> {
         let plan_request = command.into_plan_request(&cwd).map_err(|error| {
             TaskPlanErrorKind::ParsePlanRequestError {

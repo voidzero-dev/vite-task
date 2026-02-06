@@ -3298,6 +3298,7 @@ dependencies = [
  "diff-struct",
  "fspy",
  "futures-util",
+ "monostate",
  "nix 0.30.1",
  "once_cell",
  "owo-colors",

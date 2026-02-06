@@ -1,0 +1,35 @@
+---
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
+expression: task_graph_json
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-subcommand
+---
+[
+  {
+    "key": [
+      "<workspace>/",
+      "clean-cache"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/cache-subcommand",
+        "task_name": "clean-cache",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vite cache clean",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  }
+]

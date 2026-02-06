@@ -1,11 +1,7 @@
-use std::{process::ExitCode, sync::Arc};
+use std::process::ExitCode;
 
 use clap::Parser;
-use vite_path::{AbsolutePath, current_dir};
-use vite_task::{
-    Command, Session,
-    session::reporter::{ExitStatus, LabeledReporter},
-};
+use vite_task::{Command, Session};
 use vite_task_bin::OwnedSessionCallbacks;
 
 #[derive(Parser)]
@@ -21,15 +17,9 @@ async fn main() -> anyhow::Result<ExitCode> {
     Ok(exit_status.0.into())
 }
 
-async fn run() -> anyhow::Result<ExitStatus> {
-    let cwd: Arc<AbsolutePath> = current_dir()?.into();
+async fn run() -> anyhow::Result<vite_task::ExitStatus> {
     let cli = Cli::parse();
-
     let mut owned_callbacks = OwnedSessionCallbacks::default();
-    let mut session = Session::init(owned_callbacks.as_callbacks())?;
-    let plan = session.plan_from_cli(cwd, cli.command).await?;
-
-    // Create reporter and execute
-    let reporter = LabeledReporter::new(std::io::stdout(), session.workspace_path());
-    Ok(session.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitStatus::SUCCESS))
+    let session = Session::init(owned_callbacks.as_callbacks())?;
+    session.main(cli.command).await
 }

@@ -137,9 +137,13 @@ fn run_case_inner(
                 }
             };
             let Cli::Command(command) = cli;
+            let run_command = match command {
+                Command::Run(run_command) => run_command,
+                _ => panic!("only `run` commands supported in plan tests"),
+            };
 
             let plan_result =
-                session.plan_from_cli(workspace_root.path.join(plan.cwd).into(), command).await;
+                session.plan_from_cli(workspace_root.path.join(plan.cwd).into(), run_command).await;
 
             let plan = match plan_result {
                 Ok(plan) => plan,

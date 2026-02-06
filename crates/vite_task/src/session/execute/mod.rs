@@ -355,7 +355,7 @@ impl<'a> Session<'a> {
     ///
     /// The return type isn't just ExitStatus because we want to distinguish between normal successful execution,
     /// and execution that failed and needs to exit with a specific code which can be zero.
-    pub async fn execute(
+    pub(crate) async fn execute(
         &self,
         plan: ExecutionPlan,
         mut reporter: Box<dyn Reporter>,
