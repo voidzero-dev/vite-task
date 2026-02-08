@@ -42,7 +42,7 @@ async fn run() -> anyhow::Result<ExitStatus> {
                     envs: Arc::clone(envs),
                 };
                 let cache_key: Arc<[Str]> = Arc::from([Str::from("print-env-foo")]);
-                let status = session.exec(request, cache_key, true).await?;
+                let status = session.execute_synthetic(request, cache_key, true).await?;
                 if status != ExitStatus::SUCCESS {
                     return Ok(status);
                 }

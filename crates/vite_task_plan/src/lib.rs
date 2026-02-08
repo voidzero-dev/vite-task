@@ -226,7 +226,7 @@ impl ExecutionPlan {
         Ok(Self { root_node })
     }
 
-    pub fn plan_exec(
+    pub fn plan_synthetic(
         workspace_path: &Arc<AbsolutePath>,
         cwd: &Arc<AbsolutePath>,
         synthetic_plan_request: SyntheticPlanRequest,

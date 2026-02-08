@@ -247,25 +247,22 @@ impl<'a> Session<'a> {
     ///
     /// This is for executing a command with cache before/without the entrypoint [`Session::main`].
     /// In vite-plus, this is used for auto-install.
-    pub async fn exec(
+    pub async fn execute_synthetic(
         &self,
         synthetic_plan_request: SyntheticPlanRequest,
         cache_key: Arc<[Str]>,
         silent_if_cache_hit: bool,
     ) -> anyhow::Result<ExitStatus> {
-        let plan = self.plan_exec(synthetic_plan_request, cache_key)?;
+        let plan = ExecutionPlan::plan_synthetic(
+            &self.workspace_path,
+            &self.cwd,
+            synthetic_plan_request,
+            cache_key,
+        )?;
         let mut reporter = LabeledReporter::new(std::io::stdout(), self.workspace_path());
         reporter.set_hide_summary(true);
         reporter.set_silent_if_cache_hit(silent_if_cache_hit);
         Ok(self.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitStatus::SUCCESS))
-    }
-
-    fn plan_exec(
-        &self,
-        synthetic_plan_request: SyntheticPlanRequest,
-        cache_key: Arc<[Str]>,
-    ) -> Result<ExecutionPlan, vite_task_plan::Error> {
-        ExecutionPlan::plan_exec(&self.workspace_path, &self.cwd, synthetic_plan_request, cache_key)
     }
 
     pub async fn plan_from_cli(
