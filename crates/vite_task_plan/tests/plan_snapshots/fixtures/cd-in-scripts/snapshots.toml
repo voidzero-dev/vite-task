@@ -1,0 +1,9 @@
+# Tests that `cd` in scripts interacts correctly with nested vp commands
+
+[[plan]]
+name = "cd before vp run should not affect expanded task cwd"
+args = ["run", "cd-build"]
+
+[[plan]]
+name = "cd before vp lint should put synthetic task under cwd"
+args = ["run", "cd-lint"]
