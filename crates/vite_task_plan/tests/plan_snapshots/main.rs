@@ -13,7 +13,7 @@ use vite_workspace::find_workspace_root;
 
 /// Local parser wrapper for BuiltInCommand
 #[derive(Parser)]
-#[command(name = "vite")]
+#[command(name = "vp")]
 enum Cli {
     #[clap(flatten)]
     Command(Command),

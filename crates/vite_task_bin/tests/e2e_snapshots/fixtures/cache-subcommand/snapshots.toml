@@ -1,8 +1,8 @@
 [[e2e]]
 name = "cache clean"
 steps = [
-  "vite run cached-task # cache miss",
-  "vite run cached-task # cache hit",
-  "vite cache clean",
-  "vite run cached-task # cache miss after clean",
+  "vp run cached-task # cache miss",
+  "vp run cached-task # cache hit",
+  "vp cache clean",
+  "vp run cached-task # cache miss after clean",
 ]

@@ -113,13 +113,13 @@ pub struct ExecutionItemDisplay {
     /// `SpawnExecution.cwd` contains the actual cwd for execution.
     /// These two may differ if the task synthesizer returns a task with a different cwd.
     ///
-    /// Hypothetically , if `vite lint-src` under cwd `packages/lib` synthesizes a task spawning `oxlint` under `packages/lib/src`.
+    /// Hypothetically , if `vp lint-src` under cwd `packages/lib` synthesizes a task spawning `oxlint` under `packages/lib/src`.
     /// The spawned process' cwd will be `packages/lib/src`, while this field will be `packages/lib`,
-    /// which will be displayed like `packages/lib$ vite lint-src`
+    /// which will be displayed like `packages/lib$ vp lint-src`
     pub cwd: Arc<AbsolutePath>,
 }
 
-/// An execution item, either expanded from a known vite subcommand, or a spawn execution.
+/// An execution item, either expanded from a known vp subcommand, or a spawn execution.
 #[derive(Debug, Serialize)]
 pub struct ExecutionItem {
     /// Human-readable display for this execution item.
@@ -141,7 +141,7 @@ pub enum LeafExecutionKind {
 /// An execution item, from a split subcommand in a task's command (`item1 && item2 && ...`).
 #[derive(Debug, Serialize)]
 pub enum ExecutionItemKind {
-    /// Expanded from a known vite subcommand, like `vite run ...` or a synthesized task.
+    /// Expanded from a known vp subcommand, like `vp run ...` or a synthesized task.
     Expanded(#[serde(serialize_with = "serialize_by_key")] ExecutionGraph),
     /// A normal execution that spawns a child process, like `tsc --noEmit`.
     Leaf(LeafExecutionKind),

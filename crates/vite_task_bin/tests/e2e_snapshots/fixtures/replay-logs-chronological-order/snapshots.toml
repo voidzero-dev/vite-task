@@ -3,7 +3,7 @@
 [[e2e]]
 name = "replay logs chronological order"
 steps = [
-  "vite run build # cache miss",
-  "vite run build # cache hit",
-  "vite run build # cache hit",
+  "vp run build # cache miss",
+  "vp run build # cache hit",
+  "vp run build # cache hit",
 ]

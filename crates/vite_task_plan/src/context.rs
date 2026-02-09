@@ -35,7 +35,7 @@ pub struct PlanContext<'a> {
     /// The current call stack of task index nodes being planned.
     task_call_stack: Vec<(TaskNodeIndex, Range<usize>)>,
 
-    /// The extra args (`vite run task [extra_arg...]`).
+    /// The extra args (`vp run task [extra_arg...]`).
     /// It may come from real cli args, or commands in task scripts.
     extra_args: Arc<[Str]>,
 

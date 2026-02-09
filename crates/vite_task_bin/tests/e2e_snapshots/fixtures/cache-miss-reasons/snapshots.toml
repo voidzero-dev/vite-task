@@ -3,55 +3,55 @@
 [[e2e]]
 name = "env value changed"
 steps = [
-  "cross-env MY_ENV=1 vite run test # cache miss",
-  "cross-env MY_ENV=2 vite run test # cache miss: env value changed",
+  "cross-env MY_ENV=1 vp run test # cache miss",
+  "cross-env MY_ENV=2 vp run test # cache miss: env value changed",
 ]
 
 [[e2e]]
 name = "env added"
 steps = [
-  "vite run test # cache miss",
-  "cross-env MY_ENV=1 vite run test # cache miss: env added",
+  "vp run test # cache miss",
+  "cross-env MY_ENV=1 vp run test # cache miss: env added",
 ]
 
 [[e2e]]
 name = "env removed"
 steps = [
-  "cross-env MY_ENV=1 vite run test # cache miss",
-  "vite run test # cache miss: env removed",
+  "cross-env MY_ENV=1 vp run test # cache miss",
+  "vp run test # cache miss: env removed",
 ]
 
 [[e2e]]
 name = "pass-through env added"
 steps = [
-  "vite run test # cache miss",
+  "vp run test # cache miss",
   "json-edit vite-task.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # add pass-through env",
-  "vite run test # cache miss: pass-through env added",
+  "vp run test # cache miss: pass-through env added",
 ]
 
 [[e2e]]
 name = "pass-through env removed"
 steps = [
   "json-edit vite-task.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # setup",
-  "vite run test # cache miss",
+  "vp run test # cache miss",
   "json-edit vite-task.json \"delete _.tasks.test.passThroughEnvs\" # remove pass-through env",
-  "vite run test # cache miss: pass-through env removed",
+  "vp run test # cache miss: pass-through env removed",
 ]
 
 [[e2e]]
 name = "cwd changed"
 steps = [
-  "vite run test # cache miss",
+  "vp run test # cache miss",
   "mkdir -p subfolder",
   "cp test.txt subfolder/test.txt",
   "json-edit vite-task.json \"_.tasks.test.cwd = 'subfolder'\" # change cwd",
-  "vite run test # cache miss: cwd changed",
+  "vp run test # cache miss: cwd changed",
 ]
 
 [[e2e]]
 name = "input content changed"
 steps = [
-  "vite run test # cache miss",
+  "vp run test # cache miss",
   "replace-file-content test.txt initial modified # modify input",
-  "vite run test # cache miss: input changed",
+  "vp run test # cache miss: input changed",
 ]

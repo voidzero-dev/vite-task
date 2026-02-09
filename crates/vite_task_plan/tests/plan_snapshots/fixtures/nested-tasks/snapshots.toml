@@ -1,5 +1,5 @@
-# Tests nested vite run resolution
+# Tests nested vp run resolution
 
 [[plan]]
-name = "nested vite run"
+name = "nested vp run"
 args = ["run", "script2"]

@@ -7,7 +7,7 @@ use vite_str::Str;
 use super::TaskQueryKind;
 use crate::{query::TaskQuery, specifier::TaskSpecifier};
 
-/// Represents task query args of `vite run`
+/// Represents task query args of `vp run`
 /// It will be converted to `TaskQuery`, but may be invalid (contains conflicting options),
 /// if so the error is returned early before loading the task graph.
 #[derive(Debug, clap::Parser)]

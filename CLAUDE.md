@@ -40,15 +40,15 @@ Test fixtures and snapshots:
 
 ```bash
 # Run a task defined in vite-task.json
-vite run <task>                      # run task in current package
-vite run <package>#<task>            # run task in specific package
-vite run <task> -r                   # run task in all packages (recursive)
-vite run <task> -t                   # run task in current package + transitive deps
-vite run <task> --extra --args       # pass extra args to the task command
+vp run <task>                        # run task in current package
+vp run <package>#<task>              # run task in specific package
+vp run <task> -r                     # run task in all packages (recursive)
+vp run <task> -t                     # run task in current package + transitive deps
+vp run <task> --extra --args         # pass extra args to the task command
 
 # Built-in commands (run tools from node_modules/.bin)
-vite test [args...]                  # run vitest
-vite lint [args...]                  # run oxlint
+vp test [args...]                    # run vitest
+vp lint [args...]                    # run oxlint
 
 # Flags
 -r, --recursive                      # run across all packages
@@ -59,7 +59,7 @@ vite lint [args...]                  # run oxlint
 ## Key Architecture
 
 - **vite_task** - Main task runner with caching and session management
-- **vite_task_bin** - CLI binary (`vite` command) and task synthesizer
+- **vite_task_bin** - CLI binary (`vp` command) and task synthesizer
 - **vite_task_graph** - Task dependency graph construction and config loading
 - **vite_task_plan** - Execution planning (resolves env vars, working dirs, commands)
 - **vite_workspace** - Workspace detection and package dependency graph

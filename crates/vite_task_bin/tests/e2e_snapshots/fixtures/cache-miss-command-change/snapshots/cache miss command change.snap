@@ -1,10 +1,9 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/cache-miss-command-change
 ---
-> vite run task # cache miss
+> vp run task # cache miss
 $ print foo
 foo
 
@@ -30,7 +29,7 @@ Task Details:
 
 > json-edit package.json '_.scripts.task = "print baz && print bar"' # change first subtask
 
-> vite run task # first: cache miss, second: cache hit
+> vp run task # first: cache miss, second: cache hit
 $ print baz ✗ cache miss: args changed, executing
 baz
 
@@ -56,7 +55,7 @@ Task Details:
 
 > json-edit package.json '_.scripts.task = "print bar"' # remove first subtask
 
-> vite run task # cache hit
+> vp run task # cache hit
 $ print bar ✓ cache hit, replaying
 bar
 

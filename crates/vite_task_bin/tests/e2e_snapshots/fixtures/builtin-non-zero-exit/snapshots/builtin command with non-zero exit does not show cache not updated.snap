@@ -3,8 +3,8 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/builtin-non-zero-exit
 ---
-[1]> vite run lint -- -D no-debugger
-$ vite lint -D no-debugger
+[1]> vp run lint -- -D no-debugger
+$ vp lint -D no-debugger
 
   x eslint(no-debugger): `debugger` statement is not allowed
    ,-[bad.js:1:1]
@@ -26,12 +26,12 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] builtin-non-zero-exit-test#lint: $ vite lint -D no-debugger ✗ (exit code: 1)
+  [1] builtin-non-zero-exit-test#lint: $ vp lint -D no-debugger ✗ (exit code: 1)
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[1]> vite run lint -- -D no-debugger
-$ vite lint -D no-debugger
+[1]> vp run lint -- -D no-debugger
+$ vp lint -D no-debugger
 
   x eslint(no-debugger): `debugger` statement is not allowed
    ,-[bad.js:1:1]
@@ -53,6 +53,6 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] builtin-non-zero-exit-test#lint: $ vite lint -D no-debugger ✗ (exit code: 1)
+  [1] builtin-non-zero-exit-test#lint: $ vp lint -D no-debugger ✗ (exit code: 1)
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

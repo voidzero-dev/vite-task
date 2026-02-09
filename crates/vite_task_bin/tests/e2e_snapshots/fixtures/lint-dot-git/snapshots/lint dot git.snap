@@ -5,8 +5,8 @@ input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/lint-dot-git
 ---
 > mkdir .git
 
-> vite run lint # cache miss
-$ vite lint
+> vp run lint # cache miss
+$ vp lint
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[a.js:1:1]
@@ -28,14 +28,14 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] lint: $ vite lint ✓
+  [1] lint: $ vp lint ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 > echo hello > .git/foo.txt # add file inside .git
 
-> vite run lint # cache hit, .git is ignored
-$ vite lint ✓ cache hit, replaying
+> vp run lint # cache hit, .git is ignored
+$ vp lint ✓ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[a.js:1:1]
@@ -57,6 +57,6 @@ Performance:  100% cache hit rate, <duration> saved in total
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] lint: $ vite lint ✓
+  [1] lint: $ vp lint ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

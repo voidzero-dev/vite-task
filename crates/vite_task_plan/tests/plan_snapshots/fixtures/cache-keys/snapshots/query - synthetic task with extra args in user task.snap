@@ -25,7 +25,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
                   "task_name": "lint",
                   "package_path": "<workspace>/"
                 },
-                "command": "vite lint --fix",
+                "command": "vp lint --fix",
                 "and_item_index": null,
                 "cwd": "<workspace>/"
               },

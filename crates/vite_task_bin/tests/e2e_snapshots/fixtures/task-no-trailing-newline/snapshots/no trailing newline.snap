@@ -1,10 +1,9 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/task-no-trailing-newline
 ---
-> vite run hello # runs echo -n hello
+> vp run hello # runs echo -n hello
 $ echo -n foo ⊘ cache disabled: built-in command
 foo
 $ echo bar ⊘ cache disabled: built-in command

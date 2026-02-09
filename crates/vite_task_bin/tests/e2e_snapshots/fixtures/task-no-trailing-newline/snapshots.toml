@@ -3,5 +3,5 @@
 [[e2e]]
 name = "no trailing newline"
 steps = [
-  "vite run hello # runs echo -n hello",
+  "vp run hello # runs echo -n hello",
 ]

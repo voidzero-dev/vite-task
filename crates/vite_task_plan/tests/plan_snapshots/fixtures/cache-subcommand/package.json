@@ -1,6 +1,6 @@
 {
   "name": "@test/cache-subcommand",
   "scripts": {
-    "clean-cache": "vite cache clean"
+    "clean-cache": "vp cache clean"
   }
 }

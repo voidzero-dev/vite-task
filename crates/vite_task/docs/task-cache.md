@@ -29,18 +29,18 @@ For tasks defined as below:
 
 the task cache system is able to hit the same cache for `test` task and for the first subcommand in `build` task:
 
-1. user runs `vite run build` -> no cache hit. run `echo $foo` and create cache
-2. user runs `vite run test`
+1. user runs `vp run build` -> no cache hit. run `echo $foo` and create cache
+2. user runs `vp run test`
    1. `echo $foo` -> **hit cache created in step 1 and replay**
    2. `echo $bar` -> no cache hit. run `echo test` and create cache
 3. user changes env `$foo`
-4. user runs `vite run test`
+4. user runs `vp run test`
    1. `echo $foo`
       1. the cache system should be able to **locate the cache that was created in step 1 and hit in step 2.1**
       2. compare the command fingerprint and report cache miss because `$foo` is changed.
       3. re-run and replace the cache with a new one.
    2. `echo $bar` -> hit cache created in step 2.2 and replay
-5. user runs `vite run build`: **hit the cache created in step 4.1.3 and replay**.
+5. user runs `vp run build`: **hit the cache created in step 4.1.3 and replay**.
 
 ## Architecture
 
@@ -498,10 +498,10 @@ The cache location can be configured via environment variable:
 
 ```bash
 # Custom cache location
-VITE_CACHE_PATH=/tmp/vite-cache vite run build
+VITE_CACHE_PATH=/tmp/vite-cache vp run build
 
 # Default: node_modules/.vite/task-cache in workspace root
-vite run build
+vp run build
 ```
 
 ### Task-Level Cache Control
@@ -614,7 +614,7 @@ CommandFingerprint {
 ### Example: Synthetic Task Cache Key
 
 ```rust
-// Synthetic task (e.g., "vite lint" in a task script)
+// Synthetic task (e.g., "vp lint" in a task script)
 TaskRunKey {
     task_id: TaskId {
         task_group_id: TaskGroupId {
@@ -645,10 +645,10 @@ CommandFingerprint {
 
 ```bash
 # Enable debug logging
-VITE_LOG=debug vite run build
+VITE_LOG=debug vp run build
 
 # Show cache operations
-VITE_LOG=trace vite run build
+VITE_LOG=trace vp run build
 ```
 
 ### Debug Output Examples
@@ -718,8 +718,8 @@ Tasks with identical commands automatically share cache entries:
 
 Behavior:
 
-1. `vite run script1` creates command cache for `cat foo.txt`
-2. `vite run script2` hits the same command cache (shared)
+1. `vp run script1` creates command cache for `cat foo.txt`
+2. `vp run script2` hits the same command cache (shared)
 3. If `foo.txt` changes, both tasks will see cache miss on next run
 4. Cache update from either task benefits the other
 
@@ -729,8 +729,8 @@ Tasks with different arguments get separate cache entries:
 
 ```bash
 # These create separate caches
-vite run echo -- a    # TaskRunKey with args: ["a"]
-vite run echo -- b    # TaskRunKey with args: ["b"]
+vp run echo -- a    # TaskRunKey with args: ["a"]
+vp run echo -- b    # TaskRunKey with args: ["b"]
 ```
 
 ### 4. Compound Commands for Granular Caching
@@ -787,23 +787,23 @@ No need to manually specify inputs - fspy captures actual dependencies.
 
 ```bash
 # Initial run creates command cache
-> vite run script1
+> vp run script1
 Cache not found
 bar
 
 # Different task, same command - hits shared cache
-> vite run script2
+> vp run script2
 Cache hit, replaying
 bar
 
 # File change invalidates shared cache
 > echo baz > foo.txt
-> vite run script2
+> vp run script2
 Cache miss: foo.txt content changed
 baz
 
 # Original task benefits from updated cache
-> vite run script1
+> vp run script1
 Cache hit, replaying
 baz
 ```
@@ -812,20 +812,20 @@ baz
 
 ```bash
 # Different args create separate caches
-> vite run echo -- a
+> vp run echo -- a
 Cache not found
 a
 
-> vite run echo -- b
+> vp run echo -- b
 Cache not found
 b
 
 # Each argument combination has its own cache
-> vite run echo -- a
+> vp run echo -- a
 Cache hit, replaying
 a
 
-> vite run echo -- b
+> vp run echo -- b
 Cache hit, replaying
 b
 ```
@@ -834,16 +834,16 @@ b
 
 ```bash
 # Different directories create separate caches for tasks
-> cd folder1 && vite run lint
+> cd folder1 && vp run lint
 Cache not found
 Found 0 warnings and 0 errors.
 
-> cd folder2 && vite run lint
+> cd folder2 && vp run lint
 Cache not found  # Different cwd = different cache
 Found 0 warnings and 0 errors.
 
 # Each directory maintains its own cache
-> cd folder1 && vite run lint
+> cd folder1 && vp run lint
 Cache hit, replaying
 Found 0 warnings and 0 errors.
 ```

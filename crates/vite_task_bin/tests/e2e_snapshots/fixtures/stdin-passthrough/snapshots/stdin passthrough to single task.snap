@@ -1,10 +1,9 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/stdin-passthrough
 ---
-> vite run echo-stdin
+> vp run echo-stdin
 $ node -e "process.stdin.pipe(process.stdout)"
 hello from stdin
 

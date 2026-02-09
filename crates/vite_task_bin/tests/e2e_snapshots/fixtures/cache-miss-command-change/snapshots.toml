@@ -3,9 +3,9 @@
 [[e2e]]
 name = "cache miss command change"
 steps = [
-  "vite run task # cache miss",
+  "vp run task # cache miss",
   "json-edit package.json '_.scripts.task = \"print baz && print bar\"' # change first subtask",
-  "vite run task # first: cache miss, second: cache hit",
+  "vp run task # first: cache miss, second: cache hit",
   "json-edit package.json '_.scripts.task = \"print bar\"' # remove first subtask",
-  "vite run task # cache hit",
+  "vp run task # cache hit",
 ]

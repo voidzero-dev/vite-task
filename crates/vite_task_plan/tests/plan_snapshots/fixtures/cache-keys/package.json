@@ -1,8 +1,8 @@
 {
   "scripts": {
-    "lint": "vite lint",
+    "lint": "vp lint",
     "hello": "print-file",
-    "lint-and-echo": "vite lint && echo",
-    "echo-and-lint": "echo Linting && vite lint"
+    "lint-and-echo": "vp lint && echo",
+    "echo-and-lint": "echo Linting && vp lint"
   }
 }

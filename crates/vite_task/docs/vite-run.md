@@ -1,9 +1,9 @@
-# `vite-plus run`
+# `vp run`
 
 Vite-plus run has two modes:
 
-1. Implicit mode is running `vite-plus` without `run` command, it will run the task in the current package, it supposed to replace the `pnpm/yarn run` command.
-2. Explicit mode is running `vite-plus run` with run command, like `vite-plus run vite-plus#build`.
+1. Implicit mode is running `vp` without `run` command, it will run the task in the current package, it supposed to replace the `pnpm/yarn run` command.
+2. Explicit mode is running `vp run` with run command, like `vp run vite-plus#build`.
 
 ## Implicit mode
 
@@ -15,7 +15,7 @@ Vite-plus run has two modes:
 >
 > This documentation describes the current behavior and should be updated when the Implicit Mode RFC is done.
 
-With implicit mode, `vite` will run the task in the current package. It can't accept more than on task. The first argument will be treated as the task name; the args following the command will be treated as the task args and bypass to the task.
+With implicit mode, `vp` will run the task in the current package. It can't accept more than on task. The first argument will be treated as the task name; the args following the command will be treated as the task args and bypass to the task.
 
 Given the following `package.json` file:
 
@@ -31,54 +31,54 @@ Given the following `package.json` file:
 This command equivalent to `vite build`:
 
 ```bash
-vite-plus build
+vp build
 ```
 
 This command equivalent to `vite build --mode production`:
 
 ```bash
-vite-plus build --mode production
+vp build --mode production
 ```
 
 This command equivalent to `oxlint packages/cli/binding/index.js`:
 
 ```bash
-vite-plus lint packages/cli/binding/index.js
+vp lint packages/cli/binding/index.js
 ```
 
 If the command contains `#`, the command will be treated as a task in the workspace subpackage.
 
-This command equivalent to `vite-plus run cli#build`:
+This command equivalent to `vp run cli#build`:
 
 ```bash
-vite-plus cli#build
+vp cli#build
 ```
 
 ## Explicit mode
 
-With explicit mode, `vite-plus run` will run the task in the workspace subpackage. It can accept more than one task. The arguments will be treated as the task names; the args following the `--` will be treated as the task args and bypass to the task.
+With explicit mode, `vp run` will run the task in the workspace subpackage. It can accept more than one task. The arguments will be treated as the task names; the args following the `--` will be treated as the task args and bypass to the task.
 
 ### Default behavior
 
-The `vite-plus run` command will run the scoped tasks in dependency order.
+The `vp run` command will run the scoped tasks in dependency order.
 
 Task names without `#` will be resolved in the current package (the package containing the nearest package.json file from the current working directory). For example:
 
-- `vite-plus run build` - runs the build task in the current package
-- `vite-plus run test lint` - Throw `OnlyOneTaskRequest` error
-- `vite-plus run @other/package#build` - runs the build task in @other/package
+- `vp run build` - runs the build task in the current package
+- `vp run test lint` - Throw `OnlyOneTaskRequest` error
+- `vp run @other/package#build` - runs the build task in @other/package
 
 Behaviors when the package root and/or the workspace root is not found:
 
-| package root | workspace root | behaviour                                                                                                                   |
-| ------------ | -------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| found        | not found      | No possible: workspace root always fallbacks to package root.                                                               |
-| not found    | found          | `vite-plus run build` should throw an `CurrentPackageNotFound` error. `vite-plus run @other/package#build` is still allowed |
-| not found    | not found      | Throw an error on any `vite run`. The workspace root must always exist as it's where we store the cache.                    |
+| package root | workspace root | behaviour                                                                                                     |
+| ------------ | -------------- | ------------------------------------------------------------------------------------------------------------- |
+| found        | not found      | No possible: workspace root always fallbacks to package root.                                                 |
+| not found    | found          | `vp run build` should throw an `CurrentPackageNotFound` error. `vp run @other/package#build` is still allowed |
+| not found    | not found      | Throw an error on any `vp run`. The workspace root must always exist as it's where we store the cache.        |
 
 ### `--recursive,-r`
 
-With the `--recursive,-r` flag, the `vite-plus run` command will run the tasks in all monorepo packages.
+With the `--recursive,-r` flag, the `vp run` command will run the tasks in all monorepo packages.
 
 The task name should't contain `#` with the `--recursive,-r` flag. If any task name contains `#`, it would cause an `RecursiveRunWithScope` error.
 
@@ -98,16 +98,16 @@ Examples:
 
 ```bash
 # Recursive build with topological ordering (default)
-vite-plus run build -r
+vp run build -r
 
 # Recursive build WITHOUT topological ordering
-vite-plus run build -r --no-topological
+vp run build -r --no-topological
 
 # Single package with topological ordering enabled
-vite-plus run app#build -t
+vp run app#build -t
 
 # Multiple packages without topological ordering (default)
-vite-plus run app#build web#build
+vp run app#build web#build
 ```
 
 Note: `--topological` and `--no-topological` are mutually exclusive and cannot be used together. See [boolean-flags.md](./boolean-flags.md) for more information about boolean flag patterns.
@@ -172,7 +172,7 @@ Task Dependencies (explicit):
   utils#build  → utils#test
 ```
 
-The execution flow for `vite-plus run build -r --topological`:
+The execution flow for `vp run build -r --topological`:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -342,12 +342,12 @@ The final step creates an execution plan:
 
 Task requests are in form of `task_name` or `pkg#task_name`. They occur in two places:
 
-- one or multiple parameters following after `vite run`.
+- one or multiple parameters following after `vp run`.
 - items in `dependsOn`.
 
 How task requests work:
 
-- `build` in `vite run build` matches task `build` in the current package determined by cwd.
+- `build` in `vp run build` matches task `build` in the current package determined by cwd.
 - `build` in `dependsOn: ["build"]` matches task `build` in the package where the config file is.
 - `app#build` matches task `build` in package `app`.
 - `app#build` raises an error if there are multiple packages named `app`.
@@ -357,4 +357,4 @@ How task requests work:
   - `#build` raises an error if there are multiple nameless packages.
   - `build` does not match task `build` in the nameless package.
 
-While task requests with multiple `#` are invalid, packages with `#` in their names are valid. For example, a package named `pkg#special` can have a task named `build`. It can be referenced by executing `vite run build` under the folder of package `pkg#special`.
+While task requests with multiple `#` are invalid, packages with `#` in their names are valid. For example, a package named `pkg#special` can have a task named `build`. It can be referenced by executing `vp run build` under the folder of package `pkg#special`.

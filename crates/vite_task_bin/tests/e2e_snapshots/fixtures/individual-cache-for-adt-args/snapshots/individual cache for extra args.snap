@@ -1,10 +1,9 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/individual-cache-for-adt-args
 ---
-> vite run say a # cache miss
+> vp run say a # cache miss
 $ print a
 a
 
@@ -22,7 +21,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> vite run say b # cache miss, different args
+> vp run say b # cache miss, different args
 $ print b
 b
 
@@ -40,7 +39,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> vite run say a # cache hit
+> vp run say a # cache hit
 $ print a ✓ cache hit, replaying
 a
 
@@ -58,7 +57,7 @@ Task Details:
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> vite run say b # cache hit
+> vp run say b # cache hit
 $ print b ✓ cache hit, replaying
 b
 

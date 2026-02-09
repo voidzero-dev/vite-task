@@ -54,7 +54,7 @@ fn synthesize_node_modules_bin_task(
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "vite", version)]
+#[command(name = "vp", version)]
 pub enum Args {
     Lint {
         #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -79,10 +79,10 @@ impl vite_task::CommandHandler for CommandHandler {
         command: &mut ScriptCommand,
     ) -> anyhow::Result<HandledCommand> {
         match command.program.as_str() {
-            "vite" => {}
-            // `vpr <args>` is shorthand for `vite run <args>`
+            "vp" => {}
+            // `vpr <args>` is shorthand for `vp run <args>`
             "vpr" => {
-                command.program = Str::from("vite");
+                command.program = Str::from("vp");
                 command.args =
                     iter::once(Str::from("run")).chain(command.args.iter().cloned()).collect();
             }

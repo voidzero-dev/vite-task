@@ -1,10 +1,9 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/replay-logs-chronological-order
 ---
-> vite run build # cache miss
+> vp run build # cache miss
 $ node build.js
 [build.js] --------------------------------
 [build.js] start
@@ -114,7 +113,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> vite run build # cache hit
+> vp run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------
 [build.js] start
@@ -224,7 +223,7 @@ Task Details:
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> vite run build # cache hit
+> vp run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------
 [build.js] start

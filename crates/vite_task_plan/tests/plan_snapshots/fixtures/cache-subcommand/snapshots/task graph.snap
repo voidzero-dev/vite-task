@@ -16,7 +16,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-subcommand
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vite cache clean",
+        "command": "vp cache clean",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

@@ -31,4 +31,4 @@ The two task groups generates 3 tasks:
 
 These are **task names**. They are for displaying and filtering.
 
-The user could execute `vite run build` under the `app` package, or execute `vite run app#build` from anywhere. The parameter `build` and `app#build` after `vite run` are **task requests**. They are used to match against task names to determine what tasks to run.
+The user could execute `vp run build` under the `app` package, or execute `vp run app#build` from anywhere. The parameter `build` and `app#build` after `vp run` are **task requests**. They are used to match against task names to determine what tasks to run.

@@ -1,6 +1,5 @@
 ---
 source: crates/vite_task_plan/tests/plan_snapshots/main.rs
-assertion_line: 139
 expression: "&plan_json"
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-tasks
 ---
@@ -26,7 +25,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-tasks
                   "task_name": "script2",
                   "package_path": "<workspace>/"
                 },
-                "command": "vite run script1",
+                "command": "vp run script1",
                 "and_item_index": null,
                 "cwd": "<workspace>/"
               },

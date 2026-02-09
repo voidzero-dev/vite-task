@@ -148,11 +148,11 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
     // Prepare PATH for e2e tests
     let e2e_env_path = join_paths(
         [
-            // Include vite binary path to PATH so that e2e tests can run "vite ..." commands.
+            // Include vp binary path to PATH so that e2e tests can run "vp ..." commands.
             {
-                let vite_path = AbsolutePath::new(env!("CARGO_BIN_EXE_vite")).unwrap();
-                let vite_dir = vite_path.parent().unwrap();
-                vite_dir.as_path().as_os_str().into()
+                let vp_path = AbsolutePath::new(env!("CARGO_BIN_EXE_vp")).unwrap();
+                let vp_dir = vp_path.parent().unwrap();
+                vp_dir.as_path().as_os_str().into()
             },
             // Include packages/tools to PATH so that e2e tests can run utilities such as replace-file-content.
             test_bin_path,

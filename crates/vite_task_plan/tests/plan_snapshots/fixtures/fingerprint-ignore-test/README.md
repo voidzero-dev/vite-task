@@ -36,20 +36,20 @@ This allows caching package installation tasks where only dependency manifests (
 
 ```bash
 # First run - task executes
-vite run create-files
+vp run create-files
 
 # Second run - cache hit (all files tracked in fingerprint remain the same)
-vite run create-files
+vp run create-files
 
 # Modify node_modules/pkg-a/index.js
 echo 'modified' > node_modules/pkg-a/index.js
 
 # Third run - still cache hit (index.js is ignored)
-vite run create-files
+vp run create-files
 
 # Modify node_modules/pkg-a/package.json
 echo '{"name":"pkg-a","version":"2.0.0"}' > node_modules/pkg-a/package.json
 
 # Fourth run - cache miss (package.json is NOT ignored due to negation pattern)
-vite run create-files
+vp run create-files
 ```

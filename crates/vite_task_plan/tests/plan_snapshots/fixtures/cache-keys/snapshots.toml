@@ -28,7 +28,7 @@ args = ["run", "echo-and-lint", "--fix"]
 [[e2e]]
 name = "direct lint"
 steps = [
-  "vite run lint # cache miss",
+  "vp run lint # cache miss",
   "echo debugger > main.js # add lint error",
-  "vite run lint # cache miss, lint fails",
+  "vp run lint # cache miss, lint fails",
 ]

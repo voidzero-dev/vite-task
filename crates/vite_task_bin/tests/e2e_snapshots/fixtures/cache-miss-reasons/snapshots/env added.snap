@@ -1,10 +1,9 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/cache-miss-reasons
 ---
-> vite run test # cache miss
+> vp run test # cache miss
 $ print-file test.txt
 initial content
 
@@ -22,7 +21,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> cross-env MY_ENV=1 vite run test # cache miss: env added
+> cross-env MY_ENV=1 vp run test # cache miss: env added
 $ print-file test.txt ✗ cache miss: envs changed, executing
 initial content
 

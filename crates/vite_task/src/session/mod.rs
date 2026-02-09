@@ -65,9 +65,9 @@ pub struct SessionCallbacks<'a> {
 /// The result of a [`CommandHandler::handle_command`] call.
 #[derive(Debug)]
 pub enum HandledCommand {
-    /// The command was synthesized into a task (e.g., `vite lint` → `oxlint`).
+    /// The command was synthesized into a task (e.g., `vp lint` → `oxlint`).
     Synthesized(SyntheticPlanRequest),
-    /// The command is a vite-task CLI command (e.g., `vite run build`).
+    /// The command is a vite task CLI command (e.g., `vp run build`).
     ViteTaskCommand(Command),
     /// The command should be executed verbatim as an external process.
     Verbatim,
@@ -77,7 +77,7 @@ pub enum HandledCommand {
 ///
 /// The implementation should return:
 /// - [`HandledCommand::Synthesized`] to replace the command with a synthetic task.
-/// - [`HandledCommand::ViteTaskCommand`] when the command is a vite-task CLI invocation.
+/// - [`HandledCommand::ViteTaskCommand`] when the command is a vite task CLI invocation.
 /// - [`HandledCommand::Verbatim`] to execute the command as-is as an external process.
 #[async_trait::async_trait(?Send)]
 pub trait CommandHandler: Debug {
@@ -133,7 +133,7 @@ pub struct Session<'a> {
     plan_request_parser: PlanRequestParser<'a>,
 
     /// Cache is lazily initialized to avoid SQLite race conditions when multiple
-    /// processes (e.g., parallel `vite lib` commands) start simultaneously.
+    /// processes (e.g., parallel `vp lib` commands) start simultaneously.
     cache: OnceCell<ExecutionCache>,
     cache_path: AbsolutePathBuf,
 }
@@ -273,7 +273,7 @@ impl<'a> Session<'a> {
         let plan_request = command.into_plan_request(&cwd).map_err(|error| {
             TaskPlanErrorKind::ParsePlanRequestError {
                 error: error.into(),
-                program: Str::from("vite"),
+                program: Str::from("vp"),
                 args: Default::default(),
                 cwd: Arc::clone(&cwd),
             }

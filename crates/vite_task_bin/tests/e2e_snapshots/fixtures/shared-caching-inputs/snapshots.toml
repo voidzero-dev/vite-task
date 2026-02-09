@@ -3,9 +3,9 @@
 [[e2e]]
 name = "shared caching inputs"
 steps = [
-  "vite run script1 # cache miss",
-  "vite run script2 # cache hit, same command as script1",
+  "vp run script1 # cache miss",
+  "vp run script2 # cache hit, same command as script1",
   "replace-file-content foo.txt initial modified # modify shared input",
-  "vite run script2 # cache miss, input changed",
-  "vite run script1 # cache hit, script2 already warmed cache",
+  "vp run script2 # cache miss, input changed",
+  "vp run script1 # cache hit, script2 already warmed cache",
 ]

@@ -1,6 +1,6 @@
 [[e2e]]
 name = "builtin command with non-zero exit does not show cache not updated"
 steps = [
-  "vite run lint -- -D no-debugger",
-  "vite run lint -- -D no-debugger",
+  "vp run lint -- -D no-debugger",
+  "vp run lint -- -D no-debugger",
 ]

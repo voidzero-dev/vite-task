@@ -25,7 +25,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-envs
                   "task_name": "env-test",
                   "package_path": "<workspace>/"
                 },
-                "command": "vite env-test TEST_VAR hello_world",
+                "command": "vp env-test TEST_VAR hello_world",
                 "and_item_index": null,
                 "cwd": "<workspace>/"
               },

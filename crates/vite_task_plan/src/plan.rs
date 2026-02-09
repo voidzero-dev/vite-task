@@ -176,7 +176,7 @@ async fn plan_task_as_execution_node(
                 .with_plan_context(&context)?;
 
             let execution_item_kind: ExecutionItemKind = match plan_request {
-                // Expand task query like `vite run -r build`
+                // Expand task query like `vp run -r build`
                 Some(PlanRequest::Query(query_plan_request)) => {
                     // Add prefix envs to the context
                     context.add_envs(and_item.envs.iter());
@@ -401,7 +401,7 @@ fn plan_spawn_execution(
     })
 }
 
-/// Expand the parsed task request (like `run -r build`/`exec tsc`/`lint`) into an execution graph.
+/// Expand the parsed task request (like `run -r build`/`lint`) into an execution graph.
 pub async fn plan_query_request(
     query_plan_request: QueryPlanRequest,
     mut context: PlanContext<'_>,

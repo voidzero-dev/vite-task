@@ -1,10 +1,9 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/cache-miss-reasons
 ---
-> vite run test # cache miss
+> vp run test # cache miss
 $ print-file test.txt
 initial content
 
@@ -24,7 +23,7 @@ Task Details:
 
 > replace-file-content test.txt initial modified # modify input
 
-> vite run test # cache miss: input changed
+> vp run test # cache miss: input changed
 $ print-file test.txt ✗ cache miss: content of input 'test.txt' changed, executing
 modified content
 

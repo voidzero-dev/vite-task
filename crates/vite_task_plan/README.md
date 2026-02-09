@@ -27,11 +27,11 @@ plan.root_node() // Root execution node
 
 There are two types of execution requests:
 
-1. **Query Request** - Execute tasks from the task graph (e.g., `vite run -r build`)
+1. **Query Request** - Execute tasks from the task graph (e.g., `vp run -r build`)
    - Queries the task graph based on task patterns
    - Builds execution graph with dependency ordering
 
-2. **Synthetic Request** - Execute on-the-fly tasks not in the graph (e.g., `vite lint` in a task script)
+2. **Synthetic Request** - Execute on-the-fly tasks not in the graph (e.g., `vp lint` in a task script)
    - Generated dynamically by the TaskSynthesizer
    - Used for synthesized commands within task scripts
 
@@ -48,8 +48,8 @@ Each task's command is parsed and split into execution items:
   - No process spawn overhead
 
 - **Expanded Execution** - Nested execution graph
-  - Commands like `vite run ...` expand into sub-graphs
-  - Enables composition of vite commands
+  - Commands like `vp run ...` expand into sub-graphs
+  - Enables composition of vp commands
 
 ### Command Parsing
 
@@ -60,7 +60,7 @@ Commands are intelligently parsed:
 "tsc --noEmit"
 
 # Multiple commands -> Multiple execution items
-"tsc --noEmit && vite run test && echo Done"
+"tsc --noEmit && vp run test && echo Done"
 #     ↓              ↓                ↓
 # SpawnExecution  Expanded      InProcess
 ```

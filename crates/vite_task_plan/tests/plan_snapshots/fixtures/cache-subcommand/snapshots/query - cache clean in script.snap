@@ -25,7 +25,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-subcommand
                   "task_name": "clean-cache",
                   "package_path": "<workspace>/"
                 },
-                "command": "vite cache clean",
+                "command": "vp cache clean",
                 "and_item_index": null,
                 "cwd": "<workspace>/"
               },
@@ -34,7 +34,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-subcommand
                   "Spawn": {
                     "cache_metadata": null,
                     "spawn_command": {
-                      "program_path": "<workspace>/node_modules/.bin/vite",
+                      "program_path": "<workspace>/node_modules/.bin/vp",
                       "args": [
                         "cache",
                         "clean"

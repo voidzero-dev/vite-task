@@ -30,7 +30,7 @@ pub enum TaskQueryKind {
     Recursive { task_names: HashSet<Str> },
 }
 
-/// Represents a valid query for a task and its dependencies, usually issued from a CLI command `vite run ...`.
+/// Represents a valid query for a task and its dependencies, usually issued from a CLI command `vp run ...`.
 /// A query represented by this struct is always valid, but still may result in no tasks found.
 #[derive(Debug)]
 pub struct TaskQuery {
@@ -94,7 +94,7 @@ impl IndexedTaskGraph {
                             execution_graph.add_node(starting_task);
                         }
                         // Task not found, but package located, and the query requests topological deps
-                        // This happens when running `vite run --transitive taskName` in a package without `taskName`, but its dependencies have it.
+                        // This happens when running `vp run --transitive taskName` in a package without `taskName`, but its dependencies have it.
                         Err(err @ SpecifierLookupError::TaskNameNotFound { package_index, .. })
                             if include_topological_deps =>
                         {

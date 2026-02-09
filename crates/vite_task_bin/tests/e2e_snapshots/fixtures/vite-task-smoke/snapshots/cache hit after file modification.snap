@@ -1,10 +1,9 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 203
 expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/vite-task-smoke
 ---
-> vite run test-task # cache miss
+> vp run test-task # cache miss
 $ echo hello ⊘ cache disabled: built-in command
 hello
 
@@ -30,7 +29,7 @@ Task Details:
 
 > replace-file-content main.js foo bar # modify input file
 
-> vite run test-task # cache miss, main.js changed
+> vp run test-task # cache miss, main.js changed
 $ echo hello ⊘ cache disabled: built-in command
 hello
 
