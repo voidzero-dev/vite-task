@@ -13,6 +13,6 @@ pub use vite_task_graph::{
     },
     loader,
 };
-/// Re-exports useful for CommandHandler implementations.
+/// Re-exports useful for `CommandHandler` implementations.
 pub use vite_task_plan::get_path_env;
 pub use vite_task_plan::{plan_request, plan_request::ScriptCommand};

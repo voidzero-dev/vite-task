@@ -44,15 +44,15 @@ pub enum CacheStatus {
     Hit { replayed_duration: Duration },
 }
 
-/// Convert ExitStatus to an i32 exit code.
-/// On Unix, if terminated by signal, returns 128 + signal_number.
+/// Convert `ExitStatus` to an i32 exit code.
+/// On Unix, if terminated by signal, returns 128 + `signal_number`.
 pub fn exit_status_to_code(status: &ExitStatus) -> i32 {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
         status.code().unwrap_or_else(|| {
             // Process was terminated by signal, use Unix convention: 128 + signal
-            status.signal().map(|sig| 128 + sig).unwrap_or(1)
+            status.signal().map_or(1, |sig| 128 + sig)
         })
     }
     #[cfg(not(unix))]
@@ -66,11 +66,11 @@ pub fn exit_status_to_code(status: &ExitStatus) -> i32 {
 pub struct ExecutionId(u32);
 
 impl ExecutionId {
-    pub(crate) fn zero() -> Self {
+    pub(crate) const fn zero() -> Self {
         Self(0)
     }
 
-    pub(crate) fn next(&self) -> Self {
+    pub(crate) const fn next(&self) -> Self {
         Self(self.0.checked_add(1).expect("ExecutionId overflow"))
     }
 }

@@ -24,7 +24,7 @@ impl InProcessExecution {
         match &self.kind {
             InProcessExecutionKind::Echo { strings, trailing_newline } => {
                 let mut stdout = Vec::new();
-                for s in strings.iter() {
+                for s in strings {
                     stdout.extend_from_slice(s.as_bytes());
                     stdout.push(b' ');
                 }
@@ -71,9 +71,7 @@ impl InProcessExecution {
                     true
                 };
                 strings.extend(args.map(|s| s.as_ref().into()));
-                Some(InProcessExecution {
-                    kind: InProcessExecutionKind::Echo { strings, trailing_newline },
-                })
+                Some(Self { kind: InProcessExecutionKind::Echo { strings, trailing_newline } })
             }
             _ => None,
         }

@@ -11,7 +11,7 @@ use serde::Serialize;
 /// and serializes losslessly to utf8 for outputting debug json
 
 #[derive(Encode, Decode)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct MaybeString(Vec<u8>);
 
 impl From<Vec<u8>> for MaybeString {

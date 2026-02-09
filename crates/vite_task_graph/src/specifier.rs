@@ -16,21 +16,19 @@ pub struct TaskSpecifier {
 impl Display for TaskSpecifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(package_name) = &self.package_name {
-            write!(f, "{}#", package_name)?
+            write!(f, "{package_name}#")?;
         }
         write!(f, "{}", self.task_name)
     }
 }
 
 impl TaskSpecifier {
+    #[must_use]
     pub fn parse_raw(raw_specifier: &str) -> Self {
         if let Some((package_name, task_name)) = raw_specifier.rsplit_once('#') {
-            TaskSpecifier {
-                package_name: Some(Str::from(package_name)),
-                task_name: Str::from(task_name),
-            }
+            Self { package_name: Some(Str::from(package_name)), task_name: Str::from(task_name) }
         } else {
-            TaskSpecifier { package_name: None, task_name: Str::from(raw_specifier) }
+            Self { package_name: None, task_name: Str::from(raw_specifier) }
         }
     }
 }
@@ -39,6 +37,6 @@ impl FromStr for TaskSpecifier {
     type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(TaskSpecifier::parse_raw(s))
+        Ok(Self::parse_raw(s))
     }
 }

@@ -57,15 +57,15 @@ enum Step {
 impl Step {
     fn cmd(&self) -> &str {
         match self {
-            Step::Simple(s) => s.as_str(),
-            Step::WithStdin { cmd, .. } => cmd.as_str(),
+            Self::Simple(s) => s.as_str(),
+            Self::WithStdin { cmd, .. } => cmd.as_str(),
         }
     }
 
     fn stdin(&self) -> Option<&str> {
         match self {
-            Step::Simple(_) => None,
-            Step::WithStdin { stdin, .. } => Some(stdin.as_str()),
+            Self::Simple(_) => None,
+            Self::WithStdin { stdin, .. } => Some(stdin.as_str()),
         }
     }
 }
@@ -94,17 +94,17 @@ fn run_case(
     filter: Option<&str>,
 ) {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
-    if fixture_name.starts_with(".") {
+    if fixture_name.starts_with('.') {
         return; // skip hidden files like .DS_Store
     }
 
     // Skip if filter doesn't match
-    if let Some(f) = filter {
-        if !fixture_name.contains(f) {
-            return;
-        }
+    if let Some(f) = filter
+        && !fixture_name.contains(f)
+    {
+        return;
     }
-    println!("{}", fixture_name);
+    println!("{fixture_name}");
     // Configure insta to write snapshots to fixture directory
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_path(fixture_path.join("snapshots"));
@@ -124,15 +124,14 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
 
     assert_eq!(
         &stage_path, &*workspace_root.path,
-        "folder '{}' should be a workspace root",
-        fixture_name
+        "folder '{fixture_name}' should be a workspace root"
     );
 
     let cases_toml_path = fixture_path.join("snapshots.toml");
     let cases_file: SnapshotsFile = match std::fs::read(&cases_toml_path) {
         Ok(content) => toml::from_slice(&content).unwrap(),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Default::default(),
-        Err(err) => panic!("Failed to read cases.toml for fixture {}: {}", fixture_name, err),
+        Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
     // Navigate from CARGO_MANIFEST_DIR to packages/tools at the repo root
@@ -180,7 +179,7 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
             }
         }
 
-        let e2e_stage_path = tmpdir.join(format!("{}_e2e_stage_{}", fixture_name, e2e_count));
+        let e2e_stage_path = tmpdir.join(format!("{fixture_name}_e2e_stage_{e2e_count}"));
         e2e_count += 1;
         assert!(copy_dir(fixture_path, &e2e_stage_path).unwrap().is_empty());
 
@@ -197,10 +196,10 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
                 .current_dir(e2e_stage_path.join(&e2e.cwd));
 
             // On Windows, inherit PATHEXT for executable lookup
-            if cfg!(windows) {
-                if let Ok(pathext) = std::env::var("PATHEXT") {
-                    cmd.env("PATHEXT", pathext);
-                }
+            if cfg!(windows)
+                && let Ok(pathext) = std::env::var("PATHEXT")
+            {
+                cmd.env("PATHEXT", pathext);
             }
 
             // Spawn the child process
@@ -261,7 +260,7 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
                     result = child.wait(), if termination_state.is_none() => {
                         termination_state = Some(TerminationState::Exited(result.unwrap()));
                     }
-                    _ = &mut timeout, if termination_state.is_none() => {
+                    () = &mut timeout, if termination_state.is_none() => {
                         // Timeout - kill the process
                         let _ = child.kill().await;
                         termination_state = Some(TerminationState::TimedOut);
@@ -287,7 +286,7 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
                 TerminationState::Exited(status) => {
                     let exit_code = status.code().unwrap_or(-1);
                     if exit_code != 0 {
-                        e2e_outputs.push_str(format!("[{}]", exit_code).as_str());
+                        e2e_outputs.push_str(format!("[{exit_code}]").as_str());
                     }
                 }
             }
@@ -323,6 +322,6 @@ fn main() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     insta::glob!(tests_dir, "e2e_snapshots/fixtures/*", |case_path| {
-        run_case(&runtime, &tmp_dir_path, case_path, filter.as_deref())
+        run_case(&runtime, &tmp_dir_path, case_path, filter.as_deref());
     });
 }

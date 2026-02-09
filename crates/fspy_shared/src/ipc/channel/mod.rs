@@ -26,7 +26,7 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
 
-    #[allow(unused_mut)]
+    #[expect(unused_mut)]
     let mut conf = ShmemConf::new().size(capacity);
     // On Windows, allow opening raw shared memory (without backing file) for DLL injection scenarios
     #[cfg(target_os = "windows")]
@@ -54,7 +54,7 @@ impl ChannelConf {
         let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
         lock_file.try_lock_shared()?;
 
-        #[allow(unused_mut)]
+        #[expect(unused_mut)]
         let mut conf = ShmemConf::new().size(self.shm_size).os_id(&self.shm_id);
         // On Windows, allow opening raw shared memory (without backing file) for DLL injection scenarios
         #[cfg(target_os = "windows")]
@@ -103,10 +103,10 @@ pub struct Receiver {
     shm: Shmem,
 }
 
-/// Safety: Receiver doesn't read or write `shm`. It only pass it to ReceiverLockGuard under the lock.
+/// Safety: Receiver doesn't read or write `shm`. It only pass it to `ReceiverLockGuard` under the lock.
 unsafe impl Send for Receiver {}
 
-/// Safety: Receiver doesn't read or write `shm`. It only pass it to ReceiverLockGuard under the lock.
+/// Safety: Receiver doesn't read or write `shm`. It only pass it to `ReceiverLockGuard` under the lock.
 unsafe impl Sync for Receiver {}
 
 impl Drop for Receiver {
@@ -125,7 +125,7 @@ impl Receiver {
 
     /// Lock the shared memory for unique read access.
     /// Blocks until all the senders have dropped (or processes owning them have all exited) so the shared memory can be safely read.
-    /// During the lifetime of returned `ReceiverReadGuard`, no new senders can be created (ChannelConf::sender would fail).
+    /// During the lifetime of returned `ReceiverReadGuard`, no new senders can be created (`ChannelConf::sender` would fail).
     pub fn lock(&self) -> io::Result<ReceiverLockGuard<'_>> {
         self.lock_file.lock()?;
         let reader = ShmReader::new(unsafe { self.shm.as_slice() });
@@ -138,7 +138,7 @@ pub struct ReceiverLockGuard<'a> {
     lock_file: &'a File,
 }
 
-impl<'a> Drop for ReceiverLockGuard<'a> {
+impl Drop for ReceiverLockGuard<'_> {
     fn drop(&mut self) {
         if let Err(err) = self.lock_file.unlock() {
             debug!("Failed to unlock IPC lock file: {}", err);

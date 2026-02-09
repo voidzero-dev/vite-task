@@ -102,7 +102,7 @@ impl ExecutionCache {
                 }
                 6 => break, // current version
                 6.. => {
-                    return Err(anyhow::anyhow!("Unrecognized database version: {}", user_version));
+                    return Err(anyhow::anyhow!("Unrecognized database version: {user_version}"));
                 }
             }
         }

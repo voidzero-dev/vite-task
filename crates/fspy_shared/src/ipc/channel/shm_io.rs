@@ -68,7 +68,7 @@ fn assert_alignment(ptr: *const u8) {
     assert_eq!((ptr as usize + size_of::<usize>()) % align_of::<i32>(), 0);
 }
 
-fn roundup_to_align_frame_header(mut size: usize) -> usize {
+const fn roundup_to_align_frame_header(mut size: usize) -> usize {
     // round up new_end so that the next frame header is aligned
     const FRAME_HEADER_ALIGN: usize = align_of::<AtomicI32>();
     if !size.is_multiple_of(FRAME_HEADER_ALIGN) {
@@ -139,17 +139,17 @@ impl<M: AsRawSlice> ShmWriter<M> {
     }
 
     #[cfg(test)]
-    fn set_fail_on_claim(&mut self, fail_on_claim: bool) {
+    const fn set_fail_on_claim(&mut self, fail_on_claim: bool) {
         self.fail_on_claim = fail_on_claim;
     }
 
     /// Claim a frame of size `frame_size`.
     ///
     /// Returns `None` if there is no sufficient remaining space (or simulated crash in tests)
-    /// frame_size must be non-zero because frame header being 0 would be ambiguous.
+    /// `frame_size` must be non-zero because frame header being 0 would be ambiguous.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Option<FrameMut<'_>> {
         let shm_slice: *mut [u8] = self.mem.as_raw_slice();
-        let shm_ptr = shm_slice as *mut u8;
+        let shm_ptr = shm_slice.cast::<u8>();
         let shm_len = self.mem.as_raw_slice().len();
 
         let frame_size = frame_size.get();
@@ -257,7 +257,7 @@ impl<M: AsRef<[u8]>> ShmReader<M> {
     /// The content of `mem` should be created by `ShmWriter`.
     /// Failing to do so may result in panics (mostly out-of-bounds), but won't trigger undefined behavior.
     ///
-    /// The ShmReader must be created after all writing to the shared memory is done and visible to the calling thread.
+    /// The `ShmReader` must be created after all writing to the shared memory is done and visible to the calling thread.
     /// This is guaranteed by `M: AsRef<[u8]>`, which means the memory region is immutable during the lifetime of `ShmReader`,
     /// so no need to mark `ShmReader::new` as unsafe, but care must be taken to create a safe `M` from the shared memory.
     pub fn new(mem: M) -> Self {
@@ -339,7 +339,7 @@ mod tests {
         mem: Arc<Vec<usize>>,
         /// The actual requested byte length.
         ///
-        /// over-allocation might happen to ensure alignment of `usize`, so mem.len() might be inaccurate.
+        /// over-allocation might happen to ensure alignment of `usize`, so `mem.len()` might be inaccurate.
         len: usize,
     }
     unsafe impl Send for MockedShm {}

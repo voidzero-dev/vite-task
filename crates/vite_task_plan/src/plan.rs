@@ -303,7 +303,7 @@ pub fn plan_synthetic_request(
             cwd_relative_to_package: None,
             depends_on: None,
         },
-        &cwd,
+        cwd,
     );
 
     plan_spawn_execution(
@@ -321,7 +321,7 @@ fn strip_prefix_for_cache(
     path: &Arc<AbsolutePath>,
     workspace_path: &Arc<AbsolutePath>,
 ) -> Result<RelativePathBuf, PathFingerprintErrorKind> {
-    match path.strip_prefix(&*workspace_path) {
+    match path.strip_prefix(workspace_path) {
         Ok(Some(rel_path)) => Ok(rel_path),
         Ok(None) => Err(PathFingerprintErrorKind::PathOutsideWorkspace {
             path: Arc::clone(path),
@@ -392,7 +392,7 @@ fn plan_spawn_execution(
         };
         if let Some(execution_cache_key) = execution_cache_key {
             resolved_cache_metadata =
-                Some(CacheMetadata { execution_cache_key, spawn_fingerprint });
+                Some(CacheMetadata { spawn_fingerprint, execution_cache_key });
         }
     }
 

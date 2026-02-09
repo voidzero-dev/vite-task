@@ -98,6 +98,7 @@ impl ResolvedTaskConfig {
     /// The `cache_scripts` parameter determines whether caching is enabled for the script.
     /// When `true`, caching is enabled with default settings.
     /// When `false`, caching is disabled.
+    #[must_use]
     pub fn resolve_package_json_script(
         package_dir: &Arc<AbsolutePath>,
         package_json_script: &str,

@@ -29,9 +29,9 @@ impl Display for WhichError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Failed to find executable {:?} under cwd {:?} with ", self.program, self.cwd)?;
         if let Some(path_env) = &self.path_env {
-            write!(f, "PATH: {:?}", path_env)?
+            write!(f, "PATH: {path_env:?}")?;
         } else {
-            write!(f, "No PATH")?
+            write!(f, "No PATH")?;
         }
         Ok(())
     }
@@ -58,9 +58,9 @@ pub enum PathType {
 impl Display for PathType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PathType::Cwd => write!(f, "current working directory"),
-            PathType::Program => write!(f, "program path"),
-            PathType::PackagePath => write!(f, "package path"),
+            Self::Cwd => write!(f, "current working directory"),
+            Self::Program => write!(f, "program path"),
+            Self::PackagePath => write!(f, "package path"),
         }
     }
 }
@@ -137,19 +137,20 @@ impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Failed to plan execution")?;
         if !self.task_call_stack.is_empty() {
-            write!(f, ", task call stack: {}", self.task_call_stack)?
+            write!(f, ", task call stack: {}", self.task_call_stack)?;
         }
         Ok(())
     }
 }
 
 impl TaskPlanErrorKind {
+    #[must_use]
     pub fn with_empty_call_stack(self) -> Error {
         Error { task_call_stack: TaskCallStackDisplay::default(), kind: self }
     }
 }
 
-pub(crate) trait TaskPlanErrorKindResultExt {
+pub trait TaskPlanErrorKindResultExt {
     type Ok;
     /// Attach the current task call stack from the planning context to the error.
     fn with_plan_context(self, context: &PlanContext<'_>) -> Result<Self::Ok, Error>;

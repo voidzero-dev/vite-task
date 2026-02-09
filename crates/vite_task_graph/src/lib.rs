@@ -44,11 +44,13 @@ pub struct TaskDependencyType(TaskDependencyTypeInner);
 // It hides `TaskDependencyTypeInner` and only expose `is_explicit`/`is_topological`
 // to avoid incorrectly matching only Explicit variant to check if it's explicit.
 impl TaskDependencyType {
-    pub fn is_explicit(self) -> bool {
+    #[must_use]
+    pub const fn is_explicit(self) -> bool {
         matches!(self.0, TaskDependencyTypeInner::Explicit | TaskDependencyTypeInner::Both)
     }
 
-    pub fn is_topological(self) -> bool {
+    #[must_use]
+    pub const fn is_topological(self) -> bool {
         matches!(self.0, TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both)
     }
 }
@@ -167,7 +169,7 @@ unsafe impl IndexType for TaskIx {
 pub type TaskNodeIndex = NodeIndex<TaskIx>;
 pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 
-/// Full task graph of a workspace, with necessary HashMaps for quick task lookup
+/// Full task graph of a workspace, with necessary `HashMaps` for quick task lookup
 ///
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
 /// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
@@ -176,7 +178,7 @@ pub struct IndexedTaskGraph {
     task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
 
     /// Preserve the package graph for two purposes:
-    /// - `self.task_graph` refers packages via PackageNodeIndex. To display package names and paths, we need to lookup them in package_graph.
+    /// - `self.task_graph` refers packages via `PackageNodeIndex`. To display package names and paths, we need to lookup them in `package_graph`.
     /// - To find nearest topological tasks when the starting package itself doesn't contain the task with the given name.
     indexed_package_graph: IndexedPackageGraph,
 
@@ -450,13 +452,11 @@ impl IndexedTaskGraph {
             let Some(package_indices) =
                 self.indexed_package_graph.get_package_indices_by_name(&package_name)
             else {
-                return Err(SpecifierLookupError::PackageNameNotFound {
-                    package_name: package_name.into(),
-                });
+                return Err(SpecifierLookupError::PackageNameNotFound { package_name });
             };
             if package_indices.len() > 1 {
                 return Err(SpecifierLookupError::AmbiguousPackageName {
-                    package_name: package_name.into(),
+                    package_name,
                     package_paths: package_indices
                         .iter()
                         .map(|package_index| {
@@ -467,7 +467,7 @@ impl IndexedTaskGraph {
                         })
                         .collect(),
                 });
-            };
+            }
             *package_indices.first()
         } else {
             // No '#', so the specifier only contains task name, look up in the origin path package
@@ -483,25 +483,29 @@ impl IndexedTaskGraph {
                     .package_json
                     .name
                     .clone(),
-                task_name: task_id_to_lookup.task_name.clone(),
+                task_name: task_id_to_lookup.task_name,
                 package_index,
             });
         };
         Ok(*node_index)
     }
 
-    pub fn task_graph(&self) -> &TaskGraph {
+    #[must_use]
+    pub const fn task_graph(&self) -> &TaskGraph {
         &self.task_graph
     }
 
+    #[must_use]
     pub fn get_package_name(&self, package_index: PackageNodeIndex) -> &str {
         self.indexed_package_graph.package_graph()[package_index].package_json.name.as_str()
     }
 
+    #[must_use]
     pub fn get_package_path(&self, package_index: PackageNodeIndex) -> &Arc<AbsolutePath> {
         &self.indexed_package_graph.package_graph()[package_index].absolute_path
     }
 
+    #[must_use]
     pub fn get_package_path_for_task(&self, task_index: TaskNodeIndex) -> &Arc<AbsolutePath> {
         &self.task_graph[task_index].task_display.package_path
     }

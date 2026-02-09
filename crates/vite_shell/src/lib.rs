@@ -92,6 +92,7 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
     Some((TaskParsedCommand { envs, program: unquote(program).into(), args }, range))
 }
 
+#[must_use]
 pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<usize>)>> {
     let mut parser = Parser::new(
         cmd.as_bytes(),
@@ -128,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_parse_single_command() {
-        let source = r#"A=B hello world"#;
+        let source = r"A=B hello world";
         let list = try_parse_as_and_list(source).unwrap();
         assert_eq!(list.len(), 1);
         let (cmd, range) = &list[0];

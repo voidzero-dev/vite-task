@@ -8,14 +8,14 @@ macro_rules! intercept {
             const _: $fn_sig = $crate::libc::$name;
 
             #[used]
-            #[allow(dead_code)]
+            #[expect(dead_code)]
             #[unsafe(link_section = "__DATA,__interpose")]
             static mut _INTERPOSE_ENTRY: $crate::macros::InterposeEntry =
                 $crate::macros::InterposeEntry { _new: $name as _, _old: $crate::libc::$name as _ };
         };
 
         mod $name {
-            #[allow(unused)]
+            #[expect(unused)]
             use super::*;
             pub fn original() -> $fn_sig {
                 $crate::libc::$name

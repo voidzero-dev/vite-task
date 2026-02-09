@@ -145,7 +145,7 @@ impl SpyImpl {
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })
-            .map(|f| io::Result::Ok(f??)) // flatten JoinError and io::Result
+            .map(|f| f?) // flatten JoinError and io::Result
             .boxed(),
         })
     }

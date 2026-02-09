@@ -129,7 +129,7 @@ impl<S: AsRef<OsStr>> From<S> for Box<NativeStr> {
 }
 
 impl NativeStr {
-    pub fn clone_in<'new_alloc, A>(&self, alloc: &'new_alloc A) -> &'new_alloc NativeStr
+    pub fn clone_in<'new_alloc, A>(&self, alloc: &'new_alloc A) -> &'new_alloc Self
     where
         &'new_alloc A: Allocator,
     {
@@ -137,7 +137,7 @@ impl NativeStr {
         let mut data = Vec::<u8, _>::with_capacity_in(self.data.len(), alloc);
         data.extend_from_slice(&self.data);
         let data = data.leak::<'new_alloc>();
-        NativeStr::wrap_ref(data)
+        Self::wrap_ref(data)
     }
 
     pub fn strip_path_prefix<P: AsRef<Path>, R, F: FnOnce(Result<&Path, StripPrefixError>) -> R>(
@@ -152,7 +152,7 @@ impl NativeStr {
         /// \??\ is used in Nt* calls.
         /// The resulting path is not necessarily valid or points to the same location,
         /// but it's good enough for sanitizing paths in `NativeStr::strip_path_prefix`.
-        fn strip_windows_path_prefix(p: &OsStr) -> &OsStr {
+        const fn strip_windows_path_prefix(p: &OsStr) -> &OsStr {
             #[cfg(windows)]
             {
                 use os_str_bytes::OsStrBytesExt as _;

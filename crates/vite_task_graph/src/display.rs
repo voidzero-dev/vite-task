@@ -29,6 +29,7 @@ impl Display for TaskDisplay {
 
 impl IndexedTaskGraph {
     /// Get human-readable display for a task node.
+    #[must_use]
     pub fn display_task(&self, task_index: TaskNodeIndex) -> TaskDisplay {
         self.task_graph()[task_index].task_display.clone()
     }

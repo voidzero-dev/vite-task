@@ -26,7 +26,7 @@ use super::{
 use crate::{Session, session::execute::spawn::SpawnTrackResult};
 
 /// Internal error type used to abort execution when errors occur.
-/// This error is swallowed in Session::execute and never exposed externally.
+/// This error is swallowed in `Session::execute` and never exposed externally.
 #[derive(Debug)]
 struct ExecutionAborted;
 
@@ -95,7 +95,7 @@ impl ExecutionContext<'_> {
                 let ordered_executions =
                     node_indices.into_iter().map(|id| graph.remove_node(id).unwrap());
                 for task_execution in ordered_executions {
-                    for item in task_execution.items.iter() {
+                    for item in &task_execution.items {
                         match &item.kind {
                             ExecutionItemKind::Leaf(leaf_kind) => {
                                 self.execute_leaf(Some(&item.execution_item_display), leaf_kind)
@@ -183,7 +183,7 @@ impl ExecutionContext<'_> {
         //    We need to know the status before emitting Start event so users
         //    see cache status immediately when execution begins
         let (cache_status, cached_value) = if let Some(cache_metadata) = cache_metadata {
-            match self.cache.try_hit(cache_metadata, &*self.cache_base_path).await {
+            match self.cache.try_hit(cache_metadata, self.cache_base_path).await {
                 Ok(Ok(cached)) => (
                     // Cache hit - we can replay the cached outputs
                     CacheStatus::Hit { replayed_duration: cached.duration },
@@ -248,16 +248,13 @@ impl ExecutionContext<'_> {
 
         // 4. Execute spawn (cache miss or disabled)
         //    Track file system access if caching is enabled (for future cache updates)
-        let mut track_result_with_cache_metadata = if let Some(cache_metadata) = cache_metadata {
-            Some((SpawnTrackResult::default(), cache_metadata))
-        } else {
-            None
-        };
+        let mut track_result_with_cache_metadata =
+            cache_metadata.map(|cache_metadata| (SpawnTrackResult::default(), cache_metadata));
 
         // Execute command with tracking, emitting output events in real-time
         let result = match spawn_with_tracking(
             &spawn_execution.spawn_command,
-            &*self.cache_base_path,
+            self.cache_base_path,
             |kind, content| {
                 self.event_handler.handle_event(ExecutionEvent {
                     execution_id,
@@ -292,11 +289,13 @@ impl ExecutionContext<'_> {
         {
             if result.exit_status.success() {
                 // Execution succeeded, attempt cache update
-                let fingerprint_ignores =
-                    cache_metadata.spawn_fingerprint.fingerprint_ignores().map(|v| v.as_slice());
+                let fingerprint_ignores = cache_metadata
+                    .spawn_fingerprint
+                    .fingerprint_ignores()
+                    .map(std::vec::Vec::as_slice);
                 match PostRunFingerprint::create(
                     &track_result.path_reads,
-                    &*self.cache_base_path,
+                    self.cache_base_path,
                     fingerprint_ignores,
                 ) {
                     Ok(post_run_fingerprint) => {
@@ -348,12 +347,12 @@ impl ExecutionContext<'_> {
     }
 }
 
-impl<'a> Session<'a> {
+impl Session<'_> {
     /// Execute an execution plan, reporting events to the provided reporter.
     ///
     /// Returns Err(ExitStatus) to suggest the caller to abort and exit the process with the given exit status.
     ///
-    /// The return type isn't just ExitStatus because we want to distinguish between normal successful execution,
+    /// The return type isn't just `ExitStatus` because we want to distinguish between normal successful execution,
     /// and execution that failed and needs to exit with a specific code which can be zero.
     pub(crate) async fn execute(
         &self,

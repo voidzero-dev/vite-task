@@ -46,7 +46,7 @@ fn synthesize_node_modules_bin_task(
     cwd: &Arc<AbsolutePath>,
 ) -> anyhow::Result<SyntheticPlanRequest> {
     Ok(SyntheticPlanRequest {
-        program: find_executable(get_path_env(envs), &*cwd, executable_name)?,
+        program: find_executable(get_path_env(envs), cwd, executable_name)?,
         args: args.into(),
         cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
             envs: None,
@@ -109,7 +109,7 @@ impl vite_task::CommandHandler for CommandHandler {
                 );
 
                 Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
-                    program: find_executable(get_path_env(&envs), &*command.cwd, "print-env")?,
+                    program: find_executable(get_path_env(&envs), &command.cwd, "print-env")?,
                     args: [name.clone()].into(),
                     cache_config: UserCacheConfig::with_config({
                         EnabledCacheConfig { envs: None, pass_through_envs: Some(vec![name]) }

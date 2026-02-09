@@ -44,12 +44,12 @@ impl Client {
                 // this can happen if the process is started after the root target process has exited.
                 // By that time the channel would have been closed in the receiver side.
                 // In this case we just leave a message and skip sending any path accesses.
-                eprintln!("fspy: failed to create ipc sender: {}", err);
+                eprintln!("fspy: failed to create ipc sender: {err}");
                 None
             }
         };
 
-        Self { ipc_sender, encoded_payload }
+        Self { encoded_payload, ipc_sender }
     }
 
     fn send(&self, path_access: PathAccess<'_>) -> anyhow::Result<()> {

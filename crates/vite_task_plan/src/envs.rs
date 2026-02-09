@@ -45,7 +45,7 @@ impl EnvFingerprints {
     /// Resolves from all available envs and env config.
     ///
     /// Before the call, `all_envs` is expected to contain all available envs.
-    /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + pass_through).
+    /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + `pass_through`).
     pub fn resolve(
         all_envs: &mut HashMap<Arc<OsStr>, Arc<OsStr>>,
         env_config: &EnvConfig,
@@ -150,7 +150,7 @@ fn resolve_envs_with_patterns<'a>(
             };
 
             if patterns.is_match(name_str) {
-                Some((Arc::clone(&name), Arc::clone(&value)))
+                Some((Arc::clone(name), Arc::clone(value)))
             } else {
                 None
             }
@@ -343,9 +343,18 @@ mod tests {
             "Unix should treat different cases as different variables"
         );
 
-        assert_eq!(fingerprinted_envs.get("TEST_VAR").map(|s| s.as_ref()), Some("uppercase"));
-        assert_eq!(fingerprinted_envs.get("test_var").map(|s| s.as_ref()), Some("lowercase"));
-        assert_eq!(fingerprinted_envs.get("Test_Var").map(|s| s.as_ref()), Some("mixed"));
+        assert_eq!(
+            fingerprinted_envs.get("TEST_VAR").map(std::convert::AsRef::as_ref),
+            Some("uppercase")
+        );
+        assert_eq!(
+            fingerprinted_envs.get("test_var").map(std::convert::AsRef::as_ref),
+            Some("lowercase")
+        );
+        assert_eq!(
+            fingerprinted_envs.get("Test_Var").map(std::convert::AsRef::as_ref),
+            Some("mixed")
+        );
     }
 
     #[test]
@@ -487,7 +496,7 @@ mod tests {
             ResolveEnvError::EnvValueIsNotValidUnicode { key, .. } => {
                 assert_eq!(key.as_str(), "INVALID_UTF8");
             }
-            other => panic!("Expected EnvValueIsNotValidUnicode, got {:?}", other),
+            other => panic!("Expected EnvValueIsNotValidUnicode, got {other:?}"),
         }
     }
 

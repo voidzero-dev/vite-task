@@ -211,6 +211,7 @@ impl Command {
     }
 
     /// Convert to a `tokio::process::Command` without tracking.
+    #[must_use]
     pub fn into_tokio_command(self) -> TokioCommand {
         let mut tokio_cmd = TokioCommand::new(self.program);
         if let Some(cwd) = &self.cwd {

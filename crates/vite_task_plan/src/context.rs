@@ -76,7 +76,7 @@ impl Display for TaskCallStackDisplay {
             if i > 0 {
                 write!(f, " -> ")?;
             }
-            write!(f, "{}", frame)?;
+            write!(f, "{frame}")?;
         }
         Ok(())
     }
@@ -101,7 +101,7 @@ impl<'a> PlanContext<'a> {
         }
     }
 
-    pub fn envs(&self) -> &HashMap<Arc<OsStr>, Arc<OsStr>> {
+    pub const fn envs(&self) -> &HashMap<Arc<OsStr>, Arc<OsStr>> {
         &self.envs
     }
 
@@ -132,11 +132,11 @@ impl<'a> PlanContext<'a> {
         Ok(())
     }
 
-    pub fn indexed_task_graph(&self) -> &'a IndexedTaskGraph {
+    pub const fn indexed_task_graph(&self) -> &'a IndexedTaskGraph {
         self.indexed_task_graph
     }
 
-    pub fn workspace_path(&self) -> &Arc<AbsolutePath> {
+    pub const fn workspace_path(&self) -> &Arc<AbsolutePath> {
         self.workspace_path
     }
 
@@ -162,7 +162,7 @@ impl<'a> PlanContext<'a> {
         }
     }
 
-    pub fn extra_args(&self) -> &Arc<[Str]> {
+    pub const fn extra_args(&self) -> &Arc<[Str]> {
         &self.extra_args
     }
 

@@ -32,17 +32,19 @@ impl FileWithPath {
     }
 
     /// Get a reference to the file handle.
-    pub fn file(&self) -> &File {
+    #[must_use]
+    pub const fn file(&self) -> &File {
         &self.file
     }
 
     /// Get a mutable reference to the file handle.
-    pub fn file_mut(&mut self) -> &mut File {
+    pub const fn file_mut(&mut self) -> &mut File {
         &mut self.file
     }
 
     /// Get the file path.
-    pub fn path(&self) -> &Arc<AbsolutePath> {
+    #[must_use]
+    pub const fn path(&self) -> &Arc<AbsolutePath> {
         &self.path
     }
 }

@@ -1,7 +1,7 @@
 //! Human-readable formatting for cache status
 //!
 //! This module provides plain text formatting for cache status.
-//! Coloring is handled by the reporter to respect NO_COLOR environment variable.
+//! Coloring is handled by the reporter to respect `NO_COLOR` environment variable.
 
 use std::collections::HashSet;
 
@@ -125,7 +125,7 @@ fn detect_spawn_fingerprint_changes(
 
 /// Format cache status for inline display (during Start event).
 ///
-/// Returns Some(formatted_string) for Hit, Miss with reason, and Disabled, None for NotFound.
+/// Returns `Some(formatted_string)` for Hit, Miss with reason, and Disabled, None for `NotFound`.
 /// - Cache Hit: Shows "cache hit" indicator
 /// - Cache Miss (NotFound): No inline message (just command)
 /// - Cache Miss (with mismatch): Shows "cache miss" with brief reason

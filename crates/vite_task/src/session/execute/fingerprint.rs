@@ -33,7 +33,7 @@ pub struct PostRunFingerprint {
 pub enum PathFingerprint {
     /// Path was not found when fingerprinting
     NotFound,
-    /// File content hash using xxHash3_64
+    /// File content hash using `xxHash3_64`
     FileContentHash(u64),
     /// Directory with optional entry listing.
     /// `Folder(None)` means the directory was opened but entries were not read
@@ -132,7 +132,7 @@ impl PostRunFingerprint {
     }
 }
 
-/// Hash file content using xxHash3_64
+/// Hash file content using `xxHash3_64`
 fn hash_content(mut stream: impl Read) -> io::Result<u64> {
     let mut hasher = twox_hash::XxHash3_64::default();
     let mut buf = [0u8; 8192];
@@ -160,7 +160,7 @@ pub fn fingerprint_path(
 
     let file = match File::open(std_path) {
         Ok(file) => file,
-        #[allow(unused)]
+        #[expect(unused)]
         Err(err) => {
             // On Windows, File::open fails specifically for directories with PermissionDenied
             #[cfg(windows)]

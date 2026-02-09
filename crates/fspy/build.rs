@@ -21,7 +21,7 @@ fn download(url: &str) -> anyhow::Result<impl Read + use<>> {
     let output = curl.wait_with_output()?;
     if !output.status.success() {
         bail!("curl exited with status {} trying to download {}", output.status, url);
-    };
+    }
     Ok(Cursor::new(output.stdout))
 }
 

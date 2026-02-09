@@ -9,7 +9,7 @@ use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_workspace::{DependencyType, PackageInfo, PackageIx, PackageNodeIndex};
 
-/// Package graph with additional HashMaps for quick task lookup
+/// Package graph with additional `HashMaps` for quick task lookup
 #[derive(Debug)]
 pub struct IndexedPackageGraph {
     package_graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
@@ -70,7 +70,7 @@ impl IndexedPackageGraph {
         self.package_indices_by_name.get(package_name)
     }
 
-    pub fn package_graph(&self) -> &DiGraph<PackageInfo, DependencyType, PackageIx> {
+    pub const fn package_graph(&self) -> &DiGraph<PackageInfo, DependencyType, PackageIx> {
         &self.package_graph
     }
 }

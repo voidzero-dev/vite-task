@@ -132,7 +132,7 @@ impl PackageGraphBuilder {
         self.id_and_deps_by_path.insert(package_path.clone(), (id, deps));
 
         // Also maintain name to path mapping for dependency resolution
-        match self.name_to_path.entry(package_name.clone()) {
+        match self.name_to_path.entry(package_name) {
             Entry::Vacant(entry) => {
                 entry.insert(SmallVec1::new(package_path));
             }

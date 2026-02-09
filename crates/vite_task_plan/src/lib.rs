@@ -30,6 +30,7 @@ use vite_str::Str;
 use vite_task_graph::{TaskGraphLoadError, display::TaskDisplay};
 
 /// A resolved spawn execution.
+///
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug, Serialize)]
@@ -134,7 +135,7 @@ pub struct ExecutionItem {
 pub enum LeafExecutionKind {
     /// The execution is a spawn of a child process
     Spawn(SpawnExecution),
-    /// The execution is done in-process by InProcessExecution::execute()
+    /// The execution is done in-process by `InProcessExecution::execute()`
     InProcess(InProcessExecution),
 }
 
@@ -181,7 +182,8 @@ pub struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
-    pub fn root_node(&self) -> &ExecutionItemKind {
+    #[must_use]
+    pub const fn root_node(&self) -> &ExecutionItemKind {
         &self.root_node
     }
 
@@ -198,7 +200,7 @@ impl ExecutionPlan {
                 let indexed_task_graph = task_graph_loader
                     .load_task_graph()
                     .await
-                    .map_err(|load_error| TaskPlanErrorKind::TaskGraphLoadError(load_error))
+                    .map_err(TaskPlanErrorKind::TaskGraphLoadError)
                     .with_empty_call_stack()?;
 
                 let context = PlanContext::new(
@@ -206,7 +208,7 @@ impl ExecutionPlan {
                     Arc::clone(cwd),
                     envs.clone(),
                     plan_request_parser,
-                    &indexed_task_graph,
+                    indexed_task_graph,
                 );
                 let execution_graph = plan_query_request(query_plan_request, context).await?;
                 ExecutionItemKind::Expanded(execution_graph)

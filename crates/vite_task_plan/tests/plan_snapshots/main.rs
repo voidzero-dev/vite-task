@@ -11,7 +11,7 @@ use vite_str::Str;
 use vite_task::{Command, Session};
 use vite_workspace::find_workspace_root;
 
-/// Local parser wrapper for BuiltInCommand
+/// Local parser wrapper for `BuiltInCommand`
 #[derive(Parser)]
 #[command(name = "vp")]
 enum Cli {
@@ -35,17 +35,17 @@ struct SnapshotsFile {
 
 fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path, filter: Option<&str>) {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
-    if fixture_name.starts_with(".") {
+    if fixture_name.starts_with('.') {
         return; // skip hidden files like .DS_Store
     }
 
     // Skip if filter doesn't match
-    if let Some(f) = filter {
-        if !fixture_name.contains(f) {
-            return;
-        }
+    if let Some(f) = filter
+        && !fixture_name.contains(f)
+    {
+        return;
     }
-    println!("{}", fixture_name);
+    println!("{fixture_name}");
     // Configure insta to write snapshots to fixture directory
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_path(fixture_path.join("snapshots"));
@@ -69,15 +69,14 @@ fn run_case_inner(
 
     assert_eq!(
         &stage_path, &*workspace_root.path,
-        "folder '{}' should be a workspace root",
-        fixture_name
+        "folder '{fixture_name}' should be a workspace root"
     );
 
     let cases_toml_path = fixture_path.join("snapshots.toml");
     let cases_file: SnapshotsFile = match std::fs::read(&cases_toml_path) {
         Ok(content) => toml::from_slice(&content).unwrap(),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Default::default(),
-        Err(err) => panic!("Failed to read cases.toml for fixture {}: {}", fixture_name, err),
+        Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
     // Navigate from CARGO_MANIFEST_DIR to packages/tools at the repo root
@@ -99,7 +98,7 @@ fn run_case_inner(
         let workspace_root_str = workspace_root.path.as_path().to_str().unwrap();
         let mut owned_callbacks = vite_task_bin::OwnedSessionCallbacks::default();
         let mut session = Session::init_with(
-            plan_envs.into(),
+            plan_envs,
             Arc::clone(&workspace_root.path),
             owned_callbacks.as_callbacks(),
         )
@@ -128,7 +127,7 @@ fn run_case_inner(
 
             let cli = match Cli::try_parse_from(
                 std::iter::once("vp") // dummy program name
-                    .chain(plan.args.iter().map(|s| s.as_str())),
+                    .chain(plan.args.iter().map(vite_str::Str::as_str)),
             ) {
                 Ok(ok) => ok,
                 Err(err) => {

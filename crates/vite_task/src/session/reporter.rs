@@ -1,4 +1,4 @@
-//! LabeledReporter event handler for rendering execution events.
+//! `LabeledReporter` event handler for rendering execution events.
 
 use std::{
     collections::HashSet,
@@ -94,7 +94,7 @@ struct ExecutionStats {
 /// ## Simplified Summary for Single Tasks
 /// - When a single task is executed:
 ///   - Skips full summary (no Statistics/Task Details sections)
-///   - Shows only cache status (except for "NotFound" which is hidden for clean first-run output)
+///   - Shows only cache status (except for "`NotFound`" which is hidden for clean first-run output)
 ///   - Results in clean output showing just the command's stdout/stderr
 pub struct LabeledReporter<W: Write> {
     writer: W,
@@ -109,7 +109,7 @@ pub struct LabeledReporter<W: Write> {
     /// When true, skips printing the execution summary at the end
     hide_summary: bool,
 
-    /// Tracks which executions are cache hits (for silent_if_cache_hit mode)
+    /// Tracks which executions are cache hits (for `silent_if_cache_hit` mode)
     cache_hit_executions: HashSet<ExecutionId>,
 }
 
@@ -127,13 +127,13 @@ impl<W: Write> LabeledReporter<W> {
         }
     }
 
-    /// Set the silent_if_cache_hit option
-    pub fn set_silent_if_cache_hit(&mut self, silent_if_cache_hit: bool) {
+    /// Set the `silent_if_cache_hit` option
+    pub const fn set_silent_if_cache_hit(&mut self, silent_if_cache_hit: bool) {
         self.silent_if_cache_hit = silent_if_cache_hit;
     }
 
-    /// Set the hide_summary option
-    pub fn set_hide_summary(&mut self, hide_summary: bool) {
+    /// Set the `hide_summary` option
+    pub const fn set_hide_summary(&mut self, hide_summary: bool) {
         self.hide_summary = hide_summary;
     }
 
@@ -244,17 +244,18 @@ impl<W: Write> LabeledReporter<W> {
         }
 
         // For direct synthetic execution with cache hit, print message at the bottom
-        if let Some(exec) = self.executions.last() {
-            if exec.display.is_none() && matches!(exec.cache_status, CacheStatus::Hit { .. }) {
-                let should_print =
-                    !self.silent_if_cache_hit || !self.cache_hit_executions.contains(&execution_id);
-                if should_print {
-                    let _ = writeln!(
-                        self.writer,
-                        "{}",
-                        "✓ cache hit, logs replayed".style(Style::new().green().dimmed())
-                    );
-                }
+        if let Some(exec) = self.executions.last()
+            && exec.display.is_none()
+            && matches!(exec.cache_status, CacheStatus::Hit { .. })
+        {
+            let should_print =
+                !self.silent_if_cache_hit || !self.cache_hit_executions.contains(&execution_id);
+            if should_print {
+                let _ = writeln!(
+                    self.writer,
+                    "{}",
+                    "✓ cache hit, logs replayed".style(Style::new().green().dimmed())
+                );
             }
         }
 
@@ -320,10 +321,10 @@ impl<W: Write> LabeledReporter<W> {
             format!("• {cache_misses} cache misses").style(CACHE_MISS_STYLE),
         );
         if !cache_disabled_str.is_empty() {
-            let _ = write!(self.writer, "{} ", cache_disabled_str);
+            let _ = write!(self.writer, "{cache_disabled_str} ");
         }
         if !failed_str.is_empty() {
-            let _ = write!(self.writer, "{} ", failed_str);
+            let _ = write!(self.writer, "{failed_str} ");
         }
         let _ = writeln!(self.writer);
 
@@ -434,7 +435,7 @@ impl<W: Write> LabeledReporter<W> {
                 CacheStatus::Miss(_) => cache_summary.style(CACHE_MISS_STYLE),
                 CacheStatus::Disabled(_) => cache_summary.style(Style::new().bright_black()),
             };
-            let _ = writeln!(self.writer, "      {}", styled_summary);
+            let _ = writeln!(self.writer, "      {styled_summary}");
 
             // Error message if present
             if let Some(ref error_msg) = exec.error_message {
@@ -466,9 +467,9 @@ impl<W: Write> LabeledReporter<W> {
 
     /// Print simplified cache status for single built-in commands
     ///
-    /// Note: Inline cache status is now printed at Start event in handle_start(),
+    /// Note: Inline cache status is now printed at Start event in `handle_start()`,
     /// so this function is a no-op to avoid duplicate output.
-    fn print_simple_cache_status(&mut self) {
+    const fn print_simple_cache_status(&mut self) {
         // Inline cache status already printed at Start event - nothing to do here
     }
 }

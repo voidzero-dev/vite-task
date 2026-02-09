@@ -127,7 +127,7 @@ pub struct Session<'a> {
 
     plan_request_parser: PlanRequestParser<'a>,
 
-    /// Cache is lazily initialized to avoid SQLite race conditions when multiple
+    /// Cache is lazily initialized to avoid `SQLite` race conditions when multiple
     /// processes (e.g., parallel `vp lib` commands) start simultaneously.
     cache: OnceCell<ExecutionCache>,
     cache_path: AbsolutePathBuf,
@@ -213,7 +213,7 @@ impl<'a> Session<'a> {
     }
 
     /// Lazily initializes and returns the execution cache.
-    /// The cache is only created when first accessed to avoid SQLite race conditions
+    /// The cache is only created when first accessed to avoid `SQLite` race conditions
     /// when multiple processes start simultaneously.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
         self.cache.get_or_try_init(|| ExecutionCache::load_from_path(self.cache_path.clone()))
@@ -223,18 +223,18 @@ impl<'a> Session<'a> {
         Arc::clone(&self.workspace_path)
     }
 
-    pub fn task_graph(&self) -> Option<&TaskGraph> {
+    pub const fn task_graph(&self) -> Option<&TaskGraph> {
         match &self.lazy_task_graph {
             LazyTaskGraph::Initialized(graph) => Some(graph.task_graph()),
             _ => None,
         }
     }
 
-    pub fn envs(&self) -> &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>> {
+    pub const fn envs(&self) -> &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>> {
         &self.envs
     }
 
-    pub fn cwd(&self) -> &Arc<AbsolutePath> {
+    pub const fn cwd(&self) -> &Arc<AbsolutePath> {
         &self.cwd
     }
 

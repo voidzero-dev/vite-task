@@ -43,7 +43,7 @@ async fn run() -> anyhow::Result<ExitStatus> {
                     return Ok(status);
                 }
             }
-            println!("{:?}", args);
+            println!("{args:?}");
             Ok(ExitStatus::SUCCESS)
         }
     }

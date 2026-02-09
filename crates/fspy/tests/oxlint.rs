@@ -33,7 +33,7 @@ async fn track_oxlint(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<Pa
     let tools_dir = tools_bin_dir();
     let new_path = if let Some(existing_path) = std::env::var_os("PATH") {
         let mut paths = vec![tools_dir.as_os_str().to_owned()];
-        paths.extend(std::env::split_paths(&existing_path).map(|p| p.into_os_string()));
+        paths.extend(std::env::split_paths(&existing_path).map(std::path::PathBuf::into_os_string));
         std::env::join_paths(paths)?
     } else {
         OsString::from(&tools_dir)
@@ -93,10 +93,10 @@ async fn oxlint_type_aware() -> anyhow::Result<()> {
     let ts_file = tmpdir_path.join("index.ts");
     std::fs::write(
         &ts_file,
-        r#"
+        r"
 import type { Foo } from './types';
 declare const _foo: Foo;
-"#,
+",
     )?;
 
     // Run oxlint without --type-aware first

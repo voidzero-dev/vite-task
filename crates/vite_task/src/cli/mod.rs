@@ -62,13 +62,8 @@ impl RunCommand {
         self,
         cwd: &Arc<AbsolutePath>,
     ) -> Result<PlanRequest, CLITaskQueryError> {
-        let RunCommand {
-            task_specifier,
-            recursive,
-            transitive,
-            ignore_depends_on,
-            additional_args,
-        } = self;
+        let Self { task_specifier, recursive, transitive, ignore_depends_on, additional_args } =
+            self;
 
         let include_explicit_deps = !ignore_depends_on;
 

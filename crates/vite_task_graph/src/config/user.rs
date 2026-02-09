@@ -33,13 +33,15 @@ pub enum UserCacheConfig {
 
 impl UserCacheConfig {
     /// Create an enabled cache config with the given `EnabledCacheConfig`.
-    pub fn with_config(config: EnabledCacheConfig) -> Self {
-        UserCacheConfig::Enabled { cache: Some(MustBe!(true)), enabled_cache_config: config }
+    #[must_use]
+    pub const fn with_config(config: EnabledCacheConfig) -> Self {
+        Self::Enabled { cache: Some(MustBe!(true)), enabled_cache_config: config }
     }
 
     /// Create a disabled cache config.
-    pub fn disabled() -> Self {
-        UserCacheConfig::Disabled { cache: MustBe!(false) }
+    #[must_use]
+    pub const fn disabled() -> Self {
+        Self::Disabled { cache: MustBe!(false) }
     }
 }
 
@@ -125,6 +127,7 @@ impl UserRunConfig {
 
     /// Generates TypeScript type definitions for user task configuration.
     #[cfg(test)]
+    #[must_use]
     pub fn generate_ts_definition() -> String {
         use std::{
             io::Write,
@@ -199,7 +202,7 @@ mod ts_tests {
     fn typescript_generation() {
         let file_path =
             PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("run-config.ts");
-        let ts = UserRunConfig::generate_ts_definition().replace("\r", "");
+        let ts = UserRunConfig::generate_ts_definition().replace('\r', "");
 
         if env::var("VT_UPDATE_TS_TYPES").unwrap_or_default() == "1" {
             std::fs::write(&file_path, ts).unwrap();

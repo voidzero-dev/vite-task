@@ -161,7 +161,7 @@ impl From<CompactString> for Str {
 
 impl From<Str> for Arc<str> {
     fn from(value: Str) -> Self {
-        Arc::from(value.as_str())
+        Self::from(value.as_str())
     }
 }
 

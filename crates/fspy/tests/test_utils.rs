@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf, StripPrefixError};
 
 use fspy::{AccessMode, PathAccessIterable};
 #[doc(hidden)]
-#[allow(unused)]
+#[expect(unused)]
 pub use fspy_test_utils::command_executing;
 
 #[track_caller]
@@ -50,7 +50,7 @@ macro_rules! track_child {
 }
 
 #[doc(hidden)]
-#[allow(unused)]
+#[expect(unused)]
 pub async fn spawn_std(std_cmd: std::process::Command) -> anyhow::Result<PathAccessIterable> {
     let mut command = fspy::Command::new(std_cmd.get_program());
     command

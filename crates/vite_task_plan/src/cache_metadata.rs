@@ -18,7 +18,7 @@ pub enum ExecutionCacheKey {
         /// This is to distinguish multiple execution items from the same task.
         and_item_index: usize,
         /// Extra args provided when invoking the user-defined task (`vp [task_name] [extra_args...]`).
-        /// These args are appended to the last and_item. Non-last and_items don't get extra args.
+        /// These args are appended to the last `and_item`. Non-last `and_items` don't get extra args.
         extra_args: Arc<[Str]>,
         /// The package path where the user-defined task is defined, relative to the workspace root.
         package_path: RelativePathBuf,
@@ -30,6 +30,7 @@ pub enum ExecutionCacheKey {
 }
 
 /// Cache information for a spawn execution.
+///
 /// It only contains information needed for hitting existing cache entries pre-execution.
 /// It doesn't contain any post-execution information like file fingerprints
 /// (which needs actual execution and is out of scope for planning).
@@ -82,27 +83,32 @@ pub struct SpawnFingerprint {
 
 impl SpawnFingerprint {
     /// Get the fingerprint ignores patterns.
-    pub fn fingerprint_ignores(&self) -> Option<&Vec<Str>> {
+    #[must_use]
+    pub const fn fingerprint_ignores(&self) -> Option<&Vec<Str>> {
         self.fingerprint_ignores.as_ref()
     }
 
     /// Get the environment fingerprints.
-    pub fn env_fingerprints(&self) -> &EnvFingerprints {
+    #[must_use]
+    pub const fn env_fingerprints(&self) -> &EnvFingerprints {
         &self.env_fingerprints
     }
 
     /// Get the program fingerprint as a debug string.
+    #[must_use]
     pub fn program_fingerprint_debug(&self) -> String {
         format!("{:?}", self.program_fingerprint)
     }
 
     /// Get the command args.
-    pub fn args(&self) -> &Arc<[Str]> {
+    #[must_use]
+    pub const fn args(&self) -> &Arc<[Str]> {
         &self.args
     }
 
     /// Get the working directory.
-    pub fn cwd(&self) -> &RelativePathBuf {
+    #[must_use]
+    pub const fn cwd(&self) -> &RelativePathBuf {
         &self.cwd
     }
 }

@@ -77,7 +77,7 @@ where
     F: FnMut(OutputKind, BString),
 {
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
-    cmd.args(spawn_command.args.iter().map(|arg| arg.as_str()));
+    cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
     cmd.envs(spawn_command.all_envs.iter());
     cmd.current_dir(&*spawn_command.cwd);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
