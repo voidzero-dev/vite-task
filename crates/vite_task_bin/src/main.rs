@@ -3,7 +3,7 @@ use std::{process::ExitCode, sync::Arc};
 use clap::Parser;
 use vite_str::Str;
 use vite_task::{
-    EnabledCacheConfig, ExitStatus, Session, UserCacheConfig, UserTaskOptions, get_path_env,
+    EnabledCacheConfig, ExitStatus, Session, UserCacheConfig, get_path_env,
     plan_request::SyntheticPlanRequest,
 };
 use vite_task_bin::{Args, OwnedSessionCallbacks, find_executable};
@@ -29,16 +29,12 @@ async fn run() -> anyhow::Result<ExitStatus> {
                 let request = SyntheticPlanRequest {
                     program,
                     args: [Str::from("FOO")].into(),
-                    task_options: UserTaskOptions {
-                        cache_config: UserCacheConfig::Enabled {
-                            cache: None,
-                            enabled_cache_config: EnabledCacheConfig {
-                                envs: Some(Box::from([Str::from("FOO")])),
-                                pass_through_envs: None,
-                            },
-                        },
-                        ..Default::default()
-                    },
+                    cache_config: UserCacheConfig::with_config({
+                        EnabledCacheConfig {
+                            envs: Some(Box::from([Str::from("FOO")])),
+                            pass_through_envs: None,
+                        }
+                    }),
                     envs: Arc::clone(envs),
                 };
                 let cache_key: Arc<[Str]> = Arc::from([Str::from("print-env-foo")]);

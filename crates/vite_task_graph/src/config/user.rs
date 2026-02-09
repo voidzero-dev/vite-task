@@ -31,6 +31,18 @@ pub enum UserCacheConfig {
     },
 }
 
+impl UserCacheConfig {
+    /// Create an enabled cache config with the given `EnabledCacheConfig`.
+    pub fn with_config(config: EnabledCacheConfig) -> Self {
+        UserCacheConfig::Enabled { cache: Some(MustBe!(true)), enabled_cache_config: config }
+    }
+
+    /// Create a disabled cache config.
+    pub fn disabled() -> Self {
+        UserCacheConfig::Disabled { cache: MustBe!(false) }
+    }
+}
+
 /// Cache configuration fields when caching is enabled
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[cfg_attr(test, derive(TS), ts(optional_fields))]
