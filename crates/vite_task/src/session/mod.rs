@@ -9,15 +9,13 @@ use std::{ffi::OsStr, fmt::Debug, sync::Arc};
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
 pub use event::ExecutionEvent;
-use monostate::MustBe;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
 use reporter::LabeledReporter;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 use vite_task_graph::{
-    IndexedTaskGraph, TaskGraph, TaskGraphLoadError,
-    config::user::{UserCacheConfig, UserTaskOptions},
+    IndexedTaskGraph, TaskGraph, TaskGraphLoadError, config::user::UserCacheConfig,
     loader::UserConfigLoader,
 };
 use vite_task_plan::{
@@ -105,10 +103,7 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
                 Command::Cache { .. } => Ok(Some(PlanRequest::Synthetic(SyntheticPlanRequest {
                     program: Arc::from(OsStr::new(command.program.as_str())),
                     args: Arc::clone(&command.args),
-                    task_options: UserTaskOptions {
-                        cache_config: UserCacheConfig::Disabled { cache: MustBe!(false) },
-                        ..Default::default()
-                    },
+                    cache_config: UserCacheConfig::disabled(),
                     envs: Arc::clone(&command.envs),
                 }))),
                 Command::Run(run_command) => Ok(Some(run_command.into_plan_request(&command.cwd)?)),

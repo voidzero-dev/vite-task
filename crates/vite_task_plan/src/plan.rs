@@ -11,7 +11,10 @@ use futures_util::FutureExt;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::InvalidPathDataError};
 use vite_shell::try_parse_as_and_list;
 use vite_str::Str;
-use vite_task_graph::{TaskNodeIndex, config::ResolvedTaskOptions};
+use vite_task_graph::{
+    TaskNodeIndex,
+    config::{ResolvedTaskOptions, user::UserTaskOptions},
+};
 
 use crate::{
     ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, PlanContext,
@@ -290,10 +293,18 @@ pub fn plan_synthetic_request(
     execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
-    let SyntheticPlanRequest { program, args, task_options, envs } = synthetic_plan_request;
+    let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
     let program_path = which(&program, &envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
-    let resolved_options = ResolvedTaskOptions::resolve(task_options, &cwd);
+    let resolved_options = ResolvedTaskOptions::resolve(
+        UserTaskOptions {
+            cache_config,
+            // cwd_relative_to_package and depends_on don't make sense for synthetic tasks.
+            cwd_relative_to_package: None,
+            depends_on: None,
+        },
+        &cwd,
+    );
 
     plan_spawn_execution(
         workspace_path,

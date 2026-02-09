@@ -2,7 +2,7 @@ use std::{collections::HashMap, ffi::OsStr, sync::Arc};
 
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{config::user::UserTaskOptions, query::TaskQuery};
+use vite_task_graph::{config::UserCacheConfig, query::TaskQuery};
 
 /// A parsed command from a task script, passed to [`super::PlanRequestParser::get_plan_request`].
 ///
@@ -43,8 +43,8 @@ pub struct SyntheticPlanRequest {
     /// The arguments to pass to the program
     pub args: Arc<[Str]>,
 
-    /// The task options as if it's defined in `vite.config.*`
-    pub task_options: UserTaskOptions,
+    /// The cache config as if it's defined in `vite.config.*`
+    pub cache_config: UserCacheConfig,
 
     /// All environment variables to set for the synthetic task.
     ///

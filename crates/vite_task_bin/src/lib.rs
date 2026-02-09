@@ -12,7 +12,7 @@ use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
     Command, EnabledCacheConfig, HandledCommand, ScriptCommand, SessionCallbacks, UserCacheConfig,
-    UserTaskOptions, get_path_env, plan_request::SyntheticPlanRequest,
+    get_path_env, plan_request::SyntheticPlanRequest,
 };
 
 #[derive(Debug, Default)]
@@ -48,7 +48,10 @@ fn synthesize_node_modules_bin_task(
     Ok(SyntheticPlanRequest {
         program: find_executable(get_path_env(envs), &*cwd, executable_name)?,
         args: args.into(),
-        task_options: Default::default(),
+        cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
+            envs: None,
+            pass_through_envs: None,
+        }),
         envs: Arc::clone(envs),
     })
 }
@@ -108,16 +111,9 @@ impl vite_task::CommandHandler for CommandHandler {
                 Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
                     program: find_executable(get_path_env(&envs), &*command.cwd, "print-env")?,
                     args: [name.clone()].into(),
-                    task_options: UserTaskOptions {
-                        cache_config: UserCacheConfig::Enabled {
-                            cache: None,
-                            enabled_cache_config: EnabledCacheConfig {
-                                envs: None,
-                                pass_through_envs: Some(vec![name]),
-                            },
-                        },
-                        ..Default::default()
-                    },
+                    cache_config: UserCacheConfig::with_config({
+                        EnabledCacheConfig { envs: None, pass_through_envs: Some(vec![name]) }
+                    }),
                     envs: Arc::new(envs),
                 }))
             }

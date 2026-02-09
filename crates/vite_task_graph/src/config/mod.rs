@@ -40,6 +40,8 @@ pub struct ResolvedTaskOptions {
 
 impl ResolvedTaskOptions {
     /// Resolves from user-defined options and the directory path where the options are defined.
+    /// For user-defined tasks or scripts in package.json, `dir` is the package directory
+    /// For synthetic tasks, `dir` is the cwd of the original command (e.g. the cwd of `vp lint`).
     pub fn resolve(user_options: UserTaskOptions, dir: &Arc<AbsolutePath>) -> Self {
         let cwd: Arc<AbsolutePath> = match user_options.cwd_relative_to_package {
             Some(ref cwd) if !cwd.as_str().is_empty() => dir.join(cwd).into(),
