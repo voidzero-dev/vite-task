@@ -134,7 +134,11 @@ impl SpyImpl {
                 // Stop the supervisor and collect path accesses from it.
                 #[cfg(target_os = "linux")]
                 let arenas = arenas.chain(
-                    supervisor.stop().await?.into_iter().map(|handler| handler.into_arena()),
+                    supervisor
+                        .stop()
+                        .await?
+                        .into_iter()
+                        .map(syscall_handler::SyscallHandler::into_arena),
                 );
                 let arenas = arenas.collect::<Vec<_>>();
 

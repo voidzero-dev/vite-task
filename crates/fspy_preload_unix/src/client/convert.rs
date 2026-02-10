@@ -15,8 +15,8 @@ use nix::unistd::getcwd;
 fn get_fd_path(fd: RawFd) -> nix::Result<Option<PathBuf>> {
     if fd == libc::AT_FDCWD {
         return Ok(Some(getcwd()?));
-    };
-    match nix::fcntl::readlink(CString::new(format!("/proc/self/fd/{}", fd)).unwrap().as_c_str()) {
+    }
+    match nix::fcntl::readlink(CString::new(format!("/proc/self/fd/{fd}")).unwrap().as_c_str()) {
         Ok(path) => Ok(Some(path.into())),
         Err(nix::Error::EBADF | nix::Error::ENOENT) => Ok(None), // invalid fd or no such file (Most likely a stdio fd)
         Err(e) => Err(e),

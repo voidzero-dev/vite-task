@@ -43,6 +43,6 @@ fn main() {
         "execve" => {
             let _ = std::process::Command::new(path).spawn();
         }
-        _ => panic!("unknown action: {}", action),
+        _ => panic!("unknown action: {action}"),
     }
 }
