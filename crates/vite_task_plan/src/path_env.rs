@@ -99,11 +99,12 @@ mod tests {
         assert!(path_value.to_str().unwrap().contains("C:\\existing\\path"));
 
         // Verify no duplicate PATH entry was created
-        let path_like_keys: Vec<_> = envs
-            .keys()
-            .filter(|k| k.to_str().map(|s| s.eq_ignore_ascii_case("path")).unwrap_or(false))
-            .collect();
-        assert_eq!(path_like_keys.len(), 1);
+        assert_eq!(
+            envs.keys()
+                .filter(|k| k.to_str().is_some_and(|s| s.eq_ignore_ascii_case("path")))
+                .count(),
+            1
+        );
     }
 
     #[test]

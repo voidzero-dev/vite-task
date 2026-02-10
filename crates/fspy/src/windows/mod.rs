@@ -57,20 +57,22 @@ pub struct SpyImpl {
 
 impl SpyImpl {
     pub fn init_in(path: &Path) -> io::Result<Self> {
-        let dll_path = INTERPOSE_CDYLIB.write_to(&path, ".dll").unwrap();
+        let dll_path = INTERPOSE_CDYLIB.write_to(path, ".dll").unwrap();
 
         let wide_dll_path = dll_path.as_os_str().encode_wide().collect::<Vec<u16>>();
         let mut ansi_dll_path =
             winsafe::WideCharToMultiByte(CP::ACP, WC::NoValue, &wide_dll_path, None, None)
-                .map_err(|err| io::Error::from_raw_os_error(err.raw() as i32))?;
+                .map_err(|err| io::Error::from_raw_os_error(err.raw().cast_signed()))?;
 
         ansi_dll_path.push(0);
 
+        // SAFETY: we just pushed a NUL byte, so the slice is NUL-terminated
         let ansi_dll_path_with_nul =
             unsafe { CStr::from_bytes_with_nul_unchecked(ansi_dll_path.as_slice()) };
         Ok(Self { ansi_dll_path_with_nul: ansi_dll_path_with_nul.into() })
     }
 
+    #[expect(clippy::unused_async, reason = "async signature required by SpyImpl trait")]
     pub(crate) async fn spawn(&self, command: Command) -> Result<TrackedChild, SpawnError> {
         let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
         let mut command = command.into_tokio_command();
@@ -89,8 +91,10 @@ impl SpyImpl {
 
                 let mut dll_paths = ansi_dll_path_with_nul.as_ptr().cast::<c_char>();
                 let process_handle = std_child.as_raw_handle().cast::<winapi::ctypes::c_void>();
+                // SAFETY: process_handle is a valid handle to the just-spawned child process,
+                // dll_paths points to a valid null-terminated ANSI string
                 let success =
-                    unsafe { DetourUpdateProcessWithDll(process_handle, &mut dll_paths, 1) };
+                    unsafe { DetourUpdateProcessWithDll(process_handle, &raw mut dll_paths, 1) };
                 if success != TRUE {
                     return Err(io::Error::last_os_error());
                 }
@@ -100,6 +104,8 @@ impl SpyImpl {
                     ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
                 };
                 let payload_bytes = bincode::encode_to_vec(payload, BINCODE_CONFIG).unwrap();
+                // SAFETY: process_handle is valid, PAYLOAD_ID is a static GUID,
+                // payload_bytes is a valid buffer with correct length
                 let success = unsafe {
                     DetourCopyPayloadToProcess(
                         process_handle,
@@ -113,8 +119,10 @@ impl SpyImpl {
                 }
 
                 let main_thread_handle = std_child.main_thread_handle();
+                // SAFETY: main_thread_handle is a valid thread handle from the spawned child
                 let resume_thread_ret =
-                    unsafe { ResumeThread(main_thread_handle.as_raw_handle().cast()) } as i32;
+                    unsafe { ResumeThread(main_thread_handle.as_raw_handle().cast()) }
+                        .cast_signed();
 
                 if resume_thread_ret == -1 {
                     return Err(io::Error::last_os_error());
@@ -123,11 +131,7 @@ impl SpyImpl {
                 Ok(std_child)
             })
             .map_err(|err| {
-                if !*spawn_success {
-                    SpawnError::Injection(err.into())
-                } else {
-                    SpawnError::OsSpawn(err.into())
-                }
+                if *spawn_success { SpawnError::OsSpawn(err) } else { SpawnError::Injection(err) }
             })?;
 
         Ok(TrackedChild {
@@ -145,7 +149,7 @@ impl SpyImpl {
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })
-            .map(|f| io::Result::Ok(f??)) // flatten JoinError and io::Result
+            .map(|f| f?) // flatten JoinError and io::Result
             .boxed(),
         })
     }

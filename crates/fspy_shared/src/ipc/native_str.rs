@@ -46,6 +46,7 @@ impl NativeStr {
     }
 
     #[cfg(windows)]
+    #[must_use]
     pub fn from_wide(wide: &[u16]) -> &Self {
         Self::wrap_ref(must_cast_slice(wide))
     }
@@ -61,12 +62,13 @@ impl NativeStr {
     pub fn to_os_string(&self) -> OsString {
         use bytemuck::{allocation::pod_collect_to_vec, try_cast_slice};
 
-        if let Ok(wide) = try_cast_slice::<u8, u16>(&self.data) {
-            OsString::from_wide(wide)
-        } else {
-            let wide = pod_collect_to_vec::<u8, u16>(&self.data);
-            OsString::from_wide(&wide)
-        }
+        try_cast_slice::<u8, u16>(&self.data).map_or_else(
+            |_| {
+                let wide = pod_collect_to_vec::<u8, u16>(&self.data);
+                OsString::from_wide(&wide)
+            },
+            OsString::from_wide,
+        )
     }
 
     #[must_use]
@@ -152,7 +154,14 @@ impl NativeStr {
         /// \??\ is used in Nt* calls.
         /// The resulting path is not necessarily valid or points to the same location,
         /// but it's good enough for sanitizing paths in `NativeStr::strip_path_prefix`.
-        const fn strip_windows_path_prefix(p: &OsStr) -> &OsStr {
+        #[cfg_attr(
+            not(windows),
+            expect(
+                clippy::missing_const_for_fn,
+                reason = "uses non-const for loop and strip_prefix on Windows"
+            )
+        )]
+        fn strip_windows_path_prefix(p: &OsStr) -> &OsStr {
             #[cfg(windows)]
             {
                 use os_str_bytes::OsStrBytesExt as _;

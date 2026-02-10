@@ -39,9 +39,10 @@ impl ToAbsolutePath for HANDLE {
         self,
         f: F,
     ) -> winsafe::SysResult<R> {
-        let path = unsafe { get_path_name(self) }.ok();
-        let path = path.as_ref().map(|path| U16Str::from_slice(&path));
-        f(path)
+        // SAFETY: get_path_name performs FFI call with this HANDLE to retrieve the file path
+        let resolved = unsafe { get_path_name(self) }.ok();
+        let resolved = resolved.as_ref().map(|p| U16Str::from_slice(p));
+        f(resolved)
     }
 }
 
@@ -50,33 +51,38 @@ impl ToAbsolutePath for POBJECT_ATTRIBUTES {
         self,
         f: F,
     ) -> winsafe::SysResult<R> {
-        let filename_str = if let Some(object_name) = unsafe { (*self).ObjectName.as_ref() } {
-            unsafe { get_u16_str(object_name) }
-        } else {
-            U16Str::from_slice(&[])
-        };
-        let filename_slice = filename_str.as_slice();
-        let is_absolute = filename_slice.get(0) == Some(&b'\\'.into()) // \...
-        || filename_slice.get(1) == Some(&b':'.into()); // C:...
+        // SAFETY: dereferencing POBJECT_ATTRIBUTES to read ObjectName field from Windows API struct
+        let fname_str = unsafe { (*self).ObjectName.as_ref() }.map_or_else(
+            || U16Str::from_slice(&[]),
+            |object_name| {
+                // SAFETY: reading UNICODE_STRING fields from a valid OBJECT_ATTRIBUTES
+                unsafe { get_u16_str(object_name) }
+            },
+        );
+        let fname_slice = fname_str.as_slice();
+        let is_absolute = fname_slice.first() == Some(&b'\\'.into()) // \...
+        || fname_slice.get(1) == Some(&b':'.into()); // C:...
 
-        if !is_absolute {
+        if is_absolute {
+            f(Some(fname_str))
+        } else {
+            // SAFETY: dereferencing POBJECT_ATTRIBUTES to read RootDirectory handle
             let Ok(mut root_dir) = (unsafe { get_path_name((*self).RootDirectory) }) else {
                 return f(None);
             };
             // If filename is empty, just use root_dir directly
-            if filename_str.is_empty() {
+            if fname_str.is_empty() {
                 let root_dir_str = U16Str::from_slice(&root_dir);
                 return f(Some(root_dir_str));
             }
             let root_dir_cstr = {
                 root_dir.push(0);
+                // SAFETY: we just pushed a null terminator, so the buffer is null-terminated
                 unsafe { U16CStr::from_ptr_str(root_dir.as_ptr()) }
             };
-            let filename_cstr = U16CString::from_ustr_truncate(filename_str);
-            let abs_path = combine_paths(root_dir_cstr, filename_cstr.as_ucstr()).unwrap();
+            let fname_cstring = U16CString::from_ustr_truncate(fname_str);
+            let abs_path = combine_paths(root_dir_cstr, fname_cstring.as_ucstr()).unwrap();
             f(Some(abs_path.to_u16_str()))
-        } else {
-            f(Some(filename_str))
         }
     }
 }

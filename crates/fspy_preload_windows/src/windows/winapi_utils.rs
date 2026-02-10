@@ -24,8 +24,13 @@ pub fn ck(b: BOOL) -> winsafe::SysResult<()> {
     if b == FALSE { Err(GetLastError()) } else { Ok(()) }
 }
 
-pub fn ck_long(val: c_long) -> winsafe::SysResult<()> {
-    if 0 == NO_ERROR { Ok(()) } else { Err(unsafe { winsafe::co::ERROR::from_raw(val as _) }) }
+pub const fn ck_long(val: c_long) -> winsafe::SysResult<()> {
+    // SAFETY: creating an ERROR from the raw c_long value for the Windows error code
+    if 0 == NO_ERROR {
+        Ok(())
+    } else {
+        Err(unsafe { winsafe::co::ERROR::from_raw(val.cast_unsigned()) })
+    }
 }
 
 pub unsafe fn get_u16_str(ustring: &UNICODE_STRING) -> &U16Str {
@@ -37,16 +42,15 @@ pub unsafe fn get_u16_str(ustring: &UNICODE_STRING) -> &U16Str {
         // Buffer may be null in that case.
         &[]
     } else {
-        unsafe { slice::from_raw_parts((*ustring).Buffer, u16_count.try_into().unwrap()) }
+        // SAFETY: UNICODE_STRING.Buffer points to a valid u16 array of Length/2 elements
+        unsafe { slice::from_raw_parts(ustring.Buffer, usize::from(u16_count)) }
     };
-    match U16CStr::from_slice_truncate(chars) {
-        Ok(ok) => ok.as_ustr(),
-        Err(_) => chars.into(),
-    }
+    U16CStr::from_slice_truncate(chars).map_or_else(|_| chars.into(), U16CStr::as_ustr)
 }
 
 pub unsafe fn get_path_name(handle: HANDLE) -> winsafe::SysResult<SmallVec<u16, MAX_PATH>> {
     let mut path = SmallVec::<u16, MAX_PATH>::new();
+    // SAFETY: FFI call to GetFinalPathNameByHandleW to query the file path from a handle
     let len = unsafe {
         GetFinalPathNameByHandleW(
             handle,
@@ -60,9 +64,11 @@ pub unsafe fn get_path_name(handle: HANDLE) -> winsafe::SysResult<SmallVec<u16, 
     }
     let len = usize::try_from(len).unwrap();
     if len <= path.capacity() {
+        // SAFETY: GetFinalPathNameByHandleW wrote `len` u16 characters into the buffer
         unsafe { path.set_len(len) };
     } else {
         path.reserve_exact(len);
+        // SAFETY: FFI call to GetFinalPathNameByHandleW with larger buffer after first call indicated needed size
         let len = unsafe {
             GetFinalPathNameByHandleW(
                 handle,
@@ -77,16 +83,17 @@ pub unsafe fn get_path_name(handle: HANDLE) -> winsafe::SysResult<SmallVec<u16, 
         } else if len > path.capacity() {
             unreachable!()
         }
+        // SAFETY: GetFinalPathNameByHandleW wrote `len` u16 characters into the buffer
         unsafe { path.set_len(len) };
     }
     Ok(path)
 }
 
-pub fn access_mask_to_mode(desired_access: ACCESS_MASK) -> AccessMode {
+pub const fn access_mask_to_mode(desired_access: ACCESS_MASK) -> AccessMode {
     let has_write = (desired_access & (FILE_WRITE_DATA | FILE_APPEND_DATA | GENERIC_WRITE)) != 0;
     let has_read = (desired_access & (FILE_READ_DATA | GENERIC_READ)) != 0;
     if has_write {
-        if has_read { AccessMode::READ | AccessMode::WRITE } else { AccessMode::WRITE }
+        if has_read { AccessMode::READ.union(AccessMode::WRITE) } else { AccessMode::WRITE }
     } else {
         AccessMode::READ
     }
@@ -104,28 +111,33 @@ unsafe extern "system" {
 
 pub struct HeapPath(PWSTR);
 impl HeapPath {
+    #[must_use]
     pub fn to_u16_str(&self) -> &U16Str {
+        // SAFETY: the PWSTR was allocated by PathAllocCombine and is a valid null-terminated wide string
         unsafe { U16CStr::from_ptr_str(self.0).as_ustr() }
     }
 }
 impl Drop for HeapPath {
     fn drop(&mut self) {
+        // SAFETY: freeing the PWSTR allocated by PathAllocCombine via LocalFree
         unsafe { LocalFree(self.0.cast()) };
     }
 }
 
 pub fn combine_paths(path1: &U16CStr, path2: &U16CStr) -> winsafe::SysResult<HeapPath> {
-    const PATHCCH_ALLOW_LONG_PATHS: ULONG = 0x00000001;
+    const PATHCCH_ALLOW_LONG_PATHS: ULONG = 0x0000_0001;
     let mut out = std::ptr::null_mut();
+    // SAFETY: FFI call to PathAllocCombine with valid null-terminated wide string pointers
     let hr = unsafe {
         PathAllocCombine(
             path1.as_ptr(),
             path2.as_ptr(),
             PATHCCH_ALLOW_LONG_PATHS, /*PATHCOMBINE_DEFAULT*/
-            &mut out,
+            &raw mut out,
         )
     };
     if hr != S_OK {
+        // SAFETY: creating an ERROR from the HRESULT value
         return Err(unsafe { co::ERROR::from_raw(hr.try_into().unwrap()) });
     }
     Ok(HeapPath(out))
@@ -146,6 +158,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let path = tmpdir.path().canonicalize().unwrap().join(filename);
         let file = File::create(&path).unwrap();
+        // SAFETY: passing a valid raw file handle to get_path_name
         let actual_path = unsafe { get_path_name(file.as_raw_handle().cast()) }.unwrap();
         let actual_path = PathBuf::from(OsString::from_wide(&actual_path));
         assert_eq!(path, actual_path);
@@ -153,11 +166,11 @@ mod tests {
 
     #[test]
     fn test_get_path_name_short() {
-        test_get_path_name("foo")
+        test_get_path_name("foo");
     }
     #[test]
     fn test_get_path_name_long() {
-        test_get_path_name(str::repeat("a", 255).as_str())
+        test_get_path_name(str::repeat("a", 255).as_str());
     }
 
     #[test]

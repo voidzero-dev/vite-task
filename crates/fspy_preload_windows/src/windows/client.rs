@@ -25,7 +25,13 @@ impl<'a> Client<'a> {
                 // this can happen if the process is started after the root target process has exited.
                 // By that time the channel would have been closed in the receiver side.
                 // In this case we just leave a message and skip sending any path accesses.
-                eprintln!("fspy: failed to create ipc sender: {}", err);
+                #[expect(
+                    clippy::print_stderr,
+                    reason = "preload library uses stderr for debug diagnostics"
+                )]
+                {
+                    eprintln!("fspy: failed to create ipc sender: {err}");
+                }
                 None
             }
         };
@@ -42,6 +48,7 @@ impl<'a> Client<'a> {
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {
         let payload_bytes = encode_to_vec(&self.payload, BINCODE_CONFIG).unwrap();
+        // SAFETY: FFI call to DetourCopyPayloadToProcess with valid handle and payload buffer
         unsafe {
             DetourCopyPayloadToProcess(
                 child_handle,
@@ -52,7 +59,8 @@ impl<'a> Client<'a> {
         }
     }
 
-    pub fn ansi_dll_path(&self) -> &'a CStr {
+    pub const fn ansi_dll_path(&self) -> &'a CStr {
+        // SAFETY: payload.ansi_dll_path_with_nul is guaranteed to be a valid null-terminated byte string
         unsafe { CStr::from_bytes_with_nul_unchecked(self.payload.ansi_dll_path_with_nul) }
     }
 }
@@ -61,9 +69,11 @@ static CLIENT: SyncUnsafeCell<MaybeUninit<Client<'static>>> =
     SyncUnsafeCell::new(MaybeUninit::uninit());
 
 pub unsafe fn set_global_client(client: Client<'static>) {
+    // SAFETY: called once during DLL_PROCESS_ATTACH before any concurrent access
     unsafe { *CLIENT.get() = MaybeUninit::new(client) }
 }
 
 pub unsafe fn global_client() -> &'static Client<'static> {
+    // SAFETY: CLIENT is initialized via set_global_client during DLL_PROCESS_ATTACH
     unsafe { (*CLIENT.get()).assume_init_ref() }
 }

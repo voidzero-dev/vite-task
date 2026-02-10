@@ -20,8 +20,11 @@ use winapi::um::processthreadsapi::{
 #[test(tokio::test)]
 async fn create_process_a() -> anyhow::Result<()> {
     let accesses = track_child!((), |(): ()| {
+        // SAFETY: zeroing STARTUPINFOA is valid for the Windows API
         let mut si: STARTUPINFOA = unsafe { std::mem::zeroed() };
+        // SAFETY: zeroing PROCESS_INFORMATION is valid for the Windows API
         let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: all pointers are valid or null_mut as required by CreateProcessA
         unsafe {
             CreateProcessA(
                 c"C:\\fspy_test_not_exist_program.exe".as_ptr().cast(),
@@ -32,8 +35,8 @@ async fn create_process_a() -> anyhow::Result<()> {
                 0,
                 null_mut(),
                 null_mut(),
-                &mut si,
-                &mut pi,
+                &raw mut si,
+                &raw mut pi,
             )
         };
     })
@@ -46,10 +49,13 @@ async fn create_process_a() -> anyhow::Result<()> {
 #[test(tokio::test)]
 async fn create_process_w() -> anyhow::Result<()> {
     let accesses = track_child!((), |(): ()| {
+        // SAFETY: zeroing STARTUPINFOW is valid for the Windows API
         let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
+        // SAFETY: zeroing PROCESS_INFORMATION is valid for the Windows API
         let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
         let program =
             OsStr::new("C:\\fspy_test_not_exist_program.exe\0").encode_wide().collect::<Vec<u16>>();
+        // SAFETY: all pointers are valid or null_mut as required by CreateProcessW
         unsafe {
             CreateProcessW(
                 program.as_ptr(),
@@ -60,8 +66,8 @@ async fn create_process_w() -> anyhow::Result<()> {
                 0,
                 null_mut(),
                 null_mut(),
-                &mut si,
-                &mut pi,
+                &raw mut si,
+                &raw mut pi,
             )
         };
     })

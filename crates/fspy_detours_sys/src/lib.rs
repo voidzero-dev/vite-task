@@ -1,6 +1,12 @@
 #![cfg(windows)]
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "non-vite crate"
+)]
 
-#[allow(non_camel_case_types, non_snake_case)]
+#[expect(non_camel_case_types, non_snake_case, reason = "generated FFI bindings")]
 #[rustfmt::skip] // generated code is formatted by prettyplease, not rustfmt
 mod generated_bindings;
 

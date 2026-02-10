@@ -200,8 +200,9 @@ pub fn fingerprint_path(
     Ok(PathFingerprint::FileContentHash(hash_content(reader)?))
 }
 
-/// Process a directory on Windows using std::fs::read_dir
+/// Process a directory on Windows using `std::fs::read_dir`
 #[cfg(windows)]
+#[expect(clippy::disallowed_types, reason = "Windows fallback uses std::path::Path directly")]
 fn process_directory(
     path: &std::path::Path,
     path_read: PathRead,
