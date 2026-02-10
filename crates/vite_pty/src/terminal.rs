@@ -5,13 +5,13 @@ use std::{
 };
 
 pub use portable_pty::CommandBuilder;
-use portable_pty::{ChildKiller, ExitStatus, PtyPair};
+use portable_pty::{ChildKiller, ExitStatus, MasterPty};
 
 use crate::geo::ScreenSize;
 
 /// A headless terminal
 pub struct Terminal {
-    pty_pair: PtyPair,
+    master: Box<dyn MasterPty + Send>,
     parser: vt100::Parser<Vt100Callbacks>,
     child_killer: Box<dyn ChildKiller + Send + Sync>,
     reader: Box<dyn Read + Send>,
@@ -72,10 +72,13 @@ impl Terminal {
         })?;
         // Create reader BEFORE spawning child to ensure it's ready for data
         let reader = pty_pair.master.try_clone_reader()?;
-        let mut child = pty_pair.slave.spawn_command(cmd)?;
-        let child_killer = child.clone_killer();
         let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
+        // Spawn child and immediately drop slave to ensure EOF is signaled when child exits
+        let mut child = pty_pair.slave.spawn_command(cmd)?;
+        let child_killer = child.clone_killer();
+        drop(pty_pair.slave); // Critical: drop slave so EOF is signaled when child exits
+        let master = pty_pair.master;
         let exit_status: Arc<OnceLock<ExitStatus>> = Arc::new(OnceLock::new());
 
         // Background thread: wait for child to exit, set exit status, then close writer to trigger EOF
@@ -93,7 +96,7 @@ impl Terminal {
         });
 
         Ok(Self {
-            pty_pair,
+            master,
             parser: vt100::Parser::new_with_callbacks(
                 size.rows,
                 size.cols,
@@ -266,7 +269,7 @@ impl Terminal {
     /// Returns an error if the PTY cannot be resized.
     pub fn resize(&mut self, size: ScreenSize) -> anyhow::Result<()> {
         // Resize the underlying PTY via portable-pty's MasterPty::resize
-        self.pty_pair.master.resize(portable_pty::PtySize {
+        self.master.resize(portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
             pixel_width: 0,
