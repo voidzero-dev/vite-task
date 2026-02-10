@@ -1,3 +1,6 @@
+// ouroboros generates async builder methods that cannot satisfy Send bounds
+#![expect(clippy::future_not_send)]
+
 use std::io;
 
 use bincode::borrow_decode_from_slice;

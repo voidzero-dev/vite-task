@@ -7,8 +7,6 @@ mod artifact;
 
 pub mod error;
 
-// ouroboros generates async builder methods that cannot satisfy Send bounds
-#[expect(clippy::future_not_send)]
 mod ipc;
 
 #[cfg(unix)]
@@ -19,9 +17,7 @@ mod os_impl;
 #[path = "./windows/mod.rs"]
 mod os_impl;
 
-// ouroboros generates async builder methods that cannot satisfy Send bounds
 #[cfg(unix)]
-#[expect(clippy::future_not_send)]
 mod arena;
 mod command;
 
