@@ -1,5 +1,6 @@
 #![cfg_attr(target_os = "windows", feature(windows_process_extensions_main_thread_handle))]
 #![feature(once_cell_try)]
+// non-vite crate, String/Path/PathBuf/format! etc. are allowed
 #![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
 
 // Persist the injected DLL/shared library somewhere in the filesystem.

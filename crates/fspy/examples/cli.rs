@@ -1,3 +1,4 @@
+// non-vite crate, String/Path/PathBuf/format! etc. are allowed
 #![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
 
 use std::{env::args_os, ffi::OsStr, path::PathBuf, pin::Pin};
