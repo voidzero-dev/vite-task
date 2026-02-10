@@ -99,14 +99,14 @@ impl Deref for Sender {
     }
 }
 
-// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
 #[expect(
     clippy::non_send_fields_in_send_ty,
     reason = "`Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to"
 )]
+/// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
 unsafe impl Send for Sender {}
 
-// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
+/// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
 unsafe impl Sync for Sender {}
 
 /// The unique receiver side of an IPC channel.
@@ -117,14 +117,14 @@ pub struct Receiver {
     shm: Shmem,
 }
 
-// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
 #[expect(
     clippy::non_send_fields_in_send_ty,
     reason = "Receiver doesn't read or write `shm`. It only pass it to `ReceiverLockGuard` under the lock"
 )]
+/// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
 unsafe impl Send for Receiver {}
 
-// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
+/// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
 unsafe impl Sync for Receiver {}
 
 impl Drop for Receiver {

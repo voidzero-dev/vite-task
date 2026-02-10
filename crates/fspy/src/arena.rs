@@ -34,9 +34,9 @@ impl PathAccessArena {
     }
 }
 
-// SAFETY: PathAccessArena is only sent between threads during initialization; bump and accesses are safe to send together
 #[expect(
     clippy::non_send_fields_in_send_ty,
     reason = "bump and accesses are safe to be sent across threads together"
 )]
+/// SAFETY: bump and accesses are safe to send together
 unsafe impl Send for PathAccessArena {}
