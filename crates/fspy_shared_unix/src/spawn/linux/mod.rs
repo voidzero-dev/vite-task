@@ -14,6 +14,11 @@ const LD_PRELOAD: &str = "LD_PRELOAD";
 
 pub struct PreExec(SeccompPayload);
 impl PreExec {
+    /// Installs the seccomp unotify filter for the current process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the seccomp filter installation fails.
     pub fn run(&self) -> nix::Result<()> {
         install_target(&self.0)
     }
@@ -24,6 +29,7 @@ pub fn handle_exec(
     encoded_payload: &EncodedPayload,
 ) -> nix::Result<Option<PreExec>> {
     let executable_fd = open_executable(Path::new(OsStr::from_bytes(&command.program)))?;
+    // SAFETY: The file descriptor is valid and we only read from the mapping.
     let executable_mmap = unsafe { Mmap::map(&executable_fd) }
         .map_err(|io_error| nix::Error::try_from(io_error).unwrap_or(nix::Error::UnknownErrno))?;
     if elf::is_dynamically_linked_to_libc(executable_mmap)? {

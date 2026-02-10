@@ -15,6 +15,7 @@ pub struct Payload {
     pub artifacts: Artifacts,
 
     #[cfg(target_os = "linux")]
+    #[expect(clippy::struct_field_names, reason = "descriptive field name for clarity")]
     pub seccomp_payload: fspy_seccomp_unotify::payload::SeccompPayload,
 }
 
