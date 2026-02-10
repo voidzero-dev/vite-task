@@ -174,6 +174,7 @@ impl PackageGraphBuilder {
 /// newtype of `DefaultIx` for indices in package graphs
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackageIx(DefaultIx);
+// SAFETY: PackageIx is a newtype over DefaultIx which already implements IndexType correctly
 unsafe impl petgraph::graph::IndexType for PackageIx {
     fn new(x: usize) -> Self {
         Self(DefaultIx::new(x))

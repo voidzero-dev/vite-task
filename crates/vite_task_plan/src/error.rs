@@ -1,5 +1,7 @@
-// Arc<Path> is used for non-UTF-8 path data in error types
-#[expect(clippy::disallowed_types)]
+#[expect(
+    clippy::disallowed_types,
+    reason = "Arc<Path> is used for non-UTF-8 path data in error types"
+)]
 use std::path::Path;
 use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, sync::Arc};
 
@@ -51,8 +53,7 @@ pub enum PathFingerprintErrorKind {
     PathOutsideWorkspace { path: Arc<AbsolutePath>, workspace_path: Arc<AbsolutePath> },
     #[error("Path {path:?} contains characters that make it non-portable")]
     NonPortableRelativePath {
-        // path may contain non-UTF-8 data
-        #[expect(clippy::disallowed_types)]
+        #[expect(clippy::disallowed_types, reason = "path may contain non-UTF-8 data")]
         path: Arc<Path>,
         #[source]
         error: InvalidPathDataError,

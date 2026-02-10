@@ -71,6 +71,9 @@ impl From<&AbsolutePath> for Arc<AbsolutePath> {
     fn from(path: &AbsolutePath) -> Self {
         let arc: Arc<Path> = path.0.into();
         let arc_raw = Arc::into_raw(arc) as *const AbsolutePath;
+        // SAFETY: AbsolutePath is #[repr(transparent)] over Path, so the pointer cast
+        // from Arc<Path> to Arc<AbsolutePath> preserves layout. The source path is
+        // already verified absolute since it comes from an &AbsolutePath.
         unsafe { Self::from_raw(arc_raw) }
     }
 }
@@ -79,6 +82,9 @@ impl From<&AbsolutePath> for Box<AbsolutePath> {
     fn from(path: &AbsolutePath) -> Self {
         let path_box: Box<Path> = path.0.into();
         let path_box_raw = Box::into_raw(path_box) as *mut AbsolutePath;
+        // SAFETY: AbsolutePath is #[repr(transparent)] over Path, so the pointer cast
+        // from Box<Path> to Box<AbsolutePath> preserves layout. The source path is
+        // already verified absolute since it comes from an &AbsolutePath.
         unsafe { Self::from_raw(path_box_raw) }
     }
 }
@@ -87,12 +93,20 @@ impl AbsolutePath {
     /// Creates a [`AbsolutePath`] if the give path is absolute.
     pub fn new<P: AsRef<Path> + ?Sized>(path: &P) -> Option<&Self> {
         let path = path.as_ref();
-        if path.is_absolute() { Some(unsafe { Self::assume_absolute(path) }) } else { None }
+        if path.is_absolute() {
+            // SAFETY: We just verified that path.is_absolute() is true.
+            Some(unsafe { Self::assume_absolute(path) })
+        } else {
+            None
+        }
     }
 
     #[cfg(feature = "absolute-redaction")]
-    // try_redact returns std String and uses std format!
-    #[expect(clippy::disallowed_types, clippy::disallowed_macros)]
+    #[expect(
+        clippy::disallowed_types,
+        clippy::disallowed_macros,
+        reason = "try_redact returns std String and uses std format!"
+    )]
     fn try_redact(&self) -> Result<Option<String>, String> {
         use redaction::REDACTION_PREFIX;
 
@@ -128,6 +142,7 @@ impl AbsolutePath {
     /// Converts `self` to an owned [`AbsolutePathBuf`].
     #[must_use]
     pub fn to_absolute_path_buf(&self) -> AbsolutePathBuf {
+        // SAFETY: self is already an AbsolutePath, so its path data is absolute.
         unsafe { AbsolutePathBuf::assume_absolute(self.0.to_path_buf()) }
     }
 
@@ -170,12 +185,14 @@ impl AbsolutePath {
     #[must_use]
     pub fn parent(&self) -> Option<&Self> {
         let parent_path = self.0.parent()?;
+        // SAFETY: The parent of an absolute path is always absolute.
         Some(unsafe { Self::assume_absolute(parent_path) })
     }
 
     /// Creates an owned [`AbsolutePathBuf`] like `self` but with the extension added.
     pub fn with_extension<S: AsRef<OsStr>>(&self, extension: S) -> AbsolutePathBuf {
         let path = self.0.with_extension(extension);
+        // SAFETY: Changing the extension of an absolute path preserves its absoluteness.
         unsafe { AbsolutePathBuf::assume_absolute(path) }
     }
 
@@ -217,6 +234,9 @@ impl From<AbsolutePathBuf> for Arc<AbsolutePath> {
     fn from(path: AbsolutePathBuf) -> Self {
         let arc: Arc<Path> = path.0.into();
         let arc_raw = Arc::into_raw(arc) as *const AbsolutePath;
+        // SAFETY: AbsolutePath is #[repr(transparent)] over Path, so the pointer cast
+        // from Arc<Path> to Arc<AbsolutePath> preserves layout. The source path is
+        // already verified absolute since it comes from an AbsolutePathBuf.
         unsafe { Self::from_raw(arc_raw) }
     }
 }
@@ -224,7 +244,12 @@ impl From<AbsolutePathBuf> for Arc<AbsolutePath> {
 impl AbsolutePathBuf {
     #[must_use]
     pub fn new(path: PathBuf) -> Option<Self> {
-        if path.is_absolute() { Some(unsafe { Self::assume_absolute(path) }) } else { None }
+        if path.is_absolute() {
+            // SAFETY: We just verified that path.is_absolute() is true.
+            Some(unsafe { Self::assume_absolute(path) })
+        } else {
+            None
+        }
     }
 
     /// # Safety
@@ -236,6 +261,7 @@ impl AbsolutePathBuf {
 
     #[must_use]
     pub fn as_absolute_path(&self) -> &AbsolutePath {
+        // SAFETY: self is an AbsolutePathBuf, so its inner PathBuf is guaranteed absolute.
         unsafe { AbsolutePath::assume_absolute(self.0.as_path()) }
     }
 

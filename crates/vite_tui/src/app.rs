@@ -22,8 +22,10 @@ pub struct App {
     action_rx: mpsc::UnboundedReceiver<Action>,
 
     tasks_list: TasksList,
-    // vite_tui is a standalone TUI app, not using vite_str
-    #[expect(clippy::disallowed_types)]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "vite_tui is a standalone TUI app, not using vite_str"
+    )]
     tasks_pane: FxHashMap</* task name */ String, TasksPane>,
     left_panel_area: Rect,
 }
@@ -253,7 +255,10 @@ impl App {
         Ok(())
     }
 
-    #[expect(clippy::disallowed_macros)]
+    #[expect(
+        clippy::disallowed_macros,
+        reason = "vite_tui is a standalone TUI app, not using vite_str"
+    )]
     fn render(&mut self, tui: &mut Tui) -> Result<()> {
         tui.draw(|frame| {
             if let Err(err) = self.draw(frame) {

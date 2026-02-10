@@ -71,6 +71,8 @@ impl RelativePath {
     /// Panics if the stripped path contains non-UTF-8 characters, which should not happen for valid `RelativePath` instances.
     pub fn strip_prefix<P: AsRef<Self>>(&self, base: P) -> Option<&Self> {
         let stripped_path = Path::new(self.as_str()).strip_prefix(base.as_ref().as_path()).ok()?;
+        // SAFETY: The stripped result of a portable RelativePath is still portable:
+        // it remains valid UTF-8 and contains no backslash separators.
         Some(unsafe { Self::assume_portable(stripped_path.to_str().unwrap()) })
     }
 }
@@ -79,7 +81,10 @@ impl RelativePath {
 #[derive(
     Debug, Encode, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, Default,
 )]
-#[expect(clippy::unsafe_derive_deserialize)]
+#[expect(
+    clippy::unsafe_derive_deserialize,
+    reason = "unsafe in Decode impl validates portability invariants"
+)]
 pub struct RelativePathBuf(Str);
 
 impl AsRef<Path> for RelativePathBuf {
@@ -183,6 +188,8 @@ impl RelativePathBuf {
 
     #[must_use]
     pub fn as_relative_path(&self) -> &RelativePath {
+        // SAFETY: RelativePathBuf's constructors (new, Decode) validate portability
+        // invariants, so the inner string is guaranteed to be a valid portable path.
         unsafe { RelativePath::assume_portable(&self.0) }
     }
 }
@@ -191,8 +198,10 @@ impl<Context> Decode<Context> for RelativePathBuf {
     fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let path_str = Str::decode(decoder)?;
         Self::new(path_str.as_str()).map_err(|err| {
-            // bincode::error::DecodeError requires std format!
-            #[expect(clippy::disallowed_macros)]
+            #[expect(
+                clippy::disallowed_macros,
+                reason = "bincode::error::DecodeError requires std format!"
+            )]
             let msg = format!("{err}: {path_str}");
             DecodeError::OtherString(msg)
         })
@@ -273,8 +282,7 @@ mod ts_impl {
 
     use super::RelativePathBuf;
 
-    // ts_rs::TS trait requires returning std String
-    #[expect(clippy::disallowed_types)]
+    #[expect(clippy::disallowed_types, reason = "ts_rs::TS trait requires returning std String")]
     impl TS for RelativePathBuf {
         type OptionInnerType = Self;
         type WithoutGenerics = Self;

@@ -12,8 +12,7 @@ pub trait GetKey {
         Self: 'a;
     /// # Errors
     /// Returns an error if the key cannot be computed.
-    // trait error type is String for simplicity
-    #[expect(clippy::disallowed_types)]
+    #[expect(clippy::disallowed_types, reason = "trait error type is String for simplicity")]
     fn key(&self) -> Result<Self::Key<'_>, String>;
 }
 
@@ -93,8 +92,7 @@ mod tests {
         where
             Self: 'a;
 
-        // trait requires String error type
-        #[expect(clippy::disallowed_types)]
+        #[expect(clippy::disallowed_types, reason = "trait requires String error type")]
         fn key(&self) -> Result<Self::Key<'_>, String> {
             Ok(self.id)
         }

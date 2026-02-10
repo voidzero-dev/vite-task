@@ -1,5 +1,7 @@
-// Path is needed for cd command argument and error reporting
-#[expect(clippy::disallowed_types)]
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path is needed for cd command argument and error reporting"
+)]
 use std::path::Path;
 use std::{
     borrow::Cow,
@@ -54,7 +56,7 @@ fn which(
         .into())
 }
 
-#[expect(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines, reason = "sequential planning steps are clearer in one function")]
 #[expect(clippy::future_not_send, reason = "PlanContext contains !Send dyn PlanRequestParser")]
 async fn plan_task_as_execution_node(
     task_node_index: TaskNodeIndex,
@@ -104,8 +106,10 @@ async fn plan_task_as_execution_node(
 
             // Handle `cd` builtin command
             if and_item.program == "cd" {
-                // Path is needed for std::env::home_dir return type and AbsolutePath::join
-                #[expect(clippy::disallowed_types)]
+                #[expect(
+                    clippy::disallowed_types,
+                    reason = "Path is needed for std::env::home_dir return type and AbsolutePath::join"
+                )]
                 let cd_target: Cow<'_, Path> = match args.as_slice() {
                     // No args, go to home directory
                     [] => home_dir()
@@ -230,8 +234,7 @@ async fn plan_task_as_execution_node(
             items.push(ExecutionItem { execution_item_display, kind: execution_item_kind });
         }
     } else {
-        // PathBuf needed for which fallback path
-        #[expect(clippy::disallowed_types)]
+        #[expect(clippy::disallowed_types, reason = "PathBuf needed for which fallback path")]
         static SHELL_PROGRAM_PATH: LazyLock<Arc<AbsolutePath>> =
             LazyLock::new(|| {
                 if cfg!(target_os = "windows") {
@@ -387,8 +390,10 @@ fn plan_spawn_execution(
                 let program_name_str = match program_name_os_str.to_str() {
                     Some(s) => s,
                     None => {
-                        // Arc<Path> for non-UTF-8 path data in error
-                        #[expect(clippy::disallowed_types)]
+                        #[expect(
+                            clippy::disallowed_types,
+                            reason = "Arc<Path> for non-UTF-8 path data in error"
+                        )]
                         return Err(PathFingerprintError {
                             kind: PathFingerprintErrorKind::NonPortableRelativePath {
                                 path: Path::new(program_name_os_str).into(),

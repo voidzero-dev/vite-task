@@ -59,8 +59,10 @@ impl InProcessExecution {
         match name {
             "echo" => {
                 let mut strings = Vec::new();
-                // side effect (push to strings) makes map_or unsuitable
-                #[expect(clippy::option_if_let_else)]
+                #[expect(
+                    clippy::option_if_let_else,
+                    reason = "side effect (push to strings) makes map_or unsuitable"
+                )]
                 let trailing_newline = if let Some(first_arg) = args.next() {
                     let first_arg = first_arg.as_ref();
                     if first_arg == "-n" {

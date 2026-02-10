@@ -30,6 +30,7 @@ fn get_fd_path(fd: RawFd) -> nix::Result<Option<PathBuf>> {
     }
     let mut path = std::path::PathBuf::new();
     match nix::fcntl::fcntl(
+        // SAFETY: fd is a valid file descriptor provided by the caller, and the borrow does not outlive this function call
         unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) },
         nix::fcntl::FcntlArg::F_GETPATH(&mut path),
     ) {
@@ -64,6 +65,7 @@ impl ToAbsolutePath for PathAt {
         self,
         f: F,
     ) -> nix::Result<R> {
+        // SAFETY: self.1 is a non-null pointer to a valid null-terminated C string, as guaranteed by the libc calling convention
         let pathname = unsafe { CStr::from_ptr(self.1) }.to_bytes().as_bstr();
 
         if pathname.first().copied() == Some(b'/') {
@@ -85,6 +87,7 @@ impl ToAbsolutePath for *const c_char {
         self,
         f: F,
     ) -> nix::Result<R> {
+        // SAFETY: delegates to PathAt::to_absolute_path with AT_FDCWD and the caller-provided C string pointer
         unsafe { PathAt(libc::AT_FDCWD, self).to_absolute_path(f) }
     }
 }
@@ -113,6 +116,7 @@ impl ToAccessMode for OpenFlags {
 pub struct ModeStr(pub *const c_char);
 impl ToAccessMode for ModeStr {
     unsafe fn to_access_mode(self) -> AccessMode {
+        // SAFETY: self.0 is a non-null pointer to a valid null-terminated C string, as guaranteed by the libc calling convention
         let mode_str = unsafe { CStr::from_ptr(self.0) }.to_bytes().as_bstr();
         let has_read = mode_str.contains(&b'r');
         let has_write = mode_str.contains(&b'w') || mode_str.contains(&b'a');

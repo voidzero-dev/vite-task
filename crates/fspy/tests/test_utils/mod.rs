@@ -3,9 +3,18 @@ use std::path::{Path, PathBuf, StripPrefixError};
 use fspy::{AccessMode, PathAccessIterable};
 // Used by the track_child! macro; not all test files use this macro
 #[doc(hidden)]
-#[expect(clippy::useless_attribute)]
-#[expect(clippy::allow_attributes)]
-#[allow(unused_imports)]
+#[expect(
+    clippy::useless_attribute,
+    reason = "allow attribute on re-export required for macro usage"
+)]
+#[expect(
+    clippy::allow_attributes,
+    reason = "allow attribute on re-export required for macro usage"
+)]
+#[allow(
+    unused_imports,
+    reason = "used by track_child! macro; not all test files use this macro"
+)]
 pub use fspy_test_utils::command_executing;
 
 /// # Panics
@@ -57,8 +66,11 @@ macro_rules! track_child {
 
 // Used by the track_child! macro; not all test files use this macro
 #[doc(hidden)]
-#[expect(clippy::allow_attributes)]
-#[allow(dead_code)]
+#[expect(
+    clippy::allow_attributes,
+    reason = "allow attribute required for conditionally-used helper"
+)]
+#[allow(dead_code, reason = "used by track_child! macro; not all test files use this macro")]
 pub async fn spawn_std(std_cmd: std::process::Command) -> anyhow::Result<PathAccessIterable> {
     let mut command = fspy::Command::new(std_cmd.get_program());
     command

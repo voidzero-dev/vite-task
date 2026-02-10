@@ -1,5 +1,9 @@
-// non-vite crate, String/Path/PathBuf/format! etc. are allowed
-#![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "non-vite crate"
+)]
 
 use std::{
     collections::{BTreeMap, btree_map::Entry},
@@ -59,7 +63,11 @@ impl AccessCollector {
 }
 
 #[tokio::main]
-#[expect(clippy::print_stdout, clippy::print_stderr)]
+#[expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "CLI tool that outputs results and errors to stdout/stderr"
+)]
 async fn main() {
     let mut args = args();
     args.next(); // skip the first argument (the program name)

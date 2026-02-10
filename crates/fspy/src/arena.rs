@@ -1,5 +1,7 @@
-// ouroboros generates async builder methods that cannot satisfy Send bounds
-#![expect(clippy::future_not_send)]
+#![expect(
+    clippy::future_not_send,
+    reason = "ouroboros generates async builder methods that cannot satisfy Send bounds"
+)]
 
 use allocator_api2::vec::Vec;
 use bumpalo::Bump;
@@ -32,6 +34,9 @@ impl PathAccessArena {
     }
 }
 
-// Safety: bump and accesses are safe to be sent across threads together
-#[expect(clippy::non_send_fields_in_send_ty)]
+// SAFETY: PathAccessArena is only sent between threads during initialization; bump and accesses are safe to send together
+#[expect(
+    clippy::non_send_fields_in_send_ty,
+    reason = "bump and accesses are safe to be sent across threads together"
+)]
 unsafe impl Send for PathAccessArena {}

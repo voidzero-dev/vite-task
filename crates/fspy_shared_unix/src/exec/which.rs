@@ -11,12 +11,17 @@ fn concat<R>(s: &[&BStr], callback: impl FnOnce(&BStr) -> R) -> R {
             let bytes: &[u8] = s.as_ref();
             let src_ptr = bytes.as_ptr();
             let dst_ptr = buf[pos..next_pos].as_mut_ptr().cast::<u8>();
+            // SAFETY: `src_ptr` and `dst_ptr` are derived from valid slices of known lengths,
+            // they do not overlap (src is from the input slice, dst is from the stack-allocated buffer),
+            // and `s.len()` bytes are within bounds for both.
             unsafe {
                 std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, s.len());
             }
             pos = next_pos;
         }
         debug_assert_eq!(pos, buf.len());
+        // SAFETY: `buf.as_ptr()` points to a valid allocation of `buf.len()` bytes that was
+        // fully initialized by the copy loop above (verified by the debug_assert).
         let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), buf.len()) };
         callback(bytes.as_bstr())
     })

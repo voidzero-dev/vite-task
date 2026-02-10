@@ -27,6 +27,8 @@ unimplemented = "warn"
 print_stdout = "warn"
 print_stderr = "warn"
 allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+undocumented_unsafe_blocks = "warn"
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }

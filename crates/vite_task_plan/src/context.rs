@@ -46,7 +46,7 @@ pub struct PlanContext<'a> {
 pub struct TaskCallStackFrameDisplay {
     pub task_display: TaskDisplay,
 
-    #[expect(dead_code)] // To be used in terminal error display
+    #[expect(dead_code, reason = "to be used in terminal error display")]
     pub command_span: Range<usize>,
 }
 

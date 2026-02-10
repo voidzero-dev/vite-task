@@ -11,7 +11,7 @@ use serde::Serialize;
 /// and serializes losslessly to utf8 for outputting debug json
 
 #[derive(Encode, Decode)]
-#[expect(dead_code)]
+#[expect(dead_code, reason = "struct fields accessed via Deref<Target = Vec<u8>>")]
 pub struct MaybeString(Vec<u8>);
 
 impl From<Vec<u8>> for MaybeString {

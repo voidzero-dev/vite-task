@@ -140,7 +140,7 @@ impl UserRunConfig {
     #[cfg(all(test, not(clippy)))]
     #[must_use]
     // test code: uses std types for convenience
-    #[expect(clippy::disallowed_types)]
+    #[expect(clippy::disallowed_types, reason = "test code uses std types for convenience")]
     pub fn generate_ts_definition() -> String {
         use std::{
             io::Write,
@@ -208,14 +208,18 @@ impl UserRunConfig {
 #[cfg(all(test, not(clippy)))]
 mod ts_tests {
     // test code: uses std types for convenience
-    #[expect(clippy::disallowed_types)]
+    #[expect(clippy::disallowed_types, reason = "test code uses std types for convenience")]
     use std::{env, path::PathBuf};
 
     use super::UserRunConfig;
 
     #[test]
     // test code: uses std types for convenience
-    #[expect(clippy::disallowed_methods, clippy::disallowed_types)]
+    #[expect(
+        clippy::disallowed_methods,
+        clippy::disallowed_types,
+        reason = "test code uses std types for convenience"
+    )]
     fn typescript_generation() {
         let file_path =
             PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("run-config.ts");

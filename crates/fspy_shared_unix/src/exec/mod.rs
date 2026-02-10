@@ -60,8 +60,15 @@ pub struct Exec {
 }
 
 fn getenv(name: &CStr) -> Option<&'static CStr> {
+    // SAFETY: `getenv` is a C standard library function, called with a valid pointer from `CStr::as_ptr`.
     let value = unsafe { nix::libc::getenv(name.as_ptr().cast()) };
-    if value.is_null() { None } else { Some(unsafe { CStr::from_ptr(value) }) }
+    if value.is_null() {
+        None
+    } else {
+        // SAFETY: `value` is non-null (checked above) and points to a null-terminated string owned
+        // by the environment, as guaranteed by the C `getenv` contract.
+        Some(unsafe { CStr::from_ptr(value) })
+    }
 }
 
 fn peek_executable(path: &Path, buf: &mut [u8]) -> nix::Result<usize> {

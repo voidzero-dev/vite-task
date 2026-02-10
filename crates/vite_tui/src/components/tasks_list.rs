@@ -11,8 +11,10 @@ use ratatui::{
 use super::{Action, Component};
 
 pub struct TasksList {
-    // vite_tui is a standalone TUI app, not using vite_str
-    #[expect(clippy::disallowed_types)]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "vite_tui is a standalone TUI app, not using vite_str"
+    )]
     tasks: Vec<String>,
     // States
     selection: usize,
@@ -20,8 +22,10 @@ pub struct TasksList {
 }
 
 impl TasksList {
-    // vite_tui is a standalone TUI app, not using vite_str
-    #[expect(clippy::disallowed_types)]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "vite_tui is a standalone TUI app, not using vite_str"
+    )]
     pub const fn new(tasks: Vec<String>) -> Self {
         Self { state: TableState::new(), selection: 0, tasks }
     }

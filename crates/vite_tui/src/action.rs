@@ -1,4 +1,4 @@
-#[expect(unused)]
+#[expect(unused, reason = "TUI actions defined for future use")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Tick,

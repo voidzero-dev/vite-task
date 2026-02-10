@@ -1,6 +1,10 @@
 #![cfg(target_os = "linux")]
-// non-vite crate, String/Path/PathBuf/format! etc. are allowed
-#![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "non-vite crate"
+)]
 
 use std::{
     fs::{self, Permissions},

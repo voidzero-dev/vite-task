@@ -20,8 +20,10 @@ pub struct Client {
     ipc_sender: Option<Sender>,
 }
 
+// SAFETY: Client fields are only mutated during initialization in the ctor; after that, all access is read-only
 #[cfg(target_os = "macos")]
 unsafe impl Sync for Client {}
+// SAFETY: Client is only sent once during initialization; after that it lives in a static OnceLock
 #[cfg(target_os = "macos")]
 unsafe impl Send for Client {}
 
@@ -32,8 +34,10 @@ impl Debug for Client {
 }
 
 impl Client {
-    // preload library intentionally uses stderr for error reporting
-    #[expect(clippy::print_stderr)]
+    #[expect(
+        clippy::print_stderr,
+        reason = "preload library intentionally uses stderr for error reporting"
+    )]
     #[cfg(not(test))]
     fn from_env() -> Self {
         use fspy_shared_unix::payload::decode_payload_from_env;
@@ -87,6 +91,7 @@ impl Client {
         raw_exec: RawExec,
         f: impl FnOnce(RawExec, Option<PreExec>) -> nix::Result<R>,
     ) -> nix::Result<R> {
+        // SAFETY: raw_exec contains valid pointers to C strings and null-terminated arrays, as provided by the caller
         let mut exec = unsafe { raw_exec.to_exec() };
         let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |path_access| {
             self.send(path_access).unwrap();
@@ -99,7 +104,9 @@ impl Client {
         path: impl ToAbsolutePath,
         mode: impl ToAccessMode,
     ) -> anyhow::Result<()> {
+        // SAFETY: mode contains a valid pointer (if ModeStr) or a plain value, as provided by the caller
         let mode = unsafe { mode.to_access_mode() };
+        // SAFETY: path contains valid pointers to C strings/file descriptors, as provided by the caller
         let () = unsafe {
             path.to_absolute_path(|abs_path| {
                 let Some(abs_path) = abs_path else {
@@ -121,6 +128,7 @@ pub fn global_client() -> Option<&'static Client> {
 
 pub unsafe fn handle_open(path: impl ToAbsolutePath, mode: impl ToAccessMode) {
     if let Some(client) = global_client() {
+        // SAFETY: path and mode contain valid pointers/values forwarded from the interposed function's caller
         unsafe { client.try_handle_open(path, mode) }.unwrap();
     }
 }

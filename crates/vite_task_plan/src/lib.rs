@@ -85,8 +85,10 @@ pub struct TaskExecution {
 impl vite_graph_ser::GetKey for TaskExecution {
     type Key<'a> = (&'a AbsolutePath, &'a str);
 
-    // vite_graph_ser::GetKey uses String in its trait definition
-    #[expect(clippy::disallowed_types)]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "vite_graph_ser::GetKey uses String in its trait definition"
+    )]
     fn key(&self) -> Result<Self::Key<'_>, String> {
         Ok((&self.task_display.package_path, &self.task_display.task_name))
     }

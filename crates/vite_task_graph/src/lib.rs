@@ -79,8 +79,7 @@ pub struct TaskNode {
 impl vite_graph_ser::GetKey for TaskNode {
     type Key<'a> = (&'a AbsolutePath, &'a str);
 
-    // trait requires String as error type
-    #[expect(clippy::disallowed_types)]
+    #[expect(clippy::disallowed_types, reason = "trait requires String as error type")]
     fn key(&self) -> Result<Self::Key<'_>, String> {
         Ok((&self.task_display.package_path, &self.task_display.task_name))
     }
@@ -150,6 +149,7 @@ pub enum SpecifierLookupError<PackageUnknownError = Infallible> {
 /// newtype of `DefaultIx` for indices in task graphs
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct TaskIx(DefaultIx);
+// SAFETY: TaskIx is a newtype over DefaultIx which already implements IndexType correctly
 unsafe impl IndexType for TaskIx {
     fn new(x: usize) -> Self {
         Self(DefaultIx::new(x))
@@ -198,8 +198,10 @@ impl IndexedTaskGraph {
         clippy::too_many_lines,
         reason = "graph loading is inherently sequential and multi-step"
     )]
-    // UserConfigLoader uses async_trait(?Send) so the future is intentionally not Send
-    #[expect(clippy::future_not_send)]
+    #[expect(
+        clippy::future_not_send,
+        reason = "UserConfigLoader uses async_trait(?Send) so the future is intentionally not Send"
+    )]
     pub async fn load(
         workspace_root: &WorkspaceRoot,
         config_loader: &dyn loader::UserConfigLoader,

@@ -17,8 +17,10 @@ type PosixSpawnFn = unsafe extern "C" fn(
     envp: *const *mut c_char,
 ) -> libc::c_int;
 
-// mirrors the posix_spawn(3) signature which requires all these parameters
-#[expect(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the posix_spawn(3) signature which requires all these parameters"
+)]
 unsafe fn handle_posix_spawn(
     config: ExecResolveConfig,
     original: PosixSpawnFn,
@@ -30,14 +32,17 @@ unsafe fn handle_posix_spawn(
     envp: *const *mut c_char,
 ) -> c_int {
     struct AssertSend<T>(T);
-    // Safety: the closure captures raw pointers that are valid for the duration
-    // of the thread::scope call, so sending them to the scoped thread is safe.
-    #[expect(clippy::non_send_fields_in_send_ty)]
+    #[expect(
+        clippy::non_send_fields_in_send_ty,
+        reason = "the closure captures raw pointers that are valid for the duration of the thread::scope call, so sending them to the scoped thread is safe"
+    )]
+    // SAFETY: the raw pointers captured inside T are valid for the duration of the thread::scope call, so sending them to the scoped thread is safe
     unsafe impl<T> Send for AssertSend<T> {}
 
     let client = global_client()
         .expect("posix_spawn(p) unexpectedly called before client initialized in ctor");
 
+    // SAFETY: file, argv, and envp are valid pointers forwarded from the interposed posix_spawn(p) function
     let result = unsafe {
         client.handle_exec::<c_int>(
             config,
@@ -86,6 +91,7 @@ unsafe extern "C" fn posix_spawnp(
     argv: *const *mut c_char,
     envp: *const *mut c_char,
 ) -> libc::c_int {
+    // SAFETY: all arguments are valid pointers forwarded from the interposed posix_spawnp function
     unsafe {
         handle_posix_spawn(
             ExecResolveConfig::search_path_enabled(None),
@@ -109,6 +115,7 @@ unsafe extern "C" fn posix_spawn(
     argv: *const *mut c_char,
     envp: *const *mut c_char,
 ) -> libc::c_int {
+    // SAFETY: all arguments are valid pointers forwarded from the interposed posix_spawn function
     unsafe {
         handle_posix_spawn(
             ExecResolveConfig::search_path_disabled(),

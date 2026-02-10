@@ -1,5 +1,9 @@
-// non-vite crate, String/Path/PathBuf/format! etc. are allowed
-#![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "non-vite crate"
+)]
 
 use std::{env::args_os, ffi::OsStr, path::PathBuf, pin::Pin};
 
@@ -42,8 +46,10 @@ async fn main() -> anyhow::Result<()> {
     }
     csv_writer.flush().await?;
 
-    // CLI example: stderr output is intentional for user feedback
-    #[expect(clippy::print_stderr)]
+    #[expect(
+        clippy::print_stderr,
+        reason = "CLI example: stderr output is intentional for user feedback"
+    )]
     {
         eprintln!("\nfspy: {path_count} paths accessed. status: {}", termination.status);
     }

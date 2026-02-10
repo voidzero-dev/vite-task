@@ -14,6 +14,7 @@ use crate::{
 
 #[cfg(target_os = "macos")]
 pub unsafe fn environ() -> *const *const c_char {
+    // SAFETY: _NSGetEnviron() always returns a valid pointer to the process's environ on macOS
     unsafe { *(libc::_NSGetEnviron().cast()) }
 }
 
@@ -33,6 +34,7 @@ fn handle_exec(
 ) -> libc::c_int {
     let client =
         global_client().expect("exec unexpectedly called before client initialized in ctor");
+    // SAFETY: prog, argv, and envp are valid pointers to C strings/arrays forwarded from the interposed exec function
     let result = unsafe {
         client.handle_exec(config, RawExec { prog, argv, envp }, |raw_command, pre_exec| {
             if let Some(pre_exec) = pre_exec {
@@ -65,9 +67,12 @@ unsafe extern "C" fn execve(
 
 intercept!(execl(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execl(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
-    // suppresses unused warning on *::original
-    #[expect(clippy::no_effect_underscore_binding)]
+    #[expect(
+        clippy::no_effect_underscore_binding,
+        reason = "suppresses unused warning on *::original"
+    )]
     let _unused = execl::original;
+    // SAFETY: valist and arg0 are valid variadic arguments forwarded from the interposed execl function
     unsafe {
         with_argv(valist, arg0, |args, _remaining| {
             handle_exec(ExecResolveConfig::search_path_disabled(), path, args.as_ptr(), environ())
@@ -77,9 +82,12 @@ unsafe extern "C" fn execl(path: *const c_char, arg0: *const c_char, valist: ...
 
 intercept!(execlp(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execlp(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
-    // suppresses unused warning on *::original
-    #[expect(clippy::no_effect_underscore_binding)]
+    #[expect(
+        clippy::no_effect_underscore_binding,
+        reason = "suppresses unused warning on *::original"
+    )]
     let _unused = execlp::original;
+    // SAFETY: valist and arg0 are valid variadic arguments forwarded from the interposed execlp function
     unsafe {
         with_argv(valist, arg0, |args, _remaining| {
             handle_exec(
@@ -94,9 +102,12 @@ unsafe extern "C" fn execlp(path: *const c_char, arg0: *const c_char, valist: ..
 
 intercept!(execle(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execle(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
-    // suppresses unused warning on *::original
-    #[expect(clippy::no_effect_underscore_binding)]
+    #[expect(
+        clippy::no_effect_underscore_binding,
+        reason = "suppresses unused warning on *::original"
+    )]
     let _unused = execle::original;
+    // SAFETY: valist and arg0 are valid variadic arguments forwarded from the interposed execle function
     unsafe {
         with_argv(valist, arg0, |args, mut remaining| {
             let envp = remaining.arg::<*const *const c_char>();
@@ -107,9 +118,12 @@ unsafe extern "C" fn execle(path: *const c_char, arg0: *const c_char, valist: ..
 
 intercept!(execv(64): unsafe extern "C" fn(path: *const c_char, argv: *const *const c_char) -> c_int);
 unsafe extern "C" fn execv(path: *const c_char, argv: *const *const c_char) -> c_int {
-    // suppresses unused warning on *::original
-    #[expect(clippy::no_effect_underscore_binding)]
+    #[expect(
+        clippy::no_effect_underscore_binding,
+        reason = "suppresses unused warning on *::original"
+    )]
     let _unused = execv::original;
+    // SAFETY: path, argv are valid pointers forwarded from the interposed function; environ() returns the process environment
     unsafe { handle_exec(ExecResolveConfig::search_path_disabled(), path, argv, environ()) }
 }
 
@@ -118,9 +132,12 @@ intercept!(execvp(64): unsafe extern "C" fn(
     argv: *const *const libc::c_char,
 ) -> c_int);
 unsafe extern "C" fn execvp(prog: *const c_char, argv: *const *const c_char) -> c_int {
-    // suppresses unused warning on *::original
-    #[expect(clippy::no_effect_underscore_binding)]
+    #[expect(
+        clippy::no_effect_underscore_binding,
+        reason = "suppresses unused warning on *::original"
+    )]
     let _unused = execvp::original;
+    // SAFETY: environ() returns the valid process environment pointer
     handle_exec(ExecResolveConfig::search_path_enabled(None), prog, argv, unsafe { environ() })
 }
 

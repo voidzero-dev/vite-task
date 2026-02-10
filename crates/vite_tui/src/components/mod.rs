@@ -17,7 +17,7 @@ use crate::{action::Action, tui::Event};
 ///
 /// Implementors of this trait can be registered with the main application loop and will be able to
 /// receive events, update state, and be rendered on the screen.
-#[expect(unused)]
+#[expect(unused, reason = "component trait methods defined for future use")]
 pub trait Component: Send {
     /// Register an action handler that can send actions for processing if necessary.
     ///

@@ -17,14 +17,18 @@ impl RawExec {
     ) -> Vec<T> {
         let mut count = 0usize;
         let mut cur_str = strs;
+        // SAFETY: cur_str points into a valid null-terminated array of C string pointers (argv/envp convention)
         while !(unsafe { *cur_str }).is_null() {
             count += 1;
+            // SAFETY: advancing within the bounds of the null-terminated pointer array
             cur_str = unsafe { cur_str.add(1) };
         }
 
         let mut str_vec = Vec::<T>::with_capacity(count);
         for i in 0..count {
+            // SAFETY: i < count, so strs.add(i) is within the bounds of the pointer array
             let cur_str = unsafe { strs.add(i) };
+            // SAFETY: *cur_str is a non-null pointer to a valid null-terminated C string (verified by the counting loop above)
             str_vec.push(map_fn(unsafe { CStr::from_ptr(*cur_str) }.to_bytes().as_bstr()));
         }
         str_vec
@@ -49,10 +53,13 @@ impl RawExec {
     }
 
     pub unsafe fn to_exec(self) -> Exec {
+        // SAFETY: self.prog is a non-null pointer to a valid null-terminated C string, as guaranteed by the libc exec calling convention
         let program = unsafe { CStr::from_ptr(self.prog) }.to_bytes().as_bstr().to_owned();
 
+        // SAFETY: self.argv is a valid null-terminated array of C string pointers, as guaranteed by the libc exec calling convention
         let args = unsafe { Self::collect_c_str_array(self.argv, BStr::to_owned) };
 
+        // SAFETY: self.envp is a valid null-terminated array of C string pointers, as guaranteed by the libc exec calling convention
         let envs = unsafe {
             Self::collect_c_str_array(self.envp, |env| {
                 env.iter().position(|b| *b == b'=').map_or_else(

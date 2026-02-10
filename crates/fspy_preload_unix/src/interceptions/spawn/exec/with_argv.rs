@@ -8,7 +8,6 @@ use libc::{c_char, c_int};
 use nix::Error;
 
 // https://github.com/redox-os/relibc/blob/710911febb07a43716a6236cc9e5b864e227e36e/src/header/unistd/mod.rs#L1094
-// arg0/argc are standard C naming conventions for these parameters
 #[expect(clippy::similar_names, reason = "arg0 and argc are standard C naming conventions")]
 pub unsafe fn with_argv(
     mut va: VaList,
@@ -32,11 +31,13 @@ pub unsafe fn with_argv(
         stack.as_mut_slice()
     } else if argc < 4096 {
         // TODO: Use ARG_MAX, not this hardcoded constant
+        // SAFETY: requesting a heap allocation of the correct size for argc pointers
         let ptr = unsafe { libc::malloc(argc * mem::size_of::<*const c_char>()) };
         if ptr.is_null() {
             Error::ENOMEM.set();
             return -1;
         }
+        // SAFETY: ptr is non-null (checked above), properly aligned, and points to argc elements worth of allocated memory
         unsafe { slice::from_raw_parts_mut(ptr.cast::<MaybeUninit<*const c_char>>(), argc) }
     } else {
         Error::E2BIG.set();
@@ -45,10 +46,11 @@ pub unsafe fn with_argv(
     out[0].write(arg0);
 
     for item in out.iter_mut().take(argc).skip(1) {
+        // SAFETY: extracting the next *const c_char argument from the va_list; the count was pre-validated
         item.write(unsafe { va.arg::<*const c_char>() });
     }
     out[argc].write(core::ptr::null());
-    // NULL
+    // SAFETY: consuming the NULL terminator from the va_list to advance past it
     unsafe { va.arg::<*const c_char>() };
 
     // Safety: MaybeUninit<*const c_char> has the same layout as *const c_char,
@@ -57,6 +59,7 @@ pub unsafe fn with_argv(
 
     // f only returns if it fails
     if argc >= 32 {
+        // SAFETY: out was allocated with libc::malloc above (argc >= 32 branch), so it must be freed with libc::free
         unsafe { libc::free(out.as_mut_ptr().cast()) };
     }
     -1

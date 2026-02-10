@@ -107,8 +107,10 @@ impl EnvFingerprints {
                 let value: Arc<str> = if sensitive_patterns.is_match(name) {
                     let mut hasher = Sha256::new();
                     hasher.update(value.as_bytes());
-                    // result is converted to Arc<str>, not Str
-                    #[expect(clippy::disallowed_macros)]
+                    #[expect(
+                        clippy::disallowed_macros,
+                        reason = "result is converted to Arc<str>, not Str"
+                    )]
                     format!("sha256:{:x}", hasher.finalize()).into()
                 } else {
                     value.into()

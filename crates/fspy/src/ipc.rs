@@ -1,5 +1,7 @@
-// ouroboros generates async builder methods that cannot satisfy Send bounds
-#![expect(clippy::future_not_send)]
+#![expect(
+    clippy::future_not_send,
+    reason = "ouroboros generates async builder methods that cannot satisfy Send bounds"
+)]
 
 use std::io;
 

@@ -15,8 +15,8 @@ macro_rules! intercept {
 
         mod $name {
             // macro-generated: imports may or may not be used depending on expansion context
-            #[expect(clippy::allow_attributes)]
-            #[allow(unused_imports)]
+            #[expect(clippy::allow_attributes, reason = "macro-generated: imports may or may not be used depending on expansion context")]
+            #[allow(unused_imports, reason = "macro-generated: imports may or may not be used depending on expansion context")]
             use super::*;
             pub fn original() -> $fn_sig {
                 $crate::libc::$name

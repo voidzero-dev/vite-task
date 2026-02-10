@@ -103,6 +103,7 @@ impl SpyImpl {
 
         let mut tokio_command = command.into_tokio_command();
 
+        // SAFETY: the pre_exec closure only calls pre_exec.run() which is safe to call in a fork context
         unsafe {
             tokio_command.pre_exec(move || {
                 if let Some(pre_exec) = pre_exec.as_ref() {
