@@ -84,9 +84,7 @@ jobs:
       - run: cargo test --target ${{ matrix.target }}
         if: ${{ matrix.os != 'ubuntu-latest' }}
 
-      # vite_pty uses subprocess_test (ctor crate) which is incompatible with zig linker;
-      # vite_pty is tested natively on macOS and Windows
-      - run: cargo-zigbuild test --target x86_64-unknown-linux-gnu.2.17 --exclude vite_pty
+      - run: cargo-zigbuild test --target x86_64-unknown-linux-gnu.2.17
         if: ${{ matrix.os == 'ubuntu-latest' }}
 
   fmt:
