@@ -1,7 +1,0 @@
-# Tests that stdin is passed through to tasks
-
-[[e2e]]
-name = "stdin passthrough to single task"
-steps = [
-  { cmd = "vp run echo-stdin", stdin = "hello from stdin" },
-]

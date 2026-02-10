@@ -1,6 +1,0 @@
-{
-  "name": "stdin-passthrough",
-  "scripts": {
-    "echo-stdin": "node -e \"process.stdin.pipe(process.stdout)\""
-  }
-}

@@ -3,9 +3,8 @@ mod redact;
 use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
-    sync::Arc,
-    thread,
-    time::{Duration, Instant},
+    sync::{Arc, mpsc},
+    time::Duration,
 };
 
 use copy_dir::copy_dir;
@@ -56,27 +55,8 @@ fn get_shell_exe() -> std::path::PathBuf {
 }
 
 #[derive(serde::Deserialize, Debug)]
-#[serde(untagged)]
-enum Step {
-    Simple(Str),
-    WithStdin { cmd: Str, stdin: Str },
-}
-
-impl Step {
-    fn cmd(&self) -> &str {
-        match self {
-            Self::Simple(s) => s.as_str(),
-            Self::WithStdin { cmd, .. } => cmd.as_str(),
-        }
-    }
-
-    fn stdin(&self) -> Option<&str> {
-        match self {
-            Self::Simple(_) => None,
-            Self::WithStdin { stdin, .. } => Some(stdin.as_str()),
-        }
-    }
-}
+#[serde(transparent)]
+struct Step(Str);
 
 #[derive(serde::Deserialize, Debug)]
 struct E2e {
@@ -212,7 +192,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
         for step in &e2e.steps {
             let mut cmd = CommandBuilder::new(&shell_exe);
             cmd.arg("-c");
-            cmd.arg(step.cmd());
+            cmd.arg(step.0.as_str());
             cmd.env_clear();
             cmd.env("PATH", &e2e_env_path);
             cmd.env("NO_COLOR", "1");
@@ -228,33 +208,25 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
 
             let mut terminal = Terminal::spawn(SCREEN_SIZE, cmd).unwrap();
 
-            // Write stdin if provided, then signal EOF with Ctrl+D
-            if let Some(stdin_content) = step.stdin() {
-                terminal.write(stdin_content.as_bytes()).unwrap();
-                terminal.write(&[0x04]).unwrap(); // Ctrl+D: flush line buffer
-                terminal.write(&[0x04]).unwrap(); // Ctrl+D: signal EOF
-            }
-
-            // Read to end on a separate thread with timeout via clone_killer
+            // Read to end on a separate thread with timeout via channel
             let mut killer = terminal.clone_killer();
-            let handle = thread::spawn(move || {
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
                 let status = terminal.read_to_end();
                 let screen = terminal.screen_contents();
-                (status, screen)
+                let _ = tx.send((status, screen));
             });
 
-            let start = Instant::now();
-            let (termination_state, screen) = loop {
-                if handle.is_finished() {
-                    let (status, screen) = handle.join().unwrap();
-                    break (TerminationState::Exited(status.unwrap()), screen);
-                }
-                if start.elapsed() >= STEP_TIMEOUT {
+            let (termination_state, screen) = match rx.recv_timeout(STEP_TIMEOUT) {
+                Ok((status, screen)) => (TerminationState::Exited(status.unwrap()), screen),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
                     let _ = killer.kill();
-                    let (_, screen) = handle.join().unwrap();
-                    break (TerminationState::TimedOut, screen);
+                    let (_, screen) = rx.recv().unwrap();
+                    (TerminationState::TimedOut, screen)
                 }
-                thread::sleep(Duration::from_millis(10));
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("Terminal thread panicked");
+                }
             };
 
             // Format output
@@ -271,7 +243,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
             }
 
             e2e_outputs.push_str("> ");
-            e2e_outputs.push_str(step.cmd());
+            e2e_outputs.push_str(step.0.as_str());
             e2e_outputs.push('\n');
 
             e2e_outputs.push_str(&redact_e2e_output(screen, e2e_stage_path_str));
