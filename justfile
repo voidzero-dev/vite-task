@@ -41,6 +41,12 @@ test:
 lint:
   cargo clippy --workspace --all-targets --all-features -- --deny warnings
 
+lint-linux:
+  cargo-zigbuild clippy --workspace --all-targets --all-features --target x86_64-unknown-linux-gnu -- --deny warnings
+
+lint-windows:
+  cargo-xwin clippy --workspace --all-targets --all-features --target x86_64-pc-windows-msvc -- --deny warnings
+
 [unix]
 doc:
   RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --document-private-items

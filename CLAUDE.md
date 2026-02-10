@@ -13,6 +13,8 @@ just fmt           # Format code (cargo fmt, cargo shear, dprint)
 just check         # Check compilation with all features
 just test          # Run all tests
 just lint          # Clippy linting
+just lint-linux    # Cross-clippy for Linux (requires cargo-zigbuild)
+just lint-windows  # Cross-clippy for Windows (requires cargo-xwin)
 just doc           # Documentation generation
 ```
 
@@ -87,6 +89,16 @@ Tasks are defined in `vite-task.json`:
 2. **Topological**: Based on package.json dependencies
    - With `-r/--recursive`: runs task across all packages in dependency order
    - With `-t/--transitive`: runs task in current package and its dependencies
+
+## Cross-Platform Linting
+
+After major changes (especially to `fspy*` or platform-specific crates), run cross-platform clippy before pushing:
+
+```bash
+just lint          # native (host platform)
+just lint-linux    # Linux via cargo-zigbuild
+just lint-windows  # Windows via cargo-xwin
+```
 
 ## Code Constraints
 
