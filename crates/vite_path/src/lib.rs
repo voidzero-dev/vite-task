@@ -1,3 +1,5 @@
+#![expect(clippy::disallowed_types, reason = "vite_path needs to use std path types internally")]
+
 pub mod absolute;
 pub mod relative;
 
@@ -20,6 +22,10 @@ pub use relative::{RelativePath, RelativePathBuf};
 ///
 /// Panics if `std::env::current_dir()` returns a non-absolute path, which should never happen in practice.
 pub fn current_dir() -> io::Result<AbsolutePathBuf> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "std current_dir needed to get the current working directory as an absolute path"
+    )]
     let cwd = std::env::current_dir()?;
     // `std::env::current_dir` should always return a absolute path but its documentation doesn't guarantee that.
     // Do a runtime check just in case.
