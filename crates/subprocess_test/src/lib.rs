@@ -1,3 +1,10 @@
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "subprocess_test is a standalone test utility, not using vite_str/vite_path"
+)]
+
 use std::{
     collections::HashMap, env::current_exe, ffi::OsString, path::PathBuf,
     process::Command as StdCommand,
@@ -18,7 +25,7 @@ pub struct Command {
 
 impl From<Command> for StdCommand {
     fn from(cmd: Command) -> Self {
-        let mut std_cmd = StdCommand::new(cmd.program);
+        let mut std_cmd = Self::new(cmd.program);
         std_cmd.args(cmd.args);
         std_cmd.env_clear().envs(cmd.envs);
         std_cmd.current_dir(cmd.cwd);
@@ -29,7 +36,7 @@ impl From<Command> for StdCommand {
 #[cfg(feature = "fspy")]
 impl From<Command> for fspy::Command {
     fn from(cmd: Command) -> Self {
-        let mut fspy_cmd = fspy::Command::new(cmd.program);
+        let mut fspy_cmd = Self::new(cmd.program);
         fspy_cmd.args(cmd.args).envs(cmd.envs);
         fspy_cmd.current_dir(cmd.cwd);
         fspy_cmd
@@ -39,7 +46,7 @@ impl From<Command> for fspy::Command {
 #[cfg(feature = "portable-pty")]
 impl From<Command> for portable_pty::CommandBuilder {
     fn from(cmd: Command) -> Self {
-        let mut cmd_builder = portable_pty::CommandBuilder::new(cmd.program);
+        let mut cmd_builder = Self::new(cmd.program);
         cmd_builder.args(cmd.args);
         cmd_builder.env_clear();
         for (key, value) in cmd.envs {

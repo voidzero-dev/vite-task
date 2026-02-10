@@ -38,16 +38,16 @@ impl TasksList {
         self.tasks.len()
     }
 
-    fn select(&mut self, selection: usize) {
+    const fn select(&mut self, selection: usize) {
         self.selection = selection;
         self.state.select(Some(selection));
     }
 
-    fn up(&mut self) {
+    const fn up(&mut self) {
         self.select(if self.selection == 0 { self.tasks.len() - 1 } else { self.selection - 1 });
     }
 
-    fn down(&mut self) {
+    const fn down(&mut self) {
         self.select(if self.selection == self.tasks.len() - 1 { 0 } else { self.selection + 1 });
     }
 }

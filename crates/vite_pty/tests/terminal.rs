@@ -1,3 +1,10 @@
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "non-vite crate"
+)]
+
 use std::{
     io::{IsTerminal, Write, stderr, stdin, stdout},
     thread,
@@ -11,9 +18,10 @@ use vite_pty::{geo::ScreenSize, terminal::Terminal};
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn is_terminal() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
-        println!("{} {} {}", stdin().is_terminal(), stdout().is_terminal(), stderr().is_terminal())
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
+        println!("{} {} {}", stdin().is_terminal(), stdout().is_terminal(), stderr().is_terminal());
     }));
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
@@ -24,8 +32,9 @@ fn is_terminal() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_single() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         println!("hello world");
     }));
 
@@ -40,8 +49,9 @@ fn read_until_single() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_multiple_sequential() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         thread::sleep(Duration::from_millis(10));
         print!("first second third");
         let _ = stdout().flush();
@@ -61,8 +71,9 @@ fn read_until_multiple_sequential() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_not_found() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         thread::sleep(Duration::from_millis(10));
         print!("hello world");
         let _ = stdout().flush();
@@ -76,8 +87,9 @@ fn read_until_not_found() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_with_read_to_end() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         thread::sleep(Duration::from_millis(10));
         print!("prefix middle suffix");
         let _ = stdout().flush();
@@ -96,9 +108,10 @@ fn read_until_with_read_to_end() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_boundary_spanning() {
     // Test case where expected string might span across read boundaries
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         // Write in small chunks to increase chance of boundary spanning
         print!("a");
         let _ = stdout().flush();
@@ -129,9 +142,10 @@ fn read_until_boundary_spanning() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_exact_boundary() {
     // Test where we search for something at the exact boundary
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         print!("first");
         let _ = stdout().flush();
         thread::sleep(Duration::from_millis(10));
@@ -150,9 +164,10 @@ fn read_until_exact_boundary() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_after_read_to_end() {
     // Test that read_until works with data that comes after EOF
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         println!("hello world foo bar");
     }));
 
@@ -174,17 +189,16 @@ fn read_until_after_read_to_end() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn write_basic_echo() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{BufRead, Write, stdin, stdout};
         let stdin = stdin();
         let mut stdout = stdout();
-        for line in stdin.lock().lines() {
-            if let Ok(line) = line {
-                print!("{}", line);
-                stdout.flush().unwrap();
-                break; // Exit after one line
-            }
+        let first_line = stdin.lock().lines().map_while(Result::ok).next();
+        if let Some(line) = first_line {
+            print!("{line}");
+            stdout.flush().unwrap();
         }
     }));
 
@@ -204,18 +218,17 @@ fn write_basic_echo() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn write_multiple_lines() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{BufRead, Write, stdin, stdout};
         let stdin = stdin();
         let mut stdout = stdout();
-        for line in stdin.lock().lines() {
-            if let Ok(line) = line {
-                print!("Echo: {}", line);
-                stdout.flush().unwrap();
-                if line == "third" {
-                    break; // Exit after third line
-                }
+        for line in stdin.lock().lines().map_while(Result::ok) {
+            print!("Echo: {line}");
+            stdout.flush().unwrap();
+            if line == "third" {
+                break;
             }
         }
     }));
@@ -239,8 +252,9 @@ fn write_multiple_lines() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn write_after_exit() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         print!("exiting");
     }));
 
@@ -258,14 +272,15 @@ fn write_after_exit() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn write_interactive_prompt() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdin, stdout};
         let mut stdout = stdout();
         print!("Name: ");
         stdout.flush().unwrap();
 
-        let mut input = String::new();
+        let mut input = std::string::String::new();
         stdin().read_line(&mut input).unwrap();
         print!("Hello, {}", input.trim());
         stdout.flush().unwrap();
@@ -289,27 +304,14 @@ fn write_interactive_prompt() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn resize_terminal() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdin, stdout};
         #[cfg(unix)]
         use std::sync::Arc;
         #[cfg(unix)]
         use std::sync::atomic::{AtomicBool, Ordering};
-
-        #[cfg(unix)]
-        let resized = Arc::new(AtomicBool::new(false));
-        #[cfg(unix)]
-        let resized_clone = Arc::clone(&resized);
-
-        // Install SIGWINCH handler on Unix
-        #[cfg(unix)]
-        unsafe {
-            signal_hook::low_level::register(signal_hook::consts::SIGWINCH, move || {
-                resized_clone.store(true, Ordering::SeqCst);
-            })
-            .unwrap();
-        }
 
         // Cross-platform function to get terminal size
         fn get_size() -> (u16, u16) {
@@ -322,13 +324,28 @@ fn resize_terminal() {
             }
         }
 
+        #[cfg(unix)]
+        let resized = Arc::new(AtomicBool::new(false));
+        #[cfg(unix)]
+        let resized_clone = Arc::clone(&resized);
+
+        // Install SIGWINCH handler on Unix
+        #[cfg(unix)]
+        // SAFETY: The closure only performs an atomic store, which is signal-safe.
+        unsafe {
+            signal_hook::low_level::register(signal_hook::consts::SIGWINCH, move || {
+                resized_clone.store(true, Ordering::SeqCst);
+            })
+            .unwrap();
+        }
+
         // Print initial size
         let (rows, cols) = get_size();
-        println!("initial: {} {}", rows, cols);
+        println!("initial: {rows} {cols}");
         stdout().flush().unwrap();
 
         // Wait for input to synchronize
-        let mut input = String::new();
+        let mut input = std::string::String::new();
         stdin().read_line(&mut input).unwrap();
 
         // On Unix, check if resize signal was detected
@@ -347,7 +364,7 @@ fn resize_terminal() {
 
         // Print new size
         let (rows, cols) = get_size();
-        println!("resized: {} {}", rows, cols);
+        println!("resized: {rows} {cols}");
         stdout().flush().unwrap();
     }));
 
@@ -373,8 +390,9 @@ fn resize_terminal() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn send_ctrl_c_interrupts_process() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdout};
         #[cfg(unix)]
         use std::sync::Arc;
@@ -388,6 +406,7 @@ fn send_ctrl_c_interrupts_process() {
 
         // Install SIGINT handler on Unix
         #[cfg(unix)]
+        // SAFETY: The closure only performs an atomic store, which is signal-safe.
         unsafe {
             signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
                 interrupted_clone.store(true, Ordering::SeqCst);
@@ -435,8 +454,9 @@ fn send_ctrl_c_interrupts_process() {
 
 #[test]
 #[timeout(5000)]
+#[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_to_end_returns_exit_status_success() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         println!("success");
     }));
 
@@ -449,7 +469,7 @@ fn read_to_end_returns_exit_status_success() {
 #[test]
 #[timeout(5000)]
 fn read_to_end_returns_exit_status_nonzero() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |_: ()| {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         std::process::exit(42);
     }));
 

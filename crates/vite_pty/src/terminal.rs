@@ -17,7 +17,7 @@ pub struct Terminal {
     reader: Box<dyn Read + Send>,
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
 
-    /// Unprocessed data buffer for read_until
+    /// Unprocessed data buffer for `read_until`
     read_until_buffer: Vec<u8>,
 
     /// Exit status from the child process, set once by background thread
@@ -54,6 +54,15 @@ impl vt100::Callbacks for Vt100Callbacks {
 }
 
 impl Terminal {
+    /// Spawns a new child process in a headless terminal with the given size and command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the PTY cannot be opened or the command fails to spawn.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the writer lock is poisoned when the background thread closes it.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
         let pty_pair = portable_pty::native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
@@ -106,6 +115,10 @@ impl Terminal {
     /// However, `screen_contents` will reflect all data, including subsequent occurrences,
     /// even before they are consumed by `read_until`. It is designed this way because the
     /// screen must always have latest data for proper query responses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the expected string is not found before EOF or if reading fails.
     pub fn read_until(&mut self, expected: &str) -> anyhow::Result<()> {
         let expected_bytes = expected.as_bytes();
 
@@ -131,7 +144,7 @@ impl Terminal {
 
             if n == 0 {
                 // EOF - expected string not found
-                return Err(anyhow::anyhow!("Expected string not found: {}", expected));
+                return Err(anyhow::anyhow!("Expected string not found: {expected}"));
             }
 
             let data = &buf[..n];
@@ -142,6 +155,11 @@ impl Terminal {
         }
     }
 
+    /// Kills the child process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the child process cannot be killed.
     pub fn kill(&mut self) -> anyhow::Result<()> {
         self.child_killer.kill()?;
         Ok(())
@@ -176,10 +194,15 @@ impl Terminal {
         Ok(status)
     }
 
-    pub fn write(&mut self, data: &[u8]) -> anyhow::Result<()> {
+    /// Writes data to the child process's stdin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the child process has already exited or if writing fails.
+    pub fn write(&self, data: &[u8]) -> anyhow::Result<()> {
         // On Windows ConPTY, convert LF to CRLF for proper line handling
         #[cfg(target_os = "windows")]
-        let data_to_write: Vec<u8> = {
+        let converted: Vec<u8> = {
             let mut result = Vec::new();
             for &byte in data {
                 if byte == b'\n' {
@@ -192,16 +215,19 @@ impl Terminal {
             result
         };
 
+        #[cfg(target_os = "windows")]
+        let data_to_write: &[u8] = &converted;
+
         #[cfg(not(target_os = "windows"))]
-        let data_to_write = data;
+        let data_to_write: &[u8] = data;
 
         let mut writer_guard = self
             .writer
             .lock()
-            .map_err(|e| anyhow::anyhow!("Failed to acquire writer lock: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to acquire writer lock: {e}"))?;
 
         if let Some(writer) = writer_guard.as_mut() {
-            writer.write_all(&data_to_write)?;
+            writer.write_all(data_to_write)?;
             writer.flush()?;
             Ok(())
         } else {
@@ -216,16 +242,22 @@ impl Terminal {
     /// Returns an error if:
     /// - The child process has already exited
     /// - Writing to the PTY fails
-    pub fn send_ctrl_c(&mut self) -> anyhow::Result<()> {
+    pub fn send_ctrl_c(&self) -> anyhow::Result<()> {
         // ASCII 0x03 (ETX) is Ctrl+C
         // Both Unix PTY and Windows ConPTY interpret this and signal the child
         self.write(&[0x03])
     }
 
+    #[must_use]
     pub fn screen_contents(&self) -> String {
         self.parser.screen().contents()
     }
 
+    /// Resizes the terminal to the given size.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the PTY cannot be resized.
     pub fn resize(&mut self, size: ScreenSize) -> anyhow::Result<()> {
         // Resize the underlying PTY via portable-pty's MasterPty::resize
         self.pty_pair.master.resize(portable_pty::PtySize {
