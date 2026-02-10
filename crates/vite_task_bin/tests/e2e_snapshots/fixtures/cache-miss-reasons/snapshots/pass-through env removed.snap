@@ -22,7 +22,6 @@ Task Details:
   [1] cache-miss-reasons#test: $ print-file test.txt ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > json-edit vite-task.json "delete _.tasks.test.passThroughEnvs" # remove pass-through env
 
 > vp run test # cache miss: pass-through env removed

@@ -31,7 +31,6 @@ Task Details:
   [1] lint: $ vp lint ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > echo hello > .git/foo.txt # add file inside .git
 
 > vp run lint # cache hit, .git is ignored

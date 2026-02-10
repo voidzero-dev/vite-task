@@ -20,7 +20,6 @@ Task Details:
   [1] cache-miss-reasons#test: $ print-file test.txt ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > mkdir -p subfolder
 
 > cp test.txt subfolder/test.txt

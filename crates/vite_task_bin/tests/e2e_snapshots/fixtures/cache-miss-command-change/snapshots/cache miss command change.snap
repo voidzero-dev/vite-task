@@ -26,7 +26,6 @@ Task Details:
   [2] task: $ print bar ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > json-edit package.json '_.scripts.task = "print baz && print bar"' # change first subtask
 
 > vp run task # first: cache miss, second: cache hit
@@ -52,7 +51,6 @@ Task Details:
   [2] task: $ print bar ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > json-edit package.json '_.scripts.task = "print bar"' # remove first subtask
 
 > vp run task # cache hit

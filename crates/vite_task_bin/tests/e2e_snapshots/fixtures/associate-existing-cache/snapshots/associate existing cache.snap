@@ -20,7 +20,6 @@ Task Details:
   [1] script1: $ print hello ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run script2 # cache hit, same command as script1
 $ print hello ✓ cache hit, replaying
 hello
@@ -38,7 +37,6 @@ Task Details:
   [1] script2: $ print hello ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > json-edit package.json '_.scripts.script2 = "print world"' # change script2
 
 > vp run script2 # cache miss

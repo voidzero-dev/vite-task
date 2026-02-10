@@ -20,7 +20,6 @@ Task Details:
   [1] @test/cache-subcommand#cached-task: $ print-file test.txt ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run cached-task # cache hit
 $ print-file test.txt ✓ cache hit, replaying
 test content
@@ -38,7 +37,6 @@ Task Details:
   [1] @test/cache-subcommand#cached-task: $ print-file test.txt ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp cache clean
 
 > vp run cached-task # cache miss after clean

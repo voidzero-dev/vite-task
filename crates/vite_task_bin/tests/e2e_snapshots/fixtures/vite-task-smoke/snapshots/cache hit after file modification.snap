@@ -26,7 +26,6 @@ Task Details:
   [2] vite-task-smoke#test-task: $ print-file main.js ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > replace-file-content main.js foo bar # modify input file
 
 > vp run test-task # cache miss, main.js changed

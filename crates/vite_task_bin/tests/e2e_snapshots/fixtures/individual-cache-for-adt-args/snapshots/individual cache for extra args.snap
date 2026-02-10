@@ -20,7 +20,6 @@ Task Details:
   [1] say: $ print a ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run say b # cache miss, different args
 $ print b
 b
@@ -38,7 +37,6 @@ Task Details:
   [1] say: $ print b ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run say a # cache hit
 $ print a ✓ cache hit, replaying
 a
@@ -56,7 +54,6 @@ Task Details:
   [1] say: $ print a ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run say b # cache hit
 $ print b ✓ cache hit, replaying
 b

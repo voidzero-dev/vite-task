@@ -20,7 +20,6 @@ Task Details:
   [1] cache-disabled-test#no-cache-task: $ print-file test.txt ✓
       → Cache disabled in task configuration
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run no-cache-task # cache disabled, runs again
 $ print-file test.txt ⊘ cache disabled: no cache config
 test content

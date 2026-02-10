@@ -3,30 +3,34 @@ mod redact;
 use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
-    process::Stdio,
     sync::Arc,
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 
 use copy_dir::copy_dir;
 use redact::redact_e2e_output;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::Command,
-};
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
+use vite_pty::{
+    ExitStatus,
+    geo::ScreenSize,
+    terminal::{CommandBuilder, Terminal},
+};
 use vite_str::Str;
 use vite_workspace::find_workspace_root;
 
 /// Timeout for each step in e2e tests
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Screen size for the PTY terminal. Large enough to avoid line wrapping.
+const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
+
 /// Get the shell executable for running e2e test steps.
 /// On Unix, uses /bin/sh.
 /// On Windows, uses BASH env var or falls back to Git Bash.
 #[expect(
     clippy::disallowed_types,
-    reason = "PathBuf required for Command::new and std::path operations on shell executable"
+    reason = "PathBuf required for CommandBuilder and std::path operations on shell executable"
 )]
 fn get_shell_exe() -> std::path::PathBuf {
     if cfg!(windows) {
@@ -92,12 +96,7 @@ struct SnapshotsFile {
 }
 
 #[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
-fn run_case(
-    runtime: &tokio::runtime::Runtime,
-    tmpdir: &AbsolutePath,
-    fixture_path: &std::path::Path,
-    filter: Option<&str>,
-) {
+fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, filter: Option<&str>) {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
     if fixture_name.starts_with('.') {
         return; // skip hidden files like .DS_Store
@@ -119,12 +118,11 @@ fn run_case(
     settings.set_prepend_module_to_snapshot(false);
     settings.remove_snapshot_suffix();
 
-    // Use block_on inside bind to run async code with insta settings applied
-    settings.bind(|| runtime.block_on(run_case_inner(tmpdir, fixture_path, fixture_name)));
+    settings.bind(|| run_case_inner(tmpdir, fixture_path, fixture_name));
 }
 
 enum TerminationState {
-    Exited(std::process::ExitStatus),
+    Exited(ExitStatus),
     TimedOut,
 }
 
@@ -136,7 +134,7 @@ enum TerminationState {
     clippy::disallowed_types,
     reason = "Path required by insta::glob! callback; String required by from_utf8_lossy and string accumulation"
 )]
-async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture_name: &str) {
+fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture_name: &str) {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
     copy_dir(fixture_path, &stage_path).unwrap();
@@ -211,14 +209,15 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, f
         let e2e_stage_path_str = e2e_stage_path.as_path().to_str().unwrap();
 
         let mut e2e_outputs = String::new();
-        for step in e2e.steps {
-            let mut cmd = Command::new(&shell_exe);
-            cmd.arg("-c")
-                .arg(step.cmd())
-                .env_clear()
-                .env("PATH", &e2e_env_path)
-                .env("NO_COLOR", "1")
-                .current_dir(e2e_stage_path.join(&e2e.cwd));
+        for step in &e2e.steps {
+            let mut cmd = CommandBuilder::new(&shell_exe);
+            cmd.arg("-c");
+            cmd.arg(step.cmd());
+            cmd.env_clear();
+            cmd.env("PATH", &e2e_env_path);
+            cmd.env("NO_COLOR", "1");
+            cmd.env("TERM", "dumb");
+            cmd.cwd(e2e_stage_path.join(&e2e.cwd).as_path());
 
             // On Windows, inherit PATHEXT for executable lookup
             if cfg!(windows)
@@ -227,83 +226,44 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, f
                 cmd.env("PATHEXT", pathext);
             }
 
-            // Spawn the child process
-            cmd.stdin(if step.stdin().is_some() { Stdio::piped() } else { Stdio::null() });
-            cmd.stdout(Stdio::piped());
-            cmd.stderr(Stdio::piped());
+            let mut terminal = Terminal::spawn(SCREEN_SIZE, cmd).unwrap();
 
-            let mut child = cmd.spawn().unwrap();
-
-            // Write stdin if provided, then close it
+            // Write stdin if provided, then signal EOF with Ctrl+D
             if let Some(stdin_content) = step.stdin() {
-                let mut stdin = child.stdin.take().unwrap();
-                stdin.write_all(stdin_content.as_bytes()).await.unwrap();
-                drop(stdin); // Close stdin to signal EOF
+                terminal.write(stdin_content.as_bytes()).unwrap();
+                terminal.write(&[0x04]).unwrap(); // Ctrl+D: flush line buffer
+                terminal.write(&[0x04]).unwrap(); // Ctrl+D: signal EOF
             }
 
-            // Take stdout/stderr handles
-            let mut stdout_handle = child.stdout.take().unwrap();
-            let mut stderr_handle = child.stderr.take().unwrap();
+            // Read to end on a separate thread with timeout via clone_killer
+            let mut killer = terminal.clone_killer();
+            let handle = thread::spawn(move || {
+                let status = terminal.read_to_end();
+                let screen = terminal.screen_contents();
+                (status, screen)
+            });
 
-            // Buffers for accumulating output
-            let mut stdout_buf = Vec::new();
-            let mut stderr_buf = Vec::new();
-
-            // Read chunks concurrently with process wait, using select! with timeout
-            let mut stdout_done = false;
-            let mut stderr_done = false;
-
-            // Initial state is running
-            let mut termination_state: Option<TerminationState> = None;
-
-            let timeout = tokio::time::sleep(STEP_TIMEOUT);
-            tokio::pin!(timeout);
-
-            let termination_state = loop {
-                let mut stdout_chunk = [0u8; 8192];
-                let mut stderr_chunk = [0u8; 8192];
-
-                tokio::select! {
-                    result = stdout_handle.read(&mut stdout_chunk), if !stdout_done => {
-                        match result {
-                            Ok(0) | Err(_) => stdout_done = true,
-                            Ok(n) => stdout_buf.extend_from_slice(&stdout_chunk[..n]),
-                        }
-                    }
-                    result = stderr_handle.read(&mut stderr_chunk), if !stderr_done => {
-                        match result {
-                            Ok(0) | Err(_) => stderr_done = true,
-                            Ok(n) => stderr_buf.extend_from_slice(&stderr_chunk[..n]),
-                        }
-                    }
-                    result = child.wait(), if termination_state.is_none() => {
-                        termination_state = Some(TerminationState::Exited(result.unwrap()));
-                    }
-                    () = &mut timeout, if termination_state.is_none() => {
-                        // Timeout - kill the process
-                        let _ = child.kill().await;
-                        termination_state = Some(TerminationState::TimedOut);
-                    }
+            let start = Instant::now();
+            let (termination_state, screen) = loop {
+                if handle.is_finished() {
+                    let (status, screen) = handle.join().unwrap();
+                    break (TerminationState::Exited(status.unwrap()), screen);
                 }
-
-                // Exit conditions:
-                // 1. Process exited and all output drained
-                // 2. Timed out and all output drained (after kill, pipes close)
-                if let Some(termination_state) = &termination_state
-                    && stdout_done
-                    && stderr_done
-                {
-                    break termination_state;
+                if start.elapsed() >= STEP_TIMEOUT {
+                    let _ = killer.kill();
+                    let (_, screen) = handle.join().unwrap();
+                    break (TerminationState::TimedOut, screen);
                 }
+                thread::sleep(Duration::from_millis(10));
             };
 
             // Format output
-            match termination_state {
+            match &termination_state {
                 TerminationState::TimedOut => {
                     e2e_outputs.push_str("[timeout]");
                 }
                 TerminationState::Exited(status) => {
-                    let exit_code = status.code().unwrap_or(-1);
+                    let exit_code = status.exit_code();
                     if exit_code != 0 {
                         e2e_outputs.push_str(vite_str::format!("[{exit_code}]").as_str());
                     }
@@ -314,10 +274,7 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, f
             e2e_outputs.push_str(step.cmd());
             e2e_outputs.push('\n');
 
-            let stdout = String::from_utf8_lossy(&stdout_buf).into_owned();
-            let stderr = String::from_utf8_lossy(&stderr_buf).into_owned();
-            e2e_outputs.push_str(&redact_e2e_output(stdout, e2e_stage_path_str));
-            e2e_outputs.push_str(&redact_e2e_output(stderr, e2e_stage_path_str));
+            e2e_outputs.push_str(&redact_e2e_output(screen, e2e_stage_path_str));
             e2e_outputs.push('\n');
 
             // Skip remaining steps if timed out
@@ -348,10 +305,7 @@ fn main() {
 
     let tests_dir = std::env::current_dir().unwrap().join("tests");
 
-    // Create tokio runtime for async operations
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-
     insta::glob!(tests_dir, "e2e_snapshots/fixtures/*", |case_path| {
-        run_case(&runtime, &tmp_dir_path, case_path, filter.as_deref());
+        run_case(&tmp_dir_path, case_path, filter.as_deref());
     });
 }

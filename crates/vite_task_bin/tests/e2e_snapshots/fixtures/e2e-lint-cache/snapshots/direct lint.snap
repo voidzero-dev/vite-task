@@ -21,7 +21,6 @@ Task Details:
   [1] e2e-lint-cache#lint: $ vp lint ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > echo debugger > main.js # add lint error
 
 > vp run lint # cache miss, lint fails

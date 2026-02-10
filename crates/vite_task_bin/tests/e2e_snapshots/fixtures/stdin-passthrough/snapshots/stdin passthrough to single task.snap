@@ -4,7 +4,7 @@ expression: e2e_outputs
 input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/stdin-passthrough
 ---
 > vp run echo-stdin
-$ node -e "process.stdin.pipe(process.stdout)"
+hello from stdin$ node -e "process.stdin.pipe(process.stdout)"
 hello from stdin
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

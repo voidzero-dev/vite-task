@@ -112,7 +112,6 @@ Task Details:
   [1] build: $ node build.js ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------
@@ -222,7 +221,6 @@ Task Details:
   [1] build: $ node build.js ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------

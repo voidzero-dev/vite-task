@@ -29,7 +29,6 @@ Task Details:
   [1] builtin-non-zero-exit-test#lint: $ vp lint -D no-debugger ✗ (exit code: 1)
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 [1]> vp run lint -- -D no-debugger
 $ vp lint -D no-debugger
 

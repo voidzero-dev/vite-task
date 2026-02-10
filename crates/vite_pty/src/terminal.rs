@@ -248,6 +248,12 @@ impl Terminal {
         self.write(&[0x03])
     }
 
+    /// Clones the child process killer for use from another thread.
+    #[must_use]
+    pub fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        self.child_killer.clone_killer()
+    }
+
     #[must_use]
     pub fn screen_contents(&self) -> String {
         self.parser.screen().contents()

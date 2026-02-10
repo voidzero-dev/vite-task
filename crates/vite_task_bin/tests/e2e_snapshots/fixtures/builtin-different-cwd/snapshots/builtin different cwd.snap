@@ -36,7 +36,6 @@ Task Details:
   [1] lint: $ vp lint ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > cd folder2 && vp run lint # cache miss in folder2
 $ vp lint ✓ cache hit, replaying
 
@@ -70,7 +69,6 @@ Task Details:
   [1] lint: $ vp lint ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > echo 'console.log(1);' > folder2/a.js # modify folder2
 
 > cd folder1 && vp run lint # cache hit
@@ -99,7 +97,6 @@ Task Details:
   [1] lint: $ vp lint ✓
       → Cache miss: content of input 'folder2/a.js' changed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > cd folder2 && vp run lint # cache miss
 $ vp lint ✓ cache hit, replaying
 

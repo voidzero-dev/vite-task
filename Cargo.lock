@@ -3719,6 +3719,7 @@ dependencies = [
  "tokio",
  "toml",
  "vite_path",
+ "vite_pty",
  "vite_str",
  "vite_task",
  "vite_workspace",

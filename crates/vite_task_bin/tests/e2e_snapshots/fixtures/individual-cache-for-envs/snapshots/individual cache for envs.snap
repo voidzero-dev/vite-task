@@ -20,7 +20,6 @@ Task Details:
   [1] hello: $ print-env FOO ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > FOO=2 vp run hello # cache miss, different env
 $ print-env FOO ✗ cache miss: envs changed, executing
 2
@@ -38,7 +37,6 @@ Task Details:
   [1] hello: $ print-env FOO ✓
       → Cache miss: env FOO value changed from '1' to '2'
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > FOO=1 vp run hello # cache hit
 $ print-env FOO ✓ cache hit, replaying
 1
@@ -56,7 +54,6 @@ Task Details:
   [1] hello: $ print-env FOO ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > FOO=2 vp run hello # cache hit
 $ print-env FOO ✓ cache hit, replaying
 2

@@ -19,7 +19,6 @@ Task Details:
   [1] read_colon_in_name: $ node read_node_fs.js ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 > vp run read_colon_in_name # cache hit
 $ node read_node_fs.js ✓ cache hit, replaying
 
