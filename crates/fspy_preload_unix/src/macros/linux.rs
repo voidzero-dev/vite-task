@@ -62,7 +62,8 @@ macro_rules! intercept_inner {
             }
         };
         mod $name {
-            #[allow(unused)]
+            #[expect(clippy::allow_attributes, reason = "using allow because unused_imports may or may not fire depending on macro expansion")]
+            #[allow(unused_imports, reason = "glob import brings types into scope for macro-generated code")]
             use super::*;
             pub unsafe fn original() -> $fn_sig {
                 static LAZY: std::sync::LazyLock<$fn_sig> = std::sync::LazyLock::new(|| unsafe {
