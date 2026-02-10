@@ -6,4 +6,8 @@ mod os_impl;
 #[path = "./linux.rs"]
 mod os_impl;
 
-pub use os_impl::*;
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "macro_rules! macros cannot be `pub`, only `pub(crate)` at most"
+)]
+pub(crate) use os_impl::*;

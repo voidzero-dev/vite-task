@@ -25,10 +25,10 @@ pub fn ck(b: BOOL) -> winsafe::SysResult<()> {
 }
 
 pub const fn ck_long(val: c_long) -> winsafe::SysResult<()> {
-    // SAFETY: creating an ERROR from the raw c_long value for the Windows error code
     if 0 == NO_ERROR {
         Ok(())
     } else {
+        // SAFETY: creating an ERROR from the raw c_long value for the Windows error code
         Err(unsafe { winsafe::co::ERROR::from_raw(val.cast_unsigned()) })
     }
 }

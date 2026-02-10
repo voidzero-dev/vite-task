@@ -50,6 +50,7 @@ jobs:
         with:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: test
+          components: clippy
 
       - run: rustup target add ${{ matrix.target }}
 

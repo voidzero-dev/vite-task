@@ -34,11 +34,11 @@ macro_rules! intercept {
     };
 }
 
-pub use intercept;
+pub(crate) use intercept;
 
 #[cfg(test)]
 #[doc(hidden)]
-pub fn symbol_exists(name: &str) -> bool {
+pub(crate) fn symbol_exists(name: &str) -> bool {
     use std::ffi::CString;
 
     let name = CString::new(name).unwrap();
@@ -78,4 +78,4 @@ macro_rules! intercept_inner {
     };
 }
 
-pub use intercept_inner;
+pub(crate) use intercept_inner;
