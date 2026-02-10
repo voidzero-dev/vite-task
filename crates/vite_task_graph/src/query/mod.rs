@@ -1,8 +1,9 @@
 pub mod cli;
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use petgraph::{prelude::DiGraphMap, visit::EdgeRef};
+use rustc_hash::FxHashSet;
 use serde::Serialize;
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -18,7 +19,7 @@ pub enum TaskQueryKind {
     /// A normal task query specifying task specifiers and options.
     /// The tasks will be searched in packages in task specifiers, or located from cwd.
     Normal {
-        task_specifiers: HashSet<TaskSpecifier>,
+        task_specifiers: FxHashSet<TaskSpecifier>,
         /// Where the query is being run from.
         cwd: Arc<AbsolutePath>,
         /// Whether to include topological dependencies
@@ -27,7 +28,7 @@ pub enum TaskQueryKind {
     /// A recursive task query specifying one or multiple task names.
     /// It will match all tasks with the given names across all packages with topological ordering.
     /// The whole workspace will be searched, so cwd is not relevant.
-    Recursive { task_names: HashSet<Str> },
+    Recursive { task_names: FxHashSet<Str> },
 }
 
 /// Represents a valid query for a task and its dependencies, usually issued from a CLI command `vp run ...`.
@@ -63,6 +64,12 @@ pub enum TaskQueryError {
 }
 
 impl IndexedTaskGraph {
+    /// Queries the task graph based on the given [`TaskQuery`] and returns the execution graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TaskQueryError::SpecifierLookupError`] if a task specifier cannot be resolved
+    /// to a task in the graph.
     pub fn query_tasks(&self, query: TaskQuery) -> Result<TaskExecutionGraph, TaskQueryError> {
         let mut execution_graph = TaskExecutionGraph::default();
 
@@ -76,8 +83,6 @@ impl IndexedTaskGraph {
             TaskQueryKind::Normal { task_specifiers, cwd, include_topological_deps } => {
                 let package_index_from_cwd =
                     self.indexed_package_graph.get_package_index_from_cwd(&cwd);
-
-                let mut nearest_topological_tasks = Vec::<TaskNodeIndex>::new();
 
                 // For every task specifier, add matching tasks
                 for specifier in task_specifiers {
@@ -99,6 +104,7 @@ impl IndexedTaskGraph {
                             if include_topological_deps =>
                         {
                             // try to find nearest task
+                            let mut nearest_topological_tasks = Vec::<TaskNodeIndex>::new();
                             self.find_nearest_topological_tasks(
                                 &specifier.task_name,
                                 package_index,
@@ -113,7 +119,7 @@ impl IndexedTaskGraph {
                             }
                             // Add nearest tasks to execution graph
                             // Topological dependencies of nearest tasks will be added later
-                            for nearest_task in nearest_topological_tasks.drain(..) {
+                            for nearest_task in nearest_topological_tasks {
                                 execution_graph.add_node(nearest_task);
                             }
                         }
@@ -158,13 +164,13 @@ impl IndexedTaskGraph {
         execution_graph: &mut TaskExecutionGraph,
         mut filter_edge: impl FnMut(TaskDependencyType) -> bool,
     ) {
-        let mut current_starting_node_indices: HashSet<TaskNodeIndex> =
+        let mut current_starting_node_indices: FxHashSet<TaskNodeIndex> =
             execution_graph.nodes().collect();
 
         // Continue until no new nodes are added
         while !current_starting_node_indices.is_empty() {
             // Record newly added nodes in this iteration as starting nodes for next iteration
-            let mut next_starting_node_indices = HashSet::<TaskNodeIndex>::new();
+            let mut next_starting_node_indices = FxHashSet::<TaskNodeIndex>::default();
 
             for from_node in current_starting_node_indices {
                 // For each starting node, traverse its outgoing edges

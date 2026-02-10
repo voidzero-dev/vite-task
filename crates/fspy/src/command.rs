@@ -162,12 +162,25 @@ impl Command {
         self
     }
 
+    /// Spawn the command with file system access tracking.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpawnError`] if program resolution fails or the process cannot be spawned.
     pub async fn spawn(mut self) -> Result<TrackedChild, SpawnError> {
         self.resolve_program()?;
         SPY_IMPL.spawn(self).await
     }
 
     /// Resolve program name to full path using `PATH` and cwd.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpawnError::Which`] if the program cannot be found in `PATH`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no `cwd` is set and `std::env::current_dir()` fails.
     pub fn resolve_program(&mut self) -> Result<(), SpawnError> {
         let mut path_env: Option<&OsStr> = None;
         for (env_name, env_value) in &self.envs {
@@ -180,13 +193,12 @@ impl Command {
             }
         }
 
-        let cwd = if let Some(cwd) = &self.cwd {
-            cwd.clone()
-        } else {
-            std::env::current_dir().expect("failed to get current dir")
-        };
+        let cwd = self
+            .cwd
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().expect("failed to get current dir"));
         self.program = which::which_in(self.program.as_os_str(), path_env, &cwd)
-            .map_err(|err| SpawnError::WhichError {
+            .map_err(|err| SpawnError::Which {
                 program: self.program.clone(),
                 path: path_env.map(OsStr::to_owned),
                 cwd,

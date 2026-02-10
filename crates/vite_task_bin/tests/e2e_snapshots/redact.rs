@@ -1,5 +1,9 @@
 use std::borrow::Cow;
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "String mutation required by regex replace and cow_replace APIs"
+)]
 fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     use cow_utils::CowUtils as _;
     for (from, to) in redactions {
@@ -13,6 +17,10 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     }
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "String required by regex replace_all and cow_replace APIs; Path required for CARGO_MANIFEST_DIR path manipulation"
+)]
 pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     // Get the packages/tools directory path
@@ -55,12 +63,16 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     // Sort consecutive diagnostic blocks to handle non-deterministic tool output
     // (e.g., oxlint reports warnings in arbitrary order due to multi-threading).
     // Each block starts with "  ! " and ends at the next empty line.
-    output = sort_diagnostic_blocks(output);
+    output = sort_diagnostic_blocks(&output);
 
     output
 }
 
-fn sort_diagnostic_blocks(output: String) -> String {
+#[expect(
+    clippy::disallowed_types,
+    reason = "String return required because join produces a String"
+)]
+fn sort_diagnostic_blocks(output: &str) -> String {
     let parts: Vec<&str> = output.split('\n').collect();
     let mut result: Vec<&str> = Vec::new();
     let mut i = 0;

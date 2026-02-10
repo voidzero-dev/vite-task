@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
+
 use std::{
     env::{self, current_dir},
     fs,
@@ -50,19 +52,22 @@ fn download_and_unpack_tar_gz(url: &str, path: &str) -> anyhow::Result<Vec<u8>> 
     Ok(data)
 }
 
-const MACOS_BINARY_DOWNLOADS: &[(&str, &[(&str, &str, u128)])] = &[
+/// (url, `path_in_targz`, `expected_hash`)
+type BinaryDownload = (&'static str, &'static str, u128);
+
+const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "aarch64",
         &[
             (
                 "https://github.com/branchseer/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-arm64.tar.gz",
                 "oils-for-unix",
-                282073174065923237490435663309538399576,
+                282_073_174_065_923_237_490_435_663_309_538_399_576,
             ),
             (
                 "https://github.com/uutils/coreutils/releases/download/0.4.0/coreutils-0.4.0-aarch64-apple-darwin.tar.gz",
                 "coreutils-0.4.0-aarch64-apple-darwin/coreutils",
-                35998406686137668997937014088186935383,
+                35_998_406_686_137_668_997_937_014_088_186_935_383,
             ),
         ],
     ),
@@ -72,12 +77,12 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[(&str, &str, u128)])] = &[
             (
                 "https://github.com/branchseer/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-x86_64.tar.gz",
                 "oils-for-unix",
-                142673558272427867831039361796426010330,
+                142_673_558_272_427_867_831_039_361_796_426_010_330,
             ),
             (
                 "https://github.com/uutils/coreutils/releases/download/0.4.0/coreutils-0.4.0-x86_64-apple-darwin.tar.gz",
                 "coreutils-0.4.0-x86_64-apple-darwin/coreutils",
-                120898281113671104995723556995187526689,
+                120_898_281_113_671_104_995_723_556_995_187_526_689,
             ),
         ],
     ),

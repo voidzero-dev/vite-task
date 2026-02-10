@@ -91,6 +91,8 @@ impl AbsolutePath {
     }
 
     #[cfg(feature = "absolute-redaction")]
+    // try_redact returns std String and uses std format!
+    #[expect(clippy::disallowed_types, clippy::disallowed_macros)]
     fn try_redact(&self) -> Result<Option<String>, String> {
         use redaction::REDACTION_PREFIX;
 
@@ -225,6 +227,8 @@ impl AbsolutePathBuf {
         if path.is_absolute() { Some(unsafe { Self::assume_absolute(path) }) } else { None }
     }
 
+    /// # Safety
+    /// The caller must ensure that `abs_path` is an absolute path.
     #[must_use]
     pub const unsafe fn assume_absolute(abs_path: PathBuf) -> Self {
         Self(abs_path)

@@ -3,8 +3,8 @@
 //! This module provides plain text formatting for cache status.
 //! Coloring is handled by the reporter to respect `NO_COLOR` environment variable.
 
-use std::collections::HashSet;
-
+use rustc_hash::FxHashSet;
+use vite_str::Str;
 use vite_task_plan::cache_metadata::SpawnFingerprint;
 
 use super::{CacheMiss, FingerprintMismatch};
@@ -14,17 +14,17 @@ use crate::session::event::{CacheDisabledReason, CacheStatus};
 enum SpawnFingerprintChange {
     // Environment variable changes
     /// Environment variable added
-    EnvAdded { key: String, value: String },
+    EnvAdded { key: Str, value: Str },
     /// Environment variable removed
-    EnvRemoved { key: String, value: String },
+    EnvRemoved { key: Str, value: Str },
     /// Environment variable value changed
-    EnvValueChanged { key: String, old_value: String, new_value: String },
+    EnvValueChanged { key: Str, old_value: Str, new_value: Str },
 
     // Pass-through env config changes
     /// Pass-through env pattern added
-    PassThroughEnvAdded { name: String },
+    PassThroughEnvAdded { name: Str },
     /// Pass-through env pattern removed
-    PassThroughEnvRemoved { name: String },
+    PassThroughEnvRemoved { name: Str },
 
     // Command changes
     /// Program changed
@@ -38,9 +38,9 @@ enum SpawnFingerprintChange {
 
     // Fingerprint ignores changes
     /// Fingerprint ignore pattern added
-    FingerprintIgnoreAdded { pattern: String },
+    FingerprintIgnoreAdded { pattern: Str },
     /// Fingerprint ignore pattern removed
-    FingerprintIgnoreRemoved { pattern: String },
+    FingerprintIgnoreRemoved { pattern: Str },
 }
 
 /// Compare two spawn fingerprints and return all changes
@@ -57,15 +57,15 @@ fn detect_spawn_fingerprint_changes(
         if let Some(new_value) = new_env.fingerprinted_envs.get(key) {
             if old_value != new_value {
                 changes.push(SpawnFingerprintChange::EnvValueChanged {
-                    key: key.to_string(),
-                    old_value: old_value.to_string(),
-                    new_value: new_value.to_string(),
+                    key: key.clone(),
+                    old_value: Str::from(old_value.as_ref()),
+                    new_value: Str::from(new_value.as_ref()),
                 });
             }
         } else {
             changes.push(SpawnFingerprintChange::EnvRemoved {
-                key: key.to_string(),
-                value: old_value.to_string(),
+                key: key.clone(),
+                value: Str::from(old_value.as_ref()),
             });
         }
     }
@@ -74,20 +74,20 @@ fn detect_spawn_fingerprint_changes(
     for (key, new_value) in &new_env.fingerprinted_envs {
         if !old_env.fingerprinted_envs.contains_key(key) {
             changes.push(SpawnFingerprintChange::EnvAdded {
-                key: key.to_string(),
-                value: new_value.to_string(),
+                key: key.clone(),
+                value: Str::from(new_value.as_ref()),
             });
         }
     }
 
     // Check pass-through env config changes
-    let old_pass_through: HashSet<_> = old_env.pass_through_env_config.iter().collect();
-    let new_pass_through: HashSet<_> = new_env.pass_through_env_config.iter().collect();
+    let old_pass_through: FxHashSet<_> = old_env.pass_through_env_config.iter().collect();
+    let new_pass_through: FxHashSet<_> = new_env.pass_through_env_config.iter().collect();
     for name in old_pass_through.difference(&new_pass_through) {
-        changes.push(SpawnFingerprintChange::PassThroughEnvRemoved { name: name.to_string() });
+        changes.push(SpawnFingerprintChange::PassThroughEnvRemoved { name: (*name).clone() });
     }
     for name in new_pass_through.difference(&old_pass_through) {
-        changes.push(SpawnFingerprintChange::PassThroughEnvAdded { name: name.to_string() });
+        changes.push(SpawnFingerprintChange::PassThroughEnvAdded { name: (*name).clone() });
     }
 
     // Check program changes
@@ -106,18 +106,17 @@ fn detect_spawn_fingerprint_changes(
     }
 
     // Check fingerprint ignores changes
-    let old_ignores: HashSet<_> =
+    let old_ignores: FxHashSet<_> =
         old.fingerprint_ignores().map(|v| v.iter().collect()).unwrap_or_default();
-    let new_ignores: HashSet<_> =
+    let new_ignores: FxHashSet<_> =
         new.fingerprint_ignores().map(|v| v.iter().collect()).unwrap_or_default();
     for pattern in old_ignores.difference(&new_ignores) {
-        changes.push(SpawnFingerprintChange::FingerprintIgnoreRemoved {
-            pattern: pattern.to_string(),
-        });
+        changes
+            .push(SpawnFingerprintChange::FingerprintIgnoreRemoved { pattern: (*pattern).clone() });
     }
     for pattern in new_ignores.difference(&old_ignores) {
         changes
-            .push(SpawnFingerprintChange::FingerprintIgnoreAdded { pattern: pattern.to_string() });
+            .push(SpawnFingerprintChange::FingerprintIgnoreAdded { pattern: (*pattern).clone() });
     }
 
     changes
@@ -132,11 +131,11 @@ fn detect_spawn_fingerprint_changes(
 /// - Cache Disabled: Shows "cache disabled" with reason
 ///
 /// Note: Returns plain text without styling. The reporter applies colors.
-pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<String> {
+pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
     match cache_status {
         CacheStatus::Hit { .. } => {
             // Show "cache hit" indicator when replaying from cache
-            Some("✓ cache hit, replaying".to_string())
+            Some(Str::from("✓ cache hit, replaying"))
         }
         CacheStatus::Miss(CacheMiss::NotFound) => {
             // No inline message for "not found" case - just show command
@@ -172,14 +171,14 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<String> 
                     use crate::session::execute::fingerprint::PostRunFingerprintMismatch;
                     match diff {
                         PostRunFingerprintMismatch::InputContentChanged { path } => {
-                            return Some(format!(
+                            return Some(vite_str::format!(
                                 "✗ cache miss: content of input '{path}' changed, executing"
                             ));
                         }
                     }
                 }
             };
-            Some(format!("✗ cache miss: {reason}, executing"))
+            Some(vite_str::format!("✗ cache miss: {reason}, executing"))
         }
         CacheStatus::Disabled(reason) => {
             // Show inline message for disabled cache
@@ -188,7 +187,7 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<String> 
                 CacheDisabledReason::NoCacheMetadata => "cache disabled: no cache config",
                 CacheDisabledReason::CycleDetected => "cache disabled: cycle detected",
             };
-            Some(format!("⊘ {message}"))
+            Some(vite_str::format!("⊘ {message}"))
         }
     }
 }
@@ -202,63 +201,65 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<String> 
 /// - Cache Disabled: Shows user-friendly reason message
 ///
 /// Note: Returns plain text without styling. The reporter applies colors.
-pub fn format_cache_status_summary(cache_status: &CacheStatus) -> String {
+pub fn format_cache_status_summary(cache_status: &CacheStatus) -> Str {
     match cache_status {
         CacheStatus::Hit { replayed_duration } => {
             // Show saved time for cache hits
-            format!("→ Cache hit - output replayed - {replayed_duration:.2?} saved")
+            vite_str::format!("→ Cache hit - output replayed - {replayed_duration:.2?} saved")
         }
         CacheStatus::Miss(CacheMiss::NotFound) => {
             // First time running this task - no previous cache entry
-            "→ Cache miss: no previous cache entry found".to_string()
+            Str::from("→ Cache miss: no previous cache entry found")
         }
         CacheStatus::Miss(CacheMiss::FingerprintMismatch(mismatch)) => {
             // Show specific reason why cache was invalidated
             match mismatch {
                 FingerprintMismatch::SpawnFingerprintMismatch { old, new } => {
                     let changes = detect_spawn_fingerprint_changes(old, new);
-                    let formatted: Vec<String> = changes
+                    let formatted: Vec<Str> = changes
                         .iter()
                         .map(|c| match c {
                             SpawnFingerprintChange::EnvAdded { key, value } => {
-                                format!("env {key}={value} added")
+                                vite_str::format!("env {key}={value} added")
                             }
                             SpawnFingerprintChange::EnvRemoved { key, value } => {
-                                format!("env {key}={value} removed")
+                                vite_str::format!("env {key}={value} removed")
                             }
                             SpawnFingerprintChange::EnvValueChanged {
                                 key,
                                 old_value,
                                 new_value,
                             } => {
-                                format!(
+                                vite_str::format!(
                                     "env {key} value changed from '{old_value}' to '{new_value}'"
                                 )
                             }
                             SpawnFingerprintChange::PassThroughEnvAdded { name } => {
-                                format!("pass-through env '{name}' added")
+                                vite_str::format!("pass-through env '{name}' added")
                             }
                             SpawnFingerprintChange::PassThroughEnvRemoved { name } => {
-                                format!("pass-through env '{name}' removed")
+                                vite_str::format!("pass-through env '{name}' removed")
                             }
-                            SpawnFingerprintChange::ProgramChanged => "program changed".to_string(),
-                            SpawnFingerprintChange::ArgsChanged => "args changed".to_string(),
+                            SpawnFingerprintChange::ProgramChanged => Str::from("program changed"),
+                            SpawnFingerprintChange::ArgsChanged => Str::from("args changed"),
                             SpawnFingerprintChange::CwdChanged => {
-                                "working directory changed".to_string()
+                                Str::from("working directory changed")
                             }
                             SpawnFingerprintChange::FingerprintIgnoreAdded { pattern } => {
-                                format!("fingerprint ignore '{pattern}' added")
+                                vite_str::format!("fingerprint ignore '{pattern}' added")
                             }
                             SpawnFingerprintChange::FingerprintIgnoreRemoved { pattern } => {
-                                format!("fingerprint ignore '{pattern}' removed")
+                                vite_str::format!("fingerprint ignore '{pattern}' removed")
                             }
                         })
                         .collect();
 
                     if formatted.is_empty() {
-                        "→ Cache miss: configuration changed".to_string()
+                        Str::from("→ Cache miss: configuration changed")
                     } else {
-                        format!("→ Cache miss: {}", formatted.join("; "))
+                        let joined =
+                            formatted.iter().map(Str::as_str).collect::<Vec<_>>().join("; ");
+                        vite_str::format!("→ Cache miss: {joined}")
                     }
                 }
                 FingerprintMismatch::PostRunFingerprintMismatch(diff) => {
@@ -266,7 +267,7 @@ pub fn format_cache_status_summary(cache_status: &CacheStatus) -> String {
                     use crate::session::execute::fingerprint::PostRunFingerprintMismatch;
                     match diff {
                         PostRunFingerprintMismatch::InputContentChanged { path } => {
-                            format!("→ Cache miss: content of input '{path}' changed")
+                            vite_str::format!("→ Cache miss: content of input '{path}' changed")
                         }
                     }
                 }
@@ -279,7 +280,7 @@ pub fn format_cache_status_summary(cache_status: &CacheStatus) -> String {
                 CacheDisabledReason::NoCacheMetadata => "Cache disabled in task configuration",
                 CacheDisabledReason::CycleDetected => "Cache disabled: cycle detected",
             };
-            format!("→ {message}")
+            vite_str::format!("→ {message}")
         }
     }
 }

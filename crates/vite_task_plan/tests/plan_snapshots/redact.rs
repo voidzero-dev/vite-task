@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use cow_utils::CowUtils as _;
 use serde::Serialize;
 use vite_task_graph::config::DEFAULT_PASSTHROUGH_ENVS;
 
@@ -29,8 +30,12 @@ fn redact_string_in_json(value: &mut serde_json::Value, redactions: &[(&str, &st
 }
 
 /// Strip Windows executable extensions (case-insensitive) for cross-platform consistency
+#[expect(
+    clippy::disallowed_types,
+    reason = "String mutation required by serde_json::Value::String which stores a String"
+)]
 fn strip_windows_executable_extension(s: &mut String) {
-    let lower = s.to_lowercase();
+    let lower = s.as_str().cow_to_lowercase();
     for ext in [".cmd", ".bat", ".exe", ".com"] {
         if lower.ends_with(ext) {
             s.truncate(s.len() - ext.len());
@@ -39,8 +44,11 @@ fn strip_windows_executable_extension(s: &mut String) {
     }
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "String mutation required by serde_json::Value::String which stores a String"
+)]
 fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
-    use cow_utils::CowUtils as _;
     for (from, to) in redactions {
         if let Cow::Owned(mut replaced) = s.as_str().cow_replace(from, to) {
             if cfg!(windows) {
@@ -52,6 +60,10 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     }
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "String required by std::env::var return type and serde_json Value manipulation; Path required for CARGO_MANIFEST_DIR path manipulation"
+)]
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     // Get the packages/tools directory path
@@ -67,19 +79,19 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
 
     // On Windows, paths might use either backslashes or forward slashes
     // Try both variants for workspace_root, manifest_dir, and tools_dir
-    let workspace_root_forward = workspace_root.replace('\\', "/");
-    let manifest_dir_forward = manifest_dir.replace('\\', "/");
-    let tools_dir_forward = tools_dir_str.replace('\\', "/");
+    let workspace_root_forward = workspace_root.cow_replace('\\', "/");
+    let manifest_dir_forward = manifest_dir.as_str().cow_replace('\\', "/");
+    let tools_dir_forward = tools_dir_str.as_str().cow_replace('\\', "/");
 
     redact_string_in_json(
         &mut json_value,
         &[
             (workspace_root, "<workspace>"),
-            (workspace_root_forward.as_str(), "<workspace>"),
+            (workspace_root_forward.as_ref(), "<workspace>"),
             (manifest_dir.as_str(), "<manifest_dir>"),
-            (manifest_dir_forward.as_str(), "<manifest_dir>"),
+            (manifest_dir_forward.as_ref(), "<manifest_dir>"),
             (tools_dir_str.as_str(), "<tools>"),
-            (tools_dir_forward.as_str(), "<tools>"),
+            (tools_dir_forward.as_ref(), "<tools>"),
         ],
     );
 
@@ -88,8 +100,10 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
         let serde_json::Value::Object(map) = v else {
             return;
         };
-        if let Some(serde_json::Value::String(path)) = map.get_mut("PATH") {
-            *path = path.replace(';', ":");
+        if let Some(serde_json::Value::String(path)) = map.get_mut("PATH")
+            && let Cow::Owned(replaced) = path.as_str().cow_replace(';', ":")
+        {
+            *path = replaced;
         }
     });
 

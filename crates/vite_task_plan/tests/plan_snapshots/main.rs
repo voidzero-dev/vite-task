@@ -1,10 +1,12 @@
 mod redact;
 
-use std::{collections::HashMap, ffi::OsStr, path::Path, sync::Arc};
+use std::{ffi::OsStr, sync::Arc};
 
 use clap::Parser;
 use copy_dir::copy_dir;
+use cow_utils::CowUtils as _;
 use redact::redact_snapshot;
+use rustc_hash::FxHashMap;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
@@ -33,7 +35,13 @@ struct SnapshotsFile {
     pub plan_cases: Vec<Plan>,
 }
 
-fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path, filter: Option<&str>) {
+#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
+fn run_case(
+    runtime: &Runtime,
+    tmpdir: &AbsolutePath,
+    fixture_path: &std::path::Path,
+    filter: Option<&str>,
+) {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
     if fixture_name.starts_with('.') {
         return; // skip hidden files like .DS_Store
@@ -45,7 +53,10 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path, filte
     {
         return;
     }
-    println!("{fixture_name}");
+    #[expect(clippy::print_stdout, reason = "test progress output for plan snapshot test runner")]
+    {
+        println!("{fixture_name}");
+    }
     // Configure insta to write snapshots to fixture directory
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_path(fixture_path.join("snapshots"));
@@ -55,10 +66,15 @@ fn run_case(runtime: &Runtime, tmpdir: &AbsolutePath, fixture_path: &Path, filte
     settings.bind(|| run_case_inner(runtime, tmpdir, fixture_path, fixture_name));
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path required by insta::glob! callback; String required by std::fs::read and toml::from_slice"
+)]
+#[expect(clippy::too_many_lines, reason = "test setup and assertion logic in a single function")]
 fn run_case_inner(
     runtime: &Runtime,
     tmpdir: &AbsolutePath,
-    fixture_path: &Path,
+    fixture_path: &std::path::Path,
     fixture_name: &str,
 ) {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
@@ -75,19 +91,30 @@ fn run_case_inner(
     let cases_toml_path = fixture_path.join("snapshots.toml");
     let cases_file: SnapshotsFile = match std::fs::read(&cases_toml_path) {
         Ok(content) => toml::from_slice(&content).unwrap(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Default::default(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SnapshotsFile::default(),
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
     // Navigate from CARGO_MANIFEST_DIR to packages/tools at the repo root
-    let repo_root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-    let test_bin_path = Arc::<OsStr>::from(
-        repo_root.join("packages").join("tools").join("node_modules").join(".bin").into_os_string(),
-    );
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Path required for CARGO_MANIFEST_DIR path manipulation to locate packages/tools"
+    )]
+    let test_bin_path = {
+        let repo_root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        Arc::<OsStr>::from(
+            repo_root
+                .join("packages")
+                .join("tools")
+                .join("node_modules")
+                .join(".bin")
+                .into_os_string(),
+        )
+    };
 
     // Add packages/tools to PATH so test programs (such as print-file) in fixtures can be found.
-    let plan_envs: HashMap<Arc<OsStr>, Arc<OsStr>> = [
+    let plan_envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> = [
         (Arc::<OsStr>::from(OsStr::new("PATH")), Arc::clone(&test_bin_path)),
         (Arc::<OsStr>::from(OsStr::new("NO_COLOR")), Arc::<OsStr>::from(OsStr::new("1"))),
     ]
@@ -108,11 +135,17 @@ fn run_case_inner(
         let task_graph = match task_graph_result {
             Ok(task_graph) => task_graph,
             Err(err) => {
-                let mut err_str = format!("{err:#}").replace(workspace_root_str, "<workspace>");
-                if cfg!(windows) {
-                    err_str = err_str.replace('\\', "/");
+                let err_formatted = vite_str::format!("{err:#}");
+                let err_str = err_formatted.as_str().cow_replace(workspace_root_str, "<workspace>");
+                let err_str =
+                    if cfg!(windows) { err_str.as_ref().cow_replace('\\', "/") } else { err_str };
+                #[expect(
+                    clippy::disallowed_macros,
+                    reason = "insta::assert_snapshot! internally uses std::format!"
+                )]
+                {
+                    insta::assert_snapshot!("task graph load error", err_str.as_ref());
                 }
-                insta::assert_snapshot!("task graph load error", err_str);
                 return;
             }
         };
@@ -123,7 +156,7 @@ fn run_case_inner(
         insta::assert_json_snapshot!("task graph", task_graph_json);
 
         for plan in cases_file.plan_cases {
-            let snapshot_name = format!("query - {}", plan.name);
+            let snapshot_name = vite_str::format!("query - {}", plan.name);
 
             let cli = match Cli::try_parse_from(
                 std::iter::once("vp") // dummy program name
@@ -131,14 +164,19 @@ fn run_case_inner(
             ) {
                 Ok(ok) => ok,
                 Err(err) => {
-                    insta::assert_snapshot!(snapshot_name, err);
+                    #[expect(
+                        clippy::disallowed_macros,
+                        reason = "insta::assert_snapshot! internally uses std::format!"
+                    )]
+                    {
+                        insta::assert_snapshot!(snapshot_name.as_str(), err);
+                    }
                     continue;
                 }
             };
             let Cli::Command(command) = cli;
-            let run_command = match command {
-                Command::Run(run_command) => run_command,
-                _ => panic!("only `run` commands supported in plan tests"),
+            let Command::Run(run_command) = command else {
+                panic!("only `run` commands supported in plan tests")
             };
 
             let plan_result =
@@ -147,17 +185,28 @@ fn run_case_inner(
             let plan = match plan_result {
                 Ok(plan) => plan,
                 Err(err) => {
-                    insta::assert_debug_snapshot!(snapshot_name, err);
+                    #[expect(
+                        clippy::disallowed_macros,
+                        reason = "insta::assert_debug_snapshot! internally uses std::format!"
+                    )]
+                    {
+                        insta::assert_debug_snapshot!(snapshot_name.as_str(), err);
+                    }
                     continue;
                 }
             };
 
             let plan_json = redact_snapshot(&plan, workspace_root_str);
-            insta::assert_json_snapshot!(snapshot_name, &plan_json);
+            insta::assert_json_snapshot!(snapshot_name.as_str(), &plan_json);
         }
     });
 }
 
+#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! macro callback")]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "current_dir needed because insta::glob! requires std PathBuf"
+)]
 fn main() {
     let filter = std::env::args().nth(1);
 

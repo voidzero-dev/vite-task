@@ -8,14 +8,15 @@ macro_rules! intercept {
             const _: $fn_sig = $crate::libc::$name;
 
             #[used]
-            #[expect(dead_code)]
             #[unsafe(link_section = "__DATA,__interpose")]
             static mut _INTERPOSE_ENTRY: $crate::macros::InterposeEntry =
                 $crate::macros::InterposeEntry { _new: $name as _, _old: $crate::libc::$name as _ };
         };
 
         mod $name {
-            #[expect(unused)]
+            // macro-generated: imports may or may not be used depending on expansion context
+            #[expect(clippy::allow_attributes)]
+            #[allow(unused_imports)]
             use super::*;
             pub fn original() -> $fn_sig {
                 $crate::libc::$name

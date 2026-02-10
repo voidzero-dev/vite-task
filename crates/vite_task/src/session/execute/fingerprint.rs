@@ -88,11 +88,7 @@ impl PostRunFingerprint {
             .par_iter()
             .filter(|(path, _)| {
                 // Apply ignore patterns if present
-                if let Some(ref matcher) = ignore_matcher {
-                    !matcher.is_match(path.as_str())
-                } else {
-                    true
-                }
+                ignore_matcher.as_ref().is_none_or(|matcher| !matcher.is_match(path.as_str()))
             })
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
@@ -160,7 +156,6 @@ pub fn fingerprint_path(
 
     let file = match File::open(std_path) {
         Ok(file) => file,
-        #[expect(unused)]
         Err(err) => {
             // On Windows, File::open fails specifically for directories with PermissionDenied
             #[cfg(windows)]
@@ -195,7 +190,7 @@ pub fn fingerprint_path(
         // Is a directory on Unix - use the optimized nix implementation
         #[cfg(unix)]
         {
-            return process_directory_unix(reader.into_inner(), path_read);
+            return process_directory_unix(reader.get_ref(), path_read);
         }
         #[cfg(windows)]
         {
@@ -243,7 +238,7 @@ fn process_directory(
 
 /// Process a directory on Unix using nix for efficiency
 #[cfg(unix)]
-fn process_directory_unix(file: File, path_read: PathRead) -> anyhow::Result<PathFingerprint> {
+fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<PathFingerprint> {
     use std::os::fd::AsFd;
 
     if !path_read.read_dir_entries {
@@ -263,13 +258,16 @@ fn process_directory_unix(file: File, path_read: PathRead) -> anyhow::Result<Pat
         }
 
         let kind = match entry.file_type() {
-            Some(nix::dir::Type::File) => DirEntryKind::File,
             Some(nix::dir::Type::Directory) => DirEntryKind::Dir,
             Some(nix::dir::Type::Symlink) => DirEntryKind::Symlink,
-            // Treat other types as files for fingerprinting
+            // Treat files and other types as files for fingerprinting
             _ => DirEntryKind::File,
         };
 
+        #[expect(
+            clippy::disallowed_types,
+            reason = "from_utf8_lossy returns Cow referencing String"
+        )]
         let name_str = String::from_utf8_lossy(name);
         entries.insert(Str::from(name_str.as_ref()), kind);
     }

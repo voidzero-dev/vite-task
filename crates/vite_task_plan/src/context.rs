@@ -1,7 +1,6 @@
-use std::{
-    collections::HashMap, env::JoinPathsError, ffi::OsStr, fmt::Display, ops::Range, sync::Arc,
-};
+use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, ops::Range, sync::Arc};
 
+use rustc_hash::FxHashMap;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, display::TaskDisplay};
@@ -27,7 +26,7 @@ pub struct PlanContext<'a> {
     cwd: Arc<AbsolutePath>,
 
     /// The environment variables for the current execution context.
-    envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
 
     /// The callbacks for loading task graphs and parsing commands.
     callbacks: &'a mut (dyn PlanRequestParser + 'a),
@@ -86,7 +85,7 @@ impl<'a> PlanContext<'a> {
     pub fn new(
         workspace_path: &'a Arc<AbsolutePath>,
         cwd: Arc<AbsolutePath>,
-        envs: HashMap<Arc<OsStr>, Arc<OsStr>>,
+        envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
         indexed_task_graph: &'a IndexedTaskGraph,
     ) -> Self {
@@ -97,11 +96,11 @@ impl<'a> PlanContext<'a> {
             callbacks,
             task_call_stack: Vec::new(),
             indexed_task_graph,
-            extra_args: Default::default(),
+            extra_args: Arc::default(),
         }
     }
 
-    pub const fn envs(&self) -> &HashMap<Arc<OsStr>, Arc<OsStr>> {
+    pub const fn envs(&self) -> &FxHashMap<Arc<OsStr>, Arc<OsStr>> {
         &self.envs
     }
 

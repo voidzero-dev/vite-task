@@ -1,23 +1,25 @@
 //! Configuration structures for user-defined tasks in `vite.config.*`
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use monostate::MustBe;
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
-#[cfg(test)]
+#[cfg(all(test, not(clippy)))]
 use ts_rs::TS;
 use vite_path::RelativePathBuf;
 use vite_str::Str;
 
 /// Cache-related fields of a task defined by user in `vite.config.*`
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(TS), ts(optional_fields))]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
 #[serde(untagged, deny_unknown_fields, rename_all = "camelCase")]
 pub enum UserCacheConfig {
     /// Cache is enabled
     Enabled {
         /// Whether to cache the task
-        #[cfg_attr(test, ts(type = "true", optional))]
+        #[cfg_attr(all(test, not(clippy)), ts(type = "true", optional))]
         cache: Option<MustBe!(true)>,
 
         #[serde(flatten)]
@@ -26,7 +28,7 @@ pub enum UserCacheConfig {
     /// Cache is disabled
     Disabled {
         /// Whether to cache the task
-        #[cfg_attr(test, ts(type = "false"))]
+        #[cfg_attr(all(test, not(clippy)), ts(type = "false"))]
         cache: MustBe!(false),
     },
 }
@@ -47,7 +49,8 @@ impl UserCacheConfig {
 
 /// Cache configuration fields when caching is enabled
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(TS), ts(optional_fields))]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledCacheConfig {
     /// Environment variable names to be fingerprinted and passed to the task.
@@ -59,7 +62,8 @@ pub struct EnabledCacheConfig {
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(TS), ts(optional_fields))]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
@@ -93,7 +97,8 @@ impl Default for UserTaskOptions {
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(TS), ts(optional_fields, rename = "Task"))]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "Task"))]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskConfig {
     /// The command to run for the task.
@@ -108,7 +113,8 @@ pub struct UserTaskConfig {
 
 /// User configuration structure for `run` field in `vite.config.*`
 #[derive(Debug, Default, Deserialize)]
-#[cfg_attr(test, derive(TS), ts(optional_fields, rename = "RunConfig"))]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "RunConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct UserRunConfig {
     /// Enable cache for all scripts from package.json.
@@ -118,7 +124,7 @@ pub struct UserRunConfig {
     pub cache_scripts: Option<bool>,
 
     /// Task definitions
-    pub tasks: Option<HashMap<Str, UserTaskConfig>>,
+    pub tasks: Option<FxHashMap<Str, UserTaskConfig>>,
 }
 
 impl UserRunConfig {
@@ -126,8 +132,15 @@ impl UserRunConfig {
     pub const TS_TYPE: &str = include_str!("../../run-config.ts");
 
     /// Generates TypeScript type definitions for user task configuration.
-    #[cfg(test)]
+    ///
+    /// # Panics
+    ///
+    /// Panics if `oxfmt` is not found in `packages/tools`, if the formatter process
+    /// fails to spawn or write, or if the output is not valid UTF-8.
+    #[cfg(all(test, not(clippy)))]
     #[must_use]
+    // test code: uses std types for convenience
+    #[expect(clippy::disallowed_types)]
     pub fn generate_ts_definition() -> String {
         use std::{
             io::Write,
@@ -192,13 +205,17 @@ impl UserRunConfig {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(clippy)))]
 mod ts_tests {
+    // test code: uses std types for convenience
+    #[expect(clippy::disallowed_types)]
     use std::{env, path::PathBuf};
 
     use super::UserRunConfig;
 
     #[test]
+    // test code: uses std types for convenience
+    #[expect(clippy::disallowed_methods, clippy::disallowed_types)]
     fn typescript_generation() {
         let file_path =
             PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("run-config.ts");
@@ -271,8 +288,8 @@ mod tests {
             UserCacheConfig::Enabled {
                 cache: Some(MustBe!(true)),
                 enabled_cache_config: EnabledCacheConfig {
-                    envs: Some(["NODE_ENV".into()].into_iter().collect()),
-                    pass_through_envs: Some(["FOO".into()].into_iter().collect()),
+                    envs: Some(std::iter::once("NODE_ENV".into()).collect()),
+                    pass_through_envs: Some(std::iter::once("FOO".into()).collect()),
                 }
             },
         );

@@ -1,5 +1,6 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
+use rustc_hash::FxHashSet;
 use serde::Serialize;
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -39,6 +40,12 @@ pub enum CLITaskQueryError {
 
 impl CLITaskQuery {
     /// Convert to `TaskQuery`, or return an error if invalid.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CLITaskQueryError::RecursiveTransitiveConflict`] if both `--recursive` and
+    /// `--transitive` are set, or [`CLITaskQueryError::PackageNameSpecifiedWithRecursive`]
+    /// if a package name is specified with `--recursive`.
     pub fn into_task_query(self, cwd: &Arc<AbsolutePath>) -> Result<TaskQuery, CLITaskQueryError> {
         let include_explicit_deps = !self.ignore_depends_on;
 
@@ -46,7 +53,7 @@ impl CLITaskQuery {
             if self.transitive {
                 return Err(CLITaskQueryError::RecursiveTransitiveConflict);
             }
-            let task_names: HashSet<Str> = self
+            let task_names: FxHashSet<Str> = self
                 .tasks
                 .into_iter()
                 .map(|s| {

@@ -1,5 +1,7 @@
+#![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
+
 use std::{
-    collections::{BTreeMap, HashMap, btree_map::Entry},
+    collections::{BTreeMap, btree_map::Entry},
     env::{self, args},
     fs::{File, read},
     io::{BufWriter, Write as _, stderr},
@@ -8,12 +10,13 @@ use std::{
 };
 
 use fspy::{AccessMode, PathAccess};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 
 #[derive(Serialize, Deserialize)]
 struct Config {
-    cases: HashMap<String, Case>,
+    cases: FxHashMap<String, Case>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -55,6 +58,7 @@ impl AccessCollector {
 }
 
 #[tokio::main]
+#[expect(clippy::print_stdout, clippy::print_stderr)]
 async fn main() {
     let mut args = args();
     args.next(); // skip the first argument (the program name)

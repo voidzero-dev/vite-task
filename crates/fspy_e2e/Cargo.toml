@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 fspy = { workspace = true }
+rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["full"] }
 toml = { workspace = true }

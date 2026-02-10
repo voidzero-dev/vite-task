@@ -1,5 +1,6 @@
-use std::{collections::HashMap, ffi::OsStr, sync::Arc};
+use std::{ffi::OsStr, sync::Arc};
 
+use rustc_hash::FxHashMap;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{config::UserCacheConfig, query::TaskQuery};
@@ -13,7 +14,7 @@ use vite_task_graph::{config::UserCacheConfig, query::TaskQuery};
 pub struct ScriptCommand {
     pub program: Str,
     pub args: Arc<[Str]>,
-    pub envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
+    pub envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
     pub cwd: Arc<AbsolutePath>,
 }
 
@@ -54,7 +55,7 @@ pub struct SyntheticPlanRequest {
     /// - To set envs that are not subject to caching but still passed to the spawned child, use `task_options` to configure `pass_through_envs`.
     /// - To set envs that should be fingerprinted, use `task_options` to configure `envs`.
     /// - If neither is set, and caching is enabled, these envs will have not effect.
-    pub envs: Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
+    pub envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
 }
 
 #[derive(Debug)]

@@ -1,4 +1,7 @@
-use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, path::Path, sync::Arc};
+// Arc<Path> is used for non-UTF-8 path data in error types
+#[expect(clippy::disallowed_types)]
+use std::path::Path;
+use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, sync::Arc};
 
 use vite_path::{AbsolutePath, relative::InvalidPathDataError};
 use vite_str::Str;
@@ -27,9 +30,14 @@ pub struct WhichError {
 }
 impl Display for WhichError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Failed to find executable {:?} under cwd {:?} with ", self.program, self.cwd)?;
+        write!(
+            f,
+            "Failed to find executable {} under cwd {} with ",
+            self.program.display(),
+            self.cwd.as_path().display()
+        )?;
         if let Some(path_env) = &self.path_env {
-            write!(f, "PATH: {path_env:?}")?;
+            write!(f, "PATH: {}", path_env.display())?;
         } else {
             write!(f, "No PATH")?;
         }
@@ -43,6 +51,8 @@ pub enum PathFingerprintErrorKind {
     PathOutsideWorkspace { path: Arc<AbsolutePath>, workspace_path: Arc<AbsolutePath> },
     #[error("Path {path:?} contains characters that make it non-portable")]
     NonPortableRelativePath {
+        // path may contain non-UTF-8 data
+        #[expect(clippy::disallowed_types)]
         path: Arc<Path>,
         #[source]
         error: InvalidPathDataError,
@@ -150,6 +160,10 @@ impl TaskPlanErrorKind {
     }
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "Error wraps TaskPlanErrorKind with call stack for diagnostics"
+)]
 pub trait TaskPlanErrorKindResultExt {
     type Ok;
     /// Attach the current task call stack from the planning context to the error.

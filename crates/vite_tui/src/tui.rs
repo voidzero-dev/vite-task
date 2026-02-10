@@ -34,6 +34,8 @@ pub enum Event {
     Render,
     FocusGained,
     FocusLost,
+    // crossterm provides paste content as String
+    #[expect(clippy::disallowed_types)]
     Paste(String),
     Key(KeyEvent),
     Mouse(MouseEvent),

@@ -187,11 +187,15 @@ impl RelativePathBuf {
     }
 }
 
-impl<'a, Context> Decode<Context> for RelativePathBuf {
+impl<Context> Decode<Context> for RelativePathBuf {
     fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let path_str = Str::decode(decoder)?;
-        Self::new(path_str.as_str())
-            .map_err(|err| DecodeError::OtherString(format!("{err}: {path_str}")))
+        Self::new(path_str.as_str()).map_err(|err| {
+            // bincode::error::DecodeError requires std format!
+            #[expect(clippy::disallowed_macros)]
+            let msg = format!("{err}: {path_str}");
+            DecodeError::OtherString(msg)
+        })
     }
 }
 
@@ -269,6 +273,8 @@ mod ts_impl {
 
     use super::RelativePathBuf;
 
+    // ts_rs::TS trait requires returning std String
+    #[expect(clippy::disallowed_types)]
     impl TS for RelativePathBuf {
         type OptionInnerType = Self;
         type WithoutGenerics = Self;
@@ -318,10 +324,10 @@ mod tests {
     fn non_utf8() {
         use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
-        let non_utf8_path = Path::new(OsStr::from_bytes(&[0xC0]));
+        let non_utf8_os_str = OsStr::from_bytes(&[0xC0]);
         let_assert!(
             Err(FromPathError::InvalidPathData(InvalidPathDataError::NonUtf8)) =
-                RelativePathBuf::new(non_utf8_path),
+                RelativePathBuf::new(non_utf8_os_str),
         );
     }
 
@@ -380,7 +386,7 @@ mod tests {
     #[test]
     fn push() {
         let mut rel_path = RelativePathBuf::new("foo/bar").unwrap();
-        rel_path.push(RelativePathBuf::new(Path::new("baz")).unwrap());
+        rel_path.push(RelativePathBuf::new("baz").unwrap());
         assert_eq!(rel_path.as_str(), "foo/bar/baz");
     }
 

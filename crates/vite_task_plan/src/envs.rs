@@ -1,10 +1,7 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    ffi::OsStr,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, ffi::OsStr, sync::Arc};
 
 use bincode::{Decode, Encode};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use supports_color::{Stream, on};
@@ -47,7 +44,7 @@ impl EnvFingerprints {
     /// Before the call, `all_envs` is expected to contain all available envs.
     /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + `pass_through`).
     pub fn resolve(
-        all_envs: &mut HashMap<Arc<OsStr>, Arc<OsStr>>,
+        all_envs: &mut FxHashMap<Arc<OsStr>, Arc<OsStr>>,
         env_config: &EnvConfig,
     ) -> Result<Self, ResolveEnvError> {
         // Collect all envs matching fingerpinted or pass-through envs in env_config
@@ -110,6 +107,8 @@ impl EnvFingerprints {
                 let value: Arc<str> = if sensitive_patterns.is_match(name) {
                     let mut hasher = Sha256::new();
                     hasher.update(value.as_bytes());
+                    // result is converted to Arc<str>, not Str
+                    #[expect(clippy::disallowed_macros)]
                     format!("sha256:{:x}", hasher.finalize()).into()
                 } else {
                     value.into()
@@ -129,7 +128,7 @@ impl EnvFingerprints {
 fn resolve_envs_with_patterns<'a>(
     env_vars: impl Iterator<Item = (&'a Arc<OsStr>, &'a Arc<OsStr>)>,
     patterns: &[&str],
-) -> Result<HashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::Error> {
+) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::Error> {
     let patterns = GlobPatternSet::new(patterns.iter().filter(|pattern| {
         if pattern.starts_with('!') {
             // FIXME: use better way to print warning log
@@ -143,12 +142,9 @@ fn resolve_envs_with_patterns<'a>(
             true
         }
     }))?;
-    let envs: HashMap<Arc<OsStr>, Arc<OsStr>> = env_vars
+    let envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> = env_vars
         .filter_map(|(name, value)| {
-            let Some(name_str) = name.as_ref().to_str() else {
-                return None;
-            };
-
+            let name_str = name.as_ref().to_str()?;
             if patterns.is_match(name_str) {
                 Some((Arc::clone(name), Arc::clone(value)))
             } else {
@@ -184,11 +180,9 @@ const SENSITIVE_PATTERNS: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
 
-    fn create_test_envs(pairs: Vec<(&str, &str)>) -> HashMap<Arc<OsStr>, Arc<OsStr>> {
+    fn create_test_envs(pairs: Vec<(&str, &str)>) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
         pairs
             .into_iter()
             .map(|(k, v)| (Arc::from(OsStr::new(k)), Arc::from(OsStr::new(v))))
@@ -484,9 +478,8 @@ mod tests {
 
         // Create invalid UTF-8 sequence
         let invalid_utf8 = OsStr::from_bytes(&[0xff, 0xfe]);
-        let mut all_envs: HashMap<Arc<OsStr>, Arc<OsStr>> =
-            [(Arc::from(OsStr::new("INVALID_UTF8")), Arc::from(invalid_utf8))]
-                .into_iter()
+        let mut all_envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> =
+            std::iter::once((Arc::from(OsStr::new("INVALID_UTF8")), Arc::from(invalid_utf8)))
                 .collect();
 
         let result = EnvFingerprints::resolve(&mut all_envs, &env_config);
@@ -496,7 +489,9 @@ mod tests {
             ResolveEnvError::EnvValueIsNotValidUnicode { key, .. } => {
                 assert_eq!(key.as_str(), "INVALID_UTF8");
             }
-            other => panic!("Expected EnvValueIsNotValidUnicode, got {other:?}"),
+            other @ ResolveEnvError::GlobError { .. } => {
+                panic!("Expected EnvValueIsNotValidUnicode, got {other:?}")
+            }
         }
     }
 

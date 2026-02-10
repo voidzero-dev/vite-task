@@ -32,6 +32,8 @@ impl Debug for Client {
 }
 
 impl Client {
+    // preload library intentionally uses stderr for error reporting
+    #[expect(clippy::print_stderr)]
     #[cfg(not(test))]
     fn from_env() -> Self {
         use fspy_shared_unix::payload::decode_payload_from_env;

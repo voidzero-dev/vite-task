@@ -65,6 +65,8 @@ unsafe extern "C" fn execve(
 
 intercept!(execl(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execl(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
+    // suppresses unused warning on *::original
+    #[expect(clippy::no_effect_underscore_binding)]
     let _unused = execl::original;
     unsafe {
         with_argv(valist, arg0, |args, _remaining| {
@@ -75,6 +77,8 @@ unsafe extern "C" fn execl(path: *const c_char, arg0: *const c_char, valist: ...
 
 intercept!(execlp(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execlp(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
+    // suppresses unused warning on *::original
+    #[expect(clippy::no_effect_underscore_binding)]
     let _unused = execlp::original;
     unsafe {
         with_argv(valist, arg0, |args, _remaining| {
@@ -90,6 +94,8 @@ unsafe extern "C" fn execlp(path: *const c_char, arg0: *const c_char, valist: ..
 
 intercept!(execle(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execle(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
+    // suppresses unused warning on *::original
+    #[expect(clippy::no_effect_underscore_binding)]
     let _unused = execle::original;
     unsafe {
         with_argv(valist, arg0, |args, mut remaining| {
@@ -101,6 +107,8 @@ unsafe extern "C" fn execle(path: *const c_char, arg0: *const c_char, valist: ..
 
 intercept!(execv(64): unsafe extern "C" fn(path: *const c_char, argv: *const *const c_char) -> c_int);
 unsafe extern "C" fn execv(path: *const c_char, argv: *const *const c_char) -> c_int {
+    // suppresses unused warning on *::original
+    #[expect(clippy::no_effect_underscore_binding)]
     let _unused = execv::original;
     unsafe { handle_exec(ExecResolveConfig::search_path_disabled(), path, argv, environ()) }
 }
@@ -110,6 +118,8 @@ intercept!(execvp(64): unsafe extern "C" fn(
     argv: *const *const libc::c_char,
 ) -> c_int);
 unsafe extern "C" fn execvp(prog: *const c_char, argv: *const *const c_char) -> c_int {
+    // suppresses unused warning on *::original
+    #[expect(clippy::no_effect_underscore_binding)]
     let _unused = execvp::original;
     handle_exec(ExecResolveConfig::search_path_enabled(None), prog, argv, unsafe { environ() })
 }

@@ -10,6 +10,10 @@ pub trait GetKey {
     type Key<'a>: Serialize + Ord
     where
         Self: 'a;
+    /// # Errors
+    /// Returns an error if the key cannot be computed.
+    // trait error type is String for simplicity
+    #[expect(clippy::disallowed_types)]
     fn key(&self) -> Result<Self::Key<'_>, String>;
 }
 
@@ -36,6 +40,12 @@ pub struct SerializeByKey<'a, N: GetKey + Serialize, E: Serialize, Ix: petgraph:
 /// an error will be returned.
 ///
 /// This is useful for serializing graphs in a stable and human-readable way.
+///
+/// # Errors
+/// Returns a serialization error if the graph cannot be serialized.
+///
+/// # Panics
+/// Panics if an edge references a node index not present in the graph.
 pub fn serialize_by_key<
     N: GetKey + Serialize,
     E: Serialize,
@@ -83,6 +93,8 @@ mod tests {
         where
             Self: 'a;
 
+        // trait requires String error type
+        #[expect(clippy::disallowed_types)]
         fn key(&self) -> Result<Self::Key<'_>, String> {
             Ok(self.id)
         }

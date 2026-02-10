@@ -42,6 +42,8 @@ impl Display for TaskParsedCommand {
     }
 }
 
+// brush_parser::unquote_str returns String
+#[expect(clippy::disallowed_types)]
 fn unquote(word: &Word) -> String {
     let Word { value, loc: _ } = word;
     unquote_str(value.as_str())

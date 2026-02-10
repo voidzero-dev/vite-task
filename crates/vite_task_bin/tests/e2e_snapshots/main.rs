@@ -3,7 +3,6 @@ mod redact;
 use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
-    path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
     time::Duration,
@@ -25,25 +24,30 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Get the shell executable for running e2e test steps.
 /// On Unix, uses /bin/sh.
 /// On Windows, uses BASH env var or falls back to Git Bash.
-fn get_shell_exe() -> PathBuf {
+#[expect(
+    clippy::disallowed_types,
+    reason = "PathBuf required for Command::new and std::path operations on shell executable"
+)]
+fn get_shell_exe() -> std::path::PathBuf {
     if cfg!(windows) {
-        if let Some(bash) = std::env::var_os("BASH") {
-            PathBuf::from(bash)
-        } else {
-            let git_bash = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
-            if git_bash.exists() {
-                git_bash
-            } else {
-                panic!(
-                    "Could not find bash executable for e2e tests.\n\
-                     Please set the BASH environment variable to point to a bash executable,\n\
-                     or install Git for Windows which provides bash at:\n\
-                     C:\\Program Files\\Git\\bin\\bash.exe"
-                );
-            }
-        }
+        std::env::var_os("BASH").map_or_else(
+            || {
+                let git_bash = std::path::PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
+                if git_bash.exists() {
+                    git_bash
+                } else {
+                    panic!(
+                        "Could not find bash executable for e2e tests.\n\
+                         Please set the BASH environment variable to point to a bash executable,\n\
+                         or install Git for Windows which provides bash at:\n\
+                         C:\\Program Files\\Git\\bin\\bash.exe"
+                    );
+                }
+            },
+            std::path::PathBuf::from,
+        )
     } else {
-        PathBuf::from("/bin/sh")
+        std::path::PathBuf::from("/bin/sh")
     }
 }
 
@@ -87,10 +91,11 @@ struct SnapshotsFile {
     pub e2e_cases: Vec<E2e>,
 }
 
+#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
 fn run_case(
     runtime: &tokio::runtime::Runtime,
     tmpdir: &AbsolutePath,
-    fixture_path: &Path,
+    fixture_path: &std::path::Path,
     filter: Option<&str>,
 ) {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
@@ -104,7 +109,10 @@ fn run_case(
     {
         return;
     }
-    println!("{fixture_name}");
+    #[expect(clippy::print_stdout, reason = "test progress output for e2e test runner")]
+    {
+        println!("{fixture_name}");
+    }
     // Configure insta to write snapshots to fixture directory
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_path(fixture_path.join("snapshots"));
@@ -115,7 +123,20 @@ fn run_case(
     settings.bind(|| runtime.block_on(run_case_inner(tmpdir, fixture_path, fixture_name)));
 }
 
-async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name: &str) {
+enum TerminationState {
+    Exited(std::process::ExitStatus),
+    TimedOut,
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "e2e test runner with process management necessarily has many lines"
+)]
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path required by insta::glob! callback; String required by from_utf8_lossy and string accumulation"
+)]
+async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture_name: &str) {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
     copy_dir(fixture_path, &stage_path).unwrap();
@@ -130,11 +151,15 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
     let cases_toml_path = fixture_path.join("snapshots.toml");
     let cases_file: SnapshotsFile = match std::fs::read(&cases_toml_path) {
         Ok(content) => toml::from_slice(&content).unwrap(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Default::default(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SnapshotsFile::default(),
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
     // Navigate from CARGO_MANIFEST_DIR to packages/tools at the repo root
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Path required for CARGO_MANIFEST_DIR path manipulation via env! macro"
+    )]
     let repo_root =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let test_bin_path = Arc::<OsStr>::from(
@@ -179,7 +204,7 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
             }
         }
 
-        let e2e_stage_path = tmpdir.join(format!("{fixture_name}_e2e_stage_{e2e_count}"));
+        let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_e2e_stage_{e2e_count}"));
         e2e_count += 1;
         assert!(copy_dir(fixture_path, &e2e_stage_path).unwrap().is_empty());
 
@@ -228,10 +253,6 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
             let mut stdout_done = false;
             let mut stderr_done = false;
 
-            enum TerminationState {
-                Exited(std::process::ExitStatus),
-                TimedOut,
-            }
             // Initial state is running
             let mut termination_state: Option<TerminationState> = None;
 
@@ -245,16 +266,14 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
                 tokio::select! {
                     result = stdout_handle.read(&mut stdout_chunk), if !stdout_done => {
                         match result {
-                            Ok(0) => stdout_done = true,
+                            Ok(0) | Err(_) => stdout_done = true,
                             Ok(n) => stdout_buf.extend_from_slice(&stdout_chunk[..n]),
-                            Err(_) => stdout_done = true,
                         }
                     }
                     result = stderr_handle.read(&mut stderr_chunk), if !stderr_done => {
                         match result {
-                            Ok(0) => stderr_done = true,
+                            Ok(0) | Err(_) => stderr_done = true,
                             Ok(n) => stderr_buf.extend_from_slice(&stderr_chunk[..n]),
-                            Err(_) => stderr_done = true,
                         }
                     }
                     result = child.wait(), if termination_state.is_none() => {
@@ -286,7 +305,7 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
                 TerminationState::Exited(status) => {
                     let exit_code = status.code().unwrap_or(-1);
                     if exit_code != 0 {
-                        e2e_outputs.push_str(format!("[{exit_code}]").as_str());
+                        e2e_outputs.push_str(vite_str::format!("[{exit_code}]").as_str());
                     }
                 }
             }
@@ -306,10 +325,21 @@ async fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &Path, fixture_name
                 break;
             }
         }
-        insta::assert_snapshot!(e2e.name.as_str(), e2e_outputs);
+        #[expect(
+            clippy::disallowed_macros,
+            reason = "insta::assert_snapshot! internally uses std::format!"
+        )]
+        {
+            insta::assert_snapshot!(e2e.name.as_str(), e2e_outputs);
+        }
     }
 }
 
+#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! macro callback")]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "current_dir needed because insta::glob! requires std PathBuf"
+)]
 fn main() {
     let filter = std::env::args().nth(1);
 

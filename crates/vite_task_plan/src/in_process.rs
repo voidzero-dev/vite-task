@@ -20,7 +20,7 @@ pub struct InProcessExecution {
 
 impl InProcessExecution {
     /// Execute the in-process execution and return the output.
-    pub async fn execute(&self) -> InProcessExecutionOutput {
+    pub fn execute(&self) -> InProcessExecutionOutput {
         match &self.kind {
             InProcessExecutionKind::Echo { strings, trailing_newline } => {
                 let mut stdout = Vec::new();
@@ -59,6 +59,8 @@ impl InProcessExecution {
         match name {
             "echo" => {
                 let mut strings = Vec::new();
+                // side effect (push to strings) makes map_or unsuitable
+                #[expect(clippy::option_if_let_else)]
                 let trailing_newline = if let Some(first_arg) = args.next() {
                     let first_arg = first_arg.as_ref();
                     if first_arg == "-n" {

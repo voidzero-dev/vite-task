@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use vite_str::Str;
 
@@ -17,13 +16,13 @@ pub struct PackageJson {
     #[serde(default)]
     pub name: Str,
     #[serde(default)]
-    pub scripts: HashMap<Str, Str>,
+    pub scripts: FxHashMap<Str, Str>,
     #[serde(default)]
-    pub dependencies: HashMap<Str, Str>,
+    pub dependencies: FxHashMap<Str, Str>,
     #[serde(default)]
-    pub dev_dependencies: HashMap<Str, Str>,
+    pub dev_dependencies: FxHashMap<Str, Str>,
     #[serde(default)]
-    pub peer_dependencies: HashMap<Str, Str>,
+    pub peer_dependencies: FxHashMap<Str, Str>,
 }
 
 impl std::fmt::Debug for PackageJson {

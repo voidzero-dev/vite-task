@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "prepare": "husky",
-    "hello": "echo Hello, Vite Task Monorepo!",
+    "hello": "bash -c pwd",
     "lint": "vp lint"
   },
   "devDependencies": {

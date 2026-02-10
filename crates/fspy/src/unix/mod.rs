@@ -69,10 +69,10 @@ impl SpyImpl {
 
     pub(crate) async fn spawn(&self, mut command: Command) -> Result<TrackedChild, SpawnError> {
         #[cfg(target_os = "linux")]
-        let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::SupervisorError)?;
+        let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
 
         let (ipc_channel_conf, ipc_receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreationError)?;
+            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
 
         let payload = Payload {
             ipc_channel_conf,
@@ -98,7 +98,7 @@ impl SpyImpl {
                 exec_resolve_accesses.add(path_access);
             },
         )
-        .map_err(|err| SpawnError::InjectionError(err.into()))?;
+        .map_err(|err| SpawnError::Injection(err.into()))?;
         command.set_exec(exec);
 
         let mut tokio_command = command.into_tokio_command();
@@ -117,8 +117,8 @@ impl SpyImpl {
         // which needs to accept incoming connections while `pre_exec` is connecting to it.
         let mut child = spawn_blocking(move || tokio_command.spawn())
             .await
-            .map_err(|err| SpawnError::OsSpawnError(err.into()))?
-            .map_err(SpawnError::OsSpawnError)?;
+            .map_err(|err| SpawnError::OsSpawn(err.into()))?
+            .map_err(SpawnError::OsSpawn)?;
 
         Ok(TrackedChild {
             stdin: child.stdin.take(),

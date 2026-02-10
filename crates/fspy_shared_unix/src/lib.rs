@@ -1,4 +1,5 @@
 #![cfg(unix)]
+#![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
 
 pub mod exec;
 pub(crate) mod open_exec;

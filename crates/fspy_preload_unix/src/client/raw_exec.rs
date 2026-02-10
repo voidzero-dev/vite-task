@@ -48,18 +48,17 @@ impl RawExec {
         f(ptr_vec.as_ptr())
     }
 
-    pub unsafe fn to_exec<'a>(self) -> Exec {
+    pub unsafe fn to_exec(self) -> Exec {
         let program = unsafe { CStr::from_ptr(self.prog) }.to_bytes().as_bstr().to_owned();
 
         let args = unsafe { Self::collect_c_str_array(self.argv, BStr::to_owned) };
 
         let envs = unsafe {
             Self::collect_c_str_array(self.envp, |env| {
-                if let Some(eq_pos) = env.iter().position(|b| *b == b'=') {
-                    (env[..eq_pos].to_owned(), Some(env[(eq_pos + 1)..].to_owned()))
-                } else {
-                    (env.to_owned(), None)
-                }
+                env.iter().position(|b| *b == b'=').map_or_else(
+                    || (env.to_owned(), None),
+                    |eq_pos| (env[..eq_pos].to_owned(), Some(env[(eq_pos + 1)..].to_owned())),
+                )
             })
         };
 

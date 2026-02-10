@@ -11,6 +11,8 @@ use ratatui::{
 use super::{Action, Component};
 
 pub struct TasksList {
+    // vite_tui is a standalone TUI app, not using vite_str
+    #[expect(clippy::disallowed_types)]
     tasks: Vec<String>,
     // States
     selection: usize,
@@ -18,6 +20,8 @@ pub struct TasksList {
 }
 
 impl TasksList {
+    // vite_tui is a standalone TUI app, not using vite_str
+    #[expect(clippy::disallowed_types)]
     pub const fn new(tasks: Vec<String>) -> Self {
         Self { state: TableState::new(), selection: 0, tasks }
     }

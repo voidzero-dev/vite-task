@@ -29,6 +29,10 @@ impl PathAccessArena {
     }
 }
 
+// Safety: PathAccessArena is only accessed from a single thread at a time.
+// The Bump allocator and its references are not Send by default, but our usage
+// ensures the arena is moved between threads, not shared.
+#[expect(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for PathAccessArena {}
 
 // impl PathAccessArena {

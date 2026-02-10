@@ -9,6 +9,7 @@ use std::{
 use bincode::{Decode, Encode};
 use bstr::BString;
 use fspy::AccessMode;
+use rustc_hash::FxHashSet;
 use serde::Serialize;
 use tokio::io::AsyncReadExt as _;
 use vite_path::{AbsolutePath, RelativePathBuf};
@@ -21,10 +22,6 @@ use crate::collections::HashMap;
 pub struct PathRead {
     pub read_dir_entries: bool,
 }
-
-/// Path write access info
-#[derive(Debug, Clone, Copy)]
-pub struct PathWrite;
 
 /// Output kind for stdout/stderr
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Encode, Decode, Serialize)]
@@ -57,7 +54,7 @@ pub struct SpawnTrackResult {
     pub path_reads: HashMap<RelativePathBuf, PathRead>,
 
     /// Tracked path writes
-    pub path_writes: HashMap<RelativePathBuf, PathWrite>,
+    pub path_writes: FxHashSet<RelativePathBuf>,
 }
 
 /// Spawn a command with file system tracking via fspy.
@@ -67,6 +64,10 @@ pub struct SpawnTrackResult {
 ///
 /// - `on_output` is called in real-time as stdout/stderr data arrives.
 /// - `track_result` if provided, will be populated with captured outputs and path accesses for caching. If `None`, tracking is disabled.
+#[expect(
+    clippy::too_many_lines,
+    reason = "spawn logic is inherently sequential and splitting would reduce clarity"
+)]
 pub async fn spawn_with_tracking<F>(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
@@ -76,12 +77,6 @@ pub async fn spawn_with_tracking<F>(
 where
     F: FnMut(OutputKind, BString),
 {
-    let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
-    cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
-    cmd.envs(spawn_command.all_envs.iter());
-    cmd.current_dir(&*spawn_command.cwd);
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
     /// The tracking state of the spawned process
     enum TrackingState<'a> {
         /// Tacking is enabled, with the tracked child and result reference
@@ -90,6 +85,12 @@ where
         /// Tracking is disabled, with the tokio child process
         Disabled(tokio::process::Child),
     }
+
+    let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
+    cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
+    cmd.envs(spawn_command.all_envs.iter());
+    cmd.current_dir(&*spawn_command.cwd);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut tracking_state = if let Some(track_result) = track_result {
         // track_result is Some. Spawn with tracking enabled
@@ -198,7 +199,7 @@ where
             path_reads.entry(relative_path.clone()).or_insert(PathRead { read_dir_entries: false });
         }
         if access.mode.contains(AccessMode::WRITE) {
-            path_writes.insert(relative_path.clone(), PathWrite);
+            path_writes.insert(relative_path.clone());
         }
         if access.mode.contains(AccessMode::READ_DIR) {
             match path_reads.entry(relative_path) {

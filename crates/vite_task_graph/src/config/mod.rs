@@ -1,8 +1,9 @@
 pub mod user;
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use monostate::MustBe;
+use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{EnabledCacheConfig, UserCacheConfig, UserRunConfig, UserTaskConfig};
 use vite_path::AbsolutePath;
@@ -76,7 +77,7 @@ pub struct CacheConfig {
 #[derive(Debug, Serialize)]
 pub struct EnvConfig {
     /// environment variable names to be fingerprinted and passed to the task, with defaults populated
-    pub fingerprinted_envs: HashSet<Str>,
+    pub fingerprinted_envs: FxHashSet<Str>,
     /// environment variable names to be passed to the task without fingerprinting, with defaults populated
     pub pass_through_envs: Arc<[Str]>,
 }
@@ -120,6 +121,11 @@ impl ResolvedTaskConfig {
     }
 
     /// Resolves from user config, package dir, and package.json script (if any).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolveTaskConfigError::CommandConflict`] if both the user config and
+    /// package.json define a command, or [`ResolveTaskConfigError::NoCommand`] if neither does.
     pub fn resolve(
         user_config: UserTaskConfig,
         package_dir: &Arc<AbsolutePath>,

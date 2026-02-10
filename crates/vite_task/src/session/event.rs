@@ -1,6 +1,7 @@
 use std::{process::ExitStatus, time::Duration};
 
 use bstr::BString;
+use vite_str::Str;
 // Re-export ExecutionItemDisplay from vite_task_plan since it's the canonical definition
 pub use vite_task_plan::ExecutionItemDisplay;
 
@@ -38,6 +39,10 @@ pub enum CacheUpdateStatus {
 }
 
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "CacheMiss variant is intentionally large and infrequently cloned"
+)]
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss(CacheMiss),
@@ -46,7 +51,7 @@ pub enum CacheStatus {
 
 /// Convert `ExitStatus` to an i32 exit code.
 /// On Unix, if terminated by signal, returns 128 + `signal_number`.
-pub fn exit_status_to_code(status: &ExitStatus) -> i32 {
+pub fn exit_status_to_code(status: ExitStatus) -> i32 {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
@@ -70,7 +75,7 @@ impl ExecutionId {
         Self(0)
     }
 
-    pub(crate) const fn next(&self) -> Self {
+    pub(crate) const fn next(self) -> Self {
         Self(self.0.checked_add(1).expect("ExecutionId overflow"))
     }
 }
@@ -82,9 +87,13 @@ pub struct ExecutionEvent {
 }
 
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "event variants are consumed once and not stored in collections"
+)]
 pub enum ExecutionEventKind {
     Start { display: Option<ExecutionItemDisplay>, cache_status: CacheStatus },
     Output { kind: OutputKind, content: BString },
-    Error { message: String },
+    Error { message: Str },
     Finish { status: Option<ExitStatus>, cache_update_status: CacheUpdateStatus },
 }

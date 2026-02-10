@@ -1,3 +1,5 @@
+// vite_str defines Str using std types internally
+#[expect(clippy::disallowed_types)]
 use std::{
     borrow::Borrow,
     ffi::OsStr,
@@ -79,7 +81,10 @@ impl AsRef<str> for Str {
         self.0.as_ref()
     }
 }
+// vite_str provides Path interop via AsRef
+#[expect(clippy::disallowed_types)]
 impl AsRef<Path> for Str {
+    #[expect(clippy::disallowed_types)]
     fn as_ref(&self) -> &Path {
         self.0.as_ref()
     }
@@ -147,7 +152,10 @@ impl From<&str> for Str {
     }
 }
 
+// vite_str provides String conversion via From
+#[expect(clippy::disallowed_types)]
 impl From<String> for Str {
+    #[expect(clippy::disallowed_types)]
     fn from(value: String) -> Self {
         Self(value.into())
     }
@@ -182,6 +190,8 @@ mod ts_impl {
 
     use super::Str;
 
+    // ts-rs trait requires returning String
+    #[expect(clippy::disallowed_types)]
     impl TS for Str {
         type OptionInnerType = Self;
         type WithoutGenerics = Self;

@@ -10,7 +10,7 @@ pub use display::{format_cache_status_inline, format_cache_status_summary};
 use rusqlite::{Connection, OptionalExtension as _, config::DbConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use vite_path::{AbsolutePath, AbsolutePathBuf};
+use vite_path::AbsolutePath;
 use vite_task_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
 
 use super::execute::{
@@ -35,12 +35,20 @@ pub struct ExecutionCache {
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
 #[derive(Debug, Serialize, Deserialize)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "FingerprintMismatch contains SpawnFingerprint which is intentionally large; boxing would add unnecessary indirection for a short-lived enum"
+)]
 pub enum CacheMiss {
     NotFound,
     FingerprintMismatch(FingerprintMismatch),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "SpawnFingerprintMismatch holds two SpawnFingerprints for comparison; boxing would add unnecessary indirection for a short-lived enum"
+)]
 pub enum FingerprintMismatch {
     /// Found the cache entry of the same task run, but the spawn fingerprint mismatches
     /// this happens when the command itself or an env changes.
@@ -66,14 +74,17 @@ impl Display for FingerprintMismatch {
 }
 
 impl ExecutionCache {
-    pub fn load_from_path(cache_path: AbsolutePathBuf) -> anyhow::Result<Self> {
-        let path: &AbsolutePath = cache_path.as_ref();
+    pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
         tracing::info!("Creating task cache directory at {:?}", path);
         std::fs::create_dir_all(path)?;
 
         // Use file lock to prevent race conditions when multiple processes initialize the database
         let lock_path = path.join("db_open.lock");
         let lock_file = File::create(lock_path.as_path())?;
+        #[expect(
+            clippy::incompatible_msrv,
+            reason = "File::lock is stable since 1.84.0, our MSRV 1.88.0 is higher; clippy false positive"
+        )]
         lock_file.lock()?;
 
         let db_path = path.join("cache.db");
@@ -101,7 +112,7 @@ impl ExecutionCache {
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
                 6 => break, // current version
-                6.. => {
+                7.. => {
                     return Err(anyhow::anyhow!("Unrecognized database version: {user_version}"));
                 }
             }
@@ -179,18 +190,33 @@ impl ExecutionCache {
 
 // Basic database operations
 impl ExecutionCache {
+    #[expect(
+        clippy::future_not_send,
+        reason = "tokio MutexGuard is !Send but this future only runs on a single-threaded runtime"
+    )]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
+    )]
     async fn get_key_by_value<K: Encode, V: Decode<()>>(
         &self,
         table: &str,
         key: &K,
     ) -> anyhow::Result<Option<V>> {
-        let conn = self.conn.lock().await;
-        let mut select_stmt =
-            conn.prepare_cached(&format!("SELECT value FROM {table} WHERE key=?"))?;
         let key_blob = encode_to_vec(key, BINCODE_CONFIG)?;
-        let Some(value_blob) =
-            select_stmt.query_row::<Vec<u8>, _, _>([key_blob], |row| row.get(0)).optional()?
-        else {
+        let value_blob = {
+            let conn = self.conn.lock().await;
+            #[expect(
+                clippy::disallowed_macros,
+                reason = "SQL query string for rusqlite requires String"
+            )]
+            let mut select_stmt =
+                conn.prepare_cached(&format!("SELECT value FROM {table} WHERE key=?"))?;
+            let value_blob: Option<Vec<u8>> =
+                select_stmt.query_row::<Vec<u8>, _, _>([key_blob], |row| row.get(0)).optional()?;
+            value_blob
+        };
+        let Some(value_blob) = value_blob else {
             return Ok(None);
         };
         let (value, _) = decode_from_slice::<V, _>(&value_blob, BINCODE_CONFIG)?;
@@ -211,15 +237,24 @@ impl ExecutionCache {
         self.get_key_by_value("execution_key_to_fingerprint", execution_cache_key).await
     }
 
+    #[expect(
+        clippy::future_not_send,
+        reason = "tokio MutexGuard is !Send but this future only runs on a single-threaded runtime"
+    )]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "lock guard must be held while executing the prepared statement"
+    )]
     async fn upsert<K: Encode, V: Encode>(
         &self,
         table: &str,
         key: &K,
         value: &V,
     ) -> anyhow::Result<()> {
-        let conn = self.conn.lock().await;
         let key_blob = encode_to_vec(key, BINCODE_CONFIG)?;
         let value_blob = encode_to_vec(value, BINCODE_CONFIG)?;
+        let conn = self.conn.lock().await;
+        #[expect(clippy::disallowed_macros, reason = "SQL query string for rusqlite requires String")]
         let mut update_stmt = conn.prepare_cached(&format!(
             "INSERT INTO {table} (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2"
         ))?;
@@ -243,12 +278,20 @@ impl ExecutionCache {
         self.upsert("execution_key_to_fingerprint", execution_cache_key, spawn_fingerprint).await
     }
 
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "lock guard must be held while iterating over query rows"
+    )]
     async fn list_table<K: Decode<()> + Serialize, V: Decode<()> + Serialize>(
         &self,
         table: &str,
         out: &mut impl Write,
     ) -> anyhow::Result<()> {
         let conn = self.conn.lock().await;
+        #[expect(
+            clippy::disallowed_macros,
+            reason = "SQL query string for rusqlite requires String"
+        )]
         let mut select_stmt = conn.prepare_cached(&format!("SELECT key, value FROM {table}"))?;
         let mut rows = select_stmt.query([])?;
         while let Some(row) = rows.next()? {

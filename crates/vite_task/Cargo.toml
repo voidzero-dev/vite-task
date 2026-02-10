@@ -26,6 +26,7 @@ owo-colors = { workspace = true }
 petgraph = { workspace = true }
 rayon = { workspace = true }
 rusqlite = { workspace = true, features = ["bundled"] }
+rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

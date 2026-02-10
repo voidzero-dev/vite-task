@@ -22,6 +22,8 @@ pub struct ChannelConf {
 }
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders
+// non-vite crate: cannot use vite_str/vite_path types
+#[expect(clippy::missing_errors_doc)]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
@@ -50,6 +52,7 @@ impl ChannelConf {
     /// Creates a sender.
     ///
     /// This doesn't block on the file lock. Instead it returns immediately with error if the receiver is locked or dropped.
+    #[expect(clippy::missing_errors_doc)]
     pub fn sender(&self) -> io::Result<Sender> {
         let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
         lock_file.try_lock_shared()?;
@@ -90,6 +93,7 @@ impl Deref for Sender {
 }
 
 /// Safety: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
+#[expect(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for Sender {}
 
 /// Safety: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
@@ -104,6 +108,7 @@ pub struct Receiver {
 }
 
 /// Safety: Receiver doesn't read or write `shm`. It only pass it to `ReceiverLockGuard` under the lock.
+#[expect(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for Receiver {}
 
 /// Safety: Receiver doesn't read or write `shm`. It only pass it to `ReceiverLockGuard` under the lock.
@@ -126,6 +131,7 @@ impl Receiver {
     /// Lock the shared memory for unique read access.
     /// Blocks until all the senders have dropped (or processes owning them have all exited) so the shared memory can be safely read.
     /// During the lifetime of returned `ReceiverReadGuard`, no new senders can be created (`ChannelConf::sender` would fail).
+    #[expect(clippy::missing_errors_doc)]
     pub fn lock(&self) -> io::Result<ReceiverLockGuard<'_>> {
         self.lock_file.lock()?;
         let reader = ShmReader::new(unsafe { self.shm.as_slice() });
@@ -183,6 +189,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::print_stdout)]
     fn forbid_new_senders_after_locked() {
         let (conf, receiver) = channel(42).unwrap();
         let _lock = receiver.lock().unwrap();
@@ -195,6 +202,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::print_stdout)]
     fn forbid_new_senders_after_receiver_dropped() {
         let (conf, receiver) = channel(42).unwrap();
         drop(receiver);

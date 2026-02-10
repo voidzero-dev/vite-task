@@ -17,12 +17,18 @@ pub struct FileWithPath {
 
 impl FileWithPath {
     /// Open a file at the given path.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be opened.
     pub fn open(path: Arc<AbsolutePath>) -> Result<Self, Error> {
         let file = File::open(&*path)?;
         Ok(Self { file, path })
     }
 
     /// Try to open a file, returning None if it doesn't exist.
+    ///
+    /// # Errors
+    /// Returns an error if the file exists but cannot be opened.
     pub fn open_if_exists(path: Arc<AbsolutePath>) -> Result<Option<Self>, Error> {
         match File::open(&*path) {
             Ok(file) => Ok(Some(Self { file, path })),
@@ -60,6 +66,12 @@ pub struct PackageRoot<'a> {
 /// Find the package root directory from the current working directory. `original_cwd` must be absolute.
 ///
 /// If the package.json file is not found, will return `PackageJsonNotFound` error.
+///
+/// # Errors
+/// Returns an error if no `package.json` is found in any ancestor directory, or if a path cannot be stripped.
+///
+/// # Panics
+/// Panics if `original_cwd` is not within the found package root (should not happen in practice).
 pub fn find_package_root(original_cwd: &AbsolutePath) -> Result<PackageRoot<'_>, Error> {
     let mut cwd = original_cwd;
     loop {
@@ -116,6 +128,12 @@ pub struct WorkspaceRoot {
 /// If the workspace file is not found, but a package is found, `workspace_file` will be `NonWorkspacePackage` with the `package.json` File.
 ///
 /// If neither workspace nor package is found, will return `PackageJsonNotFound` error.
+///
+/// # Errors
+/// Returns an error if no workspace or package is found, or if file I/O or JSON/YAML parsing fails.
+///
+/// # Panics
+/// Panics if `original_cwd` is not within the found workspace root (should not happen in practice).
 pub fn find_workspace_root(
     original_cwd: &AbsolutePath,
 ) -> Result<(WorkspaceRoot, RelativePathBuf), Error> {

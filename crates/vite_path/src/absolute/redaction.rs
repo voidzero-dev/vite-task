@@ -15,6 +15,8 @@ impl Drop for RedactionGuard {
     }
 }
 
+/// # Panics
+/// Panics if a `RedactionGuard` is already active.
 #[must_use]
 pub fn redact_absolute_paths(prefix: &Arc<AbsolutePath>) -> RedactionGuard {
     REDACTION_PREFIX.with(|redaction_prefix| {

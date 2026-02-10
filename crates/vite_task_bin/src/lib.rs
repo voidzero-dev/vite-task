@@ -1,13 +1,12 @@
 use std::{
-    collections::HashMap,
     env::{self, join_paths},
     ffi::OsStr,
     iter,
-    path::PathBuf,
     sync::Arc,
 };
 
 use clap::Parser;
+use rustc_hash::FxHashMap;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
@@ -18,13 +17,22 @@ use vite_task::{
 #[derive(Debug, Default)]
 pub struct CommandHandler(());
 
+/// Find an executable in `node_modules/.bin` directories up the tree.
+///
+/// # Errors
+///
+/// Returns an error if the executable cannot be found in any searched path.
 pub fn find_executable(
     path_env: Option<&Arc<OsStr>>,
     cwd: &AbsolutePath,
     executable: &str,
 ) -> anyhow::Result<Arc<OsStr>> {
-    let mut paths: Vec<PathBuf> =
-        if let Some(path_env) = path_env { env::split_paths(path_env).collect() } else { vec![] };
+    #[expect(
+        clippy::disallowed_types,
+        reason = "PathBuf required by env::split_paths and which::which_in APIs"
+    )]
+    let mut paths: Vec<std::path::PathBuf> =
+        path_env.map_or_else(Vec::new, |path_env| env::split_paths(path_env).collect());
     let mut current_cwd_parent = cwd;
     loop {
         let node_modules_bin = current_cwd_parent.join("node_modules").join(".bin");
@@ -39,10 +47,15 @@ pub fn find_executable(
     Ok(executable_path.into_os_string().into())
 }
 
+/// Create a synthetic plan request for running a tool from `node_modules/.bin`.
+///
+/// # Errors
+///
+/// Returns an error if the executable cannot be found.
 fn synthesize_node_modules_bin_task(
     executable_name: &str,
     args: &[Str],
-    envs: &Arc<HashMap<Arc<OsStr>, Arc<OsStr>>>,
+    envs: &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
     cwd: &Arc<AbsolutePath>,
 ) -> anyhow::Result<SyntheticPlanRequest> {
     Ok(SyntheticPlanRequest {
@@ -102,7 +115,7 @@ impl vite_task::CommandHandler for CommandHandler {
                 synthesize_node_modules_bin_task("vitest", &args, &command.envs, &command.cwd)?,
             )),
             Args::EnvTest { name, value } => {
-                let mut envs = HashMap::clone(&command.envs);
+                let mut envs = FxHashMap::clone(&command.envs);
                 envs.insert(
                     Arc::from(OsStr::new(name.as_str())),
                     Arc::from(OsStr::new(value.as_str())),
@@ -142,8 +155,11 @@ impl vite_task::loader::UserConfigLoader for JsonUserConfigLoader {
             }
             Err(err) => return Err(err.into()),
         };
-        let json_value = jsonc_parser::parse_to_serde_value(&config_content, &Default::default())?
-            .unwrap_or_default();
+        let json_value = jsonc_parser::parse_to_serde_value(
+            &config_content,
+            &jsonc_parser::ParseOptions::default(),
+        )?
+        .unwrap_or_default();
         let user_config: vite_task::config::UserRunConfig = serde_json::from_value(json_value)?;
         Ok(Some(user_config))
     }

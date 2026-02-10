@@ -26,7 +26,7 @@ use bytemuck::{TransparentWrapper, TransparentWrapperAlloc};
 
 /// Similar to `OsStr`, but
 /// - Can be infallibly and losslessly encoded/decoded using bincode.
-///     (`Encode`/`Decoded` implementations for `OsStr` requires it to be valid UTF-8. This does not.)
+///   (`Encode`/`Decoded` implementations for `OsStr` requires it to be valid UTF-8. This does not.)
 /// - Can be constructed from wide characters on Windows with zero copy.
 /// - Supports zero-copy `BorrowDecode`.
 #[derive(TransparentWrapper, Encode, PartialEq, Eq)]

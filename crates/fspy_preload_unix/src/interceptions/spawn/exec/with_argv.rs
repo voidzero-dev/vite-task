@@ -1,6 +1,6 @@
 use std::{
     ffi::VaList,
-    mem::{self, MaybeUninit, transmute},
+    mem::{self, MaybeUninit},
     slice,
 };
 
@@ -8,6 +8,8 @@ use libc::{c_char, c_int};
 use nix::Error;
 
 // https://github.com/redox-os/relibc/blob/710911febb07a43716a6236cc9e5b864e227e36e/src/header/unistd/mod.rs#L1094
+// arg0/argc are standard C naming conventions for these parameters
+#[expect(clippy::similar_names, reason = "arg0 and argc are standard C naming conventions")]
 pub unsafe fn with_argv(
     mut va: VaList,
     arg0: *const c_char,
@@ -42,14 +44,16 @@ pub unsafe fn with_argv(
     };
     out[0].write(arg0);
 
-    for i in 1..argc {
-        out[i].write(unsafe { va.arg::<*const c_char>() });
+    for item in out.iter_mut().take(argc).skip(1) {
+        item.write(unsafe { va.arg::<*const c_char>() });
     }
     out[argc].write(core::ptr::null());
     // NULL
     unsafe { va.arg::<*const c_char>() };
 
-    f(unsafe { transmute::<&[MaybeUninit<*const c_char>], &[*const c_char]>(&*out) }, va);
+    // Safety: MaybeUninit<*const c_char> has the same layout as *const c_char,
+    // and all elements have been initialized via write() above.
+    f(unsafe { &*(&raw const *out as *const [*const c_char]) }, va);
 
     // f only returns if it fails
     if argc >= 32 {

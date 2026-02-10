@@ -78,7 +78,7 @@ impl SpyImpl {
         command.creation_flags(CREATE_SUSPENDED);
 
         let (channel_conf, receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreationError)?;
+            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
 
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;
@@ -124,9 +124,9 @@ impl SpyImpl {
             })
             .map_err(|err| {
                 if !*spawn_success {
-                    SpawnError::InjectionError(err.into())
+                    SpawnError::Injection(err.into())
                 } else {
-                    SpawnError::OsSpawnError(err.into())
+                    SpawnError::OsSpawn(err.into())
                 }
             })?;
 

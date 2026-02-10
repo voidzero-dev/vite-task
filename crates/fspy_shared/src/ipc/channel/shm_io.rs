@@ -285,14 +285,12 @@ impl<M: AsRef<[u8]>> ShmReader<M> {
                     0 => {
                         // frame was claimed but never written (crashed process)
                         // Keep reading until we find a non-zero header
-                        continue;
                     }
                     1.. => {
                         // Partially written frame - skip it and continue
                         let size = usize::try_from(frame_header).unwrap();
                         remaining_content =
                             &remaining_content[roundup_to_align_frame_header(size)..];
-                        continue;
                     }
                     ..0 => {
                         // Fully written frame (negative size indicates completion)
@@ -653,7 +651,8 @@ mod tests {
             let shm = ShmemConf::new().os_id(shm_name).open().unwrap();
             let writer = unsafe { ShmWriter::new(shm) };
             for i in 0..FRAME_COUNT_EACH_CHILD {
-                assert!(writer.try_write_frame(format!("{child_index} {i}").as_bytes()));
+                let frame_data = format!("{child_index} {i}");
+                assert!(writer.try_write_frame(frame_data.as_bytes()));
             }
             std::process::exit(0);
         }
@@ -683,7 +682,8 @@ mod tests {
         assert_eq!(frames.len(), CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
         for child_index in 0..CHILD_COUNT {
             for i in 0..FRAME_COUNT_EACH_CHILD {
-                assert!(frames.contains(&BStr::new(format!("{child_index} {i}").as_bytes())));
+                let frame_data = format!("{child_index} {i}");
+                assert!(frames.contains(&BStr::new(frame_data.as_bytes())));
             }
         }
     }

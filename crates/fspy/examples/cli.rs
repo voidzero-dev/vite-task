@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_types, clippy::disallowed_methods, clippy::disallowed_macros)]
+
 use std::{env::args_os, ffi::OsStr, path::PathBuf, pin::Pin};
 
 use tokio::{
@@ -29,15 +31,20 @@ async fn main() -> anyhow::Result<()> {
 
     for acc in termination.path_accesses.iter() {
         path_count += 1;
+        let mode_str = format!("{:?}", acc.mode);
         csv_writer
             .write_record(&[
                 acc.path.to_cow_os_str().to_string_lossy().as_ref().as_bytes(),
-                format!("{:?}", acc.mode).as_bytes(),
+                mode_str.as_bytes(),
             ])
             .await?;
     }
     csv_writer.flush().await?;
 
-    eprintln!("\nfspy: {path_count} paths accessed. status: {}", termination.status);
+    // CLI example: stderr output is intentional for user feedback
+    #[expect(clippy::print_stderr)]
+    {
+        eprintln!("\nfspy: {path_count} paths accessed. status: {}", termination.status);
+    }
     Ok(())
 }

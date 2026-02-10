@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use vite_path::RelativePathBuf;
-use vite_str::Str;
+use vite_str::{self, Str};
 
 use crate::envs::EnvFingerprints;
 
@@ -96,8 +96,8 @@ impl SpawnFingerprint {
 
     /// Get the program fingerprint as a debug string.
     #[must_use]
-    pub fn program_fingerprint_debug(&self) -> String {
-        format!("{:?}", self.program_fingerprint)
+    pub fn program_fingerprint_debug(&self) -> Str {
+        vite_str::format!("{:?}", self.program_fingerprint)
     }
 
     /// Get the command args.

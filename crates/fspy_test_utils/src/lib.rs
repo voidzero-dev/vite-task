@@ -65,6 +65,7 @@ mod tests {
     use std::str::from_utf8;
 
     #[test]
+    #[expect(clippy::print_stdout)]
     fn test_command_executing() {
         let mut command = command_executing!(42u32, |arg: u32| {
             print!("{arg}");

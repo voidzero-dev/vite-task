@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 
 use clap::Parser;
 use vite_path::AbsolutePath;
@@ -58,6 +58,11 @@ pub enum CLITaskQueryError {
 
 impl RunCommand {
     /// Convert to `PlanRequest`, or return an error if invalid.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `--recursive` and `--transitive` are both set,
+    /// or if a package name is specified with `--recursive`.
     pub fn into_plan_request(
         self,
         cwd: &Arc<AbsolutePath>,
@@ -79,10 +84,10 @@ impl RunCommand {
             } else {
                 task_specifier.task_name
             };
-            TaskQueryKind::Recursive { task_names: [task_name].into() }
+            TaskQueryKind::Recursive { task_names: iter::once(task_name).collect() }
         } else {
             TaskQueryKind::Normal {
-                task_specifiers: [task_specifier].into(),
+                task_specifiers: iter::once(task_specifier).collect(),
                 cwd: Arc::clone(cwd),
                 include_topological_deps: transitive,
             }

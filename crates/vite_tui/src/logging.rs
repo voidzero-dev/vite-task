@@ -6,8 +6,12 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use crate::config;
 
+// vite_tui is a standalone TUI app, not using vite_str
+#[expect(clippy::disallowed_types, clippy::disallowed_macros)]
 pub static LOG_ENV: LazyLock<String> =
     LazyLock::new(|| format!("{}_LOG_LEVEL", config::PROJECT_NAME.clone()));
+// vite_tui is a standalone TUI app, not using vite_str
+#[expect(clippy::disallowed_types, clippy::disallowed_macros)]
 pub static LOG_FILE: LazyLock<String> = LazyLock::new(|| format!("{}.log", env!("CARGO_PKG_NAME")));
 
 /// # Errors
