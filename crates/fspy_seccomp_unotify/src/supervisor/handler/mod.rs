@@ -4,8 +4,13 @@ use std::io;
 
 use libc::seccomp_notif;
 
+#[expect(clippy::module_name_repetitions, reason = "clearer as a standalone export")]
 pub trait SeccompNotifyHandler {
     fn syscalls() -> &'static [syscalls::Sysno];
+    /// Handles a seccomp notification for an intercepted syscall.
+    ///
+    /// # Errors
+    /// Returns an error if the handler fails to process the notification.
     fn handle_notify(&mut self, notify: &seccomp_notif) -> io::Result<()>;
 }
 

@@ -1,4 +1,10 @@
 #![cfg(target_os = "linux")]
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::disallowed_macros,
+    reason = "test file for non-vite crate"
+)]
 
 use std::{
     env::{current_dir, set_current_dir},
@@ -36,12 +42,10 @@ struct SyscallRecorder(Vec<Syscall>);
 impl SyscallRecorder {
     fn openat(&mut self, caller: Caller<'_>, (fd, path): (Fd, CStrPtr)) -> io::Result<()> {
         let at_dir = fd.get_path(caller)?;
-        let mut buf = [0u8; 40000];
-        let path = if let Some(null_pos) = path.read(caller, &mut buf)? {
-            Some(OsString::from_vec(buf[..null_pos].to_vec()))
-        } else {
-            None
-        };
+        let mut buf = vec![0u8; 40000];
+        let path = path
+            .read(caller, &mut buf)?
+            .map(|null_pos| OsString::from_vec(buf[..null_pos].to_vec()));
         self.0.push(Syscall::Openat { at_dir, path });
         Ok(())
     }
@@ -58,6 +62,9 @@ async fn run_in_pre_exec(
 
         let payload = supervisor.payload().clone();
 
+        // SAFETY: `pre_exec` closure runs in the forked child process before exec.
+        // It installs the seccomp filter and runs the user-provided closure, both of
+        // which are safe in a pre-exec context (no async, no locks held).
         unsafe {
             cmd.pre_exec(move || {
                 install_target(&payload)?;
@@ -80,7 +87,7 @@ async fn run_in_pre_exec(
         let recorders = supervisor.stop().await?;
         trace!("{} recorders awaited", recorders.len());
 
-        let syscalls = recorders.into_iter().map(|recorder| recorder.0.into_iter()).flatten();
+        let syscalls = recorders.into_iter().flat_map(|recorder| recorder.0);
         io::Result::Ok(syscalls.collect())
     })
     .await??)

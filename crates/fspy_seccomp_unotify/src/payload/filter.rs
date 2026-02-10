@@ -1,7 +1,7 @@
 use bincode::{Decode, Encode};
 
 #[derive(Debug, Encode, Decode, Clone, Copy)]
-pub(crate) struct CodableSockFilter {
+pub struct CodableSockFilter {
     code: u16,
     jt: u8,
     jf: u8,
@@ -20,7 +20,7 @@ impl From<seccompiler::sock_filter> for CodableSockFilter {
 impl From<CodableSockFilter> for libc::sock_filter {
     fn from(filter: CodableSockFilter) -> Self {
         let CodableSockFilter { code, jt, jf, k } = filter;
-        libc::sock_filter { code, jt, jf, k }
+        Self { code, jt, jf, k }
     }
 }
 

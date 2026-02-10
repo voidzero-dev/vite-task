@@ -1,5 +1,3 @@
-#![allow(clippy::wildcard_imports, reason = "generated FFI bindings")]
-
 use winapi::{
     shared::{guiddef::*, minwindef::*, windef::*},
     um::{

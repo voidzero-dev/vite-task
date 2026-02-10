@@ -12,6 +12,12 @@ use passfd::FdPassingExt;
 
 use crate::{bindings::install_unotify_filter, payload::SeccompPayload};
 
+/// Installs the seccomp user notification filter and sends the notification fd
+/// to the supervisor via the IPC socket.
+///
+/// # Errors
+/// Returns an error if setting no-new-privs fails, the filter cannot be installed,
+/// or the IPC socket communication fails.
 pub fn install_target(payload: &SeccompPayload) -> nix::Result<()> {
     set_no_new_privs()?;
     let sock_filters =

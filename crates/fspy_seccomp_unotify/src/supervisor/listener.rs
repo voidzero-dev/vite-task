@@ -1,6 +1,5 @@
 use std::{
     io,
-    ops::Deref,
     os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
 };
 
@@ -31,9 +30,14 @@ impl AsFd for NotifyListener {
     }
 }
 
-const SECCOMP_IOCTL_NOTIF_SEND: libc::c_ulong = 3222806785;
+const SECCOMP_IOCTL_NOTIF_SEND: libc::c_ulong = 3_222_806_785;
 
 impl NotifyListener {
+    /// Sends a `SECCOMP_USER_NOTIF_FLAG_CONTINUE` response for the given request ID.
+    ///
+    /// # Errors
+    /// Returns an error if the ioctl call fails, except for `ENOENT` which is
+    /// silently ignored (indicates the target process's syscall was interrupted).
     pub fn send_continue(
         &self,
         req_id: u64,
@@ -41,8 +45,13 @@ impl NotifyListener {
     ) -> io::Result<()> {
         let resp = buf.zeroed();
         resp.id = req_id;
-        resp.flags = libc::SECCOMP_USER_NOTIF_FLAG_CONTINUE as _;
+        #[expect(clippy::cast_possible_truncation, reason = "flag constant fits in u32")]
+        {
+            resp.flags = libc::SECCOMP_USER_NOTIF_FLAG_CONTINUE as u32;
+        }
 
+        // SAFETY: `resp` is a valid mutable pointer to a zeroed and populated
+        // `seccomp_notif_resp` buffer, and the fd is a valid seccomp notify fd
         let ret = unsafe {
             libc::ioctl(self.async_fd.as_raw_fd(), SECCOMP_IOCTL_NOTIF_SEND, &raw mut *resp)
         };
@@ -51,12 +60,16 @@ impl NotifyListener {
             // ignore error if target process's syscall was interrupted
             if err == nix::Error::ENOENT {
                 return Ok(());
-            };
+            }
             return Err(err.into());
-        };
+        }
         Ok(())
     }
 
+    /// Waits for and returns the next seccomp notification, or `None` if the fd is closed.
+    ///
+    /// # Errors
+    /// Returns an error if waiting on or reading from the notification fd fails.
     pub async fn next(&mut self) -> io::Result<Option<&seccomp_notif>> {
         loop {
             let mut ready_guard = self.async_fd.readable().await?;
@@ -73,8 +86,8 @@ impl NotifyListener {
             ready_guard.clear_ready();
 
             match notif_recv(ready_guard.get_inner().as_fd(), &mut self.notif_buf) {
-                Ok(()) => return Ok(Some(self.notif_buf.deref())),
-                Err(nix::Error::EINTR | nix::Error::EWOULDBLOCK | nix::Error::ENOENT) => continue,
+                Ok(()) => return Ok(Some(&self.notif_buf)),
+                Err(nix::Error::EINTR | nix::Error::EWOULDBLOCK | nix::Error::ENOENT) => {}
                 Err(other_error) => return Err(other_error.into()),
             }
         }

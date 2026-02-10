@@ -10,6 +10,10 @@ use libc::{pid_t, seccomp_notif};
 use nix::sys::uio::{RemoteIoVec, process_vm_readv};
 
 pub trait FromSyscallArg: Sized {
+    /// Converts a raw syscall argument into this type.
+    ///
+    /// # Errors
+    /// Returns an error if the argument value cannot be interpreted as this type.
     fn from_syscall_arg(arg: u64) -> io::Result<Self>;
 }
 /// Represents the caller of a syscall. Needed to read memory from the caller's address space.
@@ -26,7 +30,8 @@ impl<'a> Caller<'a> {
         f(Self { pid, _marker: std::marker::PhantomData })
     }
 
-    pub fn read_vm(self, starting_addr: usize) -> ProcessVmReader<'a> {
+    #[must_use]
+    pub const fn read_vm(self, starting_addr: usize) -> ProcessVmReader<'a> {
         ProcessVmReader { caller: self, current_addr: starting_addr }
     }
 }
@@ -36,7 +41,7 @@ pub struct ProcessVmReader<'a> {
     current_addr: usize,
 }
 
-impl<'a> io::Read for ProcessVmReader<'a> {
+impl io::Read for ProcessVmReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let buf_len = buf.len();
         let read_len = process_vm_readv(
@@ -44,9 +49,10 @@ impl<'a> io::Read for ProcessVmReader<'a> {
             &mut [IoSliceMut::new(buf)],
             &[RemoteIoVec { base: self.current_addr, len: buf_len }],
         )?;
-        self.current_addr = self.current_addr.checked_add(read_len).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "address overflow while reading remote process")
-        })?;
+        self.current_addr = self
+            .current_addr
+            .checked_add(read_len)
+            .ok_or_else(|| io::Error::other("address overflow while reading remote process"))?;
         Ok(read_len)
     }
 }
@@ -63,7 +69,10 @@ impl CStrPtr {
     /// - `Ok(None)` if the buffer was filled without encountering a null-terminator.
     /// - `Err(UnexpectedEof)` if Eof was reached without encountering a null-terminator.
     /// - `Err(other_err)` on other errors from reading the remote process memory.
-    pub fn read(&self, caller: Caller<'_>, buf: &mut [u8]) -> io::Result<Option<usize>> {
+    ///
+    /// # Errors
+    /// Returns an error if reading from the remote process memory fails.
+    pub fn read(self, caller: Caller<'_>, buf: &mut [u8]) -> io::Result<Option<usize>> {
         let mut reader = caller.read_vm(self.remote_ptr);
         let mut pos = 0;
         while let Some((_, unfilled)) = buf.split_at_mut_checked(pos) {
@@ -87,8 +96,9 @@ impl CStrPtr {
 }
 
 impl FromSyscallArg for CStrPtr {
+    #[expect(clippy::cast_possible_truncation, reason = "syscall arg represents a pointer address")]
     fn from_syscall_arg(arg: u64) -> io::Result<Self> {
-        Ok(Self { remote_ptr: arg as _ })
+        Ok(Self { remote_ptr: arg as usize })
     }
 }
 
@@ -98,20 +108,28 @@ pub struct Ptr<T> {
 }
 impl<T> FromSyscallArg for Ptr<T> {
     fn from_syscall_arg(arg: u64) -> io::Result<Self> {
-        Ok(Self { remote_ptr: arg as _, _marker: PhantomData })
+        Ok(Self { remote_ptr: arg as *mut c_void, _marker: PhantomData })
     }
 }
 impl<T> Ptr<T> {
     /// Reads the value of type T from the remote process memory.
-    /// # Safety:
+    ///
+    /// # Safety
     /// The remote pointer must be valid and point to a value of type T in the remote process memory.
+    ///
+    /// # Errors
+    /// Returns an error if reading from the remote process memory fails.
     pub unsafe fn read(&self, caller: Caller<'_>) -> io::Result<T> {
         let mut reader = caller.read_vm(self.remote_ptr as usize);
         let mut buf = MaybeUninit::<T>::zeroed();
+        // SAFETY: `MaybeUninit<T>` has the same layout as `T`, so casting to a
+        // byte slice of `size_of::<T>()` bytes is valid for writing into
         let buf_slice = unsafe {
-            std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, std::mem::size_of::<T>())
+            std::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), std::mem::size_of::<T>())
         };
         reader.read_exact(buf_slice)?;
+        // SAFETY: all bytes of `buf` have been initialized by `read_exact`,
+        // and the caller guarantees the remote pointer points to a valid `T`
         Ok(unsafe { buf.assume_init() })
     }
 }
@@ -120,7 +138,7 @@ impl<T> Ptr<T> {
 pub struct Ignored(());
 impl FromSyscallArg for Ignored {
     fn from_syscall_arg(_arg: u64) -> io::Result<Self> {
-        Ok(Ignored(()))
+        Ok(Self(()))
     }
 }
 
@@ -130,20 +148,26 @@ pub struct Fd {
 }
 
 impl Fd {
-    pub fn cwd() -> Self {
+    #[must_use]
+    pub const fn cwd() -> Self {
         Self { fd: libc::AT_FDCWD }
     }
 }
 
 impl FromSyscallArg for Fd {
+    #[expect(clippy::cast_possible_truncation, reason = "syscall arg represents a file descriptor")]
     fn from_syscall_arg(arg: u64) -> io::Result<Self> {
-        Ok(Self { fd: arg as _ })
+        Ok(Self { fd: arg as RawFd })
     }
 }
 
 impl Fd {
     // TODO: allocate in arena
-    pub fn get_path(&self, caller: Caller<'_>) -> nix::Result<OsString> {
+    /// Returns the filesystem path associated with this file descriptor.
+    ///
+    /// # Errors
+    /// Returns an error if the `/proc` readlink fails (e.g., the process has exited).
+    pub fn get_path(self, caller: Caller<'_>) -> nix::Result<OsString> {
         nix::fcntl::readlink(
             if self.fd == libc::AT_FDCWD {
                 format!("/proc/{}/cwd", caller.pid)
@@ -156,12 +180,17 @@ impl Fd {
 }
 
 impl FromSyscallArg for c_int {
+    #[expect(clippy::cast_possible_truncation, reason = "syscall arg represents a c_int value")]
     fn from_syscall_arg(arg: u64) -> io::Result<Self> {
-        Ok(arg as _)
+        Ok(arg as Self)
     }
 }
 
 pub trait FromNotify: Sized {
+    /// Parses syscall arguments from a seccomp notification.
+    ///
+    /// # Errors
+    /// Returns an error if any argument cannot be parsed.
     fn from_notify(notif: &seccomp_notif) -> io::Result<Self>;
 }
 

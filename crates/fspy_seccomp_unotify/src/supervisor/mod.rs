@@ -37,23 +37,38 @@ pub struct Supervisor<H> {
 }
 
 impl<H> Supervisor<H> {
-    pub fn payload(&self) -> &SeccompPayload {
+    #[must_use]
+    pub const fn payload(&self) -> &SeccompPayload {
         &self.payload
     }
 
+    /// Stops the supervisor and returns all handler instances.
+    ///
+    /// # Panics
+    /// Panics if the handling loop task has panicked.
+    ///
+    /// # Errors
+    /// Returns an error if any of the spawned handler tasks failed with an I/O error.
     pub async fn stop(self) -> io::Result<Vec<H>> {
         drop(self.cancel_tx);
         self.handling_loop_task.await.expect("handling loop task panicked")
     }
 }
 
+/// Creates a new supervisor that listens for seccomp user notifications.
+///
+/// # Panics
+/// Panics if the seccomp filter cannot be compiled or the target architecture is unsupported.
+///
+/// # Errors
+/// Returns an error if the temporary IPC socket cannot be created.
 pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Result<Supervisor<H>>
 {
     let notify_listener = tempfile::Builder::new()
         .prefix("fspy_seccomp_notify")
         .make(|path| UnixListener::bind(path))?;
 
-    let filter = SeccompFilter::new(
+    let seccomp_filter = SeccompFilter::new(
         H::syscalls().iter().map(|sysno| (sysno.id().into(), vec![])).collect(),
         SeccompAction::Allow,
         SeccompAction::Raw(libc::SECCOMP_RET_USER_NOTIF),
@@ -61,16 +76,13 @@ pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Re
     )
     .unwrap();
 
-    let filter = Filter(
-        BpfProgram::try_from(filter)
-            .unwrap()
-            .into_iter()
-            .map(|sock_filter| sock_filter.into())
-            .collect(),
-    );
+    let bpf_filter =
+        Filter(BpfProgram::try_from(seccomp_filter).unwrap().into_iter().map(Into::into).collect());
 
-    let payload =
-        SeccompPayload { ipc_path: notify_listener.path().as_os_str().as_bytes().to_vec(), filter };
+    let payload = SeccompPayload {
+        ipc_path: notify_listener.path().as_os_str().as_bytes().to_vec(),
+        filter: bpf_filter,
+    };
 
     // The oneshot channel is used to cancel the accept loop.
     // The sender doesn't need to actually send anything. Drop is enough.
@@ -87,6 +99,8 @@ pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Re
                 Either::Right((incoming, _)) => incoming?,
             };
             let notify_fd = incoming_stream.recv_fd().await?;
+            // SAFETY: `recv_fd` returns a valid file descriptor received via
+            // Unix domain socket fd passing
             let notify_fd = unsafe { OwnedFd::from_raw_fd(notify_fd) };
             let mut listener = NotifyListener::try_from(notify_fd)?;
 
@@ -99,8 +113,8 @@ pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Re
                     // Errors on the supervisor side could be caused by a target process aborting.
                     // It shouldn't break the syscall handling loop as there might be target processes.
                     let _handle_result = handler.handle_notify(notify);
-                    let notify_id = notify.id;
-                    listener.send_continue(notify_id, &mut resp_buf)?;
+                    let req_id = notify.id;
+                    listener.send_continue(req_id, &mut resp_buf)?;
                 }
                 io::Result::Ok(handler)
             });
