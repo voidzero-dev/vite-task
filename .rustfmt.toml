@@ -16,3 +16,8 @@ reorder_impl_items = true
 group_imports = "StdExternalCrate"
 # Group "use" statements by crate
 imports_granularity = "Crate"
+
+# Skip generated files
+ignore = [
+  "crates/fspy_detours_sys/src/generated_bindings.rs",
+]

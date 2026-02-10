@@ -17,9 +17,12 @@ pub struct ParseShebangOptions {
     pub split_arguments: bool, // TODO: recursive
 }
 
-#[expect(
-    clippy::derivable_impls,
-    reason = "on macOS split_arguments defaults to true via cfg!, which is not derivable"
+#[cfg_attr(
+    not(target_vendor = "apple"),
+    expect(
+        clippy::derivable_impls,
+        reason = "on macOS split_arguments defaults to true via cfg!, which is not derivable"
+    )
 )]
 impl Default for ParseShebangOptions {
     fn default() -> Self {
