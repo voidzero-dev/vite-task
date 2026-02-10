@@ -134,6 +134,9 @@ pub enum TaskPlanErrorKind {
 
     #[error("Failed to resolve environment variables")]
     ResolveEnvError(#[source] ResolveEnvError),
+
+    #[error("No task specifier provided for 'run' command")]
+    MissingTaskSpecifier,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -158,6 +161,13 @@ impl TaskPlanErrorKind {
     #[must_use]
     pub fn with_empty_call_stack(self) -> Error {
         Error { task_call_stack: TaskCallStackDisplay::default(), kind: self }
+    }
+}
+
+impl Error {
+    #[must_use]
+    pub const fn is_missing_task_specifier(&self) -> bool {
+        matches!(self.kind, TaskPlanErrorKind::MissingTaskSpecifier)
     }
 }
 

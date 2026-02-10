@@ -98,13 +98,18 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
             HandledCommand::ViteTaskCommand(cli_command) => match cli_command {
-                Command::Cache { .. } => Ok(Some(PlanRequest::Synthetic(SyntheticPlanRequest {
-                    program: Arc::from(OsStr::new(command.program.as_str())),
-                    args: Arc::clone(&command.args),
-                    cache_config: UserCacheConfig::disabled(),
-                    envs: Arc::clone(&command.envs),
-                }))),
-                Command::Run(run_command) => Ok(Some(run_command.into_plan_request(&command.cwd)?)),
+                Command::Cache { .. } => Ok(Some(PlanRequest::Synthetic(
+                    command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                ))),
+                Command::Run(run_command) => match run_command.into_plan_request(&command.cwd) {
+                    Ok(plan_request) => Ok(Some(plan_request)),
+                    Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
+                        Ok(Some(PlanRequest::Synthetic(
+                            command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                        )))
+                    }
+                    Err(err) => Err(err.into()),
+                },
             },
             HandledCommand::Verbatim => Ok(None),
         }
@@ -223,13 +228,19 @@ impl<'a> Session<'a> {
             Command::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             Command::Run(run_command) => {
                 let cwd = Arc::clone(&self.cwd);
-                let plan = self.plan_from_cli(cwd, run_command).await?;
-                let reporter = LabeledReporter::new(std::io::stdout(), self.workspace_path());
-                Ok(self
-                    .execute(plan, Box::new(reporter))
-                    .await
-                    .err()
-                    .unwrap_or(ExitStatus::SUCCESS))
+                match self.plan_from_cli(cwd, run_command).await {
+                    Ok(plan) => {
+                        let reporter =
+                            LabeledReporter::new(std::io::stdout(), self.workspace_path());
+                        Ok(self
+                            .execute(plan, Box::new(reporter))
+                            .await
+                            .err()
+                            .unwrap_or(ExitStatus::SUCCESS))
+                    }
+                    Err(err) if err.is_missing_task_specifier() => self.print_task_list().await,
+                    Err(err) => Err(err.into()),
+                }
             }
         }
     }
@@ -243,6 +254,63 @@ impl<'a> Session<'a> {
                 Ok(ExitStatus::SUCCESS)
             }
         }
+    }
+
+    #[expect(
+        clippy::future_not_send,
+        reason = "session is single-threaded, futures do not need to be Send"
+    )]
+    async fn print_task_list(&mut self) -> anyhow::Result<ExitStatus> {
+        use std::io::Write;
+
+        let cwd = Arc::clone(&self.cwd);
+        let task_graph = self.ensure_task_graph_loaded().await?;
+        let mut entries = task_graph.list_tasks();
+        entries.sort_unstable_by(|a, b| {
+            a.task_display
+                .package_name
+                .cmp(&b.task_display.package_name)
+                .then_with(|| a.task_display.task_name.cmp(&b.task_display.task_name))
+        });
+
+        // Find the most specific package containing the CWD (longest matching path)
+        let current_package_path = entries
+            .iter()
+            .map(|e| &e.task_display.package_path)
+            .filter(|p| cwd.as_path().starts_with(p.as_path()))
+            .max_by_key(|p| p.as_path().as_os_str().len());
+
+        let (current, others): (Vec<_>, Vec<_>) = entries
+            .iter()
+            .partition(|e| current_package_path == Some(&e.task_display.package_path));
+
+        let mut stdout = std::io::stdout().lock();
+
+        if !current.is_empty() {
+            let package_name = &current[0].task_display.package_name;
+            if package_name.is_empty() {
+                writeln!(stdout, "Tasks in the current package")?;
+            } else {
+                writeln!(stdout, "Tasks in the current package ({package_name})")?;
+            }
+            for entry in &current {
+                writeln!(stdout, "  {}", entry.task_display.task_name)?;
+                writeln!(stdout, "    {}", entry.command)?;
+            }
+        }
+
+        if !others.is_empty() {
+            if !current.is_empty() {
+                writeln!(stdout)?;
+            }
+            writeln!(stdout, "Tasks in other packages")?;
+            for entry in &others {
+                writeln!(stdout, "  {}", entry.task_display)?;
+                writeln!(stdout, "    {}", entry.command)?;
+            }
+        }
+
+        Ok(ExitStatus::SUCCESS)
     }
 
     /// Lazily initializes and returns the execution cache.
@@ -323,15 +391,21 @@ impl<'a> Session<'a> {
         cwd: Arc<AbsolutePath>,
         command: RunCommand,
     ) -> Result<ExecutionPlan, vite_task_plan::Error> {
-        let plan_request = command.into_plan_request(&cwd).map_err(|error| {
-            TaskPlanErrorKind::ParsePlanRequestError {
-                error: error.into(),
-                program: Str::from("vp"),
-                args: Arc::default(),
-                cwd: Arc::clone(&cwd),
+        let plan_request = match command.into_plan_request(&cwd) {
+            Ok(plan_request) => plan_request,
+            Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
+                return Err(TaskPlanErrorKind::MissingTaskSpecifier.with_empty_call_stack());
             }
-            .with_empty_call_stack()
-        })?;
+            Err(error) => {
+                return Err(TaskPlanErrorKind::ParsePlanRequestError {
+                    error: error.into(),
+                    program: Str::from("vp"),
+                    args: Arc::default(),
+                    cwd: Arc::clone(&cwd),
+                }
+                .with_empty_call_stack());
+            }
+        };
         let plan = ExecutionPlan::plan(
             plan_request,
             &self.workspace_path,

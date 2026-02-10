@@ -1,0 +1,21 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/task-list
+---
+> vp run
+Tasks in the current package (app)
+  build
+    echo build app
+  lint
+    echo lint app
+  test
+    echo test app
+
+Tasks in other packages
+  lib#build
+    echo build lib
+  task-list-test#hello
+    echo hello from root
+  task-list-test#list-tasks
+    vp run

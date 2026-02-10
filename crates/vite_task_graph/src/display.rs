@@ -27,10 +27,32 @@ impl Display for TaskDisplay {
     }
 }
 
+/// A task with its display info and command, for listing purposes.
+#[derive(Debug)]
+pub struct TaskListEntry {
+    pub task_display: TaskDisplay,
+    pub command: Str,
+}
+
 impl IndexedTaskGraph {
     /// Get human-readable display for a task node.
     #[must_use]
     pub fn display_task(&self, task_index: TaskNodeIndex) -> TaskDisplay {
         self.task_graph()[task_index].task_display.clone()
+    }
+
+    /// Returns all tasks as a flat list.
+    #[must_use]
+    pub fn list_tasks(&self) -> Vec<TaskListEntry> {
+        self.task_graph()
+            .node_indices()
+            .map(|idx| {
+                let node = &self.task_graph()[idx];
+                TaskListEntry {
+                    task_display: node.task_display.clone(),
+                    command: node.resolved_config.command.clone(),
+                }
+            })
+            .collect()
     }
 }

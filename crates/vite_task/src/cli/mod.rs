@@ -15,8 +15,8 @@ pub enum CacheSubcommand {
 /// Arguments for the `run` subcommand.
 #[derive(Debug, clap::Args)]
 pub struct RunCommand {
-    /// `packageName#taskName` or `taskName`.
-    pub task_specifier: TaskSpecifier,
+    /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
+    pub task_specifier: Option<TaskSpecifier>,
 
     /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
     #[clap(default_value = "false", short, long)]
@@ -49,6 +49,9 @@ pub enum Command {
 
 #[derive(thiserror::Error, Debug)]
 pub enum CLITaskQueryError {
+    #[error("no task specifier provided")]
+    MissingTaskSpecifier,
+
     #[error("--recursive and --transitive cannot be used together")]
     RecursiveTransitiveConflict,
 
@@ -69,6 +72,8 @@ impl RunCommand {
     ) -> Result<PlanRequest, CLITaskQueryError> {
         let Self { task_specifier, recursive, transitive, ignore_depends_on, additional_args } =
             self;
+
+        let task_specifier = task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
 
         let include_explicit_deps = !ignore_depends_on;
 

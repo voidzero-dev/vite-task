@@ -1,0 +1,18 @@
+[[e2e]]
+name = "list tasks from package dir"
+cwd = "packages/app"
+steps = [
+  "vp run",
+]
+
+[[e2e]]
+name = "list tasks from workspace root"
+steps = [
+  "vp run",
+]
+
+[[e2e]]
+name = "vp run in script"
+steps = [
+  "vp run list-tasks",
+]
