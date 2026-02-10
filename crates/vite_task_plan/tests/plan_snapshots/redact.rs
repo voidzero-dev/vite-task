@@ -64,6 +64,10 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     clippy::disallowed_types,
     reason = "String required by std::env::var return type and serde_json Value manipulation; Path required for CARGO_MANIFEST_DIR path manipulation"
 )]
+#[expect(
+    clippy::too_many_lines,
+    reason = "redaction logic is sequential and reads better in one function"
+)]
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     // Get the packages/tools directory path
@@ -176,6 +180,12 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
                 } else {
                     true
                 }
+            });
+            // Sort remaining entries for deterministic snapshots (FxHashSet has non-deterministic order)
+            array.sort_by(|a, b| {
+                let a_str = if let serde_json::Value::String(s) = a { s.as_str() } else { "" };
+                let b_str = if let serde_json::Value::String(s) = b { s.as_str() } else { "" };
+                a_str.cmp(b_str)
             });
             array.push(serde_json::Value::String("<default pass-through envs>".to_string()));
         }

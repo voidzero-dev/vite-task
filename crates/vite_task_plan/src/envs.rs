@@ -121,8 +121,12 @@ impl EnvFingerprints {
 
         Ok(Self {
             fingerprinted_envs,
-            // Save pass_through_envs names as-is, so any changes to it will invalidate the cache
-            pass_through_env_config: Arc::clone(&env_config.pass_through_envs),
+            // Save pass_through_envs names sorted for deterministic cache fingerprinting
+            pass_through_env_config: {
+                let mut sorted: Vec<Str> = env_config.pass_through_envs.iter().cloned().collect();
+                sorted.sort();
+                sorted.into()
+            },
         })
     }
 }
@@ -194,9 +198,7 @@ mod tests {
     fn create_env_config(fingerprinted: &[&str], pass_through: &[&str]) -> EnvConfig {
         EnvConfig {
             fingerprinted_envs: fingerprinted.iter().map(|s| Str::from(*s)).collect(),
-            pass_through_envs: Arc::from(
-                pass_through.iter().map(|s| Str::from(*s)).collect::<Vec<_>>(),
-            ),
+            pass_through_envs: pass_through.iter().map(|s| Str::from(*s)).collect(),
         }
     }
 

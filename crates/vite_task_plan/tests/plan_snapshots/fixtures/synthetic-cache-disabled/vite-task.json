@@ -1,0 +1,24 @@
+{
+  "tasks": {
+    "lint-no-cache": {
+      "command": "vp lint",
+      "cache": false
+    },
+    "lint-with-cache": {
+      "command": "vp lint",
+      "cache": true
+    },
+    "lint-with-pass-through-envs": {
+      "command": "vp lint",
+      "passThroughEnvs": ["CUSTOM_VAR"]
+    },
+    "build": {
+      "command": "vp lint",
+      "cache": true
+    },
+    "run-build-no-cache": {
+      "command": "vp run build",
+      "cache": false
+    }
+  }
+}

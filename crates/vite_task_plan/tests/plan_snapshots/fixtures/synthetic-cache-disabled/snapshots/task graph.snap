@@ -1,0 +1,176 @@
+---
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
+expression: task_graph_json
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-disabled
+---
+[
+  {
+    "key": [
+      "<workspace>/",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/synthetic-cache-disabled",
+        "task_name": "build",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vp lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/synthetic-cache-disabled",
+        "task_name": "lint",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vp lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": null
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "lint-no-cache"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/synthetic-cache-disabled",
+        "task_name": "lint-no-cache",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vp lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": null
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "lint-with-cache"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/synthetic-cache-disabled",
+        "task_name": "lint-with-cache",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vp lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "lint-with-pass-through-envs"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/synthetic-cache-disabled",
+        "task_name": "lint-with-pass-through-envs",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vp lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "CUSTOM_VAR",
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "run-build-cache-false"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/synthetic-cache-disabled",
+        "task_name": "run-build-cache-false",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vp run build",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": null
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "run-build-no-cache"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/synthetic-cache-disabled",
+        "task_name": "run-build-no-cache",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vp run build",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": null
+        }
+      }
+    },
+    "neighbors": []
+  }
+]

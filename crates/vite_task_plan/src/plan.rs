@@ -18,7 +18,10 @@ use vite_shell::try_parse_as_and_list;
 use vite_str::Str;
 use vite_task_graph::{
     TaskNodeIndex,
-    config::{ResolvedTaskOptions, user::UserTaskOptions},
+    config::{
+        CacheConfig, ResolvedTaskOptions,
+        user::{UserCacheConfig, UserTaskOptions},
+    },
 };
 
 use crate::{
@@ -199,12 +202,21 @@ async fn plan_task_as_execution_node(
                 }
                 // Synthetic task (from CommandHandler)
                 Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
+                    let parent_cache_config = task_node
+                        .resolved_config
+                        .resolved_options
+                        .cache_config
+                        .as_ref()
+                        .map_or(ParentCacheConfig::Disabled, |config| {
+                            ParentCacheConfig::Inherited(config.clone())
+                        });
                     let spawn_execution = plan_synthetic_request(
                         context.workspace_path(),
                         &and_item.envs,
                         synthetic_plan_request,
                         Some(task_execution_cache_key),
                         &cwd,
+                        parent_cache_config,
                     )
                     .with_plan_context(&context)?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
@@ -298,6 +310,75 @@ async fn plan_task_as_execution_node(
     Ok(TaskExecution { task_display: task_node.task_display.clone(), items })
 }
 
+/// Cache configuration inherited from the parent task that contains a synthetic command.
+///
+/// When a synthetic task (e.g., `vp lint` expanding to `oxlint`) appears inside a
+/// user-defined task's script, the parent task's cache configuration should constrain
+/// the synthetic task's caching behavior.
+pub enum ParentCacheConfig {
+    /// No parent task (top-level synthetic command like `vp lint` run directly).
+    /// The synthetic task uses its own default cache configuration.
+    None,
+
+    /// Parent task has caching disabled (`cache: false` or `cacheScripts` not enabled).
+    /// The synthetic task should also have caching disabled.
+    Disabled,
+
+    /// Parent task has caching enabled with this configuration.
+    /// The synthetic task inherits this config, merged with its own additions.
+    Inherited(CacheConfig),
+}
+
+/// Resolves the effective cache configuration for a synthetic task by combining
+/// the parent task's cache config with the synthetic command's own additions.
+///
+/// Synthetic tasks (e.g., `vp lint` → `oxlint`) may declare their own cache-related
+/// env requirements (e.g., `pass_through_envs` for env-test). When a parent task
+/// exists, its cache config takes precedence:
+/// - If the parent disables caching, the synthetic task is also uncached.
+/// - If the parent enables caching but the synthetic disables it, caching is disabled.
+/// - If both parent and synthetic enable caching, the synthetic inherits the parent's
+///   env config and merges in any additional envs the synthetic command needs.
+/// - If there is no parent (top-level invocation), the synthetic task's own
+///   [`UserCacheConfig`] is resolved with defaults.
+fn resolve_synthetic_cache_config(
+    parent: ParentCacheConfig,
+    synthetic_cache_config: UserCacheConfig,
+    cwd: &Arc<AbsolutePath>,
+) -> Option<CacheConfig> {
+    match parent {
+        ParentCacheConfig::None => {
+            // Top-level: resolve from synthetic's own config
+            ResolvedTaskOptions::resolve(
+                UserTaskOptions {
+                    cache_config: synthetic_cache_config,
+                    cwd_relative_to_package: None,
+                    depends_on: None,
+                },
+                cwd,
+            )
+            .cache_config
+        }
+        ParentCacheConfig::Disabled => Option::None,
+        ParentCacheConfig::Inherited(mut parent_config) => {
+            // Cache is enabled only if both parent and synthetic want it.
+            // Merge synthetic's additions into parent's config.
+            match synthetic_cache_config {
+                UserCacheConfig::Disabled { .. } => Option::None,
+                UserCacheConfig::Enabled { enabled_cache_config, .. } => {
+                    if let Some(extra_envs) = enabled_cache_config.envs {
+                        parent_config.env_config.fingerprinted_envs.extend(extra_envs.into_vec());
+                    }
+                    if let Some(extra_pts) = enabled_cache_config.pass_through_envs {
+                        parent_config.env_config.pass_through_envs.extend(extra_pts);
+                    }
+                    Some(parent_config)
+                }
+            }
+        }
+    }
+}
+
 #[expect(clippy::result_large_err, reason = "TaskPlanErrorKind is large for diagnostics")]
 pub fn plan_synthetic_request(
     workspace_path: &Arc<AbsolutePath>,
@@ -305,19 +386,15 @@ pub fn plan_synthetic_request(
     synthetic_plan_request: SyntheticPlanRequest,
     execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
+    parent_cache_config: ParentCacheConfig,
 ) -> Result<SpawnExecution, TaskPlanErrorKind> {
     let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
     let program_path = which(&program, &envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
-    let resolved_options = ResolvedTaskOptions::resolve(
-        UserTaskOptions {
-            cache_config,
-            // cwd_relative_to_package and depends_on don't make sense for synthetic tasks.
-            cwd_relative_to_package: None,
-            depends_on: None,
-        },
-        cwd,
-    );
+    let resolved_cache_config =
+        resolve_synthetic_cache_config(parent_cache_config, cache_config, cwd);
+    let resolved_options =
+        ResolvedTaskOptions { cwd: Arc::clone(cwd), cache_config: resolved_cache_config };
 
     plan_spawn_execution(
         workspace_path,

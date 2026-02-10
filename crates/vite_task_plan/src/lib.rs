@@ -16,7 +16,7 @@ pub use error::{Error, TaskPlanErrorKind};
 use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
 pub use path_env::{get_path_env, prepend_path_env};
-use plan::{plan_query_request, plan_synthetic_request};
+use plan::{ParentCacheConfig, plan_query_request, plan_synthetic_request};
 use plan_request::{PlanRequest, SyntheticPlanRequest};
 use rustc_hash::FxHashMap;
 use serde::{Serialize, ser::SerializeMap as _};
@@ -230,6 +230,7 @@ impl ExecutionPlan {
                     synthetic_plan_request,
                     None,
                     cwd,
+                    ParentCacheConfig::None,
                 )
                 .with_empty_call_stack()?;
                 ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution))
@@ -256,6 +257,7 @@ impl ExecutionPlan {
             synthetic_plan_request,
             Some(execution_cache_key),
             cwd,
+            ParentCacheConfig::None,
         )
         .with_empty_call_stack()?;
         Ok(Self { root_node: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution)) })

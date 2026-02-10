@@ -51,8 +51,11 @@ impl ResolvedTaskOptions {
         let cache_config = match user_options.cache_config {
             UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
             UserCacheConfig::Enabled { cache: _, enabled_cache_config } => {
-                let mut pass_through_envs =
-                    enabled_cache_config.pass_through_envs.unwrap_or_default();
+                let mut pass_through_envs: FxHashSet<Str> = enabled_cache_config
+                    .pass_through_envs
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
                 pass_through_envs.extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
                 Some(CacheConfig {
                     env_config: EnvConfig {
@@ -60,7 +63,7 @@ impl ResolvedTaskOptions {
                             .envs
                             .map(|e| e.into_vec().into_iter().collect())
                             .unwrap_or_default(),
-                        pass_through_envs: pass_through_envs.into(),
+                        pass_through_envs,
                     },
                 })
             }
@@ -69,17 +72,17 @@ impl ResolvedTaskOptions {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CacheConfig {
     pub env_config: EnvConfig,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EnvConfig {
     /// environment variable names to be fingerprinted and passed to the task, with defaults populated
     pub fingerprinted_envs: FxHashSet<Str>,
     /// environment variable names to be passed to the task without fingerprinting, with defaults populated
-    pub pass_through_envs: Arc<[Str]>,
+    pub pass_through_envs: FxHashSet<Str>,
 }
 
 #[derive(Debug, thiserror::Error)]
