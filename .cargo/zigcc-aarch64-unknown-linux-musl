@@ -1,0 +1,2 @@
+#!/bin/sh
+exec cargo-zigbuild zig cc -- -fno-sanitize=all -target aarch64-linux-musl "$@"
