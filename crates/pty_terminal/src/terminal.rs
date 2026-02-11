@@ -177,6 +177,10 @@ impl Terminal {
     /// Returns an error if:
     /// - Reading from the PTY fails
     /// - The exit status is not available (should not happen in normal operation)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the writer lock is poisoned.
     pub fn read_to_end(&mut self) -> anyhow::Result<ExitStatus> {
         // `read_to_end` will move cursor to the end, so clear any buffered data for `read_until`
         self.read_until_buffer.clear();
