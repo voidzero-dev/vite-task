@@ -1,17 +1,8 @@
-#![allow(
-    clippy::disallowed_types,
-    clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    reason = "subprocess_test is a standalone test utility, not using vite_str/vite_path"
-)]
-
-use std::{
-    collections::HashMap, env::current_exe, ffi::OsString, path::PathBuf,
-    process::Command as StdCommand,
-};
+use std::{env::current_exe, ffi::OsString, path::PathBuf, process::Command as StdCommand};
 
 use base64::{Engine, prelude::BASE64_STANDARD_NO_PAD};
 use bincode::{Decode, Encode, config};
+use rustc_hash::FxHashMap;
 
 /// A command configuration that can be converted to `std::process::Command`
 /// or `fspy::Command` for execution.
@@ -19,7 +10,7 @@ use bincode::{Decode, Encode, config};
 pub struct Command {
     pub program: OsString,
     pub args: Vec<OsString>,
-    pub envs: HashMap<OsString, OsString>,
+    pub envs: FxHashMap<OsString, OsString>,
     pub cwd: PathBuf,
 }
 
@@ -108,7 +99,7 @@ pub fn create_command(id: &str, arg: impl Encode) -> Command {
     let arg_base64 = BASE64_STANDARD_NO_PAD.encode(&arg_bytes);
 
     let args = vec![OsString::from(id), OsString::from(arg_base64)];
-    let envs: HashMap<OsString, OsString> = std::env::vars_os().collect();
+    let envs: FxHashMap<OsString, OsString> = std::env::vars_os().collect();
     let cwd = std::env::current_dir().unwrap();
 
     Command { program, args, envs, cwd }

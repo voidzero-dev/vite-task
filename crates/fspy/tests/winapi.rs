@@ -1,11 +1,4 @@
 #![cfg(windows)]
-#![allow(
-    clippy::disallowed_types,
-    clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    reason = "non-vite crate"
-)]
-
 mod test_utils;
 
 use std::{ffi::OsStr, os::windows::ffi::OsStrExt, path::Path, ptr::null_mut};

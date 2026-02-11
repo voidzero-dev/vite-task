@@ -1,11 +1,4 @@
 #![cfg(target_os = "linux")]
-#![allow(
-    clippy::disallowed_types,
-    clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    reason = "test file for non-vite crate"
-)]
-
 use std::{
     env::{current_dir, set_current_dir},
     error::Error,

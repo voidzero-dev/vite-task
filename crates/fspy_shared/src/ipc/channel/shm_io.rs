@@ -323,7 +323,6 @@ impl<M: AsRef<[u8]>> ShmReader<M> {
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::HashSet,
         env::current_exe,
         process::{Child, Command},
         sync::Arc,
@@ -332,6 +331,7 @@ mod tests {
 
     use assert2::assert;
     use bstr::BStr;
+    use rustc_hash::FxHashSet;
 
     use super::*;
 
@@ -718,7 +718,7 @@ mod tests {
         // The shared memory is valid and fully written.
         let shm = unsafe { shm.as_slice() };
         let reader = ShmReader::new(shm);
-        let frames = reader.iter_frames().map(BStr::new).collect::<HashSet<&BStr>>();
+        let frames = reader.iter_frames().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert_eq!(frames.len(), CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
         for child_index in 0..CHILD_COUNT {
             for i in 0..FRAME_COUNT_EACH_CHILD {

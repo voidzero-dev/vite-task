@@ -1,10 +1,3 @@
-#![allow(
-    clippy::disallowed_types,
-    clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    reason = "non-vite crate"
-)]
-
 mod test_utils;
 
 use std::{env::vars_os, ffi::OsString};

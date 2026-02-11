@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     process::Stdio,
@@ -7,6 +6,7 @@ use std::{
 
 #[cfg(unix)]
 use fspy_shared_unix::exec::Exec;
+use rustc_hash::FxHashMap;
 use tokio::process::Command as TokioCommand;
 
 use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
@@ -15,7 +15,7 @@ use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 pub struct Command {
     program: OsString,
     args: Vec<OsString>,
-    envs: HashMap<OsString, OsString>,
+    envs: FxHashMap<OsString, OsString>,
     cwd: Option<PathBuf>,
     #[cfg(unix)]
     arg0: Option<OsString>,
@@ -37,7 +37,7 @@ impl Command {
         Self {
             program: program.as_ref().to_os_string(),
             args: Vec::new(),
-            envs: HashMap::new(),
+            envs: FxHashMap::default(),
             cwd: None,
             #[cfg(unix)]
             arg0: None,

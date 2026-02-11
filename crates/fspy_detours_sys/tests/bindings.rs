@@ -1,12 +1,7 @@
 #![cfg(windows)]
-#![allow(
-    clippy::disallowed_types,
-    clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    reason = "non-vite crate"
-)]
-
 use std::{env, fs};
+
+use cow_utils::CowUtils;
 
 #[test]
 fn detours_bindings() {
@@ -56,14 +51,15 @@ fn detours_bindings() {
     // bindgen produces raw_lines with \r\n line endings on Windows;
     // Git on Windows may check out files using CRLF line endings, depending on user config.
     // To avoid unnecessary diffs, normalize all line endings to \n.
-    let bindings_content = bindings.to_string().replace("\r\n", "\n");
+    let bindings_string = bindings.to_string();
+    let bindings_content = bindings_string.cow_replace("\r\n", "\n");
     let bindings_path = "src/generated_bindings.rs";
 
     if env::var("FSPY_DETOURS_WRITE_BINDINGS").as_deref() == Ok("1") {
-        fs::write(bindings_path, bindings_content).unwrap();
+        fs::write(bindings_path, bindings_content.as_bytes()).unwrap();
     } else {
-        let existing_bindings_content =
-            fs::read_to_string(bindings_path).unwrap_or_default().replace("\r\n", "\n");
+        let existing_string = fs::read_to_string(bindings_path).unwrap_or_default();
+        let existing_bindings_content = existing_string.cow_replace("\r\n", "\n");
         assert_eq!(
             existing_bindings_content, bindings_content,
             "Bindings are out of date. Run this test with FSPY_DETOURS_WRITE_BINDINGS=1 to update them."

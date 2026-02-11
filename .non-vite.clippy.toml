@@ -1,0 +1,24 @@
+# Clippy configuration for non-vite crates (fspy_*, subprocess_test, vite_pty, etc.)
+# that don't depend on vite_str/vite_path.
+#
+# This is a subset of the root .clippy.toml, with rules recommending vite_str/vite_path
+# alternatives removed. Generic rules (cow_utils, rustc-hash) still apply.
+#
+# To use: symlink as `.clippy.toml` in the crate's directory:
+#   ln -s ../../.non-vite.clippy.toml .clippy.toml
+
+avoid-breaking-exported-api = false
+
+disallowed-methods = [
+  { path = "str::to_ascii_lowercase", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_to_ascii_lowercase` instead." },
+  { path = "str::to_ascii_uppercase", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_to_ascii_uppercase` instead." },
+  { path = "str::to_lowercase", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_to_lowercase` instead." },
+  { path = "str::to_uppercase", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_to_uppercase` instead." },
+  { path = "str::replace", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_replace` instead." },
+  { path = "str::replacen", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_replacen` instead." },
+]
+
+disallowed-types = [
+  { path = "std::collections::HashMap", reason = "Use `rustc_hash::FxHashMap` instead, which is typically faster." },
+  { path = "std::collections::HashSet", reason = "Use `rustc_hash::FxHashSet` instead, which is typically faster." },
+]

@@ -13,6 +13,7 @@ bincode = { workspace = true }
 ctor = { workspace = true }
 fspy = { workspace = true, optional = true }
 portable-pty = { workspace = true, optional = true }
+rustc-hash = { workspace = true }
 
 [features]
 default = []

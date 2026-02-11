@@ -1,11 +1,4 @@
 #![cfg(target_os = "linux")]
-#![allow(
-    clippy::disallowed_types,
-    clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    reason = "non-vite crate"
-)]
-
 use std::{
     fs::{self, Permissions},
     os::unix::fs::PermissionsExt as _,

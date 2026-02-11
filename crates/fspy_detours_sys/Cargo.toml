@@ -17,3 +17,4 @@ workspace = true
 
 [dev-dependencies]
 bindgen = { workspace = true }
+cow-utils = { workspace = true }

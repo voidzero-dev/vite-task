@@ -23,6 +23,7 @@ winapi = { workspace = true, features = ["std"] }
 [dev-dependencies]
 assert2 = { workspace = true }
 ctor = { workspace = true }
+rustc-hash = { workspace = true }
 shared_memory = { workspace = true, features = ["logging"] }
 subprocess_test = { workspace = true }
 
