@@ -366,29 +366,10 @@ fn resize_terminal() {
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn send_ctrl_c_interrupts_process() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        use std::io::{Write, stdin, stdout};
-        #[cfg(unix)]
-        use std::sync::Arc;
-        #[cfg(unix)]
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::io::{Write, stdout};
 
-        #[cfg(unix)]
-        let interrupted = Arc::new(AtomicBool::new(false));
-        #[cfg(unix)]
-        let interrupted_clone = Arc::clone(&interrupted);
-
-        // Install SIGINT handler on Unix
-        #[cfg(unix)]
-        // SAFETY: The closure only performs an atomic store, which is signal-safe.
-        unsafe {
-            signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
-                interrupted_clone.store(true, Ordering::SeqCst);
-            })
-            .unwrap();
-        }
-
-        // On Windows, explicitly ensure Ctrl+C is NOT ignored, so that
-        // CTRL_C_EVENT terminates the process via the default handler.
+        // On Windows, clear the "ignore CTRL_C" flag set by Rust runtime
+        // so that CTRL_C_EVENT reaches the ctrlc handler.
         #[cfg(windows)]
         {
             // SAFETY: Declaring correct signature for SetConsoleCtrlHandler from kernel32.
@@ -399,29 +380,28 @@ fn send_ctrl_c_interrupts_process() {
                 ) -> i32;
             }
 
-            // SAFETY: Clearing the "ignore CTRL_C" flag so the default handler runs.
+            // SAFETY: Clearing the "ignore CTRL_C" flag so handlers are invoked.
             unsafe {
                 SetConsoleCtrlHandler(None, 0); // FALSE = remove ignore
             }
         }
 
+        ctrlc::set_handler(move || {
+            // Write directly and exit from the handler to avoid races.
+            use std::io::Write;
+            let _ = write!(std::io::stdout(), "INTERRUPTED");
+            let _ = std::io::stdout().flush();
+            std::process::exit(0);
+        })
+        .unwrap();
+
         println!("ready");
         stdout().flush().unwrap();
 
-        // Block on stdin. On Unix, SIGINT interrupts read_line. On Windows,
-        // CTRL_C_EVENT terminates the process via the default handler.
-        let mut input = std::string::String::new();
-        let _ = stdin().read_line(&mut input);
-
-        // On Unix, check if SIGINT was delivered via the signal handler.
-        // On Windows, this code is unreachable: the process is terminated
-        // by CTRL_C_EVENT before read_line returns.
-        #[cfg(unix)]
-        if interrupted.load(Ordering::SeqCst) {
-            println!("INTERRUPTED");
+        // Block until Ctrl+C handler exits the process.
+        loop {
+            std::thread::park();
         }
-
-        stdout().flush().unwrap();
     }));
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
@@ -432,23 +412,10 @@ fn send_ctrl_c_interrupts_process() {
     // Send Ctrl+C
     terminal.send_ctrl_c().unwrap();
 
-    // On Unix, send newline to unblock read_line and verify SIGINT detection.
-    #[cfg(unix)]
-    {
-        terminal.write(b"\n").unwrap();
-        terminal.read_until("INTERRUPTED").unwrap();
-    }
+    // Verify interruption was detected
+    terminal.read_until("INTERRUPTED").unwrap();
 
-    let status = terminal.read_to_end().unwrap();
-
-    // On Unix, the process exits normally after detecting SIGINT.
-    #[cfg(unix)]
-    assert!(status.success());
-
-    // On Windows, the default CTRL_C handler calls ExitProcess with
-    // STATUS_CONTROL_C_EXIT, resulting in a non-zero exit code.
-    #[cfg(windows)]
-    assert!(!status.success());
+    let _ = terminal.read_to_end().unwrap();
 }
 
 #[test]
