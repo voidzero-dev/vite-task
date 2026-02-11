@@ -18,6 +18,19 @@ pub struct ScriptCommand {
     pub cwd: Arc<AbsolutePath>,
 }
 
+impl ScriptCommand {
+    /// Convert this `ScriptCommand` to a `SyntheticPlanRequest` with the given `cache_config`.
+    #[must_use]
+    pub fn to_synthetic_plan_request(&self, cache_config: UserCacheConfig) -> SyntheticPlanRequest {
+        SyntheticPlanRequest {
+            program: Arc::from(OsStr::new(&self.program)),
+            args: self.args.clone(),
+            cache_config,
+            envs: self.envs.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PlanOptions {
     pub extra_args: Arc<[Str]>,
