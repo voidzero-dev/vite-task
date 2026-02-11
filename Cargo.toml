@@ -94,6 +94,8 @@ phf = { version = "0.11.3", features = ["macros"] }
 portable-pty = "0.9.0"
 pretty_assertions = "1.4.1"
 pty_terminal = { path = "crates/pty_terminal" }
+pty_terminal_test = { path = "crates/pty_terminal_test" }
+pty_terminal_test_client = { path = "crates/pty_terminal_test_client" }
 rand = "0.9.1"
 ratatui = "0.30.0"
 rayon = "1.10.0"

@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io::{Read, Write},
     sync::{Arc, Mutex, OnceLock},
     thread,
@@ -52,9 +53,15 @@ pub struct Terminal {
 
 struct Vt100Callbacks {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
+    unhandled_osc_sequences: VecDeque<Vec<Vec<u8>>>,
 }
 
 impl vt100::Callbacks for Vt100Callbacks {
+    fn unhandled_osc(&mut self, _screen: &mut vt100::Screen, params: &[&[u8]]) {
+        let owned: Vec<Vec<u8>> = params.iter().map(|p| p.to_vec()).collect();
+        self.unhandled_osc_sequences.push_back(owned);
+    }
+
     fn unhandled_csi(
         &mut self,
         screen: &mut vt100::Screen,
@@ -117,6 +124,29 @@ impl PtyReader {
     #[must_use]
     pub fn screen_contents(&self) -> String {
         self.parser.lock().unwrap().screen().contents()
+    }
+
+    /// Drains and returns all unhandled OSC sequences received since the last call.
+    ///
+    /// Each entry is a list of byte-vector parameters from a single OSC sequence
+    /// (`ESC ] param1 ; param2 ; ... ST`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parser lock is poisoned.
+    #[must_use]
+    pub fn take_unhandled_osc_sequences(&self) -> VecDeque<Vec<Vec<u8>>> {
+        std::mem::take(&mut self.parser.lock().unwrap().callbacks_mut().unhandled_osc_sequences)
+    }
+
+    /// Returns the current cursor position as `(row, col)`, both 0-indexed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parser lock is poisoned.
+    #[must_use]
+    pub fn cursor_position(&self) -> (u16, u16) {
+        self.parser.lock().unwrap().screen().cursor_position()
     }
 }
 
@@ -243,7 +273,10 @@ impl Terminal {
             size.rows,
             size.cols,
             0,
-            Vt100Callbacks { writer: Arc::clone(&writer) },
+            Vt100Callbacks {
+                writer: Arc::clone(&writer),
+                unhandled_osc_sequences: VecDeque::new(),
+            },
         )));
 
         Ok(Self {

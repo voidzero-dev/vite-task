@@ -2493,6 +2493,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pty_terminal_test"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "ctor",
+ "ntest",
+ "portable-pty",
+ "pty_terminal",
+ "pty_terminal_test_client",
+ "subprocess_test",
+]
+
+[[package]]
+name = "pty_terminal_test_client"
+version = "0.0.0"
+
+[[package]]
 name = "quote"
 version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
