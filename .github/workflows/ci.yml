@@ -64,7 +64,10 @@ jobs:
         env:
           RUSTFLAGS: '-D warnings --cfg tokio_unstable' # also update .cargo/config.toml
 
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       # Set up node and pnpm for running tests
       # For x86_64-apple-darwin, use x64 node for fspy tests that verify Node.js fs accesses
@@ -86,6 +89,10 @@ jobs:
 
       - run: cargo-zigbuild test --target x86_64-unknown-linux-gnu.2.17
         if: ${{ matrix.os == 'ubuntu-latest' }}
+
+      - name: Check clippy result
+        if: ${{ steps.clippy.outcome == 'failure' }}
+        run: exit 1
 
   fmt:
     name: Format and Check Deps
