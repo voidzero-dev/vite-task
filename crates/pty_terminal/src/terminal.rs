@@ -194,6 +194,11 @@ impl Terminal {
         // Wait for exit status to be set by background thread
         let status = self.exit_status.wait().clone();
 
+        // Close the writer since the child has exited and all output has been consumed.
+        // This ensures subsequent write() calls fail immediately, rather than racing
+        // with the background thread which also closes the writer.
+        *self.writer.lock().unwrap() = None;
+
         Ok(status)
     }
 
