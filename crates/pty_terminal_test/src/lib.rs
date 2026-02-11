@@ -46,7 +46,9 @@ impl TestTerminal {
 
 impl Reader {
     fn sanitized_screen_contents(&self) -> String {
-        self.pty.get_ref().screen_contents().replace(MILESTONE_FENCE_CHAR, "")
+        let mut screen = self.pty.get_ref().screen_contents();
+        screen.retain(|ch| ch != MILESTONE_FENCE_CHAR);
+        screen
     }
 
     /// Reads from the PTY until a milestone with the given name is encountered.
