@@ -1,4 +1,4 @@
-use std::io::{IsTerminal, Write, stderr, stdin, stdout};
+use std::io::{BufRead, BufReader, IsTerminal, Read, Write, stderr, stdin, stdout};
 
 use ntest::timeout;
 use portable_pty::CommandBuilder;
@@ -13,148 +13,13 @@ fn is_terminal() {
         println!("{} {} {}", stdin().is_terminal(), stdout().is_terminal(), stderr().is_terminal());
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
+    let Terminal { mut pty_stream, child_handle } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+    let _ = child_handle.wait();
+    let output = pty_stream.screen_contents();
     assert_eq!(output.trim(), "true true true");
-}
-
-#[test]
-#[timeout(5000)]
-#[expect(clippy::print_stdout, reason = "subprocess test output")]
-fn read_until_single() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        println!("hello world");
-    }));
-
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    terminal.read_until("hello").unwrap();
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
-    // After reading until "hello", the buffer should contain " world"
-    // read_to_end should process the buffered data and continue reading
-    assert!(output.contains("world"));
-}
-
-#[test]
-#[timeout(5000)]
-#[expect(clippy::print_stdout, reason = "subprocess test output")]
-fn read_until_multiple_sequential() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        print!("first second third");
-        let _ = stdout().flush();
-    }));
-
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    terminal.read_until("first").unwrap();
-    terminal.read_until("second").unwrap();
-    terminal.read_until("third").unwrap();
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
-    // All three words should be in the screen
-    assert!(output.contains("first"));
-    assert!(output.contains("second"));
-    assert!(output.contains("third"));
-}
-
-#[test]
-#[timeout(5000)]
-#[expect(clippy::print_stdout, reason = "subprocess test output")]
-fn read_until_not_found() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        print!("hello world");
-        let _ = stdout().flush();
-    }));
-
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    let result = terminal.read_until("nonexistent");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Expected string not found"));
-}
-
-#[test]
-#[timeout(5000)]
-#[expect(clippy::print_stdout, reason = "subprocess test output")]
-fn read_until_with_read_to_end() {
-    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        print!("prefix middle suffix");
-        let _ = stdout().flush();
-    }));
-
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    terminal.read_until("middle").unwrap();
-    // At this point, " suffix" should be buffered
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
-    // The full output should include everything
-    assert!(output.contains("prefix"));
-    assert!(output.contains("middle"));
-    assert!(output.contains("suffix"));
-}
-
-#[test]
-#[timeout(5000)]
-#[expect(clippy::print_stdout, reason = "subprocess test output")]
-fn read_until_boundary_spanning() {
-    // Test that read_until works when the expected string may span across read() boundaries.
-    // Boundary spanning is about the reader side: the PTY reader may return partial data even
-    // from a single write. We print the full string at once because on Windows, ConPTY
-    // reprocesses output and can insert escape sequences between individually-printed characters.
-    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        print!("abcdef");
-        let _ = stdout().flush();
-    }));
-
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    // Search for a pattern that's likely to span boundaries
-    terminal.read_until("abcd").unwrap();
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
-    assert!(output.contains("abcdef"));
-}
-
-#[test]
-#[timeout(5000)]
-#[expect(clippy::print_stdout, reason = "subprocess test output")]
-fn read_until_exact_boundary() {
-    // Test where we search for something at the exact boundary
-    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        print!("firstsecond");
-        let _ = stdout().flush();
-    }));
-
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    // This should find "second" even if "first" was in a previous read
-    terminal.read_until("second").unwrap();
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
-    assert!(output.contains("first"));
-    assert!(output.contains("second"));
-}
-
-#[test]
-#[timeout(5000)]
-#[expect(clippy::print_stdout, reason = "subprocess test output")]
-fn read_until_after_read_to_end() {
-    // Test that read_until works with data that comes after EOF
-    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        println!("hello world foo bar");
-    }));
-
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-
-    // Use read_until first to consume part of the data
-    terminal.read_until("world").unwrap();
-
-    // Read everything else
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
-    assert!(output.contains("hello world foo bar"));
-
-    // After read_to_end, buffer is empty and we're at EOF
-    // Trying to find anything should fail
-    let result = terminal.read_until("bar");
-    assert!(result.is_err());
 }
 
 #[test]
@@ -172,16 +37,16 @@ fn write_basic_echo() {
         }
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let Terminal { mut pty_stream, child_handle } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
-    // Write data to the terminal
-    terminal.write(b"hello world\n").unwrap();
+    pty_stream.write_line(b"hello world").unwrap();
 
-    // Read until we see the echo
-    terminal.read_until("hello world").unwrap();
-    let _ = terminal.read_to_end().unwrap();
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+    let _ = child_handle.wait();
 
-    let output = terminal.screen_contents();
+    let output = pty_stream.screen_contents();
     // PTY echoes the input, so we see "hello world\nhello world"
     assert_eq!(output.trim(), "hello world\nhello world");
 }
@@ -195,7 +60,7 @@ fn write_multiple_lines() {
         let stdin = stdin();
         let mut stdout = stdout();
         for line in stdin.lock().lines().map_while(Result::ok) {
-            print!("Echo: {line}");
+            println!("Echo: {line}");
             stdout.flush().unwrap();
             if line == "third" {
                 break;
@@ -203,21 +68,38 @@ fn write_multiple_lines() {
         }
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let Terminal { mut pty_stream, child_handle } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
-    terminal.write(b"first\n").unwrap();
-    terminal.read_until("Echo: first").unwrap();
+    pty_stream.write_line(b"first").unwrap();
+    {
+        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut line = Vec::new();
+        // Read PTY echo of "first\n"
+        buf_reader.read_until(b'\n', &mut line).unwrap();
+        line.clear();
+        // Read child response "Echo: first\n"
+        buf_reader.read_until(b'\n', &mut line).unwrap();
+    }
 
-    terminal.write(b"second\n").unwrap();
-    terminal.read_until("Echo: second").unwrap();
+    pty_stream.write_line(b"second").unwrap();
+    {
+        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut line = Vec::new();
+        buf_reader.read_until(b'\n', &mut line).unwrap();
+        line.clear();
+        buf_reader.read_until(b'\n', &mut line).unwrap();
+    }
 
-    terminal.write(b"third\n").unwrap();
-    terminal.read_until("Echo: third").unwrap();
+    pty_stream.write_line(b"third").unwrap();
 
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
-    // PTY echoes input, so we see both the typed input and the echo response
-    assert_eq!(output.trim(), "first\nEcho: firstsecond\nEcho: secondthird\nEcho: third");
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+    let _ = child_handle.wait();
+
+    let output = pty_stream.screen_contents();
+    // PTY echoes input, then child prints "Echo: {line}\n" for each
+    assert_eq!(output.trim(), "first\nEcho: first\nsecond\nEcho: second\nthird\nEcho: third");
 }
 
 #[test]
@@ -228,15 +110,18 @@ fn write_after_exit() {
         print!("exiting");
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let Terminal { mut pty_stream, child_handle } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Read all output - this blocks until child exits and EOF is reached
-    let _ = terminal.read_to_end().unwrap();
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+    let _ = child_handle.wait();
 
     // The background thread should have set writer to None by now
     // since read_to_end only returns after EOF (child exit)
-    // Writing should fail with either our custom error or an I/O error
-    let result = terminal.write(b"too late\n");
+    // Writing should fail with BrokenPipe
+    let result = pty_stream.write_all(b"too late\n");
     assert!(result.is_err());
 }
 
@@ -256,19 +141,25 @@ fn write_interactive_prompt() {
         stdout.flush().unwrap();
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let Terminal { mut pty_stream, child_handle } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
-    // Wait for prompt
-    terminal.read_until("Name:").unwrap();
+    // Wait for prompt "Name: " (read until the space after colon)
+    {
+        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut buf = Vec::new();
+        buf_reader.read_until(b' ', &mut buf).unwrap();
+        assert!(String::from_utf8_lossy(&buf).contains("Name:"));
+    }
 
     // Send response
-    terminal.write(b"Alice\n").unwrap();
+    pty_stream.write_line(b"Alice").unwrap();
 
-    // Wait for greeting
-    terminal.read_until("Hello, Alice").unwrap();
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+    let _ = child_handle.wait();
 
-    let _ = terminal.read_to_end().unwrap();
-    let output = terminal.screen_contents();
+    let output = pty_stream.screen_contents();
     assert_eq!(output.trim(), "Name: Alice\nHello, Alice");
 }
 
@@ -341,24 +232,32 @@ fn resize_terminal() {
         stdout().flush().unwrap();
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let Terminal { mut pty_stream, child_handle: _ } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
-    // Read initial size
-    terminal.read_until("initial: 80 80").unwrap();
+    // Wait for initial size line (synchronize before resizing)
+    {
+        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut line = Vec::new();
+        buf_reader.read_until(b'\n', &mut line).unwrap();
+        assert!(String::from_utf8_lossy(&line).contains("initial: 80 80"));
+    }
 
     // Perform resize
-    terminal.resize(ScreenSize { rows: 40, cols: 40 }).unwrap();
+    pty_stream.resize(ScreenSize { rows: 40, cols: 40 }).unwrap();
 
     // Signal the process to continue and check resize
-    terminal.write(b"\n").unwrap();
+    pty_stream.write_line(b"").unwrap();
 
+    // Read remaining output
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+
+    let output = pty_stream.screen_contents();
     // Verify resize was detected (SIGWINCH on Unix, synchronous on Windows)
-    terminal.read_until("RESIZE_DETECTED").unwrap();
-
+    assert!(output.contains("RESIZE_DETECTED"));
     // Verify new size is correct
-    terminal.read_until("resized: 40 40").unwrap();
-
-    let _ = terminal.read_to_end().unwrap();
+    assert!(output.contains("resized: 40 40"));
 }
 
 #[test]
@@ -404,18 +303,27 @@ fn send_ctrl_c_interrupts_process() {
         }
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let Terminal { mut pty_stream, child_handle: _ } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for process to be ready
-    terminal.read_until("ready").unwrap();
+    {
+        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut line = Vec::new();
+        buf_reader.read_until(b'\n', &mut line).unwrap();
+        assert!(String::from_utf8_lossy(&line).contains("ready"));
+    }
 
     // Send Ctrl+C
-    terminal.send_ctrl_c().unwrap();
+    pty_stream.send_ctrl_c().unwrap();
 
+    // Read remaining output
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+
+    let output = pty_stream.screen_contents();
     // Verify interruption was detected
-    terminal.read_until("INTERRUPTED").unwrap();
-
-    let _ = terminal.read_to_end().unwrap();
+    assert!(output.contains("INTERRUPTED"));
 }
 
 #[test]
@@ -426,8 +334,11 @@ fn read_to_end_returns_exit_status_success() {
         println!("success");
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    let status = terminal.read_to_end().unwrap();
+    let Terminal { mut pty_stream, child_handle } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+    let status = child_handle.wait();
     assert!(status.success());
     assert_eq!(status.exit_code(), 0);
 }
@@ -439,8 +350,11 @@ fn read_to_end_returns_exit_status_nonzero() {
         std::process::exit(42);
     }));
 
-    let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
-    let status = terminal.read_to_end().unwrap();
+    let Terminal { mut pty_stream, child_handle } =
+        Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let mut discard = Vec::new();
+    pty_stream.read_to_end(&mut discard).unwrap();
+    let status = child_handle.wait();
     assert!(!status.success());
     assert_eq!(status.exit_code(), 42);
 }

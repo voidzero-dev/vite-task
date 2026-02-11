@@ -3,6 +3,7 @@ mod redact;
 use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
+    io::Read,
     sync::{Arc, mpsc},
     time::Duration,
 };
@@ -206,14 +207,17 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 cmd.env("PATHEXT", pathext);
             }
 
-            let mut terminal = Terminal::spawn(SCREEN_SIZE, cmd).unwrap();
+            let terminal = Terminal::spawn(SCREEN_SIZE, cmd).unwrap();
 
             // Read to end on a separate thread with timeout via channel
-            let mut killer = terminal.clone_killer();
+            let mut killer = terminal.child_handle.clone();
             let (tx, rx) = mpsc::channel();
             std::thread::spawn(move || {
-                let status = terminal.read_to_end();
-                let screen = terminal.screen_contents();
+                let Terminal { mut pty_stream, child_handle } = terminal;
+                let mut discard = Vec::new();
+                let read_result = pty_stream.read_to_end(&mut discard);
+                let screen = pty_stream.screen_contents();
+                let status = read_result.map(|_| child_handle.wait());
                 let _ = tx.send((status, screen));
             });
 
