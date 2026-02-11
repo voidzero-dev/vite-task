@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 
 pub use portable_pty::CommandBuilder;
 use pty_terminal::terminal::{PtyReader, Terminal};
@@ -25,7 +25,7 @@ pub struct TestTerminal {
 
 /// The read half of a test terminal, wrapping [`PtyReader`] with milestone support.
 pub struct Reader {
-    pty: PtyReader,
+    pty: BufReader<PtyReader>,
     child_handle: ChildHandle,
 }
 
@@ -37,13 +37,16 @@ impl TestTerminal {
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
         let Terminal { pty_reader, pty_writer, child_handle } = Terminal::spawn(size, cmd)?;
-        Ok(Self { writer: pty_writer, reader: Reader { pty: pty_reader, child_handle } })
+        Ok(Self {
+            writer: pty_writer,
+            reader: Reader { pty: BufReader::new(pty_reader), child_handle },
+        })
     }
 }
 
 impl Reader {
     fn sanitized_screen_contents(&self) -> String {
-        self.pty.screen_contents().replace(MILESTONE_FENCE_CHAR, "")
+        self.pty.get_ref().screen_contents().replace(MILESTONE_FENCE_CHAR, "")
     }
 
     /// Reads from the PTY until a milestone with the given name is encountered.
@@ -69,39 +72,16 @@ impl Reader {
         milestone.extend_from_slice(name.as_bytes());
         milestone.push(0x07); // BEL terminator
 
-        let fence: &[u8] = pty_terminal_test_client::MILESTONE_FENCE;
-
-        let mut buf = [0u8; 4096];
-        let mut milestone_match = 0usize;
-        let mut found_milestone = false;
-        let mut fence_match = 0usize;
+        let fence = pty_terminal_test_client::MILESTONE_FENCE;
+        let fence_last_byte = fence[fence.len() - 1];
+        let mut buf = Vec::new();
 
         loop {
-            let n = self.pty.read(&mut buf).expect("PTY read failed");
+            let n = self.pty.read_until(fence_last_byte, &mut buf).expect("PTY read failed");
             assert!(n > 0, "EOF reached before milestone '{name}'");
 
-            for byte in &buf[..n] {
-                if !found_milestone {
-                    if *byte == milestone[milestone_match] {
-                        milestone_match += 1;
-                        if milestone_match == milestone.len() {
-                            found_milestone = true;
-                            fence_match = 0;
-                        }
-                    } else {
-                        milestone_match = usize::from(*byte == milestone[0]);
-                    }
-                    continue;
-                }
-
-                if *byte == fence[fence_match] {
-                    fence_match += 1;
-                    if fence_match == fence.len() {
-                        return self.sanitized_screen_contents();
-                    }
-                } else {
-                    fence_match = usize::from(*byte == fence[0]);
-                }
+            if buf.ends_with(fence) && buf.windows(milestone.len()).any(|w| w == milestone) {
+                return self.sanitized_screen_contents();
             }
         }
     }
@@ -115,15 +95,5 @@ impl Reader {
         let mut discard = Vec::new();
         self.pty.read_to_end(&mut discard).expect("PTY read_to_end failed");
         self.child_handle.wait()
-    }
-
-    /// Returns the current terminal screen contents.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the parser lock is poisoned.
-    #[must_use]
-    pub fn screen_contents(&self) -> String {
-        self.sanitized_screen_contents()
     }
 }

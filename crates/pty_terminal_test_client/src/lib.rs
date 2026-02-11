@@ -23,7 +23,8 @@ pub const MILESTONE_FENCE: &[u8] = "\u{200b}".as_bytes();
 /// Each milestone also appends a non-visual zero-width-space fence (`U+200B`,
 /// UTF-8 `E2 80 8B`). This keeps a uniform protocol across platforms. On
 /// Windows, waiting for this rendered character after the OSC confirms prior
-/// rendered output has been consumed.
+/// rendered output has been consumed. This marker was also confirmed not to
+/// advance cursor position on both macOS and Windows in PTY probe runs.
 ///
 /// When the `testing` feature is disabled, this is a no-op.
 ///
