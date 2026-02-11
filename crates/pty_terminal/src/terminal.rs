@@ -249,14 +249,14 @@ impl Terminal {
 
     /// Sends Ctrl+C (SIGINT) to the child process.
     ///
+    /// Writes ETX (0x03) to the PTY. On Unix, the terminal driver converts this
+    /// to SIGINT for the child's process group. On Windows, `ConPTY` intercepts
+    /// the byte and generates `CTRL_C_EVENT` for the child.
+    ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - The child process has already exited
-    /// - Writing to the PTY fails
+    /// Returns an error if the child process has already exited or writing fails.
     pub fn send_ctrl_c(&self) -> anyhow::Result<()> {
-        // ASCII 0x03 (ETX) is Ctrl+C
-        // Both Unix PTY and Windows ConPTY interpret this and signal the child
         self.write(&[0x03])
     }
 

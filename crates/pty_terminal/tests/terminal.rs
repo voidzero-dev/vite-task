@@ -326,10 +326,13 @@ fn resize_terminal() {
             }
         }
 
-        // On Windows, resize happens synchronously via ConPTY
+        // On Windows, ConPTY resizes synchronously - detect by checking size change
         #[cfg(windows)]
         {
-            println!("RESIZE_DETECTED");
+            let (new_rows, new_cols) = get_size();
+            if (new_rows, new_cols) != (rows, cols) {
+                println!("RESIZE_DETECTED");
+            }
         }
 
         // Print new size
@@ -384,23 +387,37 @@ fn send_ctrl_c_interrupts_process() {
             .unwrap();
         }
 
-        println!("ready");
-        stdout().flush().unwrap();
-
-        // Block on stdin until the test sends a newline (after Ctrl+C)
-        let mut input = std::string::String::new();
-        let _ = stdin().read_line(&mut input);
-
-        #[cfg(unix)]
+        // On Windows, explicitly ensure Ctrl+C is NOT ignored, so that
+        // CTRL_C_EVENT terminates the process via the default handler.
+        #[cfg(windows)]
         {
-            if interrupted.load(Ordering::SeqCst) {
-                println!("INTERRUPTED");
+            // SAFETY: Declaring correct signature for SetConsoleCtrlHandler from kernel32.
+            unsafe extern "system" {
+                fn SetConsoleCtrlHandler(
+                    handler: Option<unsafe extern "system" fn(u32) -> i32>,
+                    add: i32,
+                ) -> i32;
+            }
+
+            // SAFETY: Clearing the "ignore CTRL_C" flag so the default handler runs.
+            unsafe {
+                SetConsoleCtrlHandler(None, 0); // FALSE = remove ignore
             }
         }
 
-        #[cfg(windows)]
-        {
-            // On Windows, Ctrl+C is delivered via ConPTY as CTRL_C_EVENT
+        println!("ready");
+        stdout().flush().unwrap();
+
+        // Block on stdin. On Unix, SIGINT interrupts read_line. On Windows,
+        // CTRL_C_EVENT terminates the process via the default handler.
+        let mut input = std::string::String::new();
+        let _ = stdin().read_line(&mut input);
+
+        // On Unix, check if SIGINT was delivered via the signal handler.
+        // On Windows, this code is unreachable: the process is terminated
+        // by CTRL_C_EVENT before read_line returns.
+        #[cfg(unix)]
+        if interrupted.load(Ordering::SeqCst) {
             println!("INTERRUPTED");
         }
 
@@ -415,13 +432,23 @@ fn send_ctrl_c_interrupts_process() {
     // Send Ctrl+C
     terminal.send_ctrl_c().unwrap();
 
-    // Signal the process to continue and check the interrupt flag
-    terminal.write(b"\n").unwrap();
+    // On Unix, send newline to unblock read_line and verify SIGINT detection.
+    #[cfg(unix)]
+    {
+        terminal.write(b"\n").unwrap();
+        terminal.read_until("INTERRUPTED").unwrap();
+    }
 
-    // Verify interruption was detected
-    terminal.read_until("INTERRUPTED").unwrap();
+    let status = terminal.read_to_end().unwrap();
 
-    let _ = terminal.read_to_end().unwrap();
+    // On Unix, the process exits normally after detecting SIGINT.
+    #[cfg(unix)]
+    assert!(status.success());
+
+    // On Windows, the default CTRL_C handler calls ExitProcess with
+    // STATUS_CONTROL_C_EXIT, resulting in a non-zero exit code.
+    #[cfg(windows)]
+    assert!(!status.success());
 }
 
 #[test]
