@@ -12,12 +12,16 @@ pub const MILESTONE_OSC_ID: &[u8] = b"9999";
 /// point. The test harness (via `pty_terminal_test::Reader::expect_milestone`)
 /// detects this marker and returns the screen contents at that point.
 ///
-/// On Windows, `ConPTY` delivers unrecognized OSC sequences via a fast
-/// pass-through path that may arrive before preceding rendered character output.
-/// To allow the reader to detect when rendering has caught up, each milestone
-/// also moves the cursor to a unique position on the last row (column = call
-/// count). The cursor movement goes through `ConPTY`'s rendering pipeline,
-/// guaranteeing it arrives after all preceding character output.
+/// On Windows, `ConPTY` passes unrecognized OSC sequences directly to the
+/// output pipe (synchronous, inline with input processing), while rendered
+/// character output is generated asynchronously by a separate output thread
+/// that polls the console buffer. This means the OSC can arrive at the
+/// reader before preceding character output has been emitted.
+///
+/// Each milestone also toggles cursor visibility (`CSI ?25l` / `CSI ?25h`).
+/// This keeps a uniform protocol across platforms. On Windows, this persistent
+/// terminal-state change is emitted on the rendered output path, so waiting for
+/// the expected toggle confirms prior rendered output has been consumed.
 ///
 /// When the `testing` feature is disabled, this is a no-op.
 ///
@@ -28,15 +32,21 @@ pub const MILESTONE_OSC_ID: &[u8] = b"9999";
 pub fn mark_milestone(name: &str) {
     use std::{
         io::{Write, stdout},
-        sync::atomic::{AtomicU16, Ordering},
+        sync::atomic::{AtomicBool, Ordering},
     };
 
-    static COUNTER: AtomicU16 = AtomicU16::new(0);
-    let col = COUNTER.fetch_add(1, Ordering::Relaxed) + 1; // 1-based for VT
+    static CURSOR_HIDDEN: AtomicBool = AtomicBool::new(false);
 
     let mut stdout = stdout();
-    // OSC milestone (pass-through on ConPTY) + cursor move to last row (rendering pipeline)
-    write!(stdout, "\x1b]9999;{name}\x07\x1b[999;{col}H").unwrap();
+    write!(stdout, "\x1b]9999;{name}\x07").unwrap();
+
+    let was_hidden = CURSOR_HIDDEN.fetch_xor(true, Ordering::Relaxed);
+    if was_hidden {
+        write!(stdout, "\x1b[?25h").unwrap();
+    } else {
+        write!(stdout, "\x1b[?25l").unwrap();
+    }
+
     stdout.flush().unwrap();
 }
 

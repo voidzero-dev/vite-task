@@ -25,8 +25,7 @@ pub struct TestTerminal {
 pub struct Reader {
     pty: PtyReader,
     child_handle: ChildHandle,
-    /// Counts milestones to match the child's counter-based cursor column.
-    milestone_counter: u16,
+    cursor_hidden: bool,
 }
 
 impl TestTerminal {
@@ -39,7 +38,7 @@ impl TestTerminal {
         let Terminal { pty_reader, pty_writer, child_handle } = Terminal::spawn(size, cmd)?;
         Ok(Self {
             writer: pty_writer,
-            reader: Reader { pty: pty_reader, child_handle, milestone_counter: 0 },
+            reader: Reader { pty: pty_reader, child_handle, cursor_hidden: false },
         })
     }
 }
@@ -49,12 +48,11 @@ impl Reader {
     ///
     /// Returns the terminal screen contents at the moment the milestone is detected.
     ///
-    /// On Windows, `ConPTY` delivers unrecognized OSC sequences via a fast
-    /// pass-through path that may arrive before the rendered character output.
-    /// Each milestone also moves the cursor to a unique position on the last
-    /// row; since this cursor movement goes through `ConPTY`'s rendering
-    /// pipeline, waiting for the cursor to reach the expected position
-    /// guarantees all preceding character output has been consumed.
+    /// Milestones use a uniform protocol across platforms: OSC marker followed
+    /// by an alternating cursor-visibility fence (`CSI ?25l` / `CSI ?25h`).
+    /// On Windows, `ConPTY` may deliver unrecognized OSC before rendered output;
+    /// waiting for the expected fence guarantees prior rendered output has been
+    /// consumed.
     ///
     /// # Panics
     ///
@@ -62,28 +60,50 @@ impl Reader {
     /// or if a read error occurs.
     #[must_use]
     pub fn expect_milestone(&mut self, name: &str) -> String {
-        self.milestone_counter += 1;
-        let expected_col = self.milestone_counter - 1; // 0-indexed
+        let mut milestone = Vec::with_capacity(8 + MILESTONE_OSC_ID.len() + name.len());
+        milestone.extend_from_slice(b"\x1b]");
+        milestone.extend_from_slice(MILESTONE_OSC_ID);
+        milestone.extend_from_slice(b";");
+        milestone.extend_from_slice(name.as_bytes());
+        milestone.push(0x07); // BEL terminator
 
-        let name_bytes = name.as_bytes();
+        let fence: &[u8] = {
+            self.cursor_hidden = !self.cursor_hidden;
+            if self.cursor_hidden { b"\x1b[?25l" } else { b"\x1b[?25h" }
+        };
+
         let mut buf = [0u8; 4096];
-        let mut found = false;
+        let mut milestone_match = 0usize;
+        let mut found_milestone = false;
+        let mut fence_match = 0usize;
+
         loop {
-            for seq in self.pty.take_unhandled_osc_sequences() {
-                if seq.first().is_some_and(|id| id == MILESTONE_OSC_ID)
-                    && seq.get(1).is_some_and(|n| n == name_bytes)
-                {
-                    found = true;
-                }
-            }
-            if found {
-                let (_, col) = self.pty.cursor_position();
-                if col == expected_col {
-                    return self.pty.screen_contents();
-                }
-            }
             let n = self.pty.read(&mut buf).expect("PTY read failed");
             assert!(n > 0, "EOF reached before milestone '{name}'");
+
+            for byte in &buf[..n] {
+                if !found_milestone {
+                    if *byte == milestone[milestone_match] {
+                        milestone_match += 1;
+                        if milestone_match == milestone.len() {
+                            found_milestone = true;
+                            fence_match = 0;
+                        }
+                    } else {
+                        milestone_match = usize::from(*byte == milestone[0]);
+                    }
+                    continue;
+                }
+
+                if *byte == fence[fence_match] {
+                    fence_match += 1;
+                    if fence_match == fence.len() {
+                        return self.pty.screen_contents();
+                    }
+                } else {
+                    fence_match = usize::from(*byte == fence[0]);
+                }
+            }
         }
     }
 

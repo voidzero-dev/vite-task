@@ -70,3 +70,58 @@ fn milestone_raw_mode_keystrokes() {
     let status = reader.wait_for_exit();
     assert!(status.success());
 }
+
+/// Verifies that the cursor-visibility fence in `mark_milestone` does not
+/// pollute `screen_contents()`. The subprocess appends characters without
+/// clearing the screen, so any leftover space would appear between them.
+#[test]
+#[timeout(5000)]
+fn milestone_does_not_pollute_screen() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
+        use std::io::{Read, Write, stdout};
+
+        crossterm::terminal::enable_raw_mode().unwrap();
+        pty_terminal_test_client::mark_milestone("ready");
+
+        let mut stdin = std::io::stdin();
+        let mut stdout = stdout();
+        let mut byte = [0u8; 1];
+
+        loop {
+            stdin.read_exact(&mut byte).unwrap();
+            let ch = byte[0] as char;
+
+            // Append the character without clearing the screen
+            write!(stdout, "{ch}").unwrap();
+            stdout.flush().unwrap();
+
+            pty_terminal_test_client::mark_milestone("keystroke");
+
+            if ch == 'q' {
+                break;
+            }
+        }
+
+        crossterm::terminal::disable_raw_mode().unwrap();
+    }));
+
+    let TestTerminal { mut writer, mut reader } =
+        TestTerminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+
+    let _ = reader.expect_milestone("ready");
+
+    writer.write_all(b"a").unwrap();
+    writer.flush().unwrap();
+    let screen = reader.expect_milestone("keystroke");
+    assert_eq!(screen.trim(), "a");
+
+    writer.write_all(b"b").unwrap();
+    writer.flush().unwrap();
+    let screen = reader.expect_milestone("keystroke");
+    assert_eq!(screen.trim(), "ab");
+
+    writer.write_all(b"q").unwrap();
+    writer.flush().unwrap();
+    let status = reader.wait_for_exit();
+    assert!(status.success());
+}
