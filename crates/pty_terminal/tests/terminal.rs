@@ -13,12 +13,12 @@ fn is_terminal() {
         println!("{} {} {}", stdin().is_terminal(), stdout().is_terminal(), stderr().is_terminal());
     }));
 
-    let Terminal { mut pty_stream, child_handle } =
+    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
     let _ = child_handle.wait();
-    let output = pty_stream.screen_contents();
+    let output = pty_reader.screen_contents();
     assert_eq!(output.trim(), "true true true");
 }
 
@@ -37,16 +37,16 @@ fn write_basic_echo() {
         }
     }));
 
-    let Terminal { mut pty_stream, child_handle } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
-    pty_stream.write_line(b"hello world").unwrap();
+    pty_writer.write_line(b"hello world").unwrap();
 
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
     let _ = child_handle.wait();
 
-    let output = pty_stream.screen_contents();
+    let output = pty_reader.screen_contents();
     // PTY echoes the input, so we see "hello world\nhello world"
     assert_eq!(output.trim(), "hello world\nhello world");
 }
@@ -68,12 +68,12 @@ fn write_multiple_lines() {
         }
     }));
 
-    let Terminal { mut pty_stream, child_handle } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
-    pty_stream.write_line(b"first").unwrap();
+    pty_writer.write_line(b"first").unwrap();
     {
-        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut buf_reader = BufReader::new(&mut pty_reader);
         let mut line = Vec::new();
         // Read PTY echo of "first\n"
         buf_reader.read_until(b'\n', &mut line).unwrap();
@@ -82,22 +82,22 @@ fn write_multiple_lines() {
         buf_reader.read_until(b'\n', &mut line).unwrap();
     }
 
-    pty_stream.write_line(b"second").unwrap();
+    pty_writer.write_line(b"second").unwrap();
     {
-        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut buf_reader = BufReader::new(&mut pty_reader);
         let mut line = Vec::new();
         buf_reader.read_until(b'\n', &mut line).unwrap();
         line.clear();
         buf_reader.read_until(b'\n', &mut line).unwrap();
     }
 
-    pty_stream.write_line(b"third").unwrap();
+    pty_writer.write_line(b"third").unwrap();
 
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
     let _ = child_handle.wait();
 
-    let output = pty_stream.screen_contents();
+    let output = pty_reader.screen_contents();
     // PTY echoes input, then child prints "Echo: {line}\n" for each
     assert_eq!(output.trim(), "first\nEcho: first\nsecond\nEcho: second\nthird\nEcho: third");
 }
@@ -110,18 +110,18 @@ fn write_after_exit() {
         print!("exiting");
     }));
 
-    let Terminal { mut pty_stream, child_handle } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Read all output - this blocks until child exits and EOF is reached
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
     let _ = child_handle.wait();
 
     // The background thread should have set writer to None by now
     // since read_to_end only returns after EOF (child exit)
     // Writing should fail with BrokenPipe
-    let result = pty_stream.write_all(b"too late\n");
+    let result = pty_writer.write_all(b"too late\n");
     assert!(result.is_err());
 }
 
@@ -141,25 +141,25 @@ fn write_interactive_prompt() {
         stdout.flush().unwrap();
     }));
 
-    let Terminal { mut pty_stream, child_handle } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for prompt "Name: " (read until the space after colon)
     {
-        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut buf_reader = BufReader::new(&mut pty_reader);
         let mut buf = Vec::new();
         buf_reader.read_until(b' ', &mut buf).unwrap();
         assert!(String::from_utf8_lossy(&buf).contains("Name:"));
     }
 
     // Send response
-    pty_stream.write_line(b"Alice").unwrap();
+    pty_writer.write_line(b"Alice").unwrap();
 
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
     let _ = child_handle.wait();
 
-    let output = pty_stream.screen_contents();
+    let output = pty_reader.screen_contents();
     assert_eq!(output.trim(), "Name: Alice\nHello, Alice");
 }
 
@@ -232,28 +232,28 @@ fn resize_terminal() {
         stdout().flush().unwrap();
     }));
 
-    let Terminal { mut pty_stream, child_handle: _ } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle: _ } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for initial size line (synchronize before resizing)
     {
-        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut buf_reader = BufReader::new(&mut pty_reader);
         let mut line = Vec::new();
         buf_reader.read_until(b'\n', &mut line).unwrap();
         assert!(String::from_utf8_lossy(&line).contains("initial: 80 80"));
     }
 
     // Perform resize
-    pty_stream.resize(ScreenSize { rows: 40, cols: 40 }).unwrap();
+    pty_writer.resize(ScreenSize { rows: 40, cols: 40 }).unwrap();
 
     // Signal the process to continue and check resize
-    pty_stream.write_line(b"").unwrap();
+    pty_writer.write_line(b"").unwrap();
 
     // Read remaining output
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
 
-    let output = pty_stream.screen_contents();
+    let output = pty_reader.screen_contents();
     // Verify resize was detected (SIGWINCH on Unix, synchronous on Windows)
     assert!(output.contains("RESIZE_DETECTED"));
     // Verify new size is correct
@@ -303,25 +303,25 @@ fn send_ctrl_c_interrupts_process() {
         }
     }));
 
-    let Terminal { mut pty_stream, child_handle: _ } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle: _ } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for process to be ready
     {
-        let mut buf_reader = BufReader::new(&mut pty_stream);
+        let mut buf_reader = BufReader::new(&mut pty_reader);
         let mut line = Vec::new();
         buf_reader.read_until(b'\n', &mut line).unwrap();
         assert!(String::from_utf8_lossy(&line).contains("ready"));
     }
 
     // Send Ctrl+C
-    pty_stream.send_ctrl_c().unwrap();
+    pty_writer.send_ctrl_c().unwrap();
 
     // Read remaining output
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
 
-    let output = pty_stream.screen_contents();
+    let output = pty_reader.screen_contents();
     // Verify interruption was detected
     assert!(output.contains("INTERRUPTED"));
 }
@@ -334,10 +334,10 @@ fn read_to_end_returns_exit_status_success() {
         println!("success");
     }));
 
-    let Terminal { mut pty_stream, child_handle } =
+    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
     let status = child_handle.wait();
     assert!(status.success());
     assert_eq!(status.exit_code(), 0);
@@ -350,10 +350,10 @@ fn read_to_end_returns_exit_status_nonzero() {
         std::process::exit(42);
     }));
 
-    let Terminal { mut pty_stream, child_handle } =
+    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
-    pty_stream.read_to_end(&mut discard).unwrap();
+    pty_reader.read_to_end(&mut discard).unwrap();
     let status = child_handle.wait();
     assert!(!status.success());
     assert_eq!(status.exit_code(), 42);

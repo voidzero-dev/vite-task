@@ -213,10 +213,10 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
             let mut killer = terminal.child_handle.clone();
             let (tx, rx) = mpsc::channel();
             std::thread::spawn(move || {
-                let Terminal { mut pty_stream, child_handle } = terminal;
+                let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle } = terminal;
                 let mut discard = Vec::new();
-                let read_result = pty_stream.read_to_end(&mut discard);
-                let screen = pty_stream.screen_contents();
+                let read_result = pty_reader.read_to_end(&mut discard);
+                let screen = pty_reader.screen_contents();
                 let status = read_result.map(|_| child_handle.wait());
                 let _ = tx.send((status, screen));
             });

@@ -9,17 +9,22 @@ use portable_pty::{ChildKiller, ExitStatus, MasterPty};
 
 use crate::geo::ScreenSize;
 
-/// A combined PTY reader/writer that implements [`Read`] and [`Write`].
+/// The read half of a PTY connection. Implements [`Read`].
 ///
-/// Reading feeds data through an internal vt100 parser, keeping `screen_contents()`
-/// up-to-date with parsed terminal output.
+/// Reading feeds data through an internal vt100 parser (shared with [`PtyWriter`]),
+/// keeping `screen_contents()` up-to-date with parsed terminal output.
+pub struct PtyReader {
+    reader: Box<dyn Read + Send>,
+    parser: Arc<Mutex<vt100::Parser<Vt100Callbacks>>>,
+}
+
+/// The write half of a PTY connection. Implements [`Write`].
 ///
 /// The writer is shared with `Vt100Callbacks` (for DSR query responses) and the
 /// background child-monitoring thread (which sets it to `None` on child exit).
-pub struct PtyStream {
-    reader: Box<dyn Read + Send>,
+pub struct PtyWriter {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
-    parser: vt100::Parser<Vt100Callbacks>,
+    parser: Arc<Mutex<vt100::Parser<Vt100Callbacks>>>,
     master: Box<dyn MasterPty + Send>,
 }
 
@@ -38,9 +43,10 @@ impl Clone for ChildHandle {
     }
 }
 
-/// A headless terminal consisting of a PTY stream and a child process handle.
+/// A headless terminal consisting of a PTY reader, writer, and a child process handle.
 pub struct Terminal {
-    pub pty_stream: PtyStream,
+    pub pty_reader: PtyReader,
+    pub pty_writer: PtyWriter,
     pub child_handle: ChildHandle,
 }
 
@@ -73,17 +79,17 @@ impl vt100::Callbacks for Vt100Callbacks {
     }
 }
 
-impl Read for PtyStream {
+impl Read for PtyReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.reader.read(buf)?;
         if n > 0 {
-            self.parser.process(&buf[..n]);
+            self.parser.lock().unwrap().process(&buf[..n]);
         }
         Ok(n)
     }
 }
 
-impl Write for PtyStream {
+impl Write for PtyWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut guard =
             self.writer.lock().map_err(|e| std::io::Error::other(format!("Poisoned lock: {e}")))?;
@@ -102,7 +108,19 @@ impl Write for PtyStream {
     }
 }
 
-impl PtyStream {
+impl PtyReader {
+    /// Returns the current terminal screen contents as a string (parsed by the vt100 emulator).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parser lock is poisoned.
+    #[must_use]
+    pub fn screen_contents(&self) -> String {
+        self.parser.lock().unwrap().screen().contents()
+    }
+}
+
+impl PtyWriter {
     /// Writes `line` followed by a platform-appropriate line ending to the child process.
     ///
     /// On Unix, appends `\n`. On Windows `ConPTY`, appends `\r\n` for proper line handling.
@@ -120,12 +138,6 @@ impl PtyStream {
         self.write_all(b"\r\n")?;
 
         self.flush()
-    }
-
-    /// Returns the current terminal screen contents as a string (parsed by the vt100 emulator).
-    #[must_use]
-    pub fn screen_contents(&self) -> String {
-        self.parser.screen().contents()
     }
 
     /// Sends Ctrl+C (SIGINT) to the child process.
@@ -149,7 +161,11 @@ impl PtyStream {
     /// # Errors
     ///
     /// Returns an error if the PTY cannot be resized.
-    pub fn resize(&mut self, size: ScreenSize) -> anyhow::Result<()> {
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parser lock is poisoned.
+    pub fn resize(&self, size: ScreenSize) -> anyhow::Result<()> {
         self.master.resize(portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
@@ -157,7 +173,7 @@ impl PtyStream {
             pixel_height: 0,
         })?;
 
-        self.parser.screen_mut().set_size(size.rows, size.cols);
+        self.parser.lock().unwrap().screen_mut().set_size(size.rows, size.cols);
 
         Ok(())
     }
@@ -223,18 +239,16 @@ impl Terminal {
             }
         });
 
+        let parser = Arc::new(Mutex::new(vt100::Parser::new_with_callbacks(
+            size.rows,
+            size.cols,
+            0,
+            Vt100Callbacks { writer: Arc::clone(&writer) },
+        )));
+
         Ok(Self {
-            pty_stream: PtyStream {
-                parser: vt100::Parser::new_with_callbacks(
-                    size.rows,
-                    size.cols,
-                    0,
-                    Vt100Callbacks { writer: Arc::clone(&writer) },
-                ),
-                reader,
-                writer,
-                master,
-            },
+            pty_reader: PtyReader { reader, parser: Arc::clone(&parser) },
+            pty_writer: PtyWriter { writer, parser, master },
             child_handle: ChildHandle { child_killer, exit_status },
         })
     }
