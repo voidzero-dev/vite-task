@@ -27,12 +27,12 @@ which = { workspace = true }
 copy_dir = { workspace = true }
 cow-utils = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
+pty_terminal = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 tempfile = { workspace = true }
 toml = { workspace = true }
 vite_path = { workspace = true, features = ["absolute-redaction"] }
-vite_pty = { workspace = true }
 vite_workspace = { workspace = true }
 
 [lints]

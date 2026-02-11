@@ -1,4 +1,4 @@
-# Clippy configuration for non-vite crates (fspy_*, subprocess_test, vite_pty, etc.)
+# Clippy configuration for non-vite crates (fspy_*, subprocess_test, pty_terminal, etc.)
 # that don't depend on vite_str/vite_path.
 #
 # This is a subset of the root .clippy.toml, with rules recommending vite_str/vite_path
@@ -16,6 +16,8 @@ disallowed-methods = [
   { path = "str::to_uppercase", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_to_uppercase` instead." },
   { path = "str::replace", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_replace` instead." },
   { path = "str::replacen", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_replacen` instead." },
+  { path = "std::thread::sleep", reason = "Use proper synchronization (channels, condvars, etc.) instead of sleeping. Sleep is only acceptable for intentional user-facing delays (e.g. animations, debouncing)." },
+  { path = "tokio::time::sleep", reason = "Use proper synchronization (channels, signals, etc.) instead of sleeping. Sleep is only acceptable for intentional user-facing delays (e.g. animations, debouncing)." },
 ]
 
 disallowed-types = [

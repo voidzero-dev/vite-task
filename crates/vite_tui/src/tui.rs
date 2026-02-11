@@ -144,6 +144,10 @@ impl Tui {
         cancellation_token.cancel();
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "polling with short sleep is acceptable for TUI task shutdown"
+    )]
     pub fn stop(&self) {
         self.cancel();
         let mut counter = 0;

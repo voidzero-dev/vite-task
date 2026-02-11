@@ -1,5 +1,5 @@
 [package]
-name = "vite_pty"
+name = "pty_terminal"
 version = "0.0.0"
 authors.workspace = true
 edition.workspace = true

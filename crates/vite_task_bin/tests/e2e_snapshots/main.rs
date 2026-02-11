@@ -8,13 +8,13 @@ use std::{
 };
 
 use copy_dir::copy_dir;
-use redact::redact_e2e_output;
-use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
-use vite_pty::{
+use pty_terminal::{
     ExitStatus,
     geo::ScreenSize,
     terminal::{CommandBuilder, Terminal},
 };
+use redact::redact_e2e_output;
+use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use vite_workspace::find_workspace_root;
 

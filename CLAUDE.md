@@ -53,8 +53,8 @@ Test fixtures and snapshots:
    cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p <package> --test <test>
 
    # Examples:
-   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p vite_pty --test terminal
-   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p vite_pty --test terminal -- resize_terminal
+   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p pty_terminal --test terminal
+   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p pty_terminal --test terminal -- resize_terminal
    ```
 
 3. **Cross-Platform Test Design Patterns**:
@@ -64,7 +64,7 @@ Test fixtures and snapshots:
      - **Unix**: SIGWINCH signals, ioctl, /dev/null, etc.
      - **Windows**: ConPTY, GetConsoleScreenBufferInfo, NUL, etc.
 
-4. **Example**: The `vite_pty::resize_terminal` test demonstrates proper cross-platform testing:
+4. **Example**: The `pty_terminal::resize_terminal` test demonstrates proper cross-platform testing:
    - Unix: Installs SIGWINCH handler to verify signal delivery
    - Windows: Acknowledges synchronous ConPTY resize behavior
    - Both: Query terminal size using cross-platform `terminal_size` crate

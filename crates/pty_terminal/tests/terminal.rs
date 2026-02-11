@@ -1,13 +1,9 @@
-use std::{
-    io::{IsTerminal, Write, stderr, stdin, stdout},
-    thread,
-    time::Duration,
-};
+use std::io::{IsTerminal, Write, stderr, stdin, stdout};
 
 use ntest::timeout;
 use portable_pty::CommandBuilder;
+use pty_terminal::{geo::ScreenSize, terminal::Terminal};
 use subprocess_test::command_for_fn;
-use vite_pty::{geo::ScreenSize, terminal::Terminal};
 
 #[test]
 #[timeout(5000)]
@@ -45,7 +41,6 @@ fn read_until_single() {
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_multiple_sequential() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        thread::sleep(Duration::from_millis(10));
         print!("first second third");
         let _ = stdout().flush();
     }));
@@ -67,7 +62,6 @@ fn read_until_multiple_sequential() {
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_not_found() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        thread::sleep(Duration::from_millis(10));
         print!("hello world");
         let _ = stdout().flush();
     }));
@@ -83,7 +77,6 @@ fn read_until_not_found() {
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_with_read_to_end() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        thread::sleep(Duration::from_millis(10));
         print!("prefix middle suffix");
         let _ = stdout().flush();
     }));
@@ -106,23 +99,10 @@ fn read_until_boundary_spanning() {
     // Test case where expected string might span across read boundaries
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         // Write in small chunks to increase chance of boundary spanning
-        print!("a");
-        let _ = stdout().flush();
-        thread::sleep(Duration::from_millis(5));
-        print!("b");
-        let _ = stdout().flush();
-        thread::sleep(Duration::from_millis(5));
-        print!("c");
-        let _ = stdout().flush();
-        thread::sleep(Duration::from_millis(5));
-        print!("d");
-        let _ = stdout().flush();
-        thread::sleep(Duration::from_millis(5));
-        print!("e");
-        let _ = stdout().flush();
-        thread::sleep(Duration::from_millis(5));
-        print!("f");
-        let _ = stdout().flush();
+        for c in ['a', 'b', 'c', 'd', 'e', 'f'] {
+            print!("{c}");
+            let _ = stdout().flush();
+        }
     }));
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
@@ -139,10 +119,7 @@ fn read_until_boundary_spanning() {
 fn read_until_exact_boundary() {
     // Test where we search for something at the exact boundary
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        print!("first");
-        let _ = stdout().flush();
-        thread::sleep(Duration::from_millis(10));
-        print!("second");
+        print!("firstsecond");
         let _ = stdout().flush();
     }));
 
@@ -386,7 +363,7 @@ fn resize_terminal() {
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn send_ctrl_c_interrupts_process() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        use std::io::{Write, stdout};
+        use std::io::{Write, stdin, stdout};
         #[cfg(unix)]
         use std::sync::Arc;
         #[cfg(unix)]
@@ -410,8 +387,9 @@ fn send_ctrl_c_interrupts_process() {
         println!("ready");
         stdout().flush().unwrap();
 
-        // Wait briefly for Ctrl+C
-        thread::sleep(Duration::from_millis(100));
+        // Block on stdin until the test sends a newline (after Ctrl+C)
+        let mut input = std::string::String::new();
+        let _ = stdin().read_line(&mut input);
 
         #[cfg(unix)]
         {
@@ -422,9 +400,7 @@ fn send_ctrl_c_interrupts_process() {
 
         #[cfg(windows)]
         {
-            // On Windows, we'll verify differently - the process may exit
-            // or handle the CTRL_C_EVENT depending on handler setup
-            // For this test, we just verify the mechanism works
+            // On Windows, Ctrl+C is delivered via ConPTY as CTRL_C_EVENT
             println!("INTERRUPTED");
         }
 
@@ -438,6 +414,9 @@ fn send_ctrl_c_interrupts_process() {
 
     // Send Ctrl+C
     terminal.send_ctrl_c().unwrap();
+
+    // Signal the process to continue and check the interrupt flag
+    terminal.write(b"\n").unwrap();
 
     // Verify interruption was detected
     terminal.read_until("INTERRUPTED").unwrap();

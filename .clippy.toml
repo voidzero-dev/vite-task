@@ -8,6 +8,8 @@ disallowed-methods = [
   { path = "str::replace", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_replace` instead." },
   { path = "str::replacen", reason = "To avoid memory allocation, use `cow_utils::CowUtils::cow_replacen` instead." },
   { path = "std::env::current_dir", reason = "To get an `AbsolutePathBuf`, Use `vite_path::current_dir` instead." },
+  { path = "std::thread::sleep", reason = "Use proper synchronization (channels, condvars, etc.) instead of sleeping. Sleep is only acceptable for intentional user-facing delays (e.g. animations, debouncing)." },
+  { path = "tokio::time::sleep", reason = "Use proper synchronization (channels, signals, etc.) instead of sleeping. Sleep is only acceptable for intentional user-facing delays (e.g. animations, debouncing)." },
 ]
 
 disallowed-types = [
