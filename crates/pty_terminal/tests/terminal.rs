@@ -96,13 +96,13 @@ fn read_until_with_read_to_end() {
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_until_boundary_spanning() {
-    // Test case where expected string might span across read boundaries
+    // Test that read_until works when the expected string may span across read() boundaries.
+    // Boundary spanning is about the reader side: the PTY reader may return partial data even
+    // from a single write. We print the full string at once because on Windows, ConPTY
+    // reprocesses output and can insert escape sequences between individually-printed characters.
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
-        // Write in small chunks to increase chance of boundary spanning
-        for c in ['a', 'b', 'c', 'd', 'e', 'f'] {
-            print!("{c}");
-            let _ = stdout().flush();
-        }
+        print!("abcdef");
+        let _ = stdout().flush();
     }));
 
     let mut terminal = Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
