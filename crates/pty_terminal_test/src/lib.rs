@@ -10,6 +10,8 @@ pub use pty_terminal::{
 
 /// The OSC parameter ID that identifies milestone sequences.
 const MILESTONE_OSC_ID: &[u8] = pty_terminal_test_client::MILESTONE_OSC_ID;
+/// The zero-width fence character appended by `mark_milestone`.
+const MILESTONE_FENCE_CHAR: char = '\u{200b}';
 
 /// A test-oriented terminal that provides milestone-based synchronization.
 ///
@@ -25,7 +27,6 @@ pub struct TestTerminal {
 pub struct Reader {
     pty: PtyReader,
     child_handle: ChildHandle,
-    cursor_hidden: bool,
 }
 
 impl TestTerminal {
@@ -36,20 +37,21 @@ impl TestTerminal {
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
         let Terminal { pty_reader, pty_writer, child_handle } = Terminal::spawn(size, cmd)?;
-        Ok(Self {
-            writer: pty_writer,
-            reader: Reader { pty: pty_reader, child_handle, cursor_hidden: false },
-        })
+        Ok(Self { writer: pty_writer, reader: Reader { pty: pty_reader, child_handle } })
     }
 }
 
 impl Reader {
+    fn sanitized_screen_contents(&self) -> String {
+        self.pty.screen_contents().replace(MILESTONE_FENCE_CHAR, "")
+    }
+
     /// Reads from the PTY until a milestone with the given name is encountered.
     ///
     /// Returns the terminal screen contents at the moment the milestone is detected.
     ///
     /// Milestones use a uniform protocol across platforms: OSC marker followed
-    /// by an alternating cursor-visibility fence (`CSI ?25l` / `CSI ?25h`).
+    /// by a non-visual zero-width-space fence.
     /// On Windows, `ConPTY` may deliver unrecognized OSC before rendered output;
     /// waiting for the expected fence guarantees prior rendered output has been
     /// consumed.
@@ -67,10 +69,7 @@ impl Reader {
         milestone.extend_from_slice(name.as_bytes());
         milestone.push(0x07); // BEL terminator
 
-        let fence: &[u8] = {
-            self.cursor_hidden = !self.cursor_hidden;
-            if self.cursor_hidden { b"\x1b[?25l" } else { b"\x1b[?25h" }
-        };
+        let fence: &[u8] = pty_terminal_test_client::MILESTONE_FENCE;
 
         let mut buf = [0u8; 4096];
         let mut milestone_match = 0usize;
@@ -98,7 +97,7 @@ impl Reader {
                 if *byte == fence[fence_match] {
                     fence_match += 1;
                     if fence_match == fence.len() {
-                        return self.pty.screen_contents();
+                        return self.sanitized_screen_contents();
                     }
                 } else {
                     fence_match = usize::from(*byte == fence[0]);
@@ -125,6 +124,6 @@ impl Reader {
     /// Panics if the parser lock is poisoned.
     #[must_use]
     pub fn screen_contents(&self) -> String {
-        self.pty.screen_contents()
+        self.sanitized_screen_contents()
     }
 }

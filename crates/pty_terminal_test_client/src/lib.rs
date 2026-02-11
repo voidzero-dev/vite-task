@@ -5,6 +5,8 @@
 /// The vt100 parser splits by `;`, so `unhandled_osc` receives
 /// `params = [b"9999", b"<name>"]`.
 pub const MILESTONE_OSC_ID: &[u8] = b"9999";
+/// A non-visual UTF-8 fence appended after each milestone OSC.
+pub const MILESTONE_FENCE: &[u8] = "\u{200b}".as_bytes();
 
 /// Emits a milestone marker as a private OSC escape sequence.
 ///
@@ -18,10 +20,10 @@ pub const MILESTONE_OSC_ID: &[u8] = b"9999";
 /// that polls the console buffer. This means the OSC can arrive at the
 /// reader before preceding character output has been emitted.
 ///
-/// Each milestone also toggles cursor visibility (`CSI ?25l` / `CSI ?25h`).
-/// This keeps a uniform protocol across platforms. On Windows, this persistent
-/// terminal-state change is emitted on the rendered output path, so waiting for
-/// the expected toggle confirms prior rendered output has been consumed.
+/// Each milestone also appends a non-visual zero-width-space fence (`U+200B`,
+/// UTF-8 `E2 80 8B`). This keeps a uniform protocol across platforms. On
+/// Windows, waiting for this rendered character after the OSC confirms prior
+/// rendered output has been consumed.
 ///
 /// When the `testing` feature is disabled, this is a no-op.
 ///
@@ -30,22 +32,11 @@ pub const MILESTONE_OSC_ID: &[u8] = b"9999";
 /// Panics if writing to stdout fails.
 #[cfg(feature = "testing")]
 pub fn mark_milestone(name: &str) {
-    use std::{
-        io::{Write, stdout},
-        sync::atomic::{AtomicBool, Ordering},
-    };
-
-    static CURSOR_HIDDEN: AtomicBool = AtomicBool::new(false);
+    use std::io::{Write, stdout};
 
     let mut stdout = stdout();
     write!(stdout, "\x1b]9999;{name}\x07").unwrap();
-
-    let was_hidden = CURSOR_HIDDEN.fetch_xor(true, Ordering::Relaxed);
-    if was_hidden {
-        write!(stdout, "\x1b[?25h").unwrap();
-    } else {
-        write!(stdout, "\x1b[?25l").unwrap();
-    }
+    stdout.write_all(MILESTONE_FENCE).unwrap();
 
     stdout.flush().unwrap();
 }

@@ -71,7 +71,7 @@ fn milestone_raw_mode_keystrokes() {
     assert!(status.success());
 }
 
-/// Verifies that the cursor-visibility fence in `mark_milestone` does not
+/// Verifies that the non-visual milestone fence in `mark_milestone` does not
 /// pollute `screen_contents()`. The subprocess appends characters without
 /// clearing the screen, so any leftover space would appear between them.
 #[test]
