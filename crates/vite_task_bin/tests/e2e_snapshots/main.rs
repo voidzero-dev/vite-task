@@ -3,10 +3,10 @@ mod redact;
 use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
-    io::Write,
+    io::{Read, Write},
     process::Stdio,
-    sync::{Arc, mpsc},
-    time::Duration,
+    sync::{Arc, Mutex, mpsc},
+    time::{Duration, Instant},
 };
 
 use copy_dir::copy_dir;
@@ -207,20 +207,8 @@ enum TerminationState {
     TimedOut,
 }
 
-fn kill_process(pid: u32) {
-    let pid_arg = vite_str::format!("{pid}");
-
-    #[cfg(unix)]
-    {
-        let _ = std::process::Command::new("kill").arg("-9").arg(pid_arg.as_str()).status();
-    }
-
-    #[cfg(windows)]
-    {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", pid_arg.as_str(), "/T", "/F"])
-            .status();
-    }
+fn kill_process(child: &mut std::process::Child) {
+    let _ = child.kill();
 }
 
 #[expect(
@@ -334,15 +322,16 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 let terminal = TestTerminal::spawn(SCREEN_SIZE, cmd).unwrap();
                 let mut killer = terminal.child_handle.clone();
                 let interactions = step.interactions().to_vec();
+                let output = Arc::new(Mutex::new(String::new()));
+                let output_for_thread = Arc::clone(&output);
                 let (tx, rx) = mpsc::channel();
                 std::thread::spawn(move || {
                     let mut terminal = terminal;
-                    let mut interaction_output = String::new();
 
                     for interaction in interactions {
                         match interaction {
                             Interaction::ExpectMilestone(expect) => {
-                                interaction_output.push_str(
+                                output_for_thread.lock().unwrap().push_str(
                                     vite_str::format!(
                                         "@ expect-milestone: {}\n",
                                         expect.expect_milestone
@@ -352,18 +341,19 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                                 let milestone_screen = terminal
                                     .reader
                                     .expect_milestone(expect.expect_milestone.as_str());
-                                interaction_output.push_str(&milestone_screen);
-                                interaction_output.push('\n');
+                                let mut output = output_for_thread.lock().unwrap();
+                                output.push_str(&milestone_screen);
+                                output.push('\n');
                             }
                             Interaction::Write(write) => {
-                                interaction_output.push_str(
+                                output_for_thread.lock().unwrap().push_str(
                                     vite_str::format!("@ write: {}\n", write.write).as_str(),
                                 );
                                 terminal.writer.write_all(write.write.as_str().as_bytes()).unwrap();
                                 terminal.writer.flush().unwrap();
                             }
                             Interaction::WriteLine(write_line) => {
-                                interaction_output.push_str(
+                                output_for_thread.lock().unwrap().push_str(
                                     vite_str::format!("@ write-line: {}\n", write_line.write_line)
                                         .as_str(),
                                 );
@@ -374,7 +364,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                             }
                             Interaction::WriteKey(write_key) => {
                                 let key_name = write_key.write_key.as_str();
-                                interaction_output.push_str(
+                                output_for_thread.lock().unwrap().push_str(
                                     vite_str::format!("@ write-key: {key_name}\n").as_str(),
                                 );
                                 terminal.writer.write_all(write_key.write_key.bytes()).unwrap();
@@ -386,20 +376,25 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                     let status = terminal.reader.wait_for_exit();
                     let screen = terminal.reader.screen_contents();
 
-                    let mut output = interaction_output;
-                    if !output.is_empty() && !output.ends_with('\n') {
-                        output.push('\n');
+                    {
+                        let mut output = output_for_thread.lock().unwrap();
+                        if !output.is_empty() && !output.ends_with('\n') {
+                            output.push('\n');
+                        }
+                        output.push_str(&screen);
                     }
-                    output.push_str(&screen);
 
-                    let _ = tx.send((i64::from(status.exit_code()), output));
+                    let _ = tx.send(i64::from(status.exit_code()));
                 });
 
                 match rx.recv_timeout(STEP_TIMEOUT) {
-                    Ok((exit_code, output)) => (TerminationState::Exited(exit_code), output),
+                    Ok(exit_code) => {
+                        let output = output.lock().unwrap().clone();
+                        (TerminationState::Exited(exit_code), output)
+                    }
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         let _ = killer.kill();
-                        let (_, output) = rx.recv().unwrap();
+                        let output = output.lock().unwrap().clone();
                         (TerminationState::TimedOut, output)
                     }
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -426,37 +421,78 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                     cmd.env("PATHEXT", pathext);
                 }
 
-                let child = cmd.spawn().unwrap();
-                let pid = child.id();
-                let (tx, rx) = mpsc::channel();
-                std::thread::spawn(move || {
-                    let output = child.wait_with_output();
-                    let _ = tx.send(output);
+                let mut child = cmd.spawn().unwrap();
+
+                let stdout_output = Arc::new(Mutex::new(Vec::<u8>::new()));
+                let stderr_output = Arc::new(Mutex::new(Vec::<u8>::new()));
+
+                let stdout = child.stdout.take().unwrap();
+                let stdout_output_for_thread = Arc::clone(&stdout_output);
+                let stdout_thread = std::thread::spawn(move || {
+                    let mut stdout = stdout;
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match stdout.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                stdout_output_for_thread
+                                    .lock()
+                                    .unwrap()
+                                    .extend_from_slice(&buf[..n]);
+                            }
+                            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                            Err(_) => break,
+                        }
+                    }
                 });
 
-                match rx.recv_timeout(STEP_TIMEOUT) {
-                    Ok(output) => {
-                        let output = output.unwrap();
-                        let mut combined_output =
-                            String::from_utf8_lossy(&output.stdout).into_owned();
-                        combined_output.push_str(String::from_utf8_lossy(&output.stderr).as_ref());
-
-                        let exit_code = i64::from(output.status.code().unwrap_or(1));
-                        (TerminationState::Exited(exit_code), combined_output)
+                let stderr = child.stderr.take().unwrap();
+                let stderr_output_for_thread = Arc::clone(&stderr_output);
+                let stderr_thread = std::thread::spawn(move || {
+                    let mut stderr = stderr;
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match stderr.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                stderr_output_for_thread
+                                    .lock()
+                                    .unwrap()
+                                    .extend_from_slice(&buf[..n]);
+                            }
+                            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                            Err(_) => break,
+                        }
                     }
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        kill_process(pid);
-                        let output = rx.recv().unwrap().unwrap();
+                });
 
-                        let mut combined_output =
-                            String::from_utf8_lossy(&output.stdout).into_owned();
-                        combined_output.push_str(String::from_utf8_lossy(&output.stderr).as_ref());
+                let snapshot_output = || {
+                    let stdout = { stdout_output.lock().unwrap().clone() };
+                    let stderr = { stderr_output.lock().unwrap().clone() };
 
-                        (TerminationState::TimedOut, combined_output)
+                    let mut combined_output = String::from_utf8_lossy(&stdout).into_owned();
+                    combined_output.push_str(String::from_utf8_lossy(&stderr).as_ref());
+                    combined_output
+                };
+
+                let start = Instant::now();
+                loop {
+                    if let Some(status) = child.try_wait().unwrap() {
+                        let _ = stdout_thread.join();
+                        let _ = stderr_thread.join();
+                        let combined_output = snapshot_output();
+
+                        let exit_code = i64::from(status.code().unwrap_or(1));
+                        break (TerminationState::Exited(exit_code), combined_output);
                     }
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        panic!("Process wait thread panicked");
+
+                    if start.elapsed() >= STEP_TIMEOUT {
+                        kill_process(&mut child);
+                        let combined_output = snapshot_output();
+                        break (TerminationState::TimedOut, combined_output);
                     }
+
+                    std::thread::park_timeout(Duration::from_millis(10));
                 }
             };
 
