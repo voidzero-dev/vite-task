@@ -26,7 +26,6 @@ vite_task = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
-copy_dir = { workspace = true }
 cow-utils = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
 pty_terminal = { workspace = true }
