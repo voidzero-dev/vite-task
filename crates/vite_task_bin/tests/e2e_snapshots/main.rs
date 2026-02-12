@@ -9,6 +9,7 @@ use std::{
 };
 
 use cp_r::CopyOptions;
+use pathdiff::diff_paths;
 use pty_terminal::{geo::ScreenSize, terminal::CommandBuilder};
 use pty_terminal_test::TestTerminal;
 use redact::redact_e2e_output;
@@ -68,14 +69,14 @@ fn resolve_runtime_vp_path() -> AbsolutePathBuf {
     let compile_time_repo_root = compile_time_manifest.parent().unwrap().parent().unwrap();
     let runtime_repo_root = runtime_manifest.parent().unwrap().parent().unwrap();
 
-    let relative_vp = compile_time_vp.strip_prefix(compile_time_repo_root).unwrap_or_else(|_| {
+    let relative_vp = diff_paths(&compile_time_vp, compile_time_repo_root).unwrap_or_else(|| {
         panic!(
-            "Failed to resolve vp relative path. vp={} repo_root={}",
+            "Failed to diff vp path. vp={} repo_root={}",
             compile_time_vp.display(),
             compile_time_repo_root.display(),
         )
     });
-    let runtime_vp = runtime_repo_root.join(relative_vp);
+    let runtime_vp = runtime_repo_root.join(&relative_vp);
 
     assert!(
         runtime_vp.exists(),

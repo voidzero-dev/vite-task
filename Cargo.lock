@@ -2232,6 +2232,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pathdiff"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
+
+[[package]]
 name = "peg"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3848,6 +3854,7 @@ dependencies = [
  "crossterm",
  "insta",
  "jsonc-parser",
+ "pathdiff",
  "pty_terminal",
  "pty_terminal_test",
  "pty_terminal_test_client",

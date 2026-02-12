@@ -90,6 +90,7 @@ os_str_bytes = "7.1.1"
 ouroboros = "0.18.5"
 owo-colors = "4.1.0"
 passfd = { git = "https://github.com/polachok/passfd", rev = "d55881752c16aced1a49a75f9c428d38d3767213", default-features = false }
+pathdiff = "0.2.3"
 petgraph = "0.8.2"
 phf = { version = "0.11.3", features = ["macros"] }
 portable-pty = "0.9.0"
