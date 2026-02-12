@@ -10,8 +10,6 @@ pub use pty_terminal::{
 
 /// The OSC parameter ID that identifies milestone sequences.
 const MILESTONE_OSC_ID: &[u8] = pty_terminal_test_client::MILESTONE_OSC_ID;
-/// The zero-width fence character appended by `mark_milestone`.
-const MILESTONE_FENCE_CHAR: char = '\u{200b}';
 
 /// A test-oriented terminal that provides milestone-based synchronization.
 ///
@@ -45,21 +43,14 @@ impl TestTerminal {
 }
 
 impl Reader {
-    fn sanitized_screen_contents(&self) -> String {
-        let mut screen = self.pty.get_ref().screen_contents();
-        screen.retain(|ch| ch != MILESTONE_FENCE_CHAR);
-        screen
-    }
-
     /// Reads from the PTY until a milestone with the given name is encountered.
     ///
     /// Returns the terminal screen contents at the moment the milestone is detected.
     ///
     /// Milestones use a uniform protocol across platforms: OSC marker followed
-    /// by a non-visual zero-width-space fence.
-    /// On Windows, `ConPTY` may deliver unrecognized OSC before rendered output;
-    /// waiting for the expected fence guarantees prior rendered output has been
-    /// consumed.
+    /// by a non-visual DECSET 2026 on/off fence sequence.
+    /// The fence is used as a stream delimiter so milestone parsing can detect
+    /// marker boundaries without polluting screen contents.
     ///
     /// # Panics
     ///
@@ -83,7 +74,7 @@ impl Reader {
             assert!(n > 0, "EOF reached before milestone '{name}'");
 
             if buf.ends_with(fence) && buf.windows(milestone.len()).any(|w| w == milestone) {
-                return self.sanitized_screen_contents();
+                return self.pty.get_ref().screen_contents();
             }
         }
     }

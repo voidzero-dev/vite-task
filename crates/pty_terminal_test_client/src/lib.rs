@@ -1,12 +1,13 @@
 /// The OSC parameter ID used for the milestone protocol.
 ///
 /// Milestone OSC format: `ESC ] 9999 ; <name> BEL`
+/// followed by the fence sequence `ESC [ ? 2026 h ESC [ ? 2026 l`.
 ///
 /// The vt100 parser splits by `;`, so `unhandled_osc` receives
 /// `params = [b"9999", b"<name>"]`.
 pub const MILESTONE_OSC_ID: &[u8] = b"9999";
-/// A non-visual UTF-8 fence appended after each milestone OSC.
-pub const MILESTONE_FENCE: &[u8] = "\u{200b}".as_bytes();
+/// A non-visual fence appended after each milestone OSC sequence.
+pub const MILESTONE_FENCE: &[u8] = b"\x1b[?2026h\x1b[?2026l";
 
 /// Emits a milestone marker as a private OSC escape sequence.
 ///
@@ -20,11 +21,8 @@ pub const MILESTONE_FENCE: &[u8] = "\u{200b}".as_bytes();
 /// that polls the console buffer. This means the OSC can arrive at the
 /// reader before preceding character output has been emitted.
 ///
-/// Each milestone also appends a non-visual zero-width-space fence (`U+200B`,
-/// UTF-8 `E2 80 8B`). This keeps a uniform protocol across platforms. On
-/// Windows, waiting for this rendered character after the OSC confirms prior
-/// rendered output has been consumed. This marker was also confirmed not to
-/// advance cursor position on both macOS and Windows in PTY probe runs.
+/// Milestones append a non-visual fence sequence after OSC so the reader can
+/// delimit milestone boundaries from the raw PTY stream.
 ///
 /// When the `testing` feature is disabled, this is a no-op.
 ///
@@ -36,6 +34,8 @@ pub fn mark_milestone(name: &str) {
     use std::io::{Write, stdout};
 
     let mut stdout = stdout();
+    // Flush prior output, then emit milestone sequence.
+    stdout.flush().unwrap();
     write!(stdout, "\x1b]9999;{name}\x07").unwrap();
     stdout.write_all(MILESTONE_FENCE).unwrap();
 
