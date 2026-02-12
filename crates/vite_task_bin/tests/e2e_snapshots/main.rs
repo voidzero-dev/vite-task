@@ -9,7 +9,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use copy_dir::copy_dir;
 use pty_terminal::{geo::ScreenSize, terminal::CommandBuilder};
 use pty_terminal_test::TestTerminal;
 use redact::redact_e2e_output;
@@ -22,6 +21,9 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Screen size for the PTY terminal. Large enough to avoid line wrapping.
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
+
+const COMPILE_TIME_CARGO_BIN_EXE_VP: &str = env!("CARGO_BIN_EXE_vp");
+const COMPILE_TIME_CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Get the shell executable for running e2e test steps.
 /// On Unix, uses /bin/sh.
@@ -51,6 +53,65 @@ fn get_shell_exe() -> std::path::PathBuf {
     } else {
         std::path::PathBuf::from("/bin/sh")
     }
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path types required for runtime path remapping between compile and runtime roots"
+)]
+fn runtime_manifest_dir() -> std::path::PathBuf {
+    std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(
+        || std::path::PathBuf::from(COMPILE_TIME_CARGO_MANIFEST_DIR),
+        std::path::PathBuf::from,
+    )
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path types required for runtime path remapping between compile and runtime roots"
+)]
+fn relative_path_from(path: &std::path::Path, base: &std::path::Path) -> std::path::PathBuf {
+    use std::path::{Component, PathBuf};
+
+    let path_components = path.components().collect::<Vec<_>>();
+    let base_components = base.components().collect::<Vec<_>>();
+
+    let common_prefix_len = path_components
+        .iter()
+        .zip(base_components.iter())
+        .take_while(|(path_comp, base_comp)| path_comp == base_comp)
+        .count();
+
+    let mut relative_path = PathBuf::new();
+
+    for base_comp in &base_components[common_prefix_len..] {
+        match base_comp {
+            Component::Normal(_) | Component::CurDir | Component::ParentDir => {
+                relative_path.push("..");
+            }
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+
+    for path_comp in &path_components[common_prefix_len..] {
+        relative_path.push(path_comp.as_os_str());
+    }
+
+    relative_path
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path types required for runtime path remapping between compile and runtime roots"
+)]
+fn resolve_runtime_vp_path() -> AbsolutePathBuf {
+    let compile_time_vp = std::path::Path::new(COMPILE_TIME_CARGO_BIN_EXE_VP);
+    let compile_time_manifest = std::path::Path::new(COMPILE_TIME_CARGO_MANIFEST_DIR);
+    let vp_relative_path = relative_path_from(compile_time_vp, compile_time_manifest);
+
+    let runtime_manifest = runtime_manifest_dir();
+    let runtime_vp = runtime_manifest.join(vp_relative_path);
+    AbsolutePathBuf::new(runtime_vp).unwrap()
 }
 
 const fn default_true() -> bool {
@@ -207,6 +268,29 @@ enum TerminationState {
     TimedOut,
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path required for recursive fixture copy in test harness"
+)]
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = dst.join(entry.file_name());
+        let file_type = entry.file_type()?;
+
+        if file_type.is_dir() {
+            copy_dir_recursive(&source_path, &target_path)?;
+        } else if file_type.is_file() {
+            std::fs::copy(&source_path, &target_path)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn kill_process(child: &mut std::process::Child) {
     let _ = child.kill();
 }
@@ -222,7 +306,7 @@ fn kill_process(child: &mut std::process::Child) {
 fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture_name: &str) {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
-    copy_dir(fixture_path, &stage_path).unwrap();
+    copy_dir_recursive(fixture_path, stage_path.as_path()).unwrap();
 
     let (workspace_root, _cwd) = find_workspace_root(&stage_path).unwrap();
 
@@ -238,13 +322,9 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
-    // Navigate from CARGO_MANIFEST_DIR to packages/tools at the repo root
-    #[expect(
-        clippy::disallowed_types,
-        reason = "Path required for CARGO_MANIFEST_DIR path manipulation via env! macro"
-    )]
-    let repo_root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    // Navigate from runtime CARGO_MANIFEST_DIR to packages/tools at the repo root.
+    let repo_root = runtime_manifest_dir();
+    let repo_root = repo_root.parent().unwrap().parent().unwrap();
     let test_bin_path = Arc::<OsStr>::from(
         repo_root.join("packages").join("tools").join("node_modules").join(".bin").into_os_string(),
     );
@@ -257,7 +337,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
         [
             // Include vp binary path to PATH so that e2e tests can run "vp ..." commands.
             {
-                let vp_path = AbsolutePath::new(env!("CARGO_BIN_EXE_vp")).unwrap();
+                let vp_path = resolve_runtime_vp_path();
                 let vp_dir = vp_path.parent().unwrap();
                 vp_dir.as_path().as_os_str().into()
             },
@@ -289,7 +369,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
 
         let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_e2e_stage_{e2e_count}"));
         e2e_count += 1;
-        assert!(copy_dir(fixture_path, &e2e_stage_path).unwrap().is_empty());
+        copy_dir_recursive(fixture_path, e2e_stage_path.as_path()).unwrap();
 
         let e2e_stage_path_str = e2e_stage_path.as_path().to_str().unwrap();
 
@@ -530,20 +610,20 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
     }
 }
 
-#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! macro callback")]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "current_dir needed because insta::glob! requires std PathBuf"
-)]
 fn main() {
     let filter = std::env::args().nth(1);
 
     let tmp_dir = tempfile::tempdir().unwrap();
-    let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
+    let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().to_path_buf()).unwrap();
 
-    let tests_dir = std::env::current_dir().unwrap().join("tests");
+    let fixtures_dir = runtime_manifest_dir().join("tests").join("e2e_snapshots").join("fixtures");
+    let mut fixture_paths = std::fs::read_dir(fixtures_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    fixture_paths.sort();
 
-    insta::glob!(tests_dir, "e2e_snapshots/fixtures/*", |case_path| {
+    for case_path in &fixture_paths {
         run_case(&tmp_dir_path, case_path, filter.as_deref());
-    });
+    }
 }

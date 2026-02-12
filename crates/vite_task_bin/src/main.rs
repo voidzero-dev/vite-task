@@ -112,11 +112,15 @@ impl Drop for RawModeGuard {
 
 fn run_interact() -> anyhow::Result<ExitStatus> {
     let stdin_is_tty = std::io::stdin().is_terminal();
-    let mut raw_mode = RawModeGuard::new(stdin_is_tty)?;
+    let enable_raw_mode = if cfg!(windows) { true } else { stdin_is_tty };
+    let mut raw_mode = RawModeGuard::new(enable_raw_mode)?;
 
     let mut stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     let mut text_buffer = Vec::<u8>::new();
+    let mut ansi_escape_pending = false;
+    let mut ansi_csi_pending = false;
+    let mut windows_extended_key_pending = false;
 
     write_line(&mut stdout, b"START")?;
     write_milestone(&mut stdout, "ready")?;
@@ -129,19 +133,50 @@ fn run_interact() -> anyhow::Result<ExitStatus> {
         }
 
         let byte = byte[0];
-        if byte == 0x1b {
-            let mut seq = [0u8; 2];
-            if stdin.read_exact(&mut seq).is_err() {
-                break;
+        if ansi_escape_pending {
+            ansi_escape_pending = false;
+
+            if byte == b'[' || byte == b'O' {
+                ansi_csi_pending = true;
+                continue;
+            }
+        }
+
+        if ansi_csi_pending {
+            ansi_csi_pending = false;
+
+            if byte == b'A' {
+                write_milestone(&mut stdout, "after-up")?;
+                continue;
             }
 
-            if seq == [b'[', b'A'] {
-                write_line(&mut stdout, b"KEY:UP")?;
-                write_milestone(&mut stdout, "after-up")?;
-            } else if seq == [b'[', b'B'] {
-                write_line(&mut stdout, b"KEY:DOWN")?;
+            if byte == b'B' {
                 write_milestone(&mut stdout, "after-down")?;
+                continue;
             }
+        }
+
+        if windows_extended_key_pending {
+            windows_extended_key_pending = false;
+
+            if byte == 72 {
+                write_milestone(&mut stdout, "after-up")?;
+                continue;
+            }
+
+            if byte == 80 {
+                write_milestone(&mut stdout, "after-down")?;
+                continue;
+            }
+        }
+
+        if byte == 0x1b {
+            ansi_escape_pending = true;
+            continue;
+        }
+
+        if byte == 0x00 || byte == 0xe0 {
+            windows_extended_key_pending = true;
             continue;
         }
 

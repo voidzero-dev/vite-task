@@ -60,6 +60,10 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     .unwrap();
     output = node_trace_warning_regex.replace_all(&output, "").into_owned();
 
+    // Remove nondeterministic mise warnings from shell startup in cross-platform runners.
+    let mise_warning_regex = regex::Regex::new(r"(?m)^mise WARN\s+.*\n?").unwrap();
+    output = mise_warning_regex.replace_all(&output, "").into_owned();
+
     // Sort consecutive diagnostic blocks to handle non-deterministic tool output
     // (e.g., oxlint reports warnings in arbitrary order due to multi-threading).
     // Each block starts with "  ! " and ends at the next empty line.

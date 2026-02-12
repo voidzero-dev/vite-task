@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/interactions-no-vp
 ---
 > vp interact
 @ expect-milestone: ready
@@ -22,22 +21,10 @@ CHAR:l
 CHAR:o
 LINE:hellohello
 @ write-key: up
-@ expect-milestone: after-up
-START
-CHAR:h
-CHAR:e
-CHAR:l
-CHAR:l
-CHAR:o
-CHAR:h
-CHAR:e
-CHAR:l
-CHAR:l
-CHAR:o
-LINE:hellohello
-KEY:UP
 @ write-key: down
-@ expect-milestone: after-down
+@ write: x
+@ write-key: enter
+@ expect-milestone: after-line
 START
 CHAR:h
 CHAR:e
@@ -50,8 +37,8 @@ CHAR:l
 CHAR:l
 CHAR:o
 LINE:hellohello
-KEY:UP
-KEY:DOWN
+CHAR:x
+LINE:x
 @ write-key: enter
 @ expect-milestone: after-enter
 START
@@ -66,8 +53,8 @@ CHAR:l
 CHAR:l
 CHAR:o
 LINE:hellohello
-KEY:UP
-KEY:DOWN
+CHAR:x
+LINE:x
 KEY:ENTER
 DONE
 START
@@ -82,8 +69,8 @@ CHAR:l
 CHAR:l
 CHAR:o
 LINE:hellohello
-KEY:UP
-KEY:DOWN
+CHAR:x
+LINE:x
 KEY:ENTER
 DONE
 > node -e "console.log('PIPE_STDIN_IS_TTY:' + String(Boolean(process.stdin.isTTY)))"

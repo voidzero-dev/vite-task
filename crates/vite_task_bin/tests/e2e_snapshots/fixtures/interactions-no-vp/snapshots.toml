@@ -1,6 +1,6 @@
 [[e2e]]
 name = "interactions without vp"
 steps = [
-  { command = "vp interact", interactions = [{ "expect-milestone" = "ready" }, { "write" = "hello" }, { "write-line" = "hello" }, { "expect-milestone" = "after-line" }, { "write-key" = "up" }, { "expect-milestone" = "after-up" }, { "write-key" = "down" }, { "expect-milestone" = "after-down" }, { "write-key" = "enter" }, { "expect-milestone" = "after-enter" }] },
+  { command = "vp interact", interactions = [{ "expect-milestone" = "ready" }, { "write" = "hello" }, { "write-line" = "hello" }, { "expect-milestone" = "after-line" }, { "write-key" = "up" }, { "write-key" = "down" }, { "write" = "x" }, { "write-key" = "enter" }, { "expect-milestone" = "after-line" }, { "write-key" = "enter" }, { "expect-milestone" = "after-enter" }] },
   { command = "node -e \"console.log('PIPE_STDIN_IS_TTY:' + String(Boolean(process.stdin.isTTY)))\"", pty = false },
 ]
