@@ -22,29 +22,29 @@ steps = [
 ]
 ```
 
-Steps also support an object form with PTY and interactions:
+Steps also support an object form with interactions:
 
 ```toml
 [[e2e]]
 name = "interactive step"
 steps = [
   { command = "vp interact", interactions = [{ expect-milestone = "ready" }, { write = "hello" }, { write-line = "world" }, { write-key = "up" }, { write-key = "down" }, { write-key = "enter" }] },
-  { command = "node check-stdin.js", pty = false },
+  "echo -n | node check-stdin.js",
 ]
 ```
 
 Notes:
 
-- String steps are shorthand for `{ command = "...", pty = true }`.
-- `interactions` are only valid when `pty = true`.
+- String steps are shorthand for `{ command = "..." }`.
 - `write-key` accepts `up`, `down`, and `enter`.
 - Snapshots include every interaction line, and each `expect-milestone` records the screen at that point.
+- For stdin pipe scenarios, write the step command with shell piping, for example: `echo -n | command`.
 
 The test runner:
 
 1. Copies the fixture to a temp directory
 2. Executes each step using `/bin/sh` (Unix) or `bash` (Windows)
-3. Runs each step in PTY mode by default (`TestTerminal`) unless `pty = false` (pipe stdio)
+3. Runs each step in PTY mode (`TestTerminal`)
 4. Applies configured interactions in order for PTY steps
 5. Captures output and exit codes
 6. Compares against snapshot in `fixtures/<name>/snapshots/`

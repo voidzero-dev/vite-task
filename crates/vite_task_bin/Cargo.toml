@@ -27,6 +27,7 @@ which = { workspace = true }
 
 [dev-dependencies]
 cow-utils = { workspace = true }
+cp_r = { workspace = true }
 insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
 pty_terminal = { workspace = true }
 pty_terminal_test = { workspace = true }

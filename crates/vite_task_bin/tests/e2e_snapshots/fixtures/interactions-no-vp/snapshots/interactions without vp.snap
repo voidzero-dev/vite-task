@@ -73,5 +73,5 @@ CHAR:x
 LINE:x
 KEY:ENTER
 DONE
-> node -e "console.log('PIPE_STDIN_IS_TTY:' + String(Boolean(process.stdin.isTTY)))"
+> echo -n | node -e "console.log('PIPE_STDIN_IS_TTY:' + String(Boolean(process.stdin.isTTY)))"
 PIPE_STDIN_IS_TTY:false
