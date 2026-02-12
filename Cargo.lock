@@ -3834,7 +3834,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
- "copy_dir",
  "cow-utils",
  "crossterm",
  "insta",
