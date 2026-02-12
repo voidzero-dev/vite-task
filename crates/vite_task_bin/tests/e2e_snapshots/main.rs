@@ -594,7 +594,7 @@ fn main() {
     let filter = std::env::args().nth(1);
 
     let tmp_dir = tempfile::tempdir().unwrap();
-    let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().to_path_buf()).unwrap();
+    let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
     let fixtures_dir = runtime_manifest_dir().join("tests").join("e2e_snapshots").join("fixtures");
     let mut fixture_paths = std::fs::read_dir(fixtures_dir)
