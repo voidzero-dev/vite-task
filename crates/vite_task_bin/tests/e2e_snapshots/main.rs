@@ -111,7 +111,9 @@ fn resolve_runtime_vp_path() -> AbsolutePathBuf {
 
     let runtime_manifest = runtime_manifest_dir();
     let runtime_vp = runtime_manifest.join(vp_relative_path);
-    AbsolutePathBuf::new(runtime_vp).unwrap()
+    let resolved_vp = if runtime_vp.exists() { runtime_vp } else { compile_time_vp.to_path_buf() };
+    let resolved_vp = resolved_vp.canonicalize().unwrap_or(resolved_vp);
+    AbsolutePathBuf::new(resolved_vp).unwrap()
 }
 
 const fn default_true() -> bool {
