@@ -122,15 +122,15 @@ fn write_after_exit() {
     let _ = child_handle.wait();
 
     // Writer shutdown is done by a background thread after child wait returns.
-    // Poll briefly to avoid a race where write occurs before shutdown is observed.
+    // Poll briefly for the writer state to flip to closed before asserting write failure.
     let deadline = Instant::now() + Duration::from_millis(300);
-    loop {
-        if pty_writer.write_all(b"too late\n").is_err() {
-            break;
-        }
+    while !pty_writer.is_closed() {
         assert!(Instant::now() <= deadline, "writer did not close after child exit");
         std::thread::yield_now();
     }
+
+    let result = pty_writer.write_all(b"too late\n");
+    assert!(result.is_err());
 }
 
 #[test]

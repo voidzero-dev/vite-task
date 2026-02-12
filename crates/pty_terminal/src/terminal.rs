@@ -151,6 +151,16 @@ impl PtyReader {
 }
 
 impl PtyWriter {
+    /// Returns `true` if the child process write channel has been closed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the writer lock is poisoned.
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.writer.lock().unwrap().is_none()
+    }
+
     /// Writes `line` followed by a platform-appropriate line ending to the child process.
     ///
     /// On Unix, appends `\n`. On Windows `ConPTY`, appends `\r\n` for proper line handling.
