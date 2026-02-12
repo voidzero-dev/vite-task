@@ -8,6 +8,8 @@ pub use pty_terminal::{
     terminal::{ChildHandle, PtyWriter},
 };
 
+const MILESTONE_HYPERTEXT: char = '\u{200b}';
+
 /// A test-oriented terminal that provides milestone-based synchronization.
 ///
 /// Wraps a PTY terminal, splitting it into a [`PtyWriter`] for sending input
@@ -16,6 +18,7 @@ pub use pty_terminal::{
 pub struct TestTerminal {
     pub writer: PtyWriter,
     pub reader: Reader,
+    pub child_handle: ChildHandle,
 }
 
 /// The read half of a test terminal, wrapping [`PtyReader`] with milestone support.
@@ -34,12 +37,21 @@ impl TestTerminal {
         let Terminal { pty_reader, pty_writer, child_handle } = Terminal::spawn(size, cmd)?;
         Ok(Self {
             writer: pty_writer,
-            reader: Reader { pty: BufReader::new(pty_reader), child_handle },
+            reader: Reader { pty: BufReader::new(pty_reader), child_handle: child_handle.clone() },
+            child_handle,
         })
     }
 }
 
 impl Reader {
+    /// Returns terminal screen contents with milestone hyperlink text removed.
+    #[must_use]
+    pub fn screen_contents(&self) -> String {
+        let mut contents = self.pty.get_ref().screen_contents();
+        contents.retain(|ch| ch != MILESTONE_HYPERTEXT);
+        contents
+    }
+
     /// Reads from the PTY until a milestone with the given name is encountered.
     ///
     /// Returns the terminal screen contents at the moment the milestone is detected.
@@ -56,7 +68,6 @@ impl Reader {
     /// or if a read error occurs.
     #[must_use]
     pub fn expect_milestone(&mut self, name: &str) -> String {
-        const MILESTONE_HYPERTEXT: char = '\u{200b}';
         let mut buf = [0u8; 4096];
 
         loop {
@@ -70,9 +81,7 @@ impl Reader {
                 })
                 .any(|decoded| decoded == name);
             if found {
-                let mut contents = self.pty.get_ref().screen_contents();
-                contents.retain(|ch| ch != MILESTONE_HYPERTEXT);
-                return contents;
+                return self.screen_contents();
             }
 
             let n = self.pty.read(&mut buf).expect("PTY read failed");

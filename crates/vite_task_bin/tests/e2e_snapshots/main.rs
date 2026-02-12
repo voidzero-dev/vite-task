@@ -3,17 +3,15 @@ mod redact;
 use std::{
     env::{self, join_paths, split_paths},
     ffi::OsStr,
-    io::Read,
+    io::Write,
+    process::Stdio,
     sync::{Arc, mpsc},
     time::Duration,
 };
 
 use copy_dir::copy_dir;
-use pty_terminal::{
-    ExitStatus,
-    geo::ScreenSize,
-    terminal::{CommandBuilder, Terminal},
-};
+use pty_terminal::{geo::ScreenSize, terminal::CommandBuilder};
+use pty_terminal_test::TestTerminal;
 use redact::redact_e2e_output;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
@@ -55,9 +53,111 @@ fn get_shell_exe() -> std::path::PathBuf {
     }
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 #[derive(serde::Deserialize, Debug)]
-#[serde(transparent)]
-struct Step(Str);
+#[serde(untagged)]
+enum Step {
+    Command(Str),
+    Detailed(StepConfig),
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+struct StepConfig {
+    command: Str,
+    #[serde(default = "default_true")]
+    pty: bool,
+    #[serde(default)]
+    interactions: Vec<Interaction>,
+}
+
+impl Step {
+    fn command(&self) -> &str {
+        match self {
+            Self::Command(command) => command.as_str(),
+            Self::Detailed(config) => config.command.as_str(),
+        }
+    }
+
+    const fn pty(&self) -> bool {
+        match self {
+            Self::Command(_) => true,
+            Self::Detailed(config) => config.pty,
+        }
+    }
+
+    fn interactions(&self) -> &[Interaction] {
+        match self {
+            Self::Command(_) => &[],
+            Self::Detailed(config) => &config.interactions,
+        }
+    }
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum Interaction {
+    ExpectMilestone(ExpectMilestoneInteraction),
+    Write(WriteInteraction),
+    WriteLine(WriteLineInteraction),
+    WriteKey(WriteKeyInteraction),
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct ExpectMilestoneInteraction {
+    #[serde(rename = "expect-milestone")]
+    expect_milestone: Str,
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct WriteInteraction {
+    write: Str,
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct WriteLineInteraction {
+    #[serde(rename = "write-line")]
+    write_line: Str,
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct WriteKeyInteraction {
+    #[serde(rename = "write-key")]
+    write_key: WriteKey,
+}
+
+#[derive(serde::Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+enum WriteKey {
+    Up,
+    Down,
+    Enter,
+}
+
+impl WriteKey {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Enter => "enter",
+        }
+    }
+
+    const fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::Up => b"\x1b[A",
+            Self::Down => b"\x1b[B",
+            Self::Enter => b"\r",
+        }
+    }
+}
 
 #[derive(serde::Deserialize, Debug)]
 struct E2e {
@@ -103,8 +203,24 @@ fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, filter: Optio
 }
 
 enum TerminationState {
-    Exited(ExitStatus),
+    Exited(i64),
     TimedOut,
+}
+
+fn kill_process(pid: u32) {
+    let pid_arg = vite_str::format!("{pid}");
+
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("kill").arg("-9").arg(pid_arg.as_str()).status();
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", pid_arg.as_str(), "/T", "/F"])
+            .status();
+    }
 }
 
 #[expect(
@@ -191,45 +307,156 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
 
         let mut e2e_outputs = String::new();
         for step in &e2e.steps {
-            let mut cmd = CommandBuilder::new(&shell_exe);
-            cmd.arg("-c");
-            cmd.arg(step.0.as_str());
-            cmd.env_clear();
-            cmd.env("PATH", &e2e_env_path);
-            cmd.env("NO_COLOR", "1");
-            cmd.env("TERM", "dumb");
-            cmd.cwd(e2e_stage_path.join(&e2e.cwd).as_path());
+            assert!(
+                !(!step.pty() && !step.interactions().is_empty()),
+                "Step '{}' sets pty = false but also defines interactions; interactions require pty = true",
+                step.command()
+            );
 
-            // On Windows, inherit PATHEXT for executable lookup
-            if cfg!(windows)
-                && let Ok(pathext) = std::env::var("PATHEXT")
-            {
-                cmd.env("PATHEXT", pathext);
-            }
+            let step_command = step.command();
+            let (termination_state, output) = if step.pty() {
+                let mut cmd = CommandBuilder::new(&shell_exe);
+                cmd.arg("-c");
+                cmd.arg(step_command);
+                cmd.env_clear();
+                cmd.env("PATH", &e2e_env_path);
+                cmd.env("NO_COLOR", "1");
+                cmd.env("TERM", "dumb");
+                cmd.cwd(e2e_stage_path.join(&e2e.cwd).as_path());
 
-            let terminal = Terminal::spawn(SCREEN_SIZE, cmd).unwrap();
-
-            // Read to end on a separate thread with timeout via channel
-            let mut killer = terminal.child_handle.clone();
-            let (tx, rx) = mpsc::channel();
-            std::thread::spawn(move || {
-                let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle } = terminal;
-                let mut discard = Vec::new();
-                let read_result = pty_reader.read_to_end(&mut discard);
-                let screen = pty_reader.screen_contents();
-                let status = read_result.map(|_| child_handle.wait());
-                let _ = tx.send((status, screen));
-            });
-
-            let (termination_state, screen) = match rx.recv_timeout(STEP_TIMEOUT) {
-                Ok((status, screen)) => (TerminationState::Exited(status.unwrap()), screen),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    let _ = killer.kill();
-                    let (_, screen) = rx.recv().unwrap();
-                    (TerminationState::TimedOut, screen)
+                // On Windows, inherit PATHEXT for executable lookup
+                if cfg!(windows)
+                    && let Ok(pathext) = std::env::var("PATHEXT")
+                {
+                    cmd.env("PATHEXT", pathext);
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    panic!("Terminal thread panicked");
+
+                let terminal = TestTerminal::spawn(SCREEN_SIZE, cmd).unwrap();
+                let mut killer = terminal.child_handle.clone();
+                let interactions = step.interactions().to_vec();
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let mut terminal = terminal;
+                    let mut interaction_output = String::new();
+
+                    for interaction in interactions {
+                        match interaction {
+                            Interaction::ExpectMilestone(expect) => {
+                                interaction_output.push_str(
+                                    vite_str::format!(
+                                        "@ expect-milestone: {}\n",
+                                        expect.expect_milestone
+                                    )
+                                    .as_str(),
+                                );
+                                let milestone_screen = terminal
+                                    .reader
+                                    .expect_milestone(expect.expect_milestone.as_str());
+                                interaction_output.push_str(&milestone_screen);
+                                interaction_output.push('\n');
+                            }
+                            Interaction::Write(write) => {
+                                interaction_output.push_str(
+                                    vite_str::format!("@ write: {}\n", write.write).as_str(),
+                                );
+                                terminal.writer.write_all(write.write.as_str().as_bytes()).unwrap();
+                                terminal.writer.flush().unwrap();
+                            }
+                            Interaction::WriteLine(write_line) => {
+                                interaction_output.push_str(
+                                    vite_str::format!("@ write-line: {}\n", write_line.write_line)
+                                        .as_str(),
+                                );
+                                terminal
+                                    .writer
+                                    .write_line(write_line.write_line.as_str().as_bytes())
+                                    .unwrap();
+                            }
+                            Interaction::WriteKey(write_key) => {
+                                let key_name = write_key.write_key.as_str();
+                                interaction_output.push_str(
+                                    vite_str::format!("@ write-key: {key_name}\n").as_str(),
+                                );
+                                terminal.writer.write_all(write_key.write_key.bytes()).unwrap();
+                                terminal.writer.flush().unwrap();
+                            }
+                        }
+                    }
+
+                    let status = terminal.reader.wait_for_exit();
+                    let screen = terminal.reader.screen_contents();
+
+                    let mut output = interaction_output;
+                    if !output.is_empty() && !output.ends_with('\n') {
+                        output.push('\n');
+                    }
+                    output.push_str(&screen);
+
+                    let _ = tx.send((i64::from(status.exit_code()), output));
+                });
+
+                match rx.recv_timeout(STEP_TIMEOUT) {
+                    Ok((exit_code, output)) => (TerminationState::Exited(exit_code), output),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let _ = killer.kill();
+                        let (_, output) = rx.recv().unwrap();
+                        (TerminationState::TimedOut, output)
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        panic!("Terminal thread panicked");
+                    }
+                }
+            } else {
+                let mut cmd = std::process::Command::new(&shell_exe);
+                cmd.arg("-c");
+                cmd.arg(step_command);
+                cmd.env_clear();
+                cmd.env("PATH", &e2e_env_path);
+                cmd.env("NO_COLOR", "1");
+                cmd.env("TERM", "dumb");
+                cmd.current_dir(e2e_stage_path.join(&e2e.cwd).as_path());
+                cmd.stdin(Stdio::piped());
+                cmd.stdout(Stdio::piped());
+                cmd.stderr(Stdio::piped());
+
+                // On Windows, inherit PATHEXT for executable lookup
+                if cfg!(windows)
+                    && let Ok(pathext) = std::env::var("PATHEXT")
+                {
+                    cmd.env("PATHEXT", pathext);
+                }
+
+                let child = cmd.spawn().unwrap();
+                let pid = child.id();
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let output = child.wait_with_output();
+                    let _ = tx.send(output);
+                });
+
+                match rx.recv_timeout(STEP_TIMEOUT) {
+                    Ok(output) => {
+                        let output = output.unwrap();
+                        let mut combined_output =
+                            String::from_utf8_lossy(&output.stdout).into_owned();
+                        combined_output.push_str(String::from_utf8_lossy(&output.stderr).as_ref());
+
+                        let exit_code = i64::from(output.status.code().unwrap_or(1));
+                        (TerminationState::Exited(exit_code), combined_output)
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        kill_process(pid);
+                        let output = rx.recv().unwrap().unwrap();
+
+                        let mut combined_output =
+                            String::from_utf8_lossy(&output.stdout).into_owned();
+                        combined_output.push_str(String::from_utf8_lossy(&output.stderr).as_ref());
+
+                        (TerminationState::TimedOut, combined_output)
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        panic!("Process wait thread panicked");
+                    }
                 }
             };
 
@@ -238,19 +465,18 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 TerminationState::TimedOut => {
                     e2e_outputs.push_str("[timeout]");
                 }
-                TerminationState::Exited(status) => {
-                    let exit_code = status.exit_code();
-                    if exit_code != 0 {
+                TerminationState::Exited(exit_code) => {
+                    if *exit_code != 0 {
                         e2e_outputs.push_str(vite_str::format!("[{exit_code}]").as_str());
                     }
                 }
             }
 
             e2e_outputs.push_str("> ");
-            e2e_outputs.push_str(step.0.as_str());
+            e2e_outputs.push_str(step_command);
             e2e_outputs.push('\n');
 
-            e2e_outputs.push_str(&redact_e2e_output(screen, e2e_stage_path_str));
+            e2e_outputs.push_str(&redact_e2e_output(output, e2e_stage_path_str));
             e2e_outputs.push('\n');
 
             // Skip remaining steps if timed out

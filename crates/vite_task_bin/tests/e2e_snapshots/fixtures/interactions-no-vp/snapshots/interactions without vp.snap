@@ -1,0 +1,90 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/interactions-no-vp
+---
+> vp interact
+@ expect-milestone: ready
+START
+@ write: hello
+@ write-line: hello
+@ expect-milestone: after-line
+START
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+LINE:hellohello
+@ write-key: up
+@ expect-milestone: after-up
+START
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+LINE:hellohello
+KEY:UP
+@ write-key: down
+@ expect-milestone: after-down
+START
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+LINE:hellohello
+KEY:UP
+KEY:DOWN
+@ write-key: enter
+@ expect-milestone: after-enter
+START
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+LINE:hellohello
+KEY:UP
+KEY:DOWN
+KEY:ENTER
+DONE
+START
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+CHAR:h
+CHAR:e
+CHAR:l
+CHAR:l
+CHAR:o
+LINE:hellohello
+KEY:UP
+KEY:DOWN
+KEY:ENTER
+DONE
+> node -e "console.log('PIPE_STDIN_IS_TTY:' + String(Boolean(process.stdin.isTTY)))"
+PIPE_STDIN_IS_TTY:false

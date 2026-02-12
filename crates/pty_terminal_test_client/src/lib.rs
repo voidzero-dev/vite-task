@@ -27,7 +27,7 @@ pub fn encoded_milestone(name: &str) -> Vec<u8> {
     seq.into_bytes()
 }
 
-fn decode_hex_nibble(byte: u8) -> Option<u8> {
+const fn decode_hex_nibble(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
@@ -79,7 +79,7 @@ pub fn decode_milestone_from_osc8_params(params: &[Vec<u8>]) -> Option<String> {
 /// reader before preceding character output has been emitted.
 ///
 /// Milestones include a zero-width hyperlink anchor (`U+200B`) before closing.
-/// This keeps the hyperlink metadata observable in ConPTY output paths that can
+/// This keeps the hyperlink metadata observable in `ConPTY` output paths that can
 /// drop zero-length hyperlinks.
 ///
 /// When the `testing` feature is disabled, this is a no-op.

@@ -27,7 +27,7 @@ use pty_terminal::geo::ScreenSize;
 use pty_terminal_test::TestTerminal;
 
 let cmd = CommandBuilder::from("your-binary-or-subprocess-test-command");
-let TestTerminal { mut writer, mut reader } =
+let TestTerminal { mut writer, mut reader, child_handle: _ } =
     TestTerminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd)?;
 
 // Wait until child reaches a known point.

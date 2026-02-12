@@ -40,7 +40,7 @@ fn milestone_raw_mode_keystrokes() {
         crossterm::terminal::disable_raw_mode().unwrap();
     }));
 
-    let TestTerminal { mut writer, mut reader } =
+    let TestTerminal { mut writer, mut reader, child_handle: _ } =
         TestTerminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for the subprocess to be ready
@@ -105,7 +105,7 @@ fn milestone_does_not_pollute_screen() {
         crossterm::terminal::disable_raw_mode().unwrap();
     }));
 
-    let TestTerminal { mut writer, mut reader } =
+    let TestTerminal { mut writer, mut reader, child_handle: _ } =
         TestTerminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     let _ = reader.expect_milestone("ready");
