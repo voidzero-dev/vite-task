@@ -22,7 +22,6 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(20);
 /// Screen size for the PTY terminal. Large enough to avoid line wrapping.
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
 
-const COMPILE_TIME_CARGO_BIN_EXE_VP: &str = env!("CARGO_BIN_EXE_vp");
 const COMPILE_TIME_CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Get the shell executable for running e2e test steps.
@@ -60,60 +59,39 @@ fn get_shell_exe() -> std::path::PathBuf {
     reason = "Path types required for runtime path remapping between compile and runtime roots"
 )]
 fn runtime_manifest_dir() -> std::path::PathBuf {
-    std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(
+    let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(
         || std::path::PathBuf::from(COMPILE_TIME_CARGO_MANIFEST_DIR),
         std::path::PathBuf::from,
-    )
-}
+    );
 
-#[expect(
-    clippy::disallowed_types,
-    reason = "Path types required for runtime path remapping between compile and runtime roots"
-)]
-fn relative_path_from(path: &std::path::Path, base: &std::path::Path) -> std::path::PathBuf {
-    use std::path::{Component, PathBuf};
-
-    let path_components = path.components().collect::<Vec<_>>();
-    let base_components = base.components().collect::<Vec<_>>();
-
-    let common_prefix_len = path_components
-        .iter()
-        .zip(base_components.iter())
-        .take_while(|(path_comp, base_comp)| path_comp == base_comp)
-        .count();
-
-    let mut relative_path = PathBuf::new();
-
-    for base_comp in &base_components[common_prefix_len..] {
-        match base_comp {
-            Component::Normal(_) | Component::CurDir | Component::ParentDir => {
-                relative_path.push("..");
+    #[cfg(windows)]
+    {
+        // In cargo-xtest with a Windows target executed via wine on Unix hosts,
+        // runtime CARGO_MANIFEST_DIR can be Unix-style (e.g. "/Volumes/...").
+        // Map it to wine's Z: drive for Windows-native path resolution.
+        if manifest_dir.to_string_lossy().starts_with('/') {
+            let mut mapped = std::path::PathBuf::from(r"Z:\");
+            for segment in manifest_dir.to_string_lossy().trim_start_matches('/').split('/') {
+                if !segment.is_empty() {
+                    mapped.push(segment);
+                }
             }
-            Component::RootDir | Component::Prefix(_) => {}
+            return mapped;
         }
     }
 
-    for path_comp in &path_components[common_prefix_len..] {
-        relative_path.push(path_comp.as_os_str());
-    }
-
-    relative_path
+    manifest_dir
 }
 
-#[expect(
-    clippy::disallowed_types,
-    reason = "Path types required for runtime path remapping between compile and runtime roots"
-)]
 fn resolve_runtime_vp_path() -> AbsolutePathBuf {
-    let compile_time_vp = std::path::Path::new(COMPILE_TIME_CARGO_BIN_EXE_VP);
-    let compile_time_manifest = std::path::Path::new(COMPILE_TIME_CARGO_MANIFEST_DIR);
-    let vp_relative_path = relative_path_from(compile_time_vp, compile_time_manifest);
-
-    let runtime_manifest = runtime_manifest_dir();
-    let runtime_vp = runtime_manifest.join(vp_relative_path);
-    let resolved_vp = if runtime_vp.exists() { runtime_vp } else { compile_time_vp.to_path_buf() };
-    let resolved_vp = resolved_vp.canonicalize().unwrap_or(resolved_vp);
-    AbsolutePathBuf::new(resolved_vp).unwrap()
+    // Locate `vp` next to the test binary's debug directory.
+    // tests/<name>.exe is in target/<triple>/debug/deps/, and vp(.exe) is in target/<triple>/debug/.
+    let current_exe = std::env::current_exe().unwrap();
+    let current_exe = current_exe.canonicalize().unwrap_or(current_exe);
+    let debug_dir = current_exe.parent().unwrap().parent().unwrap();
+    let runtime_vp = debug_dir.join(if cfg!(windows) { "vp.exe" } else { "vp" });
+    let runtime_vp = runtime_vp.canonicalize().unwrap_or(runtime_vp);
+    AbsolutePathBuf::new(runtime_vp).unwrap()
 }
 
 const fn default_true() -> bool {
