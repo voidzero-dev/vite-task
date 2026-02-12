@@ -1,4 +1,7 @@
-use std::io::{BufRead, BufReader, IsTerminal, Read, Write, stderr, stdin, stdout};
+use std::{
+    io::{BufRead, BufReader, IsTerminal, Read, Write, stderr, stdin, stdout},
+    time::{Duration, Instant},
+};
 
 use ntest::timeout;
 use portable_pty::CommandBuilder;
@@ -118,11 +121,16 @@ fn write_after_exit() {
     pty_reader.read_to_end(&mut discard).unwrap();
     let _ = child_handle.wait();
 
-    // The background thread should have set writer to None by now
-    // since read_to_end only returns after EOF (child exit)
-    // Writing should fail with BrokenPipe
-    let result = pty_writer.write_all(b"too late\n");
-    assert!(result.is_err());
+    // Writer shutdown is done by a background thread after child wait returns.
+    // Poll briefly to avoid a race where write occurs before shutdown is observed.
+    let deadline = Instant::now() + Duration::from_millis(300);
+    loop {
+        if pty_writer.write_all(b"too late\n").is_err() {
+            break;
+        }
+        assert!(Instant::now() <= deadline, "writer did not close after child exit");
+        std::thread::yield_now();
+    }
 }
 
 #[test]
