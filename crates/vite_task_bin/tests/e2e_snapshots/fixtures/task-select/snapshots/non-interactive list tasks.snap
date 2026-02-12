@@ -3,9 +3,15 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > echo '' | vp run
+  check: echo check root
+  format: echo format root
   hello: echo hello from root
-  list-tasks: vp run
+  run-typo-task: vp run nonexistent-xyz
+  validate: echo validate root
   app#build: echo build app
   app#lint: echo lint app
   app#test: echo test app
   lib#build: echo build lib
+  lib#lint: echo lint lib
+  lib#test: echo test lib
+  lib#typecheck: echo typecheck lib

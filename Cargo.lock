@@ -2010,6 +2010,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "num"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3786,6 +3796,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vite_select"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "assert2",
+ "crossterm",
+ "nucleo-matcher",
+ "vite_str",
+]
+
+[[package]]
 name = "vite_shell"
 version = "0.0.0"
 dependencies = [
@@ -3825,6 +3846,7 @@ dependencies = [
  "once_cell",
  "owo-colors",
  "petgraph",
+ "pty_terminal_test_client",
  "rayon",
  "rusqlite",
  "rustc-hash",
@@ -3836,6 +3858,7 @@ dependencies = [
  "twox-hash",
  "vite_glob",
  "vite_path",
+ "vite_select",
  "vite_str",
  "vite_task_graph",
  "vite_task_plan",

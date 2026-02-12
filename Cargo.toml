@@ -85,6 +85,7 @@ memmap2 = "0.9.7"
 monostate = "1.0.2"
 nix = { version = "0.30.1", features = ["dir"] }
 ntapi = "0.4.1"
+nucleo-matcher = "0.3.1"
 once_cell = "1.19"
 os_str_bytes = "7.1.1"
 ouroboros = "0.18.5"
@@ -135,6 +136,7 @@ vec1 = "1.12.1"
 vite_glob = { path = "crates/vite_glob" }
 vite_graph_ser = { path = "crates/vite_graph_ser" }
 vite_path = { path = "crates/vite_path" }
+vite_select = { path = "crates/vite_select" }
 vite_shell = { path = "crates/vite_shell" }
 vite_str = { path = "crates/vite_str" }
 vite_task = { path = "crates/vite_task" }

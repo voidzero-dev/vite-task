@@ -2,14 +2,33 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run list-tasks
-$ vp run ⊘ cache disabled: no cache config
-  hello: echo hello from root
-  list-tasks: vp run
-  app#build: echo build app
-  app#lint: echo lint app
-  app#test: echo test app
+> vp run
+@ expect-milestone: task-select::0
+Search task (↑/↓ to move, enter to select): 
+> build: echo build app
+  lint: echo lint app
+  test: echo test app
   lib#build: echo build lib
+  lib#lint: echo lint lib
+  lib#test: echo test lib
+  lib#typecheck: echo typecheck lib
+  task-select-test#check: echo check root
+  (…4 more)
+@ write-key: down
+@ expect-milestone: task-select::1
+Search task (↑/↓ to move, enter to select): 
+  build: echo build app
+> lint: echo lint app
+  test: echo test app
+  lib#build: echo build lib
+  lib#lint: echo lint lib
+  lib#test: echo test lib
+  lib#typecheck: echo typecheck lib
+  task-select-test#check: echo check root
+  (…4 more)
+@ write-key: enter
+~/packages/app$ echo lint app ⊘ cache disabled: built-in command
+lint app
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -21,6 +40,6 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] task-list-test#list-tasks: $ vp run ✓
-      → Cache disabled in task configuration
+  [1] app#lint: ~/packages/app$ echo lint app ✓
+      → Cache disabled for built-in command
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

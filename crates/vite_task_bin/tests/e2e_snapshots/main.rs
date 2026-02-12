@@ -161,6 +161,8 @@ enum WriteKey {
     Up,
     Down,
     Enter,
+    Escape,
+    Backspace,
 }
 
 impl WriteKey {
@@ -169,6 +171,8 @@ impl WriteKey {
             Self::Up => "up",
             Self::Down => "down",
             Self::Enter => "enter",
+            Self::Escape => "escape",
+            Self::Backspace => "backspace",
         }
     }
 
@@ -177,6 +181,8 @@ impl WriteKey {
             Self::Up => b"\x1b[A",
             Self::Down => b"\x1b[B",
             Self::Enter => b"\r",
+            Self::Escape => b"\x1b",
+            Self::Backspace => b"\x7f",
         }
     }
 }

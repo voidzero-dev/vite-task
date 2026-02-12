@@ -4,7 +4,7 @@ mod execute;
 pub(crate) mod reporter;
 
 // Re-export types that are part of the public API
-use std::{ffi::OsStr, fmt::Debug, sync::Arc};
+use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, sync::Arc};
 
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
@@ -14,9 +14,10 @@ pub use reporter::ExitStatus;
 use reporter::LabeledReporter;
 use rustc_hash::FxHashMap;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
+use vite_select::SelectItem;
 use vite_str::Str;
 use vite_task_graph::{
-    IndexedTaskGraph, TaskGraph, TaskGraphLoadError, config::user::UserCacheConfig,
+    IndexedTaskGraph, TaskGraph, TaskGraphLoadError, TaskSpecifier, config::user::UserCacheConfig,
     loader::UserConfigLoader,
 };
 use vite_task_plan::{
@@ -26,7 +27,7 @@ use vite_task_plan::{
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
-use crate::cli::{CacheSubcommand, Command, RunCommand};
+use crate::cli::{CacheSubcommand, Command, RunCommand, RunFlags};
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
@@ -228,6 +229,13 @@ impl<'a> Session<'a> {
             Command::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             Command::Run(run_command) => {
                 let cwd = Arc::clone(&self.cwd);
+                let is_interactive =
+                    std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
+                // Copy flags before consuming run_command
+                let flags = run_command.flags;
+                let additional_args = run_command.additional_args.clone();
+
                 match self.plan_from_cli(cwd, run_command).await {
                     Ok(plan) => {
                         let reporter =
@@ -238,8 +246,23 @@ impl<'a> Session<'a> {
                             .err()
                             .unwrap_or(ExitStatus::SUCCESS))
                     }
-                    Err(err) if err.is_missing_task_specifier() => self.print_task_list().await,
-                    Err(err) => Err(err.into()),
+                    Err(err) if err.is_missing_task_specifier() => {
+                        self.handle_no_task(is_interactive, None, flags, additional_args).await
+                    }
+                    Err(err) => {
+                        if let Some(task_name) = err.task_not_found_name() {
+                            let task_name = task_name.to_owned();
+                            self.handle_no_task(
+                                is_interactive,
+                                Some(&task_name),
+                                flags,
+                                additional_args,
+                            )
+                            .await
+                        } else {
+                            Err(err.into())
+                        }
+                    }
                 }
             }
         }
@@ -256,13 +279,25 @@ impl<'a> Session<'a> {
         }
     }
 
+    /// Handle the case where no task was specified or a task name was not found.
+    ///
+    /// In interactive mode, shows a fuzzy-searchable selection list.
+    /// In non-interactive mode, prints the task list or "did you mean" suggestions.
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
     )]
-    async fn print_task_list(&mut self) -> anyhow::Result<ExitStatus> {
-        use std::io::Write;
-
+    #[expect(
+        clippy::large_futures,
+        reason = "interactive select future is large but only awaited once"
+    )]
+    async fn handle_no_task(
+        &mut self,
+        is_interactive: bool,
+        not_found_name: Option<&str>,
+        flags: RunFlags,
+        additional_args: Vec<Str>,
+    ) -> anyhow::Result<ExitStatus> {
         let cwd = Arc::clone(&self.cwd);
         let task_graph = self.ensure_task_graph_loaded().await?;
         let mut entries = task_graph.list_tasks();
@@ -278,39 +313,111 @@ impl<'a> Session<'a> {
             .iter()
             .map(|e| &e.task_display.package_path)
             .filter(|p| cwd.as_path().starts_with(p.as_path()))
-            .max_by_key(|p| p.as_path().as_os_str().len());
+            .max_by_key(|p| p.as_path().as_os_str().len())
+            .cloned();
 
+        // Sort: current package tasks first, then others
         let (current, others): (Vec<_>, Vec<_>) = entries
             .iter()
-            .partition(|e| current_package_path == Some(&e.task_display.package_path));
+            .partition(|e| current_package_path.as_ref() == Some(&e.task_display.package_path));
 
+        // Build the items list: current package tasks first (unqualified name),
+        // then other packages (qualified with package#task).
+        let select_items: Vec<SelectItem> = current
+            .iter()
+            .map(|entry| SelectItem {
+                label: entry.task_display.task_name.clone(),
+                description: entry.command.clone(),
+            })
+            .chain(others.iter().map(|entry| SelectItem {
+                label: vite_str::format!("{}", entry.task_display),
+                description: entry.command.clone(),
+            }))
+            .collect();
+
+        let header = not_found_name.map(|name| vite_str::format!("Task \"{name}\" not found."));
+        let header_str = header.as_deref();
+
+        if is_interactive {
+            self.interactive_task_select(
+                &select_items,
+                not_found_name,
+                header_str,
+                flags,
+                additional_args,
+            )
+            .await
+        } else {
+            Self::non_interactive_task_list(&select_items, not_found_name, header_str)
+        }
+    }
+
+    #[expect(
+        clippy::future_not_send,
+        reason = "session is single-threaded, futures do not need to be Send"
+    )]
+    #[expect(
+        clippy::large_futures,
+        reason = "execution plan future is large but only awaited once"
+    )]
+    async fn interactive_task_select(
+        &mut self,
+        items: &[SelectItem],
+        not_found_name: Option<&str>,
+        header: Option<&str>,
+        flags: RunFlags,
+        additional_args: Vec<Str>,
+    ) -> anyhow::Result<ExitStatus> {
+        let selection =
+            vite_select::interactive_select(items, not_found_name, header, 8, |state| {
+                use std::io::Write;
+                let milestone_name =
+                    vite_str::format!("task-select:{}:{}", state.query, state.selected_index);
+                let milestone_bytes = pty_terminal_test_client::encoded_milestone(&milestone_name);
+                let mut out = std::io::stdout();
+                let _ = out.write_all(&milestone_bytes);
+                let _ = out.flush();
+            })?;
+
+        let Some(result) = selection else {
+            return Ok(ExitStatus::SUCCESS);
+        };
+
+        let selected_label = &items[result.original_index].label;
+
+        // Parse the selected label back into a TaskSpecifier and re-run
+        let task_specifier = TaskSpecifier::parse_raw(selected_label);
+
+        let run_command =
+            RunCommand { task_specifier: Some(task_specifier), flags, additional_args };
+
+        let cwd = Arc::clone(&self.cwd);
+        let plan = self.plan_from_cli(cwd, run_command).await?;
+        let reporter = LabeledReporter::new(std::io::stdout(), self.workspace_path());
+        Ok(self.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitStatus::SUCCESS))
+    }
+
+    fn non_interactive_task_list(
+        items: &[SelectItem],
+        not_found_name: Option<&str>,
+        header: Option<&str>,
+    ) -> anyhow::Result<ExitStatus> {
         let mut stdout = std::io::stdout().lock();
 
-        if !current.is_empty() {
-            let package_name = &current[0].task_display.package_name;
-            if package_name.is_empty() {
-                writeln!(stdout, "Tasks in the current package")?;
-            } else {
-                writeln!(stdout, "Tasks in the current package ({package_name})")?;
-            }
-            for entry in &current {
-                writeln!(stdout, "  {}", entry.task_display.task_name)?;
-                writeln!(stdout, "    {}", entry.command)?;
-            }
-        }
+        // For the "did you mean" case, add suffix to header
+        let did_you_mean_header = not_found_name
+            .map(|name| vite_str::format!("Task \"{name}\" not found. Did you mean:"));
+        let effective_header =
+            if not_found_name.is_some() { did_you_mean_header.as_deref() } else { header };
 
-        if !others.is_empty() {
-            if !current.is_empty() {
-                writeln!(stdout)?;
-            }
-            writeln!(stdout, "Tasks in other packages")?;
-            for entry in &others {
-                writeln!(stdout, "  {}", entry.task_display)?;
-                writeln!(stdout, "    {}", entry.command)?;
-            }
-        }
+        vite_select::print_select_list(&mut stdout, items, not_found_name, effective_header)?;
 
-        Ok(ExitStatus::SUCCESS)
+        if not_found_name.is_some() {
+            // Non-interactive typo case should exit with failure
+            Ok(ExitStatus::FAILURE)
+        } else {
+            Ok(ExitStatus::SUCCESS)
+        }
     }
 
     /// Lazily initializes and returns the execution cache.

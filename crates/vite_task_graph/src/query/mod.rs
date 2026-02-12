@@ -61,6 +61,9 @@ pub enum TaskQueryError {
         #[source]
         lookup_error: SpecifierLookupError<PackageUnknownError>,
     },
+
+    #[error("No packages have a task named '{task_name}'")]
+    RecursiveTaskNotFound { task_name: Str },
 }
 
 impl IndexedTaskGraph {
@@ -135,11 +138,24 @@ impl IndexedTaskGraph {
             }
             TaskQueryKind::Recursive { task_names } => {
                 // Add all tasks matching the names across all packages
+                let mut matched_names = FxHashSet::<&str>::with_capacity_and_hasher(
+                    task_names.len(),
+                    rustc_hash::FxBuildHasher,
+                );
                 for task_index in self.task_graph.node_indices() {
                     let current_task_name =
                         self.task_graph[task_index].task_display.task_name.as_str();
                     if task_names.contains(current_task_name) {
                         execution_graph.add_node(task_index);
+                        matched_names.insert(current_task_name);
+                    }
+                }
+                // Return an error if any requested task name was not found in any package
+                for task_name in &task_names {
+                    if !matched_names.contains(task_name.as_str()) {
+                        return Err(TaskQueryError::RecursiveTaskNotFound {
+                            task_name: task_name.clone(),
+                        });
                     }
                 }
             }

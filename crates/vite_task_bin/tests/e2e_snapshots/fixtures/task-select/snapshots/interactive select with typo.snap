@@ -2,14 +2,15 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run list-tasks
-$ vp run ⊘ cache disabled: no cache config
-  hello: echo hello from root
-  list-tasks: vp run
-  app#build: echo build app
-  app#lint: echo lint app
-  app#test: echo test app
+> vp run buid
+@ expect-milestone: task-select:buid:0
+Task "buid" not found.
+Search task (↑/↓ to move, enter to select): buid
+> build: echo build app
   lib#build: echo build lib
+@ write-key: enter
+~/packages/app$ echo build app ⊘ cache disabled: built-in command
+build app
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -21,6 +22,6 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] task-list-test#list-tasks: $ vp run ✓
-      → Cache disabled in task configuration
+  [1] app#build: ~/packages/app$ echo build app ✓
+      → Cache disabled for built-in command
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

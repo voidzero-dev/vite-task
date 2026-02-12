@@ -1,0 +1,11 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+[1]> vp run run-typo-task
+Error: Failed to plan execution, task call stack: task-select-test#run-typo-task
+
+Caused by:
+    0: Failed to query tasks from task graph
+    1: Failed to look up task from specifier: nonexistent-xyz
+    2: Task 'nonexistent-xyz' not found in package task-select-test

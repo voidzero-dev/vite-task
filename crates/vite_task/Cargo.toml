@@ -24,6 +24,7 @@ futures-util = { workspace = true }
 once_cell = { workspace = true }
 owo-colors = { workspace = true }
 petgraph = { workspace = true }
+pty_terminal_test_client = { workspace = true }
 rayon = { workspace = true }
 rusqlite = { workspace = true, features = ["bundled"] }
 rustc-hash = { workspace = true }
@@ -35,6 +36,7 @@ tracing = { workspace = true }
 twox-hash = { workspace = true }
 vite_glob = { workspace = true }
 vite_path = { workspace = true }
+vite_select = { workspace = true }
 vite_str = { workspace = true }
 vite_task_graph = { workspace = true }
 vite_task_plan = { workspace = true }

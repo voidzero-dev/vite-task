@@ -1,0 +1,85 @@
+# Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+[[e2e]]
+name = "non-interactive list tasks"
+steps = [
+  "echo '' | vp run",
+]
+
+# Non-interactive: typo triggers "did you mean"
+[[e2e]]
+name = "non-interactive did you mean"
+steps = [
+  "echo '' | vp run buid",
+]
+
+# Non-interactive: typo with -r flag
+[[e2e]]
+name = "non-interactive did you mean with recursive"
+steps = [
+  "echo '' | vp run -r buid",
+]
+
+# Interactive: navigate down and select second task
+[[e2e]]
+name = "interactive select task"
+cwd = "packages/app"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "down" }, { "expect-milestone" = "task-select::1" }, { "write-key" = "enter" }] },
+]
+
+# Interactive: typo pre-filled in search
+[[e2e]]
+name = "interactive select with typo"
+cwd = "packages/app"
+steps = [
+  { command = "vp run buid", interactions = [{ "expect-milestone" = "task-select:buid:0" }, { "write-key" = "enter" }] },
+]
+
+# Interactive: type to search then select
+[[e2e]]
+name = "interactive search then select"
+cwd = "packages/app"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "lin" }, { "expect-milestone" = "task-select:lin:0" }, { "write-key" = "enter" }] },
+]
+
+# Interactive: cancel with escape
+[[e2e]]
+name = "interactive cancel"
+cwd = "packages/app"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "escape" }] },
+]
+
+# Interactive: -r flag preserved
+[[e2e]]
+name = "interactive select with recursive"
+cwd = "packages/app"
+steps = [
+  { command = "vp run -r", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
+]
+
+# Interactive: -t flag + typo
+[[e2e]]
+name = "interactive select with typo and transitive"
+cwd = "packages/app"
+steps = [
+  { command = "vp run -t buid", interactions = [{ "expect-milestone" = "task-select:buid:0" }, { "write-key" = "enter" }] },
+]
+
+# Interactive: scroll down past visible page, then select a task beyond the initial viewport
+[[e2e]]
+name = "interactive scroll long list"
+cwd = "packages/app"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, # Navigate down to index 8 (past page_size=8, triggering scroll)
+    { "write-key" = "down" },{ "write-key" = "down" },{ "write-key" = "down" },{ "write-key" = "down" },{ "write-key" = "down" },{ "write-key" = "down" },{ "write-key" = "down" },{ "write-key" = "down" },{ "expect-milestone" = "task-select::8" }, # Scroll back up to the top
+    { "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "expect-milestone" = "task-select::0" },{ "write-key" = "enter" },] },
+]
+
+# Typo inside a task script should fail with an error, NOT show a list
+[[e2e]]
+name = "typo in task script fails without list"
+steps = [
+  "vp run run-typo-task",
+]

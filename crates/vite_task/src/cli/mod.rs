@@ -12,12 +12,12 @@ pub enum CacheSubcommand {
     Clean,
 }
 
-/// Arguments for the `run` subcommand.
-#[derive(Debug, clap::Args)]
-pub struct RunCommand {
-    /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
-    pub task_specifier: Option<TaskSpecifier>,
-
+/// Flags that control how a `run` command selects tasks.
+///
+/// Extracted as a separate struct so they can be cheaply `Copy`-ed
+/// before `RunCommand` is consumed.
+#[derive(Debug, Clone, Copy, clap::Args)]
+pub struct RunFlags {
     /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
     #[clap(default_value = "false", short, long)]
     pub recursive: bool,
@@ -29,6 +29,16 @@ pub struct RunCommand {
     /// Do not run dependencies specified in `dependsOn` fields.
     #[clap(default_value = "false", long)]
     pub ignore_depends_on: bool,
+}
+
+/// Arguments for the `run` subcommand.
+#[derive(Debug, clap::Args)]
+pub struct RunCommand {
+    /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
+    pub task_specifier: Option<TaskSpecifier>,
+
+    #[clap(flatten)]
+    pub flags: RunFlags,
 
     /// Additional arguments to pass to the tasks
     #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -70,8 +80,11 @@ impl RunCommand {
         self,
         cwd: &Arc<AbsolutePath>,
     ) -> Result<PlanRequest, CLITaskQueryError> {
-        let Self { task_specifier, recursive, transitive, ignore_depends_on, additional_args } =
-            self;
+        let Self {
+            task_specifier,
+            flags: RunFlags { recursive, transitive, ignore_depends_on },
+            additional_args,
+        } = self;
 
         let task_specifier = task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
 

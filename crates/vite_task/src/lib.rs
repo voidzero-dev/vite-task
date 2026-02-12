@@ -4,7 +4,7 @@ mod maybe_str;
 pub mod session;
 
 // Public exports for vite_task_bin
-pub use cli::{CacheSubcommand, Command, RunCommand};
+pub use cli::{CacheSubcommand, Command, RunCommand, RunFlags};
 pub use session::{CommandHandler, ExitStatus, HandledCommand, Session, SessionCallbacks};
 pub use vite_task_graph::{
     config::{
