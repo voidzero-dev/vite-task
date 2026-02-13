@@ -345,10 +345,10 @@ impl<'a> Session<'a> {
         });
 
         // Build mode-dependent params and call select_list once
-        let mut selected_index = 0usize;
+        let mut selected_index = if is_interactive { Some(0) } else { None };
         let mut stdout = std::io::stdout();
-        let mode = if is_interactive {
-            vite_select::Mode::Interactive { selected_index: &mut selected_index }
+        let mode = if let Some(selected_index) = selected_index.as_mut() {
+            vite_select::Mode::Interactive { selected_index }
         } else {
             vite_select::Mode::NonInteractive
         };
@@ -371,13 +371,14 @@ impl<'a> Session<'a> {
             },
         )?;
 
-        if !is_interactive {
+        let Some(selected_index) = selected_index else {
+            // Non-interactive: if no task was found, return failure. Otherwise, print the list and return
             return if not_found_name.is_some() {
                 Ok(ExitStatus::FAILURE)
             } else {
                 Ok(ExitStatus::SUCCESS)
             };
-        }
+        };
 
         // Interactive: run the selected task
         let selected_label = &select_items[selected_index].label;
