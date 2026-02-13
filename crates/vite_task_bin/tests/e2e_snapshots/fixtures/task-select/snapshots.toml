@@ -43,12 +43,12 @@ steps = [
   { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "lin" }, { "expect-milestone" = "task-select:lin:0" }, { "write-key" = "enter" }] },
 ]
 
-# Interactive: cancel with escape
+# Interactive: escape clears query and resets filter
 [[e2e]]
-name = "interactive cancel"
+name = "interactive escape clears query"
 cwd = "packages/app"
 steps = [
-  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "escape" }] },
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "lin" }, { "expect-milestone" = "task-select:lin:0" }, { "write-key" = "escape" }, { "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
 ]
 
 # Interactive: -r flag preserved

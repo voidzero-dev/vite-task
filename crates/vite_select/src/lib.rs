@@ -4,6 +4,7 @@ mod interactive;
 use std::io::Write;
 
 pub use fuzzy::fuzzy_match;
+use interactive::{RenderParams, render_items};
 use vite_str::Str;
 
 /// An item in the selection list.
@@ -14,6 +15,17 @@ pub struct SelectItem {
     pub description: Str,
 }
 
+/// Selection mode.
+pub enum Mode<'a> {
+    /// Interactive terminal UI with fuzzy search, keyboard navigation, and selection.
+    ///
+    /// On Enter, `*selected_index` is set to the index of the chosen item
+    /// in the original `items` slice.
+    Interactive { selected_index: &'a mut usize },
+    /// Non-interactive: renders the list once and returns.
+    NonInteractive,
+}
+
 /// Snapshot of the selector's visible state, passed to `after_render`.
 pub struct RenderState<'a> {
     /// Current search text (empty if no filter typed yet).
@@ -22,66 +34,61 @@ pub struct RenderState<'a> {
     pub selected_index: usize,
 }
 
-/// Result returned when the user confirms a selection.
-pub struct SelectResult {
-    /// Index into the *original* `items` slice.
-    pub original_index: usize,
-}
-
-/// Show an interactive fuzzy-searchable select list.
+/// Show a task selection list.
 ///
-/// `after_render` is called after every render with the current visible state
-/// (useful for emitting test milestones).
+/// In [`Mode::Interactive`], enters a terminal UI with fuzzy search and
+/// keyboard navigation. `after_render` is called after every render with the
+/// current visible state (useful for emitting test milestones). On Enter,
+/// `*selected_index` is set to the chosen item's index in the original
+/// `items` slice.
 ///
-/// Returns `Ok(None)` if the user cancels (Esc / Ctrl-C).
+/// In [`Mode::NonInteractive`], renders the list once to `writer` and
+/// returns. `page_size` and `after_render` are ignored.
 ///
 /// # Errors
 ///
 /// Returns an error if terminal I/O fails.
-pub fn interactive_select(
+pub fn select_list(
+    writer: &mut impl Write,
     items: &[SelectItem],
-    initial_query: Option<&str>,
+    query: Option<&str>,
+    mode: Mode<'_>,
     header: Option<&str>,
     page_size: usize,
     after_render: impl FnMut(&RenderState<'_>),
-) -> anyhow::Result<Option<SelectResult>> {
-    interactive::run(items, initial_query, header, page_size, after_render)
+) -> anyhow::Result<()> {
+    match mode {
+        Mode::Interactive { selected_index } => {
+            interactive::run(items, query, selected_index, header, page_size, after_render)
+        }
+        Mode::NonInteractive => non_interactive(writer, items, query, header),
+    }
 }
 
-/// Print a list of items to `writer` (non-interactive).
-///
-/// When `query` is `Some(q)`, only items matching the fuzzy filter are printed.
-/// When `query` is `None`, all items are printed.
-///
-/// `header` is printed above the list (e.g. an error message).
-///
-/// # Errors
-///
-/// Returns an error if writing fails.
-pub fn print_select_list(
+fn non_interactive(
     writer: &mut impl Write,
     items: &[SelectItem],
     query: Option<&str>,
     header: Option<&str>,
 ) -> anyhow::Result<()> {
-    if let Some(header) = header {
-        writeln!(writer, "{header}")?;
-    }
-
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
-
-    let indices: Vec<usize> =
+    let filtered: Vec<usize> =
         query.map_or_else(|| (0..items.len()).collect(), |q| fuzzy_match(q, &labels));
+    let len = filtered.len();
 
-    if indices.is_empty() {
-        writeln!(writer, "  No matching tasks found.")?;
-        return Ok(());
-    }
-
-    for &idx in &indices {
-        let item = &items[idx];
-        writeln!(writer, "  {}: {}", item.label, item.description)?;
-    }
+    render_items(
+        writer,
+        &RenderParams {
+            items,
+            filtered: &filtered,
+            selected_in_filtered: None,
+            visible_range: 0..len,
+            hidden_count: 0,
+            header,
+            query: None,
+            line_ending: "\n",
+        },
+    )?;
 
     Ok(())
 }

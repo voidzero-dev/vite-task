@@ -3,11 +3,12 @@ use std::io::{Write, stdout};
 use crossterm::{
     cursor::{self, MoveToColumn},
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor},
+    style::{Attribute, SetAttribute},
     terminal::{self, Clear, ClearType},
 };
+use owo_colors::{OwoColorize, Stream};
 
-use crate::{RenderState, SelectItem, SelectResult, fuzzy::fuzzy_match};
+use crate::{RenderState, SelectItem, fuzzy::fuzzy_match};
 
 struct RawModeGuard;
 
@@ -97,6 +98,105 @@ impl<'a> State<'a> {
     }
 }
 
+/// Parameters for rendering a task list.
+pub struct RenderParams<'a> {
+    pub items: &'a [SelectItem],
+    pub filtered: &'a [usize],
+    /// Index into `filtered` of the highlighted item, or `None` for non-interactive.
+    pub selected_in_filtered: Option<usize>,
+    /// Which slice of `filtered` to display.
+    pub visible_range: std::ops::Range<usize>,
+    /// Number of items beyond the visible range.
+    pub hidden_count: usize,
+    pub header: Option<&'a str>,
+    /// Current search text. `Some` enables the prompt line (interactive only).
+    pub query: Option<&'a str>,
+    /// `"\r\n"` for raw mode, `"\n"` for normal.
+    pub line_ending: &'a str,
+}
+
+/// Render the item list. Shared rendering logic used by both interactive
+/// and non-interactive modes (via [`crate::non_interactive`]).
+///
+/// Returns the number of lines written.
+pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyhow::Result<usize> {
+    let RenderParams {
+        items,
+        filtered,
+        selected_in_filtered,
+        visible_range,
+        hidden_count,
+        header,
+        query,
+        line_ending,
+    } = params;
+
+    let mut lines = 0usize;
+
+    // Header (e.g. error message)
+    if let Some(header) = header {
+        write!(writer, "{header}{line_ending}")?;
+        lines += 1;
+    }
+
+    // Prompt line (interactive only)
+    if let Some(q) = query {
+        let bold = SetAttribute(Attribute::Bold);
+        let reset = SetAttribute(Attribute::Reset);
+        // Print ": " separator before query only when query is non-empty,
+        // to avoid a trailing space that Windows ConPTY would strip.
+        if q.is_empty() {
+            write!(
+                writer,
+                "{bold}Search task{reset} (\u{2191}/\u{2193} to move, enter to select):{line_ending}",
+            )?;
+        } else {
+            write!(
+                writer,
+                "{bold}Search task{reset} (\u{2191}/\u{2193} to move, enter to select): {q}{line_ending}",
+            )?;
+        }
+        lines += 1;
+    }
+
+    // Items
+    for vi in visible_range.clone() {
+        let item_idx = filtered[vi];
+        let item = &items[item_idx];
+        let is_selected = *selected_in_filtered == Some(vi);
+        let desc_str = item.description.as_str();
+        let desc = desc_str.if_supports_color(Stream::Stdout, |s| s.cyan());
+
+        if is_selected {
+            write!(
+                writer,
+                "{bold}> {label}: {desc}{reset}{line_ending}",
+                bold = SetAttribute(Attribute::Bold),
+                label = item.label,
+                reset = SetAttribute(Attribute::Reset),
+            )?;
+        } else {
+            write!(writer, "  {}: {desc}{line_ending}", item.label)?;
+        }
+        lines += 1;
+    }
+
+    // Footer: hidden items count
+    if *hidden_count > 0 {
+        write!(writer, "  (\u{2026}{hidden_count} more){line_ending}")?;
+        lines += 1;
+    }
+
+    // Empty state
+    if filtered.is_empty() {
+        write!(writer, "  No matching tasks.{line_ending}")?;
+        lines += 1;
+    }
+
+    writer.flush()?;
+    Ok(lines)
+}
+
 fn render(
     stdout: &mut impl Write,
     state: &mut State<'_>,
@@ -114,108 +214,32 @@ fn render(
         )?;
     }
 
-    let mut lines = 0u16;
+    let lines = render_items(
+        stdout,
+        &RenderParams {
+            items: state.items,
+            filtered: &state.filtered,
+            selected_in_filtered: Some(state.selected),
+            visible_range: state.visible_range(),
+            hidden_count: state.hidden_count(),
+            header,
+            query: Some(&state.query),
+            line_ending: "\r\n",
+        },
+    )?;
 
-    // Header (error message)
-    if let Some(header) = header {
-        crossterm::execute!(stdout, Print(header), Print("\r\n"))?;
-        lines += 1;
-    }
-
-    // Prompt line
-    // Print ": " separator before query only when query is non-empty,
-    // to avoid a trailing space that Windows ConPTY would strip.
-    if state.query.is_empty() {
-        crossterm::execute!(
-            stdout,
-            SetAttribute(Attribute::Bold),
-            Print("Search task"),
-            SetAttribute(Attribute::Reset),
-            Print(" ("),
-            Print("\u{2191}/\u{2193} to move, enter to select"),
-            Print("):"),
-            Print("\r\n"),
-        )?;
-    } else {
-        crossterm::execute!(
-            stdout,
-            SetAttribute(Attribute::Bold),
-            Print("Search task"),
-            SetAttribute(Attribute::Reset),
-            Print(" ("),
-            Print("\u{2191}/\u{2193} to move, enter to select"),
-            Print("): "),
-            Print(&state.query),
-            Print("\r\n"),
-        )?;
-    }
-    lines += 1;
-
-    // Items
-    let visible = state.visible_range();
-
-    for vi in visible {
-        let item_idx = state.filtered[vi];
-        let item = &state.items[item_idx];
-        let is_selected = vi == state.selected;
-
-        if is_selected {
-            crossterm::execute!(
-                stdout,
-                SetAttribute(Attribute::Bold),
-                Print("> "),
-                Print(item.label.as_str()),
-                Print(": "),
-                SetForegroundColor(Color::Cyan),
-                Print(item.description.as_str()),
-                ResetColor,
-                SetAttribute(Attribute::Reset),
-                Print("\r\n"),
-            )?;
-        } else {
-            crossterm::execute!(
-                stdout,
-                Print("  "),
-                Print(item.label.as_str()),
-                Print(": "),
-                SetForegroundColor(Color::Cyan),
-                Print(item.description.as_str()),
-                ResetColor,
-                Print("\r\n"),
-            )?;
-        }
-        lines += 1;
-    }
-
-    // Footer: hidden items count
-    let hidden = state.hidden_count();
-    if hidden > 0 {
-        crossterm::execute!(
-            stdout,
-            Print(vite_str::format!("  (\u{2026}{hidden} more)")),
-            Print("\r\n"),
-        )?;
-        lines += 1;
-    }
-
-    // Empty state
-    if state.filtered.is_empty() {
-        crossterm::execute!(stdout, Print("  No matching tasks.\r\n"))?;
-        lines += 1;
-    }
-
-    stdout.flush()?;
-    state.rendered_lines = lines as usize;
+    state.rendered_lines = lines;
     Ok(())
 }
 
 pub fn run(
     items: &[SelectItem],
     initial_query: Option<&str>,
+    selected_index: &mut usize,
     header: Option<&str>,
     page_size: usize,
     mut after_render: impl FnMut(&RenderState<'_>),
-) -> anyhow::Result<Option<SelectResult>> {
+) -> anyhow::Result<()> {
     if items.is_empty() {
         anyhow::bail!("No tasks available");
     }
@@ -236,19 +260,20 @@ pub fn run(
         match ev {
             Event::Key(KeyEvent { code, modifiers, kind: KeyEventKind::Press, .. }) => match code {
                 KeyCode::Esc => {
-                    cleanup(&mut out, &state)?;
-                    return Ok(None);
+                    // Clear the search query and reset the filter
+                    state.query.clear();
+                    state.refilter();
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                     cleanup(&mut out, &state)?;
-                    return Ok(None);
+                    std::process::exit(130);
                 }
                 KeyCode::Enter => {
-                    let result = state
-                        .selected_original_index()
-                        .map(|idx| SelectResult { original_index: idx });
+                    if let Some(idx) = state.selected_original_index() {
+                        *selected_index = idx;
+                    }
                     cleanup(&mut out, &state)?;
-                    return Ok(result);
+                    return Ok(());
                 }
                 KeyCode::Up => {
                     state.move_up();

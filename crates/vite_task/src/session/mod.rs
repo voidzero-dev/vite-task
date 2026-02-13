@@ -368,8 +368,15 @@ impl<'a> Session<'a> {
         flags: RunFlags,
         additional_args: Vec<Str>,
     ) -> anyhow::Result<ExitStatus> {
-        let selection =
-            vite_select::interactive_select(items, not_found_name, header, 8, |state| {
+        let mut selected_index = 0usize;
+        vite_select::select_list(
+            &mut std::io::stdout(),
+            items,
+            not_found_name,
+            vite_select::Mode::Interactive { selected_index: &mut selected_index },
+            header,
+            8,
+            |state| {
                 use std::io::Write;
                 let milestone_name =
                     vite_str::format!("task-select:{}:{}", state.query, state.selected_index);
@@ -377,13 +384,10 @@ impl<'a> Session<'a> {
                 let mut out = std::io::stdout();
                 let _ = out.write_all(&milestone_bytes);
                 let _ = out.flush();
-            })?;
+            },
+        )?;
 
-        let Some(result) = selection else {
-            return Ok(ExitStatus::SUCCESS);
-        };
-
-        let selected_label = &items[result.original_index].label;
+        let selected_label = &items[selected_index].label;
 
         // Parse the selected label back into a TaskSpecifier and re-run
         let task_specifier = TaskSpecifier::parse_raw(selected_label);
@@ -410,7 +414,15 @@ impl<'a> Session<'a> {
         let effective_header =
             if not_found_name.is_some() { did_you_mean_header.as_deref() } else { header };
 
-        vite_select::print_select_list(&mut stdout, items, not_found_name, effective_header)?;
+        vite_select::select_list(
+            &mut stdout,
+            items,
+            not_found_name,
+            vite_select::Mode::NonInteractive,
+            effective_header,
+            0,
+            |_| {},
+        )?;
 
         if not_found_name.is_some() {
             // Non-interactive typo case should exit with failure
