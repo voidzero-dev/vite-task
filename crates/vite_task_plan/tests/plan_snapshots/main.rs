@@ -11,6 +11,7 @@ use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use vite_task::{Command, Session};
+use vite_task_plan::ExecutionPlan;
 use vite_workspace::find_workspace_root;
 
 /// Local parser wrapper for `BuiltInCommand`
@@ -183,7 +184,7 @@ fn run_case_inner(
                 session.plan_from_cli(workspace_root.path.join(plan.cwd).into(), run_command).await;
 
             let plan = match plan_result {
-                Ok(plan) => plan,
+                Ok(graph) => ExecutionPlan::from_execution_graph(graph),
                 Err(err) => {
                     #[expect(
                         clippy::disallowed_macros,

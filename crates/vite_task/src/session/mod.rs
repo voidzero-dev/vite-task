@@ -21,7 +21,7 @@ use vite_task_graph::{
     loader::UserConfigLoader,
 };
 use vite_task_plan::{
-    ExecutionPlan, TaskGraphLoader,
+    ExecutionGraph, ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind,
     plan_request::{PlanRequest, ScriptCommand, SyntheticPlanRequest},
     prepend_path_env,
 };
@@ -102,15 +102,17 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
                 Command::Cache { .. } => Ok(Some(PlanRequest::Synthetic(
                     command.to_synthetic_plan_request(UserCacheConfig::disabled()),
                 ))),
-                Command::Run(run_command) => match run_command.into_plan_request(&command.cwd) {
-                    Ok(plan_request) => Ok(Some(plan_request)),
-                    Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
-                        Ok(Some(PlanRequest::Synthetic(
-                            command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                        )))
+                Command::Run(run_command) => {
+                    match run_command.into_query_plan_request(&command.cwd) {
+                        Ok(query_plan_request) => Ok(Some(PlanRequest::Query(query_plan_request))),
+                        Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
+                            Ok(Some(PlanRequest::Synthetic(
+                                command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                            )))
+                        }
+                        Err(err) => Err(err.into()),
                     }
-                    Err(err) => Err(err.into()),
-                },
+                }
             },
             HandledCommand::Verbatim => Ok(None),
         }
@@ -238,7 +240,7 @@ impl<'a> Session<'a> {
                 let additional_args = run_command.additional_args.clone();
 
                 match self.plan_from_cli(cwd, run_command).await {
-                    Ok(plan) if plan.is_empty() => {
+                    Ok(ref graph) if graph.node_count() == 0 => {
                         // No tasks matched the query — show task selector / "did you mean"
                         self.handle_no_task(
                             is_interactive,
@@ -248,7 +250,8 @@ impl<'a> Session<'a> {
                         )
                         .await
                     }
-                    Ok(plan) => {
+                    Ok(graph) => {
+                        let plan = ExecutionPlan::from_execution_graph(graph);
                         let reporter =
                             LabeledReporter::new(std::io::stdout(), self.workspace_path());
                         Ok(self
@@ -398,7 +401,8 @@ impl<'a> Session<'a> {
             RunCommand { task_specifier: Some(task_specifier), flags, additional_args };
 
         let cwd = Arc::clone(&self.cwd);
-        let plan = self.plan_from_cli(cwd, run_command).await?;
+        let graph = self.plan_from_cli(cwd, run_command).await?;
+        let plan = ExecutionPlan::from_execution_graph(graph);
         let reporter = LabeledReporter::new(std::io::stdout(), self.workspace_path());
         Ok(self.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitStatus::SUCCESS))
     }
@@ -480,9 +484,9 @@ impl<'a> Session<'a> {
         &mut self,
         cwd: Arc<AbsolutePath>,
         command: RunCommand,
-    ) -> Result<ExecutionPlan, vite_task_plan::Error> {
-        let plan_request = match command.into_plan_request(&cwd) {
-            Ok(plan_request) => plan_request,
+    ) -> Result<ExecutionGraph, vite_task_plan::Error> {
+        let query_plan_request = match command.into_query_plan_request(&cwd) {
+            Ok(query_plan_request) => query_plan_request,
             Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
                 return Err(vite_task_plan::Error::MissingTaskSpecifier);
             }
@@ -495,15 +499,14 @@ impl<'a> Session<'a> {
                 });
             }
         };
-        let plan = ExecutionPlan::plan(
-            plan_request,
+        ExecutionPlan::plan_query(
+            query_plan_request,
             &self.workspace_path,
             &cwd,
             &self.envs,
             &mut self.plan_request_parser,
             &mut self.lazy_task_graph,
         )
-        .await?;
-        Ok(plan)
+        .await
     }
 }

@@ -4,7 +4,7 @@ use clap::Parser;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskSpecifier, query::TaskQueryKind};
-use vite_task_plan::plan_request::{PlanOptions, PlanRequest, QueryPlanRequest};
+use vite_task_plan::plan_request::{PlanOptions, QueryPlanRequest};
 
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum CacheSubcommand {
@@ -70,16 +70,16 @@ pub enum CLITaskQueryError {
 }
 
 impl RunCommand {
-    /// Convert to `PlanRequest`, or return an error if invalid.
+    /// Convert to `QueryPlanRequest`, or return an error if invalid.
     ///
     /// # Errors
     ///
     /// Returns an error if `--recursive` and `--transitive` are both set,
     /// or if a package name is specified with `--recursive`.
-    pub fn into_plan_request(
+    pub fn into_query_plan_request(
         self,
         cwd: &Arc<AbsolutePath>,
-    ) -> Result<PlanRequest, CLITaskQueryError> {
+    ) -> Result<QueryPlanRequest, CLITaskQueryError> {
         let Self {
             task_specifier,
             flags: RunFlags { recursive, transitive, ignore_depends_on },
@@ -110,9 +110,9 @@ impl RunCommand {
                 include_topological_deps: transitive,
             }
         };
-        Ok(PlanRequest::Query(QueryPlanRequest {
+        Ok(QueryPlanRequest {
             query: vite_task_graph::query::TaskQuery { kind: query_kind, include_explicit_deps },
             plan_options: PlanOptions { extra_args: additional_args.into() },
-        }))
+        })
     }
 }

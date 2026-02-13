@@ -11,12 +11,13 @@ pub mod plan_request;
 use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 
 use context::PlanContext;
-pub use error::Error;
-use execution_graph::ExecutionGraph;
+use error::TaskPlanErrorKindResultExt;
+pub use error::{Error, TaskPlanErrorKind};
+pub use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
 pub use path_env::{get_path_env, prepend_path_env};
 use plan::{ParentCacheConfig, plan_query_request, plan_synthetic_request};
-use plan_request::{PlanRequest, SyntheticPlanRequest};
+use plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest};
 use rustc_hash::FxHashMap;
 use serde::{Serialize, ser::SerializeMap as _};
 use vite_graph_ser::serialize_by_key;
@@ -200,6 +201,41 @@ impl ExecutionPlan {
         }
     }
 
+    /// Create an execution plan from an execution graph.
+    #[must_use]
+    pub const fn from_execution_graph(execution_graph: ExecutionGraph) -> Self {
+        Self { root_node: ExecutionItemKind::Expanded(execution_graph) }
+    }
+
+    /// Plan a query execution: load the task graph, query it, and build the execution graph.
+    ///
+    /// # Errors
+    /// Returns an error if task graph loading, query, or execution planning fails.
+    #[expect(clippy::future_not_send, reason = "PlanRequestParser and TaskGraphLoader are !Send")]
+    pub async fn plan_query(
+        query_plan_request: QueryPlanRequest,
+        workspace_path: &Arc<AbsolutePath>,
+        cwd: &Arc<AbsolutePath>,
+        envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+        plan_request_parser: &mut (dyn PlanRequestParser + '_),
+        task_graph_loader: &mut (dyn TaskGraphLoader + '_),
+    ) -> Result<ExecutionGraph, Error> {
+        let indexed_task_graph = task_graph_loader
+            .load_task_graph()
+            .await
+            .map_err(TaskPlanErrorKind::TaskGraphLoadError)
+            .with_empty_call_stack()?;
+
+        let context = PlanContext::new(
+            workspace_path,
+            Arc::clone(cwd),
+            envs.clone(),
+            plan_request_parser,
+            indexed_task_graph,
+        );
+        plan_query_request(query_plan_request, context).await
+    }
+
     /// Plan an execution from a plan request.
     ///
     /// # Errors
@@ -215,16 +251,15 @@ impl ExecutionPlan {
     ) -> Result<Self, Error> {
         let root_node = match plan_request {
             PlanRequest::Query(query_plan_request) => {
-                let indexed_task_graph = task_graph_loader.load_task_graph().await?;
-
-                let context = PlanContext::new(
+                let execution_graph = Self::plan_query(
+                    query_plan_request,
                     workspace_path,
-                    Arc::clone(cwd),
-                    envs.clone(),
+                    cwd,
+                    envs,
                     plan_request_parser,
-                    indexed_task_graph,
-                );
-                let execution_graph = plan_query_request(query_plan_request, context).await?;
+                    task_graph_loader,
+                )
+                .await?;
                 ExecutionItemKind::Expanded(execution_graph)
             }
             PlanRequest::Synthetic(synthetic_plan_request) => {
