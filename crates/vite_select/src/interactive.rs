@@ -113,6 +113,10 @@ pub struct RenderParams<'a> {
     pub query: Option<&'a str>,
     /// `"\r\n"` for raw mode, `"\n"` for normal.
     pub line_ending: &'a str,
+    /// Maximum visible width per line. Descriptions are truncated to prevent
+    /// line wrapping, which would break cursor-based clearing in interactive mode.
+    /// Use `usize::MAX` to disable truncation (non-interactive / piped output).
+    pub max_line_width: usize,
 }
 
 /// Render the item list. Shared rendering logic used by both interactive
@@ -129,6 +133,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         header,
         query,
         line_ending,
+        max_line_width: _,
     } = params;
 
     let mut lines = 0usize;
@@ -164,8 +169,24 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         let item_idx = filtered[vi];
         let item = &items[item_idx];
         let is_selected = *selected_in_filtered == Some(vi);
+
+        // Truncate description to prevent line wrapping.
+        // Line layout: prefix (2: "> " or "  ") + label + ": " (2) + description
+        let prefix_and_label_width = 2 + item.label.chars().count() + 2;
+        let max_desc_chars = params.max_line_width.saturating_sub(prefix_and_label_width);
         let desc_str = item.description.as_str();
-        let desc = desc_str.if_supports_color(Stream::Stdout, |s| s.cyan());
+        let desc_char_count = desc_str.chars().count();
+        let truncated;
+        let display_desc = if desc_char_count > max_desc_chars {
+            let take = max_desc_chars.saturating_sub(1); // room for "…"
+            #[expect(clippy::disallowed_types, reason = "intermediate collect for char truncation")]
+            let prefix: std::string::String = desc_str.chars().take(take).collect();
+            truncated = vite_str::format!("{prefix}\u{2026}");
+            truncated.as_str()
+        } else {
+            desc_str
+        };
+        let desc = display_desc.if_supports_color(Stream::Stdout, |s| s.cyan());
 
         if is_selected {
             write!(
@@ -214,6 +235,9 @@ fn render(
         )?;
     }
 
+    // Query terminal width on each render to handle resize
+    let max_line_width = terminal::size().map_or(80, |(w, _)| w as usize);
+
     let lines = render_items(
         stdout,
         &RenderParams {
@@ -225,6 +249,7 @@ fn render(
             header,
             query: Some(&state.query),
             line_ending: "\r\n",
+            max_line_width,
         },
     )?;
 
@@ -319,4 +344,122 @@ fn cleanup(stdout: &mut impl Write, state: &State<'_>) -> anyhow::Result<()> {
     crossterm::execute!(stdout, cursor::Show)?;
     stdout.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_items(items: &[(&str, &str)]) -> Vec<SelectItem> {
+        items
+            .iter()
+            .map(|(label, desc)| SelectItem { label: (*label).into(), description: (*desc).into() })
+            .collect()
+    }
+
+    /// Strip ANSI escape sequences from output for easier assertions.
+    #[expect(clippy::disallowed_types, reason = "test helper building arbitrary output string")]
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                // Skip until we hit a letter (end of escape sequence)
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
+
+    #[expect(clippy::disallowed_types, reason = "test helper building arbitrary output string")]
+    fn render_to_string(items: &[SelectItem], max_line_width: usize) -> String {
+        let filtered: Vec<usize> = (0..items.len()).collect();
+        let len = filtered.len();
+        let mut buf = Vec::new();
+        render_items(
+            &mut buf,
+            &RenderParams {
+                items,
+                filtered: &filtered,
+                selected_in_filtered: Some(0),
+                visible_range: 0..len,
+                hidden_count: 0,
+                header: None,
+                query: None,
+                line_ending: "\n",
+                max_line_width,
+            },
+        )
+        .unwrap();
+        strip_ansi(&String::from_utf8(buf).unwrap())
+    }
+
+    #[test]
+    fn truncates_long_description() {
+        let items = make_items(&[("build", "a]really long command that exceeds the width limit")]);
+        //                        "  build: a really long..." = 2 + 5 + 2 + desc
+        // max_line_width = 30 => max_desc = 30 - 9 = 21 chars
+        let output = render_to_string(&items, 30);
+        let line = output.lines().next().unwrap();
+        // "> " (2) + "build" (5) + ": " (2) + desc (21) = 30
+        assert!(
+            line.chars().count() <= 30,
+            "line should be at most 30 chars, got {}: {line:?}",
+            line.chars().count()
+        );
+        assert!(line.contains('\u{2026}'), "truncated line should contain ellipsis: {line:?}");
+    }
+
+    #[test]
+    fn does_not_truncate_short_description() {
+        let items = make_items(&[("build", "echo ok")]);
+        let output = render_to_string(&items, 80);
+        let line = output.lines().next().unwrap();
+        assert!(!line.contains('\u{2026}'), "short line should not be truncated: {line:?}");
+        assert!(line.contains("echo ok"), "full description should appear: {line:?}");
+    }
+
+    #[test]
+    fn max_line_width_max_disables_truncation() {
+        let long_desc = "x".repeat(500);
+        let items = make_items(&[("build", &long_desc)]);
+        let output = render_to_string(&items, usize::MAX);
+        let line = output.lines().next().unwrap();
+        assert!(!line.contains('\u{2026}'), "usize::MAX should disable truncation: {line:?}");
+        assert!(line.contains(&long_desc), "full 500-char description should appear");
+    }
+
+    #[test]
+    fn each_line_fits_within_max_width() {
+        let items = make_items(&[
+            ("build", "tsc -p tsconfig.build.json && echo done"),
+            ("lint", "oxlint --fix"),
+            ("test", "vitest run --reporter=verbose --coverage"),
+        ]);
+        let max_width = 40;
+        let output = render_to_string(&items, max_width);
+        for line in output.lines() {
+            assert!(
+                line.chars().count() <= max_width,
+                "line exceeds max width {max_width}: ({}) {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn truncation_preserves_label() {
+        let items = make_items(&[("my-task", "very long description here")]);
+        // "  my-task: very..." => prefix(2) + label(7) + sep(2) + desc
+        // max_line_width = 20 => max_desc = 20 - 11 = 9 chars
+        let output = render_to_string(&items, 20);
+        let line = output.lines().next().unwrap();
+        assert!(line.contains("my-task"), "label should always be preserved: {line:?}");
+    }
 }

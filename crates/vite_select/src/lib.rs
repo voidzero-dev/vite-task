@@ -106,6 +106,7 @@ fn non_interactive(
             header,
             query: None,
             line_ending: "\n",
+            max_line_width: usize::MAX,
         },
     )?;
 

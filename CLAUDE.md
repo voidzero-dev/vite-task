@@ -48,8 +48,8 @@ Test fixtures and snapshots:
    - If a feature can't work on a platform, it shouldn't be added
 
 2. **Windows Cross-Testing from macOS**:
+   `cargo xtest` cross-compiles the test binary and runs it on a real remote Windows environment (not emulation). The filesystem is bridged so the test can access local fixture files.
    ```bash
-   # Test on Windows (aarch64) from macOS via cross-compilation
    cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p <package> --test <test>
 
    # Examples:
