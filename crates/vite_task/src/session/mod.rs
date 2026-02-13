@@ -335,46 +335,30 @@ impl<'a> Session<'a> {
             }))
             .collect();
 
-        let header = not_found_name.map(|name| vite_str::format!("Task \"{name}\" not found."));
-        let header_str = header.as_deref();
+        // Build header: interactive says "not found.", non-interactive "did you mean:" suffix
+        let header = not_found_name.map(|name| {
+            if is_interactive {
+                vite_str::format!("Task \"{name}\" not found.")
+            } else {
+                vite_str::format!("Task \"{name}\" not found. Did you mean:")
+            }
+        });
 
-        if is_interactive {
-            self.interactive_task_select(
-                &select_items,
-                not_found_name,
-                header_str,
-                flags,
-                additional_args,
-            )
-            .await
-        } else {
-            Self::non_interactive_task_list(&select_items, not_found_name, header_str)
-        }
-    }
-
-    #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
-    #[expect(
-        clippy::large_futures,
-        reason = "execution plan future is large but only awaited once"
-    )]
-    async fn interactive_task_select(
-        &mut self,
-        items: &[SelectItem],
-        not_found_name: Option<&str>,
-        header: Option<&str>,
-        flags: RunFlags,
-        additional_args: Vec<Str>,
-    ) -> anyhow::Result<ExitStatus> {
+        // Build mode-dependent params and call select_list once
         let mut selected_index = 0usize;
+        let mut stdout = std::io::stdout();
+        let mode = if is_interactive {
+            vite_select::Mode::Interactive { selected_index: &mut selected_index }
+        } else {
+            vite_select::Mode::NonInteractive
+        };
+
         vite_select::select_list(
-            &mut std::io::stdout(),
-            items,
+            &mut stdout,
+            &select_items,
             not_found_name,
-            vite_select::Mode::Interactive { selected_index: &mut selected_index },
-            header,
+            mode,
+            header.as_deref(),
             8,
             |state| {
                 use std::io::Write;
@@ -387,11 +371,17 @@ impl<'a> Session<'a> {
             },
         )?;
 
-        let selected_label = &items[selected_index].label;
+        if !is_interactive {
+            return if not_found_name.is_some() {
+                Ok(ExitStatus::FAILURE)
+            } else {
+                Ok(ExitStatus::SUCCESS)
+            };
+        }
 
-        // Parse the selected label back into a TaskSpecifier and re-run
+        // Interactive: run the selected task
+        let selected_label = &select_items[selected_index].label;
         let task_specifier = TaskSpecifier::parse_raw(selected_label);
-
         let run_command =
             RunCommand { task_specifier: Some(task_specifier), flags, additional_args };
 
@@ -399,37 +389,6 @@ impl<'a> Session<'a> {
         let plan = self.plan_from_cli(cwd, run_command).await?;
         let reporter = LabeledReporter::new(std::io::stdout(), self.workspace_path());
         Ok(self.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitStatus::SUCCESS))
-    }
-
-    fn non_interactive_task_list(
-        items: &[SelectItem],
-        not_found_name: Option<&str>,
-        header: Option<&str>,
-    ) -> anyhow::Result<ExitStatus> {
-        let mut stdout = std::io::stdout().lock();
-
-        // For the "did you mean" case, add suffix to header
-        let did_you_mean_header = not_found_name
-            .map(|name| vite_str::format!("Task \"{name}\" not found. Did you mean:"));
-        let effective_header =
-            if not_found_name.is_some() { did_you_mean_header.as_deref() } else { header };
-
-        vite_select::select_list(
-            &mut stdout,
-            items,
-            not_found_name,
-            vite_select::Mode::NonInteractive,
-            effective_header,
-            0,
-            |_| {},
-        )?;
-
-        if not_found_name.is_some() {
-            // Non-interactive typo case should exit with failure
-            Ok(ExitStatus::FAILURE)
-        } else {
-            Ok(ExitStatus::SUCCESS)
-        }
     }
 
     /// Lazily initializes and returns the execution cache.
