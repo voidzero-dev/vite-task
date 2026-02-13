@@ -21,12 +21,7 @@ async fn run() -> anyhow::Result<ExitStatus> {
     let mut owned_callbacks = OwnedSessionCallbacks::default();
     let session = Session::init(owned_callbacks.as_callbacks())?;
     match args {
-        Args::Task(command) => {
-            #[expect(clippy::large_futures, reason = "session.main produces a large future")]
-            {
-                session.main(command).await
-            }
-        }
+        Args::Task(command) => session.main(command).await,
         args => {
             // If env FOO is set, run `print-env FOO` via Session::exec before proceeding.
             // In vite-plus, Session::exec is used for auto-install.

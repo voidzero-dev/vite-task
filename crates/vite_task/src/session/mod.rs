@@ -8,10 +8,9 @@ use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, sync::Arc};
 
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
-pub use event::ExecutionEvent;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
-use reporter::LabeledReporter;
+use reporter::LabeledReporterBuilder;
 use rustc_hash::FxHashMap;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_select::SelectItem;
@@ -222,10 +221,6 @@ impl<'a> Session<'a> {
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
     )]
-    #[expect(
-        clippy::large_futures,
-        reason = "execution plan future is large but only awaited once"
-    )]
     pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
         match command {
             Command::Cache { ref subcmd } => self.handle_cache_command(subcmd),
@@ -239,7 +234,7 @@ impl<'a> Session<'a> {
                 let flags = run_command.flags;
                 let additional_args = run_command.additional_args.clone();
 
-                match self.plan_from_cli(cwd, run_command).await {
+                match self.plan_from_cli_run(cwd, run_command).await {
                     Ok(ref graph) if graph.node_count() == 0 => {
                         // No tasks matched the query — show task selector / "did you mean"
                         self.handle_no_task(
@@ -251,11 +246,10 @@ impl<'a> Session<'a> {
                         .await
                     }
                     Ok(graph) => {
-                        let plan = ExecutionPlan::from_execution_graph(graph);
-                        let reporter =
-                            LabeledReporter::new(std::io::stdout(), self.workspace_path());
+                        let builder =
+                            LabeledReporterBuilder::new(std::io::stdout(), self.workspace_path());
                         Ok(self
-                            .execute(plan, Box::new(reporter))
+                            .execute_graph(graph, Box::new(builder))
                             .await
                             .err()
                             .unwrap_or(ExitStatus::SUCCESS))
@@ -300,10 +294,6 @@ impl<'a> Session<'a> {
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
-    )]
-    #[expect(
-        clippy::large_futures,
-        reason = "interactive select future is large but only awaited once"
     )]
     async fn handle_no_task(
         &mut self,
@@ -401,10 +391,9 @@ impl<'a> Session<'a> {
             RunCommand { task_specifier: Some(task_specifier), flags, additional_args };
 
         let cwd = Arc::clone(&self.cwd);
-        let graph = self.plan_from_cli(cwd, run_command).await?;
-        let plan = ExecutionPlan::from_execution_graph(graph);
-        let reporter = LabeledReporter::new(std::io::stdout(), self.workspace_path());
-        Ok(self.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitStatus::SUCCESS))
+        let graph = self.plan_from_cli_run(cwd, run_command).await?;
+        let builder = LabeledReporterBuilder::new(std::io::stdout(), self.workspace_path());
+        Ok(self.execute_graph(graph, Box::new(builder)).await.err().unwrap_or(ExitStatus::SUCCESS))
     }
 
     /// Lazily initializes and returns the execution cache.
@@ -439,8 +428,15 @@ impl<'a> Session<'a> {
 
     /// Execute a synthetic command with cache support.
     ///
-    /// This is for executing a command with cache before/without the entrypoint [`Session::main`].
-    /// In vite-plus, this is used for auto-install.
+    /// This is for executing a single command with cache before/without the entrypoint
+    /// [`Session::main`]. In vite-plus, this is used for auto-install.
+    ///
+    /// Unlike `execute_graph` which uses the full graph reporter
+    /// pipeline, this method uses a `PlainReporter` — a lightweight reporter with no
+    /// summary, no stats tracking, and no graph awareness.
+    ///
+    /// The exit status is determined from the `execute_spawn` return value, not from
+    /// the reporter.
     ///
     /// # Errors
     ///
@@ -459,16 +455,46 @@ impl<'a> Session<'a> {
         cache_key: Arc<[Str]>,
         silent_if_cache_hit: bool,
     ) -> anyhow::Result<ExitStatus> {
-        let plan = ExecutionPlan::plan_synthetic(
+        // Plan the synthetic execution — returns a SpawnExecution directly
+        // (synthetic plans are always a single spawned process)
+        let spawn_execution = ExecutionPlan::plan_synthetic(
             &self.workspace_path,
             &self.cwd,
             synthetic_plan_request,
             cache_key,
         )?;
-        let mut reporter = LabeledReporter::new(std::io::stdout(), self.workspace_path());
-        reporter.set_hide_summary(true);
-        reporter.set_silent_if_cache_hit(silent_if_cache_hit);
-        Ok(self.execute(plan, Box::new(reporter)).await.err().unwrap_or(ExitStatus::SUCCESS))
+
+        // Initialize cache (needed for cache-aware execution)
+        let cache = self.cache()?;
+
+        // Create a plain (standalone) reporter — no graph awareness, no summary
+        let plain_reporter = reporter::PlainReporter::new(std::io::stdout(), silent_if_cache_hit);
+
+        // Execute the spawn directly using the free function, bypassing the graph pipeline
+        match execute::execute_spawn(
+            Box::new(plain_reporter),
+            &spawn_execution,
+            cache,
+            &self.workspace_path,
+        )
+        .await
+        {
+            // Cache hit — no process was spawned, success
+            Ok(None) => Ok(ExitStatus::SUCCESS),
+            // Process ran successfully
+            Ok(Some(status)) if status.success() => Ok(ExitStatus::SUCCESS),
+            // Process ran but exited with non-zero status
+            Ok(Some(status)) => {
+                let code = event::exit_status_to_code(status);
+                #[expect(
+                    clippy::cast_sign_loss,
+                    reason = "value is clamped to 1..=255, always positive"
+                )]
+                Ok(ExitStatus(code.clamp(1, 255) as u8))
+            }
+            // Error — already reported through the reporter's finish()
+            Err(_) => Ok(ExitStatus::FAILURE),
+        }
     }
 
     /// Plans execution from a CLI run command.
@@ -480,7 +506,7 @@ impl<'a> Session<'a> {
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
     )]
-    pub async fn plan_from_cli(
+    pub async fn plan_from_cli_run(
         &mut self,
         cwd: Arc<AbsolutePath>,
         command: RunCommand,

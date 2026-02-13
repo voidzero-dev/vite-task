@@ -185,7 +185,6 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
             let message = match reason {
                 CacheDisabledReason::InProcessExecution => "cache disabled: built-in command",
                 CacheDisabledReason::NoCacheMetadata => "cache disabled: no cache config",
-                CacheDisabledReason::CycleDetected => "cache disabled: cycle detected",
             };
             Some(vite_str::format!("⊘ {message}"))
         }
@@ -278,7 +277,6 @@ pub fn format_cache_status_summary(cache_status: &CacheStatus) -> Str {
             let message = match reason {
                 CacheDisabledReason::InProcessExecution => "Cache disabled for built-in command",
                 CacheDisabledReason::NoCacheMetadata => "Cache disabled in task configuration",
-                CacheDisabledReason::CycleDetected => "Cache disabled: cycle detected",
             };
             vite_str::format!("→ {message}")
         }

@@ -180,8 +180,9 @@ fn run_case_inner(
                 panic!("only `run` commands supported in plan tests")
             };
 
-            let plan_result =
-                session.plan_from_cli(workspace_root.path.join(plan.cwd).into(), run_command).await;
+            let plan_result = session
+                .plan_from_cli_run(workspace_root.path.join(plan.cwd).into(), run_command)
+                .await;
 
             let plan = match plan_result {
                 Ok(graph) => ExecutionPlan::from_execution_graph(graph),

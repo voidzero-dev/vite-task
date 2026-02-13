@@ -277,7 +277,11 @@ impl ExecutionPlan {
         Ok(Self { root_node })
     }
 
-    /// Plan a synthetic task execution.
+    /// Plan a synthetic task execution, returning the resolved [`SpawnExecution`] directly.
+    ///
+    /// Unlike `plan_query` which returns a full execution graph, synthetic executions
+    /// are always a single spawned process. The caller can execute it directly using
+    /// `execute_spawn`.
     ///
     /// # Errors
     /// Returns an error if the program is not found or path fingerprinting fails.
@@ -287,16 +291,17 @@ impl ExecutionPlan {
         cwd: &Arc<AbsolutePath>,
         synthetic_plan_request: SyntheticPlanRequest,
         cache_key: Arc<[Str]>,
-    ) -> Result<Self, Error> {
+    ) -> Result<SpawnExecution, Error> {
         let execution_cache_key = cache_metadata::ExecutionCacheKey::ExecAPI(cache_key);
-        let execution = plan_synthetic_request(
+        plan_synthetic_request(
             workspace_path,
             &BTreeMap::default(),
             synthetic_plan_request,
             Some(execution_cache_key),
             cwd,
             ParentCacheConfig::None,
-        )?;
+        )
+        .with_empty_call_stack()?;
         Ok(Self { root_node: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution)) })
     }
 }

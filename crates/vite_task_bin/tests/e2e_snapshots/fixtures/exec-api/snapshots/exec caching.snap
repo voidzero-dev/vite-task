@@ -5,11 +5,9 @@ input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/exec-api
 ---
 > FOO=bar vp lint # cache miss
 bar
-
 Lint { args: [] }
 > FOO=bar vp lint # cache hit, silent
 Lint { args: [] }
 > FOO=baz vp lint # env changed, cache miss
 baz
-
 Lint { args: [] }

@@ -1,10 +1,5 @@
 use std::{process::ExitStatus, time::Duration};
 
-use bstr::BString;
-use vite_str::Str;
-// Re-export ExecutionItemDisplay from vite_task_plan since it's the canonical definition
-pub use vite_task_plan::ExecutionItemDisplay;
-
 use super::cache::CacheMiss;
 
 #[derive(Debug)]
@@ -17,7 +12,6 @@ pub enum OutputKind {
 pub enum CacheDisabledReason {
     InProcessExecution,
     NoCacheMetadata,
-    CycleDetected,
 }
 
 #[derive(Debug)]
@@ -34,8 +28,16 @@ pub enum CacheNotUpdatedReason {
 pub enum CacheUpdateStatus {
     /// Cache was successfully updated with new fingerprint and outputs
     Updated,
-    /// Cache was not updated (with reason)
-    NotUpdated(CacheNotUpdatedReason),
+    /// Cache was not updated (with reason).
+    /// The reason is part of the `LeafExecutionReporter` trait contract — reporters
+    /// can use it for detailed logging, even if current implementations don't.
+    NotUpdated(
+        #[expect(
+            dead_code,
+            reason = "part of LeafExecutionReporter trait contract; reporters may use for detailed logging"
+        )]
+        CacheNotUpdatedReason,
+    ),
 }
 
 #[derive(Debug)]
@@ -65,35 +67,4 @@ pub fn exit_status_to_code(status: ExitStatus) -> i32 {
         // Windows always has an exit code
         status.code().unwrap_or(1)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ExecutionId(u32);
-
-impl ExecutionId {
-    pub(crate) const fn zero() -> Self {
-        Self(0)
-    }
-
-    pub(crate) const fn next(self) -> Self {
-        Self(self.0.checked_add(1).expect("ExecutionId overflow"))
-    }
-}
-
-#[derive(Debug)]
-pub struct ExecutionEvent {
-    pub execution_id: ExecutionId,
-    pub kind: ExecutionEventKind,
-}
-
-#[derive(Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "event variants are consumed once and not stored in collections"
-)]
-pub enum ExecutionEventKind {
-    Start { display: Option<ExecutionItemDisplay>, cache_status: CacheStatus },
-    Output { kind: OutputKind, content: BString },
-    Error { message: Str },
-    Finish { status: Option<ExitStatus>, cache_update_status: CacheUpdateStatus },
 }
