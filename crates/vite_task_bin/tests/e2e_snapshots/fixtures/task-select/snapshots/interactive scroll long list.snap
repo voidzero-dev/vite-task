@@ -4,7 +4,7 @@ expression: e2e_outputs
 ---
 > vp run
 @ expect-milestone: task-select::0
-Search task (↑/↓ to move, enter to select): 
+Search task (↑/↓ to move, enter to select):
 > build: echo build app
   lint: echo lint app
   test: echo test app
@@ -23,7 +23,7 @@ Search task (↑/↓ to move, enter to select):
 @ write-key: down
 @ write-key: down
 @ expect-milestone: task-select::8
-Search task (↑/↓ to move, enter to select): 
+Search task (↑/↓ to move, enter to select):
   lint: echo lint app
   test: echo test app
   lib#build: echo build lib
@@ -42,7 +42,7 @@ Search task (↑/↓ to move, enter to select):
 @ write-key: up
 @ write-key: up
 @ expect-milestone: task-select::0
-Search task (↑/↓ to move, enter to select): 
+Search task (↑/↓ to move, enter to select):
 > build: echo build app
   lint: echo lint app
   test: echo test app

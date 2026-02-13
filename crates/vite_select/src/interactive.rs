@@ -123,17 +123,32 @@ fn render(
     }
 
     // Prompt line
-    crossterm::execute!(
-        stdout,
-        SetAttribute(Attribute::Bold),
-        Print("Search task"),
-        SetAttribute(Attribute::Reset),
-        Print(" ("),
-        Print("\u{2191}/\u{2193} to move, enter to select"),
-        Print("): "),
-        Print(&state.query),
-        Print("\r\n"),
-    )?;
+    // Print ": " separator before query only when query is non-empty,
+    // to avoid a trailing space that Windows ConPTY would strip.
+    if state.query.is_empty() {
+        crossterm::execute!(
+            stdout,
+            SetAttribute(Attribute::Bold),
+            Print("Search task"),
+            SetAttribute(Attribute::Reset),
+            Print(" ("),
+            Print("\u{2191}/\u{2193} to move, enter to select"),
+            Print("):"),
+            Print("\r\n"),
+        )?;
+    } else {
+        crossterm::execute!(
+            stdout,
+            SetAttribute(Attribute::Bold),
+            Print("Search task"),
+            SetAttribute(Attribute::Reset),
+            Print(" ("),
+            Print("\u{2191}/\u{2193} to move, enter to select"),
+            Print("): "),
+            Print(&state.query),
+            Print("\r\n"),
+        )?;
+    }
     lines += 1;
 
     // Items

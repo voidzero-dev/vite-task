@@ -1,6 +1,7 @@
 [default.extend-words]
 ratatui = "ratatui"
 PUNICODE = "PUNICODE"
+buid = "buid"
 
 [files]
 extend-exclude = [
