@@ -297,9 +297,10 @@ pub fn run(
                     std::process::exit(130);
                 }
                 KeyCode::Enter => {
-                    if let Some(idx) = state.selected_original_index() {
-                        *selected_index = idx;
-                    }
+                    let Some(idx) = state.selected_original_index() else {
+                        continue;
+                    };
+                    *selected_index = idx;
                     cleanup(&mut out, &state)?;
                     return Ok(());
                 }

@@ -117,6 +117,14 @@ steps = [
   { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "t" }, { "expect-milestone" = "task-select:t:0" }, { "write-key" = "enter" }] },
 ]
 
+# Interactive: Enter with no matching results does nothing
+[[e2e]]
+name = "interactive enter with no results does nothing"
+cwd = "packages/app"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "zzzzz" }, { "expect-milestone" = "task-select:zzzzz:0" }, { "write-key" = "enter" }, { "write-key" = "escape" }, { "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
+]
+
 # Typo inside a task script should fail with an error, NOT show a list
 [[e2e]]
 name = "typo in task script fails without list"
