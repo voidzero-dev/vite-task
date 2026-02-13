@@ -232,11 +232,22 @@ impl<'a> Session<'a> {
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
-                // Copy flags before consuming run_command
+                // Save task name and flags before consuming run_command
+                let task_name = run_command.task_specifier.as_ref().map(|s| s.task_name.clone());
                 let flags = run_command.flags;
                 let additional_args = run_command.additional_args.clone();
 
                 match self.plan_from_cli(cwd, run_command).await {
+                    Ok(plan) if plan.is_empty() => {
+                        // No tasks matched the query — show task selector / "did you mean"
+                        self.handle_no_task(
+                            is_interactive,
+                            task_name.as_deref(),
+                            flags,
+                            additional_args,
+                        )
+                        .await
+                    }
                     Ok(plan) => {
                         let reporter =
                             LabeledReporter::new(std::io::stdout(), self.workspace_path());

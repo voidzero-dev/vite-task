@@ -192,6 +192,15 @@ impl ExecutionPlan {
         &self.root_node
     }
 
+    /// Returns `true` if the plan contains no tasks to execute.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match &self.root_node {
+            ExecutionItemKind::Expanded(graph) => graph.node_count() == 0,
+            ExecutionItemKind::Leaf(_) => false,
+        }
+    }
+
     /// Plan an execution from a plan request.
     ///
     /// # Errors

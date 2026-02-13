@@ -185,9 +185,6 @@ impl Error {
             TaskPlanErrorKind::TaskQueryError(
                 vite_task_graph::query::TaskQueryError::SpecifierLookupError { specifier, .. },
             ) => Some(specifier.task_name.as_str()),
-            TaskPlanErrorKind::TaskQueryError(
-                vite_task_graph::query::TaskQueryError::RecursiveTaskNotFound { task_name },
-            ) => Some(task_name.as_str()),
             _ => None,
         }
     }
