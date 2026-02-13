@@ -77,6 +77,46 @@ steps = [
     { "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "write-key" = "up" },{ "expect-milestone" = "task-select::0" },{ "write-key" = "enter" },] },
 ]
 
+# Non-interactive: list tasks from lib package (lib tasks first, unqualified)
+[[e2e]]
+name = "non-interactive list tasks from lib"
+cwd = "packages/lib"
+steps = [
+  "echo '' | vp run",
+]
+
+# Interactive: select from lib package (first item is lib's task)
+[[e2e]]
+name = "interactive select task from lib"
+cwd = "packages/lib"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
+]
+
+# Interactive: search for a task that only exists in another package
+[[e2e]]
+name = "interactive search other package task"
+cwd = "packages/app"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "typec" }, { "expect-milestone" = "task-select:typec:0" }, { "write-key" = "enter" }] },
+]
+
+# Interactive: '#' in query skips current-package reordering
+[[e2e]]
+name = "interactive search with hash skips reorder"
+cwd = "packages/app"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "lib#" }, { "expect-milestone" = "task-select:lib#:0" }, { "write-key" = "enter" }] },
+]
+
+# Interactive: multiple current-package matches preserve fuzzy rating order
+[[e2e]]
+name = "interactive search preserves rating within package"
+cwd = "packages/lib"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "t" }, { "expect-milestone" = "task-select:t:0" }, { "write-key" = "enter" }] },
+]
+
 # Typo inside a task script should fail with an error, NOT show a list
 [[e2e]]
 name = "typo in task script fails without list"

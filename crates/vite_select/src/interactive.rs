@@ -238,6 +238,7 @@ pub fn run(
     selected_index: &mut usize,
     header: Option<&str>,
     page_size: usize,
+    mut before_render: impl FnMut(&mut Vec<usize>, &str),
     mut after_render: impl FnMut(&RenderState<'_>),
 ) -> anyhow::Result<()> {
     if items.is_empty() {
@@ -250,6 +251,7 @@ pub fn run(
     crossterm::execute!(out, cursor::Hide)?;
 
     let mut state = State::new(items, initial_query, page_size);
+    before_render(&mut state.filtered, &state.query);
 
     // Initial render
     render(&mut out, &mut state, header)?;
@@ -263,6 +265,7 @@ pub fn run(
                     // Clear the search query and reset the filter
                     state.query.clear();
                     state.refilter();
+                    before_render(&mut state.filtered, &state.query);
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                     cleanup(&mut out, &state)?;
@@ -284,10 +287,12 @@ pub fn run(
                 KeyCode::Char(c) => {
                     state.query.push(c);
                     state.refilter();
+                    before_render(&mut state.filtered, &state.query);
                 }
                 KeyCode::Backspace => {
                     state.query.pop();
                     state.refilter();
+                    before_render(&mut state.filtered, &state.query);
                 }
                 _ => continue,
             },

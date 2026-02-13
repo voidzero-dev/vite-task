@@ -506,4 +506,12 @@ impl IndexedTaskGraph {
     pub fn get_package_path_for_task(&self, task_index: TaskNodeIndex) -> &Arc<AbsolutePath> {
         &self.task_graph[task_index].task_display.package_path
     }
+
+    /// Get the package path for a given current working directory by traversing up the directory
+    /// tree to find the nearest package.
+    #[must_use]
+    pub fn get_package_path_from_cwd(&self, cwd: &AbsolutePath) -> Option<&Arc<AbsolutePath>> {
+        let index = self.indexed_package_graph.get_package_index_from_cwd(cwd)?;
+        Some(self.get_package_path(index))
+    }
 }

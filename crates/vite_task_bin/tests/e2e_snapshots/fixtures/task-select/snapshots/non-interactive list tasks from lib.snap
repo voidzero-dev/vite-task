@@ -1,0 +1,17 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> echo '' | vp run
+  build: echo build lib
+  lint: echo lint lib
+  test: echo test lib
+  typecheck: echo typecheck lib
+  app#build: echo build app
+  app#lint: echo lint app
+  app#test: echo test app
+  task-select-test#check: echo check root
+  task-select-test#format: echo format root
+  task-select-test#hello: echo hello from root
+  task-select-test#run-typo-task: vp run nonexistent-xyz
+  task-select-test#validate: echo validate root

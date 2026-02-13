@@ -1,0 +1,45 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vp run
+@ expect-milestone: task-select::0
+Search task (↑/↓ to move, enter to select):
+> build: echo build lib
+  lint: echo lint lib
+  test: echo test lib
+  typecheck: echo typecheck lib
+  app#build: echo build app
+  app#lint: echo lint app
+  app#test: echo test app
+  task-select-test#check: echo check root
+  (…4 more)
+@ write: t
+@ expect-milestone: task-select:t:0
+Search task (↑/↓ to move, enter to select): t
+> test: echo test lib
+  typecheck: echo typecheck lib
+  lint: echo lint lib
+  task-select-test#check: echo check root
+  task-select-test#format: echo format root
+  task-select-test#hello: echo hello from root
+  task-select-test#run-typo-task: vp run nonexistent-xyz
+  task-select-test#validate: echo validate root
+  (…2 more)
+@ write-key: enter
+~/packages/lib$ echo test lib ⊘ cache disabled: built-in command
+test lib
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] lib#test: ~/packages/lib$ echo test lib ✓
+      → Cache disabled for built-in command
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

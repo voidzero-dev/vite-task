@@ -300,6 +300,7 @@ impl<'a> Session<'a> {
     ) -> anyhow::Result<ExitStatus> {
         let cwd = Arc::clone(&self.cwd);
         let task_graph = self.ensure_task_graph_loaded().await?;
+        let current_package_path = task_graph.get_package_path_from_cwd(&cwd).cloned();
         let mut entries = task_graph.list_tasks();
         entries.sort_unstable_by(|a, b| {
             a.task_display
@@ -308,31 +309,19 @@ impl<'a> Session<'a> {
                 .then_with(|| a.task_display.task_name.cmp(&b.task_display.task_name))
         });
 
-        // Find the most specific package containing the CWD (longest matching path)
-        let current_package_path = entries
+        // Build items: current package tasks use unqualified names (no '#'),
+        // other packages use qualified "package#task" names.
+        let select_items: Vec<SelectItem> = entries
             .iter()
-            .map(|e| &e.task_display.package_path)
-            .filter(|p| cwd.as_path().starts_with(p.as_path()))
-            .max_by_key(|p| p.as_path().as_os_str().len())
-            .cloned();
-
-        // Sort: current package tasks first, then others
-        let (current, others): (Vec<_>, Vec<_>) = entries
-            .iter()
-            .partition(|e| current_package_path.as_ref() == Some(&e.task_display.package_path));
-
-        // Build the items list: current package tasks first (unqualified name),
-        // then other packages (qualified with package#task).
-        let select_items: Vec<SelectItem> = current
-            .iter()
-            .map(|entry| SelectItem {
-                label: entry.task_display.task_name.clone(),
-                description: entry.command.clone(),
+            .map(|entry| {
+                let label =
+                    if current_package_path.as_ref() == Some(&entry.task_display.package_path) {
+                        entry.task_display.task_name.clone()
+                    } else {
+                        vite_str::format!("{}", entry.task_display)
+                    };
+                SelectItem { label, description: entry.command.clone() }
             })
-            .chain(others.iter().map(|entry| SelectItem {
-                label: vite_str::format!("{}", entry.task_display),
-                description: entry.command.clone(),
-            }))
             .collect();
 
         // Build header: interactive says "not found.", non-interactive "did you mean:" suffix
@@ -347,19 +336,30 @@ impl<'a> Session<'a> {
         // Build mode-dependent params and call select_list once
         let mut selected_index = if is_interactive { Some(0) } else { None };
         let mut stdout = std::io::stdout();
-        let mode = if let Some(selected_index) = selected_index.as_mut() {
-            vite_select::Mode::Interactive { selected_index }
-        } else {
-            vite_select::Mode::NonInteractive
+        let mode =
+            selected_index.as_mut().map_or(vite_select::Mode::NonInteractive, |selected_index| {
+                vite_select::Mode::Interactive { selected_index }
+            });
+
+        let params = vite_select::SelectParams {
+            items: &select_items,
+            query: not_found_name,
+            header: header.as_deref(),
+            page_size: 8,
         };
 
         vite_select::select_list(
             &mut stdout,
-            &select_items,
-            not_found_name,
+            &params,
             mode,
-            header.as_deref(),
-            8,
+            |filtered, query| {
+                // When the query doesn't contain '#', move current-package tasks (those
+                // without '#' in their label) to the top. `sort_by_key` is a stable sort,
+                // so the fuzzy rating order is preserved within each group.
+                if !query.contains('#') {
+                    filtered.sort_by_key(|&idx| select_items[idx].label.contains('#'));
+                }
+            },
             |state| {
                 use std::io::Write;
                 let milestone_name =

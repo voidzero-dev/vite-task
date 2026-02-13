@@ -34,6 +34,17 @@ pub struct RenderState<'a> {
     pub selected_index: usize,
 }
 
+/// Parameters for [`select_list`].
+pub struct SelectParams<'a> {
+    pub items: &'a [SelectItem],
+    /// Initial search query (pre-filled in interactive, used as filter in non-interactive).
+    pub query: Option<&'a str>,
+    /// Header line rendered above the list (e.g. an error message).
+    pub header: Option<&'a str>,
+    /// Max visible rows (interactive only).
+    pub page_size: usize,
+}
+
 /// Show a task selection list.
 ///
 /// In [`Mode::Interactive`], enters a terminal UI with fuzzy search and
@@ -50,18 +61,24 @@ pub struct RenderState<'a> {
 /// Returns an error if terminal I/O fails.
 pub fn select_list(
     writer: &mut impl Write,
-    items: &[SelectItem],
-    query: Option<&str>,
+    params: &SelectParams<'_>,
     mode: Mode<'_>,
-    header: Option<&str>,
-    page_size: usize,
+    before_render: impl FnMut(&mut Vec<usize>, &str),
     after_render: impl FnMut(&RenderState<'_>),
 ) -> anyhow::Result<()> {
     match mode {
-        Mode::Interactive { selected_index } => {
-            interactive::run(items, query, selected_index, header, page_size, after_render)
+        Mode::Interactive { selected_index } => interactive::run(
+            params.items,
+            params.query,
+            selected_index,
+            params.header,
+            params.page_size,
+            before_render,
+            after_render,
+        ),
+        Mode::NonInteractive => {
+            non_interactive(writer, params.items, params.query, params.header, before_render)
         }
-        Mode::NonInteractive => non_interactive(writer, items, query, header),
     }
 }
 
@@ -70,10 +87,12 @@ fn non_interactive(
     items: &[SelectItem],
     query: Option<&str>,
     header: Option<&str>,
+    mut before_render: impl FnMut(&mut Vec<usize>, &str),
 ) -> anyhow::Result<()> {
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
-    let filtered: Vec<usize> =
+    let mut filtered: Vec<usize> =
         query.map_or_else(|| (0..items.len()).collect(), |q| fuzzy_match(q, &labels));
+    before_render(&mut filtered, query.unwrap_or_default());
     let len = filtered.len();
 
     render_items(
