@@ -13,7 +13,11 @@ Search task (↑/↓ to move, enter to select):
   lib#test: echo test lib
   lib#typecheck: echo typecheck lib
   task-select-test#check: echo check root
-  (…4 more)
+  task-select-test#clean: echo clean root
+  task-select-test#deploy: echo deploy root
+  task-select-test#docs: echo docs root
+  task-select-test#format: echo format root
+  (…3 more)
 @ write: typec
 @ expect-milestone: task-select:typec:0
 Search task (↑/↓ to move, enter to select): typec

@@ -11,6 +11,9 @@ expression: e2e_outputs
   app#lint: echo lint app
   app#test: echo test app
   task-select-test#check: echo check root
+  task-select-test#clean: echo clean root
+  task-select-test#deploy: echo deploy root
+  task-select-test#docs: echo docs root
   task-select-test#format: echo format root
   task-select-test#hello: echo hello from root
   task-select-test#run-typo-task: vp run nonexistent-xyz

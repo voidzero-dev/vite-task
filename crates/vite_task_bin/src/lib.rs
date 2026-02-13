@@ -84,7 +84,6 @@ pub enum Args {
         name: Str,
         value: Str,
     },
-    Interact,
     #[command(flatten)]
     Task(Command),
 }
@@ -131,7 +130,6 @@ impl vite_task::CommandHandler for CommandHandler {
                     envs: Arc::new(envs),
                 }))
             }
-            Args::Interact => Ok(HandledCommand::Verbatim),
             Args::Task(cli_command) => Ok(HandledCommand::ViteTaskCommand(cli_command)),
         }
     }

@@ -356,7 +356,7 @@ impl<'a> Session<'a> {
             items: &select_items,
             query: not_found_name,
             header: header.as_deref(),
-            page_size: 8,
+            page_size: 12,
         };
 
         vite_select::select_list(

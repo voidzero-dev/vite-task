@@ -13,7 +13,11 @@ Search task (↑/↓ to move, enter to select):
   lib#test: echo test lib
   lib#typecheck: echo typecheck lib
   task-select-test#check: echo check root
-  (…4 more)
+  task-select-test#clean: echo clean root
+  task-select-test#deploy: echo deploy root
+  task-select-test#docs: echo docs root
+  task-select-test#format: echo format root
+  (…3 more)
 @ write-key: down
 @ write-key: down
 @ write-key: down
@@ -24,6 +28,7 @@ Search task (↑/↓ to move, enter to select):
 @ write-key: down
 @ expect-milestone: task-select::8
 Search task (↑/↓ to move, enter to select):
+  build: echo build app
   lint: echo lint app
   test: echo test app
   lib#build: echo build lib
@@ -31,7 +36,10 @@ Search task (↑/↓ to move, enter to select):
   lib#test: echo test lib
   lib#typecheck: echo typecheck lib
   task-select-test#check: echo check root
-> task-select-test#format: echo format root
+> task-select-test#clean: echo clean root
+  task-select-test#deploy: echo deploy root
+  task-select-test#docs: echo docs root
+  task-select-test#format: echo format root
   (…3 more)
 @ write-key: up
 @ write-key: up
@@ -51,7 +59,11 @@ Search task (↑/↓ to move, enter to select):
   lib#test: echo test lib
   lib#typecheck: echo typecheck lib
   task-select-test#check: echo check root
-  (…4 more)
+  task-select-test#clean: echo clean root
+  task-select-test#deploy: echo deploy root
+  task-select-test#docs: echo docs root
+  task-select-test#format: echo format root
+  (…3 more)
 @ write-key: enter
 ~/packages/app$ echo build app ⊘ cache disabled: built-in command
 build app

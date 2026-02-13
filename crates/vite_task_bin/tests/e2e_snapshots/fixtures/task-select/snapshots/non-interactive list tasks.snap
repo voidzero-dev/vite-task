@@ -4,6 +4,9 @@ expression: e2e_outputs
 ---
 > echo '' | vp run
   check: echo check root
+  clean: echo clean root
+  deploy: echo deploy root
+  docs: echo docs root
   format: echo format root
   hello: echo hello from root
   run-typo-task: vp run nonexistent-xyz

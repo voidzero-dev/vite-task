@@ -1,6 +1,0 @@
-[[e2e]]
-name = "interactions without vp"
-steps = [
-  { command = "vp interact", interactions = [{ "expect-milestone" = "ready" }, { "write" = "hello" }, { "write-line" = "hello" }, { "expect-milestone" = "after-line" }, { "write-key" = "up" }, { "write-key" = "down" }, { "write" = "x" }, { "write-key" = "enter" }, { "expect-milestone" = "after-line" }, { "write-key" = "enter" }, { "expect-milestone" = "after-enter" }] },
-  "echo -n | node -e \"console.log('PIPE_STDIN_IS_TTY:' + String(Boolean(process.stdin.isTTY)))\"",
-]
