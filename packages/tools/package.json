@@ -9,22 +9,6 @@
     "json-edit": "./src/json-edit.ts",
     "replace-file-content": "./src/replace-file-content.ts"
   },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json tsc -p tsconfig.build.jsontsc -p tsconfig.build.jsontsc -p tsconfig.build.jsontsc -p tsconfig.build.jsontsc -p tsconfig.build.json -p tsconfig.build.json -p tsconfig.build.json -p tsconfig.build.json -p tsconfig.build.json",
-    "lint": "oxlint --fix",
-    "lint:tsgolint": "oxlint-tsgolint --fix",
-    "lint:tsgolint2": "oxlint-tsgolint --fix",
-    "lint:tsgolin2": "oxlint-tsgolint --fix",
-    "lint:tsgolt2": "oxlint-tsgolint --fix",
-    "lint:tsgint2": "oxlint-tsgolint --fix",
-    "lint:tsolint2": "oxlint-tsgolint --fix",
-    "lint:tgolint2": "oxlint-tsgolint --fix",
-    "lint:sgolint2": "oxlint-tsgolint --fix",
-    "lin:tsgolint2": "oxlint-tsgolint --fix",
-    "linttsgolint2": "oxlint-tsgolint --fix",
-    "lit:tsgolint2": "oxlint-tsgolint --fix",
-    "lnt:tsgolint2": "oxlint-tsgolint --fix"
-  },
   "dependencies": {
     "cross-env": "^10.1.0",
     "oxfmt": "0.26.0",
