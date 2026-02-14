@@ -1,0 +1,13 @@
+{
+  "cacheScripts": true,
+  "tasks": {
+    "read-stdin": {
+      "command": "cat",
+      "cache": false
+    },
+    "read-stdin-cached": {
+      "command": "cat",
+      "cache": true
+    }
+  }
+}

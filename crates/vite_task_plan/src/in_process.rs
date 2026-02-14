@@ -20,6 +20,7 @@ pub struct InProcessExecution {
 
 impl InProcessExecution {
     /// Execute the in-process execution and return the output.
+    #[must_use]
     pub fn execute(&self) -> InProcessExecutionOutput {
         match &self.kind {
             InProcessExecutionKind::Echo { strings, trailing_newline } => {

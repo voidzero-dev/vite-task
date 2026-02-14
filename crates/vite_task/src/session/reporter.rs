@@ -36,7 +36,7 @@ use smallvec::SmallVec;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_plan::{
-    ExecutionGraph, ExecutionItem, ExecutionItemDisplay, ExecutionItemKind,
+    ExecutionGraph, ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind,
     execution_graph::ExecutionNodeIndex,
 };
 
@@ -58,6 +58,27 @@ pub struct ExitStatus(pub u8);
 impl ExitStatus {
     pub const FAILURE: Self = Self(1);
     pub const SUCCESS: Self = Self(0);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Stdin suggestion
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Suggestion from the reporter about what stdin mode to use for a spawned process.
+///
+/// The actual stdin mode is determined by [`execute_spawn`](super::execute::execute_spawn)
+/// based on this suggestion AND whether caching is enabled for the task:
+/// - `Inherited` is only used when the suggestion is `Inherited` AND caching is disabled.
+///   This prevents non-deterministic user input from corrupting cached output.
+/// - `Null` is always respected as-is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StdinSuggestion {
+    /// Suggest connecting the child process's stdin to /dev/null (or NUL on Windows).
+    /// Used when multiple tasks run in sequence and stdin should not be shared.
+    Null,
+    /// Suggest inheriting stdin from the parent process, allowing interactive input.
+    /// Only effective when caching is disabled for the task.
+    Inherited,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -192,6 +213,15 @@ pub trait GraphExecutionReporter {
 /// `start()` may not be called before `finish()` if an error occurs before the cache
 /// status is determined (e.g., cache lookup failure).
 pub trait LeafExecutionReporter {
+    /// Suggest which stdin mode to use for the spawned process.
+    ///
+    /// Called by [`execute_spawn`](super::execute::execute_spawn) before spawning to
+    /// determine the child process's stdin configuration. The final decision also
+    /// depends on whether caching is enabled — inherited stdin is only used when
+    /// the suggestion is [`StdinSuggestion::Inherited`] AND the task has no cache
+    /// metadata (caching disabled).
+    fn stdin_suggestion(&self) -> StdinSuggestion;
+
     /// Report that execution is starting with the given cache status.
     ///
     /// Called after the cache lookup completes, before any output is produced.
@@ -333,6 +363,12 @@ impl<W: Write> PlainReporter<W> {
 }
 
 impl<W: Write> LeafExecutionReporter for PlainReporter<W> {
+    fn stdin_suggestion(&self) -> StdinSuggestion {
+        // PlainReporter is used for single-leaf synthetic executions (e.g., auto-install).
+        // Always suggest inherited stdin so the spawned process can be interactive.
+        StdinSuggestion::Inherited
+    }
+
     fn start(&mut self, cache_status: CacheStatus) {
         self.is_cache_hit = matches!(cache_status, CacheStatus::Hit { .. });
         // PlainReporter has no display info (synthetic executions),
@@ -404,6 +440,27 @@ struct SharedReporterState<W: Write> {
     stats: ExecutionStats,
     /// The first error encountered during execution. Used to print the abort banner.
     first_error: Option<Str>,
+    /// Total number of spawned leaf executions in the graph (including nested `Expanded`
+    /// subgraphs). Computed once at build time and used to determine the stdin suggestion:
+    /// inherited stdin is only suggested when there is exactly one spawn leaf.
+    spawn_leaf_count: usize,
+}
+
+/// Count the total number of spawned leaf executions in an execution graph,
+/// recursing into nested `Expanded` subgraphs.
+///
+/// In-process executions are not counted because they don't spawn child processes
+/// and thus don't need stdin.
+fn count_spawn_leaves(graph: &ExecutionGraph) -> usize {
+    graph
+        .node_weights()
+        .flat_map(|task| task.items.iter())
+        .map(|item| match &item.kind {
+            ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(_)) => 1,
+            ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(_)) => 0,
+            ExecutionItemKind::Expanded(nested_graph) => count_spawn_leaves(nested_graph),
+        })
+        .sum()
 }
 
 /// Builder for the labeled graph reporter.
@@ -439,12 +496,14 @@ impl<W: Write> LabeledReporterBuilder<W> {
 
 impl<W: Write + 'static> GraphExecutionReporterBuilder for LabeledReporterBuilder<W> {
     fn build(self: Box<Self>, graph: &Arc<ExecutionGraph>) -> Box<dyn GraphExecutionReporter> {
+        let spawn_leaf_count = count_spawn_leaves(graph);
         Box::new(LabeledGraphReporter {
             shared: Rc::new(RefCell::new(SharedReporterState {
                 writer: self.writer,
                 executions: Vec::new(),
                 stats: ExecutionStats::default(),
                 first_error: None,
+                spawn_leaf_count,
             })),
             graph: Arc::clone(graph),
             workspace_path: self.workspace_path,
@@ -571,6 +630,18 @@ struct LabeledLeafReporter<W: Write> {
 }
 
 impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
+    fn stdin_suggestion(&self) -> StdinSuggestion {
+        // Only suggest inherited stdin when the graph has exactly one spawned leaf
+        // execution. With multiple spawned tasks, stdin should not be shared — each
+        // task gets /dev/null to avoid contention.
+        let shared = self.shared.borrow();
+        if shared.spawn_leaf_count == 1 {
+            StdinSuggestion::Inherited
+        } else {
+            StdinSuggestion::Null
+        }
+    }
+
     fn start(&mut self, cache_status: CacheStatus) {
         self.started = true;
         self.is_cache_hit = matches!(cache_status, CacheStatus::Hit { .. });
@@ -883,4 +954,262 @@ fn print_summary(
         "{}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".style(Style::new().bright_black())
     );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use vite_task_graph::display::TaskDisplay;
+    use vite_task_plan::{
+        ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, InProcessExecution,
+        LeafExecutionKind, SpawnCommand, SpawnExecution, TaskExecution,
+    };
+
+    use super::*;
+
+    /// Create a dummy `AbsolutePath` for test fixtures.
+    fn test_path() -> Arc<AbsolutePath> {
+        #[cfg(unix)]
+        {
+            Arc::from(AbsolutePath::new("/test").unwrap())
+        }
+        #[cfg(windows)]
+        {
+            Arc::from(AbsolutePath::new("C:\\test").unwrap())
+        }
+    }
+
+    /// Create a dummy `TaskDisplay` for test fixtures.
+    fn test_task_display(name: &str) -> TaskDisplay {
+        TaskDisplay {
+            package_name: "pkg".into(),
+            task_name: name.into(),
+            package_path: test_path(),
+        }
+    }
+
+    /// Create a dummy `ExecutionItemDisplay` for test fixtures.
+    fn test_display(name: &str) -> ExecutionItemDisplay {
+        ExecutionItemDisplay {
+            task_display: test_task_display(name),
+            command: name.into(),
+            and_item_index: None,
+            cwd: test_path(),
+        }
+    }
+
+    /// Create a `TaskExecution` with a single spawn leaf.
+    fn spawn_task(name: &str) -> TaskExecution {
+        TaskExecution {
+            task_display: test_task_display(name),
+            items: vec![ExecutionItem {
+                execution_item_display: test_display(name),
+                kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(SpawnExecution {
+                    cache_metadata: None,
+                    spawn_command: SpawnCommand {
+                        program_path: test_path(),
+                        args: Arc::from([]),
+                        all_envs: Arc::new(BTreeMap::new()),
+                        cwd: test_path(),
+                    },
+                })),
+            }],
+        }
+    }
+
+    /// Create a `TaskExecution` with a single in-process leaf (echo).
+    fn in_process_task(name: &str) -> TaskExecution {
+        TaskExecution {
+            task_display: test_task_display(name),
+            items: vec![ExecutionItem {
+                execution_item_display: test_display(name),
+                kind: ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(
+                    InProcessExecution::get_builtin_execution(
+                        "echo",
+                        ["hello"].iter(),
+                        &test_path(),
+                    )
+                    .unwrap(),
+                )),
+            }],
+        }
+    }
+
+    /// Create a `TaskExecution` with an expanded (nested) subgraph as its item.
+    fn expanded_task(name: &str, nested_graph: ExecutionGraph) -> TaskExecution {
+        TaskExecution {
+            task_display: test_task_display(name),
+            items: vec![ExecutionItem {
+                execution_item_display: test_display(name),
+                kind: ExecutionItemKind::Expanded(nested_graph),
+            }],
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // count_spawn_leaves tests
+    // ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn count_spawn_leaves_empty_graph() {
+        let graph = ExecutionGraph::default();
+        assert_eq!(count_spawn_leaves(&graph), 0);
+    }
+
+    #[test]
+    fn count_spawn_leaves_single_spawn() {
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(spawn_task("build"));
+        assert_eq!(count_spawn_leaves(&graph), 1);
+    }
+
+    #[test]
+    fn count_spawn_leaves_multiple_spawns() {
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(spawn_task("build"));
+        graph.add_node(spawn_task("test"));
+        graph.add_node(spawn_task("lint"));
+        assert_eq!(count_spawn_leaves(&graph), 3);
+    }
+
+    #[test]
+    fn count_spawn_leaves_in_process_not_counted() {
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(in_process_task("echo"));
+        assert_eq!(count_spawn_leaves(&graph), 0);
+    }
+
+    #[test]
+    fn count_spawn_leaves_mixed_spawn_and_in_process() {
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(spawn_task("build"));
+        graph.add_node(in_process_task("echo"));
+        assert_eq!(count_spawn_leaves(&graph), 1);
+    }
+
+    #[test]
+    fn count_spawn_leaves_nested_expanded() {
+        // Build a nested graph containing two spawns
+        let mut nested = ExecutionGraph::default();
+        nested.add_node(spawn_task("nested-build"));
+        nested.add_node(spawn_task("nested-test"));
+
+        // Outer graph has one expanded item pointing to the nested graph
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(expanded_task("expand", nested));
+        assert_eq!(count_spawn_leaves(&graph), 2);
+    }
+
+    #[test]
+    fn count_spawn_leaves_nested_with_top_level() {
+        // Nested graph with one spawn
+        let mut nested = ExecutionGraph::default();
+        nested.add_node(spawn_task("nested-lint"));
+
+        // Top-level graph has one spawn + one expanded
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(spawn_task("build"));
+        graph.add_node(expanded_task("expand", nested));
+        assert_eq!(count_spawn_leaves(&graph), 2);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // PlainReporter stdin_suggestion tests
+    // ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn plain_reporter_always_suggests_inherited() {
+        let reporter = PlainReporter::new(Vec::<u8>::new(), false);
+        assert_eq!(reporter.stdin_suggestion(), StdinSuggestion::Inherited);
+    }
+
+    #[test]
+    fn plain_reporter_suggests_inherited_even_when_silent() {
+        let reporter = PlainReporter::new(Vec::<u8>::new(), true);
+        assert_eq!(reporter.stdin_suggestion(), StdinSuggestion::Inherited);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // LabeledLeafReporter stdin_suggestion tests
+    // ────────────────────────────────────────────────────────────
+
+    /// Build a `LabeledGraphReporter` for the given graph and return a leaf reporter
+    /// for the first node's first item.
+    fn build_labeled_leaf(graph: ExecutionGraph) -> Box<dyn LeafExecutionReporter> {
+        let graph_arc = Arc::new(graph);
+        let builder = Box::new(LabeledReporterBuilder::new(Vec::<u8>::new(), test_path()));
+        let mut reporter = builder.build(&graph_arc);
+
+        // Create a leaf reporter for the first node
+        let path = LeafExecutionPath::default();
+        reporter.new_leaf_execution(&path)
+    }
+
+    #[test]
+    fn labeled_reporter_single_spawn_suggests_inherited() {
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(spawn_task("build"));
+        let leaf = build_labeled_leaf(graph);
+        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
+    }
+
+    #[test]
+    fn labeled_reporter_multiple_spawns_suggests_null() {
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(spawn_task("build"));
+        graph.add_node(spawn_task("test"));
+        let leaf = build_labeled_leaf(graph);
+        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
+    }
+
+    #[test]
+    fn labeled_reporter_single_in_process_suggests_inherited() {
+        // Zero spawn leaves → spawn_leaf_count == 0, so not == 1 → Null
+        // This is correct: in-process executions don't spawn child processes,
+        // so stdin suggestion doesn't apply to them.
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(in_process_task("echo"));
+        let leaf = build_labeled_leaf(graph);
+        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
+    }
+
+    #[test]
+    fn labeled_reporter_one_spawn_one_in_process_suggests_inherited() {
+        // One spawn leaf + one in-process → spawn_leaf_count == 1 → Inherited
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(spawn_task("build"));
+        graph.add_node(in_process_task("echo"));
+        let leaf = build_labeled_leaf(graph);
+        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
+    }
+
+    #[test]
+    fn labeled_reporter_nested_single_spawn_suggests_inherited() {
+        // Nested graph with exactly one spawn
+        let mut nested = ExecutionGraph::default();
+        nested.add_node(spawn_task("nested-build"));
+
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(expanded_task("expand", nested));
+        let leaf = build_labeled_leaf(graph);
+        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
+    }
+
+    #[test]
+    fn labeled_reporter_nested_multiple_spawns_suggests_null() {
+        // Nested graph with two spawns
+        let mut nested = ExecutionGraph::default();
+        nested.add_node(spawn_task("nested-a"));
+        nested.add_node(spawn_task("nested-b"));
+
+        let mut graph = ExecutionGraph::default();
+        graph.add_node(expanded_task("expand", nested));
+        let leaf = build_labeled_leaf(graph);
+        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
+    }
 }

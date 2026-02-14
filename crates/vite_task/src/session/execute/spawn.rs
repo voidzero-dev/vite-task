@@ -62,6 +62,7 @@ pub struct SpawnTrackResult {
 /// Returns the execution result including captured outputs, exit status,
 /// and tracked file accesses.
 ///
+/// - `stdin` controls the child process's stdin (typically `Stdio::null()` or `Stdio::inherit()`).
 /// - `on_output` is called in real-time as stdout/stderr data arrives.
 /// - `track_result` if provided, will be populated with captured outputs and path accesses for caching. If `None`, tracking is disabled.
 #[expect(
@@ -71,6 +72,7 @@ pub struct SpawnTrackResult {
 pub async fn spawn_with_tracking<F>(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
+    stdin: Stdio,
     mut on_output: F,
     track_result: Option<&mut SpawnTrackResult>,
 ) -> anyhow::Result<SpawnResult>
@@ -90,7 +92,7 @@ where
     cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
     cmd.envs(spawn_command.all_envs.iter());
     cmd.current_dir(&*spawn_command.cwd);
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut tracking_state = if let Some(track_result) = track_result {
         // track_result is Some. Spawn with tracking enabled

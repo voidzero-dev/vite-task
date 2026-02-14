@@ -1,0 +1,31 @@
+# Tests stdin inheritance behavior for spawned tasks.
+#
+# Stdin is inherited from the parent process only when BOTH conditions are met:
+# 1. The reporter suggests inherited stdin (single spawn leaf in the graph, or synthetic execution)
+# 2. Caching is disabled for the task (cache_metadata is None)
+#
+# Otherwise, stdin is set to /dev/null.
+
+[[e2e]]
+name = "single task no cache inherits stdin"
+# Single spawn leaf + cache disabled → stdin is inherited
+# The piped "from-stdin" should appear in the task's output
+steps = [
+  "echo from-stdin | vp run read-stdin",
+]
+
+[[e2e]]
+name = "single task with cache gets null stdin"
+# Single spawn leaf + cache enabled → stdin is null (protects cache determinism)
+# The piped "from-stdin" should NOT appear in the task's output
+steps = [
+  "echo from-stdin | vp run read-stdin-cached",
+]
+
+[[e2e]]
+name = "multiple tasks get null stdin"
+# Multiple spawn leaves → stdin is null regardless of cache setting
+# The piped "from-stdin" should NOT appear in any task's output
+steps = [
+  "echo from-stdin | vp run -r read-stdin",
+]

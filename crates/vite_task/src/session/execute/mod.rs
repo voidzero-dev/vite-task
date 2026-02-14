@@ -1,7 +1,7 @@
 pub mod fingerprint;
 pub mod spawn;
 
-use std::sync::Arc;
+use std::{process::Stdio, sync::Arc};
 
 use futures_util::FutureExt;
 use petgraph::{algo::toposort, stable_graph::StableGraph};
@@ -23,7 +23,7 @@ use super::{
     },
     reporter::{
         ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionPath,
-        LeafExecutionReporter,
+        LeafExecutionReporter, StdinSuggestion,
     },
 };
 use crate::{Session, session::execute::spawn::SpawnTrackResult};
@@ -252,6 +252,18 @@ pub async fn execute_spawn(
     let mut track_result_with_cache_metadata =
         cache_metadata.map(|cache_metadata| (SpawnTrackResult::default(), cache_metadata));
 
+    // Determine the child process's stdin mode based on:
+    // - The reporter's suggestion (inherited only when appropriate, e.g., single task)
+    // - Whether caching is disabled (inherited stdin would make output non-deterministic,
+    //   breaking cache semantics)
+    let stdin = if leaf_reporter.stdin_suggestion() == StdinSuggestion::Inherited
+        && cache_metadata.is_none()
+    {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    };
+
     // Execute command with tracking, streaming output in real-time via the reporter
     #[expect(
         clippy::large_futures,
@@ -260,6 +272,7 @@ pub async fn execute_spawn(
     let result = match spawn_with_tracking(
         &spawn_execution.spawn_command,
         cache_base_path,
+        stdin,
         |kind, content| {
             leaf_reporter.output(
                 match kind {

@@ -14,7 +14,7 @@ use context::PlanContext;
 use error::TaskPlanErrorKindResultExt;
 pub use error::{Error, TaskPlanErrorKind};
 pub use execution_graph::ExecutionGraph;
-use in_process::InProcessExecution;
+pub use in_process::InProcessExecution;
 pub use path_env::{get_path_env, prepend_path_env};
 use plan::{ParentCacheConfig, plan_query_request, plan_synthetic_request};
 use plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest};
