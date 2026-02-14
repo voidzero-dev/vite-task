@@ -21,7 +21,7 @@ use vite_task_graph::{
     loader::UserConfigLoader,
 };
 use vite_task_plan::{
-    ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind,
+    ExecutionPlan, TaskGraphLoader,
     plan_request::{PlanRequest, ScriptCommand, SyntheticPlanRequest},
     prepend_path_env,
 };
@@ -484,16 +484,15 @@ impl<'a> Session<'a> {
         let plan_request = match command.into_plan_request(&cwd) {
             Ok(plan_request) => plan_request,
             Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
-                return Err(TaskPlanErrorKind::MissingTaskSpecifier.with_empty_call_stack());
+                return Err(vite_task_plan::Error::MissingTaskSpecifier);
             }
             Err(error) => {
-                return Err(TaskPlanErrorKind::ParsePlanRequestError {
+                return Err(vite_task_plan::Error::ParsePlanRequest {
                     error: error.into(),
                     program: Str::from("vp"),
                     args: Arc::default(),
                     cwd: Arc::clone(&cwd),
-                }
-                .with_empty_call_stack());
+                });
             }
         };
         let plan = ExecutionPlan::plan(

@@ -3,15 +3,13 @@
     reason = "Arc<Path> is used for non-UTF-8 path data in error types"
 )]
 use std::path::Path;
-use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, sync::Arc};
+use std::{env::JoinPathsError, ffi::OsStr, sync::Arc};
 
 use vite_path::{AbsolutePath, relative::InvalidPathDataError};
 use vite_str::Str;
+use vite_task_graph::display::TaskDisplay;
 
-use crate::{
-    context::{PlanContext, TaskCallStackDisplay, TaskRecursionError},
-    envs::ResolveEnvError,
-};
+use crate::{context::TaskRecursionError, envs::ResolveEnvError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CdCommandError {
@@ -30,7 +28,7 @@ pub struct WhichError {
     #[source]
     pub error: which::Error,
 }
-impl Display for WhichError {
+impl std::fmt::Display for WhichError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -66,7 +64,7 @@ pub enum PathType {
     Program,
     PackagePath,
 }
-impl Display for PathType {
+impl std::fmt::Display for PathType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Cwd => write!(f, "current working directory"),
@@ -84,18 +82,26 @@ pub struct PathFingerprintError {
     pub kind: PathFingerprintErrorKind,
 }
 
-/// Errors that can occur when planning a specific execution from a task .
+/// Errors that can occur when planning a specific execution from a task.
 #[derive(Debug, thiserror::Error)]
-pub enum TaskPlanErrorKind {
+pub enum Error {
+    #[error("Failed to plan tasks from `{command}` in task {task_display}")]
+    NestPlan {
+        task_display: TaskDisplay,
+        command: Str,
+        #[source]
+        error: Box<Self>,
+    },
+
     #[error("Failed to load task graph")]
-    TaskGraphLoadError(
+    TaskGraphLoad(
         #[source]
         #[from]
         vite_task_graph::TaskGraphLoadError,
     ),
 
     #[error("Failed to execute 'cd' command")]
-    CdCommandError(
+    CdCommand(
         #[source]
         #[from]
         CdCommandError,
@@ -105,10 +111,10 @@ pub enum TaskPlanErrorKind {
     ProgramNotFound(#[from] WhichError),
 
     #[error(transparent)]
-    PathFingerprintError(#[from] PathFingerprintError),
+    PathFingerprint(#[from] PathFingerprintError),
 
     #[error("Failed to query tasks from task graph")]
-    TaskQueryError(
+    TaskQuery(
         #[source]
         #[from]
         vite_task_graph::query::TaskQueryError,
@@ -118,7 +124,7 @@ pub enum TaskPlanErrorKind {
     TaskRecursionDetected(#[from] TaskRecursionError),
 
     #[error("Invalid vite task command: {program} with args {args:?} under cwd {cwd:?}")]
-    ParsePlanRequestError {
+    ParsePlanRequest {
         program: Str,
         args: Arc<[Str]>,
         cwd: Arc<AbsolutePath>,
@@ -127,100 +133,38 @@ pub enum TaskPlanErrorKind {
     },
 
     #[error("Failed to add node_modules/.bin to PATH environment variable")]
-    AddNodeModulesBinPathError {
+    AddNodeModulesBinPath {
         #[source]
         join_paths_error: JoinPathsError,
     },
 
     #[error("Failed to resolve environment variables")]
-    ResolveEnvError(#[source] ResolveEnvError),
+    ResolveEnv(#[source] ResolveEnvError),
 
     #[error("No task specifier provided for 'run' command")]
     MissingTaskSpecifier,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub struct Error {
-    task_call_stack: TaskCallStackDisplay,
-
-    #[source]
-    kind: TaskPlanErrorKind,
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Failed to plan execution")?;
-        if !self.task_call_stack.is_empty() {
-            write!(f, ", task call stack: {}", self.task_call_stack)?;
-        }
-        Ok(())
-    }
-}
-
-impl TaskPlanErrorKind {
-    #[must_use]
-    pub fn with_empty_call_stack(self) -> Error {
-        Error { task_call_stack: TaskCallStackDisplay::default(), kind: self }
-    }
-}
-
 impl Error {
     #[must_use]
     pub const fn is_missing_task_specifier(&self) -> bool {
-        matches!(self.kind, TaskPlanErrorKind::MissingTaskSpecifier)
+        matches!(self, Self::MissingTaskSpecifier)
     }
 
     /// If this error represents a top-level task-not-found lookup failure,
     /// returns the task name that the user typed.
     ///
-    /// Returns `None` if the error occurred in a nested task (non-empty call stack),
+    /// Returns `None` if the error occurred in a nested task (wrapped in `NestPlan`),
     /// since nested task errors should propagate as-is rather than triggering
     /// interactive task selection.
     #[must_use]
     pub fn task_not_found_name(&self) -> Option<&str> {
-        if !self.task_call_stack.is_empty() {
-            return None;
-        }
-        match &self.kind {
-            TaskPlanErrorKind::TaskQueryError(
-                vite_task_graph::query::TaskQueryError::SpecifierLookupError { specifier, .. },
-            ) => Some(specifier.task_name.as_str()),
+        match self {
+            Self::TaskQuery(vite_task_graph::query::TaskQueryError::SpecifierLookupError {
+                specifier,
+                ..
+            }) => Some(specifier.task_name.as_str()),
             _ => None,
-        }
-    }
-}
-
-#[expect(
-    clippy::result_large_err,
-    reason = "Error wraps TaskPlanErrorKind with call stack for diagnostics"
-)]
-pub trait TaskPlanErrorKindResultExt {
-    type Ok;
-    /// Attach the current task call stack from the planning context to the error.
-    fn with_plan_context(self, context: &PlanContext<'_>) -> Result<Self::Ok, Error>;
-
-    /// Attach an empty task call stack to the error.
-    fn with_empty_call_stack(self) -> Result<Self::Ok, Error>;
-}
-
-impl<T> TaskPlanErrorKindResultExt for Result<T, TaskPlanErrorKind> {
-    type Ok = T;
-
-    /// Attach the current task call stack from the planning context to the error.
-    fn with_plan_context(self, context: &PlanContext<'_>) -> Result<T, Error> {
-        match self {
-            Ok(value) => Ok(value),
-            Err(kind) => {
-                let task_call_stack = context.display_call_stack();
-                Err(Error { task_call_stack, kind })
-            }
-        }
-    }
-
-    fn with_empty_call_stack(self) -> Result<T, Error> {
-        match self {
-            Ok(value) => Ok(value),
-            Err(kind) => Err(kind.with_empty_call_stack()),
         }
     }
 }

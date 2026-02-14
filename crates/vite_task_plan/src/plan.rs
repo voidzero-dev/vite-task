@@ -29,10 +29,7 @@ use crate::{
     SpawnCommand, SpawnExecution, TaskExecution,
     cache_metadata::{CacheMetadata, ExecutionCacheKey, ProgramFingerprint, SpawnFingerprint},
     envs::EnvFingerprints,
-    error::{
-        CdCommandError, Error, PathFingerprintError, PathFingerprintErrorKind, PathType,
-        TaskPlanErrorKind, TaskPlanErrorKindResultExt,
-    },
+    error::{CdCommandError, Error, PathFingerprintError, PathFingerprintErrorKind, PathType},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex},
     in_process::InProcessExecution,
     path_env::get_path_env,
@@ -66,10 +63,7 @@ async fn plan_task_as_execution_node(
     mut context: PlanContext<'_>,
 ) -> Result<TaskExecution, Error> {
     // Check for recursions in the task call stack.
-    context
-        .check_recursion(task_node_index)
-        .map_err(TaskPlanErrorKind::TaskRecursionDetected)
-        .with_plan_context(&context)?;
+    context.check_recursion(task_node_index)?;
 
     let task_node = &context.indexed_task_graph().task_graph()[task_node_index];
     let command_str = task_node.resolved_config.command.as_str();
@@ -78,10 +72,7 @@ async fn plan_task_as_execution_node(
     // Prepend {package_path}/node_modules/.bin to PATH
     let package_node_modules_bin_path = package_path.join("node_modules").join(".bin");
     if let Err(join_paths_error) = context.prepend_path(&package_node_modules_bin_path) {
-        // Push the current task frame with full command span (the path was added for every and_item of the command) before returning the error
-        context.push_stack_frame(task_node_index, 0..command_str.len());
-        return Err(TaskPlanErrorKind::AddNodeModulesBinPathError { join_paths_error })
-            .with_plan_context(&context);
+        return Err(Error::AddNodeModulesBinPath { join_paths_error });
     }
 
     let mut items = Vec::<ExecutionItem>::new();
@@ -115,16 +106,12 @@ async fn plan_task_as_execution_node(
                 )]
                 let cd_target: Cow<'_, Path> = match args.as_slice() {
                     // No args, go to home directory
-                    [] => home_dir()
-                        .ok_or_else(|| {
-                            TaskPlanErrorKind::CdCommandError(CdCommandError::NoHomeDirectory)
-                        })
-                        .with_plan_context(&context)?
-                        .into(),
+                    [] => {
+                        home_dir().ok_or(Error::CdCommand(CdCommandError::NoHomeDirectory))?.into()
+                    }
                     [dir] => Path::new(dir.as_str()).into(),
                     _ => {
-                        return Err(TaskPlanErrorKind::CdCommandError(CdCommandError::ToManyArgs))
-                            .with_plan_context(&context);
+                        return Err(Error::CdCommand(CdCommandError::ToManyArgs));
                     }
                 };
                 cwd = cwd.join(cd_target.as_ref()).into();
@@ -163,13 +150,10 @@ async fn plan_task_as_execution_node(
                 and_item_index: index,
                 extra_args: Arc::clone(&extra_args),
                 package_path: strip_prefix_for_cache(package_path, context.workspace_path())
-                    .map_err(|kind| {
-                        TaskPlanErrorKind::PathFingerprintError(PathFingerprintError {
-                            kind,
-                            path_type: PathType::PackagePath,
-                        })
-                    })
-                    .with_plan_context(&context)?,
+                    .map_err(|kind| PathFingerprintError {
+                        kind,
+                        path_type: PathType::PackagePath,
+                    })?,
             };
 
             // Try to parse the args of an and_item to a plan request like `run -r build`
@@ -180,24 +164,28 @@ async fn plan_task_as_execution_node(
                 envs,
                 cwd: Arc::clone(&cwd),
             };
-            let plan_request = context
-                .callbacks()
-                .get_plan_request(&mut script_command)
-                .await
-                .map_err(|error| TaskPlanErrorKind::ParsePlanRequestError {
-                    program: script_command.program.clone(),
-                    args: Arc::clone(&script_command.args),
-                    cwd: Arc::clone(&script_command.cwd),
-                    error,
-                })
-                .with_plan_context(&context)?;
+            let plan_request =
+                context.callbacks().get_plan_request(&mut script_command).await.map_err(
+                    |error| Error::ParsePlanRequest {
+                        program: script_command.program.clone(),
+                        args: Arc::clone(&script_command.args),
+                        cwd: Arc::clone(&script_command.cwd),
+                        error,
+                    },
+                )?;
 
             let execution_item_kind: ExecutionItemKind = match plan_request {
                 // Expand task query like `vp run -r build`
                 Some(PlanRequest::Query(query_plan_request)) => {
                     // Add prefix envs to the context
                     context.add_envs(and_item.envs.iter());
-                    let execution_graph = plan_query_request(query_plan_request, context).await?;
+                    let execution_graph = plan_query_request(query_plan_request, context)
+                        .await
+                        .map_err(|error| Error::NestPlan {
+                            task_display: task_node.task_display.clone(),
+                            command: Str::from(&command_str[add_item_span.clone()]),
+                            error: Box::new(error),
+                        })?;
                     ExecutionItemKind::Expanded(execution_graph)
                 }
                 // Synthetic task (from CommandHandler)
@@ -217,8 +205,7 @@ async fn plan_task_as_execution_node(
                         Some(task_execution_cache_key),
                         &cwd,
                         parent_cache_config,
-                    )
-                    .with_plan_context(&context)?;
+                    )?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
                 // Normal 3rd party tool command (like `tsc --noEmit`), using potentially mutated script_command
@@ -227,9 +214,7 @@ async fn plan_task_as_execution_node(
                         &OsStr::new(&script_command.program).into(),
                         &script_command.envs,
                         &script_command.cwd,
-                    )
-                    .map_err(TaskPlanErrorKind::ProgramNotFound)
-                    .with_plan_context(&context)?;
+                    )?;
                     let spawn_execution = plan_spawn_execution(
                         context.workspace_path(),
                         Some(task_execution_cache_key),
@@ -238,8 +223,7 @@ async fn plan_task_as_execution_node(
                         &script_command.envs,
                         program_path,
                         script_command.args,
-                    )
-                    .with_plan_context(&context)?;
+                    )?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
             };
@@ -286,21 +270,17 @@ async fn plan_task_as_execution_node(
                 and_item_index: 0,
                 extra_args: Arc::clone(context.extra_args()),
                 package_path: strip_prefix_for_cache(package_path, context.workspace_path())
-                    .map_err(|kind| {
-                        TaskPlanErrorKind::PathFingerprintError(PathFingerprintError {
-                            kind,
-                            path_type: PathType::PackagePath,
-                        })
-                    })
-                    .with_plan_context(&context)?,
+                    .map_err(|kind| PathFingerprintError {
+                        kind,
+                        path_type: PathType::PackagePath,
+                    })?,
             }),
             &BTreeMap::new(),
             &task_node.resolved_config.resolved_options,
             context.envs(),
             Arc::clone(&*SHELL_PROGRAM_PATH),
             SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
-        )
-        .with_plan_context(&context)?;
+        )?;
         items.push(ExecutionItem {
             execution_item_display,
             kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
@@ -379,7 +359,7 @@ fn resolve_synthetic_cache_config(
     }
 }
 
-#[expect(clippy::result_large_err, reason = "TaskPlanErrorKind is large for diagnostics")]
+#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
 pub fn plan_synthetic_request(
     workspace_path: &Arc<AbsolutePath>,
     prefix_envs: &BTreeMap<Str, Str>,
@@ -387,10 +367,10 @@ pub fn plan_synthetic_request(
     execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
     parent_cache_config: ParentCacheConfig,
-) -> Result<SpawnExecution, TaskPlanErrorKind> {
+) -> Result<SpawnExecution, Error> {
     let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
-    let program_path = which(&program, &envs, cwd).map_err(TaskPlanErrorKind::ProgramNotFound)?;
+    let program_path = which(&program, &envs, cwd)?;
     let resolved_cache_config =
         resolve_synthetic_cache_config(parent_cache_config, cache_config, cwd);
     let resolved_options =
@@ -424,7 +404,7 @@ fn strip_prefix_for_cache(
     }
 }
 
-#[expect(clippy::result_large_err, reason = "TaskPlanErrorKind is large for diagnostics")]
+#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
 #[expect(
     clippy::needless_pass_by_value,
     reason = "program_path ownership is needed for Arc construction"
@@ -437,7 +417,7 @@ fn plan_spawn_execution(
     envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
     program_path: Arc<AbsolutePath>,
     args: Arc<[Str]>,
-) -> Result<SpawnExecution, TaskPlanErrorKind> {
+) -> Result<SpawnExecution, Error> {
     // all envs available in the current context
     let mut all_envs = envs.clone();
     let cwd = Arc::clone(&resolved_task_options.cwd);
@@ -447,7 +427,7 @@ fn plan_spawn_execution(
         // Resolve envs according cache configs
         let mut env_fingerprints =
             EnvFingerprints::resolve(&mut all_envs, &cache_config.env_config)
-                .map_err(TaskPlanErrorKind::ResolveEnvError)?;
+                .map_err(Error::ResolveEnv)?;
 
         // Add prefix envs to fingerprinted envs
         env_fingerprints
@@ -529,8 +509,7 @@ pub async fn plan_query_request(
     let task_node_index_graph = context
         .indexed_task_graph()
         .query_tasks(query_plan_request.query)
-        .map_err(TaskPlanErrorKind::TaskQueryError)
-        .with_plan_context(&context)?;
+        .map_err(Error::TaskQuery)?;
 
     let mut execution_node_indices_by_task_index =
         FxHashMap::<TaskNodeIndex, ExecutionNodeIndex>::with_capacity_and_hasher(
