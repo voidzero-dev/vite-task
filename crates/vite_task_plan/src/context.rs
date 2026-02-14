@@ -1,9 +1,9 @@
-use std::{env::JoinPathsError, ffi::OsStr, fmt::Display, ops::Range, sync::Arc};
+use std::{env::JoinPathsError, ffi::OsStr, ops::Range, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, display::TaskDisplay};
+use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex};
 
 use crate::{PlanRequestParser, path_env::prepend_path_env};
 
@@ -41,46 +41,6 @@ pub struct PlanContext<'a> {
     indexed_task_graph: &'a IndexedTaskGraph,
 }
 
-/// A human-readable frame in the task call stack.
-#[derive(Debug, Clone)]
-pub struct TaskCallStackFrameDisplay {
-    pub task_display: TaskDisplay,
-
-    #[expect(dead_code, reason = "to be used in terminal error display")]
-    pub command_span: Range<usize>,
-}
-
-impl Display for TaskCallStackFrameDisplay {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO: display command_span
-        write!(f, "{}", self.task_display)
-    }
-}
-
-/// A human-readable display of the task call stack.
-#[derive(Default, Debug, Clone)]
-pub struct TaskCallStackDisplay {
-    frames: Arc<[TaskCallStackFrameDisplay]>,
-}
-
-impl TaskCallStackDisplay {
-    pub fn is_empty(&self) -> bool {
-        self.frames.is_empty()
-    }
-}
-
-impl Display for TaskCallStackDisplay {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (i, frame) in self.frames.iter().enumerate() {
-            if i > 0 {
-                write!(f, " -> ")?;
-            }
-            write!(f, "{frame}")?;
-        }
-        Ok(())
-    }
-}
-
 impl<'a> PlanContext<'a> {
     pub fn new(
         workspace_path: &'a Arc<AbsolutePath>,
@@ -102,20 +62,6 @@ impl<'a> PlanContext<'a> {
 
     pub const fn envs(&self) -> &FxHashMap<Arc<OsStr>, Arc<OsStr>> {
         &self.envs
-    }
-
-    /// Get a human-readable display of the current task call stack.
-    pub fn display_call_stack(&self) -> TaskCallStackDisplay {
-        TaskCallStackDisplay {
-            frames: self
-                .task_call_stack
-                .iter()
-                .map(|(idx, span)| TaskCallStackFrameDisplay {
-                    task_display: self.indexed_task_graph.display_task(*idx),
-                    command_span: span.clone(),
-                })
-                .collect(),
-        }
     }
 
     /// Check if adding the given task node index would create a recursion in the call stack.

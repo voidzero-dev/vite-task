@@ -11,8 +11,7 @@ pub mod plan_request;
 use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 
 use context::PlanContext;
-use error::TaskPlanErrorKindResultExt;
-pub use error::{Error, TaskPlanErrorKind};
+pub use error::Error;
 use execution_graph::ExecutionGraph;
 use in_process::InProcessExecution;
 pub use path_env::{get_path_env, prepend_path_env};
@@ -216,11 +215,7 @@ impl ExecutionPlan {
     ) -> Result<Self, Error> {
         let root_node = match plan_request {
             PlanRequest::Query(query_plan_request) => {
-                let indexed_task_graph = task_graph_loader
-                    .load_task_graph()
-                    .await
-                    .map_err(TaskPlanErrorKind::TaskGraphLoadError)
-                    .with_empty_call_stack()?;
+                let indexed_task_graph = task_graph_loader.load_task_graph().await?;
 
                 let context = PlanContext::new(
                     workspace_path,
@@ -240,8 +235,7 @@ impl ExecutionPlan {
                     None,
                     cwd,
                     ParentCacheConfig::None,
-                )
-                .with_empty_call_stack()?;
+                )?;
                 ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution))
             }
         };
@@ -252,7 +246,7 @@ impl ExecutionPlan {
     ///
     /// # Errors
     /// Returns an error if the program is not found or path fingerprinting fails.
-    #[expect(clippy::result_large_err, reason = "Error contains task call stack for diagnostics")]
+    #[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
     pub fn plan_synthetic(
         workspace_path: &Arc<AbsolutePath>,
         cwd: &Arc<AbsolutePath>,
@@ -267,8 +261,7 @@ impl ExecutionPlan {
             Some(execution_cache_key),
             cwd,
             ParentCacheConfig::None,
-        )
-        .with_empty_call_stack()?;
+        )?;
         Ok(Self { root_node: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution)) })
     }
 }

@@ -3,7 +3,7 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 [1]> vp run run-typo-task
-Error: Failed to plan execution, task call stack: task-select-test#run-typo-task
+Error: Failed to plan tasks from `vp run nonexistent-xyz` in task task-select-test#run-typo-task
 
 Caused by:
     0: Failed to query tasks from task graph
