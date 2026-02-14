@@ -5,10 +5,7 @@ use std::{process::Stdio, sync::Arc};
 
 use futures_util::FutureExt;
 use vite_path::AbsolutePath;
-use vite_task_plan::{
-    ExecutionGraph, ExecutionItemKind, LeafExecutionKind, SpawnExecution,
-    execution_graph::ExecutionNodeIndex,
-};
+use vite_task_plan::{ExecutionGraph, ExecutionItemKind, LeafExecutionKind, SpawnExecution};
 
 use self::{
     fingerprint::PostRunFingerprint,
@@ -59,13 +56,9 @@ struct ExecutionContext<'a> {
 impl ExecutionContext<'_> {
     /// Execute all tasks in an execution graph in dependency order.
     ///
-    /// Since `ExecutionGraph` is `Acyclic<DiGraph<...>>`, the graph is guaranteed to have
-    /// no cycles at the type level. We use `nodes_iter()` which returns nodes in topological
-    /// order (for every edge A→B, A comes before B).
-    ///
-    /// In our graph, edges go from dependents to dependencies (A→B means "A depends on B"),
-    /// so `nodes_iter()` gives dependents before dependencies. We reverse this to execute
-    /// dependencies first.
+    /// `ExecutionGraph` guarantees acyclicity at construction time and caches a
+    /// topological order. We iterate `toposort()` in reverse to get execution order
+    /// (dependencies before dependents).
     ///
     /// The `path_prefix` tracks our position within nested execution graphs. For the
     /// root call this is an empty path; for nested `Expanded` items it carries the
@@ -78,22 +71,15 @@ impl ExecutionContext<'_> {
         graph: &ExecutionGraph,
         path_prefix: &LeafExecutionPath,
     ) {
-        // `nodes_iter()` returns nodes in topological order: for every edge A→B,
+        // `toposort()` returns nodes in topological order: for every edge A→B,
         // A appears before B. Since our edges mean "A depends on B", dependencies
-        // (B) appear after their dependents (A). Reversing gives us execution order
-        // where dependencies run first.
-        //
-        // Collect into a Vec first since the `nodes_iter()` return type
-        // (`impl Iterator`) does not implement `DoubleEndedIterator`.
-        let mut node_indices: Vec<ExecutionNodeIndex> = graph.nodes_iter().collect();
-        node_indices.reverse();
+        // (B) appear after their dependents (A). We iterate in reverse to get
+        // execution order where dependencies run first.
 
         // Execute tasks in dependency-first order. Each task may have multiple items
         // (from `&&`-split commands), which are executed sequentially.
-        for node_ix in node_indices {
-            // Access the inner DiGraph directly for node indexing, since the `Acyclic`
-            // wrapper's only `Index` impl is our custom `Index<ExecutionPathItem>`.
-            let task_execution = &graph.inner()[node_ix];
+        for &node_ix in graph.toposort().iter().rev() {
+            let task_execution = &graph[node_ix];
 
             for (item_idx, item) in task_execution.items.iter().enumerate() {
                 // Build the path for this item by appending to the prefix
@@ -361,10 +347,6 @@ impl Session<'_> {
 
         // Wrap the graph in Arc so both the reporter and execution can reference it.
         // The reporter clones the Arc internally for display lookups.
-        // `Acyclic` uses `RefCell` internally for topological-order caching, making it
-        // `!Sync`. We still need `Arc` here because the reporter holds a clone for display
-        // lookups. The graph is only ever accessed from a single thread in practice.
-        #[expect(clippy::arc_with_non_send_sync, reason = "Acyclic<!Sync> but single-threaded use")]
         let graph = Arc::new(execution_graph);
         let mut reporter = builder.build(&graph);
 

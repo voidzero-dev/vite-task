@@ -23,7 +23,6 @@
 use std::{
     cell::RefCell,
     io::Write,
-    ops::Index,
     process::ExitStatus as StdExitStatus,
     rc::Rc,
     sync::{Arc, LazyLock},
@@ -95,17 +94,11 @@ struct ExecutionPathItem {
     task_execution_item_index: usize,
 }
 
-/// Indexing a graph by a single `ExecutionPathItem` yields the [`ExecutionItem`]
-/// at that position.
-///
-/// Uses `.inner()` to access the underlying `DiGraph`'s `Index<NodeIndex>` impl,
-/// since `Acyclic` delegates indexing through `Deref` and the compiler might
-/// otherwise recurse into this very impl.
-impl Index<ExecutionPathItem> for ExecutionGraph {
-    type Output = ExecutionItem;
-
-    fn index(&self, index: ExecutionPathItem) -> &Self::Output {
-        &self.inner()[index.graph_node_ix].items[index.task_execution_item_index]
+impl ExecutionPathItem {
+    /// Resolve this path item against a graph, returning the [`ExecutionItem`]
+    /// at the identified position.
+    fn resolve(self, graph: &ExecutionGraph) -> &ExecutionItem {
+        &graph[self.graph_node_ix].items[self.task_execution_item_index]
     }
 }
 
@@ -145,7 +138,7 @@ impl LeafExecutionPath {
     ) -> Option<&'a ExecutionItemDisplay> {
         let mut current_graph = root_graph;
         for (depth, path_item) in self.0.iter().enumerate() {
-            let item = &current_graph[*path_item];
+            let item = path_item.resolve(current_graph);
             let is_last = depth == self.0.len() - 1;
             if is_last {
                 // Last element — return the display info regardless of Leaf/Expanded
@@ -930,7 +923,6 @@ fn print_summary(
 mod tests {
     use std::collections::BTreeMap;
 
-    use petgraph::data::Build;
     use vite_task_graph::display::TaskDisplay;
     use vite_task_plan::{
         ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, InProcessExecution,
@@ -1030,58 +1022,51 @@ mod tests {
 
     #[test]
     fn count_spawn_leaves_single_spawn() {
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(spawn_task("build"));
+        let graph = ExecutionGraph::from_node_list([spawn_task("build")]);
         assert_eq!(count_spawn_leaves(&graph), 1);
     }
 
     #[test]
     fn count_spawn_leaves_multiple_spawns() {
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(spawn_task("build"));
-        graph.add_node(spawn_task("test"));
-        graph.add_node(spawn_task("lint"));
+        let graph = ExecutionGraph::from_node_list([
+            spawn_task("build"),
+            spawn_task("test"),
+            spawn_task("lint"),
+        ]);
         assert_eq!(count_spawn_leaves(&graph), 3);
     }
 
     #[test]
     fn count_spawn_leaves_in_process_not_counted() {
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(in_process_task("echo"));
+        let graph = ExecutionGraph::from_node_list([in_process_task("echo")]);
         assert_eq!(count_spawn_leaves(&graph), 0);
     }
 
     #[test]
     fn count_spawn_leaves_mixed_spawn_and_in_process() {
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(spawn_task("build"));
-        graph.add_node(in_process_task("echo"));
+        let graph = ExecutionGraph::from_node_list([spawn_task("build"), in_process_task("echo")]);
         assert_eq!(count_spawn_leaves(&graph), 1);
     }
 
     #[test]
     fn count_spawn_leaves_nested_expanded() {
         // Build a nested graph containing two spawns
-        let mut nested = ExecutionGraph::default();
-        nested.add_node(spawn_task("nested-build"));
-        nested.add_node(spawn_task("nested-test"));
+        let nested =
+            ExecutionGraph::from_node_list([spawn_task("nested-build"), spawn_task("nested-test")]);
 
         // Outer graph has one expanded item pointing to the nested graph
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(expanded_task("expand", nested));
+        let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
         assert_eq!(count_spawn_leaves(&graph), 2);
     }
 
     #[test]
     fn count_spawn_leaves_nested_with_top_level() {
         // Nested graph with one spawn
-        let mut nested = ExecutionGraph::default();
-        nested.add_node(spawn_task("nested-lint"));
+        let nested = ExecutionGraph::from_node_list([spawn_task("nested-lint")]);
 
         // Top-level graph has one spawn + one expanded
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(spawn_task("build"));
-        graph.add_node(expanded_task("expand", nested));
+        let graph =
+            ExecutionGraph::from_node_list([spawn_task("build"), expanded_task("expand", nested)]);
         assert_eq!(count_spawn_leaves(&graph), 2);
     }
 
@@ -1108,10 +1093,6 @@ mod tests {
     /// Build a `LabeledGraphReporter` for the given graph and return a leaf reporter
     /// for the first node's first item.
     fn build_labeled_leaf(graph: ExecutionGraph) -> Box<dyn LeafExecutionReporter> {
-        #[expect(
-            clippy::arc_with_non_send_sync,
-            reason = "Acyclic<!Sync> but single-threaded test"
-        )]
         let graph_arc = Arc::new(graph);
         let builder = Box::new(LabeledReporterBuilder::new(Vec::<u8>::new(), test_path()));
         let mut reporter = builder.build(&graph_arc);
@@ -1123,17 +1104,14 @@ mod tests {
 
     #[test]
     fn labeled_reporter_single_spawn_suggests_inherited() {
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(spawn_task("build"));
+        let graph = ExecutionGraph::from_node_list([spawn_task("build")]);
         let leaf = build_labeled_leaf(graph);
         assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
     }
 
     #[test]
     fn labeled_reporter_multiple_spawns_suggests_null() {
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(spawn_task("build"));
-        graph.add_node(spawn_task("test"));
+        let graph = ExecutionGraph::from_node_list([spawn_task("build"), spawn_task("test")]);
         let leaf = build_labeled_leaf(graph);
         assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
     }
@@ -1143,8 +1121,7 @@ mod tests {
         // Zero spawn leaves → spawn_leaf_count == 0, so not == 1 → Null
         // This is correct: in-process executions don't spawn child processes,
         // so stdin suggestion doesn't apply to them.
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(in_process_task("echo"));
+        let graph = ExecutionGraph::from_node_list([in_process_task("echo")]);
         let leaf = build_labeled_leaf(graph);
         assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
     }
@@ -1152,9 +1129,7 @@ mod tests {
     #[test]
     fn labeled_reporter_one_spawn_one_in_process_suggests_inherited() {
         // One spawn leaf + one in-process → spawn_leaf_count == 1 → Inherited
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(spawn_task("build"));
-        graph.add_node(in_process_task("echo"));
+        let graph = ExecutionGraph::from_node_list([spawn_task("build"), in_process_task("echo")]);
         let leaf = build_labeled_leaf(graph);
         assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
     }
@@ -1162,11 +1137,9 @@ mod tests {
     #[test]
     fn labeled_reporter_nested_single_spawn_suggests_inherited() {
         // Nested graph with exactly one spawn
-        let mut nested = ExecutionGraph::default();
-        nested.add_node(spawn_task("nested-build"));
+        let nested = ExecutionGraph::from_node_list([spawn_task("nested-build")]);
 
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(expanded_task("expand", nested));
+        let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
         let leaf = build_labeled_leaf(graph);
         assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
     }
@@ -1174,12 +1147,10 @@ mod tests {
     #[test]
     fn labeled_reporter_nested_multiple_spawns_suggests_null() {
         // Nested graph with two spawns
-        let mut nested = ExecutionGraph::default();
-        nested.add_node(spawn_task("nested-a"));
-        nested.add_node(spawn_task("nested-b"));
+        let nested =
+            ExecutionGraph::from_node_list([spawn_task("nested-a"), spawn_task("nested-b")]);
 
-        let mut graph = ExecutionGraph::default();
-        graph.add_node(expanded_task("expand", nested));
+        let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
         let leaf = build_labeled_leaf(graph);
         assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
     }

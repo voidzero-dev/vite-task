@@ -138,10 +138,10 @@ pub enum LeafExecutionKind {
     InProcess(InProcessExecution),
 }
 
-/// Serialize an `ExecutionGraph` (which is `Acyclic<DiGraph<...>>`) using `serialize_by_key`.
+/// Serialize an `ExecutionGraph` using `serialize_by_key`.
 ///
 /// `vite_graph_ser::serialize_by_key` expects `&DiGraph<N, E, Ix>`, so we call `.inner()`
-/// on the `Acyclic` wrapper to get the underlying `DiGraph` reference.
+/// to get the underlying `DiGraph` reference.
 fn serialize_execution_graph_by_key<S: Serializer>(
     graph: &ExecutionGraph,
     serializer: S,

@@ -30,15 +30,11 @@ use crate::{
     cache_metadata::{CacheMetadata, ExecutionCacheKey, ProgramFingerprint, SpawnFingerprint},
     envs::EnvFingerprints,
     error::{CdCommandError, Error, PathFingerprintError, PathFingerprintErrorKind, PathType},
-    execution_graph::{ExecutionGraph, ExecutionNodeIndex},
+    execution_graph::{ExecutionGraph, ExecutionNodeIndex, InnerExecutionGraph},
     in_process::InProcessExecution,
     path_env::get_path_env,
     plan_request::{PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest},
 };
-
-/// Type alias for the inner graph used during construction, before acyclicity validation.
-type InnerExecutionGraph =
-    petgraph::graph::DiGraph<TaskExecution, (), crate::execution_graph::ExecutionIx>;
 
 /// Locate the executable path for a given program name in the provided envs and cwd.
 fn which(
@@ -504,8 +500,8 @@ fn plan_spawn_execution(
 
 /// Expand the parsed task request (like `run -r build`/`lint`) into an execution graph.
 ///
-/// Builds a `DiGraph` of task executions, then validates it is acyclic by wrapping
-/// in `petgraph::acyclic::Acyclic`. Returns `CycleDependencyDetected` if a cycle is found.
+/// Builds a `DiGraph` of task executions, then validates it is acyclic via
+/// `ExecutionGraph::try_from_graph`. Returns `CycleDependencyDetected` if a cycle is found.
 #[expect(clippy::future_not_send, reason = "PlanContext contains !Send dyn PlanRequestParser")]
 pub async fn plan_query_request(
     query_plan_request: QueryPlanRequest,
@@ -547,18 +543,11 @@ pub async fn plan_query_request(
         );
     }
 
-    // Validate the graph is acyclic by wrapping in `Acyclic`.
-    // `Acyclic::try_from` performs a topological sort; if a cycle is found,
-    // it returns `Cycle(node_id)` identifying one node in the cycle.
-    ExecutionGraph::try_from(inner_graph).map_err(|cycle| {
+    // Validate the graph is acyclic.
+    // `try_from_graph` performs a topological sort; if a cycle is found,
+    // it returns `CycleError` identifying one node in the cycle.
+    ExecutionGraph::try_from_graph(inner_graph).map_err(|cycle| {
         // Look up the human-readable task display for the node involved in the cycle.
-        // The cycle's node_id is still valid against the original inner_graph (which
-        // was moved into try_from but returned back on error — however, `Cycle` only
-        // contains the node index, not the graph). We stored the display info in our
-        // local map, so we can look it up by reversing the index mapping.
-        //
-        // Since we no longer have access to the inner_graph after the failed try_from,
-        // we find the TaskDisplay by searching our index map for the node index.
         let task_display =
             execution_node_indices_by_task_index.iter().find_map(|(task_idx, &exec_idx)| {
                 if exec_idx == cycle.node_id() {
