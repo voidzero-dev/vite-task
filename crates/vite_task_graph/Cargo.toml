@@ -24,7 +24,7 @@ vite_workspace = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-ts-rs = { workspace = true }
+ts-rs = { workspace = true, features = ["no-serde-warnings"] }
 vite_path = { workspace = true, features = ["ts-rs"] }
 vite_str = { workspace = true, features = ["ts-rs"] }
 which = { workspace = true }
