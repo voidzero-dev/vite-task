@@ -2,11 +2,11 @@
   "cacheScripts": true,
   "tasks": {
     "read-stdin": {
-      "command": "cat",
+      "command": "read-stdin",
       "cache": false
     },
     "read-stdin-cached": {
-      "command": "cat",
+      "command": "read-stdin",
       "cache": true
     }
   }

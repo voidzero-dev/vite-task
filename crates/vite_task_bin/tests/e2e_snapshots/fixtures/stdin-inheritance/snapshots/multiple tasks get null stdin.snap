@@ -3,9 +3,9 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > echo from-stdin | vp run -r read-stdin
-$ cat ⊘ cache disabled: no cache config
+$ read-stdin ⊘ cache disabled: no cache config
 
-~/packages/other$ cat
+~/packages/other$ read-stdin
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -17,9 +17,9 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] stdin-inheritance-test#read-stdin: $ cat ✓
+  [1] stdin-inheritance-test#read-stdin: $ read-stdin ✓
       → Cache disabled in task configuration
   ·······················································
-  [2] other#read-stdin: ~/packages/other$ cat ✓
+  [2] other#read-stdin: ~/packages/other$ read-stdin ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

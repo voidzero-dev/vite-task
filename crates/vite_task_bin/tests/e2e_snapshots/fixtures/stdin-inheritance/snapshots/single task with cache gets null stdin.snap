@@ -3,7 +3,7 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > echo from-stdin | vp run read-stdin-cached
-$ cat
+$ read-stdin
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -15,6 +15,6 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] stdin-inheritance-test#read-stdin-cached: $ cat ✓
+  [1] stdin-inheritance-test#read-stdin-cached: $ read-stdin ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,6 +1,6 @@
 {
   "name": "other",
   "scripts": {
-    "read-stdin": "cat"
+    "read-stdin": "read-stdin"
   }
 }
