@@ -20,7 +20,7 @@ use vite_task_graph::{
     loader::UserConfigLoader,
 };
 use vite_task_plan::{
-    ExecutionGraph, ExecutionPlan, TaskGraphLoader, TaskPlanErrorKind,
+    ExecutionGraph, ExecutionPlan, TaskGraphLoader,
     plan_request::{PlanRequest, ScriptCommand, SyntheticPlanRequest},
     prepend_path_env,
 };
@@ -457,12 +457,18 @@ impl<'a> Session<'a> {
     ) -> anyhow::Result<ExitStatus> {
         // Plan the synthetic execution — returns a SpawnExecution directly
         // (synthetic plans are always a single spawned process)
-        let spawn_execution = ExecutionPlan::plan_synthetic(
+        let execution_plan = ExecutionPlan::plan_synthetic(
             &self.workspace_path,
             &self.cwd,
             synthetic_plan_request,
             cache_key,
         )?;
+        let vite_task_plan::ExecutionItemKind::Leaf(vite_task_plan::LeafExecutionKind::Spawn(
+            spawn_execution,
+        )) = execution_plan.into_root_node()
+        else {
+            unreachable!("plan_synthetic always produces a Leaf(Spawn(..)) node")
+        };
 
         // Initialize cache (needed for cache-aware execution)
         let cache = self.cache()?;
@@ -480,11 +486,11 @@ impl<'a> Session<'a> {
         .await
         {
             // Cache hit — no process was spawned, success
-            Ok(None) => Ok(ExitStatus::SUCCESS),
+            execute::SpawnOutcome::CacheHit => Ok(ExitStatus::SUCCESS),
             // Process ran successfully
-            Ok(Some(status)) if status.success() => Ok(ExitStatus::SUCCESS),
+            execute::SpawnOutcome::Spawned(status) if status.success() => Ok(ExitStatus::SUCCESS),
             // Process ran but exited with non-zero status
-            Ok(Some(status)) => {
+            execute::SpawnOutcome::Spawned(status) => {
                 let code = event::exit_status_to_code(status);
                 #[expect(
                     clippy::cast_sign_loss,
@@ -492,8 +498,8 @@ impl<'a> Session<'a> {
                 )]
                 Ok(ExitStatus(code.clamp(1, 255) as u8))
             }
-            // Error — already reported through the reporter's finish()
-            Err(_) => Ok(ExitStatus::FAILURE),
+            // Infrastructure error — already reported through the reporter's finish()
+            execute::SpawnOutcome::Failed => Ok(ExitStatus::FAILURE),
         }
     }
 

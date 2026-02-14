@@ -1,10 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/error_cycle_dependency
 ---
 [1]> vp run task-a # task-a -> task-b -> task-a cycle
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Execution aborted due to error: Cycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✗ Cycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))

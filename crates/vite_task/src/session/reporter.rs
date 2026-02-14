@@ -438,8 +438,6 @@ struct SharedReporterState<W: Write> {
     writer: W,
     executions: Vec<ExecutionInfo>,
     stats: ExecutionStats,
-    /// The first error encountered during execution. Used to print the abort banner.
-    first_error: Option<Str>,
     /// Total number of spawned leaf executions in the graph (including nested `Expanded`
     /// subgraphs). Computed once at build time and used to determine the stdin suggestion:
     /// inherited stdin is only suggested when there is exactly one spawn leaf.
@@ -502,7 +500,6 @@ impl<W: Write + 'static> GraphExecutionReporterBuilder for LabeledReporterBuilde
                 writer: self.writer,
                 executions: Vec::new(),
                 stats: ExecutionStats::default(),
-                first_error: None,
                 spawn_leaf_count,
             })),
             graph: Arc::clone(graph),
@@ -537,43 +534,14 @@ impl<W: Write + 'static> GraphExecutionReporter for LabeledGraphReporter<W> {
     fn finish(self: Box<Self>, error: Option<Str>) -> Result<(), ExitStatus> {
         let mut shared = self.shared.borrow_mut();
 
-        // If a graph-level error was passed in, store it as first_error
-        // (only if no leaf error was already recorded — leaf errors take precedence
-        // since they occurred first chronologically)
-        if let Some(ref error_msg) = error
-            && shared.first_error.is_none()
-        {
-            shared.first_error = Some(error_msg.clone());
-        }
-
-        // Check if execution was aborted due to error (either graph-level or leaf-level).
-        // Clone the error message before using the writer to avoid borrow conflicts.
-        if let Some(error_msg) = shared.first_error.clone() {
-            // Print error abort banner
-            let _ = writeln!(shared.writer);
-            let _ = writeln!(
-                shared.writer,
-                "{}",
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    .style(Style::new().bright_black())
-            );
-            let _ = writeln!(
-                shared.writer,
-                "{} {}",
-                "Execution aborted due to error:".style(Style::new().red().bold()),
-                error_msg.style(Style::new().red())
-            );
-            let _ = writeln!(
-                shared.writer,
-                "{}",
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    .style(Style::new().bright_black())
-            );
-
+        // Handle graph-level errors (e.g., cycle detection, cache init failure).
+        // These are distinct from leaf-level errors which are tracked per-execution.
+        if let Some(error_msg) = error {
+            write_error_message(&mut shared.writer, &error_msg);
             return Err(ExitStatus::FAILURE);
         }
 
-        // No errors — print summary.
+        // Print summary.
         // Special case: single execution without display info (e.g., synthetic via nested expansion)
         // → skip summary since there's nothing meaningful to show.
         let is_single_displayless =
@@ -585,11 +553,17 @@ impl<W: Write + 'static> GraphExecutionReporter for LabeledGraphReporter<W> {
             print_summary(writer, executions, stats, &self.workspace_path);
         }
 
-        // Determine exit code based on failed tasks:
-        // 1. All tasks succeed → return Ok(())
-        // 2. Exactly one task failed → return Err with that task's exit code
-        // 3. More than one task failed → return Err(1)
-        // Note: None means success (cache hit or in-process)
+        // Determine exit code based on failed tasks and infrastructure errors:
+        // - Infrastructure errors (cache lookup, spawn failure) have error_message set
+        //   but no meaningful exit_status.
+        // - Process failures have a non-zero exit_status.
+        //
+        // Rules:
+        // 1. No failures at all → Ok(())
+        // 2. Exactly one process failure, no infra errors → use that task's exit code
+        // 3. Any infra errors, or multiple failures → Err(1)
+        let has_infra_errors = shared.executions.iter().any(|exec| exec.error_message.is_some());
+
         let failed_exit_codes: Vec<i32> = shared
             .executions
             .iter()
@@ -598,9 +572,9 @@ impl<W: Write + 'static> GraphExecutionReporter for LabeledGraphReporter<W> {
             .map(|status| exit_status_to_code(*status))
             .collect();
 
-        match failed_exit_codes.as_slice() {
-            [] => Ok(()),
-            [code] => {
+        match (has_infra_errors, failed_exit_codes.as_slice()) {
+            (false, []) => Ok(()),
+            (false, [code]) => {
                 // Return the single failed task's exit code (clamped to u8 range)
                 #[expect(
                     clippy::cast_sign_loss,
@@ -692,11 +666,6 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
         if let Some(ref message) = error {
             write_error_message(&mut shared.writer, message);
 
-            // Track first error for the abort banner
-            if shared.first_error.is_none() {
-                shared.first_error = Some(message.clone());
-            }
-
             // Update the execution info if start() was called (an entry was pushed).
             // Without the `self.started` guard, `last_mut()` would return a
             // *different* execution's entry, corrupting its error_message.
@@ -743,8 +712,8 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
 
 /// Print the full execution summary with statistics, performance, and per-task details.
 ///
-/// This is called by [`LabeledGraphReporter::finish`] when there are no errors
-/// and the summary should be displayed.
+/// Called by [`LabeledGraphReporter::finish`] after all tasks have executed.
+/// Infrastructure errors and task failures are included in the summary.
 #[expect(
     clippy::too_many_lines,
     reason = "summary formatting is inherently verbose with many write calls"

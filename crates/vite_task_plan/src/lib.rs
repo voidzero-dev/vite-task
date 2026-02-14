@@ -11,8 +11,7 @@ pub mod plan_request;
 use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 
 use context::PlanContext;
-use error::TaskPlanErrorKindResultExt;
-pub use error::{Error, TaskPlanErrorKind};
+pub use error::Error;
 pub use execution_graph::ExecutionGraph;
 pub use in_process::InProcessExecution;
 pub use path_env::{get_path_env, prepend_path_env};
@@ -192,6 +191,11 @@ impl ExecutionPlan {
         &self.root_node
     }
 
+    #[must_use]
+    pub fn into_root_node(self) -> ExecutionItemKind {
+        self.root_node
+    }
+
     /// Returns `true` if the plan contains no tasks to execute.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -220,11 +224,7 @@ impl ExecutionPlan {
         plan_request_parser: &mut (dyn PlanRequestParser + '_),
         task_graph_loader: &mut (dyn TaskGraphLoader + '_),
     ) -> Result<ExecutionGraph, Error> {
-        let indexed_task_graph = task_graph_loader
-            .load_task_graph()
-            .await
-            .map_err(TaskPlanErrorKind::TaskGraphLoadError)
-            .with_empty_call_stack()?;
+        let indexed_task_graph = task_graph_loader.load_task_graph().await?;
 
         let context = PlanContext::new(
             workspace_path,
@@ -291,17 +291,16 @@ impl ExecutionPlan {
         cwd: &Arc<AbsolutePath>,
         synthetic_plan_request: SyntheticPlanRequest,
         cache_key: Arc<[Str]>,
-    ) -> Result<SpawnExecution, Error> {
+    ) -> Result<Self, Error> {
         let execution_cache_key = cache_metadata::ExecutionCacheKey::ExecAPI(cache_key);
-        plan_synthetic_request(
+        let execution = plan_synthetic_request(
             workspace_path,
             &BTreeMap::default(),
             synthetic_plan_request,
             Some(execution_cache_key),
             cwd,
             ParentCacheConfig::None,
-        )
-        .with_empty_call_stack()?;
+        )?;
         Ok(Self { root_node: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(execution)) })
     }
 }

@@ -28,15 +28,21 @@ use super::{
 };
 use crate::{Session, session::execute::spawn::SpawnTrackResult};
 
-/// Internal error type used to abort execution when errors occur.
+/// Outcome of a spawned execution.
 ///
-/// Contains an optional graph-level error message:
-/// - `None`: A leaf-level error occurred and was already reported through
-///   `LeafExecutionReporter::finish()`
-/// - `Some(message)`: A graph-level error occurred (e.g., cycle detection)
-///   that needs to be passed to `GraphExecutionReporter::finish()`
-#[derive(Debug)]
-pub struct ExecutionAborted(Option<Str>);
+/// Returned by [`execute_spawn`] to communicate what happened. Errors are
+/// already reported through `LeafExecutionReporter::finish()` before this
+/// value is returned — the caller does not need to handle error display.
+pub enum SpawnOutcome {
+    /// Cache hit — no process was spawned. Cached outputs were replayed.
+    CacheHit,
+    /// Process was spawned and exited with this status.
+    Spawned(std::process::ExitStatus),
+    /// An infrastructure error prevented the process from running
+    /// (cache lookup failure or spawn failure).
+    /// Already reported through the leaf reporter.
+    Failed,
+}
 
 /// Holds mutable references needed during graph execution.
 ///
@@ -62,12 +68,15 @@ impl ExecutionContext<'_> {
     /// The `path_prefix` tracks our position within nested execution graphs. For the
     /// root call this is an empty path; for nested `Expanded` items it carries the
     /// path so far.
+    /// Returns `Some(error_message)` if the graph contains a cycle (graph-level error),
+    /// or `None` on success. Leaf-level errors are reported through the reporter
+    /// and do not abort the graph.
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_expanded_graph(
         &mut self,
         graph: &ExecutionGraph,
         path_prefix: &LeafExecutionPath,
-    ) -> Result<(), ExecutionAborted> {
+    ) -> Option<Str> {
         // Use StableGraph to preserve node indices during removal.
         // We need stable indices because the LeafExecutionPath references nodes
         // by their original index in the graph.
@@ -87,9 +96,7 @@ impl ExecutionContext<'_> {
             Err(cycle) => {
                 // Cycle detected — return a graph-level error.
                 // This will be passed to `GraphExecutionReporter::finish(Some(msg))`.
-                return Err(ExecutionAborted(Some(vite_str::format!(
-                    "Cycle dependencies detected: {cycle:?}"
-                ))));
+                return Some(vite_str::format!("Cycle dependencies detected: {cycle:?}"));
             }
         };
 
@@ -110,16 +117,23 @@ impl ExecutionContext<'_> {
 
                 match &item.kind {
                     ExecutionItemKind::Leaf(leaf_kind) => {
-                        self.execute_leaf(&item_path, leaf_kind).boxed_local().await?;
+                        self.execute_leaf(&item_path, leaf_kind).boxed_local().await;
                     }
                     ExecutionItemKind::Expanded(nested_graph) => {
-                        // Recurse into the nested graph, carrying the path prefix forward
-                        self.execute_expanded_graph(nested_graph, &item_path).boxed_local().await?;
+                        // Recurse into the nested graph, carrying the path prefix forward.
+                        // Cycle errors in nested graphs propagate up immediately.
+                        if let Some(err) = self
+                            .execute_expanded_graph(nested_graph, &item_path)
+                            .boxed_local()
+                            .await
+                        {
+                            return Some(err);
+                        }
                     }
                 }
             }
         }
-        Ok(())
+        None
     }
 
     /// Execute a single leaf item (in-process command or spawned process).
@@ -131,7 +145,7 @@ impl ExecutionContext<'_> {
         &mut self,
         path: &LeafExecutionPath,
         leaf_execution_kind: &LeafExecutionKind,
-    ) -> Result<(), ExecutionAborted> {
+    ) {
         let mut leaf_reporter = self.reporter.new_leaf_execution(path);
 
         match leaf_execution_kind {
@@ -147,17 +161,15 @@ impl ExecutionContext<'_> {
                     CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
                     None,
                 );
-                Ok(())
             }
-            LeafExecutionKind::Spawn(spawn_execution) =>
-            {
+            LeafExecutionKind::Spawn(spawn_execution) => {
                 #[expect(
                     clippy::large_futures,
                     reason = "spawn execution with cache management creates large futures"
                 )]
-                execute_spawn(leaf_reporter, spawn_execution, self.cache, self.cache_base_path)
-                    .await
-                    .map(|_status| ())
+                let _ =
+                    execute_spawn(leaf_reporter, spawn_execution, self.cache, self.cache_base_path)
+                        .await;
             }
         }
     }
@@ -174,12 +186,8 @@ impl ExecutionContext<'_> {
 /// 3. If cache hit: replay cached outputs → finish
 /// 4. If cache miss/disabled: spawn process → stream output → update cache → finish
 ///
-/// # Returns
-///
-/// - `Ok(None)` — cache hit, no process was spawned
-/// - `Ok(Some(exit_status))` — process ran, here's its exit status
-/// - `Err(ExecutionAborted(None))` — an error occurred, already reported through
-///   `leaf_reporter.finish(..., Some(error_message))`
+/// Errors (cache lookup failure, spawn failure, cache update failure) are reported
+/// through `leaf_reporter.finish()` and do not abort the caller.
 #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
 #[expect(
     clippy::too_many_lines,
@@ -190,7 +198,7 @@ pub async fn execute_spawn(
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
     cache_base_path: &Arc<AbsolutePath>,
-) -> Result<Option<std::process::ExitStatus>, ExecutionAborted> {
+) -> SpawnOutcome {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
     // 1. Determine cache status FIRST by trying cache hit.
@@ -209,14 +217,14 @@ pub async fn execute_spawn(
                 None,
             ),
             Err(err) => {
-                // Cache lookup error — report through finish and abort.
+                // Cache lookup error — report through finish.
                 // Note: start() is NOT called because we don't have a valid cache status.
                 leaf_reporter.finish(
                     None,
                     CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
                     Some(vite_str::format!("Cache lookup failed: {err}")),
                 );
-                return Err(ExecutionAborted(None));
+                return SpawnOutcome::Failed;
             }
         }
     } else {
@@ -244,7 +252,7 @@ pub async fn execute_spawn(
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
             None,
         );
-        return Ok(None);
+        return SpawnOutcome::CacheHit;
     }
 
     // 4. Execute spawn (cache miss or disabled).
@@ -293,7 +301,7 @@ pub async fn execute_spawn(
                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
                 Some(vite_str::format!("Failed to spawn process: {err}")),
             );
-            return Err(ExecutionAborted(None));
+            return SpawnOutcome::Failed;
         }
     };
 
@@ -339,11 +347,12 @@ pub async fn execute_spawn(
         (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
     };
 
-    // 6. Finish the leaf execution with the result and optional error
-    let has_error = cache_error.is_some();
+    // 6. Finish the leaf execution with the result and optional cache error.
+    //    Cache update/fingerprint failures are reported but do not affect the outcome —
+    //    the process ran, so we return its actual exit status.
     leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error);
 
-    if has_error { Err(ExecutionAborted(None)) } else { Ok(Some(result.exit_status)) }
+    SpawnOutcome::Spawned(result.exit_status)
 }
 
 impl Session<'_> {
@@ -382,18 +391,14 @@ impl Session<'_> {
             cache_base_path: &self.workspace_path,
         };
 
-        // Execute the graph. On abort, extract the optional graph-level error message.
-        let graph_error = match execution_context
-            .execute_expanded_graph(&graph, &LeafExecutionPath::default())
-            .await
-        {
-            Ok(()) => None,
-            Err(ExecutionAborted(error)) => error,
-        };
+        // Execute the graph. Individual leaf errors are reported through the reporter
+        // and do not abort the graph. Only graph-level errors (cycle detection) are
+        // returned here.
+        let graph_error =
+            execution_context.execute_expanded_graph(&graph, &LeafExecutionPath::default()).await;
 
-        // Always call finish, whether execution succeeded or was aborted.
-        // graph_error is None for leaf-level errors (already handled by leaf reporter)
-        // and Some(msg) for graph-level errors (cycle detection).
+        // Leaf-level errors and non-zero exit statuses are tracked internally
+        // by the reporter. graph_error is Some only for cycle detection.
         reporter.finish(graph_error)
     }
 }
