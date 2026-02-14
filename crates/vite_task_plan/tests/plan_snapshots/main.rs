@@ -187,12 +187,23 @@ fn run_case_inner(
             let plan = match plan_result {
                 Ok(graph) => ExecutionPlan::from_execution_graph(graph),
                 Err(err) => {
+                    // Format the full error chain using anyhow's `{:#}` formatter
+                    // and redact workspace paths for snapshot stability.
+                    let anyhow_err: anyhow::Error = err.into();
+                    let err_formatted = vite_str::format!("{anyhow_err:#}");
+                    let err_str =
+                        err_formatted.as_str().cow_replace(workspace_root_str, "<workspace>");
+                    let err_str = if cfg!(windows) {
+                        err_str.as_ref().cow_replace('\\', "/")
+                    } else {
+                        err_str
+                    };
                     #[expect(
                         clippy::disallowed_macros,
-                        reason = "insta::assert_debug_snapshot! internally uses std::format!"
+                        reason = "insta::assert_snapshot! internally uses std::format!"
                     )]
                     {
-                        insta::assert_debug_snapshot!(snapshot_name.as_str(), err);
+                        insta::assert_snapshot!(snapshot_name.as_str(), err_str.as_ref());
                     }
                     continue;
                 }

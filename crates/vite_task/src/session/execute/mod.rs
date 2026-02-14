@@ -4,12 +4,10 @@ pub mod spawn;
 use std::{process::Stdio, sync::Arc};
 
 use futures_util::FutureExt;
-use petgraph::{algo::toposort, stable_graph::StableGraph};
 use vite_path::AbsolutePath;
-use vite_str::Str;
 use vite_task_plan::{
-    ExecutionGraph, ExecutionItemKind, LeafExecutionKind, SpawnExecution, TaskExecution,
-    execution_graph::ExecutionIx,
+    ExecutionGraph, ExecutionItemKind, LeafExecutionKind, SpawnExecution,
+    execution_graph::ExecutionNodeIndex,
 };
 
 use self::{
@@ -59,56 +57,43 @@ struct ExecutionContext<'a> {
 }
 
 impl ExecutionContext<'_> {
-    /// Execute all tasks in an execution graph in topological order.
+    /// Execute all tasks in an execution graph in dependency order.
     ///
-    /// This is the main entry point for graph traversal. It topologically sorts the graph
-    /// (reversing edges so dependencies execute first), then executes each task's items
-    /// sequentially.
+    /// Since `ExecutionGraph` is `Acyclic<DiGraph<...>>`, the graph is guaranteed to have
+    /// no cycles at the type level. We use `nodes_iter()` which returns nodes in topological
+    /// order (for every edge A→B, A comes before B).
+    ///
+    /// In our graph, edges go from dependents to dependencies (A→B means "A depends on B"),
+    /// so `nodes_iter()` gives dependents before dependencies. We reverse this to execute
+    /// dependencies first.
     ///
     /// The `path_prefix` tracks our position within nested execution graphs. For the
     /// root call this is an empty path; for nested `Expanded` items it carries the
     /// path so far.
-    /// Returns `Some(error_message)` if the graph contains a cycle (graph-level error),
-    /// or `None` on success. Leaf-level errors are reported through the reporter
-    /// and do not abort the graph.
+    /// Leaf-level errors are reported through the reporter and do not abort the graph.
+    /// Cycle detection is handled at plan time, so this function cannot encounter cycles.
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_expanded_graph(
         &mut self,
         graph: &ExecutionGraph,
         path_prefix: &LeafExecutionPath,
-    ) -> Option<Str> {
-        // Use StableGraph to preserve node indices during removal.
-        // We need stable indices because the LeafExecutionPath references nodes
-        // by their original index in the graph.
-        let mut stable_graph: StableGraph<&TaskExecution, (), _, ExecutionIx> =
-            graph.map(|_, task_execution| task_execution, |_, ()| ()).into();
+    ) {
+        // `nodes_iter()` returns nodes in topological order: for every edge A→B,
+        // A appears before B. Since our edges mean "A depends on B", dependencies
+        // (B) appear after their dependents (A). Reversing gives us execution order
+        // where dependencies run first.
+        //
+        // Collect into a Vec first since the `nodes_iter()` return type
+        // (`impl Iterator`) does not implement `DoubleEndedIterator`.
+        let mut node_indices: Vec<ExecutionNodeIndex> = graph.nodes_iter().collect();
+        node_indices.reverse();
 
-        // The graph is constructed with edges from dependents to dependencies
-        // (e.g., A → B means "A depends on B"). For execution we need the reverse:
-        // dependencies should execute first. Reversing edges before topological sort
-        // achieves this.
-        stable_graph.reverse();
-
-        // Topological sort ensures tasks execute in dependency order.
-        // A cycle means the dependency graph is invalid.
-        let node_indices = match toposort(&stable_graph, None) {
-            Ok(ok) => ok,
-            Err(cycle) => {
-                // Cycle detected — return a graph-level error.
-                // This will be passed to `GraphExecutionReporter::finish(Some(msg))`.
-                return Some(vite_str::format!("Cycle dependencies detected: {cycle:?}"));
-            }
-        };
-
-        // Execute tasks in topological order. Each task may have multiple items
+        // Execute tasks in dependency-first order. Each task may have multiple items
         // (from `&&`-split commands), which are executed sequentially.
         for node_ix in node_indices {
-            // `remove_node` on a StableGraph preserves other node indices.
-            // The original node index (`node_ix`) is still valid for path construction
-            // because it corresponds to the same node in the original (non-stable) graph.
-            let task_execution = stable_graph
-                .remove_node(node_ix)
-                .expect("node was returned by toposort so it must exist");
+            // Access the inner DiGraph directly for node indexing, since the `Acyclic`
+            // wrapper's only `Index` impl is our custom `Index<ExecutionPathItem>`.
+            let task_execution = &graph.inner()[node_ix];
 
             for (item_idx, item) in task_execution.items.iter().enumerate() {
                 // Build the path for this item by appending to the prefix
@@ -121,19 +106,11 @@ impl ExecutionContext<'_> {
                     }
                     ExecutionItemKind::Expanded(nested_graph) => {
                         // Recurse into the nested graph, carrying the path prefix forward.
-                        // Cycle errors in nested graphs propagate up immediately.
-                        if let Some(err) = self
-                            .execute_expanded_graph(nested_graph, &item_path)
-                            .boxed_local()
-                            .await
-                        {
-                            return Some(err);
-                        }
+                        self.execute_expanded_graph(nested_graph, &item_path).boxed_local().await;
                     }
                 }
             }
         }
-        None
     }
 
     /// Execute a single leaf item (in-process command or spawned process).
@@ -358,9 +335,9 @@ pub async fn execute_spawn(
 impl Session<'_> {
     /// Execute an execution graph, reporting events through the provided reporter builder.
     ///
-    /// The builder is first transitioned to a `GraphExecutionReporter` by providing the graph.
-    /// Then each task in the graph is executed in topological order, with leaf executions
-    /// reported through individual `LeafExecutionReporter` instances.
+    /// Cache is initialized only if any leaf execution needs it. The reporter is built
+    /// after cache initialization, so cache errors are reported directly to stderr
+    /// without involving the reporter at all.
     ///
     /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
     /// Returns `Ok(())` when all tasks succeeded.
@@ -370,20 +347,26 @@ impl Session<'_> {
         execution_graph: ExecutionGraph,
         builder: Box<dyn GraphExecutionReporterBuilder>,
     ) -> Result<(), ExitStatus> {
-        // Wrap the graph in Arc so both the reporter and execution can reference it.
-        // The reporter clones the Arc internally for display lookups.
-        let graph = Arc::new(execution_graph);
-        let mut reporter = builder.build(&graph);
-
-        // Lazily initialize the cache on first execution
+        // Initialize cache before building the reporter. Cache errors are reported
+        // directly to stderr and cause an early exit, keeping the reporter flow clean
+        // (the reporter's `finish()` no longer accepts graph-level error messages).
         let cache = match self.cache() {
             Ok(cache) => cache,
+            #[expect(clippy::print_stderr, reason = "cache init errors bypass the reporter")]
             Err(err) => {
-                // Cache initialization failure is a graph-level error — pass to finish()
-                return reporter
-                    .finish(Some(vite_str::format!("Failed to initialize cache: {err}")));
+                eprintln!("Failed to initialize cache: {err}");
+                return Err(ExitStatus::FAILURE);
             }
         };
+
+        // Wrap the graph in Arc so both the reporter and execution can reference it.
+        // The reporter clones the Arc internally for display lookups.
+        // `Acyclic` uses `RefCell` internally for topological-order caching, making it
+        // `!Sync`. We still need `Arc` here because the reporter holds a clone for display
+        // lookups. The graph is only ever accessed from a single thread in practice.
+        #[expect(clippy::arc_with_non_send_sync, reason = "Acyclic<!Sync> but single-threaded use")]
+        let graph = Arc::new(execution_graph);
+        let mut reporter = builder.build(&graph);
 
         let mut execution_context = ExecutionContext {
             reporter: &mut *reporter,
@@ -391,14 +374,12 @@ impl Session<'_> {
             cache_base_path: &self.workspace_path,
         };
 
-        // Execute the graph. Individual leaf errors are reported through the reporter
-        // and do not abort the graph. Only graph-level errors (cycle detection) are
-        // returned here.
-        let graph_error =
-            execution_context.execute_expanded_graph(&graph, &LeafExecutionPath::default()).await;
+        // Execute the graph. Leaf-level errors are reported through the reporter
+        // and do not abort the graph. Cycle detection is handled at plan time.
+        execution_context.execute_expanded_graph(&graph, &LeafExecutionPath::default()).await;
 
         // Leaf-level errors and non-zero exit statuses are tracked internally
-        // by the reporter. graph_error is Some only for cycle detection.
-        reporter.finish(graph_error)
+        // by the reporter.
+        reporter.finish()
     }
 }

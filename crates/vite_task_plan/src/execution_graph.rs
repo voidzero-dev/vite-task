@@ -23,4 +23,17 @@ unsafe impl IndexType for ExecutionIx {
 pub type ExecutionNodeIndex = NodeIndex<ExecutionIx>;
 pub type ExecutionEdgeIndex = EdgeIndex<ExecutionIx>;
 
-pub type ExecutionGraph = petgraph::graph::DiGraph<TaskExecution, (), ExecutionIx>;
+/// The inner directed graph type before acyclicity wrapping.
+/// Used during graph construction in `plan_query_request` before validation.
+type InnerExecutionGraph = petgraph::graph::DiGraph<TaskExecution, (), ExecutionIx>;
+
+/// A directed acyclic execution graph.
+///
+/// Wraps `petgraph::graph::DiGraph` in `petgraph::acyclic::Acyclic` to enforce at the
+/// type level that the graph has no cycles. This guarantee is established at plan time
+/// when the graph is constructed in `plan_query_request`, eliminating the need for
+/// runtime cycle detection during execution.
+///
+/// `Acyclic` implements `Deref<Target = DiGraph<...>>`, so all read operations on the
+/// inner graph (indexing, iteration, node/edge counts) work transparently.
+pub type ExecutionGraph = petgraph::acyclic::Acyclic<InnerExecutionGraph>;

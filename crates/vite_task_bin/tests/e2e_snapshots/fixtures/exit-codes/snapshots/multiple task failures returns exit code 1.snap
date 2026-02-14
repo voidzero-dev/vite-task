@@ -1,12 +1,11 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/exit-codes
 ---
 [1]> vp run -r fail # multiple failures -> exit code 1
-~/packages/pkg-b$ node -e "process.exit(7)"
-
 ~/packages/pkg-a$ node -e "process.exit(42)"
+
+~/packages/pkg-b$ node -e "process.exit(7)"
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -18,9 +17,9 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] pkg-b#fail: ~/packages/pkg-b$ node -e "process.exit(7)" ✗ (exit code: 7)
+  [1] pkg-a#fail: ~/packages/pkg-a$ node -e "process.exit(42)" ✗ (exit code: 42)
       → Cache miss: no previous cache entry found
   ·······················································
-  [2] pkg-a#fail: ~/packages/pkg-a$ node -e "process.exit(42)" ✗ (exit code: 42)
+  [2] pkg-b#fail: ~/packages/pkg-b$ node -e "process.exit(7)" ✗ (exit code: 7)
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -18,8 +18,7 @@ pub use path_env::{get_path_env, prepend_path_env};
 use plan::{ParentCacheConfig, plan_query_request, plan_synthetic_request};
 use plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest};
 use rustc_hash::FxHashMap;
-use serde::{Serialize, ser::SerializeMap as _};
-use vite_graph_ser::serialize_by_key;
+use serde::{Serialize, Serializer, ser::SerializeMap as _};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskGraphLoadError, display::TaskDisplay};
@@ -139,15 +138,22 @@ pub enum LeafExecutionKind {
     InProcess(InProcessExecution),
 }
 
+/// Serialize an `ExecutionGraph` (which is `Acyclic<DiGraph<...>>`) using `serialize_by_key`.
+///
+/// `vite_graph_ser::serialize_by_key` expects `&DiGraph<N, E, Ix>`, so we call `.inner()`
+/// on the `Acyclic` wrapper to get the underlying `DiGraph` reference.
+fn serialize_execution_graph_by_key<S: Serializer>(
+    graph: &ExecutionGraph,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    vite_graph_ser::serialize_by_key(graph.inner(), serializer)
+}
+
 /// An execution item, from a split subcommand in a task's command (`item1 && item2 && ...`).
 #[derive(Debug, Serialize)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "variants are used in-place, boxing would add indirection"
-)]
 pub enum ExecutionItemKind {
     /// Expanded from a known vp subcommand, like `vp run ...` or a synthesized task.
-    Expanded(#[serde(serialize_with = "serialize_by_key")] ExecutionGraph),
+    Expanded(#[serde(serialize_with = "serialize_execution_graph_by_key")] ExecutionGraph),
     /// A normal execution that spawns a child process, like `tsc --noEmit`.
     Leaf(LeafExecutionKind),
 }

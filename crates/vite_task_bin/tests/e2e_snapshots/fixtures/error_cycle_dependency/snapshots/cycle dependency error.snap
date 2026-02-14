@@ -3,4 +3,7 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 [1]> vp run task-a # task-a -> task-b -> task-a cycle
-✗ Cycle dependencies detected: Cycle(NodeIndex(ExecutionIx(1)))
+Error: Failed to plan execution
+
+Caused by:
+    Cycle dependency detected involving task error-cycle-dependency-test#task-b

@@ -97,11 +97,15 @@ struct ExecutionPathItem {
 
 /// Indexing a graph by a single `ExecutionPathItem` yields the [`ExecutionItem`]
 /// at that position.
+///
+/// Uses `.inner()` to access the underlying `DiGraph`'s `Index<NodeIndex>` impl,
+/// since `Acyclic` delegates indexing through `Deref` and the compiler might
+/// otherwise recurse into this very impl.
 impl Index<ExecutionPathItem> for ExecutionGraph {
     type Output = ExecutionItem;
 
     fn index(&self, index: ExecutionPathItem) -> &Self::Output {
-        &self[index.graph_node_ix].items[index.task_execution_item_index]
+        &self.inner()[index.graph_node_ix].items[index.task_execution_item_index]
     }
 }
 
@@ -197,13 +201,13 @@ pub trait GraphExecutionReporter {
 
     /// Finalize the graph execution session.
     ///
-    /// If `error` is `Some`, a graph-level error occurred (e.g., cycle detection, cache
-    /// initialization failure). Leaf-level errors are already tracked internally by the
-    /// reporter via the leaf reporter's `finish()` method.
+    /// Leaf-level errors are already tracked internally by the reporter via the
+    /// leaf reporter's `finish()` method. Graph-level errors (cycle detection) are
+    /// now caught at plan time and never reach the reporter.
     ///
     /// Returns `Ok(())` if all tasks succeeded, or `Err(ExitStatus)` to indicate the
     /// process should exit with the given status code.
-    fn finish(self: Box<Self>, error: Option<Str>) -> Result<(), ExitStatus>;
+    fn finish(self: Box<Self>) -> Result<(), ExitStatus>;
 }
 
 /// Reporter for a single leaf execution (one spawned process or in-process command).
@@ -531,15 +535,8 @@ impl<W: Write + 'static> GraphExecutionReporter for LabeledGraphReporter<W> {
         })
     }
 
-    fn finish(self: Box<Self>, error: Option<Str>) -> Result<(), ExitStatus> {
+    fn finish(self: Box<Self>) -> Result<(), ExitStatus> {
         let mut shared = self.shared.borrow_mut();
-
-        // Handle graph-level errors (e.g., cycle detection, cache init failure).
-        // These are distinct from leaf-level errors which are tracked per-execution.
-        if let Some(error_msg) = error {
-            write_error_message(&mut shared.writer, &error_msg);
-            return Err(ExitStatus::FAILURE);
-        }
 
         // Print summary.
         // Special case: single execution without display info (e.g., synthetic via nested expansion)
@@ -933,6 +930,7 @@ fn print_summary(
 mod tests {
     use std::collections::BTreeMap;
 
+    use petgraph::data::Build;
     use vite_task_graph::display::TaskDisplay;
     use vite_task_plan::{
         ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, InProcessExecution,
@@ -1110,6 +1108,10 @@ mod tests {
     /// Build a `LabeledGraphReporter` for the given graph and return a leaf reporter
     /// for the first node's first item.
     fn build_labeled_leaf(graph: ExecutionGraph) -> Box<dyn LeafExecutionReporter> {
+        #[expect(
+            clippy::arc_with_non_send_sync,
+            reason = "Acyclic<!Sync> but single-threaded test"
+        )]
         let graph_arc = Arc::new(graph);
         let builder = Box::new(LabeledReporterBuilder::new(Vec::<u8>::new(), test_path()));
         let mut reporter = builder.build(&graph_arc);

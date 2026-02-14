@@ -36,6 +36,10 @@ use crate::{
     plan_request::{PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest},
 };
 
+/// Type alias for the inner graph used during construction, before acyclicity validation.
+type InnerExecutionGraph =
+    petgraph::graph::DiGraph<TaskExecution, (), crate::execution_graph::ExecutionIx>;
+
 /// Locate the executable path for a given program name in the provided envs and cwd.
 fn which(
     program: &Arc<OsStr>,
@@ -499,6 +503,9 @@ fn plan_spawn_execution(
 }
 
 /// Expand the parsed task request (like `run -r build`/`lint`) into an execution graph.
+///
+/// Builds a `DiGraph` of task executions, then validates it is acyclic by wrapping
+/// in `petgraph::acyclic::Acyclic`. Returns `CycleDependencyDetected` if a cycle is found.
 #[expect(clippy::future_not_send, reason = "PlanContext contains !Send dyn PlanRequestParser")]
 pub async fn plan_query_request(
     query_plan_request: QueryPlanRequest,
@@ -517,7 +524,8 @@ pub async fn plan_query_request(
             rustc_hash::FxBuildHasher,
         );
 
-    let mut execution_graph = ExecutionGraph::with_capacity(
+    // Build the inner DiGraph first, then validate acyclicity at the end.
+    let mut inner_graph = InnerExecutionGraph::with_capacity(
         task_node_index_graph.node_count(),
         task_node_index_graph.edge_count(),
     );
@@ -527,17 +535,45 @@ pub async fn plan_query_request(
         let task_execution =
             plan_task_as_execution_node(task_index, context.duplicate()).boxed_local().await?;
         execution_node_indices_by_task_index
-            .insert(task_index, execution_graph.add_node(task_execution));
+            .insert(task_index, inner_graph.add_node(task_execution));
     }
 
     // Add edges between execution nodes according to task dependencies
     for (from_task_index, to_task_index, ()) in task_node_index_graph.all_edges() {
-        execution_graph.add_edge(
+        inner_graph.add_edge(
             execution_node_indices_by_task_index[&from_task_index],
             execution_node_indices_by_task_index[&to_task_index],
             (),
         );
     }
 
-    Ok(execution_graph)
+    // Validate the graph is acyclic by wrapping in `Acyclic`.
+    // `Acyclic::try_from` performs a topological sort; if a cycle is found,
+    // it returns `Cycle(node_id)` identifying one node in the cycle.
+    ExecutionGraph::try_from(inner_graph).map_err(|cycle| {
+        // Look up the human-readable task display for the node involved in the cycle.
+        // The cycle's node_id is still valid against the original inner_graph (which
+        // was moved into try_from but returned back on error — however, `Cycle` only
+        // contains the node index, not the graph). We stored the display info in our
+        // local map, so we can look it up by reversing the index mapping.
+        //
+        // Since we no longer have access to the inner_graph after the failed try_from,
+        // we find the TaskDisplay by searching our index map for the node index.
+        let task_display =
+            execution_node_indices_by_task_index.iter().find_map(|(task_idx, &exec_idx)| {
+                if exec_idx == cycle.node_id() {
+                    Some(context.indexed_task_graph().display_task(*task_idx))
+                } else {
+                    None
+                }
+            });
+        // If for some reason the node wasn't found in our map (shouldn't happen),
+        // fall back to a placeholder display.
+        let display = task_display.unwrap_or_else(|| vite_task_graph::display::TaskDisplay {
+            package_name: "unknown".into(),
+            task_name: "unknown".into(),
+            package_path: Arc::clone(context.workspace_path()),
+        });
+        Error::CycleDependencyDetected(display)
+    })
 }
