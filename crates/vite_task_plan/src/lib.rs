@@ -151,6 +151,10 @@ fn serialize_execution_graph_by_key<S: Serializer>(
 
 /// An execution item, from a split subcommand in a task's command (`item1 && item2 && ...`).
 #[derive(Debug, Serialize)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "SpawnExecution in Leaf is large but not worth boxing"
+)]
 pub enum ExecutionItemKind {
     /// Expanded from a known vp subcommand, like `vp run ...` or a synthesized task.
     Expanded(#[serde(serialize_with = "serialize_execution_graph_by_key")] ExecutionGraph),

@@ -544,23 +544,28 @@ pub async fn plan_query_request(
     }
 
     // Validate the graph is acyclic.
-    // `try_from_graph` performs a topological sort; if a cycle is found,
-    // it returns `CycleError` identifying one node in the cycle.
+    // `try_from_graph` performs a DFS; if a cycle is found, it returns
+    // `CycleError` containing the full cycle path as node indices.
     ExecutionGraph::try_from_graph(inner_graph).map_err(|cycle| {
-        // Look up the human-readable task display for the node involved in the cycle.
-        // Every node in `inner_graph` was added via `inner_graph.add_node()` above,
-        // with a corresponding entry inserted into `execution_node_indices_by_task_index`.
-        // The cycle error's node_id comes from the same graph, so the lookup always succeeds.
-        let display = execution_node_indices_by_task_index
+        // Map each execution node index in the cycle path to its human-readable TaskDisplay.
+        // Every node in the cycle was added via `inner_graph.add_node()` above,
+        // with a corresponding entry in `execution_node_indices_by_task_index`.
+        let displays = cycle
+            .cycle_path()
             .iter()
-            .find_map(|(task_idx, &exec_idx)| {
-                if exec_idx == cycle.node_id() {
-                    Some(context.indexed_task_graph().display_task(*task_idx))
-                } else {
-                    None
-                }
+            .map(|&exec_idx| {
+                execution_node_indices_by_task_index
+                    .iter()
+                    .find_map(|(task_idx, &mapped_exec_idx)| {
+                        if mapped_exec_idx == exec_idx {
+                            Some(context.indexed_task_graph().display_task(*task_idx))
+                        } else {
+                            None
+                        }
+                    })
+                    .expect("cycle node must exist in execution_node_indices_by_task_index")
             })
-            .expect("cycle node must exist in execution_node_indices_by_task_index");
-        Error::CycleDependencyDetected(display)
+            .collect();
+        Error::CycleDependencyDetected(displays)
     })
 }

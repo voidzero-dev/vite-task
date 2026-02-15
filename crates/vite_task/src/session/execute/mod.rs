@@ -56,8 +56,8 @@ struct ExecutionContext<'a> {
 impl ExecutionContext<'_> {
     /// Execute all tasks in an execution graph in dependency order.
     ///
-    /// `ExecutionGraph` guarantees acyclicity at construction time and caches a
-    /// topological order. We iterate `toposort()` in reverse to get execution order
+    /// `ExecutionGraph` guarantees acyclicity at construction time.
+    /// We compute a topological order and iterate in reverse to get execution order
     /// (dependencies before dependents).
     ///
     /// The `path_prefix` tracks our position within nested execution graphs. For the
@@ -71,14 +71,15 @@ impl ExecutionContext<'_> {
         graph: &ExecutionGraph,
         path_prefix: &LeafExecutionPath,
     ) {
-        // `toposort()` returns nodes in topological order: for every edge A→B,
-        // A appears before B. Since our edges mean "A depends on B", dependencies
-        // (B) appear after their dependents (A). We iterate in reverse to get
-        // execution order where dependencies run first.
+        // `compute_topological_order()` returns nodes in topological order: for every
+        // edge A→B, A appears before B. Since our edges mean "A depends on B",
+        // dependencies (B) appear after their dependents (A). We iterate in reverse
+        // to get execution order where dependencies run first.
 
         // Execute tasks in dependency-first order. Each task may have multiple items
         // (from `&&`-split commands), which are executed sequentially.
-        for &node_ix in graph.toposort().iter().rev() {
+        let topo_order = graph.compute_topological_order();
+        for &node_ix in topo_order.iter().rev() {
             let task_execution = &graph[node_ix];
 
             for (item_idx, item) in task_execution.items.iter().enumerate() {

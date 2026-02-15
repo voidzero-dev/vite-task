@@ -146,11 +146,11 @@ pub enum Error {
 
     /// A cycle was detected in the task dependency graph during planning.
     ///
-    /// This is caught by `ExecutionGraph::try_from_graph`, which validates that the
-    /// graph is a DAG. The contained `TaskDisplay` identifies one of the tasks
-    /// involved in the cycle.
-    #[error("Cycle dependency detected involving task {0}")]
-    CycleDependencyDetected(TaskDisplay),
+    /// This is caught by `AcyclicGraph::try_from_graph`, which validates that the
+    /// graph is a DAG. The contained path lists all tasks forming the cycle
+    /// as a closed loop (the first and last elements are the same).
+    #[error("Cycle dependency detected: {}", _0.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(" -> "))]
+    CycleDependencyDetected(Vec<TaskDisplay>),
 }
 
 impl Error {
