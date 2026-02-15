@@ -44,12 +44,6 @@ pub enum ExecutionError {
 }
 
 #[derive(Debug)]
-pub enum OutputKind {
-    Stdout,
-    Stderr,
-}
-
-#[derive(Debug)]
 pub enum CacheDisabledReason {
     InProcessExecution,
     NoCacheMetadata,

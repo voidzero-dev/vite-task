@@ -3,13 +3,33 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vp run list-tasks
+@ expect-milestone: task-select::0
 $ vp run ⊘ cache disabled: no cache config
-  hello: echo hello from root
+Search task (↑/↓ to move, enter to select):
+> hello: echo hello from root
   list-tasks: vp run
   app#build: echo build app
   app#lint: echo lint app
   app#test: echo test app
   lib#build: echo build lib
+@ write-key: enter
+$ vp run ⊘ cache disabled: no cache config
+$ echo hello from root ⊘ cache disabled: built-in command
+hello from root
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] task-list-test#hello: $ echo hello from root ✓
+      → Cache disabled for built-in command
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

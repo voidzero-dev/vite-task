@@ -246,8 +246,7 @@ impl<'a> Session<'a> {
                         .await
                     }
                     Ok(graph) => {
-                        let builder =
-                            LabeledReporterBuilder::new(std::io::stdout(), self.workspace_path());
+                        let builder = LabeledReporterBuilder::new(self.workspace_path());
                         Ok(self
                             .execute_graph(graph, Box::new(builder))
                             .await
@@ -392,7 +391,7 @@ impl<'a> Session<'a> {
 
         let cwd = Arc::clone(&self.cwd);
         let graph = self.plan_from_cli_run(cwd, run_command).await?;
-        let builder = LabeledReporterBuilder::new(std::io::stdout(), self.workspace_path());
+        let builder = LabeledReporterBuilder::new(self.workspace_path());
         Ok(self.execute_graph(graph, Box::new(builder)).await.err().unwrap_or(ExitStatus::SUCCESS))
     }
 
@@ -468,7 +467,7 @@ impl<'a> Session<'a> {
         let cache = self.cache()?;
 
         // Create a plain (standalone) reporter — no graph awareness, no summary
-        let plain_reporter = reporter::PlainReporter::new(std::io::stdout(), silent_if_cache_hit);
+        let plain_reporter = reporter::PlainReporter::new(silent_if_cache_hit);
 
         // Execute the spawn directly using the free function, bypassing the graph pipeline
         match execute::execute_spawn(

@@ -4,22 +4,25 @@ pub mod spawn;
 use std::{process::Stdio, sync::Arc};
 
 use futures_util::FutureExt;
+use tokio::io::AsyncWriteExt as _;
 use vite_path::AbsolutePath;
-use vite_task_plan::{ExecutionGraph, ExecutionItemKind, LeafExecutionKind, SpawnExecution};
+use vite_task_plan::{
+    ExecutionGraph, ExecutionItemKind, LeafExecutionKind, SpawnCommand, SpawnExecution,
+};
 
 use self::{
     fingerprint::PostRunFingerprint,
-    spawn::{OutputKind as SpawnOutputKind, spawn_with_tracking},
+    spawn::{SpawnResult, spawn_with_tracking},
 };
 use super::{
     cache::{CommandCacheValue, ExecutionCache},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
-        ExecutionError, OutputKind,
+        ExecutionError,
     },
     reporter::{
         ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionPath,
-        LeafExecutionReporter, StdinSuggestion,
+        LeafExecutionReporter, StdioSuggestion,
     },
 };
 use crate::{Session, session::execute::spawn::SpawnTrackResult};
@@ -116,10 +119,13 @@ impl ExecutionContext<'_> {
         match leaf_execution_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 // In-process (built-in) commands: caching is disabled, execute synchronously
-                leaf_reporter.start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
+                let mut stdio_config = leaf_reporter
+                    .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
 
                 let execution_output = in_process_execution.execute();
-                leaf_reporter.output(OutputKind::Stdout, execution_output.stdout.into());
+                // Write output to the stdout writer from StdioConfig
+                let _ = stdio_config.stdout_writer.write_all(&execution_output.stdout).await;
+                let _ = stdio_config.stdout_writer.flush().await;
 
                 leaf_reporter.finish(
                     None,
@@ -147,9 +153,10 @@ impl ExecutionContext<'_> {
 ///
 /// The full lifecycle is:
 /// 1. Cache lookup (determines cache status)
-/// 2. `leaf_reporter.start(cache_status)`
-/// 3. If cache hit: replay cached outputs → finish
-/// 4. If cache miss/disabled: spawn process → stream output → update cache → finish
+/// 2. `leaf_reporter.start(cache_status)` → `StdioConfig`
+/// 3. If cache hit: replay cached outputs via `StdioConfig` writers → finish
+/// 4. If `Inherited` suggestion AND caching disabled: `spawn_inherited()` → finish
+/// 5. Else (piped): `spawn_with_tracking()` with writers → cache update → finish
 ///
 /// Errors (cache lookup failure, spawn failure, cache update failure) are reported
 /// through `leaf_reporter.finish()` and do not abort the caller.
@@ -197,20 +204,20 @@ pub async fn execute_spawn(
         (CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata), None)
     };
 
-    // 2. Report execution start with the determined cache status
-    leaf_reporter.start(cache_status);
+    // 2. Report execution start with the determined cache status.
+    //    Returns StdioConfig with the reporter's suggestion and async writers.
+    let mut stdio_config = leaf_reporter.start(cache_status);
 
-    // 3. If cache hit, replay outputs and finish early.
+    // 3. If cache hit, replay outputs via the StdioConfig writers and finish early.
     //    No need to actually execute the command — just replay what was cached.
     if let Some(cached) = cached_value {
         for output in cached.std_outputs.iter() {
-            leaf_reporter.output(
-                match output.kind {
-                    SpawnOutputKind::StdOut => OutputKind::Stdout,
-                    SpawnOutputKind::StdErr => OutputKind::Stderr,
-                },
-                output.content.clone().into(),
-            );
+            let writer: &mut (dyn tokio::io::AsyncWrite + Unpin) = match output.kind {
+                spawn::OutputKind::StdOut => &mut stdio_config.stdout_writer,
+                spawn::OutputKind::StdErr => &mut stdio_config.stderr_writer,
+            };
+            let _ = writer.write_all(&output.content).await;
+            let _ = writer.flush().await;
         }
         leaf_reporter.finish(
             None,
@@ -220,24 +227,44 @@ pub async fn execute_spawn(
         return SpawnOutcome::CacheHit;
     }
 
-    // 4. Execute spawn (cache miss or disabled).
-    //    Track file system access if caching is enabled (for future cache updates).
+    // 4. Determine actual stdio mode based on the suggestion AND cache state.
+    //    Inherited stdio is only used when the reporter suggests it AND caching is
+    //    completely disabled (no cache_metadata). If caching is enabled but missed,
+    //    we still need piped mode to capture output for the cache update.
+    let use_inherited =
+        stdio_config.suggestion == StdioSuggestion::Inherited && cache_metadata.is_none();
+
+    if use_inherited {
+        // Inherited mode: all three stdio FDs (stdin, stdout, stderr) are inherited
+        // from the parent process. No fspy tracking, no output capture.
+        // Drop the StdioConfig writers before spawning to avoid holding tokio::io::Stdout
+        // while the child also writes to the same FD.
+        drop(stdio_config);
+
+        match spawn_inherited(&spawn_execution.spawn_command).await {
+            Ok(result) => {
+                leaf_reporter.finish(
+                    Some(result.exit_status),
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    None,
+                );
+                return SpawnOutcome::Spawned(result.exit_status);
+            }
+            Err(err) => {
+                leaf_reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    Some(ExecutionError::Spawn(err)),
+                );
+                return SpawnOutcome::Failed;
+            }
+        }
+    }
+
+    // 5. Piped mode: execute spawn with tracking, streaming output to writers.
     let mut track_result_with_cache_metadata =
         cache_metadata.map(|cache_metadata| (SpawnTrackResult::default(), cache_metadata));
 
-    // Determine the child process's stdin mode based on:
-    // - The reporter's suggestion (inherited only when appropriate, e.g., single task)
-    // - Whether caching is disabled (inherited stdin would make output non-deterministic,
-    //   breaking cache semantics)
-    let stdin = if leaf_reporter.stdin_suggestion() == StdinSuggestion::Inherited
-        && cache_metadata.is_none()
-    {
-        Stdio::inherit()
-    } else {
-        Stdio::null()
-    };
-
-    // Execute command with tracking, streaming output in real-time via the reporter
     #[expect(
         clippy::large_futures,
         reason = "spawn_with_tracking manages process I/O and creates a large future"
@@ -245,16 +272,8 @@ pub async fn execute_spawn(
     let result = match spawn_with_tracking(
         &spawn_execution.spawn_command,
         cache_base_path,
-        stdin,
-        |kind, content| {
-            leaf_reporter.output(
-                match kind {
-                    SpawnOutputKind::StdOut => OutputKind::Stdout,
-                    SpawnOutputKind::StdErr => OutputKind::Stderr,
-                },
-                content,
-            );
-        },
+        &mut stdio_config.stdout_writer,
+        &mut stdio_config.stderr_writer,
         track_result_with_cache_metadata.as_mut().map(|(track_result, _)| track_result),
     )
     .await
@@ -270,7 +289,7 @@ pub async fn execute_spawn(
         }
     };
 
-    // 5. Update cache if successful and determine cache update status.
+    // 6. Update cache if successful and determine cache update status.
     //    Errors during cache update are terminal (reported through finish).
     let (cache_update_status, cache_error) = if let Some((track_result, cache_metadata)) =
         track_result_with_cache_metadata
@@ -315,12 +334,35 @@ pub async fn execute_spawn(
         (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
     };
 
-    // 6. Finish the leaf execution with the result and optional cache error.
+    // 7. Finish the leaf execution with the result and optional cache error.
     //    Cache update/fingerprint failures are reported but do not affect the outcome —
     //    the process ran, so we return its actual exit status.
     leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error);
 
     SpawnOutcome::Spawned(result.exit_status)
+}
+
+/// Spawn a command with all three stdio file descriptors inherited from the parent.
+///
+/// Used when the reporter suggests inherited stdio AND caching is disabled.
+/// All three FDs (stdin, stdout, stderr) are inherited, allowing interactive input
+/// and direct terminal output. No fspy tracking is performed since there's no
+/// cache to update.
+///
+/// The child process will see `is_terminal() == true` for stdout/stderr when the
+/// parent is running in a terminal. This is expected behavior.
+async fn spawn_inherited(spawn_command: &SpawnCommand) -> anyhow::Result<SpawnResult> {
+    let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
+    cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
+    cmd.envs(spawn_command.all_envs.iter());
+    cmd.current_dir(&*spawn_command.cwd);
+    cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+
+    let start = std::time::Instant::now();
+    let mut child = cmd.into_tokio_command().spawn()?;
+    let exit_status = child.wait().await?;
+
+    Ok(SpawnResult { exit_status, duration: start.elapsed() })
 }
 
 impl Session<'_> {

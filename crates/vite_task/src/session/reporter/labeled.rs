@@ -11,7 +11,6 @@ use std::{
     time::Duration,
 };
 
-use bstr::BString;
 use owo_colors::Style;
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -19,13 +18,13 @@ use vite_task_plan::{ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, Le
 
 use super::{
     CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt, ExitStatus, GraphExecutionReporter,
-    GraphExecutionReporterBuilder, LeafExecutionPath, LeafExecutionReporter, StdinSuggestion,
-    format_command_display, write_cache_hit_message, write_command_with_cache_status,
-    write_error_message,
+    GraphExecutionReporterBuilder, LeafExecutionPath, LeafExecutionReporter, StdioConfig,
+    StdioSuggestion, format_command_display, write_cache_hit_message,
+    write_command_with_cache_status, write_error_message,
 };
 use crate::session::{
     cache::format_cache_status_summary,
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError, OutputKind, exit_status_to_code},
+    event::{CacheStatus, CacheUpdateStatus, ExecutionError, exit_status_to_code},
 };
 
 /// Information tracked for each leaf execution, used in the final summary.
@@ -56,13 +55,12 @@ struct ExecutionStats {
 ///
 /// This is safe because execution is single-threaded and sequential — only one leaf
 /// reporter is active at a time.
-struct SharedReporterState<W: Write> {
-    writer: W,
+struct SharedReporterState {
     executions: Vec<ExecutionInfo>,
     stats: ExecutionStats,
     /// Total number of spawned leaf executions in the graph (including nested `Expanded`
-    /// subgraphs). Computed once at build time and used to determine the stdin suggestion:
-    /// inherited stdin is only suggested when there is exactly one spawn leaf.
+    /// subgraphs). Computed once at build time and used to determine the stdio suggestion:
+    /// inherited stdio is only suggested when there is exactly one spawn leaf.
     spawn_leaf_count: usize,
 }
 
@@ -99,27 +97,24 @@ pub(super) fn count_spawn_leaves(graph: &ExecutionGraph) -> usize {
 ///   - Skips full summary (no Statistics/Task Details sections)
 ///   - Shows only cache status inline
 ///   - Results in clean output showing just the command's stdout/stderr
-pub struct LabeledReporterBuilder<W: Write> {
-    writer: W,
+pub struct LabeledReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
 }
 
-impl<W: Write> LabeledReporterBuilder<W> {
+impl LabeledReporterBuilder {
     /// Create a new labeled reporter builder.
     ///
-    /// - `writer`: The output stream (typically `std::io::stdout()`).
     /// - `workspace_path`: The workspace root, used to compute relative cwds in display.
-    pub const fn new(writer: W, workspace_path: Arc<AbsolutePath>) -> Self {
-        Self { writer, workspace_path }
+    pub const fn new(workspace_path: Arc<AbsolutePath>) -> Self {
+        Self { workspace_path }
     }
 }
 
-impl<W: Write + 'static> GraphExecutionReporterBuilder for LabeledReporterBuilder<W> {
+impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
     fn build(self: Box<Self>, graph: &Arc<ExecutionGraph>) -> Box<dyn GraphExecutionReporter> {
         let spawn_leaf_count = count_spawn_leaves(graph);
         Box::new(LabeledGraphReporter {
             shared: Rc::new(RefCell::new(SharedReporterState {
-                writer: self.writer,
                 executions: Vec::new(),
                 stats: ExecutionStats::default(),
                 spawn_leaf_count,
@@ -134,13 +129,13 @@ impl<W: Write + 'static> GraphExecutionReporterBuilder for LabeledReporterBuilde
 ///
 /// Creates [`LabeledLeafReporter`] instances for each leaf execution. The leaf reporters
 /// share mutable state with this reporter via `Rc<RefCell<SharedReporterState>>`.
-pub struct LabeledGraphReporter<W: Write> {
-    shared: Rc<RefCell<SharedReporterState<W>>>,
+pub struct LabeledGraphReporter {
+    shared: Rc<RefCell<SharedReporterState>>,
     graph: Arc<ExecutionGraph>,
     workspace_path: Arc<AbsolutePath>,
 }
 
-impl<W: Write + 'static> GraphExecutionReporter for LabeledGraphReporter<W> {
+impl GraphExecutionReporter for LabeledGraphReporter {
     fn new_leaf_execution(&mut self, path: &LeafExecutionPath) -> Box<dyn LeafExecutionReporter> {
         // Look up display info from the graph using the path
         let display = path.resolve_display(&self.graph).cloned();
@@ -154,7 +149,7 @@ impl<W: Write + 'static> GraphExecutionReporter for LabeledGraphReporter<W> {
     }
 
     fn finish(self: Box<Self>) -> Result<(), ExitStatus> {
-        let mut shared = self.shared.borrow_mut();
+        let shared = self.shared.borrow();
 
         // Print summary.
         // Special case: single execution without display info (e.g., synthetic via nested expansion)
@@ -162,10 +157,12 @@ impl<W: Write + 'static> GraphExecutionReporter for LabeledGraphReporter<W> {
         let is_single_displayless =
             shared.executions.len() == 1 && shared.executions[0].display.is_none();
         if !is_single_displayless {
-            // Destructure to get simultaneous mutable access to writer and immutable
-            // access to executions/stats, satisfying the borrow checker.
-            let SharedReporterState { ref mut writer, ref executions, ref stats, .. } = *shared;
-            print_summary(writer, executions, stats, &self.workspace_path);
+            print_summary(
+                &mut std::io::stdout(),
+                &shared.executions,
+                &shared.stats,
+                &self.workspace_path,
+            );
         }
 
         // Determine exit code based on failed tasks and infrastructure errors:
@@ -204,10 +201,10 @@ impl<W: Write + 'static> GraphExecutionReporter for LabeledGraphReporter<W> {
 
 /// Leaf-level reporter created by [`LabeledGraphReporter::new_leaf_execution`].
 ///
-/// Writes output in real-time to the shared writer and updates shared stats/errors
+/// Writes display output in real-time to stdout and updates shared stats/errors
 /// via `Rc<RefCell<SharedReporterState>>`.
-struct LabeledLeafReporter<W: Write> {
-    shared: Rc<RefCell<SharedReporterState<W>>>,
+struct LabeledLeafReporter {
+    shared: Rc<RefCell<SharedReporterState>>,
     /// Display info for this execution, looked up from the graph via the path.
     display: Option<ExecutionItemDisplay>,
     workspace_path: Arc<AbsolutePath>,
@@ -218,20 +215,8 @@ struct LabeledLeafReporter<W: Write> {
     is_cache_hit: bool,
 }
 
-impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
-    fn stdin_suggestion(&self) -> StdinSuggestion {
-        // Only suggest inherited stdin when the graph has exactly one spawned leaf
-        // execution. With multiple spawned tasks, stdin should not be shared — each
-        // task gets /dev/null to avoid contention.
-        let shared = self.shared.borrow();
-        if shared.spawn_leaf_count == 1 {
-            StdinSuggestion::Inherited
-        } else {
-            StdinSuggestion::Null
-        }
-    }
-
-    fn start(&mut self, cache_status: CacheStatus) {
+impl LeafExecutionReporter for LabeledLeafReporter {
+    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
         self.started = true;
         self.is_cache_hit = matches!(cache_status, CacheStatus::Hit { .. });
 
@@ -247,7 +232,7 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
         // Print command line with cache status (if display info is available)
         if let Some(ref display) = self.display {
             write_command_with_cache_status(
-                &mut shared.writer,
+                &mut std::io::stdout(),
                 display,
                 &self.workspace_path,
                 &cache_status,
@@ -261,12 +246,19 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
             exit_status: None,
             error_message: None,
         });
-    }
 
-    fn output(&mut self, _kind: OutputKind, content: BString) {
-        let mut shared = self.shared.borrow_mut();
-        let _ = shared.writer.write_all(&content);
-        let _ = shared.writer.flush();
+        // Determine stdio suggestion: inherited only when exactly one spawn leaf
+        let suggestion = if shared.spawn_leaf_count == 1 {
+            StdioSuggestion::Inherited
+        } else {
+            StdioSuggestion::Piped
+        };
+
+        StdioConfig {
+            suggestion,
+            stdout_writer: Box::new(tokio::io::stdout()),
+            stderr_writer: Box::new(tokio::io::stderr()),
+        }
     }
 
     fn finish(
@@ -276,13 +268,14 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
         error: Option<ExecutionError>,
     ) {
         let mut shared = self.shared.borrow_mut();
+        let mut stdout = std::io::stdout();
 
         // Handle errors — format the full error chain using anyhow's `{:#}` formatter
         // (joins cause chain with `: ` separators).
         let has_error = error.is_some();
         if let Some(error) = error {
             let message: Str = vite_str::format!("{:#}", anyhow::Error::from(error));
-            write_error_message(&mut shared.writer, &message);
+            write_error_message(&mut stdout, &message);
 
             // Update the execution info if start() was called (an entry was pushed).
             // Without the `self.started` guard, `last_mut()` would return a
@@ -312,14 +305,14 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
         // For executions without display info (synthetics via nested expansion) that are
         // cache hits, print the cache hit message
         if self.started && self.display.is_none() && self.is_cache_hit {
-            write_cache_hit_message(&mut shared.writer);
+            write_cache_hit_message(&mut stdout);
         }
 
         // Add a trailing newline after each task's output for readability.
         // Skip if start() was never called (e.g. cache lookup failure) — there's
         // no task output to separate.
         if self.started {
-            let _ = writeln!(shared.writer);
+            let _ = writeln!(stdout);
         }
     }
 }

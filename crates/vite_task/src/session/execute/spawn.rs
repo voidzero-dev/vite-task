@@ -7,11 +7,10 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
-use bstr::BString;
 use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
-use tokio::io::AsyncReadExt as _;
+use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 
@@ -57,28 +56,26 @@ pub struct SpawnTrackResult {
     pub path_writes: FxHashSet<RelativePathBuf>,
 }
 
-/// Spawn a command with file system tracking via fspy.
+/// Spawn a command with file system tracking via fspy, using piped stdio.
 ///
 /// Returns the execution result including captured outputs, exit status,
 /// and tracked file accesses.
 ///
-/// - `stdin` controls the child process's stdin (typically `Stdio::null()` or `Stdio::inherit()`).
-/// - `on_output` is called in real-time as stdout/stderr data arrives.
+/// - stdin is always `/dev/null` (piped mode is for non-interactive execution).
+/// - `stdout_writer`/`stderr_writer` receive the child's stdout/stderr output in real-time.
 /// - `track_result` if provided, will be populated with captured outputs and path accesses for caching. If `None`, tracking is disabled.
+#[expect(clippy::future_not_send, reason = "uses !Send dyn AsyncWrite writers internally")]
 #[expect(
     clippy::too_many_lines,
     reason = "spawn logic is inherently sequential and splitting would reduce clarity"
 )]
-pub async fn spawn_with_tracking<F>(
+pub async fn spawn_with_tracking(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
-    stdin: Stdio,
-    mut on_output: F,
+    stdout_writer: &mut (dyn AsyncWrite + Unpin),
+    stderr_writer: &mut (dyn AsyncWrite + Unpin),
     track_result: Option<&mut SpawnTrackResult>,
-) -> anyhow::Result<SpawnResult>
-where
-    F: FnMut(OutputKind, BString),
-{
+) -> anyhow::Result<SpawnResult> {
     /// The tracking state of the spawned process
     enum TrackingState<'a> {
         /// Tacking is enabled, with the tracked child and result reference
@@ -92,7 +89,7 @@ where
     cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
     cmd.envs(spawn_command.all_envs.iter());
     cmd.current_dir(&*spawn_command.cwd);
-    cmd.stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut tracking_state = if let Some(track_result) = track_result {
         // track_result is Some. Spawn with tracking enabled
@@ -122,37 +119,49 @@ where
 
     let start = Instant::now();
 
-    // Helper closure to process output chunks
-    let mut process_output = |kind: OutputKind, content: Vec<u8>| {
-        // Emit event immediately
-        on_output(kind, content.clone().into());
-
-        // Store outputs for caching
-        if let Some(outputs) = &mut outputs {
-            // Merge consecutive outputs of the same kind for caching
-            if let Some(last) = outputs.last_mut()
-                && last.kind == kind
-            {
-                last.content.extend(&content);
-            } else {
-                outputs.push(StdOutput { kind, content });
-            }
-        }
-    };
-
     // Read from both stdout and stderr concurrently using select!
     loop {
         tokio::select! {
             result = child_stdout.read(&mut stdout_buf), if !stdout_done => {
                 match result? {
                     0 => stdout_done = true,
-                    n => process_output(OutputKind::StdOut, stdout_buf[..n].to_vec()),
+                    n => {
+                        let content = stdout_buf[..n].to_vec();
+                        // Write to the async writer immediately
+                        stdout_writer.write_all(&content).await?;
+                        stdout_writer.flush().await?;
+                        // Store outputs for caching
+                        if let Some(outputs) = &mut outputs {
+                            if let Some(last) = outputs.last_mut()
+                                && last.kind == OutputKind::StdOut
+                            {
+                                last.content.extend(&content);
+                            } else {
+                                outputs.push(StdOutput { kind: OutputKind::StdOut, content });
+                            }
+                        }
+                    }
                 }
             }
             result = child_stderr.read(&mut stderr_buf), if !stderr_done => {
                 match result? {
                     0 => stderr_done = true,
-                    n => process_output(OutputKind::StdErr, stderr_buf[..n].to_vec()),
+                    n => {
+                        let content = stderr_buf[..n].to_vec();
+                        // Write to the async writer immediately
+                        stderr_writer.write_all(&content).await?;
+                        stderr_writer.flush().await?;
+                        // Store outputs for caching
+                        if let Some(outputs) = &mut outputs {
+                            if let Some(last) = outputs.last_mut()
+                                && last.kind == OutputKind::StdErr
+                            {
+                                last.content.extend(&content);
+                            } else {
+                                outputs.push(StdOutput { kind: OutputKind::StdErr, content });
+                            }
+                        }
+                    }
                 }
             }
             else => break,

@@ -31,18 +31,18 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use bstr::BString;
 pub use labeled::LabeledReporterBuilder;
 use owo_colors::{Style, Styled};
 pub use plain::PlainReporter;
 use smallvec::SmallVec;
+use tokio::io::AsyncWrite;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_plan::{ExecutionGraph, ExecutionItem, ExecutionItemDisplay, ExecutionItemKind};
 
 use super::{
     cache::format_cache_status_inline,
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError, OutputKind},
+    event::{CacheStatus, CacheUpdateStatus, ExecutionError},
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -61,24 +61,43 @@ impl ExitStatus {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Stdin suggestion
+// Stdio suggestion and configuration
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// Suggestion from the reporter about what stdin mode to use for a spawned process.
+/// Suggestion from the reporter about what stdio mode to use for a spawned process.
 ///
-/// The actual stdin mode is determined by [`execute_spawn`](super::execute::execute_spawn)
+/// The actual stdio mode is determined by [`execute_spawn`](super::execute::execute_spawn)
 /// based on this suggestion AND whether caching is enabled for the task:
-/// - `Inherited` is only used when the suggestion is `Inherited` AND caching is disabled.
-///   This prevents non-deterministic user input from corrupting cached output.
-/// - `Null` is always respected as-is.
+/// - `Inherited` is only honoured when caching is disabled (`cache_metadata` is `None`).
+///   With caching enabled, the execution engine overrides to `Piped` so that output can
+///   be captured for the cache.
+/// - `Piped` is always respected as-is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StdinSuggestion {
-    /// Suggest connecting the child process's stdin to /dev/null (or NUL on Windows).
-    /// Used when multiple tasks run in sequence and stdin should not be shared.
-    Null,
-    /// Suggest inheriting stdin from the parent process, allowing interactive input.
+pub enum StdioSuggestion {
+    /// stdin is `/dev/null`, stdout and stderr are piped into the reporter's
+    /// [`AsyncWrite`] streams.  Used when multiple tasks run concurrently and
+    /// stdio should not be shared.
+    Piped,
+    /// All three file descriptors (stdin, stdout, stderr) are inherited from the
+    /// parent process, allowing interactive input and direct terminal output.
     /// Only effective when caching is disabled for the task.
     Inherited,
+}
+
+/// Stdio configuration returned by [`LeafExecutionReporter::start`].
+///
+/// Contains the reporter's suggestion for the stdio mode together with two
+/// async writers that receive the child process's stdout and stderr when the
+/// execution engine decides to use piped mode.  The writers are always provided
+/// because the engine may override the suggestion (e.g. when caching forces
+/// piped mode even though the reporter suggested inherited).
+pub struct StdioConfig {
+    /// The reporter's preferred stdio mode.
+    pub suggestion: StdioSuggestion,
+    /// Async writer for the child process's stdout (used in piped mode and cache replay).
+    pub stdout_writer: Box<dyn AsyncWrite + Unpin>,
+    /// Async writer for the child process's stderr (used in piped mode and cache replay).
+    pub stderr_writer: Box<dyn AsyncWrite + Unpin>,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -207,27 +226,24 @@ pub trait GraphExecutionReporter {
 
 /// Reporter for a single leaf execution (one spawned process or in-process command).
 ///
-/// Lifecycle: `start()` → zero or more `output()` → `finish()`.
+/// Lifecycle: `start()` → `finish()`.
 ///
 /// `start()` may not be called before `finish()` if an error occurs before the cache
 /// status is determined (e.g., cache lookup failure).
 pub trait LeafExecutionReporter {
-    /// Suggest which stdin mode to use for the spawned process.
-    ///
-    /// Called by [`execute_spawn`](super::execute::execute_spawn) before spawning to
-    /// determine the child process's stdin configuration. The final decision also
-    /// depends on whether caching is enabled — inherited stdin is only used when
-    /// the suggestion is [`StdinSuggestion::Inherited`] AND the task has no cache
-    /// metadata (caching disabled).
-    fn stdin_suggestion(&self) -> StdinSuggestion;
-
     /// Report that execution is starting with the given cache status.
     ///
     /// Called after the cache lookup completes, before any output is produced.
-    fn start(&mut self, cache_status: CacheStatus);
-
-    /// Report a chunk of output (stdout or stderr) from the executing process.
-    fn output(&mut self, kind: OutputKind, content: BString);
+    /// Returns a [`StdioConfig`] containing:
+    /// - The reporter's stdio mode suggestion (inherited or piped).
+    /// - Two [`AsyncWrite`] streams for receiving the child's stdout and stderr
+    ///   (used when the execution engine decides on piped mode, or for cache replay).
+    ///
+    /// The execution engine decides the actual stdio mode based on the suggestion
+    /// AND whether caching is enabled — inherited stdio is only used when the
+    /// suggestion is [`StdioSuggestion::Inherited`] AND the task has no cache
+    /// metadata (caching disabled).
+    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig;
 
     /// Finalize this leaf execution.
     ///
@@ -337,7 +353,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::session::reporter::labeled::count_spawn_leaves;
+    use crate::session::{
+        event::{CacheDisabledReason, CacheStatus},
+        reporter::labeled::count_spawn_leaves,
+    };
 
     /// Create a dummy `AbsolutePath` for test fixtures.
     fn test_path() -> Arc<AbsolutePath> {
@@ -479,30 +498,34 @@ mod tests {
     }
 
     // ────────────────────────────────────────────────────────────
-    // PlainReporter stdin_suggestion tests
+    // PlainReporter stdio suggestion tests
     // ────────────────────────────────────────────────────────────
 
     #[test]
     fn plain_reporter_always_suggests_inherited() {
-        let reporter = PlainReporter::new(Vec::<u8>::new(), false);
-        assert_eq!(reporter.stdin_suggestion(), StdinSuggestion::Inherited);
+        let mut reporter = PlainReporter::new(false);
+        let stdio_config =
+            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
     }
 
     #[test]
     fn plain_reporter_suggests_inherited_even_when_silent() {
-        let reporter = PlainReporter::new(Vec::<u8>::new(), true);
-        assert_eq!(reporter.stdin_suggestion(), StdinSuggestion::Inherited);
+        let mut reporter = PlainReporter::new(true);
+        let stdio_config =
+            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
     }
 
     // ────────────────────────────────────────────────────────────
-    // LabeledLeafReporter stdin_suggestion tests
+    // LabeledLeafReporter stdio suggestion tests
     // ────────────────────────────────────────────────────────────
 
     /// Build a `LabeledGraphReporter` for the given graph and return a leaf reporter
     /// for the first node's first item.
     fn build_labeled_leaf(graph: ExecutionGraph) -> Box<dyn LeafExecutionReporter> {
         let graph_arc = Arc::new(graph);
-        let builder = Box::new(LabeledReporterBuilder::new(Vec::<u8>::new(), test_path()));
+        let builder = Box::new(LabeledReporterBuilder::new(test_path()));
         let mut reporter = builder.build(&graph_arc);
 
         // Create a leaf reporter for the first node
@@ -513,33 +536,37 @@ mod tests {
     #[test]
     fn labeled_reporter_single_spawn_suggests_inherited() {
         let graph = ExecutionGraph::from_node_list([spawn_task("build")]);
-        let leaf = build_labeled_leaf(graph);
-        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
+        let mut leaf = build_labeled_leaf(graph);
+        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
     }
 
     #[test]
-    fn labeled_reporter_multiple_spawns_suggests_null() {
+    fn labeled_reporter_multiple_spawns_suggests_piped() {
         let graph = ExecutionGraph::from_node_list([spawn_task("build"), spawn_task("test")]);
-        let leaf = build_labeled_leaf(graph);
-        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
+        let mut leaf = build_labeled_leaf(graph);
+        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
     }
 
     #[test]
-    fn labeled_reporter_single_in_process_suggests_inherited() {
-        // Zero spawn leaves → spawn_leaf_count == 0, so not == 1 → Null
+    fn labeled_reporter_single_in_process_suggests_piped() {
+        // Zero spawn leaves → spawn_leaf_count == 0, so not == 1 → Piped
         // This is correct: in-process executions don't spawn child processes,
-        // so stdin suggestion doesn't apply to them.
+        // so stdio suggestion doesn't apply to them.
         let graph = ExecutionGraph::from_node_list([in_process_task("echo")]);
-        let leaf = build_labeled_leaf(graph);
-        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
+        let mut leaf = build_labeled_leaf(graph);
+        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
     }
 
     #[test]
     fn labeled_reporter_one_spawn_one_in_process_suggests_inherited() {
         // One spawn leaf + one in-process → spawn_leaf_count == 1 → Inherited
         let graph = ExecutionGraph::from_node_list([spawn_task("build"), in_process_task("echo")]);
-        let leaf = build_labeled_leaf(graph);
-        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
+        let mut leaf = build_labeled_leaf(graph);
+        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
     }
 
     #[test]
@@ -548,18 +575,20 @@ mod tests {
         let nested = ExecutionGraph::from_node_list([spawn_task("nested-build")]);
 
         let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
-        let leaf = build_labeled_leaf(graph);
-        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Inherited);
+        let mut leaf = build_labeled_leaf(graph);
+        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
     }
 
     #[test]
-    fn labeled_reporter_nested_multiple_spawns_suggests_null() {
+    fn labeled_reporter_nested_multiple_spawns_suggests_piped() {
         // Nested graph with two spawns
         let nested =
             ExecutionGraph::from_node_list([spawn_task("nested-a"), spawn_task("nested-b")]);
 
         let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
-        let leaf = build_labeled_leaf(graph);
-        assert_eq!(leaf.stdin_suggestion(), StdinSuggestion::Null);
+        let mut leaf = build_labeled_leaf(graph);
+        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
     }
 }

@@ -14,5 +14,5 @@ steps = [
 [[e2e]]
 name = "vp run in script"
 steps = [
-  "vp run list-tasks",
+  { command = "vp run list-tasks", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
 ]
