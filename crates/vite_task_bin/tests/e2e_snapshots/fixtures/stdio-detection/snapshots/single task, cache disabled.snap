@@ -1,0 +1,23 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vp run check-tty
+$ check-tty ⊘ cache disabled: no cache config
+stdin:tty
+stdout:tty
+stderr:tty
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] stdio-detection-test#check-tty: $ check-tty ✓
+      → Cache disabled in task configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

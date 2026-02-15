@@ -1,0 +1,13 @@
+{
+  "cacheScripts": true,
+  "tasks": {
+    "check-tty": {
+      "command": "check-tty",
+      "cache": false
+    },
+    "check-tty-cached": {
+      "command": "check-tty",
+      "cache": true
+    }
+  }
+}

@@ -1,0 +1,57 @@
+# Tests stdio mode detection across all combinations of task count and cache state.
+#
+# `check-tty` prints whether each stdio stream is a TTY. In the PTY test
+# environment, inherited stdio shows as "tty"; piped/null shows as "not-tty".
+#
+# Only one combination produces inherited (TTY) stdio: a single task with
+# caching disabled. All other combinations use piped stdio — either because
+# multiple tasks require labeled output, or because caching needs to capture
+# or replay output.
+
+# ─── Single task ─────────────────────────────────────────────────
+
+[[e2e]]
+name = "single task, cache disabled"
+# Expect: all stdio inherited from terminal (tty)
+steps = [
+  "vp run check-tty",
+]
+
+[[e2e]]
+name = "single task, cache miss"
+# Expect: stdio piped for cache capture (not-tty)
+steps = [
+  "vp run check-tty-cached",
+]
+
+[[e2e]]
+name = "single task, cache hit"
+# Expect: first run is a miss (not-tty), second run replays cached output
+steps = [
+  "vp run check-tty-cached",
+  "vp run check-tty-cached",
+]
+
+# ─── Multiple tasks (-r) ────────────────────────────────────────
+
+[[e2e]]
+name = "multiple tasks, cache disabled"
+# Expect: stdio piped for labeled output (not-tty)
+steps = [
+  "vp run -r check-tty",
+]
+
+[[e2e]]
+name = "multiple tasks, cache miss"
+# Expect: stdio piped (not-tty)
+steps = [
+  "vp run -r check-tty-cached",
+]
+
+[[e2e]]
+name = "multiple tasks, cache hit"
+# Expect: first run is a miss (not-tty), second run replays cached output
+steps = [
+  "vp run -r check-tty-cached",
+  "vp run -r check-tty-cached",
+]
