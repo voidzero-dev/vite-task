@@ -1,0 +1,33 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vp run -t build # core -> lib -> app
+~/packages/core$ echo 'Building core' ⊘ cache disabled: built-in command
+Building core
+
+~/packages/lib$ echo 'Building lib' ⊘ cache disabled: built-in command
+Building lib
+
+~/packages/app$ echo 'Building app' ⊘ cache disabled: built-in command
+Building app
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   3 tasks • 0 cache hits • 0 cache misses • 3 cache disabled 
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] @topo/core#build: ~/packages/core$ echo 'Building core' ✓
+      → Cache disabled for built-in command
+  ·······················································
+  [2] @topo/lib#build: ~/packages/lib$ echo 'Building lib' ✓
+      → Cache disabled for built-in command
+  ·······················································
+  [3] @topo/app#build: ~/packages/app$ echo 'Building app' ✓
+      → Cache disabled for built-in command
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
