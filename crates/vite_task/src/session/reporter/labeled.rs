@@ -216,6 +216,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         if let Some(buf) = summary_buf {
             let mut writer = self.writer.borrow_mut();
             let _ = writer.write_all(&buf).await;
+            let _ = writer.flush().await;
         }
 
         result
@@ -288,6 +289,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
             };
             let mut writer = self.writer.borrow_mut();
             let _ = writer.write_all(line.as_bytes()).await;
+            let _ = writer.flush().await;
         }
 
         StdioConfig {
@@ -366,6 +368,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
         if !buf.is_empty() {
             let mut writer = self.writer.borrow_mut();
             let _ = writer.write_all(&buf).await;
+            let _ = writer.flush().await;
         }
     }
 }

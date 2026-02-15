@@ -86,6 +86,7 @@ impl LeafExecutionReporter for PlainReporter {
             let message = vite_str::format!("{:#}", anyhow::Error::from(error));
             let line = format_error_message(&message);
             let _ = self.writer.write_all(line.as_bytes()).await;
+            let _ = self.writer.flush().await;
             return;
         }
 
@@ -93,6 +94,7 @@ impl LeafExecutionReporter for PlainReporter {
         if self.is_cache_hit && !self.is_silent() {
             let line = format_cache_hit_message();
             let _ = self.writer.write_all(line.as_bytes()).await;
+            let _ = self.writer.flush().await;
         }
     }
 }
