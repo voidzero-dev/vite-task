@@ -342,7 +342,7 @@ fn format_cache_hit_message() -> Str {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[cfg(test)]
-pub(crate) mod test_fixtures {
+pub mod test_fixtures {
     use std::{collections::BTreeMap, sync::Arc};
 
     use vite_path::AbsolutePath;
