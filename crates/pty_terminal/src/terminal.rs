@@ -258,24 +258,32 @@ impl Terminal {
         let reader = pty_pair.master.try_clone_reader()?;
         let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
-        // Spawn child and immediately drop slave to ensure EOF is signaled when child exits
         let mut child = pty_pair.slave.spawn_command(cmd)?;
         let child_killer = child.clone_killer();
-        drop(pty_pair.slave); // Critical: drop slave so EOF is signaled when child exits
         let master = pty_pair.master;
         let exit_status: Arc<OnceLock<ExitStatus>> = Arc::new(OnceLock::new());
 
-        // Background thread: wait for child to exit, set exit status, then close writer to trigger EOF
+        // Background thread: wait for child to exit, then clean up.
+        //
+        // The slave is kept alive until after `child.wait()` returns rather than
+        // being dropped immediately after spawn. On macOS, if the parent's slave
+        // fd is closed early (before spawn) and the child exits quickly, ALL
+        // slave references close before the reader issues its first `read()`.
+        // macOS then returns EIO on the master without draining the output buffer,
+        // causing data loss. Holding the slave until the background thread takes
+        // over guarantees the PTY stays connected while the child runs.
         thread::spawn({
             let writer = Arc::clone(&writer);
             let exit_status = Arc::clone(&exit_status);
+            let slave = pty_pair.slave;
             move || {
                 // Wait for child and set exit status
                 if let Ok(status) = child.wait() {
                     let _ = exit_status.set(status);
                 }
-                // Close writer to signal EOF to the reader
+                // Close writer first, then drop slave to trigger EOF on the reader.
                 *writer.lock().unwrap() = None;
+                drop(slave);
             }
         });
 
