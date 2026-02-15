@@ -23,7 +23,6 @@ fspy = { workspace = true }
 futures-util = { workspace = true }
 once_cell = { workspace = true }
 owo-colors = { workspace = true }
-petgraph = { workspace = true }
 pty_terminal_test_client = { workspace = true }
 rayon = { workspace = true }
 rusqlite = { workspace = true, features = ["bundled"] }

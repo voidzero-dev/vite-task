@@ -3877,7 +3877,6 @@ dependencies = [
  "nix 0.30.1",
  "once_cell",
  "owo-colors",
- "petgraph",
  "pty_terminal_test_client",
  "rayon",
  "rusqlite",
