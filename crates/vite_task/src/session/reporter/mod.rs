@@ -153,13 +153,12 @@ impl LeafExecutionPath {
                     current_graph = nested_graph;
                 }
                 ExecutionItemKind::Leaf(_) => {
-                    // A Leaf in the middle of the path is a bug in path construction.
-                    // This should never happen if the execution engine builds paths correctly.
-                    debug_assert!(
-                        false,
-                        "LeafExecutionPath: intermediate element is a Leaf, expected Expanded"
-                    );
-                    return None;
+                    // A Leaf in the middle of the path means the execution engine
+                    // pushed a Leaf node as an intermediate step, which is a bug —
+                    // only Expanded items can contain nested graphs to descend into.
+                    unreachable!(
+                        "LeafExecutionPath: intermediate element at depth {depth} is a Leaf, expected Expanded"
+                    )
                 }
             }
         }

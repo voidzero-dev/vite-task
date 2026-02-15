@@ -548,21 +548,19 @@ pub async fn plan_query_request(
     // it returns `CycleError` identifying one node in the cycle.
     ExecutionGraph::try_from_graph(inner_graph).map_err(|cycle| {
         // Look up the human-readable task display for the node involved in the cycle.
-        let task_display =
-            execution_node_indices_by_task_index.iter().find_map(|(task_idx, &exec_idx)| {
+        // Every node in `inner_graph` was added via `inner_graph.add_node()` above,
+        // with a corresponding entry inserted into `execution_node_indices_by_task_index`.
+        // The cycle error's node_id comes from the same graph, so the lookup always succeeds.
+        let display = execution_node_indices_by_task_index
+            .iter()
+            .find_map(|(task_idx, &exec_idx)| {
                 if exec_idx == cycle.node_id() {
                     Some(context.indexed_task_graph().display_task(*task_idx))
                 } else {
                     None
                 }
-            });
-        // If for some reason the node wasn't found in our map (shouldn't happen),
-        // fall back to a placeholder display.
-        let display = task_display.unwrap_or_else(|| vite_task_graph::display::TaskDisplay {
-            package_name: "unknown".into(),
-            task_name: "unknown".into(),
-            package_path: Arc::clone(context.workspace_path()),
-        });
+            })
+            .expect("cycle node must exist in execution_node_indices_by_task_index");
         Error::CycleDependencyDetected(display)
     })
 }
