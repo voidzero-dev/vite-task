@@ -5,6 +5,7 @@ use petgraph::{
     visit::{DfsEvent, depth_first_search},
 };
 use rustc_hash::FxHashMap;
+use serde::{Serialize, Serializer};
 
 use crate::TaskExecution;
 
@@ -145,6 +146,12 @@ impl<N, Ix: IndexType> Deref for AcyclicGraph<N, Ix> {
 
 /// The execution graph type alias, specialized for task execution.
 pub type ExecutionGraph = AcyclicGraph<TaskExecution, ExecutionIx>;
+
+impl<N: vite_graph_ser::GetKey + Serialize, Ix: IndexType> Serialize for AcyclicGraph<N, Ix> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        vite_graph_ser::serialize_by_key(&self.graph, serializer)
+    }
+}
 
 /// Find a cycle in the directed graph, returning the cycle path if one exists.
 ///

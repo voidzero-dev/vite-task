@@ -11,7 +11,6 @@ use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use vite_task::{Command, Session};
-use vite_task_plan::ExecutionPlan;
 use vite_workspace::find_workspace_root;
 
 /// Local parser wrapper for `BuiltInCommand`
@@ -185,7 +184,7 @@ fn run_case_inner(
                 .await;
 
             let plan = match plan_result {
-                Ok(graph) => ExecutionPlan::from_execution_graph(graph),
+                Ok(graph) => graph,
                 Err(err) => {
                     // Format the full error chain using anyhow's `{:#}` formatter
                     // and redact workspace paths for snapshot stability.

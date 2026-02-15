@@ -3,56 +3,52 @@ source: crates/vite_task_plan/tests/plan_snapshots/main.rs
 expression: "&plan_json"
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-subcommand
 ---
-{
-  "root_node": {
-    "Expanded": [
-      {
-        "key": [
-          "<workspace>/",
-          "clean-cache"
-        ],
-        "node": {
-          "task_display": {
-            "package_name": "@test/cache-subcommand",
-            "task_name": "clean-cache",
-            "package_path": "<workspace>/"
+[
+  {
+    "key": [
+      "<workspace>/",
+      "clean-cache"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/cache-subcommand",
+        "task_name": "clean-cache",
+        "package_path": "<workspace>/"
+      },
+      "items": [
+        {
+          "execution_item_display": {
+            "task_display": {
+              "package_name": "@test/cache-subcommand",
+              "task_name": "clean-cache",
+              "package_path": "<workspace>/"
+            },
+            "command": "vp cache clean",
+            "and_item_index": null,
+            "cwd": "<workspace>/"
           },
-          "items": [
-            {
-              "execution_item_display": {
-                "task_display": {
-                  "package_name": "@test/cache-subcommand",
-                  "task_name": "clean-cache",
-                  "package_path": "<workspace>/"
-                },
-                "command": "vp cache clean",
-                "and_item_index": null,
-                "cwd": "<workspace>/"
-              },
-              "kind": {
-                "Leaf": {
-                  "Spawn": {
-                    "cache_metadata": null,
-                    "spawn_command": {
-                      "program_path": "<workspace>/node_modules/.bin/vp",
-                      "args": [
-                        "cache",
-                        "clean"
-                      ],
-                      "all_envs": {
-                        "NO_COLOR": "1",
-                        "PATH": "<workspace>/node_modules/.bin:<tools>/node_modules/.bin"
-                      },
-                      "cwd": "<workspace>/"
-                    }
-                  }
+          "kind": {
+            "Leaf": {
+              "Spawn": {
+                "cache_metadata": null,
+                "spawn_command": {
+                  "program_path": "<workspace>/node_modules/.bin/vp",
+                  "args": [
+                    "cache",
+                    "clean"
+                  ],
+                  "all_envs": {
+                    "NO_COLOR": "1",
+                    "PATH": "<workspace>/node_modules/.bin:<tools>/node_modules/.bin"
+                  },
+                  "cwd": "<workspace>/"
                 }
               }
             }
-          ]
-        },
-        "neighbors": []
-      }
-    ]
+          }
+        }
+      ]
+    },
+    "neighbors": []
   }
-}
+]

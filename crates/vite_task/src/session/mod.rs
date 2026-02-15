@@ -20,7 +20,7 @@ use vite_task_graph::{
     loader::UserConfigLoader,
 };
 use vite_task_plan::{
-    ExecutionGraph, ExecutionPlan, TaskGraphLoader,
+    ExecutionGraph, TaskGraphLoader,
     plan_request::{PlanRequest, ScriptCommand, SyntheticPlanRequest},
     prepend_path_env,
 };
@@ -457,18 +457,12 @@ impl<'a> Session<'a> {
     ) -> anyhow::Result<ExitStatus> {
         // Plan the synthetic execution — returns a SpawnExecution directly
         // (synthetic plans are always a single spawned process)
-        let execution_plan = ExecutionPlan::plan_synthetic(
+        let spawn_execution = vite_task_plan::plan_synthetic(
             &self.workspace_path,
             &self.cwd,
             synthetic_plan_request,
             cache_key,
         )?;
-        let vite_task_plan::ExecutionItemKind::Leaf(vite_task_plan::LeafExecutionKind::Spawn(
-            spawn_execution,
-        )) = execution_plan.into_root_node()
-        else {
-            unreachable!("plan_synthetic always produces a Leaf(Spawn(..)) node")
-        };
 
         // Initialize cache (needed for cache-aware execution)
         let cache = self.cache()?;
@@ -531,7 +525,7 @@ impl<'a> Session<'a> {
                 });
             }
         };
-        ExecutionPlan::plan_query(
+        vite_task_plan::plan_query(
             query_plan_request,
             &self.workspace_path,
             &cwd,

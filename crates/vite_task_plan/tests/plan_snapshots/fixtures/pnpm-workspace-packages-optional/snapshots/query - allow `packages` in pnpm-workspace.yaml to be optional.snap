@@ -3,51 +3,47 @@ source: crates/vite_task_plan/tests/plan_snapshots/main.rs
 expression: "&plan_json"
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/pnpm-workspace-packages-optional
 ---
-{
-  "root_node": {
-    "Expanded": [
-      {
-        "key": [
-          "<workspace>/",
-          "hello"
-        ],
-        "node": {
-          "task_display": {
-            "package_name": "additional-envs",
-            "task_name": "hello",
-            "package_path": "<workspace>/"
+[
+  {
+    "key": [
+      "<workspace>/",
+      "hello"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "additional-envs",
+        "task_name": "hello",
+        "package_path": "<workspace>/"
+      },
+      "items": [
+        {
+          "execution_item_display": {
+            "task_display": {
+              "package_name": "additional-envs",
+              "task_name": "hello",
+              "package_path": "<workspace>/"
+            },
+            "command": "echo hello",
+            "and_item_index": null,
+            "cwd": "<workspace>/"
           },
-          "items": [
-            {
-              "execution_item_display": {
-                "task_display": {
-                  "package_name": "additional-envs",
-                  "task_name": "hello",
-                  "package_path": "<workspace>/"
-                },
-                "command": "echo hello",
-                "and_item_index": null,
-                "cwd": "<workspace>/"
-              },
-              "kind": {
-                "Leaf": {
-                  "InProcess": {
-                    "kind": {
-                      "Echo": {
-                        "strings": [
-                          "hello"
-                        ],
-                        "trailing_newline": true
-                      }
-                    }
+          "kind": {
+            "Leaf": {
+              "InProcess": {
+                "kind": {
+                  "Echo": {
+                    "strings": [
+                      "hello"
+                    ],
+                    "trailing_newline": true
                   }
                 }
               }
             }
-          ]
-        },
-        "neighbors": []
-      }
-    ]
+          }
+        }
+      ]
+    },
+    "neighbors": []
   }
-}
+]
