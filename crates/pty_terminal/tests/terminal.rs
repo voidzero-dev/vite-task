@@ -352,7 +352,8 @@ fn read_to_end_returns_exit_status_success() {
 }
 
 #[test]
-#[timeout(15000)]
+#[cfg_attr(windows, timeout(15000))]
+#[cfg_attr(not(windows), timeout(5000))]
 fn read_to_end_returns_exit_status_nonzero() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         std::process::exit(42);
