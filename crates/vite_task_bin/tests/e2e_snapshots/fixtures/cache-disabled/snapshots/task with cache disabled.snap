@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/cache-disabled
 ---
 > vp run no-cache-task # cache miss
 $ print-file test.txt ⊘ cache disabled: no cache config
@@ -12,7 +11,7 @@ test content
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled 
+Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled
 Performance:  0% cache hit rate
 
 Task Details:
@@ -29,7 +28,7 @@ test content
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled 
+Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled
 Performance:  0% cache hit rate
 
 Task Details:

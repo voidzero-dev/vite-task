@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/task-no-trailing-newline
 ---
 > vp run hello # runs echo -n hello
 $ echo -n foo ⊘ cache disabled: built-in command
@@ -14,7 +13,7 @@ bar
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   2 tasks • 0 cache hits • 0 cache misses • 2 cache disabled 
+Statistics:   2 tasks • 0 cache hits • 0 cache misses • 2 cache disabled
 Performance:  0% cache hit rate
 
 Task Details:

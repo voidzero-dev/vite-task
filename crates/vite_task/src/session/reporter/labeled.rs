@@ -380,20 +380,19 @@ fn print_summary(
     };
 
     // Build statistics line, only including non-empty parts
-    // Note: trailing space after "cache misses" is intentional for consistent formatting
     let _ = write!(
         writer,
-        "{}  {} {} {} ",
+        "{}  {} {} {}",
         "Statistics:".style(Style::new().bold()),
         vite_str::format!(" {total} tasks").style(Style::new().bright_white()),
         vite_str::format!("• {cache_hits} cache hits").style(Style::new().green()),
         vite_str::format!("• {cache_misses} cache misses").style(CACHE_MISS_STYLE),
     );
     if !cache_disabled_str.is_empty() {
-        let _ = write!(writer, "{cache_disabled_str} ");
+        let _ = write!(writer, " {cache_disabled_str}");
     }
     if !failed_str.is_empty() {
-        let _ = write!(writer, "{failed_str} ");
+        let _ = write!(writer, " {failed_str}");
     }
     let _ = writeln!(writer);
 

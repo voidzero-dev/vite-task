@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/exit-codes
 ---
 [42]> vp run pkg-a#fail # exits with code 42
 ~/packages/pkg-a$ node -e "process.exit(42)"
@@ -11,7 +10,7 @@ input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/exit-codes
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 1 cache misses • 1 failed 
+Statistics:   1 tasks • 0 cache hits • 1 cache misses • 1 failed
 Performance:  0% cache hit rate
 
 Task Details:

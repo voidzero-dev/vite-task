@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/e2e-env-test
 ---
 > vp run env-test -- SYNTHETIC_ENV_VAR test_value_from_synthesizer # prints env value
 $ vp env-test SYNTHETIC_ENV_VAR test_value_from_synthesizer
@@ -12,7 +11,7 @@ test_value_from_synthesizer
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Statistics:   1 tasks • 0 cache hits • 1 cache misses
 Performance:  0% cache hit rate
 
 Task Details:

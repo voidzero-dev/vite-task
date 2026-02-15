@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/signal-exit
 ---
 [134]> vp run abort # SIGABRT -> exit code 134
 $ node -e "process.kill(process.pid, 6)"
@@ -11,7 +10,7 @@ $ node -e "process.kill(process.pid, 6)"
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 1 cache misses • 1 failed 
+Statistics:   1 tasks • 0 cache hits • 1 cache misses • 1 failed
 Performance:  0% cache hit rate
 
 Task Details:

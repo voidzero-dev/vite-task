@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/exec-api
 ---
 > FOO=bar vp run lint-task # no print-env FOO output
 $ vp lint
@@ -13,7 +12,7 @@ Finished in <duration> on 0 files with 90 rules using <n> threads.
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 1 cache misses 
+Statistics:   1 tasks • 0 cache hits • 1 cache misses
 Performance:  0% cache hit rate
 
 Task Details:

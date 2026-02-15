@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/cache-miss-command-change
 ---
 > vp run task # cache miss
 $ print foo
@@ -15,7 +14,7 @@ bar
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   2 tasks • 0 cache hits • 2 cache misses 
+Statistics:   2 tasks • 0 cache hits • 2 cache misses
 Performance:  0% cache hit rate
 
 Task Details:
@@ -40,7 +39,7 @@ bar
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   2 tasks • 1 cache hits • 1 cache misses 
+Statistics:   2 tasks • 1 cache hits • 1 cache misses
 Performance:  50% cache hit rate, <duration> saved in total
 
 Task Details:
@@ -62,7 +61,7 @@ bar
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 1 cache hits • 0 cache misses 
+Statistics:   1 tasks • 1 cache hits • 0 cache misses
 Performance:  100% cache hit rate, <duration> saved in total
 
 Task Details:
