@@ -17,8 +17,8 @@ use vite_task_plan::{ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, Le
 use super::{
     CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt, ExitStatus, GraphExecutionReporter,
     GraphExecutionReporterBuilder, LeafExecutionPath, LeafExecutionReporter, StdioConfig,
-    StdioSuggestion, format_cache_hit_message, format_command_display,
-    format_command_with_cache_status, format_error_message,
+    StdioSuggestion, format_command_display, format_command_with_cache_status,
+    format_error_message,
 };
 use crate::session::{
     cache::format_cache_status_summary,
@@ -28,9 +28,7 @@ use crate::session::{
 /// Information tracked for each leaf execution, used in the final summary.
 #[derive(Debug)]
 struct ExecutionInfo {
-    /// Display info for this execution. `None` for displayless executions
-    /// (e.g., synthetics reached via nested expansion).
-    display: Option<ExecutionItemDisplay>,
+    display: ExecutionItemDisplay,
     /// Cache status, determined at `start()`.
     cache_status: CacheStatus,
     /// Exit status from the process. `None` means no process was spawned (cache hit or in-process).
@@ -146,8 +144,7 @@ pub struct LabeledGraphReporter {
 )]
 impl GraphExecutionReporter for LabeledGraphReporter {
     fn new_leaf_execution(&mut self, path: &LeafExecutionPath) -> Box<dyn LeafExecutionReporter> {
-        // Look up display info from the graph using the path
-        let display = path.resolve_display(&self.graph).cloned();
+        let display = path.resolve_item(&self.graph).execution_item_display.clone();
         Box::new(LabeledLeafReporter {
             shared: Rc::clone(&self.shared),
             writer: Rc::clone(&self.writer),
@@ -164,16 +161,8 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         let (summary_buf, result) = {
             let shared = self.shared.borrow();
 
-            // Print summary.
-            // Special case: single execution without display info (e.g., synthetic via
-            // nested expansion) → skip summary since there's nothing meaningful to show.
-            let is_single_displayless =
-                shared.executions.len() == 1 && shared.executions[0].display.is_none();
-            let summary_buf = if is_single_displayless {
-                None
-            } else {
-                Some(format_summary(&shared.executions, &shared.stats, &self.workspace_path))
-            };
+            let summary_buf =
+                Some(format_summary(&shared.executions, &shared.stats, &self.workspace_path));
 
             // Determine exit code based on failed tasks and infrastructure errors:
             // - Infrastructure errors (cache lookup, spawn failure) have error_message set
@@ -231,7 +220,7 @@ struct LabeledLeafReporter {
     shared: Rc<RefCell<SharedReporterState>>,
     writer: Rc<RefCell<Box<dyn AsyncWrite + Unpin>>>,
     /// Display info for this execution, looked up from the graph via the path.
-    display: Option<ExecutionItemDisplay>,
+    display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
     /// Whether `start()` has been called. Used to determine if stats should be updated
     /// in `finish()` and whether to push an `ExecutionInfo` entry.
@@ -281,16 +270,14 @@ impl LeafExecutionReporter for LabeledLeafReporter {
 
         // Format command line with cache status (sync), then write asynchronously.
         // The shared borrow to read cache_status is brief and dropped before the await.
-        if let Some(ref display) = self.display {
-            let line = {
-                let shared = self.shared.borrow();
-                let cache_status = &shared.executions.last().unwrap().cache_status;
-                format_command_with_cache_status(display, &self.workspace_path, cache_status)
-            };
-            let mut writer = self.writer.borrow_mut();
-            let _ = writer.write_all(line.as_bytes()).await;
-            let _ = writer.flush().await;
-        }
+        let line = {
+            let shared = self.shared.borrow();
+            let cache_status = &shared.executions.last().unwrap().cache_status;
+            format_command_with_cache_status(&self.display, &self.workspace_path, cache_status)
+        };
+        let mut writer = self.writer.borrow_mut();
+        let _ = writer.write_all(line.as_bytes()).await;
+        let _ = writer.flush().await;
 
         StdioConfig {
             suggestion,
@@ -350,12 +337,6 @@ impl LeafExecutionReporter for LabeledLeafReporter {
 
         if let Some(ref message) = error_message {
             buf.extend_from_slice(format_error_message(message).as_bytes());
-        }
-
-        // For executions without display info (synthetics via nested expansion) that are
-        // cache hits, print the cache hit message
-        if self.started && self.display.is_none() && self.is_cache_hit {
-            buf.extend_from_slice(format_cache_hit_message().as_bytes());
         }
 
         // Add a trailing newline after each task's output for readability.
@@ -516,10 +497,7 @@ fn format_summary(
     );
 
     for (idx, exec) in executions.iter().enumerate() {
-        // Skip executions without display info (they have nothing to show in the summary)
-        let Some(ref display) = exec.display else {
-            continue;
-        };
+        let display = &exec.display;
 
         let task_display = &display.task_display;
 
@@ -677,13 +655,16 @@ mod tests {
     /// Build a `LabeledGraphReporter` for the given graph and return a leaf reporter
     /// for the first node's first item.
     fn build_labeled_leaf(graph: ExecutionGraph) -> Box<dyn LeafExecutionReporter> {
+        use vite_task_plan::execution_graph::ExecutionNodeIndex;
+
         let graph_arc = Arc::new(graph);
         let builder =
             Box::new(LabeledReporterBuilder::new(test_path(), Box::new(tokio::io::sink())));
         let mut reporter = builder.build(&graph_arc);
 
-        // Create a leaf reporter for the first node
-        let path = LeafExecutionPath::default();
+        // Create a leaf reporter for the first node's first item
+        let mut path = LeafExecutionPath::default();
+        path.push(ExecutionNodeIndex::new(0), 0);
         reporter.new_leaf_execution(&path)
     }
 

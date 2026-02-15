@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{Deref, Index};
 
 use petgraph::{
     graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
@@ -134,13 +134,24 @@ impl<N, Ix: IndexType> Default for AcyclicGraph<N, Ix> {
 }
 
 /// Deref to the inner `DiGraph` so that read-only graph operations
-/// (`node_count()`, `node_weights()`, `node_indices()`, indexing by `NodeIndex`, etc.)
+/// (`node_count()`, `node_weights()`, `node_indices()`, etc.)
 /// work transparently on `AcyclicGraph`.
 impl<N, Ix: IndexType> Deref for AcyclicGraph<N, Ix> {
     type Target = DiGraph<N, (), Ix>;
 
     fn deref(&self) -> &Self::Target {
         &self.graph
+    }
+}
+
+/// Explicit `NodeIndex` indexing so that `graph[node_ix]` continues to work
+/// even when downstream crates add their own `Index` impls on `AcyclicGraph`
+/// (a direct `Index` impl shadows any `Index` that would be found through `Deref`).
+impl<N, Ix: IndexType> Index<NodeIndex<Ix>> for AcyclicGraph<N, Ix> {
+    type Output = N;
+
+    fn index(&self, index: NodeIndex<Ix>) -> &Self::Output {
+        &self.graph[index]
     }
 }
 

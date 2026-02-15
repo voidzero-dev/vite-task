@@ -37,7 +37,9 @@ use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_plan::{ExecutionGraph, ExecutionItem, ExecutionItemDisplay, ExecutionItemKind};
+use vite_task_plan::{
+    ExecutionGraph, ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind,
+};
 
 use super::{
     cache::format_cache_status_inline,
@@ -144,44 +146,52 @@ impl LeafExecutionPath {
         self.0.push(ExecutionPathItem { graph_node_ix, task_execution_item_index });
     }
 
-    /// Look up the [`ExecutionItemDisplay`] for the leaf identified by this path,
-    /// traversing through nested `Expanded` graphs as needed.
+    /// Resolve this path against a root execution graph, returning the final
+    /// [`ExecutionItem`] the path points to.
     ///
-    /// Returns `None` if the path is empty.
+    /// This is the shared traversal logic that walks through nested `Expanded`
+    /// graphs. Used by:
+    /// - `Index<&LeafExecutionPath> for ExecutionGraph` — extracts `&LeafExecutionKind`
+    /// - `new_leaf_execution` in `labeled.rs` — extracts `ExecutionItemDisplay`
     ///
     /// # Panics
     ///
-    /// Panics if an intermediate path element does not point to an `Expanded` item,
-    /// which indicates a bug in path construction.
-    fn resolve_display<'a>(
-        &self,
-        root_graph: &'a ExecutionGraph,
-    ) -> Option<&'a ExecutionItemDisplay> {
+    /// - If the path is empty (indicates a bug in path construction).
+    /// - If an intermediate path element points to a `Leaf` item instead of
+    ///   `Expanded` (only `Expanded` items contain nested graphs to descend into).
+    fn resolve_item<'a>(&self, root_graph: &'a ExecutionGraph) -> &'a ExecutionItem {
         let mut current_graph = root_graph;
+        let last_depth = self.0.len() - 1;
         for (depth, path_item) in self.0.iter().enumerate() {
             let item = path_item.resolve(current_graph);
-            let is_last = depth == self.0.len() - 1;
-            if is_last {
-                // Last element — return the display info regardless of Leaf/Expanded
-                return Some(&item.execution_item_display);
+            if depth == last_depth {
+                return item;
             }
-            // Intermediate element — must be Expanded so we can descend into it
             match &item.kind {
                 ExecutionItemKind::Expanded(nested_graph) => {
                     current_graph = nested_graph;
                 }
                 ExecutionItemKind::Leaf(_) => {
-                    // A Leaf in the middle of the path means the execution engine
-                    // pushed a Leaf node as an intermediate step, which is a bug —
-                    // only Expanded items can contain nested graphs to descend into.
                     unreachable!(
                         "LeafExecutionPath: intermediate element at depth {depth} is a Leaf, expected Expanded"
                     )
                 }
             }
         }
-        // Empty path
-        None
+        unreachable!("LeafExecutionPath: empty path")
+    }
+}
+
+impl std::ops::Index<&LeafExecutionPath> for ExecutionGraph {
+    type Output = LeafExecutionKind;
+
+    fn index(&self, path: &LeafExecutionPath) -> &Self::Output {
+        match &path.resolve_item(self).kind {
+            ExecutionItemKind::Leaf(kind) => kind,
+            ExecutionItemKind::Expanded(_) => {
+                unreachable!("LeafExecutionPath: final element is Expanded, expected Leaf")
+            }
+        }
     }
 }
 
