@@ -237,6 +237,14 @@ impl ChildHandle {
     }
 }
 
+fn set_exit_status_from_wait_result(
+    exit_status: &OnceLock<ExitStatus>,
+    wait_result: std::io::Result<ExitStatus>,
+) {
+    let status = wait_result.unwrap_or_else(|_| ExitStatus::with_exit_code(1));
+    let _ = exit_status.set(status);
+}
+
 impl Terminal {
     /// Spawns a new child process in a headless terminal with the given size and command.
     ///
@@ -270,10 +278,7 @@ impl Terminal {
             let writer = Arc::clone(&writer);
             let exit_status = Arc::clone(&exit_status);
             move || {
-                // Wait for child and set exit status
-                if let Ok(status) = child.wait() {
-                    let _ = exit_status.set(status);
-                }
+                set_exit_status_from_wait_result(&exit_status, child.wait());
                 // Close writer to signal EOF to the reader
                 *writer.lock().unwrap() = None;
             }
@@ -294,5 +299,33 @@ impl Terminal {
             pty_writer: PtyWriter { writer, parser, master },
             child_handle: ChildHandle { child_killer, exit_status },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_exit_status_from_wait_result_sets_error_fallback() {
+        let exit_status = OnceLock::new();
+        set_exit_status_from_wait_result(
+            &exit_status,
+            Err(std::io::Error::other("forced wait error for test")),
+        );
+
+        let status = exit_status.wait();
+        assert!(!status.success());
+        assert_eq!(status.exit_code(), 1);
+    }
+
+    #[test]
+    fn set_exit_status_from_wait_result_preserves_child_status() {
+        let exit_status = OnceLock::new();
+        set_exit_status_from_wait_result(&exit_status, Ok(ExitStatus::with_exit_code(42)));
+
+        let status = exit_status.wait();
+        assert!(!status.success());
+        assert_eq!(status.exit_code(), 42);
     }
 }

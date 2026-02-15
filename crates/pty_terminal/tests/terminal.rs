@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::{
     io::{BufRead, BufReader, IsTerminal, Read, Write, stderr, stdin, stdout},
     time::{Duration, Instant},
@@ -8,10 +10,19 @@ use portable_pty::CommandBuilder;
 use pty_terminal::{geo::ScreenSize, terminal::Terminal};
 use subprocess_test::command_for_fn;
 
+#[cfg(windows)]
+fn windows_test_serial_guard() -> MutexGuard<'static, ()> {
+    static WINDOWS_TEST_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    WINDOWS_TEST_MUTEX.lock().unwrap()
+}
+
 #[test]
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn is_terminal() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         println!("{} {} {}", stdin().is_terminal(), stdout().is_terminal(), stderr().is_terminal());
     }));
@@ -29,6 +40,9 @@ fn is_terminal() {
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn write_basic_echo() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{BufRead, Write, stdin, stdout};
         let stdin = stdin();
@@ -58,6 +72,9 @@ fn write_basic_echo() {
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn write_multiple_lines() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{BufRead, Write, stdin, stdout};
         let stdin = stdin();
@@ -109,6 +126,9 @@ fn write_multiple_lines() {
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn write_after_exit() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         print!("exiting");
     }));
@@ -137,6 +157,9 @@ fn write_after_exit() {
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn write_interactive_prompt() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdin, stdout};
         let mut stdout = stdout();
@@ -175,6 +198,9 @@ fn write_interactive_prompt() {
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn resize_terminal() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdin, stdout};
         #[cfg(unix)]
@@ -272,6 +298,9 @@ fn resize_terminal() {
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn send_ctrl_c_interrupts_process() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdout};
 
@@ -338,6 +367,9 @@ fn send_ctrl_c_interrupts_process() {
 #[timeout(5000)]
 #[expect(clippy::print_stdout, reason = "subprocess test output")]
 fn read_to_end_returns_exit_status_success() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         println!("success");
     }));
@@ -352,9 +384,11 @@ fn read_to_end_returns_exit_status_success() {
 }
 
 #[test]
-#[cfg_attr(windows, timeout(15000))]
-#[cfg_attr(not(windows), timeout(5000))]
+#[timeout(5000)]
 fn read_to_end_returns_exit_status_nonzero() {
+    #[cfg(windows)]
+    let _guard = windows_test_serial_guard();
+
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         std::process::exit(42);
     }));
