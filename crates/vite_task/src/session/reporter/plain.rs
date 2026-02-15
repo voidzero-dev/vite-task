@@ -1,11 +1,13 @@
 //! Plain reporter — a standalone [`LeafExecutionReporter`] for single-leaf execution.
 //!
 //! Used for synthetic executions (e.g., auto-install) where there is no execution graph
-//! and no summary is needed. Writes directly to stdout/stderr with no shared state.
+//! and no summary is needed. Writes directly to the provided writer with no shared state.
+
+use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 
 use super::{
-    LeafExecutionReporter, StdioConfig, StdioSuggestion, write_cache_hit_message,
-    write_error_message,
+    LeafExecutionReporter, StdioConfig, StdioSuggestion, format_cache_hit_message,
+    format_error_message,
 };
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
 
@@ -13,7 +15,7 @@ use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
 /// (e.g., `execute_synthetic`).
 ///
 /// This reporter:
-/// - Writes display output (errors, cache-hit messages) directly to stdout
+/// - Writes display output (errors, cache-hit messages) to the provided async writer
 /// - Has no display info (synthetic executions have no task display)
 /// - Does not track stats or print summaries
 /// - Supports `silent_if_cache_hit` to suppress output for cached executions
@@ -21,6 +23,8 @@ use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
 /// The exit status is determined by the caller from the `execute_spawn` return value,
 /// not from the reporter.
 pub struct PlainReporter {
+    /// Async writer for reporter display output (errors, cache-hit messages).
+    writer: Box<dyn AsyncWrite + Unpin>,
     /// When true, suppresses all output (command line, process output, cache hit message)
     /// for executions that are cache hits.
     silent_if_cache_hit: bool,
@@ -32,8 +36,9 @@ impl PlainReporter {
     /// Create a new plain reporter.
     ///
     /// - `silent_if_cache_hit`: If true, suppress all output when the execution is a cache hit.
-    pub const fn new(silent_if_cache_hit: bool) -> Self {
-        Self { silent_if_cache_hit, is_cache_hit: false }
+    /// - `writer`: Async writer for reporter display output.
+    pub fn new(silent_if_cache_hit: bool, writer: Box<dyn AsyncWrite + Unpin>) -> Self {
+        Self { writer, silent_if_cache_hit, is_cache_hit: false }
     }
 
     /// Returns true if output should be suppressed for this execution.
@@ -42,8 +47,9 @@ impl PlainReporter {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl LeafExecutionReporter for PlainReporter {
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
+    async fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
         self.is_cache_hit = matches!(cache_status, CacheStatus::Hit { .. });
         // PlainReporter is used for single-leaf synthetic executions (e.g., auto-install).
         // Always suggest inherited stdio so the spawned process can be interactive.
@@ -69,24 +75,46 @@ impl LeafExecutionReporter for PlainReporter {
         }
     }
 
-    fn finish(
-        self: Box<Self>,
+    async fn finish(
+        mut self: Box<Self>,
         _status: Option<std::process::ExitStatus>,
         _cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
     ) {
-        let mut stdout = std::io::stdout();
-
         // Handle errors — format the full error chain and print inline.
         if let Some(error) = error {
             let message = vite_str::format!("{:#}", anyhow::Error::from(error));
-            write_error_message(&mut stdout, &message);
+            let line = format_error_message(&message);
+            let _ = self.writer.write_all(line.as_bytes()).await;
             return;
         }
 
         // For cache hits, print the "cache hit" message (unless silent)
         if self.is_cache_hit && !self.is_silent() {
-            write_cache_hit_message(&mut stdout);
+            let line = format_cache_hit_message();
+            let _ = self.writer.write_all(line.as_bytes()).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::event::CacheDisabledReason;
+
+    #[tokio::test]
+    async fn plain_reporter_always_suggests_inherited() {
+        let mut reporter = PlainReporter::new(false, Box::new(tokio::io::sink()));
+        let stdio_config =
+            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
+    }
+
+    #[tokio::test]
+    async fn plain_reporter_suggests_inherited_even_when_silent() {
+        let mut reporter = PlainReporter::new(true, Box::new(tokio::io::sink()));
+        let stdio_config =
+            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
+        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
     }
 }

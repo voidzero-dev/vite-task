@@ -26,7 +26,6 @@ mod plain;
 // Re-export the concrete implementations so callers can use `reporter::PlainReporter`
 // and `reporter::LabeledReporterBuilder` without navigating into child modules.
 use std::{
-    io::Write,
     process::ExitStatus as StdExitStatus,
     sync::{Arc, LazyLock},
 };
@@ -206,6 +205,7 @@ pub trait GraphExecutionReporterBuilder {
 ///
 /// Creates [`LeafExecutionReporter`] instances for individual leaf executions
 /// and finalizes the session with `finish()`.
+#[async_trait::async_trait(?Send)]
 pub trait GraphExecutionReporter {
     /// Create a new leaf execution reporter for the leaf identified by `path`.
     ///
@@ -221,7 +221,7 @@ pub trait GraphExecutionReporter {
     ///
     /// Returns `Ok(())` if all tasks succeeded, or `Err(ExitStatus)` to indicate the
     /// process should exit with the given status code.
-    fn finish(self: Box<Self>) -> Result<(), ExitStatus>;
+    async fn finish(self: Box<Self>) -> Result<(), ExitStatus>;
 }
 
 /// Reporter for a single leaf execution (one spawned process or in-process command).
@@ -230,6 +230,7 @@ pub trait GraphExecutionReporter {
 ///
 /// `start()` may not be called before `finish()` if an error occurs before the cache
 /// status is determined (e.g., cache lookup failure).
+#[async_trait::async_trait(?Send)]
 pub trait LeafExecutionReporter {
     /// Report that execution is starting with the given cache status.
     ///
@@ -243,7 +244,7 @@ pub trait LeafExecutionReporter {
     /// AND whether caching is enabled — inherited stdio is only used when the
     /// suggestion is [`StdioSuggestion::Inherited`] AND the task has no cache
     /// metadata (caching disabled).
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig;
+    async fn start(&mut self, cache_status: CacheStatus) -> StdioConfig;
 
     /// Finalize this leaf execution.
     ///
@@ -253,7 +254,7 @@ pub trait LeafExecutionReporter {
     ///   failure, spawn failure, fingerprint creation failure, cache update failure).
     ///
     /// This method consumes the reporter — no further calls are possible after `finish()`.
-    fn finish(
+    async fn finish(
         self: Box<Self>,
         status: Option<StdExitStatus>,
         cache_update_status: CacheUpdateStatus,
@@ -298,68 +299,61 @@ fn format_command_display(display: &ExecutionItemDisplay, workspace_path: &Absol
     vite_str::format!("{cwd_str}$ {}", display.command)
 }
 
-/// Write the command line with optional inline cache status to the writer.
+/// Format the command line with optional inline cache status.
 ///
 /// This is called during `start()` to show the user what command is being executed
-/// and its cache status.
-fn write_command_with_cache_status(
-    writer: &mut impl Write,
+/// and its cache status. The caller writes the returned string to the async writer.
+fn format_command_with_cache_status(
     display: &ExecutionItemDisplay,
     workspace_path: &AbsolutePath,
     cache_status: &CacheStatus,
-) {
+) -> Str {
     let command_str = format_command_display(display, workspace_path);
-    if let Some(inline_status) = format_cache_status_inline(cache_status) {
-        // Apply styling based on cache status type
-        let styled_status = match cache_status {
-            CacheStatus::Hit { .. } => inline_status.style(Style::new().green().dimmed()),
-            CacheStatus::Miss(_) => inline_status.style(CACHE_MISS_STYLE.dimmed()),
-            CacheStatus::Disabled(_) => inline_status.style(Style::new().bright_black()),
-        };
-        let _ = writeln!(writer, "{} {}", command_str.style(COMMAND_STYLE), styled_status);
-    } else {
-        let _ = writeln!(writer, "{}", command_str.style(COMMAND_STYLE));
-    }
+    format_cache_status_inline(cache_status).map_or_else(
+        || vite_str::format!("{}\n", command_str.style(COMMAND_STYLE)),
+        |inline_status| {
+            // Apply styling based on cache status type
+            let styled_status = match cache_status {
+                CacheStatus::Hit { .. } => inline_status.style(Style::new().green().dimmed()),
+                CacheStatus::Miss(_) => inline_status.style(CACHE_MISS_STYLE.dimmed()),
+                CacheStatus::Disabled(_) => inline_status.style(Style::new().bright_black()),
+            };
+            vite_str::format!("{} {}\n", command_str.style(COMMAND_STYLE), styled_status)
+        },
+    )
 }
 
-/// Write an error message in red with an error icon.
-fn write_error_message(writer: &mut impl Write, message: &str) {
-    let _ = writeln!(
-        writer,
-        "{} {}",
+/// Format an error message in red with an error icon.
+fn format_error_message(message: &str) -> Str {
+    vite_str::format!(
+        "{} {}\n",
         "✗".style(Style::new().red().bold()),
         message.style(Style::new().red())
-    );
+    )
 }
 
-/// Write the "cache hit, logs replayed" message for synthetic executions without display info.
-fn write_cache_hit_message(writer: &mut impl Write) {
-    let _ =
-        writeln!(writer, "{}", "✓ cache hit, logs replayed".style(Style::new().green().dimmed()));
+/// Format the "cache hit, logs replayed" message for synthetic executions without display info.
+fn format_cache_hit_message() -> Str {
+    vite_str::format!("{}\n", "✓ cache hit, logs replayed".style(Style::new().green().dimmed()))
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Tests
+// Test fixtures (shared by child module tests)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
+pub(crate) mod test_fixtures {
+    use std::{collections::BTreeMap, sync::Arc};
 
+    use vite_path::AbsolutePath;
     use vite_task_graph::display::TaskDisplay;
     use vite_task_plan::{
-        ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, InProcessExecution,
+        ExecutionGraph, ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, InProcessExecution,
         LeafExecutionKind, SpawnCommand, SpawnExecution, TaskExecution,
     };
 
-    use super::*;
-    use crate::session::{
-        event::{CacheDisabledReason, CacheStatus},
-        reporter::labeled::count_spawn_leaves,
-    };
-
     /// Create a dummy `AbsolutePath` for test fixtures.
-    fn test_path() -> Arc<AbsolutePath> {
+    pub fn test_path() -> Arc<AbsolutePath> {
         #[cfg(unix)]
         {
             Arc::from(AbsolutePath::new("/test").unwrap())
@@ -371,7 +365,7 @@ mod tests {
     }
 
     /// Create a dummy `TaskDisplay` for test fixtures.
-    fn test_task_display(name: &str) -> TaskDisplay {
+    pub fn test_task_display(name: &str) -> TaskDisplay {
         TaskDisplay {
             package_name: "pkg".into(),
             task_name: name.into(),
@@ -380,7 +374,7 @@ mod tests {
     }
 
     /// Create a dummy `ExecutionItemDisplay` for test fixtures.
-    fn test_display(name: &str) -> ExecutionItemDisplay {
+    pub fn test_display(name: &str) -> ExecutionItemDisplay {
         ExecutionItemDisplay {
             task_display: test_task_display(name),
             command: name.into(),
@@ -390,7 +384,7 @@ mod tests {
     }
 
     /// Create a `TaskExecution` with a single spawn leaf.
-    fn spawn_task(name: &str) -> TaskExecution {
+    pub fn spawn_task(name: &str) -> TaskExecution {
         TaskExecution {
             task_display: test_task_display(name),
             items: vec![ExecutionItem {
@@ -409,7 +403,7 @@ mod tests {
     }
 
     /// Create a `TaskExecution` with a single in-process leaf (echo).
-    fn in_process_task(name: &str) -> TaskExecution {
+    pub fn in_process_task(name: &str) -> TaskExecution {
         TaskExecution {
             task_display: test_task_display(name),
             items: vec![ExecutionItem {
@@ -427,7 +421,7 @@ mod tests {
     }
 
     /// Create a `TaskExecution` with an expanded (nested) subgraph as its item.
-    fn expanded_task(name: &str, nested_graph: ExecutionGraph) -> TaskExecution {
+    pub fn expanded_task(name: &str, nested_graph: ExecutionGraph) -> TaskExecution {
         TaskExecution {
             task_display: test_task_display(name),
             items: vec![ExecutionItem {
@@ -435,160 +429,5 @@ mod tests {
                 kind: ExecutionItemKind::Expanded(nested_graph),
             }],
         }
-    }
-
-    // ────────────────────────────────────────────────────────────
-    // count_spawn_leaves tests
-    // ────────────────────────────────────────────────────────────
-
-    #[test]
-    fn count_spawn_leaves_empty_graph() {
-        let graph = ExecutionGraph::default();
-        assert_eq!(count_spawn_leaves(&graph), 0);
-    }
-
-    #[test]
-    fn count_spawn_leaves_single_spawn() {
-        let graph = ExecutionGraph::from_node_list([spawn_task("build")]);
-        assert_eq!(count_spawn_leaves(&graph), 1);
-    }
-
-    #[test]
-    fn count_spawn_leaves_multiple_spawns() {
-        let graph = ExecutionGraph::from_node_list([
-            spawn_task("build"),
-            spawn_task("test"),
-            spawn_task("lint"),
-        ]);
-        assert_eq!(count_spawn_leaves(&graph), 3);
-    }
-
-    #[test]
-    fn count_spawn_leaves_in_process_not_counted() {
-        let graph = ExecutionGraph::from_node_list([in_process_task("echo")]);
-        assert_eq!(count_spawn_leaves(&graph), 0);
-    }
-
-    #[test]
-    fn count_spawn_leaves_mixed_spawn_and_in_process() {
-        let graph = ExecutionGraph::from_node_list([spawn_task("build"), in_process_task("echo")]);
-        assert_eq!(count_spawn_leaves(&graph), 1);
-    }
-
-    #[test]
-    fn count_spawn_leaves_nested_expanded() {
-        // Build a nested graph containing two spawns
-        let nested =
-            ExecutionGraph::from_node_list([spawn_task("nested-build"), spawn_task("nested-test")]);
-
-        // Outer graph has one expanded item pointing to the nested graph
-        let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
-        assert_eq!(count_spawn_leaves(&graph), 2);
-    }
-
-    #[test]
-    fn count_spawn_leaves_nested_with_top_level() {
-        // Nested graph with one spawn
-        let nested = ExecutionGraph::from_node_list([spawn_task("nested-lint")]);
-
-        // Top-level graph has one spawn + one expanded
-        let graph =
-            ExecutionGraph::from_node_list([spawn_task("build"), expanded_task("expand", nested)]);
-        assert_eq!(count_spawn_leaves(&graph), 2);
-    }
-
-    // ────────────────────────────────────────────────────────────
-    // PlainReporter stdio suggestion tests
-    // ────────────────────────────────────────────────────────────
-
-    #[test]
-    fn plain_reporter_always_suggests_inherited() {
-        let mut reporter = PlainReporter::new(false);
-        let stdio_config =
-            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
-    }
-
-    #[test]
-    fn plain_reporter_suggests_inherited_even_when_silent() {
-        let mut reporter = PlainReporter::new(true);
-        let stdio_config =
-            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
-    }
-
-    // ────────────────────────────────────────────────────────────
-    // LabeledLeafReporter stdio suggestion tests
-    // ────────────────────────────────────────────────────────────
-
-    /// Build a `LabeledGraphReporter` for the given graph and return a leaf reporter
-    /// for the first node's first item.
-    fn build_labeled_leaf(graph: ExecutionGraph) -> Box<dyn LeafExecutionReporter> {
-        let graph_arc = Arc::new(graph);
-        let builder = Box::new(LabeledReporterBuilder::new(test_path()));
-        let mut reporter = builder.build(&graph_arc);
-
-        // Create a leaf reporter for the first node
-        let path = LeafExecutionPath::default();
-        reporter.new_leaf_execution(&path)
-    }
-
-    #[test]
-    fn labeled_reporter_single_spawn_suggests_inherited() {
-        let graph = ExecutionGraph::from_node_list([spawn_task("build")]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
-    }
-
-    #[test]
-    fn labeled_reporter_multiple_spawns_suggests_piped() {
-        let graph = ExecutionGraph::from_node_list([spawn_task("build"), spawn_task("test")]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
-    }
-
-    #[test]
-    fn labeled_reporter_single_in_process_suggests_piped() {
-        // Zero spawn leaves → spawn_leaf_count == 0, so not == 1 → Piped
-        // This is correct: in-process executions don't spawn child processes,
-        // so stdio suggestion doesn't apply to them.
-        let graph = ExecutionGraph::from_node_list([in_process_task("echo")]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
-    }
-
-    #[test]
-    fn labeled_reporter_one_spawn_one_in_process_suggests_inherited() {
-        // One spawn leaf + one in-process → spawn_leaf_count == 1 → Inherited
-        let graph = ExecutionGraph::from_node_list([spawn_task("build"), in_process_task("echo")]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
-    }
-
-    #[test]
-    fn labeled_reporter_nested_single_spawn_suggests_inherited() {
-        // Nested graph with exactly one spawn
-        let nested = ExecutionGraph::from_node_list([spawn_task("nested-build")]);
-
-        let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
-    }
-
-    #[test]
-    fn labeled_reporter_nested_multiple_spawns_suggests_piped() {
-        // Nested graph with two spawns
-        let nested =
-            ExecutionGraph::from_node_list([spawn_task("nested-a"), spawn_task("nested-b")]);
-
-        let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
     }
 }

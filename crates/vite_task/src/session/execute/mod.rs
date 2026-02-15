@@ -120,18 +120,21 @@ impl ExecutionContext<'_> {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 // In-process (built-in) commands: caching is disabled, execute synchronously
                 let mut stdio_config = leaf_reporter
-                    .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
+                    .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution))
+                    .await;
 
                 let execution_output = in_process_execution.execute();
                 // Write output to the stdout writer from StdioConfig
                 let _ = stdio_config.stdout_writer.write_all(&execution_output.stdout).await;
                 let _ = stdio_config.stdout_writer.flush().await;
 
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    None,
-                );
+                leaf_reporter
+                    .finish(
+                        None,
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                        None,
+                    )
+                    .await;
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
                 #[expect(
@@ -191,11 +194,13 @@ pub async fn execute_spawn(
             Err(err) => {
                 // Cache lookup error — report through finish.
                 // Note: start() is NOT called because we don't have a valid cache status.
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
-                );
+                leaf_reporter
+                    .finish(
+                        None,
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                        Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
+                    )
+                    .await;
                 return SpawnOutcome::Failed;
             }
         }
@@ -206,7 +211,7 @@ pub async fn execute_spawn(
 
     // 2. Report execution start with the determined cache status.
     //    Returns StdioConfig with the reporter's suggestion and async writers.
-    let mut stdio_config = leaf_reporter.start(cache_status);
+    let mut stdio_config = leaf_reporter.start(cache_status).await;
 
     // 3. If cache hit, replay outputs via the StdioConfig writers and finish early.
     //    No need to actually execute the command — just replay what was cached.
@@ -219,11 +224,9 @@ pub async fn execute_spawn(
             let _ = writer.write_all(&output.content).await;
             let _ = writer.flush().await;
         }
-        leaf_reporter.finish(
-            None,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-            None,
-        );
+        leaf_reporter
+            .finish(None, CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit), None)
+            .await;
         return SpawnOutcome::CacheHit;
     }
 
@@ -243,19 +246,23 @@ pub async fn execute_spawn(
 
         match spawn_inherited(&spawn_execution.spawn_command).await {
             Ok(result) => {
-                leaf_reporter.finish(
-                    Some(result.exit_status),
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    None,
-                );
+                leaf_reporter
+                    .finish(
+                        Some(result.exit_status),
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                        None,
+                    )
+                    .await;
                 return SpawnOutcome::Spawned(result.exit_status);
             }
             Err(err) => {
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Spawn(err)),
-                );
+                leaf_reporter
+                    .finish(
+                        None,
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                        Some(ExecutionError::Spawn(err)),
+                    )
+                    .await;
                 return SpawnOutcome::Failed;
             }
         }
@@ -280,11 +287,13 @@ pub async fn execute_spawn(
     {
         Ok(result) => result,
         Err(err) => {
-            leaf_reporter.finish(
-                None,
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Spawn(err)),
-            );
+            leaf_reporter
+                .finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    Some(ExecutionError::Spawn(err)),
+                )
+                .await;
             return SpawnOutcome::Failed;
         }
     };
@@ -337,7 +346,7 @@ pub async fn execute_spawn(
     // 7. Finish the leaf execution with the result and optional cache error.
     //    Cache update/fingerprint failures are reported but do not affect the outcome —
     //    the process ran, so we return its actual exit status.
-    leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error);
+    leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error).await;
 
     SpawnOutcome::Spawned(result.exit_status)
 }
@@ -409,6 +418,6 @@ impl Session<'_> {
 
         // Leaf-level errors and non-zero exit statuses are tracked internally
         // by the reporter.
-        reporter.finish()
+        reporter.finish().await
     }
 }
