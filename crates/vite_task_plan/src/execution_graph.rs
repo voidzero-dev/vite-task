@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
 use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
+use serde::{Serialize, Serializer};
 
 use crate::TaskExecution;
 
@@ -133,5 +134,11 @@ impl Deref for ExecutionGraph {
 
     fn deref(&self) -> &Self::Target {
         &self.graph
+    }
+}
+
+impl Serialize for ExecutionGraph {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        vite_graph_ser::serialize_by_key(&self.graph, serializer)
     }
 }
