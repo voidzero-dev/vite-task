@@ -42,7 +42,7 @@ use vite_task_plan::{ExecutionGraph, ExecutionItem, ExecutionItemDisplay, Execut
 
 use super::{
     cache::format_cache_status_inline,
-    event::{CacheStatus, CacheUpdateStatus, OutputKind},
+    event::{CacheStatus, CacheUpdateStatus, ExecutionError, OutputKind},
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -241,7 +241,7 @@ pub trait LeafExecutionReporter {
         self: Box<Self>,
         status: Option<StdExitStatus>,
         cache_update_status: CacheUpdateStatus,
-        error: Option<Str>,
+        error: Option<ExecutionError>,
     );
 }
 

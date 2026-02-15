@@ -6,10 +6,9 @@
 use std::io::Write;
 
 use bstr::BString;
-use vite_str::Str;
 
 use super::{LeafExecutionReporter, StdinSuggestion, write_cache_hit_message, write_error_message};
-use crate::session::event::{CacheStatus, CacheUpdateStatus, OutputKind};
+use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError, OutputKind};
 
 /// A self-contained [`LeafExecutionReporter`] for single-leaf executions
 /// (e.g., `execute_synthetic`).
@@ -71,11 +70,12 @@ impl<W: Write> LeafExecutionReporter for PlainReporter<W> {
         mut self: Box<Self>,
         _status: Option<std::process::ExitStatus>,
         _cache_update_status: CacheUpdateStatus,
-        error: Option<Str>,
+        error: Option<ExecutionError>,
     ) {
-        // Handle errors — print inline error message
-        if let Some(ref message) = error {
-            write_error_message(&mut self.writer, message);
+        // Handle errors — format the full error chain and print inline.
+        if let Some(error) = error {
+            let message = vite_str::format!("{:#}", anyhow::Error::from(error));
+            write_error_message(&mut self.writer, &message);
             return;
         }
 

@@ -2,6 +2,47 @@ use std::{process::ExitStatus, time::Duration};
 
 use super::cache::CacheMiss;
 
+/// The cache operation that failed.
+#[derive(Debug)]
+pub enum CacheErrorKind {
+    /// Cache lookup (`try_hit`) failed.
+    Lookup,
+    /// Writing the cache entry failed after successful execution.
+    Update,
+}
+
+impl std::fmt::Display for CacheErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Lookup => f.write_str("lookup"),
+            Self::Update => f.write_str("update"),
+        }
+    }
+}
+
+/// Error that occurred during a leaf execution.
+///
+/// Reported through [`super::reporter::LeafExecutionReporter::finish()`] and
+/// displayed by the reporter.
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutionError {
+    /// A cache operation failed.
+    #[error("Cache {kind} failed")]
+    Cache {
+        kind: CacheErrorKind,
+        #[source]
+        source: anyhow::Error,
+    },
+
+    /// The OS failed to spawn the child process (e.g., command not found).
+    #[error("Failed to spawn process")]
+    Spawn(#[source] anyhow::Error),
+
+    /// Creating the post-run fingerprint failed after successful execution.
+    #[error("Failed to create post-run fingerprint")]
+    PostRunFingerprint(#[source] anyhow::Error),
+}
+
 #[derive(Debug)]
 pub enum OutputKind {
     Stdout,

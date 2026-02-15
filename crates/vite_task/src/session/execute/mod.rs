@@ -14,7 +14,8 @@ use self::{
 use super::{
     cache::{CommandCacheValue, ExecutionCache},
     event::{
-        CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, OutputKind,
+        CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
+        ExecutionError, OutputKind,
     },
     reporter::{
         ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionPath,
@@ -186,7 +187,7 @@ pub async fn execute_spawn(
                 leaf_reporter.finish(
                     None,
                     CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(vite_str::format!("Cache lookup failed: {err}")),
+                    Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
                 );
                 return SpawnOutcome::Failed;
             }
@@ -263,7 +264,7 @@ pub async fn execute_spawn(
             leaf_reporter.finish(
                 None,
                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(vite_str::format!("Failed to spawn process: {err}")),
+                Some(ExecutionError::Spawn(err)),
             );
             return SpawnOutcome::Failed;
         }
@@ -293,13 +294,16 @@ pub async fn execute_spawn(
                         Ok(()) => (CacheUpdateStatus::Updated, None),
                         Err(err) => (
                             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                            Some(vite_str::format!("Failed to update cache: {err}")),
+                            Some(ExecutionError::Cache {
+                                kind: CacheErrorKind::Update,
+                                source: err,
+                            }),
                         ),
                     }
                 }
                 Err(err) => (
                     CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(vite_str::format!("Failed to create post-run fingerprint: {err}")),
+                    Some(ExecutionError::PostRunFingerprint(err)),
                 ),
             }
         } else {

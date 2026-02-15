@@ -25,7 +25,7 @@ use super::{
 };
 use crate::session::{
     cache::format_cache_status_summary,
-    event::{CacheStatus, CacheUpdateStatus, OutputKind, exit_status_to_code},
+    event::{CacheStatus, CacheUpdateStatus, ExecutionError, OutputKind, exit_status_to_code},
 };
 
 /// Information tracked for each leaf execution, used in the final summary.
@@ -273,13 +273,16 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
         self: Box<Self>,
         status: Option<StdExitStatus>,
         _cache_update_status: CacheUpdateStatus,
-        error: Option<Str>,
+        error: Option<ExecutionError>,
     ) {
         let mut shared = self.shared.borrow_mut();
 
-        // Handle errors
-        if let Some(ref message) = error {
-            write_error_message(&mut shared.writer, message);
+        // Handle errors — format the full error chain using anyhow's `{:#}` formatter
+        // (joins cause chain with `: ` separators).
+        let has_error = error.is_some();
+        if let Some(error) = error {
+            let message: Str = vite_str::format!("{:#}", anyhow::Error::from(error));
+            write_error_message(&mut shared.writer, &message);
 
             // Update the execution info if start() was called (an entry was pushed).
             // Without the `self.started` guard, `last_mut()` would return a
@@ -287,7 +290,7 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
             if self.started
                 && let Some(exec) = shared.executions.last_mut()
             {
-                exec.error_message = Some(message.clone());
+                exec.error_message = Some(message);
             }
 
             shared.stats.failed += 1;
@@ -295,7 +298,7 @@ impl<W: Write> LeafExecutionReporter for LabeledLeafReporter<W> {
 
         // Update failure statistics for non-zero exit status (not an error, just a failed task)
         // None means success (cache hit or in-process), Some checks the actual exit status
-        if error.is_none() && status.is_some_and(|s| !s.success()) {
+        if !has_error && status.is_some_and(|s| !s.success()) {
             shared.stats.failed += 1;
         }
 
