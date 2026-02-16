@@ -588,6 +588,10 @@ mod tests {
         reporter.new_leaf_execution(path)
     }
 
+    #[expect(
+        clippy::future_not_send,
+        reason = "LeafExecutionReporter futures are !Send in single-threaded reporter tests"
+    )]
     async fn suggestion_for_path(
         graph: ExecutionGraph,
         path: &LeafExecutionPath,
