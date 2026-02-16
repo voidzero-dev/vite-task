@@ -26,7 +26,7 @@ pub struct PtyReader {
 pub struct PtyWriter {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     parser: Arc<Mutex<vt100::Parser<Vt100Callbacks>>>,
-    master: Box<dyn MasterPty + Send>,
+    master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
 }
 
 /// A cloneable handle to a child process spawned in a PTY.
@@ -200,18 +200,22 @@ impl PtyWriter {
     ///
     /// # Errors
     ///
-    /// Returns an error if the PTY cannot be resized.
+    /// Returns an error if the PTY cannot be resized or the child has already exited.
     ///
     /// # Panics
     ///
     /// Panics if the parser lock is poisoned.
     pub fn resize(&self, size: ScreenSize) -> anyhow::Result<()> {
-        self.master.resize(portable_pty::PtySize {
+        let guard = self.master.lock().unwrap();
+        let master =
+            guard.as_ref().ok_or_else(|| anyhow::anyhow!("cannot resize: child has exited"))?;
+        master.resize(portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
             pixel_width: 0,
             pixel_height: 0,
         })?;
+        drop(guard);
 
         self.parser.lock().unwrap().screen_mut().set_size(size.rows, size.cols);
 
@@ -258,24 +262,41 @@ impl Terminal {
         let reader = pty_pair.master.try_clone_reader()?;
         let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
-        // Spawn child and immediately drop slave to ensure EOF is signaled when child exits
         let mut child = pty_pair.slave.spawn_command(cmd)?;
         let child_killer = child.clone_killer();
-        drop(pty_pair.slave); // Critical: drop slave so EOF is signaled when child exits
-        let master = pty_pair.master;
+        let master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>> =
+            Arc::new(Mutex::new(Some(pty_pair.master)));
         let exit_status: Arc<OnceLock<ExitStatus>> = Arc::new(OnceLock::new());
 
-        // Background thread: wait for child to exit, set exit status, then close writer to trigger EOF
+        // Background thread: wait for child to exit, then clean up.
+        //
+        // The slave and master are kept alive until after `child.wait()` returns
+        // rather than being dropped immediately after spawn.
+        //
+        // macOS: if the parent's slave fd is closed early and the child exits
+        // quickly, all slave references close before the reader issues its first
+        // `read()`. macOS then returns EIO on the master without draining the
+        // output buffer, causing data loss.
+        //
+        // Windows (ConPTY): the reader pipe only gets EOF when the ConPTY handle
+        // is destroyed via `ClosePseudoConsole`, which requires all
+        // `Arc<Mutex<Inner>>` references (held by both master and slave) to be
+        // dropped. Dropping the master here brings that refcount to zero, ensuring
+        // the reader sees EOF promptly after the child exits.
         thread::spawn({
             let writer = Arc::clone(&writer);
+            let master = Arc::clone(&master);
             let exit_status = Arc::clone(&exit_status);
+            let slave = pty_pair.slave;
             move || {
                 // Wait for child and set exit status
                 if let Ok(status) = child.wait() {
                     let _ = exit_status.set(status);
                 }
-                // Close writer to signal EOF to the reader
+                // Close writer, master, and slave to trigger EOF on the reader.
                 *writer.lock().unwrap() = None;
+                *master.lock().unwrap() = None;
+                drop(slave);
             }
         });
 
