@@ -32,7 +32,7 @@ pub struct PtyWriter {
 /// A cloneable handle to a child process spawned in a PTY.
 pub struct ChildHandle {
     child_killer: Box<dyn ChildKiller + Send + Sync>,
-    exit_status: Arc<OnceLock<ExitStatus>>,
+    exit_status: Arc<OnceLock<std::io::Result<ExitStatus>>>,
 }
 
 impl Clone for ChildHandle {
@@ -221,9 +221,16 @@ impl PtyWriter {
 
 impl ChildHandle {
     /// Blocks until the child process has exited and returns its exit status.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if waiting for the child process exit status fails.
     #[must_use]
-    pub fn wait(&self) -> ExitStatus {
-        self.exit_status.wait().clone()
+    pub fn wait(&self) -> std::io::Result<ExitStatus> {
+        match self.exit_status.wait() {
+            Ok(status) => Ok(status.clone()),
+            Err(error) => Err(std::io::Error::new(error.kind(), error.to_string())),
+        }
     }
 
     /// Kills the child process.
@@ -238,11 +245,10 @@ impl ChildHandle {
 }
 
 fn set_exit_status_from_wait_result(
-    exit_status: &OnceLock<ExitStatus>,
+    exit_status: &OnceLock<std::io::Result<ExitStatus>>,
     wait_result: std::io::Result<ExitStatus>,
 ) {
-    let status = wait_result.unwrap_or_else(|_| ExitStatus::with_exit_code(1));
-    let _ = exit_status.set(status);
+    let _ = exit_status.set(wait_result);
 }
 
 impl Terminal {
@@ -271,7 +277,7 @@ impl Terminal {
         let child_killer = child.clone_killer();
         drop(pty_pair.slave); // Critical: drop slave so EOF is signaled when child exits
         let master = pty_pair.master;
-        let exit_status: Arc<OnceLock<ExitStatus>> = Arc::new(OnceLock::new());
+        let exit_status: Arc<OnceLock<std::io::Result<ExitStatus>>> = Arc::new(OnceLock::new());
 
         // Background thread: wait for child to exit, set exit status, then close writer to trigger EOF
         thread::spawn({
@@ -307,7 +313,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn set_exit_status_from_wait_result_sets_error_fallback() {
+    fn set_exit_status_from_wait_result_preserves_error() {
         let exit_status = OnceLock::new();
         set_exit_status_from_wait_result(
             &exit_status,
@@ -315,8 +321,9 @@ mod tests {
         );
 
         let status = exit_status.wait();
-        assert!(!status.success());
-        assert_eq!(status.exit_code(), 1);
+        assert!(status.is_err());
+        assert_eq!(status.as_ref().unwrap_err().kind(), std::io::ErrorKind::Other);
+        assert_eq!(status.as_ref().unwrap_err().to_string(), "forced wait error for test");
     }
 
     #[test]
@@ -325,7 +332,7 @@ mod tests {
         set_exit_status_from_wait_result(&exit_status, Ok(ExitStatus::with_exit_code(42)));
 
         let status = exit_status.wait();
-        assert!(!status.success());
-        assert_eq!(status.exit_code(), 42);
+        assert!(!status.as_ref().unwrap().success());
+        assert_eq!(status.as_ref().unwrap().exit_code(), 42);
     }
 }

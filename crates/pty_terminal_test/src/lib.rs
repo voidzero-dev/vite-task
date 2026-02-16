@@ -91,10 +91,14 @@ impl Reader {
 
     /// Reads all remaining PTY output until the child exits, then returns the exit status.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if waiting for the child process exit status fails.
+    ///
     /// # Panics
     ///
     /// Panics if reading from the PTY fails.
-    pub fn wait_for_exit(&mut self) -> ExitStatus {
+    pub fn wait_for_exit(&mut self) -> std::io::Result<ExitStatus> {
         let mut discard = Vec::new();
         self.pty.read_to_end(&mut discard).expect("PTY read_to_end failed");
         self.child_handle.wait()

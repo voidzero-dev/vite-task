@@ -391,7 +391,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                     }
                 }
 
-                let status = terminal.reader.wait_for_exit();
+                let status = terminal.reader.wait_for_exit().unwrap();
                 let screen = terminal.reader.screen_contents();
 
                 {
