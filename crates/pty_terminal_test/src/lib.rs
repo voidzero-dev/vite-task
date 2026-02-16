@@ -98,7 +98,7 @@ impl Reader {
     /// # Panics
     ///
     /// Panics if reading from the PTY fails.
-    pub fn wait_for_exit(&mut self) -> std::io::Result<ExitStatus> {
+    pub fn wait_for_exit(&mut self) -> anyhow::Result<ExitStatus> {
         let mut discard = Vec::new();
         self.pty.read_to_end(&mut discard).expect("PTY read_to_end failed");
         self.child_handle.wait()

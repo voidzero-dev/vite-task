@@ -10,6 +10,8 @@ use portable_pty::{ChildKiller, ExitStatus, MasterPty};
 
 use crate::geo::ScreenSize;
 
+type ChildWaitResult = Result<ExitStatus, Arc<std::io::Error>>;
+
 /// The read half of a PTY connection. Implements [`Read`].
 ///
 /// Reading feeds data through an internal vt100 parser (shared with [`PtyWriter`]),
@@ -32,7 +34,7 @@ pub struct PtyWriter {
 /// A cloneable handle to a child process spawned in a PTY.
 pub struct ChildHandle {
     child_killer: Box<dyn ChildKiller + Send + Sync>,
-    exit_status: Arc<OnceLock<std::io::Result<ExitStatus>>>,
+    exit_status: Arc<OnceLock<ChildWaitResult>>,
 }
 
 impl Clone for ChildHandle {
@@ -226,10 +228,10 @@ impl ChildHandle {
     ///
     /// Returns an error if waiting for the child process exit status fails.
     #[must_use]
-    pub fn wait(&self) -> std::io::Result<ExitStatus> {
+    pub fn wait(&self) -> anyhow::Result<ExitStatus> {
         match self.exit_status.wait() {
             Ok(status) => Ok(status.clone()),
-            Err(error) => Err(std::io::Error::new(error.kind(), error.to_string())),
+            Err(error) => Err(anyhow::Error::new(Arc::clone(error))),
         }
     }
 
@@ -270,14 +272,14 @@ impl Terminal {
         let child_killer = child.clone_killer();
         drop(pty_pair.slave); // Critical: drop slave so EOF is signaled when child exits
         let master = pty_pair.master;
-        let exit_status: Arc<OnceLock<std::io::Result<ExitStatus>>> = Arc::new(OnceLock::new());
+        let exit_status: Arc<OnceLock<ChildWaitResult>> = Arc::new(OnceLock::new());
 
         // Background thread: wait for child to exit, set exit status, then close writer to trigger EOF
         thread::spawn({
             let writer = Arc::clone(&writer);
             let exit_status = Arc::clone(&exit_status);
             move || {
-                let _ = exit_status.set(child.wait());
+                let _ = exit_status.set(child.wait().map_err(Arc::new));
                 // Close writer to signal EOF to the reader
                 *writer.lock().unwrap() = None;
             }
