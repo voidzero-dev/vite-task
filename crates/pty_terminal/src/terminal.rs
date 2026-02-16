@@ -227,7 +227,6 @@ impl ChildHandle {
     /// # Errors
     ///
     /// Returns an error if waiting for the child process exit status fails.
-    #[must_use]
     pub fn wait(&self) -> anyhow::Result<ExitStatus> {
         match self.exit_status.wait() {
             Ok(status) => Ok(status.clone()),
