@@ -1,0 +1,19 @@
+# Tests stdio suggestion criteria based on graph shape along each leaf path.
+#
+# Rules under test:
+# - Suggest piped when the leaf's containing graph has more than one node, or
+#   any ancestor graph on its path has more than one node.
+# - Suggest inherited only when every graph on the path (root + nested Expanded
+#   graphs) has exactly one node.
+
+[[e2e]]
+name = "single-node chains inherit even with multi-node sibling graph"
+steps = [
+  "vp run foo",
+]
+
+[[e2e]]
+name = "multi-node ancestor forces piped for nested single-node graph"
+steps = [
+  "vp run -r foo-nested",
+]

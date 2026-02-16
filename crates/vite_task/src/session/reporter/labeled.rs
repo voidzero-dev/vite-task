@@ -54,27 +54,6 @@ struct ExecutionStats {
 struct SharedReporterState {
     executions: Vec<ExecutionInfo>,
     stats: ExecutionStats,
-    /// Total number of spawned leaf executions in the graph (including nested `Expanded`
-    /// subgraphs). Computed once at build time and used to determine the stdio suggestion:
-    /// inherited stdio is only suggested when there is exactly one spawn leaf.
-    spawn_leaf_count: usize,
-}
-
-/// Count the total number of spawned leaf executions in an execution graph,
-/// recursing into nested `Expanded` subgraphs.
-///
-/// In-process executions are not counted because they don't spawn child processes
-/// and thus don't need stdin.
-pub(super) fn count_spawn_leaves(graph: &ExecutionGraph) -> usize {
-    graph
-        .node_weights()
-        .flat_map(|task| task.items.iter())
-        .map(|item| match &item.kind {
-            ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(_)) => 1,
-            ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(_)) => 0,
-            ExecutionItemKind::Expanded(nested_graph) => count_spawn_leaves(nested_graph),
-        })
-        .sum()
 }
 
 /// Builder for the labeled graph reporter.
@@ -110,13 +89,11 @@ impl LabeledReporterBuilder {
 
 impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
     fn build(self: Box<Self>, graph: &Arc<ExecutionGraph>) -> Box<dyn GraphExecutionReporter> {
-        let spawn_leaf_count = count_spawn_leaves(graph);
         let writer = Rc::new(RefCell::new(self.writer));
         Box::new(LabeledGraphReporter {
             shared: Rc::new(RefCell::new(SharedReporterState {
                 executions: Vec::new(),
                 stats: ExecutionStats::default(),
-                spawn_leaf_count,
             })),
             writer,
             graph: Arc::clone(graph),
@@ -144,12 +121,23 @@ pub struct LabeledGraphReporter {
 )]
 impl GraphExecutionReporter for LabeledGraphReporter {
     fn new_leaf_execution(&mut self, path: &LeafExecutionPath) -> Box<dyn LeafExecutionReporter> {
-        let display = path.resolve_item(&self.graph).execution_item_display.clone();
+        let item = path.resolve_item(&self.graph);
+        let display = item.execution_item_display.clone();
+        let stdio_suggestion = match &item.kind {
+            ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(_))
+                if path.all_containing_graphs_single_node(&self.graph) =>
+            {
+                StdioSuggestion::Inherited
+            }
+            _ => StdioSuggestion::Piped,
+        };
+
         Box::new(LabeledLeafReporter {
             shared: Rc::clone(&self.shared),
             writer: Rc::clone(&self.writer),
             display,
             workspace_path: Arc::clone(&self.workspace_path),
+            stdio_suggestion,
             started: false,
         })
     }
@@ -221,6 +209,8 @@ struct LabeledLeafReporter {
     /// Display info for this execution, looked up from the graph via the path.
     display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
+    /// Stdio suggestion precomputed from this leaf's graph path.
+    stdio_suggestion: StdioSuggestion,
     /// Whether `start()` has been called. Used to determine if stats should be updated
     /// in `finish()` and whether to push an `ExecutionInfo` entry.
     started: bool,
@@ -237,7 +227,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
         self.started = true;
 
         // Update shared state synchronously, then drop the borrow before any async writes.
-        let suggestion = {
+        {
             let mut shared = self.shared.borrow_mut();
 
             // Update statistics based on cache status
@@ -254,14 +244,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
                 exit_status: None,
                 error_message: None,
             });
-
-            // Determine stdio suggestion: inherited only when exactly one spawn leaf
-            if shared.spawn_leaf_count == 1 {
-                StdioSuggestion::Inherited
-            } else {
-                StdioSuggestion::Piped
-            }
-        };
+        }
         // shared borrow dropped here
 
         // Format command line with cache status (sync), then write asynchronously.
@@ -276,7 +259,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
         let _ = writer.flush().await;
 
         StdioConfig {
-            suggestion,
+            suggestion: self.stdio_suggestion,
             stdout_writer: Box::new(tokio::io::stdout()),
             stderr_writer: Box::new(tokio::io::stderr()),
         }
@@ -573,7 +556,9 @@ fn format_summary(
 mod tests {
     use std::sync::Arc;
 
-    use vite_task_plan::ExecutionGraph;
+    use vite_task_plan::{
+        ExecutionGraph, ExecutionItem, TaskExecution, execution_graph::ExecutionNodeIndex,
+    };
 
     use super::*;
     use crate::session::{
@@ -584,148 +569,148 @@ mod tests {
         },
     };
 
-    // ────────────────────────────────────────────────────────────
-    // count_spawn_leaves tests
-    // ────────────────────────────────────────────────────────────
-
-    #[test]
-    fn count_spawn_leaves_empty_graph() {
-        let graph = ExecutionGraph::default();
-        assert_eq!(count_spawn_leaves(&graph), 0);
+    fn leaf_path(path_items: &[(usize, usize)]) -> LeafExecutionPath {
+        let mut path = LeafExecutionPath::default();
+        for (node_ix, item_ix) in path_items {
+            path.push(ExecutionNodeIndex::new(*node_ix), *item_ix);
+        }
+        path
     }
 
-    #[test]
-    fn count_spawn_leaves_single_spawn() {
-        let graph = ExecutionGraph::from_node_list([spawn_task("build")]);
-        assert_eq!(count_spawn_leaves(&graph), 1);
-    }
-
-    #[test]
-    fn count_spawn_leaves_multiple_spawns() {
-        let graph = ExecutionGraph::from_node_list([
-            spawn_task("build"),
-            spawn_task("test"),
-            spawn_task("lint"),
-        ]);
-        assert_eq!(count_spawn_leaves(&graph), 3);
-    }
-
-    #[test]
-    fn count_spawn_leaves_in_process_not_counted() {
-        let graph = ExecutionGraph::from_node_list([in_process_task("echo")]);
-        assert_eq!(count_spawn_leaves(&graph), 0);
-    }
-
-    #[test]
-    fn count_spawn_leaves_mixed_spawn_and_in_process() {
-        let graph = ExecutionGraph::from_node_list([spawn_task("build"), in_process_task("echo")]);
-        assert_eq!(count_spawn_leaves(&graph), 1);
-    }
-
-    #[test]
-    fn count_spawn_leaves_nested_expanded() {
-        // Build a nested graph containing two spawns
-        let nested =
-            ExecutionGraph::from_node_list([spawn_task("nested-build"), spawn_task("nested-test")]);
-
-        // Outer graph has one expanded item pointing to the nested graph
-        let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
-        assert_eq!(count_spawn_leaves(&graph), 2);
-    }
-
-    #[test]
-    fn count_spawn_leaves_nested_with_top_level() {
-        // Nested graph with one spawn
-        let nested = ExecutionGraph::from_node_list([spawn_task("nested-lint")]);
-
-        // Top-level graph has one spawn + one expanded
-        let graph =
-            ExecutionGraph::from_node_list([spawn_task("build"), expanded_task("expand", nested)]);
-        assert_eq!(count_spawn_leaves(&graph), 2);
-    }
-
-    // ────────────────────────────────────────────────────────────
-    // LabeledLeafReporter stdio suggestion tests
-    // ────────────────────────────────────────────────────────────
-
-    /// Build a `LabeledGraphReporter` for the given graph and return a leaf reporter
-    /// for the first node's first item.
-    fn build_labeled_leaf(graph: ExecutionGraph) -> Box<dyn LeafExecutionReporter> {
-        use vite_task_plan::execution_graph::ExecutionNodeIndex;
-
+    fn build_labeled_leaf(
+        graph: ExecutionGraph,
+        path: &LeafExecutionPath,
+    ) -> Box<dyn LeafExecutionReporter> {
         let graph_arc = Arc::new(graph);
         let builder =
             Box::new(LabeledReporterBuilder::new(test_path(), Box::new(tokio::io::sink())));
         let mut reporter = builder.build(&graph_arc);
+        reporter.new_leaf_execution(path)
+    }
 
-        // Create a leaf reporter for the first node's first item
-        let mut path = LeafExecutionPath::default();
-        path.push(ExecutionNodeIndex::new(0), 0);
-        reporter.new_leaf_execution(&path)
+    async fn suggestion_for_path(
+        graph: ExecutionGraph,
+        path: &LeafExecutionPath,
+    ) -> StdioSuggestion {
+        let mut leaf = build_labeled_leaf(graph, path);
+        let stdio_config =
+            leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
+        stdio_config.suggestion
+    }
+
+    fn spawn_item(name: &str) -> ExecutionItem {
+        let mut task = spawn_task(name);
+        task.items.pop().expect("spawn_task always has one item")
+    }
+
+    fn expanded_item(name: &str, nested_graph: ExecutionGraph) -> ExecutionItem {
+        let mut task = expanded_task(name, nested_graph);
+        task.items.pop().expect("expanded_task always has one item")
+    }
+
+    fn task_with_items(name: &str, items: Vec<ExecutionItem>) -> TaskExecution {
+        let mut task = spawn_task(name);
+        task.items = items;
+        task
+    }
+
+    fn graph_with_mixed_and_siblings() -> ExecutionGraph {
+        let nested_single_node = ExecutionGraph::from_node_list([spawn_task("bar")]);
+        let nested_multi_node =
+            ExecutionGraph::from_node_list([spawn_task("build-a"), spawn_task("build-b")]);
+
+        let root = task_with_items(
+            "foo",
+            vec![
+                spawn_item("foo-step"),
+                expanded_item("run-bar", nested_single_node),
+                expanded_item("run-build-recursive", nested_multi_node),
+            ],
+        );
+
+        ExecutionGraph::from_node_list([root])
     }
 
     #[tokio::test]
-    async fn labeled_reporter_single_spawn_suggests_inherited() {
+    async fn labeled_reporter_single_spawn_in_single_node_chain_suggests_inherited() {
         let graph = ExecutionGraph::from_node_list([spawn_task("build")]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config =
-            leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
+        let path = leaf_path(&[(0, 0)]);
+
+        assert_eq!(suggestion_for_path(graph, &path).await, StdioSuggestion::Inherited);
     }
 
     #[tokio::test]
-    async fn labeled_reporter_multiple_spawns_suggests_piped() {
+    async fn labeled_reporter_multi_node_root_graph_suggests_piped() {
         let graph = ExecutionGraph::from_node_list([spawn_task("build"), spawn_task("test")]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config =
-            leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
+        let path = leaf_path(&[(0, 0)]);
+
+        assert_eq!(suggestion_for_path(graph, &path).await, StdioSuggestion::Piped);
     }
 
     #[tokio::test]
-    async fn labeled_reporter_single_in_process_suggests_piped() {
-        // Zero spawn leaves → spawn_leaf_count == 0, so not == 1 → Piped
-        // This is correct: in-process executions don't spawn child processes,
-        // so stdio suggestion doesn't apply to them.
-        let graph = ExecutionGraph::from_node_list([in_process_task("echo")]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config =
-            leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
-    }
-
-    #[tokio::test]
-    async fn labeled_reporter_one_spawn_one_in_process_suggests_inherited() {
-        // One spawn leaf + one in-process → spawn_leaf_count == 1 → Inherited
-        let graph = ExecutionGraph::from_node_list([spawn_task("build"), in_process_task("echo")]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config =
-            leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
-    }
-
-    #[tokio::test]
-    async fn labeled_reporter_nested_single_spawn_suggests_inherited() {
-        // Nested graph with exactly one spawn
+    async fn labeled_reporter_nested_single_node_chain_suggests_inherited() {
         let nested = ExecutionGraph::from_node_list([spawn_task("nested-build")]);
-
         let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config =
-            leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
+        let path = leaf_path(&[(0, 0), (0, 0)]);
+
+        assert_eq!(suggestion_for_path(graph, &path).await, StdioSuggestion::Inherited);
     }
 
     #[tokio::test]
-    async fn labeled_reporter_nested_multiple_spawns_suggests_piped() {
-        // Nested graph with two spawns
+    async fn labeled_reporter_nested_multi_node_graph_suggests_piped() {
         let nested =
             ExecutionGraph::from_node_list([spawn_task("nested-a"), spawn_task("nested-b")]);
-
         let graph = ExecutionGraph::from_node_list([expanded_task("expand", nested)]);
-        let mut leaf = build_labeled_leaf(graph);
-        let stdio_config =
-            leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
+        let path = leaf_path(&[(0, 0), (0, 0)]);
+
+        assert_eq!(suggestion_for_path(graph, &path).await, StdioSuggestion::Piped);
+    }
+
+    #[tokio::test]
+    async fn labeled_reporter_multi_node_ancestor_forces_piped_for_nested_leaf() {
+        let nested = ExecutionGraph::from_node_list([spawn_task("nested-build")]);
+        let graph = ExecutionGraph::from_node_list([
+            expanded_task("expand", nested),
+            spawn_task("sibling"),
+        ]);
+        let path = leaf_path(&[(0, 0), (0, 0)]);
+
+        assert_eq!(suggestion_for_path(graph, &path).await, StdioSuggestion::Piped);
+    }
+
+    #[tokio::test]
+    async fn labeled_reporter_keeps_inherited_for_single_node_chains_with_multi_node_and_sibling() {
+        // Root graph has one node and three sequential `&&` items:
+        // 1) direct spawn leaf
+        // 2) expanded graph with one node
+        // 3) expanded graph with multiple nodes
+        //
+        // The first two leaves should still suggest inherited stdio because their
+        // containing graph chain has only one node at every level. The third should
+        // suggest piped because its containing graph has multiple nodes.
+        let path_top_level = leaf_path(&[(0, 0)]);
+        let path_nested_single = leaf_path(&[(0, 1), (0, 0)]);
+        let path_nested_multi = leaf_path(&[(0, 2), (0, 0)]);
+
+        assert_eq!(
+            suggestion_for_path(graph_with_mixed_and_siblings(), &path_top_level).await,
+            StdioSuggestion::Inherited
+        );
+        assert_eq!(
+            suggestion_for_path(graph_with_mixed_and_siblings(), &path_nested_single).await,
+            StdioSuggestion::Inherited
+        );
+        assert_eq!(
+            suggestion_for_path(graph_with_mixed_and_siblings(), &path_nested_multi).await,
+            StdioSuggestion::Piped
+        );
+    }
+
+    #[tokio::test]
+    async fn labeled_reporter_in_process_leaf_suggests_piped() {
+        let graph = ExecutionGraph::from_node_list([in_process_task("echo")]);
+        let path = leaf_path(&[(0, 0)]);
+
+        assert_eq!(suggestion_for_path(graph, &path).await, StdioSuggestion::Piped);
     }
 }
