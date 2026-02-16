@@ -67,7 +67,7 @@ fn milestone_raw_mode_keystrokes() {
     // Write 'q' to quit and wait for the child to exit
     writer.write_all(b"q").unwrap();
     writer.flush().unwrap();
-    let status = reader.wait_for_exit();
+    let status = reader.wait_for_exit().unwrap();
     assert!(status.success());
 }
 
@@ -122,6 +122,6 @@ fn milestone_does_not_pollute_screen() {
 
     writer.write_all(b"q").unwrap();
     writer.flush().unwrap();
-    let status = reader.wait_for_exit();
+    let status = reader.wait_for_exit().unwrap();
     assert!(status.success());
 }

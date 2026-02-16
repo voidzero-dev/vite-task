@@ -20,7 +20,7 @@ fn is_terminal() {
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
-    let _ = child_handle.wait();
+    let _ = child_handle.wait().unwrap();
     let output = pty_reader.screen_contents();
     assert_eq!(output.trim(), "true true true");
 }
@@ -47,7 +47,7 @@ fn write_basic_echo() {
 
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
-    let _ = child_handle.wait();
+    let _ = child_handle.wait().unwrap();
 
     let output = pty_reader.screen_contents();
     // PTY echoes the input, so we see "hello world\nhello world"
@@ -98,7 +98,7 @@ fn write_multiple_lines() {
 
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
-    let _ = child_handle.wait();
+    let _ = child_handle.wait().unwrap();
 
     let output = pty_reader.screen_contents();
     // PTY echoes input, then child prints "Echo: {line}\n" for each
@@ -119,7 +119,7 @@ fn write_after_exit() {
     // Read all output - this blocks until child exits and EOF is reached
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
-    let _ = child_handle.wait();
+    let _ = child_handle.wait().unwrap();
 
     // Writer shutdown is done by a background thread after child wait returns.
     // Poll briefly for the writer state to flip to closed before asserting write failure.
@@ -165,7 +165,7 @@ fn write_interactive_prompt() {
 
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
-    let _ = child_handle.wait();
+    let _ = child_handle.wait().unwrap();
 
     let output = pty_reader.screen_contents();
     assert_eq!(output.trim(), "Name: Alice\nHello, Alice");
@@ -346,7 +346,7 @@ fn read_to_end_returns_exit_status_success() {
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
-    let status = child_handle.wait();
+    let status = child_handle.wait().unwrap();
     assert!(status.success());
     assert_eq!(status.exit_code(), 0);
 }
@@ -362,7 +362,7 @@ fn read_to_end_returns_exit_status_nonzero() {
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
-    let status = child_handle.wait();
+    let status = child_handle.wait().unwrap();
     assert!(!status.success());
     assert_eq!(status.exit_code(), 42);
 }

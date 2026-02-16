@@ -151,7 +151,6 @@ impl GraphExecutionReporter for LabeledGraphReporter {
             display,
             workspace_path: Arc::clone(&self.workspace_path),
             started: false,
-            is_cache_hit: false,
         })
     }
 
@@ -162,7 +161,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
             let shared = self.shared.borrow();
 
             let summary_buf =
-                Some(format_summary(&shared.executions, &shared.stats, &self.workspace_path));
+                format_summary(&shared.executions, &shared.stats, &self.workspace_path);
 
             // Determine exit code based on failed tasks and infrastructure errors:
             // - Infrastructure errors (cache lookup, spawn failure) have error_message set
@@ -201,10 +200,10 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         };
         // shared borrow dropped here
 
-        // Write the summary buffer asynchronously (if any)
-        if let Some(buf) = summary_buf {
+        // Write the summary buffer asynchronously
+        {
             let mut writer = self.writer.borrow_mut();
-            let _ = writer.write_all(&buf).await;
+            let _ = writer.write_all(&summary_buf).await;
             let _ = writer.flush().await;
         }
 
@@ -225,8 +224,6 @@ struct LabeledLeafReporter {
     /// Whether `start()` has been called. Used to determine if stats should be updated
     /// in `finish()` and whether to push an `ExecutionInfo` entry.
     started: bool,
-    /// Whether the current execution is a cache hit, set by `start()`.
-    is_cache_hit: bool,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -238,7 +235,6 @@ struct LabeledLeafReporter {
 impl LeafExecutionReporter for LabeledLeafReporter {
     async fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
         self.started = true;
-        self.is_cache_hit = matches!(cache_status, CacheStatus::Hit { .. });
 
         // Update shared state synchronously, then drop the borrow before any async writes.
         let suggestion = {
