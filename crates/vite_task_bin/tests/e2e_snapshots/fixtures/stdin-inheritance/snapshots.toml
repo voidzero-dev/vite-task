@@ -1,7 +1,8 @@
 # Tests stdin inheritance behavior for spawned tasks.
 #
 # Stdin is inherited from the parent process only when BOTH conditions are met:
-# 1. The reporter suggests inherited stdin (single spawn leaf in the graph, or synthetic execution)
+# 1. The reporter suggests inherited stdin (the leaf is in a single-node graph chain,
+#    or the execution uses PlainReporter for synthetic execution)
 # 2. Caching is disabled for the task (cache_metadata is None)
 #
 # Otherwise, stdin is set to /dev/null.

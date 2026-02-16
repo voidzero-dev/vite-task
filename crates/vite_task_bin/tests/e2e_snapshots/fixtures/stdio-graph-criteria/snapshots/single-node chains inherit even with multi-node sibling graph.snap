@@ -1,0 +1,47 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vp run foo
+$ check-tty ⊘ cache disabled: no cache config
+stdin:tty
+stdout:tty
+stderr:tty
+
+$ check-tty ⊘ cache disabled: no cache config
+stdin:tty
+stdout:tty
+stderr:tty
+
+~/packages/other$ check-tty ⊘ cache disabled: no cache config
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+$ check-tty ⊘ cache disabled: no cache config
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   4 tasks • 0 cache hits • 0 cache misses • 4 cache disabled
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] stdio-graph-criteria-test#foo: $ check-tty ✓
+      → Cache disabled in task configuration
+  ·······················································
+  [2] stdio-graph-criteria-test#bar: $ check-tty ✓
+      → Cache disabled in task configuration
+  ·······················································
+  [3] other#check-tty: ~/packages/other$ check-tty ✓
+      → Cache disabled in task configuration
+  ·······················································
+  [4] stdio-graph-criteria-test#check-tty: $ check-tty ✓
+      → Cache disabled in task configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
