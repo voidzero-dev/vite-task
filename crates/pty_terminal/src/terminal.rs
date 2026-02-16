@@ -244,13 +244,6 @@ impl ChildHandle {
     }
 }
 
-fn set_exit_status_from_wait_result(
-    exit_status: &OnceLock<std::io::Result<ExitStatus>>,
-    wait_result: std::io::Result<ExitStatus>,
-) {
-    let _ = exit_status.set(wait_result);
-}
-
 impl Terminal {
     /// Spawns a new child process in a headless terminal with the given size and command.
     ///
@@ -284,7 +277,7 @@ impl Terminal {
             let writer = Arc::clone(&writer);
             let exit_status = Arc::clone(&exit_status);
             move || {
-                set_exit_status_from_wait_result(&exit_status, child.wait());
+                let _ = exit_status.set(child.wait());
                 // Close writer to signal EOF to the reader
                 *writer.lock().unwrap() = None;
             }
@@ -305,34 +298,5 @@ impl Terminal {
             pty_writer: PtyWriter { writer, parser, master },
             child_handle: ChildHandle { child_killer, exit_status },
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn set_exit_status_from_wait_result_preserves_error() {
-        let exit_status = OnceLock::new();
-        set_exit_status_from_wait_result(
-            &exit_status,
-            Err(std::io::Error::other("forced wait error for test")),
-        );
-
-        let status = exit_status.wait();
-        assert!(status.is_err());
-        assert_eq!(status.as_ref().unwrap_err().kind(), std::io::ErrorKind::Other);
-        assert_eq!(status.as_ref().unwrap_err().to_string(), "forced wait error for test");
-    }
-
-    #[test]
-    fn set_exit_status_from_wait_result_preserves_child_status() {
-        let exit_status = OnceLock::new();
-        set_exit_status_from_wait_result(&exit_status, Ok(ExitStatus::with_exit_code(42)));
-
-        let status = exit_status.wait();
-        assert!(!status.as_ref().unwrap().success());
-        assert_eq!(status.as_ref().unwrap().exit_code(), 42);
     }
 }
