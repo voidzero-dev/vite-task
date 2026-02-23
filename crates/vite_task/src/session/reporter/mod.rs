@@ -37,9 +37,7 @@ use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_plan::{
-    ExecutionGraph, ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind,
-};
+use vite_task_plan::{ExecutionGraph, ExecutionItem, ExecutionItemDisplay, ExecutionItemKind};
 
 use super::{
     cache::format_cache_status_inline,
@@ -105,7 +103,7 @@ pub struct StdioConfig {
 // Leaf execution path — identifies a leaf within a (potentially nested) execution graph
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// One step in a [`LeafExecutionPath`]: identifies a specific execution item
+/// One step in the execution path: identifies a specific execution item
 /// within a single level of the execution graph.
 #[derive(Clone, Copy, Debug)]
 struct ExecutionPathItem {
@@ -125,73 +123,139 @@ impl ExecutionPathItem {
     }
 }
 
-/// A path through a (potentially nested) execution graph that identifies a specific
-/// leaf execution.
+/// A prefix path through nested `Expanded` execution graphs, used during graph
+/// traversal to incrementally build up the path before reaching a leaf.
 ///
-/// Each element in the path represents a step deeper into a nested `Expanded` execution
-/// graph. The last element identifies the actual leaf item.
+/// Created at the root via [`new`](Self::new) and extended at each `Expanded`
+/// level via [`extended`](Self::extended). Completed into a [`LeafExecutionPath`]
+/// via [`to_leaf_path`](Self::to_leaf_path) when a `Leaf` item is reached.
 ///
-/// For example, a path of `[(node_0, item_1), (node_2, item_0)]` means:
+/// Tracks `all_containing_graphs_single_node` incrementally so that
+/// [`LeafExecutionPath`] can expose it as a simple field accessor without
+/// re-traversing the graph.
+#[derive(Clone, Debug)]
+pub struct ExecutionPathPrefix {
+    /// Steps through intermediate `Expanded` items (may be empty for root-level leaves).
+    steps: SmallVec<ExecutionPathItem, 4>,
+    /// Whether every graph encountered so far (root + all nested `Expanded` ancestors)
+    /// has exactly one node.
+    all_containing_graphs_single_node: bool,
+}
+
+impl ExecutionPathPrefix {
+    /// Create a prefix for the root execution graph.
+    ///
+    /// Captures the root graph's node count for the single-node chain check.
+    pub fn new(root_graph: &ExecutionGraph) -> Self {
+        Self {
+            steps: SmallVec::new(),
+            all_containing_graphs_single_node: root_graph.node_count() == 1,
+        }
+    }
+
+    /// Extend this prefix with a step into a nested `Expanded` graph.
+    ///
+    /// Called in the `ExecutionItemKind::Expanded` arm of the traversal loop.
+    /// The nested graph's node count is folded into the single-node chain check.
+    pub fn extended(
+        &self,
+        graph_node_ix: ExecutionNodeIndex,
+        task_execution_item_index: usize,
+        nested_graph: &ExecutionGraph,
+    ) -> Self {
+        let mut steps = self.steps.clone();
+        steps.push(ExecutionPathItem { graph_node_ix, task_execution_item_index });
+        Self {
+            steps,
+            all_containing_graphs_single_node: self.all_containing_graphs_single_node
+                && nested_graph.node_count() == 1,
+        }
+    }
+
+    /// Complete this prefix into a [`LeafExecutionPath`] by appending the final
+    /// leaf step.
+    ///
+    /// Called in the `ExecutionItemKind::Leaf` arm of the traversal loop.
+    pub fn to_leaf_path(
+        &self,
+        graph_node_ix: ExecutionNodeIndex,
+        task_execution_item_index: usize,
+    ) -> LeafExecutionPath {
+        LeafExecutionPath {
+            ancestors: self.steps.clone(),
+            leaf: ExecutionPathItem { graph_node_ix, task_execution_item_index },
+            all_containing_graphs_single_node: self.all_containing_graphs_single_node,
+        }
+    }
+}
+
+/// A complete path from root graph to a leaf execution item.
+///
+/// Structurally guaranteed to be non-empty: always contains at least the `leaf`
+/// step. The `ancestors` may be empty (for root-level leaves) or contain one or
+/// more steps through intermediate `Expanded` graphs.
+///
+/// For example, a path with `ancestors = [(node_0, item_1)]` and
+/// `leaf = (node_2, item_0)` means:
 /// - In the root graph, node 0, item 1 (which is an `Expanded` containing a nested graph)
 /// - In that nested graph, node 2, item 0 (the actual leaf execution)
 ///
-/// Uses `SmallVec` with inline capacity of 4 since most execution graphs are shallow
-/// (typically 1-2 levels of nesting).
-#[derive(Clone, Debug, Default)]
-pub struct LeafExecutionPath(SmallVec<ExecutionPathItem, 4>);
+/// Constructed exclusively via [`ExecutionPathPrefix::to_leaf_path`], which
+/// ensures that `ancestors` correspond to `Expanded` items and precomputes
+/// `all_containing_graphs_single_node`.
+#[derive(Clone, Debug)]
+pub struct LeafExecutionPath {
+    /// Steps through intermediate `Expanded` items (empty for root-level leaves).
+    ///
+    /// Inline capacity of 4 (matching [`ExecutionPathPrefix`]) since most execution
+    /// graphs are shallow (typically 1-2 levels of nesting, so 0-1 ancestors).
+    ancestors: SmallVec<ExecutionPathItem, 4>,
+    /// The final step identifying the leaf item.
+    leaf: ExecutionPathItem,
+    /// Whether every containing graph (root + all nested `Expanded` ancestors)
+    /// has exactly one node. Precomputed during path construction.
+    all_containing_graphs_single_node: bool,
+}
 
 impl LeafExecutionPath {
-    /// Append a new step to this path, identifying an item at the given node and item indices.
-    pub fn push(&mut self, graph_node_ix: ExecutionNodeIndex, task_execution_item_index: usize) {
-        self.0.push(ExecutionPathItem { graph_node_ix, task_execution_item_index });
+    /// Walk through ancestor steps, descending into nested `Expanded` graphs.
+    /// Returns the graph that directly contains the leaf item.
+    ///
+    /// This is the single traversal helper used by [`resolve_item`](Self::resolve_item).
+    /// Construction via [`ExecutionPathPrefix`] ensures all ancestors point to
+    /// `Expanded` items, so the `Leaf` arm is structurally unreachable.
+    fn resolve_leaf_graph<'a>(&self, root_graph: &'a ExecutionGraph) -> &'a ExecutionGraph {
+        let mut current = root_graph;
+        for (depth, step) in self.ancestors.iter().enumerate() {
+            match &step.resolve(current).kind {
+                ExecutionItemKind::Expanded(nested) => current = nested,
+                ExecutionItemKind::Leaf(_) => unreachable!(
+                    "LeafExecutionPath: ancestor at depth {depth} is a Leaf, expected Expanded"
+                ),
+            }
+        }
+        current
     }
 
     /// Resolve this path against a root execution graph, returning the final
     /// [`ExecutionItem`] the path points to.
     ///
-    /// This is the shared traversal logic that walks through nested `Expanded`
-    /// graphs. Used by:
-    /// - `Index<&LeafExecutionPath> for ExecutionGraph` — extracts `&LeafExecutionKind`
-    /// - `new_leaf_execution` in `labeled.rs` — extracts `ExecutionItemDisplay`
-    ///
-    /// # Panics
-    ///
-    /// - If the path is empty (indicates a bug in path construction).
-    /// - If an intermediate path element points to a `Leaf` item instead of
-    ///   `Expanded` (only `Expanded` items contain nested graphs to descend into).
+    /// Used by `new_leaf_execution` in `labeled.rs` to extract `ExecutionItemDisplay`.
     fn resolve_item<'a>(&self, root_graph: &'a ExecutionGraph) -> &'a ExecutionItem {
-        let mut current_graph = root_graph;
-        let last_depth = self.0.len() - 1;
-        for (depth, path_item) in self.0.iter().enumerate() {
-            let item = path_item.resolve(current_graph);
-            if depth == last_depth {
-                return item;
-            }
-            match &item.kind {
-                ExecutionItemKind::Expanded(nested_graph) => {
-                    current_graph = nested_graph;
-                }
-                ExecutionItemKind::Leaf(_) => {
-                    unreachable!(
-                        "LeafExecutionPath: intermediate element at depth {depth} is a Leaf, expected Expanded"
-                    )
-                }
-            }
-        }
-        unreachable!("LeafExecutionPath: empty path")
+        self.leaf.resolve(self.resolve_leaf_graph(root_graph))
     }
-}
 
-impl std::ops::Index<&LeafExecutionPath> for ExecutionGraph {
-    type Output = LeafExecutionKind;
-
-    fn index(&self, path: &LeafExecutionPath) -> &Self::Output {
-        match &path.resolve_item(self).kind {
-            ExecutionItemKind::Leaf(kind) => kind,
-            ExecutionItemKind::Expanded(_) => {
-                unreachable!("LeafExecutionPath: final element is Expanded, expected Leaf")
-            }
-        }
+    /// Whether every containing graph (root + all nested `Expanded` ancestors)
+    /// has exactly one node.
+    ///
+    /// This is used by the labeled reporter to determine whether inherited stdio
+    /// can be suggested for spawned processes: when there is only one task at
+    /// every level of the graph, the spawned process can safely inherit the
+    /// parent's stdio without interleaving output from other tasks.
+    ///
+    /// Precomputed during path construction — no graph traversal needed.
+    pub const fn all_containing_graphs_single_node(&self) -> bool {
+        self.all_containing_graphs_single_node
     }
 }
 

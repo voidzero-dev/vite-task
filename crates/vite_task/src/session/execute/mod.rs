@@ -21,8 +21,8 @@ use super::{
         ExecutionError,
     },
     reporter::{
-        ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionPath,
-        LeafExecutionReporter, StdioSuggestion,
+        ExecutionPathPrefix, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
+        LeafExecutionPath, LeafExecutionReporter, StdioSuggestion,
     },
 };
 use crate::{Session, session::execute::spawn::SpawnTrackResult};
@@ -73,7 +73,7 @@ impl ExecutionContext<'_> {
     async fn execute_expanded_graph(
         &mut self,
         graph: &ExecutionGraph,
-        path_prefix: &LeafExecutionPath,
+        prefix: &ExecutionPathPrefix,
     ) {
         // `compute_topological_order()` returns nodes in topological order: for every
         // edge A→B, A appears before B. Since our edges mean "A depends on B",
@@ -87,17 +87,16 @@ impl ExecutionContext<'_> {
             let task_execution = &graph[node_ix];
 
             for (item_idx, item) in task_execution.items.iter().enumerate() {
-                // Build the path for this item by appending to the prefix
-                let mut item_path = path_prefix.clone();
-                item_path.push(node_ix, item_idx);
-
                 match &item.kind {
                     ExecutionItemKind::Leaf(leaf_kind) => {
-                        self.execute_leaf(&item_path, leaf_kind).boxed_local().await;
+                        let path = prefix.to_leaf_path(node_ix, item_idx);
+                        self.execute_leaf(&path, leaf_kind).boxed_local().await;
                     }
                     ExecutionItemKind::Expanded(nested_graph) => {
-                        // Recurse into the nested graph, carrying the path prefix forward.
-                        self.execute_expanded_graph(nested_graph, &item_path).boxed_local().await;
+                        let nested_prefix = prefix.extended(node_ix, item_idx, nested_graph);
+                        self.execute_expanded_graph(nested_graph, &nested_prefix)
+                            .boxed_local()
+                            .await;
                     }
                 }
             }
@@ -414,7 +413,7 @@ impl Session<'_> {
 
         // Execute the graph. Leaf-level errors are reported through the reporter
         // and do not abort the graph. Cycle detection is handled at plan time.
-        execution_context.execute_expanded_graph(&graph, &LeafExecutionPath::default()).await;
+        execution_context.execute_expanded_graph(&graph, &ExecutionPathPrefix::new(&graph)).await;
 
         // Leaf-level errors and non-zero exit statuses are tracked internally
         // by the reporter.

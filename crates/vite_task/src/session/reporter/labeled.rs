@@ -573,13 +573,13 @@ fn format_summary(
 mod tests {
     use std::sync::Arc;
 
-    use vite_task_plan::ExecutionGraph;
+    use vite_task_plan::{ExecutionGraph, execution_graph::ExecutionNodeIndex};
 
     use super::*;
     use crate::session::{
         event::CacheDisabledReason,
         reporter::{
-            LeafExecutionPath, LeafExecutionReporter, StdioSuggestion,
+            ExecutionPathPrefix, LeafExecutionReporter, StdioSuggestion,
             test_fixtures::{expanded_task, in_process_task, spawn_task, test_path},
         },
     };
@@ -651,16 +651,13 @@ mod tests {
     /// Build a `LabeledGraphReporter` for the given graph and return a leaf reporter
     /// for the first node's first item.
     fn build_labeled_leaf(graph: ExecutionGraph) -> Box<dyn LeafExecutionReporter> {
-        use vite_task_plan::execution_graph::ExecutionNodeIndex;
-
         let graph_arc = Arc::new(graph);
         let builder =
             Box::new(LabeledReporterBuilder::new(test_path(), Box::new(tokio::io::sink())));
         let mut reporter = builder.build(&graph_arc);
 
         // Create a leaf reporter for the first node's first item
-        let mut path = LeafExecutionPath::default();
-        path.push(ExecutionNodeIndex::new(0), 0);
+        let path = ExecutionPathPrefix::new(&graph_arc).to_leaf_path(ExecutionNodeIndex::new(0), 0);
         reporter.new_leaf_execution(&path)
     }
 
