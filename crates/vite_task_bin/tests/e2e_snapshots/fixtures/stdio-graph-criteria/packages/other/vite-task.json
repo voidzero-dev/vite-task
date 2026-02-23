@@ -1,0 +1,16 @@
+{
+  "tasks": {
+    "check-tty": {
+      "command": "check-tty",
+      "cache": false
+    },
+    "bar": {
+      "command": "check-tty",
+      "cache": false
+    },
+    "foo-nested": {
+      "command": "vp run bar",
+      "cache": false
+    }
+  }
+}

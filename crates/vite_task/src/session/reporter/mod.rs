@@ -180,6 +180,49 @@ impl LeafExecutionPath {
         }
         unreachable!("LeafExecutionPath: empty path")
     }
+
+    /// Return true when this leaf is contained in a chain of execution graphs where
+    /// every graph (root + all nested `Expanded` ancestors) has exactly one node.
+    ///
+    /// This is used by the labeled reporter to determine whether inherited stdio can
+    /// be suggested for spawned processes.
+    ///
+    /// # Panics
+    ///
+    /// - If the path is empty (indicates a bug in path construction).
+    /// - If an intermediate path element points to a `Leaf` item instead of
+    ///   `Expanded`.
+    fn all_containing_graphs_single_node(&self, root_graph: &ExecutionGraph) -> bool {
+        let Some((last_path_item, parent_path_items)) = self.0.split_last() else {
+            unreachable!("LeafExecutionPath: empty path")
+        };
+
+        let mut current_graph = root_graph;
+        if current_graph.node_count() != 1 {
+            return false;
+        }
+
+        for (depth, path_item) in parent_path_items.iter().enumerate() {
+            let item = path_item.resolve(current_graph);
+            match &item.kind {
+                ExecutionItemKind::Expanded(nested_graph) => {
+                    current_graph = nested_graph;
+                    if current_graph.node_count() != 1 {
+                        return false;
+                    }
+                }
+                ExecutionItemKind::Leaf(_) => {
+                    unreachable!(
+                        "LeafExecutionPath: intermediate element at depth {depth} is a Leaf, expected Expanded"
+                    )
+                }
+            }
+        }
+
+        // Validate that the final path item resolves in the containing graph.
+        let _ = last_path_item.resolve(current_graph);
+        true
+    }
 }
 
 impl std::ops::Index<&LeafExecutionPath> for ExecutionGraph {

@@ -1,0 +1,31 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vp run -r foo-nested
+~/packages/other$ check-tty ⊘ cache disabled: no cache config
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+$ check-tty ⊘ cache disabled: no cache config
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   2 tasks • 0 cache hits • 0 cache misses • 2 cache disabled
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] other#bar: ~/packages/other$ check-tty ✓
+      → Cache disabled in task configuration
+  ·······················································
+  [2] stdio-graph-criteria-test#bar: $ check-tty ✓
+      → Cache disabled in task configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
