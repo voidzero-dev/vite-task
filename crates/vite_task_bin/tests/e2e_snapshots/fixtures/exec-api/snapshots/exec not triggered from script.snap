@@ -6,17 +6,3 @@ expression: e2e_outputs
 $ vp lint
 Found 0 warnings and 0 errors.
 Finished in <duration> on 0 files with 90 rules using <n> threads.
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] @test/exec-api#lint-task: $ vp lint ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

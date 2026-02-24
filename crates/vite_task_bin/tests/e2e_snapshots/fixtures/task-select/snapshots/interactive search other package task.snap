@@ -25,17 +25,3 @@ Search task (↑/↓ to move, enter to select): typec
 @ write-key: enter
 ~/packages/lib$ echo typecheck lib ⊘ cache disabled: built-in command
 typecheck lib
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] lib#typecheck: ~/packages/lib$ echo typecheck lib ✓
-      → Cache disabled for built-in command
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

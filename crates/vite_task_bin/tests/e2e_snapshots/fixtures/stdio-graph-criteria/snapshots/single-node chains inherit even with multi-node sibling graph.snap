@@ -23,25 +23,5 @@ stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   4 tasks • 0 cache hits • 0 cache misses • 4 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] stdio-graph-criteria-test#foo: $ check-tty ✓
-      → Cache disabled in task configuration
-  ·······················································
-  [2] stdio-graph-criteria-test#bar: $ check-tty ✓
-      → Cache disabled in task configuration
-  ·······················································
-  [3] other#check-tty: ~/packages/other$ check-tty ✓
-      → Cache disabled in task configuration
-  ·······················································
-  [4] stdio-graph-criteria-test#check-tty: $ check-tty ✓
-      → Cache disabled in task configuration
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] 0/4 cache hit (0%). (Run `vp run --details` for full details)

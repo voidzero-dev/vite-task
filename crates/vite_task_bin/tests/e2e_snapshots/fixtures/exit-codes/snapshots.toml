@@ -3,11 +3,11 @@
 [[e2e]]
 name = "single task failure returns task exit code"
 steps = [
-  "vp run pkg-a#fail # exits with code 42",
+  "vp run --details pkg-a#fail # exits with code 42",
 ]
 
 [[e2e]]
 name = "multiple task failures returns exit code 1"
 steps = [
-  "vp run -r fail # multiple failures -> exit code 1",
+  "vp run --details -r fail # multiple failures -> exit code 1",
 ]

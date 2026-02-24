@@ -97,20 +97,6 @@ $ node build.js
 [echo.js] 30303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030
 [echo.js] --------------------------------
 [build.js] main process end
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] build: $ node build.js ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > vp run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------
@@ -207,19 +193,8 @@ $ node build.js ✓ cache hit, replaying
 [echo.js] --------------------------------
 [build.js] main process end
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 1 cache hits • 0 cache misses
-Performance:  100% cache hit rate, <duration> saved in total
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] build: $ node build.js ✓
-      → Cache hit - output replayed - <duration> saved
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] cache hit, <duration> saved.
 > vp run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------
@@ -316,16 +291,5 @@ $ node build.js ✓ cache hit, replaying
 [echo.js] --------------------------------
 [build.js] main process end
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 1 cache hits • 0 cache misses
-Performance:  100% cache hit rate, <duration> saved in total
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] build: $ node build.js ✓
-      → Cache hit - output replayed - <duration> saved
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] cache hit, <duration> saved.

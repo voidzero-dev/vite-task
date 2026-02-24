@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-[134]> vp run abort # SIGABRT -> exit code 134
+[134]> vp run --details abort # SIGABRT -> exit code 134
 $ node -e "process.kill(process.pid, 6)"
 
 

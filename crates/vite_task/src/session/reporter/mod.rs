@@ -22,6 +22,7 @@
 
 mod labeled;
 mod plain;
+pub mod summary;
 
 // Re-export the concrete implementations so callers can use `reporter::PlainReporter`
 // and `reporter::LabeledReporterBuilder` without navigating into child modules.

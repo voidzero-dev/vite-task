@@ -7,19 +7,5 @@ expression: e2e_outputs
 
 $ read-stdin ⊘ cache disabled: no cache config
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   2 tasks • 0 cache hits • 1 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] other#read-stdin: ~/packages/other$ read-stdin ✓
-      → Cache miss: no previous cache entry found
-  ·······················································
-  [2] stdin-inheritance-test#read-stdin: $ read-stdin ✓
-      → Cache disabled in task configuration
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] 0/2 cache hit (0%). (Run `vp run --details` for full details)

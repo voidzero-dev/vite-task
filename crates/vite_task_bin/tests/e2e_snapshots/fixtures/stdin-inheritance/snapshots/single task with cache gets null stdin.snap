@@ -4,17 +4,3 @@ expression: e2e_outputs
 ---
 > echo from-stdin | vp run read-stdin-cached
 $ read-stdin
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] stdin-inheritance-test#read-stdin-cached: $ read-stdin ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

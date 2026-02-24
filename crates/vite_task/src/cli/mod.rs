@@ -17,6 +17,7 @@ pub enum CacheSubcommand {
 /// Extracted as a separate struct so they can be cheaply `Copy`-ed
 /// before `RunCommand` is consumed.
 #[derive(Debug, Clone, Copy, clap::Args)]
+#[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
 pub struct RunFlags {
     /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
     #[clap(default_value = "false", short, long)]
@@ -29,6 +30,10 @@ pub struct RunFlags {
     /// Do not run dependencies specified in `dependsOn` fields.
     #[clap(default_value = "false", long)]
     pub ignore_depends_on: bool,
+
+    /// Show full detailed summary after execution.
+    #[clap(default_value = "false", long)]
+    pub details: bool,
 }
 
 /// Arguments for the `run` subcommand.
@@ -43,6 +48,10 @@ pub struct RunCommand {
     /// Additional arguments to pass to the tasks
     #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
     pub additional_args: Vec<Str>,
+
+    /// Display the detailed summary of the last run.
+    #[clap(long, exclusive = true)]
+    pub last_details: bool,
 }
 
 /// vite task CLI subcommands
@@ -82,8 +91,9 @@ impl RunCommand {
     ) -> Result<QueryPlanRequest, CLITaskQueryError> {
         let Self {
             task_specifier,
-            flags: RunFlags { recursive, transitive, ignore_depends_on },
+            flags: RunFlags { recursive, transitive, ignore_depends_on, .. },
             additional_args,
+            ..
         } = self;
 
         let task_specifier = task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;

@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> FOO=1 vp run hello # cache miss
+> FOO=1 vp run --details hello # cache miss
 $ print-env FOO
 1
 
@@ -19,7 +19,7 @@ Task Details:
   [1] hello: $ print-env FOO ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> FOO=2 vp run hello # cache miss, different env
+> FOO=2 vp run --details hello # cache miss, different env
 $ print-env FOO ✗ cache miss: envs changed, executing
 2
 
@@ -36,7 +36,7 @@ Task Details:
   [1] hello: $ print-env FOO ✓
       → Cache miss: env FOO value changed from '1' to '2'
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> FOO=1 vp run hello # cache hit
+> FOO=1 vp run --details hello # cache hit
 $ print-env FOO ✓ cache hit, replaying
 1
 
@@ -53,7 +53,7 @@ Task Details:
   [1] hello: $ print-env FOO ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> FOO=2 vp run hello # cache hit
+> FOO=2 vp run --details hello # cache hit
 $ print-env FOO ✓ cache hit, replaying
 2
 

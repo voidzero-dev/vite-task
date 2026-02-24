@@ -5,5 +5,5 @@
 name = "signal terminated task returns non-zero exit code"
 platform = "unix"
 steps = [
-  "vp run abort # SIGABRT -> exit code 134",
+  "vp run --details abort # SIGABRT -> exit code 134",
 ]

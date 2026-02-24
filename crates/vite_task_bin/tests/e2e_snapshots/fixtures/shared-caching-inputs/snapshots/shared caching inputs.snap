@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run script1 # cache miss
+> vp run --details script1 # cache miss
 $ print-file foo.txt
 initial content
 
@@ -19,7 +19,7 @@ Task Details:
   [1] script1: $ print-file foo.txt ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> vp run script2 # cache hit, same command as script1
+> vp run --details script2 # cache hit, same command as script1
 $ print-file foo.txt ✓ cache hit, replaying
 initial content
 
@@ -38,7 +38,7 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > replace-file-content foo.txt initial modified # modify shared input
 
-> vp run script2 # cache miss, input changed
+> vp run --details script2 # cache miss, input changed
 $ print-file foo.txt ✗ cache miss: content of input 'foo.txt' changed, executing
 modified content
 
@@ -55,7 +55,7 @@ Task Details:
   [1] script2: $ print-file foo.txt ✓
       → Cache miss: content of input 'foo.txt' changed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> vp run script1 # cache hit, script2 already warmed cache
+> vp run --details script1 # cache hit, script2 already warmed cache
 $ print-file foo.txt ✓ cache hit, replaying
 modified content
 

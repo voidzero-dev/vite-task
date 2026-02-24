@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run script1 # cache miss
+> vp run --details script1 # cache miss
 $ print hello
 hello
 
@@ -19,7 +19,7 @@ Task Details:
   [1] script1: $ print hello ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> vp run script2 # cache hit, same command as script1
+> vp run --details script2 # cache hit, same command as script1
 $ print hello ✓ cache hit, replaying
 hello
 
@@ -38,7 +38,7 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > json-edit package.json '_.scripts.script2 = "print world"' # change script2
 
-> vp run script2 # cache miss
+> vp run --details script2 # cache miss
 $ print world ✗ cache miss: args changed, executing
 world
 

@@ -28,17 +28,3 @@ Search task (↑/↓ to move, enter to select): lib#
 @ write-key: enter
 ~/packages/lib$ echo build lib ⊘ cache disabled: built-in command
 build lib
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] lib#build: ~/packages/lib$ echo build lib ✓
-      → Cache disabled for built-in command
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> cd folder1 && vp run lint # cache miss in folder1
+> cd folder1 && vp run --details lint # cache miss in folder1
 $ vp lint
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
@@ -35,8 +35,8 @@ Task Details:
   [1] lint: $ vp lint ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> cd folder2 && vp run lint # cache miss in folder2
-$ vp lint ✓ cache hit, replaying
+> cd folder2 && vp run --details lint # cache miss in folder2
+$ vp lint ✗ cache miss: content of input 'node_modules/.vite/task-cache' changed, executing
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[folder1/a.js:1:1]
@@ -60,17 +60,17 @@ Finished in <duration> on 2 files with 90 rules using <n> threads.
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 1 cache hits • 0 cache misses
-Performance:  100% cache hit rate, <duration> saved in total
+Statistics:   1 tasks • 0 cache hits • 1 cache misses
+Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
   [1] lint: $ vp lint ✓
-      → Cache hit - output replayed - <duration> saved
+      → Cache miss: content of input 'node_modules/.vite/task-cache' changed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > echo 'console.log(1);' > folder2/a.js # modify folder2
 
-> cd folder1 && vp run lint # cache hit
+> cd folder1 && vp run --details lint # cache hit
 $ vp lint ✗ cache miss: content of input 'folder2/a.js' changed, executing
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
@@ -96,7 +96,7 @@ Task Details:
   [1] lint: $ vp lint ✓
       → Cache miss: content of input 'folder2/a.js' changed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> cd folder2 && vp run lint # cache miss
+> cd folder2 && vp run --details lint # cache miss
 $ vp lint ✓ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.

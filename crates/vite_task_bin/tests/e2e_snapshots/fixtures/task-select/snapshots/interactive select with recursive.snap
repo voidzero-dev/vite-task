@@ -25,19 +25,5 @@ build lib
 ~/packages/app$ echo build app ⊘ cache disabled: built-in command
 build app
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   2 tasks • 0 cache hits • 0 cache misses • 2 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] lib#build: ~/packages/lib$ echo build lib ✓
-      → Cache disabled for built-in command
-  ·······················································
-  [2] app#build: ~/packages/app$ echo build app ✓
-      → Cache disabled for built-in command
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] 0/2 cache hit (0%). (Run `vp run --details` for full details)

@@ -5,34 +5,6 @@ expression: e2e_outputs
 > vp run env-test -- FOO bar # sets FOO=bar
 $ vp env-test FOO bar
 bar
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] e2e-env-test#env-test: $ vp env-test FOO bar ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > vp run env-test -- BAZ qux # sets BAZ=qux
 $ vp env-test BAZ qux
 qux
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] e2e-env-test#env-test: $ vp env-test BAZ qux ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

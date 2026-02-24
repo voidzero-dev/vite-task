@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run cached-task # cache miss
+> vp run --details cached-task # cache miss
 $ print-file test.txt
 test content
 
@@ -19,7 +19,7 @@ Task Details:
   [1] cache-disabled-test#cached-task: $ print-file test.txt ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> vp run cached-task # cache hit
+> vp run --details cached-task # cache hit
 $ print-file test.txt ✓ cache hit, replaying
 test content
 

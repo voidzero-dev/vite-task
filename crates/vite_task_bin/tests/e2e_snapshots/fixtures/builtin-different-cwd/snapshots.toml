@@ -3,9 +3,9 @@
 [[e2e]]
 name = "builtin different cwd"
 steps = [
-  "cd folder1 && vp run lint # cache miss in folder1",
-  "cd folder2 && vp run lint # cache miss in folder2",
+  "cd folder1 && vp run --details lint # cache miss in folder1",
+  "cd folder2 && vp run --details lint # cache miss in folder2",
   "echo 'console.log(1);' > folder2/a.js # modify folder2",
-  "cd folder1 && vp run lint # cache hit",
-  "cd folder2 && vp run lint # cache miss",
+  "cd folder1 && vp run --details lint # cache hit",
+  "cd folder2 && vp run --details lint # cache miss",
 ]

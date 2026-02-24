@@ -10,7 +10,10 @@ use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
-use reporter::LabeledReporterBuilder;
+use reporter::{
+    LabeledReporterBuilder,
+    summary::{LastRunSummary, ReadSummaryError, format_full_summary},
+};
 use rustc_hash::FxHashMap;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_select::SelectItem;
@@ -225,12 +228,18 @@ impl<'a> Session<'a> {
         match command {
             Command::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             Command::Run(run_command) => {
+                // --last-details: display saved summary and exit (exclusive flag)
+                if run_command.last_details {
+                    return self.show_last_run_details();
+                }
+
                 let cwd = Arc::clone(&self.cwd);
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
                 // Save task name and flags before consuming run_command
                 let task_name = run_command.task_specifier.as_ref().map(|s| s.task_name.clone());
+                let show_details = run_command.flags.details;
                 let flags = run_command.flags;
                 let additional_args = run_command.additional_args.clone();
 
@@ -249,6 +258,8 @@ impl<'a> Session<'a> {
                         let builder = LabeledReporterBuilder::new(
                             self.workspace_path(),
                             Box::new(tokio::io::stdout()),
+                            show_details,
+                            Some(self.summary_file_path()),
                         );
                         Ok(self
                             .execute_graph(graph, Box::new(builder))
@@ -389,13 +400,22 @@ impl<'a> Session<'a> {
         // Interactive: run the selected task
         let selected_label = &select_items[selected_index].label;
         let task_specifier = TaskSpecifier::parse_raw(selected_label);
-        let run_command =
-            RunCommand { task_specifier: Some(task_specifier), flags, additional_args };
+        let show_details = flags.details;
+        let run_command = RunCommand {
+            task_specifier: Some(task_specifier),
+            flags,
+            additional_args,
+            last_details: false,
+        };
 
         let cwd = Arc::clone(&self.cwd);
         let graph = self.plan_from_cli_run(cwd, run_command).await?;
-        let builder =
-            LabeledReporterBuilder::new(self.workspace_path(), Box::new(tokio::io::stdout()));
+        let builder = LabeledReporterBuilder::new(
+            self.workspace_path(),
+            Box::new(tokio::io::stdout()),
+            show_details,
+            Some(self.summary_file_path()),
+        );
         Ok(self.execute_graph(graph, Box::new(builder)).await.err().unwrap_or(ExitStatus::SUCCESS))
     }
 
@@ -412,6 +432,44 @@ impl<'a> Session<'a> {
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {
         Arc::clone(&self.workspace_path)
+    }
+
+    /// Path to the `last-summary.json` file inside the cache directory.
+    fn summary_file_path(&self) -> AbsolutePathBuf {
+        self.cache_path.join("last-summary.json")
+    }
+
+    /// Display the saved summary from the last run (`--last-details`).
+    #[expect(
+        clippy::print_stderr,
+        reason = "--last-details error messages are user-facing diagnostics, not debug output"
+    )]
+    fn show_last_run_details(&self) -> anyhow::Result<ExitStatus> {
+        let path = self.summary_file_path();
+        match LastRunSummary::read_from_path(&path) {
+            Ok(Some(summary)) => {
+                let buf = format_full_summary(&summary);
+                {
+                    use std::io::Write;
+                    let mut stdout = std::io::stdout().lock();
+                    let _ = stdout.write_all(&buf);
+                    let _ = stdout.flush();
+                }
+                Ok(ExitStatus(summary.exit_code))
+            }
+            Ok(None) => {
+                eprintln!("No previous run summary found. Run a task first to generate a summary.");
+                Ok(ExitStatus::FAILURE)
+            }
+            Err(ReadSummaryError::IncompatibleVersion) => {
+                eprintln!(
+                    "Summary data was saved by a different version of vite-task and cannot be read. \
+                     Run a task to generate a new summary."
+                );
+                Ok(ExitStatus::FAILURE)
+            }
+            Err(ReadSummaryError::Io(err)) => Err(err.into()),
+        }
     }
 
     pub const fn task_graph(&self) -> Option<&TaskGraph> {

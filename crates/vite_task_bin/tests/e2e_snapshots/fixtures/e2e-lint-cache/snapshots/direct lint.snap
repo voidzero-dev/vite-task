@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run lint # cache miss
+> vp run --details lint # cache miss
 $ vp lint
 Found 0 warnings and 0 errors.
 Finished in <duration> on 0 files with 90 rules using <n> threads.
@@ -22,7 +22,7 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > echo debugger > main.js # add lint error
 
-> vp run lint # cache miss, lint fails
+> vp run --details lint # cache miss, lint fails
 $ vp lint ✗ cache miss: content of input '' changed, executing
 
   ! eslint(no-debugger): `debugger` statement is not allowed

@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-[1]> vp run -r fail # multiple failures -> exit code 1
+[1]> vp run --details -r fail # multiple failures -> exit code 1
 ~/packages/pkg-a$ node -e "process.exit(42)"
 
 ~/packages/pkg-b$ node -e "process.exit(7)"

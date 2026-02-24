@@ -13,22 +13,8 @@ stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   2 tasks • 0 cache hits • 2 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] other#check-tty-cached: ~/packages/other$ check-tty ✓
-      → Cache miss: no previous cache entry found
-  ·······················································
-  [2] stdio-detection-test#check-tty-cached: $ check-tty ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] 0/2 cache hit (0%). (Run `vp run --details` for full details)
 > vp run -r check-tty-cached
 ~/packages/other$ check-tty ✓ cache hit, replaying
 stdin:not-tty
@@ -40,19 +26,5 @@ stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   2 tasks • 2 cache hits • 0 cache misses
-Performance:  100% cache hit rate, <duration> saved in total
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] other#check-tty-cached: ~/packages/other$ check-tty ✓
-      → Cache hit - output replayed - <duration> saved
-  ·······················································
-  [2] stdio-detection-test#check-tty-cached: $ check-tty ✓
-      → Cache hit - output replayed - <duration> saved
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] 2/2 cache hit (100%), <duration> saved. (Run `vp run --details` for full details)

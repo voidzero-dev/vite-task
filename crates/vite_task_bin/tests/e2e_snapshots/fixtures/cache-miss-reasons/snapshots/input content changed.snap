@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run test # cache miss
+> vp run --details test # cache miss
 $ print-file test.txt
 initial content
 
@@ -21,7 +21,7 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > replace-file-content test.txt initial modified # modify input
 
-> vp run test # cache miss: input changed
+> vp run --details test # cache miss: input changed
 $ print-file test.txt ✗ cache miss: content of input 'test.txt' changed, executing
 modified content
 

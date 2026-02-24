@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> cross-env MY_ENV=1 vp run test # cache miss
+> cross-env MY_ENV=1 vp run --details test # cache miss
 $ print-file test.txt
 initial content
 
@@ -19,7 +19,7 @@ Task Details:
   [1] cache-miss-reasons#test: $ print-file test.txt ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> vp run test # cache miss: env removed
+> vp run --details test # cache miss: env removed
 $ print-file test.txt ✗ cache miss: envs changed, executing
 initial content
 

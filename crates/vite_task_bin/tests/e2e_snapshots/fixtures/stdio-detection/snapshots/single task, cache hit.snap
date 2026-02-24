@@ -7,36 +7,11 @@ $ check-tty
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] stdio-detection-test#check-tty-cached: $ check-tty ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > vp run check-tty-cached
 $ check-tty ✓ cache hit, replaying
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 1 cache hits • 0 cache misses
-Performance:  100% cache hit rate, <duration> saved in total
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] stdio-detection-test#check-tty-cached: $ check-tty ✓
-      → Cache hit - output replayed - <duration> saved
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] cache hit, <duration> saved.

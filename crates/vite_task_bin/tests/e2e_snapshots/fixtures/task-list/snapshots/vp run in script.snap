@@ -16,31 +16,3 @@ Search task (↑/↓ to move, enter to select):
 $ vp run ⊘ cache disabled: no cache config
 $ echo hello from root ⊘ cache disabled: built-in command
 hello from root
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] task-list-test#hello: $ echo hello from root ✓
-      → Cache disabled for built-in command
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] task-list-test#list-tasks: $ vp run ✓
-      → Cache disabled in task configuration
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

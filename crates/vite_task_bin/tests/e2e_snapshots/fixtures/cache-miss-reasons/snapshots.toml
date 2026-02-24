@@ -3,55 +3,55 @@
 [[e2e]]
 name = "env value changed"
 steps = [
-  "cross-env MY_ENV=1 vp run test # cache miss",
-  "cross-env MY_ENV=2 vp run test # cache miss: env value changed",
+  "cross-env MY_ENV=1 vp run --details test # cache miss",
+  "cross-env MY_ENV=2 vp run --details test # cache miss: env value changed",
 ]
 
 [[e2e]]
 name = "env added"
 steps = [
-  "vp run test # cache miss",
-  "cross-env MY_ENV=1 vp run test # cache miss: env added",
+  "vp run --details test # cache miss",
+  "cross-env MY_ENV=1 vp run --details test # cache miss: env added",
 ]
 
 [[e2e]]
 name = "env removed"
 steps = [
-  "cross-env MY_ENV=1 vp run test # cache miss",
-  "vp run test # cache miss: env removed",
+  "cross-env MY_ENV=1 vp run --details test # cache miss",
+  "vp run --details test # cache miss: env removed",
 ]
 
 [[e2e]]
 name = "pass-through env added"
 steps = [
-  "vp run test # cache miss",
+  "vp run --details test # cache miss",
   "json-edit vite-task.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # add pass-through env",
-  "vp run test # cache miss: pass-through env added",
+  "vp run --details test # cache miss: pass-through env added",
 ]
 
 [[e2e]]
 name = "pass-through env removed"
 steps = [
   "json-edit vite-task.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # setup",
-  "vp run test # cache miss",
+  "vp run --details test # cache miss",
   "json-edit vite-task.json \"delete _.tasks.test.passThroughEnvs\" # remove pass-through env",
-  "vp run test # cache miss: pass-through env removed",
+  "vp run --details test # cache miss: pass-through env removed",
 ]
 
 [[e2e]]
 name = "cwd changed"
 steps = [
-  "vp run test # cache miss",
+  "vp run --details test # cache miss",
   "mkdir -p subfolder",
   "cp test.txt subfolder/test.txt",
   "json-edit vite-task.json \"_.tasks.test.cwd = 'subfolder'\" # change cwd",
-  "vp run test # cache miss: cwd changed",
+  "vp run --details test # cache miss: cwd changed",
 ]
 
 [[e2e]]
 name = "input content changed"
 steps = [
-  "vp run test # cache miss",
+  "vp run --details test # cache miss",
   "replace-file-content test.txt initial modified # modify input",
-  "vp run test # cache miss: input changed",
+  "vp run --details test # cache miss: input changed",
 ]
