@@ -9,7 +9,7 @@ initial content
 $ print-file foo.txt ✓ cache hit, replaying
 initial content
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.
 > replace-file-content foo.txt initial modified # modify shared input
 
@@ -20,5 +20,5 @@ modified content
 $ print-file foo.txt ✓ cache hit, replaying
 modified content
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.

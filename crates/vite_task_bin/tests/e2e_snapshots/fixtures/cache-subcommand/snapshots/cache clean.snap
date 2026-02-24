@@ -9,7 +9,7 @@ test content
 $ print-file test.txt ✓ cache hit, replaying
 test content
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.
 > vp cache clean
 

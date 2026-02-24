@@ -9,7 +9,7 @@ hello
 $ print hello ✓ cache hit, replaying
 hello
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.
 > json-edit package.json '_.scripts.script2 = "print world"' # change script2
 

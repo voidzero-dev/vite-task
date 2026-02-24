@@ -9,7 +9,7 @@ hello
 $ print-file main.js
 console.log('foo');
 
-────────────────────────────────────────────────
+---
 [vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)
 > replace-file-content main.js foo bar # modify input file
 
@@ -20,5 +20,5 @@ hello
 $ print-file main.js ✗ cache miss: content of input 'main.js' changed, executing
 console.log('bar');
 
-────────────────────────────────────────────────
+---
 [vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)

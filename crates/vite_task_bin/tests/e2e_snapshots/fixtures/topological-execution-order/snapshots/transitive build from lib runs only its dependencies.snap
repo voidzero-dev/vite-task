@@ -9,5 +9,5 @@ Building core
 ~/packages/lib$ echo 'Building lib' ⊘ cache disabled: built-in command
 Building lib
 
-────────────────────────────────────────────────
+---
 [vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)

@@ -12,11 +12,11 @@ b
 $ print a ✓ cache hit, replaying
 a
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.
 > vp run say b # cache hit
 $ print b ✓ cache hit, replaying
 b
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.

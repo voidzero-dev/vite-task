@@ -7,5 +7,5 @@ expression: e2e_outputs
 
 ~/packages/pkg-b$ node -e "process.exit(7)"
 
-────────────────────────────────────────────────
+---
 [vp run] 0/2 cache hit (0%), 2 failed. (Run `vp run --verbose` for full details)

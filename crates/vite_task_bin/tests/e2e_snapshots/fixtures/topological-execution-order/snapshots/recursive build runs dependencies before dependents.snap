@@ -12,5 +12,5 @@ Building lib
 ~/packages/app$ echo 'Building app' ⊘ cache disabled: built-in command
 Building app
 
-────────────────────────────────────────────────
+---
 [vp run] 0/3 cache hit (0%). (Run `vp run --verbose` for full details)

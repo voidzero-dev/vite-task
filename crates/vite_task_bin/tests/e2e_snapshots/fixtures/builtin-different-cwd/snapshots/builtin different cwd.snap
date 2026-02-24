@@ -41,7 +41,7 @@ $ vp lint ✓ cache hit, replaying
 Found 2 warnings and 0 errors.
 Finished in <duration> on 2 files with 90 rules using <n> threads.
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.
 > echo 'console.log(1);' > folder2/a.js # modify folder2
 
@@ -70,5 +70,5 @@ $ vp lint ✓ cache hit, replaying
 Found 1 warning and 0 errors.
 Finished in <duration> on 2 files with 90 rules using <n> threads.
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.
