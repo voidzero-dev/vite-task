@@ -7,5 +7,5 @@ $ node read_node_fs.js
 > vp run read_colon_in_name # cache hit
 $ node read_node_fs.js ✓ cache hit, replaying
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.

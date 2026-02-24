@@ -661,11 +661,7 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
     let mut buf = Vec::new();
 
     // Thin line separator
-    let _ = writeln!(
-        buf,
-        "{}",
-        "────────────────────────────────────────────────".style(Style::new().bright_black())
-    );
+    let _ = writeln!(buf, "{}", "---".style(Style::new().bright_black()));
 
     if is_single_task {
         // Single task cache hit

@@ -193,7 +193,7 @@ $ node build.js ✓ cache hit, replaying
 [echo.js] --------------------------------
 [build.js] main process end
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.
 > vp run build # cache hit
 $ node build.js ✓ cache hit, replaying
@@ -291,5 +291,5 @@ $ node build.js ✓ cache hit, replaying
 [echo.js] --------------------------------
 [build.js] main process end
 
-────────────────────────────────────────────────
+---
 [vp run] cache hit, <duration> saved.
