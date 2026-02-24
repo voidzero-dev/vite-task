@@ -29,7 +29,6 @@ rusqlite = { workspace = true, features = ["bundled"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
-smallvec.workspace = true
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "io-std", "io-util", "macros", "sync"] }
 tracing = { workspace = true }
