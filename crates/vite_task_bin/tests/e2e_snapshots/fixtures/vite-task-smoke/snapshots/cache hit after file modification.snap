@@ -2,51 +2,23 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run --verbose test-task # cache miss
+> vp run test-task # cache miss
 $ echo hello ⊘ cache disabled: built-in command
 hello
 
 $ print-file main.js
 console.log('foo');
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   2 tasks • 0 cache hits • 1 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] vite-task-smoke#test-task: $ echo hello ✓
-      → Cache disabled for built-in command
-  ·······················································
-  [2] vite-task-smoke#test-task: $ print-file main.js ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)
 > replace-file-content main.js foo bar # modify input file
 
-> vp run --verbose test-task # cache miss, main.js changed
+> vp run test-task # cache miss, main.js changed
 $ echo hello ⊘ cache disabled: built-in command
 hello
 
 $ print-file main.js ✗ cache miss: content of input 'main.js' changed, executing
 console.log('bar');
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   2 tasks • 0 cache hits • 1 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
 ────────────────────────────────────────────────
-  [1] vite-task-smoke#test-task: $ echo hello ✓
-      → Cache disabled for built-in command
-  ·······················································
-  [2] vite-task-smoke#test-task: $ print-file main.js ✓
-      → Cache miss: content of input 'main.js' changed
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)

@@ -1,8 +1,8 @@
 [[e2e]]
 name = "cache clean"
 steps = [
-  "vp run --verbose cached-task # cache miss",
-  "vp run --verbose cached-task # cache hit",
+  "vp run cached-task # cache miss",
+  "vp run cached-task # cache hit",
   "vp cache clean",
-  "vp run --verbose cached-task # cache miss after clean",
+  "vp run cached-task # cache miss after clean",
 ]

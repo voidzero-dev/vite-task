@@ -3,8 +3,8 @@
 [[e2e]]
 name = "individual cache for envs"
 steps = [
-  "FOO=1 vp run --verbose hello # cache miss",
-  "FOO=2 vp run --verbose hello # cache miss, different env",
-  "FOO=1 vp run --verbose hello # cache hit",
-  "FOO=2 vp run --verbose hello # cache hit",
+  "FOO=1 vp run hello # cache miss",
+  "FOO=2 vp run hello # cache miss, different env",
+  "FOO=1 vp run hello # cache hit",
+  "FOO=2 vp run hello # cache hit",
 ]

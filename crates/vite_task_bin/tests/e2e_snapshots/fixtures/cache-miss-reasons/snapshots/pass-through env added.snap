@@ -2,39 +2,11 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run --verbose test # cache miss
+> vp run test # cache miss
 $ print-file test.txt
 initial content
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] cache-miss-reasons#test: $ print-file test.txt ✓
-      → Cache miss: no previous cache entry found
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > json-edit vite-task.json "_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']" # add pass-through env
 
-> vp run --verbose test # cache miss: pass-through env added
+> vp run test # cache miss: pass-through env added
 $ print-file test.txt ✗ cache miss: pass-through env config changed, executing
 initial content
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] cache-miss-reasons#test: $ print-file test.txt ✓
-      → Cache miss: pass-through env 'MY_PASSTHROUGH' added
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
