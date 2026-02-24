@@ -186,9 +186,14 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         }
 
         // Write the summary buffer asynchronously.
-        if !summary_buf.is_empty() {
+        // Always flush the writer — even when the summary is empty, a preceding
+        // spawned process may have written to the same fd via Stdio::inherit()
+        // and the data must be flushed before the caller reads the output.
+        {
             let mut writer = self.writer.borrow_mut();
-            let _ = writer.write_all(&summary_buf).await;
+            if !summary_buf.is_empty() {
+                let _ = writer.write_all(&summary_buf).await;
+            }
             let _ = writer.flush().await;
         }
 
