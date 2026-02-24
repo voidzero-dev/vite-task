@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> cd folder1 && vp run --details lint # cache miss in folder1
+> cd folder1 && vp run --verbose lint # cache miss in folder1
 $ vp lint
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
@@ -35,7 +35,7 @@ Task Details:
   [1] lint: $ vp lint ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> cd folder2 && vp run --details lint # cache miss in folder2
+> cd folder2 && vp run --verbose lint # cache miss in folder2
 $ vp lint ✓ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
@@ -70,7 +70,7 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > echo 'console.log(1);' > folder2/a.js # modify folder2
 
-> cd folder1 && vp run --details lint # cache hit
+> cd folder1 && vp run --verbose lint # cache hit
 $ vp lint ✗ cache miss: content of input 'folder2/a.js' changed, executing
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
@@ -96,7 +96,7 @@ Task Details:
   [1] lint: $ vp lint ✓
       → Cache miss: content of input 'folder2/a.js' changed
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> cd folder2 && vp run --details lint # cache miss
+> cd folder2 && vp run --verbose lint # cache miss
 $ vp lint ✓ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.

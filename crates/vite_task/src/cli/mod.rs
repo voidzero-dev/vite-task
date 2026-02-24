@@ -32,8 +32,8 @@ pub struct RunFlags {
     pub ignore_depends_on: bool,
 
     /// Show full detailed summary after execution.
-    #[clap(default_value = "false", long)]
-    pub details: bool,
+    #[clap(default_value = "false", short = 'v', long)]
+    pub verbose: bool,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

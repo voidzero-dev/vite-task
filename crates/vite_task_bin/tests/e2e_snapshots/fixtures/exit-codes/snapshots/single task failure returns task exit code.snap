@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-[42]> vp run --details pkg-a#fail # exits with code 42
+[42]> vp run --verbose pkg-a#fail # exits with code 42
 ~/packages/pkg-a$ node -e "process.exit(42)"
 
 

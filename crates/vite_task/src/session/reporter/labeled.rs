@@ -49,12 +49,12 @@ struct SharedReporterState {
 /// - Single task + cache hit → thin line + "[vp run] cache hit, {duration} saved."
 /// - Multi-task → thin line + one-liner with stats
 ///
-/// ## Full Summary (`--details`)
+/// ## Full Summary (`--verbose`)
 /// - Shows full Statistics, Performance, and Task Details sections
 pub struct LabeledReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn AsyncWrite + Unpin>,
-    /// Whether to render the full detailed summary (`--details` flag).
+    /// Whether to render the full detailed summary (`--verbose` flag).
     show_details: bool,
     /// Callback to persist the summary (e.g., write `last-summary.json`).
     /// `None` when persistence is not needed (e.g., nested script execution, tests).

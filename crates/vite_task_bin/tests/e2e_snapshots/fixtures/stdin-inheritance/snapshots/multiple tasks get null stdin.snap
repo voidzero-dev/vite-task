@@ -8,4 +8,4 @@ expression: e2e_outputs
 $ read-stdin ⊘ cache disabled: no cache config
 
 ────────────────────────────────────────────────
-[vp run] 0/2 cache hit (0%). (Run `vp run --details` for full details)
+[vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)

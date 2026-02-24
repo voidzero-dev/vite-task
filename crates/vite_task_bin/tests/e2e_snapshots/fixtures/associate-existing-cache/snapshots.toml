@@ -3,8 +3,8 @@
 [[e2e]]
 name = "associate existing cache"
 steps = [
-  "vp run --details script1 # cache miss",
-  "vp run --details script2 # cache hit, same command as script1",
+  "vp run --verbose script1 # cache miss",
+  "vp run --verbose script2 # cache hit, same command as script1",
   "json-edit package.json '_.scripts.script2 = \"print world\"' # change script2",
-  "vp run --details script2 # cache miss",
+  "vp run --verbose script2 # cache miss",
 ]

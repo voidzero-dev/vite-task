@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run --details -r build # core -> lib -> app
+> vp run --verbose -r build # core -> lib -> app
 ~/packages/core$ echo 'Building core' ⊘ cache disabled: built-in command
 Building core
 

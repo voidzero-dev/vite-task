@@ -3,7 +3,7 @@
 [[e2e]]
 name = "direct lint"
 steps = [
-  "vp run --details lint # cache miss",
+  "vp run --verbose lint # cache miss",
   "echo debugger > main.js # add lint error",
-  "vp run --details lint # cache miss, lint fails",
+  "vp run --verbose lint # cache miss, lint fails",
 ]

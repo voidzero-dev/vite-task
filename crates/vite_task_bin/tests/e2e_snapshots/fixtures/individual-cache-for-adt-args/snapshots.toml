@@ -3,8 +3,8 @@
 [[e2e]]
 name = "individual cache for extra args"
 steps = [
-  "vp run --details say a # cache miss",
-  "vp run --details say b # cache miss, different args",
-  "vp run --details say a # cache hit",
-  "vp run --details say b # cache hit",
+  "vp run --verbose say a # cache miss",
+  "vp run --verbose say b # cache miss, different args",
+  "vp run --verbose say a # cache hit",
+  "vp run --verbose say b # cache hit",
 ]

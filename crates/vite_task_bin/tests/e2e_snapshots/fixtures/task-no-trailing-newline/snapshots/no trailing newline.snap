@@ -9,4 +9,4 @@ $ echo bar ⊘ cache disabled: built-in command
 bar
 
 ────────────────────────────────────────────────
-[vp run] 0/2 cache hit (0%). (Run `vp run --details` for full details)
+[vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)

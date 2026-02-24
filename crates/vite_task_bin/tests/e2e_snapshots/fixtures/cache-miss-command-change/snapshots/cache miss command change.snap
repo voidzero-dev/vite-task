@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run --details task # cache miss
+> vp run --verbose task # cache miss
 $ print foo
 foo
 
@@ -27,7 +27,7 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > json-edit package.json '_.scripts.task = "print baz && print bar"' # change first subtask
 
-> vp run --details task # first: cache miss, second: cache hit
+> vp run --verbose task # first: cache miss, second: cache hit
 $ print baz ✗ cache miss: args changed, executing
 baz
 
@@ -52,7 +52,7 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > json-edit package.json '_.scripts.task = "print bar"' # remove first subtask
 
-> vp run --details task # cache hit
+> vp run --verbose task # cache hit
 $ print bar ✓ cache hit, replaying
 bar
 

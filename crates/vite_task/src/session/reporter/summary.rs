@@ -459,12 +459,12 @@ impl TaskResult {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Full summary rendering (--details and --last-details)
+// Full summary rendering (--verbose and --last-details)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Render the full detailed execution summary.
 ///
-/// Used by both `--details` (live) and `--last-details` (from file).
+/// Used by both `--verbose` (live) and `--last-details` (from file).
 #[expect(
     clippy::too_many_lines,
     reason = "summary formatting is inherently verbose with many write calls"
@@ -647,7 +647,7 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
 /// - Single task + not cache hit → empty (no summary at all)
 /// - Single task + cache hit → thin line + "[vp run] cache hit, {duration} saved."
 /// - Multi-task → thin line + "[vp run] {hits}/{total} cache hit ({rate}%), {duration} saved."
-///   with optional failure count and `--details` hint.
+///   with optional failure count and `--verbose` hint.
 pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
     let stats = SummaryStats::compute(&summary.tasks);
 
@@ -713,7 +713,7 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
         let _ = write!(
             buf,
             ". {}",
-            "(Run `vp run --details` for full details)".style(Style::new().bright_black()),
+            "(Run `vp run --verbose` for full details)".style(Style::new().bright_black()),
         );
         let _ = writeln!(buf);
     }

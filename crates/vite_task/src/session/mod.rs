@@ -237,7 +237,7 @@ impl<'a> Session<'a> {
 
                 // Save task name and flags before consuming run_command
                 let task_name = run_command.task_specifier.as_ref().map(|s| s.task_name.clone());
-                let show_details = run_command.flags.details;
+                let show_details = run_command.flags.verbose;
                 let flags = run_command.flags;
                 let additional_args = run_command.additional_args.clone();
 
@@ -398,7 +398,7 @@ impl<'a> Session<'a> {
         // Interactive: run the selected task
         let selected_label = &select_items[selected_index].label;
         let task_specifier = TaskSpecifier::parse_raw(selected_label);
-        let show_details = flags.details;
+        let show_details = flags.verbose;
         let run_command =
             RunCommand { task_specifier: Some(task_specifier), flags, additional_args };
 

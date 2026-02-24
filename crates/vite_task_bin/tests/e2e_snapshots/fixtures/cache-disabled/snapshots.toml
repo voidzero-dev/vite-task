@@ -3,13 +3,13 @@
 [[e2e]]
 name = "task with cache disabled"
 steps = [
-  "vp run --details no-cache-task # cache miss",
-  "vp run --details no-cache-task # cache disabled, runs again",
+  "vp run --verbose no-cache-task # cache miss",
+  "vp run --verbose no-cache-task # cache disabled, runs again",
 ]
 
 [[e2e]]
 name = "task with cache enabled"
 steps = [
-  "vp run --details cached-task # cache miss",
-  "vp run --details cached-task # cache hit",
+  "vp run --verbose cached-task # cache miss",
+  "vp run --verbose cached-task # cache hit",
 ]

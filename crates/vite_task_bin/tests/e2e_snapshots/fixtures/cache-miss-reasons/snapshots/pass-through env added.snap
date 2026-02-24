@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run --details test # cache miss
+> vp run --verbose test # cache miss
 $ print-file test.txt
 initial content
 
@@ -21,7 +21,7 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > json-edit vite-task.json "_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']" # add pass-through env
 
-> vp run --details test # cache miss: pass-through env added
+> vp run --verbose test # cache miss: pass-through env added
 $ print-file test.txt ✗ cache miss: pass-through env config changed, executing
 initial content
 

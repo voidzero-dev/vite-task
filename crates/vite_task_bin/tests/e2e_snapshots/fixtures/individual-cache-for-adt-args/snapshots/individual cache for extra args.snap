@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run --details say a # cache miss
+> vp run --verbose say a # cache miss
 $ print a
 a
 
@@ -19,7 +19,7 @@ Task Details:
   [1] say: $ print a ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> vp run --details say b # cache miss, different args
+> vp run --verbose say b # cache miss, different args
 $ print b
 b
 
@@ -36,7 +36,7 @@ Task Details:
   [1] say: $ print b ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> vp run --details say a # cache hit
+> vp run --verbose say a # cache hit
 $ print a ✓ cache hit, replaying
 a
 
@@ -53,7 +53,7 @@ Task Details:
   [1] say: $ print a ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> vp run --details say b # cache hit
+> vp run --verbose say b # cache hit
 $ print b ✓ cache hit, replaying
 b
 

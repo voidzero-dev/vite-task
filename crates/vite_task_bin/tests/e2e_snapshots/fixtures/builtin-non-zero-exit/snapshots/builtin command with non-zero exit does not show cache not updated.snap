@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-[1]> vp run --details lint -- -D no-debugger
+[1]> vp run --verbose lint -- -D no-debugger
 $ vp lint -D no-debugger
 
   x eslint(no-debugger): `debugger` statement is not allowed
@@ -28,7 +28,7 @@ Task Details:
   [1] builtin-non-zero-exit-test#lint: $ vp lint -D no-debugger ✗ (exit code: 1)
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[1]> vp run --details lint -- -D no-debugger
+[1]> vp run --verbose lint -- -D no-debugger
 $ vp lint -D no-debugger
 
   x eslint(no-debugger): `debugger` statement is not allowed
