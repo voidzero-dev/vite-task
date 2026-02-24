@@ -33,7 +33,7 @@ pub use plain::PlainReporter;
 use tokio::io::AsyncWrite;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_plan::{ExecutionItem, ExecutionItemDisplay};
+use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     cache::format_cache_status_inline,
@@ -114,7 +114,7 @@ pub trait GraphExecutionReporterBuilder {
 /// and finalizes the session with `finish()`.
 #[async_trait::async_trait(?Send)]
 pub trait GraphExecutionReporter {
-    /// Create a new leaf execution reporter for the given execution item.
+    /// Create a new leaf execution reporter for the given leaf.
     ///
     /// `all_ancestors_single_node` is `true` when every execution graph in
     /// the ancestry chain (root + all nested `Expanded` parents) contains
@@ -122,7 +122,8 @@ pub trait GraphExecutionReporter {
     /// (e.g. suggesting inherited stdio for a single spawned process).
     fn new_leaf_execution(
         &mut self,
-        item: &ExecutionItem,
+        display: &ExecutionItemDisplay,
+        leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
     ) -> Box<dyn LeafExecutionReporter>;
 

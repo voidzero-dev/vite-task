@@ -12,7 +12,7 @@ use owo_colors::Style;
 use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_plan::{ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind};
+use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt, ExitStatus, GraphExecutionReporter,
@@ -119,14 +119,13 @@ pub struct LabeledGraphReporter {
 impl GraphExecutionReporter for LabeledGraphReporter {
     fn new_leaf_execution(
         &mut self,
-        item: &ExecutionItem,
+        display: &ExecutionItemDisplay,
+        leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
     ) -> Box<dyn LeafExecutionReporter> {
-        let display = item.execution_item_display.clone();
-        let stdio_suggestion = match &item.kind {
-            ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(_)) if all_ancestors_single_node => {
-                StdioSuggestion::Inherited
-            }
+        let display = display.clone();
+        let stdio_suggestion = match leaf_kind {
+            LeafExecutionKind::Spawn(_) if all_ancestors_single_node => StdioSuggestion::Inherited,
             _ => StdioSuggestion::Piped,
         };
 
@@ -552,6 +551,8 @@ fn format_summary(
 
 #[cfg(test)]
 mod tests {
+    use vite_task_plan::ExecutionItemKind;
+
     use super::*;
     use crate::session::{
         event::CacheDisabledReason,
@@ -561,14 +562,24 @@ mod tests {
         },
     };
 
+    /// Extract the `LeafExecutionKind` from a test fixture item.
+    /// Panics if the item is not a leaf (test fixtures always produce leaves).
+    fn leaf_kind(item: &vite_task_plan::ExecutionItem) -> &LeafExecutionKind {
+        match &item.kind {
+            ExecutionItemKind::Leaf(kind) => kind,
+            ExecutionItemKind::Expanded(_) => panic!("test fixture item must be a Leaf"),
+        }
+    }
+
     fn build_labeled_leaf(
-        item: &ExecutionItem,
+        display: &ExecutionItemDisplay,
+        leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
     ) -> Box<dyn LeafExecutionReporter> {
         let builder =
             Box::new(LabeledReporterBuilder::new(test_path(), Box::new(tokio::io::sink())));
         let mut reporter = builder.build();
-        reporter.new_leaf_execution(item, all_ancestors_single_node)
+        reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node)
     }
 
     #[expect(
@@ -576,10 +587,11 @@ mod tests {
         reason = "LeafExecutionReporter futures are !Send in single-threaded reporter tests"
     )]
     async fn suggestion_for(
-        item: &ExecutionItem,
+        display: &ExecutionItemDisplay,
+        leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
     ) -> StdioSuggestion {
-        let mut leaf = build_labeled_leaf(item, all_ancestors_single_node);
+        let mut leaf = build_labeled_leaf(display, leaf_kind, all_ancestors_single_node);
         let stdio_config =
             leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
         stdio_config.suggestion
@@ -588,24 +600,40 @@ mod tests {
     #[tokio::test]
     async fn spawn_with_all_single_node_ancestors_suggests_inherited() {
         let task = spawn_task("build");
-        assert_eq!(suggestion_for(&task.items[0], true).await, StdioSuggestion::Inherited);
+        let item = &task.items[0];
+        assert_eq!(
+            suggestion_for(&item.execution_item_display, leaf_kind(item), true).await,
+            StdioSuggestion::Inherited
+        );
     }
 
     #[tokio::test]
     async fn spawn_without_all_single_node_ancestors_suggests_piped() {
         let task = spawn_task("build");
-        assert_eq!(suggestion_for(&task.items[0], false).await, StdioSuggestion::Piped);
+        let item = &task.items[0];
+        assert_eq!(
+            suggestion_for(&item.execution_item_display, leaf_kind(item), false).await,
+            StdioSuggestion::Piped
+        );
     }
 
     #[tokio::test]
     async fn in_process_leaf_suggests_piped_even_with_single_node_ancestors() {
         let task = in_process_task("echo");
-        assert_eq!(suggestion_for(&task.items[0], true).await, StdioSuggestion::Piped);
+        let item = &task.items[0];
+        assert_eq!(
+            suggestion_for(&item.execution_item_display, leaf_kind(item), true).await,
+            StdioSuggestion::Piped
+        );
     }
 
     #[tokio::test]
     async fn in_process_leaf_suggests_piped_without_single_node_ancestors() {
         let task = in_process_task("echo");
-        assert_eq!(suggestion_for(&task.items[0], false).await, StdioSuggestion::Piped);
+        let item = &task.items[0];
+        assert_eq!(
+            suggestion_for(&item.execution_item_display, leaf_kind(item), false).await,
+            StdioSuggestion::Piped
+        );
     }
 }

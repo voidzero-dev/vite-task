@@ -7,7 +7,7 @@ use futures_util::FutureExt;
 use tokio::io::AsyncWriteExt as _;
 use vite_path::AbsolutePath;
 use vite_task_plan::{
-    ExecutionGraph, ExecutionItem, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
+    ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
     SpawnExecution,
 };
 
@@ -91,8 +91,14 @@ impl ExecutionContext<'_> {
 
             for item in &task_execution.items {
                 match &item.kind {
-                    ExecutionItemKind::Leaf(_) => {
-                        self.execute_leaf(item, all_ancestors_single_node).boxed_local().await;
+                    ExecutionItemKind::Leaf(leaf_kind) => {
+                        self.execute_leaf(
+                            &item.execution_item_display,
+                            leaf_kind,
+                            all_ancestors_single_node,
+                        )
+                        .boxed_local()
+                        .await;
                     }
                     ExecutionItemKind::Expanded(nested_graph) => {
                         self.execute_expanded_graph(
@@ -112,14 +118,16 @@ impl ExecutionContext<'_> {
     /// Creates a [`LeafExecutionReporter`] from the graph reporter and delegates
     /// to the appropriate execution method.
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
-    async fn execute_leaf(&mut self, item: &ExecutionItem, all_ancestors_single_node: bool) {
-        let mut leaf_reporter = self.reporter.new_leaf_execution(item, all_ancestors_single_node);
+    async fn execute_leaf(
+        &mut self,
+        display: &ExecutionItemDisplay,
+        leaf_kind: &LeafExecutionKind,
+        all_ancestors_single_node: bool,
+    ) {
+        let mut leaf_reporter =
+            self.reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node);
 
-        let ExecutionItemKind::Leaf(leaf_execution_kind) = &item.kind else {
-            unreachable!("execute_leaf called with non-leaf ExecutionItem");
-        };
-
-        match leaf_execution_kind {
+        match leaf_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 // In-process (built-in) commands: caching is disabled, execute synchronously
                 let mut stdio_config = leaf_reporter
