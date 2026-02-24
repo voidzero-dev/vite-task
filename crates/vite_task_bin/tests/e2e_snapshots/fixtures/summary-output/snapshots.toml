@@ -1,0 +1,80 @@
+# Tests for compact and verbose summary output
+
+# Single task, cache miss → no summary at all
+[[e2e]]
+name = "single task cache miss shows no summary"
+cwd = "packages/a"
+steps = [
+  "vp run build",
+]
+
+# Single task, cache hit → compact one-liner
+[[e2e]]
+name = "single task cache hit shows compact summary"
+cwd = "packages/a"
+steps = [
+  "vp run build # first run, cache miss",
+  "vp run build # second run, cache hit → compact summary",
+]
+
+# Multi-task (recursive), all cache miss → compact summary with 0 hits
+[[e2e]]
+name = "multi task all cache miss shows compact summary"
+steps = [
+  "vp run -r build",
+]
+
+# Multi-task (recursive), some cache hits → compact summary with hit count
+[[e2e]]
+name = "multi task with cache hits shows compact summary"
+steps = [
+  "vp run -r build # first run, all miss",
+  "vp run -r build # second run, all hit",
+]
+
+# Single task with --verbose → full detailed summary
+[[e2e]]
+name = "single task verbose shows full summary"
+cwd = "packages/a"
+steps = [
+  "vp run -v build",
+]
+
+# Multi-task with --verbose → full detailed summary
+[[e2e]]
+name = "multi task verbose shows full summary"
+steps = [
+  "vp run -r -v build",
+]
+
+# Multi-task with --verbose after cache hits
+[[e2e]]
+name = "multi task verbose with cache hits shows full summary"
+steps = [
+  "vp run -r build # first run, populate cache",
+  "vp run -r -v build # second run, verbose with cache hits",
+]
+
+# --last-details with no previous run
+[[e2e]]
+name = "last details with no previous run shows error"
+steps = [
+  "vp run --last-details",
+]
+
+# --last-details after a run shows saved summary
+[[e2e]]
+name = "last details after run shows saved summary"
+cwd = "packages/a"
+steps = [
+  "vp run build # populate summary file",
+  "vp run --last-details # display saved summary",
+]
+
+# --last-details after a multi-task run
+[[e2e]]
+name = "last details after multi task run shows saved summary"
+steps = [
+  "vp run -r build # populate summary file",
+  "vp run --last-details # display saved summary",
+]

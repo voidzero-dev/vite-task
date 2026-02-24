@@ -1,0 +1,13 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vp run build # first run, cache miss
+~/packages/a$ print built-a
+built-a
+> vp run build # second run, cache hit → compact summary
+~/packages/a$ print built-a ✓ cache hit, replaying
+built-a
+
+---
+[vp run] cache hit, <duration> saved.
