@@ -15,7 +15,7 @@ use reporter::{
     summary::{LastRunSummary, ReadSummaryError, format_full_summary},
 };
 use rustc_hash::FxHashMap;
-use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
+use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_select::SelectItem;
 use vite_str::Str;
 use vite_task_graph::{
@@ -141,11 +141,6 @@ pub struct Session<'a> {
     /// processes (e.g., parallel `vp lib` commands) start simultaneously.
     cache: OnceCell<ExecutionCache>,
     cache_path: AbsolutePathBuf,
-    /// Cache directory path relative to the workspace root.
-    /// Used to exclude cache directory accesses from fspy tracking (the cache
-    /// directory is infrastructure, not a task input).
-    /// `None` when the cache directory is outside the workspace (custom `VITE_CACHE_PATH`).
-    cache_dir_relative: Option<RelativePathBuf>,
 }
 
 fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf {
@@ -203,12 +198,6 @@ impl<'a> Session<'a> {
         let (workspace_root, _) = find_workspace_root(&cwd)?;
         let cache_path = get_cache_path_of_workspace(&workspace_root.path);
 
-        // Compute the cache directory path relative to the workspace root.
-        // Used to exclude cache directory accesses from fspy tracking.
-        // `None` if the cache path is outside the workspace (custom VITE_CACHE_PATH)
-        // or if stripping the prefix fails.
-        let cache_dir_relative = cache_path.strip_prefix(&workspace_root.path).ok().flatten();
-
         // Prepend workspace's node_modules/.bin to PATH
         let workspace_node_modules_bin = workspace_root.path.join("node_modules").join(".bin");
         prepend_path_env(&mut envs, &workspace_node_modules_bin)?;
@@ -225,7 +214,6 @@ impl<'a> Session<'a> {
             plan_request_parser: PlanRequestParser { command_handler: callbacks.command_handler },
             cache: OnceCell::new(),
             cache_path,
-            cache_dir_relative,
         })
     }
 
@@ -557,7 +545,6 @@ impl<'a> Session<'a> {
             &spawn_execution,
             cache,
             &self.workspace_path,
-            self.cache_dir_relative.as_deref(),
         )
         .await
         {

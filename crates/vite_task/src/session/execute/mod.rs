@@ -5,7 +5,7 @@ use std::{process::Stdio, sync::Arc};
 
 use futures_util::FutureExt;
 use tokio::io::AsyncWriteExt as _;
-use vite_path::{AbsolutePath, RelativePath};
+use vite_path::AbsolutePath;
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
     SpawnExecution,
@@ -56,11 +56,6 @@ struct ExecutionContext<'a> {
     /// Base path for resolving relative paths in cache entries.
     /// Typically the workspace root.
     cache_base_path: &'a Arc<AbsolutePath>,
-    /// Cache directory path relative to the workspace root.
-    /// Used to exclude cache directory accesses from fspy tracking (the cache
-    /// directory is infrastructure, not a task input).
-    /// `None` when the cache directory is outside the workspace (custom `VITE_CACHE_PATH`).
-    cache_dir_relative: Option<&'a RelativePath>,
 }
 
 impl ExecutionContext<'_> {
@@ -157,14 +152,9 @@ impl ExecutionContext<'_> {
                     clippy::large_futures,
                     reason = "spawn execution with cache management creates large futures"
                 )]
-                let _ = execute_spawn(
-                    leaf_reporter,
-                    spawn_execution,
-                    self.cache,
-                    self.cache_base_path,
-                    self.cache_dir_relative,
-                )
-                .await;
+                let _ =
+                    execute_spawn(leaf_reporter, spawn_execution, self.cache, self.cache_base_path)
+                        .await;
             }
         }
     }
@@ -194,7 +184,6 @@ pub async fn execute_spawn(
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
     cache_base_path: &Arc<AbsolutePath>,
-    cache_dir_relative: Option<&RelativePath>,
 ) -> SpawnOutcome {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
@@ -304,7 +293,6 @@ pub async fn execute_spawn(
         &mut stdio_config.stdout_writer,
         &mut stdio_config.stderr_writer,
         track_result_with_cache_metadata.as_mut().map(|(track_result, _)| track_result),
-        cache_dir_relative,
     )
     .await
     {
@@ -430,7 +418,6 @@ impl Session<'_> {
             reporter: &mut *reporter,
             cache,
             cache_base_path: &self.workspace_path,
-            cache_dir_relative: self.cache_dir_relative.as_deref(),
         };
 
         // Execute the graph. Leaf-level errors are reported through the reporter

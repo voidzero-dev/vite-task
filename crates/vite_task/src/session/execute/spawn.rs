@@ -11,7 +11,7 @@ use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use vite_path::{AbsolutePath, RelativePath, RelativePathBuf};
+use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 
 use crate::collections::HashMap;
@@ -75,7 +75,6 @@ pub async fn spawn_with_tracking(
     stdout_writer: &mut (dyn AsyncWrite + Unpin),
     stderr_writer: &mut (dyn AsyncWrite + Unpin),
     track_result: Option<&mut SpawnTrackResult>,
-    cache_dir_relative: Option<&RelativePath>,
 ) -> anyhow::Result<SpawnResult> {
     /// The tracking state of the spawned process
     enum TrackingState<'a> {
@@ -204,16 +203,6 @@ pub async fn spawn_with_tracking(
 
         // Skip .git directory accesses (workaround for tools like oxlint)
         if relative_path.as_path().strip_prefix(".git").is_ok() {
-            continue;
-        }
-
-        // Skip cache directory accesses — the cache directory is infrastructure
-        // (SQLite DB, last-summary.json), not a task input. Tools like oxlint may
-        // traverse node_modules/ and read files in the cache directory, which would
-        // otherwise cause spurious cache misses when those files change between runs.
-        if let Some(cache_dir) = cache_dir_relative
-            && relative_path.as_path().strip_prefix(cache_dir).is_ok()
-        {
             continue;
         }
 
