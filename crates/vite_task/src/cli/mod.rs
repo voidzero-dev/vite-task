@@ -36,34 +36,98 @@ pub struct RunFlags {
     pub details: bool,
 }
 
-/// Arguments for the `run` subcommand.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Clap-parsed types (used only at the parsing boundary)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Arguments for the `run` subcommand as parsed by clap.
+///
+/// Contains the `--last-details` flag which is resolved into a separate
+/// [`Command::RunLastDetails`] variant via [`ParsedCommand::into_command`].
 #[derive(Debug, clap::Args)]
-pub struct RunCommand {
+pub struct ParsedRunCommand {
     /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
-    pub task_specifier: Option<TaskSpecifier>,
+    task_specifier: Option<TaskSpecifier>,
 
     #[clap(flatten)]
-    pub flags: RunFlags,
+    flags: RunFlags,
 
     /// Additional arguments to pass to the tasks
     #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
-    pub additional_args: Vec<Str>,
+    additional_args: Vec<Str>,
 
     /// Display the detailed summary of the last run.
     #[clap(long, exclusive = true)]
-    pub last_details: bool,
+    last_details: bool,
 }
 
-/// vite task CLI subcommands
+/// vite task CLI subcommands as parsed by clap.
+///
+/// Use [`ParsedCommand::into_command`] to resolve into the dispatched [`Command`]
+/// enum, which makes `--last-details` exclusive at the type level.
 #[derive(Debug, Parser)]
-pub enum Command {
+pub enum ParsedCommand {
     /// Run tasks
-    Run(RunCommand),
+    Run(ParsedRunCommand),
     /// Manage the task cache
     Cache {
         #[clap(subcommand)]
         subcmd: CacheSubcommand,
     },
+}
+
+impl ParsedCommand {
+    /// Resolve the clap-parsed command into the dispatched [`Command`] enum.
+    ///
+    /// When `--last-details` is set on the `run` subcommand, this produces
+    /// [`Command::RunLastDetails`] instead of [`Command::Run`], making the
+    /// exclusivity enforced at the type level.
+    #[must_use]
+    pub fn into_command(self) -> Command {
+        match self {
+            Self::Run(run) if run.last_details => Command::RunLastDetails,
+            Self::Run(run) => Command::Run(RunCommand {
+                task_specifier: run.task_specifier,
+                flags: run.flags,
+                additional_args: run.additional_args,
+            }),
+            Self::Cache { subcmd } => Command::Cache { subcmd },
+        }
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Resolved types (used for dispatch — `--last-details` is a separate variant)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Resolved CLI command for dispatch.
+///
+/// Unlike [`ParsedCommand`], this enum makes `--last-details` a separate variant
+/// ([`Command::RunLastDetails`]) so that it is exclusive at the type level —
+/// there is no way to combine it with task execution fields.
+#[derive(Debug)]
+pub enum Command {
+    /// Run tasks with the given parameters.
+    Run(RunCommand),
+    /// Display the saved detailed summary of the last run (`--last-details`).
+    RunLastDetails,
+    /// Manage the task cache.
+    Cache { subcmd: CacheSubcommand },
+}
+
+/// Resolved arguments for executing tasks.
+///
+/// Does not contain `last_details` — that case is represented by
+/// [`Command::RunLastDetails`] instead.
+#[derive(Debug)]
+pub struct RunCommand {
+    /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
+    pub task_specifier: Option<TaskSpecifier>,
+
+    pub flags: RunFlags,
+
+    /// Additional arguments to pass to the tasks.
+    pub additional_args: Vec<Str>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -93,7 +157,6 @@ impl RunCommand {
             task_specifier,
             flags: RunFlags { recursive, transitive, ignore_depends_on, .. },
             additional_args,
-            ..
         } = self;
 
         let task_specifier = task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;

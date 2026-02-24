@@ -101,9 +101,11 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
             HandledCommand::ViteTaskCommand(cli_command) => match cli_command {
-                Command::Cache { .. } => Ok(Some(PlanRequest::Synthetic(
-                    command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                ))),
+                Command::Cache { .. } | Command::RunLastDetails => {
+                    Ok(Some(PlanRequest::Synthetic(
+                        command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                    )))
+                }
                 Command::Run(run_command) => {
                     match run_command.into_query_plan_request(&command.cwd) {
                         Ok(query_plan_request) => Ok(Some(PlanRequest::Query(query_plan_request))),
@@ -227,12 +229,8 @@ impl<'a> Session<'a> {
     pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
         match command {
             Command::Cache { ref subcmd } => self.handle_cache_command(subcmd),
+            Command::RunLastDetails => self.show_last_run_details(),
             Command::Run(run_command) => {
-                // --last-details: display saved summary and exit (exclusive flag)
-                if run_command.last_details {
-                    return self.show_last_run_details();
-                }
-
                 let cwd = Arc::clone(&self.cwd);
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
@@ -259,7 +257,7 @@ impl<'a> Session<'a> {
                             self.workspace_path(),
                             Box::new(tokio::io::stdout()),
                             show_details,
-                            Some(self.summary_file_path()),
+                            Some(self.make_summary_writer()),
                         );
                         Ok(self
                             .execute_graph(graph, Box::new(builder))
@@ -401,12 +399,8 @@ impl<'a> Session<'a> {
         let selected_label = &select_items[selected_index].label;
         let task_specifier = TaskSpecifier::parse_raw(selected_label);
         let show_details = flags.details;
-        let run_command = RunCommand {
-            task_specifier: Some(task_specifier),
-            flags,
-            additional_args,
-            last_details: false,
-        };
+        let run_command =
+            RunCommand { task_specifier: Some(task_specifier), flags, additional_args };
 
         let cwd = Arc::clone(&self.cwd);
         let graph = self.plan_from_cli_run(cwd, run_command).await?;
@@ -414,7 +408,7 @@ impl<'a> Session<'a> {
             self.workspace_path(),
             Box::new(tokio::io::stdout()),
             show_details,
-            Some(self.summary_file_path()),
+            Some(self.make_summary_writer()),
         );
         Ok(self.execute_graph(graph, Box::new(builder)).await.err().unwrap_or(ExitStatus::SUCCESS))
     }
@@ -439,6 +433,19 @@ impl<'a> Session<'a> {
         self.cache_path.join("last-summary.json")
     }
 
+    /// Create a callback that persists the summary to `last-summary.json`.
+    ///
+    /// The returned closure captures the file path and handles errors internally
+    /// (logging failures without propagating).
+    fn make_summary_writer(&self) -> Box<dyn FnOnce(&LastRunSummary)> {
+        let path = self.summary_file_path();
+        Box::new(move |summary: &LastRunSummary| {
+            if let Err(err) = summary.write_atomic(&path) {
+                tracing::warn!("Failed to write summary to {path:?}: {err}");
+            }
+        })
+    }
+
     /// Display the saved summary from the last run (`--last-details`).
     #[expect(
         clippy::print_stderr,
@@ -452,8 +459,8 @@ impl<'a> Session<'a> {
                 {
                     use std::io::Write;
                     let mut stdout = std::io::stdout().lock();
-                    let _ = stdout.write_all(&buf);
-                    let _ = stdout.flush();
+                    stdout.write_all(&buf)?;
+                    stdout.flush()?;
                 }
                 Ok(ExitStatus(summary.exit_code))
             }

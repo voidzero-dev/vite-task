@@ -33,7 +33,7 @@ Task Details:
 > echo hello > .git/foo.txt # add file inside .git
 
 > vp run --details lint # cache hit, .git is ignored
-$ vp lint ✗ cache miss: content of input 'node_modules/.vite/task-cache' changed, executing
+$ vp lint ✓ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[a.js:1:1]
@@ -50,11 +50,11 @@ Finished in <duration> on 1 file with 90 rules using <n> threads.
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
+Statistics:   1 tasks • 1 cache hits • 0 cache misses
+Performance:  100% cache hit rate, <duration> saved in total
 
 Task Details:
 ────────────────────────────────────────────────
   [1] lint: $ vp lint ✓
-      → Cache miss: content of input 'node_modules/.vite/task-cache' changed
+      → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

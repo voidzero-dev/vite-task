@@ -36,7 +36,7 @@ Task Details:
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > cd folder2 && vp run --details lint # cache miss in folder2
-$ vp lint ✗ cache miss: content of input 'node_modules/.vite/task-cache' changed, executing
+$ vp lint ✓ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[folder1/a.js:1:1]
@@ -60,13 +60,13 @@ Finished in <duration> on 2 files with 90 rules using <n> threads.
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
+Statistics:   1 tasks • 1 cache hits • 0 cache misses
+Performance:  100% cache hit rate, <duration> saved in total
 
 Task Details:
 ────────────────────────────────────────────────
   [1] lint: $ vp lint ✓
-      → Cache miss: content of input 'node_modules/.vite/task-cache' changed
+      → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 > echo 'console.log(1);' > folder2/a.js # modify folder2
 

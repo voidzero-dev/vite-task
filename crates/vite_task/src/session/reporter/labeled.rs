@@ -9,7 +9,7 @@
 use std::{cell::RefCell, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
 
 use tokio::io::{AsyncWrite, AsyncWriteExt as _};
-use vite_path::{AbsolutePath, AbsolutePathBuf};
+use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
@@ -18,29 +18,15 @@ use super::{
     StdioConfig, StdioSuggestion, format_command_with_cache_status, format_error_message,
 };
 use crate::session::{
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError, exit_status_to_code},
+    event::{CacheStatus, CacheUpdateStatus, ExecutionError},
     reporter::summary::{
-        LastRunSummary, SavedExecutionError, format_compact_summary, format_full_summary,
+        LastRunSummary, SavedExecutionError, SpawnOutcome, TaskResult, TaskSummary,
+        format_compact_summary, format_full_summary,
     },
 };
 
-/// Information tracked for each leaf execution, used to build the summary.
-#[derive(Debug)]
-struct ExecutionInfo {
-    display: ExecutionItemDisplay,
-    /// Cache status, determined at `start()`.
-    cache_status: CacheStatus,
-    /// Exit status from the process. `None` means no process was spawned (cache hit or in-process).
-    exit_status: Option<StdExitStatus>,
-    /// Execution error, converted to the serializable form for the summary.
-    saved_error: Option<SavedExecutionError>,
-}
-
-/// Running statistics updated as leaf executions complete.
-#[derive(Default)]
-struct ExecutionStats {
-    failed: usize,
-}
+/// Callback type for persisting the summary (e.g., writing `last-summary.json`).
+type WriteSummaryFn = Box<dyn FnOnce(&LastRunSummary)>;
 
 /// Mutable state shared between [`LabeledGraphReporter`] and its [`LabeledLeafReporter`] instances
 /// via `Rc<RefCell<...>>`.
@@ -48,8 +34,7 @@ struct ExecutionStats {
 /// This is safe because execution is single-threaded and sequential — only one leaf
 /// reporter is active at a time.
 struct SharedReporterState {
-    executions: Vec<ExecutionInfo>,
-    stats: ExecutionStats,
+    tasks: Vec<TaskSummary>,
 }
 
 /// Builder for the labeled graph reporter.
@@ -71,9 +56,9 @@ pub struct LabeledReporterBuilder {
     writer: Box<dyn AsyncWrite + Unpin>,
     /// Whether to render the full detailed summary (`--details` flag).
     show_details: bool,
-    /// Path to write `last-summary.json`. `None` when persistence is not needed
-    /// (e.g., nested script execution).
-    summary_file_path: Option<AbsolutePathBuf>,
+    /// Callback to persist the summary (e.g., write `last-summary.json`).
+    /// `None` when persistence is not needed (e.g., nested script execution, tests).
+    write_summary: Option<WriteSummaryFn>,
 }
 
 impl LabeledReporterBuilder {
@@ -82,14 +67,14 @@ impl LabeledReporterBuilder {
     /// - `workspace_path`: The workspace root, used to compute relative cwds in display.
     /// - `writer`: Async writer for reporter display output.
     /// - `show_details`: Whether to render the full detailed summary.
-    /// - `summary_file_path`: Where to persist `last-summary.json`, or `None` to skip.
+    /// - `write_summary`: Callback to persist the summary, or `None` to skip.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn AsyncWrite + Unpin>,
         show_details: bool,
-        summary_file_path: Option<AbsolutePathBuf>,
+        write_summary: Option<WriteSummaryFn>,
     ) -> Self {
-        Self { workspace_path, writer, show_details, summary_file_path }
+        Self { workspace_path, writer, show_details, write_summary }
     }
 }
 
@@ -97,14 +82,11 @@ impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
     fn build(self: Box<Self>) -> Box<dyn GraphExecutionReporter> {
         let writer = Rc::new(RefCell::new(self.writer));
         Box::new(LabeledGraphReporter {
-            shared: Rc::new(RefCell::new(SharedReporterState {
-                executions: Vec::new(),
-                stats: ExecutionStats::default(),
-            })),
+            shared: Rc::new(RefCell::new(SharedReporterState { tasks: Vec::new() })),
             writer,
             workspace_path: self.workspace_path,
             show_details: self.show_details,
-            summary_file_path: self.summary_file_path,
+            write_summary: self.write_summary,
         })
     }
 }
@@ -118,7 +100,7 @@ pub struct LabeledGraphReporter {
     writer: Rc<RefCell<Box<dyn AsyncWrite + Unpin>>>,
     workspace_path: Arc<AbsolutePath>,
     show_details: bool,
-    summary_file_path: Option<AbsolutePathBuf>,
+    write_summary: Option<WriteSummaryFn>,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -146,78 +128,64 @@ impl GraphExecutionReporter for LabeledGraphReporter {
             display,
             workspace_path: Arc::clone(&self.workspace_path),
             stdio_suggestion,
-            started: false,
+            cache_status: None,
         })
     }
 
     async fn finish(self: Box<Self>) -> Result<(), ExitStatus> {
-        // Borrow shared state synchronously to build the summary and compute
-        // the exit result. The borrow is dropped before any async writes.
-        let (summary_buf, result, exit_code) = {
-            let shared = self.shared.borrow();
-
-            // Build LastRunSummary from execution data
-            let executions: Vec<_> = shared
-                .executions
-                .iter()
-                .map(|exec| {
-                    (&exec.display, &exec.cache_status, exec.exit_status, exec.saved_error.as_ref())
-                })
-                .collect();
-
-            // Determine exit code (same logic as before)
-            let has_infra_errors = shared.executions.iter().any(|exec| exec.saved_error.is_some());
-
-            let failed_exit_codes: Vec<i32> = shared
-                .executions
-                .iter()
-                .filter_map(|exec| exec.exit_status.as_ref())
-                .filter(|status| !status.success())
-                .map(|status| exit_status_to_code(*status))
-                .collect();
-
-            let result = match (has_infra_errors, failed_exit_codes.as_slice()) {
-                (false, []) => Ok(()),
-                (false, [code]) =>
-                {
-                    #[expect(
-                        clippy::cast_sign_loss,
-                        reason = "value is clamped to 1..=255, always positive"
-                    )]
-                    Err(ExitStatus((*code).clamp(1, 255) as u8))
-                }
-                _ => Err(ExitStatus::FAILURE),
-            };
-
-            let exit_code = match &result {
-                Ok(()) => 0u8,
-                Err(status) => status.0,
-            };
-
-            // Build LastRunSummary from the execution data
-            let summary =
-                LastRunSummary::from_executions(&executions, &self.workspace_path, exit_code);
-
-            // Render summary based on mode
-            let summary_buf = if self.show_details {
-                format_full_summary(&summary)
-            } else {
-                format_compact_summary(&summary)
-            };
-
-            // Save summary to file (best-effort, log failures)
-            if let Some(ref path) = self.summary_file_path
-                && let Err(err) = summary.write_atomic(path)
-            {
-                tracing::warn!("Failed to write summary to {:?}: {err}", path);
-            }
-
-            (summary_buf, result, exit_code)
+        // Take tasks from shared state — all leaf reporters have been dropped by now.
+        let tasks = {
+            let mut shared = self.shared.borrow_mut();
+            std::mem::take(&mut shared.tasks)
         };
-        // shared borrow dropped here
-        let _ = exit_code; // used only in the block above
 
-        // Write the summary buffer asynchronously
+        // Compute exit status from the collected task results.
+        let has_infra_errors = tasks.iter().any(|t| t.result.error().is_some());
+
+        let failed_exit_codes: Vec<i32> = tasks
+            .iter()
+            .filter_map(|t| match &t.result {
+                TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code }, .. } => {
+                    Some(exit_code.get())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let result = match (has_infra_errors, failed_exit_codes.as_slice()) {
+            (false, []) => Ok(()),
+            (false, [code]) =>
+            {
+                #[expect(
+                    clippy::cast_sign_loss,
+                    reason = "value is clamped to 1..=255, always positive"
+                )]
+                Err(ExitStatus((*code).clamp(1, 255) as u8))
+            }
+            _ => Err(ExitStatus::FAILURE),
+        };
+
+        let exit_code = match &result {
+            Ok(()) => 0u8,
+            Err(status) => status.0,
+        };
+
+        // Build summary from collected tasks.
+        let summary = LastRunSummary { tasks, exit_code };
+
+        // Render summary based on mode.
+        let summary_buf = if self.show_details {
+            format_full_summary(&summary)
+        } else {
+            format_compact_summary(&summary)
+        };
+
+        // Persist summary via callback (best-effort, callback handles errors).
+        if let Some(write_summary) = self.write_summary {
+            write_summary(&summary);
+        }
+
+        // Write the summary buffer asynchronously.
         if !summary_buf.is_empty() {
             let mut writer = self.writer.borrow_mut();
             let _ = writer.write_all(&summary_buf).await;
@@ -230,8 +198,8 @@ impl GraphExecutionReporter for LabeledGraphReporter {
 
 /// Leaf-level reporter created by [`LabeledGraphReporter::new_leaf_execution`].
 ///
-/// Writes display output in real-time to the shared async writer and updates shared
-/// stats/errors via `Rc<RefCell<SharedReporterState>>`.
+/// Writes display output in real-time to the shared async writer and builds
+/// [`TaskSummary`] entries that are pushed to [`SharedReporterState`] on completion.
 struct LabeledLeafReporter {
     shared: Rc<RefCell<SharedReporterState>>,
     writer: Rc<RefCell<Box<dyn AsyncWrite + Unpin>>>,
@@ -240,9 +208,9 @@ struct LabeledLeafReporter {
     workspace_path: Arc<AbsolutePath>,
     /// Stdio suggestion precomputed from this leaf's graph path.
     stdio_suggestion: StdioSuggestion,
-    /// Whether `start()` has been called. Used to determine if stats should be updated
-    /// in `finish()` and whether to push an `ExecutionInfo` entry.
-    started: bool,
+    /// Cache status, set at `start()` time. `None` means `start()` was never called
+    /// (e.g., cache lookup failure). Consumed in `finish()` to build [`TaskSummary`].
+    cache_status: Option<CacheStatus>,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -253,29 +221,12 @@ struct LabeledLeafReporter {
 )]
 impl LeafExecutionReporter for LabeledLeafReporter {
     async fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
-        self.started = true;
+        // Format command line with cache status before storing it.
+        let line =
+            format_command_with_cache_status(&self.display, &self.workspace_path, &cache_status);
 
-        // Update shared state synchronously, then drop the borrow before any async writes.
-        {
-            let mut shared = self.shared.borrow_mut();
+        self.cache_status = Some(cache_status);
 
-            // Store execution info for the summary
-            shared.executions.push(ExecutionInfo {
-                display: self.display.clone(),
-                cache_status,
-                exit_status: None,
-                saved_error: None,
-            });
-        }
-        // shared borrow dropped here
-
-        // Format command line with cache status (sync), then write asynchronously.
-        // The shared borrow to read cache_status is brief and dropped before the await.
-        let line = {
-            let shared = self.shared.borrow();
-            let cache_status = &shared.executions.last().unwrap().cache_status;
-            format_command_with_cache_status(&self.display, &self.workspace_path, cache_status)
-        };
         let mut writer = self.writer.borrow_mut();
         let _ = writer.write_all(line.as_bytes()).await;
         let _ = writer.flush().await;
@@ -293,48 +244,35 @@ impl LeafExecutionReporter for LabeledLeafReporter {
         _cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
     ) {
-        // Convert the execution error to its serializable form before borrowing shared state
+        // Convert error before consuming it (need the original for display formatting).
         let saved_error = error.as_ref().map(SavedExecutionError::from_execution_error);
-        let has_error = saved_error.is_some();
-
-        // Format the error message for display (using the original error with full anyhow chain)
         let error_display: Option<Str> =
             error.map(|e| vite_str::format!("{:#}", anyhow::Error::from(e)));
 
-        // Update shared state synchronously, then drop the borrow before any async writes.
-        {
-            let mut shared = self.shared.borrow_mut();
+        // Destructure self to avoid partial-move issues with Box<Self>.
+        let Self { shared, writer, display, workspace_path, cache_status, .. } = *self;
+        let started = cache_status.is_some();
 
-            // Handle errors — update execution info and stats.
-            if saved_error.is_some() {
-                // Update the execution info if start() was called (an entry was pushed).
-                // Without the `self.started` guard, `last_mut()` would return a
-                // *different* execution's entry, corrupting its error.
-                if self.started
-                    && let Some(exec) = shared.executions.last_mut()
-                {
-                    exec.saved_error = saved_error;
-                }
+        // Build TaskSummary and push to shared state if start() was called.
+        if let Some(cache_status) = cache_status {
+            let cwd_relative = if let Ok(Some(rel)) = display.cwd.strip_prefix(&workspace_path) {
+                Str::from(rel.as_str())
+            } else {
+                Str::default()
+            };
 
-                shared.stats.failed += 1;
-            }
+            let task_summary = TaskSummary {
+                package_name: display.task_display.package_name.clone(),
+                task_name: display.task_display.task_name.clone(),
+                command: display.command.clone(),
+                cwd: cwd_relative,
+                result: TaskResult::from_execution(&cache_status, status, saved_error.as_ref()),
+            };
 
-            // Update failure statistics for non-zero exit status (not an error, just a failed task)
-            // None means success (cache hit or in-process), Some checks the actual exit status
-            if !has_error && status.is_some_and(|s| !s.success()) {
-                shared.stats.failed += 1;
-            }
-
-            // Update execution info with exit status (if start() was called and an entry exists)
-            if self.started
-                && let Some(exec) = shared.executions.last_mut()
-            {
-                exec.exit_status = status;
-            }
+            shared.borrow_mut().tasks.push(task_summary);
         }
-        // shared borrow dropped here
 
-        // Build all display output into a buffer (sync), then write once asynchronously.
+        // Build all display output into a buffer, then write once asynchronously.
         let mut buf = Vec::new();
 
         if let Some(ref message) = error_display {
@@ -344,12 +282,12 @@ impl LeafExecutionReporter for LabeledLeafReporter {
         // Add a trailing newline after each task's output for readability.
         // Skip if start() was never called (e.g. cache lookup failure) — there's
         // no task output to separate.
-        if self.started {
+        if started {
             buf.push(b'\n');
         }
 
         if !buf.is_empty() {
-            let mut writer = self.writer.borrow_mut();
+            let mut writer = writer.borrow_mut();
             let _ = writer.write_all(&buf).await;
             let _ = writer.flush().await;
         }

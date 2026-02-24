@@ -13,7 +13,6 @@ use owo_colors::Style;
 use serde::{Deserialize, Serialize};
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_plan::ExecutionItemDisplay;
 
 use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
 use crate::session::{
@@ -320,44 +319,6 @@ fn duration_to_ms(d: Duration) -> u64 {
 }
 
 impl LastRunSummary {
-    /// Build a summary from the reporter's collected execution data.
-    ///
-    /// Each element contains references to the display info, cache status, exit status,
-    /// and an optional pre-converted execution error.
-    /// `workspace_path` is used to compute relative cwds.
-    /// `exit_code` is the overall exit code for the run.
-    pub fn from_executions(
-        executions: &[(
-            &ExecutionItemDisplay,
-            &CacheStatus,
-            Option<std::process::ExitStatus>,
-            Option<&SavedExecutionError>,
-        )],
-        workspace_path: &AbsolutePath,
-        exit_code: u8,
-    ) -> Self {
-        let tasks = executions
-            .iter()
-            .map(|(display, cache_status, exit_status, saved_error)| {
-                let cwd_relative = if let Ok(Some(rel)) = display.cwd.strip_prefix(workspace_path) {
-                    Str::from(rel.as_str())
-                } else {
-                    Str::default()
-                };
-
-                TaskSummary {
-                    package_name: display.task_display.package_name.clone(),
-                    task_name: display.task_display.task_name.clone(),
-                    command: display.command.clone(),
-                    cwd: cwd_relative,
-                    result: TaskResult::from_execution(cache_status, *exit_status, *saved_error),
-                }
-            })
-            .collect();
-
-        Self { tasks, exit_code }
-    }
-
     // ── Persistence ──────────────────────────────────────────────────────
 
     /// Write the summary as JSON atomically (write to `.tmp`, then rename).
@@ -485,7 +446,7 @@ impl TaskResult {
     }
 
     /// Optional error associated with this result.
-    const fn error(&self) -> Option<&SavedExecutionError> {
+    pub const fn error(&self) -> Option<&SavedExecutionError> {
         match self {
             Self::CacheHit { .. } | Self::InProcess => None,
             Self::Spawned { outcome, .. } => match outcome {
