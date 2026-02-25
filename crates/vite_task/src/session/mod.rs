@@ -29,7 +29,7 @@ use vite_task_plan::{
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
-use crate::cli::{CacheSubcommand, Command, RunCommand, RunFlags};
+use crate::cli::{CacheSubcommand, Command, ResolvedCommand, RunCommand, RunFlags};
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
@@ -100,13 +100,13 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
     ) -> anyhow::Result<Option<PlanRequest>> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
-            HandledCommand::ViteTaskCommand(cli_command) => match cli_command {
-                Command::Cache { .. } | Command::RunLastDetails => {
+            HandledCommand::ViteTaskCommand(cli_command) => match cli_command.into_resolved() {
+                ResolvedCommand::Cache { .. } | ResolvedCommand::RunLastDetails => {
                     Ok(Some(PlanRequest::Synthetic(
                         command.to_synthetic_plan_request(UserCacheConfig::disabled()),
                     )))
                 }
-                Command::Run(run_command) => {
+                ResolvedCommand::Run(run_command) => {
                     match run_command.into_query_plan_request(&command.cwd) {
                         Ok(query_plan_request) => Ok(Some(PlanRequest::Query(query_plan_request))),
                         Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
@@ -227,10 +227,10 @@ impl<'a> Session<'a> {
         reason = "session is single-threaded, futures do not need to be Send"
     )]
     pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
-        match command {
-            Command::Cache { ref subcmd } => self.handle_cache_command(subcmd),
-            Command::RunLastDetails => self.show_last_run_details(),
-            Command::Run(run_command) => {
+        match command.into_resolved() {
+            ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
+            ResolvedCommand::RunLastDetails => self.show_last_run_details(),
+            ResolvedCommand::Run(run_command) => {
                 let cwd = Arc::clone(&self.cwd);
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
@@ -241,7 +241,7 @@ impl<'a> Session<'a> {
                 let flags = run_command.flags;
                 let additional_args = run_command.additional_args.clone();
 
-                match self.plan_from_cli_run(cwd, run_command).await {
+                match self.plan_from_cli_run_resolved(cwd, run_command).await {
                     Ok(ref graph) if graph.node_count() == 0 => {
                         // No tasks matched the query — show task selector / "did you mean"
                         self.handle_no_task(
@@ -399,8 +399,12 @@ impl<'a> Session<'a> {
         let selected_label = &select_items[selected_index].label;
         let task_specifier = TaskSpecifier::parse_raw(selected_label);
         let show_details = flags.verbose;
-        let run_command =
-            RunCommand { task_specifier: Some(task_specifier), flags, additional_args };
+        let run_command = RunCommand {
+            task_specifier: Some(task_specifier),
+            flags,
+            additional_args,
+            last_details: false,
+        };
 
         let cwd = Arc::clone(&self.cwd);
         let graph = self.plan_from_cli_run(cwd, run_command).await?;
@@ -579,6 +583,19 @@ impl<'a> Session<'a> {
         &mut self,
         cwd: Arc<AbsolutePath>,
         command: RunCommand,
+    ) -> Result<ExecutionGraph, vite_task_plan::Error> {
+        self.plan_from_cli_run_resolved(cwd, command.into_resolved()).await
+    }
+
+    /// Internal: plans execution from a resolved run command.
+    #[expect(
+        clippy::future_not_send,
+        reason = "session is single-threaded, futures do not need to be Send"
+    )]
+    async fn plan_from_cli_run_resolved(
+        &mut self,
+        cwd: Arc<AbsolutePath>,
+        command: crate::cli::ResolvedRunCommand,
     ) -> Result<ExecutionGraph, vite_task_plan::Error> {
         let query_plan_request = match command.into_query_plan_request(&cwd) {
             Ok(query_plan_request) => query_plan_request,

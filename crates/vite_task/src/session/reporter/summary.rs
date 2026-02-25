@@ -709,7 +709,7 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
         let _ = write!(
             buf,
             ". {}",
-            "(Run `vp run --verbose` for full details)".style(Style::new().bright_black()),
+            "(Run `vp run --last-details` for full details)".style(Style::new().bright_black()),
         );
         let _ = writeln!(buf);
     }

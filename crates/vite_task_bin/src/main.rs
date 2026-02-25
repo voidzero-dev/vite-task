@@ -21,7 +21,7 @@ async fn run() -> anyhow::Result<ExitStatus> {
     let mut owned_callbacks = OwnedSessionCallbacks::default();
     let session = Session::init(owned_callbacks.as_callbacks())?;
     match args {
-        Args::Task(parsed) => session.main(parsed.into_command()).await,
+        Args::Task(parsed) => session.main(parsed).await,
         args => {
             // If env FOO is set, run `print-env FOO` via Session::exec before proceeding.
             // In vite-plus, Session::exec is used for auto-install.

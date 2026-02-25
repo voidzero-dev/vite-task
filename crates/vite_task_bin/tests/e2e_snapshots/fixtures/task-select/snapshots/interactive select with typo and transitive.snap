@@ -16,4 +16,4 @@ build lib
 build app
 
 ---
-[vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)
+[vp run] 0/2 cache hit (0%). (Run `vp run --last-details` for full details)

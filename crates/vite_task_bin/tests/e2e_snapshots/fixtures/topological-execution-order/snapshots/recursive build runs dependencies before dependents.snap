@@ -13,4 +13,4 @@ Building lib
 Building app
 
 ---
-[vp run] 0/3 cache hit (0%). (Run `vp run --verbose` for full details)
+[vp run] 0/3 cache hit (0%). (Run `vp run --last-details` for full details)

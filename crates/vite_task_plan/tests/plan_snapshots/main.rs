@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
-use vite_task::{Command, ParsedCommand, Session};
+use vite_task::{Command, Session};
 use vite_workspace::find_workspace_root;
 
 /// Local parser wrapper for `BuiltInCommand`
@@ -18,7 +18,7 @@ use vite_workspace::find_workspace_root;
 #[command(name = "vp")]
 enum Cli {
     #[clap(flatten)]
-    Command(ParsedCommand),
+    Command(Command),
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -175,7 +175,7 @@ fn run_case_inner(
                 }
             };
             let Cli::Command(parsed) = cli;
-            let Command::Run(run_command) = parsed.into_command() else {
+            let Command::Run(run_command) = parsed else {
                 panic!("only `run` commands supported in plan tests")
             };
 

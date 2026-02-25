@@ -10,7 +10,7 @@ built-a
 built-b
 
 ---
-[vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)
+[vp run] 0/2 cache hit (0%). (Run `vp run --last-details` for full details)
 > vp run -r build # second run, all hit
 ~/packages/a$ print built-a ✓ cache hit, replaying
 built-a
@@ -19,4 +19,4 @@ built-a
 built-b
 
 ---
-[vp run] 2/2 cache hit (100%), <duration> saved. (Run `vp run --verbose` for full details)
+[vp run] 2/2 cache hit (100%), <duration> saved. (Run `vp run --last-details` for full details)

@@ -14,7 +14,7 @@ stdout:not-tty
 stderr:not-tty
 
 ---
-[vp run] 0/2 cache hit (0%). (Run `vp run --verbose` for full details)
+[vp run] 0/2 cache hit (0%). (Run `vp run --last-details` for full details)
 > vp run -r check-tty-cached
 ~/packages/other$ check-tty ✓ cache hit, replaying
 stdin:not-tty
@@ -27,4 +27,4 @@ stdout:not-tty
 stderr:not-tty
 
 ---
-[vp run] 2/2 cache hit (100%), <duration> saved. (Run `vp run --verbose` for full details)
+[vp run] 2/2 cache hit (100%), <duration> saved. (Run `vp run --last-details` for full details)

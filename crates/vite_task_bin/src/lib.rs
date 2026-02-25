@@ -10,8 +10,8 @@ use rustc_hash::FxHashMap;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
-    EnabledCacheConfig, HandledCommand, ParsedCommand, ScriptCommand, SessionCallbacks,
-    UserCacheConfig, get_path_env, plan_request::SyntheticPlanRequest,
+    Command, EnabledCacheConfig, HandledCommand, ScriptCommand, SessionCallbacks, UserCacheConfig,
+    get_path_env, plan_request::SyntheticPlanRequest,
 };
 
 #[derive(Debug, Default)]
@@ -85,7 +85,7 @@ pub enum Args {
         value: Str,
     },
     #[command(flatten)]
-    Task(ParsedCommand),
+    Task(Command),
 }
 
 #[async_trait::async_trait(?Send)]
@@ -130,7 +130,7 @@ impl vite_task::CommandHandler for CommandHandler {
                     envs: Arc::new(envs),
                 }))
             }
-            Args::Task(parsed) => Ok(HandledCommand::ViteTaskCommand(parsed.into_command())),
+            Args::Task(parsed) => Ok(HandledCommand::ViteTaskCommand(parsed)),
         }
     }
 }
