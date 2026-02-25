@@ -1,6 +1,0 @@
-{
-  "name": "script-stdout-inherited-test",
-  "scripts": {
-    "foo": "node -e \"console.log(5173)\""
-  }
-}
