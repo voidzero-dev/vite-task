@@ -1,0 +1,11 @@
+# Tests that stdout from a package.json script is captured correctly
+# when stdio is inherited (single task, no caching).
+#
+# Reproduces a bug where `node -e "console.log(5173)"` output was
+# lost when executed via `vp run` in non-PTY environments.
+
+[[e2e]]
+name = "script stdout captured with inherited stdio"
+steps = [
+  "vp run foo",
+]

@@ -379,7 +379,40 @@ async fn spawn_inherited(spawn_command: &SpawnCommand) -> anyhow::Result<SpawnRe
     cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
 
     let start = std::time::Instant::now();
-    let mut child = cmd.into_tokio_command().spawn()?;
+    let mut tokio_cmd = cmd.into_tokio_command();
+
+    // Clear FD_CLOEXEC on stdio fds before exec. libuv (used by Node.js) marks
+    // stdin/stdout/stderr as close-on-exec, which causes them to be closed when
+    // the child process calls exec(). Without this fix, the child's fds 0-2 are
+    // closed after exec and Node.js reopens them as /dev/null, losing all output.
+    // See: https://github.com/libuv/libuv/issues/2062
+    // SAFETY: The pre_exec closure only performs fcntl operations to clear
+    // FD_CLOEXEC flags on stdio fds, which is safe in a post-fork context.
+    #[cfg(unix)]
+    unsafe {
+        tokio_cmd.pre_exec(|| {
+            use std::os::fd::BorrowedFd;
+
+            use nix::{
+                fcntl::{FcntlArg, FdFlag, fcntl},
+                libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
+            };
+            for fd in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
+                // SAFETY: fds 0-2 are always valid in a post-fork context
+                let borrowed = BorrowedFd::borrow_raw(fd);
+                if let Ok(flags) = fcntl(borrowed, FcntlArg::F_GETFD) {
+                    let mut fd_flags = FdFlag::from_bits_retain(flags);
+                    if fd_flags.contains(FdFlag::FD_CLOEXEC) {
+                        fd_flags.remove(FdFlag::FD_CLOEXEC);
+                        let _ = fcntl(borrowed, FcntlArg::F_SETFD(fd_flags));
+                    }
+                }
+            }
+            Ok(())
+        });
+    }
+
+    let mut child = tokio_cmd.spawn()?;
     let exit_status = child.wait().await?;
 
     Ok(SpawnResult { exit_status, duration: start.elapsed() })
