@@ -1,4 +1,4 @@
-use std::{iter, sync::Arc};
+use std::sync::Arc;
 
 use clap::Parser;
 use vite_path::AbsolutePath;
@@ -185,10 +185,10 @@ impl ResolvedRunCommand {
             } else {
                 task_specifier.task_name
             };
-            TaskQueryKind::Recursive { task_names: iter::once(task_name).collect() }
+            TaskQueryKind::Recursive { task_name }
         } else {
             TaskQueryKind::Normal {
-                task_specifiers: iter::once(task_specifier).collect(),
+                task_specifier,
                 cwd: Arc::clone(cwd),
                 include_topological_deps: transitive,
             }
