@@ -3,7 +3,7 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vp run check-tty
-$ check-tty ⊘ cache disabled: no cache config
+$ check-tty ⊘ cache disabled
 stdin:tty
 stdout:tty
 stderr:tty

@@ -3,12 +3,12 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vp run -r foo-nested
-~/packages/other$ check-tty ⊘ cache disabled: no cache config
+~/packages/other$ check-tty ⊘ cache disabled
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-$ check-tty ⊘ cache disabled: no cache config
+$ check-tty ⊘ cache disabled
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty

@@ -35,5 +35,5 @@ Search task (↑/↓ to move, enter to select): t
   app#test: echo test app
   (…1 more)
 @ write-key: enter
-~/packages/lib$ echo test lib ⊘ cache disabled: built-in command
+~/packages/lib$ echo test lib ⊘ cache disabled
 test lib

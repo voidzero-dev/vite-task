@@ -8,7 +8,7 @@ stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-$ check-tty ⊘ cache disabled: no cache config
+$ check-tty ⊘ cache disabled
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty

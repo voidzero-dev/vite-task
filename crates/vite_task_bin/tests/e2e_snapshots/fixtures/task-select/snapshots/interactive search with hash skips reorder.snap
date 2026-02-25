@@ -26,5 +26,5 @@ Search task (↑/↓ to move, enter to select): lib#
   lib#test: echo test lib
   lib#typecheck: echo typecheck lib
 @ write-key: enter
-~/packages/lib$ echo build lib ⊘ cache disabled: built-in command
+~/packages/lib$ echo build lib ⊘ cache disabled
 build lib

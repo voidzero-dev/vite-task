@@ -19,5 +19,5 @@ Search task (↑/↓ to move, enter to select):
   task-select-test#format: echo format root
   (…3 more)
 @ write-key: enter
-~/packages/lib$ echo build lib ⊘ cache disabled: built-in command
+~/packages/lib$ echo build lib ⊘ cache disabled
 build lib

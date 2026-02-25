@@ -23,5 +23,5 @@ Search task (↑/↓ to move, enter to select):
 Search task (↑/↓ to move, enter to select): typec
 > lib#typecheck: echo typecheck lib
 @ write-key: enter
-~/packages/lib$ echo typecheck lib ⊘ cache disabled: built-in command
+~/packages/lib$ echo typecheck lib ⊘ cache disabled
 typecheck lib

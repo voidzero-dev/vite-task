@@ -3,7 +3,7 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vp run test-task # cache miss
-$ echo hello ⊘ cache disabled: built-in command
+$ echo hello ⊘ cache disabled
 hello
 
 $ print-file main.js
@@ -14,7 +14,7 @@ console.log('foo');
 > replace-file-content main.js foo bar # modify input file
 
 > vp run test-task # cache miss, main.js changed
-$ echo hello ⊘ cache disabled: built-in command
+$ echo hello ⊘ cache disabled
 hello
 
 $ print-file main.js ✗ cache miss: content of input 'main.js' changed, executing

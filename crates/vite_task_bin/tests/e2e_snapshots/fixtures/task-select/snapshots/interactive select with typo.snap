@@ -9,5 +9,5 @@ Search task (↑/↓ to move, enter to select): buid
 > build: echo build app
   lib#build: echo build lib
 @ write-key: enter
-~/packages/app$ echo build app ⊘ cache disabled: built-in command
+~/packages/app$ echo build app ⊘ cache disabled
 build app

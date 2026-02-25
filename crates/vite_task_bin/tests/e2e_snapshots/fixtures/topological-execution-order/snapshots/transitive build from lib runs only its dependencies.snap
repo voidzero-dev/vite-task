@@ -3,10 +3,10 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vp run -t build # core -> lib
-~/packages/core$ echo 'Building core' ⊘ cache disabled: built-in command
+~/packages/core$ echo 'Building core' ⊘ cache disabled
 Building core
 
-~/packages/lib$ echo 'Building lib' ⊘ cache disabled: built-in command
+~/packages/lib$ echo 'Building lib' ⊘ cache disabled
 Building lib
 
 ---

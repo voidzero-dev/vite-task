@@ -9,7 +9,7 @@ use vite_str::Str;
 use vite_task_plan::cache_metadata::SpawnFingerprint;
 
 use super::{CacheMiss, FingerprintMismatch};
-use crate::session::event::{CacheDisabledReason, CacheStatus};
+use crate::session::event::CacheStatus;
 
 /// Describes a single atomic change between two spawn fingerprints.
 ///
@@ -216,13 +216,6 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
             };
             Some(vite_str::format!("✗ cache miss: {reason}, executing"))
         }
-        CacheStatus::Disabled(reason) => {
-            // Show inline message for disabled cache
-            let message = match reason {
-                CacheDisabledReason::InProcessExecution => "cache disabled: built-in command",
-                CacheDisabledReason::NoCacheMetadata => "cache disabled: no cache config",
-            };
-            Some(vite_str::format!("⊘ {message}"))
-        }
+        CacheStatus::Disabled(_) => Some(Str::from("⊘ cache disabled")),
     }
 }

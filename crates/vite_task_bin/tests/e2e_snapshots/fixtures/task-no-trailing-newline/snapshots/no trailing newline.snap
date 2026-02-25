@@ -3,9 +3,9 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vp run hello # runs echo -n hello
-$ echo -n foo ⊘ cache disabled: built-in command
+$ echo -n foo ⊘ cache disabled
 foo
-$ echo bar ⊘ cache disabled: built-in command
+$ echo bar ⊘ cache disabled
 bar
 
 ---

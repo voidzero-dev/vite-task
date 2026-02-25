@@ -4,7 +4,7 @@ expression: e2e_outputs
 ---
 > vp run list-tasks
 @ expect-milestone: task-select::0
-$ vp run ⊘ cache disabled: no cache config
+$ vp run ⊘ cache disabled
 Search task (↑/↓ to move, enter to select):
 > hello: echo hello from root
   list-tasks: vp run
@@ -13,6 +13,6 @@ Search task (↑/↓ to move, enter to select):
   app#test: echo test app
   lib#build: echo build lib
 @ write-key: enter
-$ vp run ⊘ cache disabled: no cache config
-$ echo hello from root ⊘ cache disabled: built-in command
+$ vp run ⊘ cache disabled
+$ echo hello from root ⊘ cache disabled
 hello from root

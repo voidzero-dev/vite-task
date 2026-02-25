@@ -35,5 +35,5 @@ Search task (↑/↓ to move, enter to select):
   task-select-test#format: echo format root
   (…3 more)
 @ write-key: enter
-~/packages/app$ echo lint app ⊘ cache disabled: built-in command
+~/packages/app$ echo lint app ⊘ cache disabled
 lint app

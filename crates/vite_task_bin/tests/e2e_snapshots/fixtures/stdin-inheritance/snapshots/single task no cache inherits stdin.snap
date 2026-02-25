@@ -3,5 +3,5 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > echo from-stdin | vp run read-stdin
-$ read-stdin ⊘ cache disabled: no cache config
+$ read-stdin ⊘ cache disabled
 from-stdin
