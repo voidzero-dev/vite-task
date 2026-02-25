@@ -43,7 +43,7 @@ pub struct RunFlags {
 /// Arguments for the `run` subcommand as parsed by clap.
 ///
 /// Contains the `--last-details` flag which is resolved into a separate
-/// [`ResolvedCommand::RunLastDetails`] variant via [`Command::into_resolved`].
+/// `ResolvedCommand::RunLastDetails` variant internally.
 #[derive(Debug, clap::Args)]
 pub struct RunCommand {
     /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
@@ -63,7 +63,9 @@ pub struct RunCommand {
 
 /// vite task CLI subcommands as parsed by clap.
 ///
-/// Pass directly to [`Session::main`] or [`HandledCommand::ViteTaskCommand`].
+/// vite task CLI subcommands as parsed by clap.
+///
+/// Pass directly to `Session::main` or `HandledCommand::ViteTaskCommand`.
 /// The `--last-details` flag on the `run` subcommand is resolved internally.
 #[derive(Debug, Parser)]
 pub enum Command {
