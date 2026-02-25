@@ -1,5 +1,3 @@
-pub mod cli;
-
 use std::sync::Arc;
 
 use petgraph::{prelude::DiGraphMap, visit::EdgeRef};
@@ -16,19 +14,19 @@ use crate::{
 /// Different kinds of task queries.
 #[derive(Debug)]
 pub enum TaskQueryKind {
-    /// A normal task query specifying task specifiers and options.
-    /// The tasks will be searched in packages in task specifiers, or located from cwd.
+    /// A normal task query specifying a task specifier and options.
+    /// The task will be searched in the package in the task specifier, or located from cwd.
     Normal {
-        task_specifiers: FxHashSet<TaskSpecifier>,
+        task_specifier: TaskSpecifier,
         /// Where the query is being run from.
         cwd: Arc<AbsolutePath>,
         /// Whether to include topological dependencies
         include_topological_deps: bool,
     },
-    /// A recursive task query specifying one or multiple task names.
-    /// It will match all tasks with the given names across all packages with topological ordering.
+    /// A recursive task query specifying a task name.
+    /// It will match all tasks with the given name across all packages with topological ordering.
     /// The whole workspace will be searched, so cwd is not relevant.
-    Recursive { task_names: FxHashSet<Str> },
+    Recursive { task_name: Str },
 }
 
 /// Represents a valid query for a task and its dependencies, usually issued from a CLI command `vp run ...`.
@@ -80,65 +78,60 @@ impl IndexedTaskGraph {
 
         // Add starting tasks without dependencies
         match query.kind {
-            TaskQueryKind::Normal { task_specifiers, cwd, include_topological_deps } => {
+            TaskQueryKind::Normal { task_specifier, cwd, include_topological_deps } => {
                 let package_index_from_cwd =
                     self.indexed_package_graph.get_package_index_from_cwd(&cwd);
 
-                // For every task specifier, add matching tasks
-                for specifier in task_specifiers {
-                    // Find the starting task
-                    let starting_task_result =
-                        self.get_task_index_by_specifier(specifier.clone(), || {
-                            package_index_from_cwd
-                                .ok_or_else(|| PackageUnknownError { cwd: Arc::clone(&cwd) })
-                        });
+                // Find the starting task
+                let starting_task_result =
+                    self.get_task_index_by_specifier(task_specifier.clone(), || {
+                        package_index_from_cwd
+                            .ok_or_else(|| PackageUnknownError { cwd: Arc::clone(&cwd) })
+                    });
 
-                    match starting_task_result {
-                        Ok(starting_task) => {
-                            // Found it, add to execution graph
-                            execution_graph.add_node(starting_task);
-                        }
-                        // Task not found, but package located, and the query requests topological deps
-                        // This happens when running `vp run --transitive taskName` in a package without `taskName`, but its dependencies have it.
-                        Err(err @ SpecifierLookupError::TaskNameNotFound { package_index, .. })
-                            if include_topological_deps =>
-                        {
-                            // try to find nearest task
-                            let mut nearest_topological_tasks = Vec::<TaskNodeIndex>::new();
-                            self.find_nearest_topological_tasks(
-                                &specifier.task_name,
-                                package_index,
-                                &mut nearest_topological_tasks,
-                            );
-                            if nearest_topological_tasks.is_empty() {
-                                // No nearest task found, return original error
-                                return Err(TaskQueryError::SpecifierLookupError {
-                                    specifier,
-                                    lookup_error: err,
-                                });
-                            }
-                            // Add nearest tasks to execution graph
-                            // Topological dependencies of nearest tasks will be added later
-                            for nearest_task in nearest_topological_tasks {
-                                execution_graph.add_node(nearest_task);
-                            }
-                        }
-                        Err(err) => {
-                            // Not recoverable by finding nearest package, return error
+                match starting_task_result {
+                    Ok(starting_task) => {
+                        // Found it, add to execution graph
+                        execution_graph.add_node(starting_task);
+                    }
+                    // Task not found, but package located, and the query requests topological deps
+                    // This happens when running `vp run --transitive taskName` in a package without `taskName`, but its dependencies have it.
+                    Err(err @ SpecifierLookupError::TaskNameNotFound { package_index, .. })
+                        if include_topological_deps =>
+                    {
+                        // try to find nearest task
+                        let mut nearest_topological_tasks = Vec::<TaskNodeIndex>::new();
+                        self.find_nearest_topological_tasks(
+                            &task_specifier.task_name,
+                            package_index,
+                            &mut nearest_topological_tasks,
+                        );
+                        if nearest_topological_tasks.is_empty() {
+                            // No nearest task found, return original error
                             return Err(TaskQueryError::SpecifierLookupError {
-                                specifier,
+                                specifier: task_specifier,
                                 lookup_error: err,
                             });
                         }
+                        // Add nearest tasks to execution graph
+                        // Topological dependencies of nearest tasks will be added later
+                        for nearest_task in nearest_topological_tasks {
+                            execution_graph.add_node(nearest_task);
+                        }
+                    }
+                    Err(err) => {
+                        // Not recoverable by finding nearest package, return error
+                        return Err(TaskQueryError::SpecifierLookupError {
+                            specifier: task_specifier,
+                            lookup_error: err,
+                        });
                     }
                 }
             }
-            TaskQueryKind::Recursive { task_names } => {
-                // Add all tasks matching the names across all packages
+            TaskQueryKind::Recursive { task_name } => {
+                // Add all tasks matching the name across all packages
                 for task_index in self.task_graph.node_indices() {
-                    let current_task_name =
-                        self.task_graph[task_index].task_display.task_name.as_str();
-                    if task_names.contains(current_task_name) {
+                    if self.task_graph[task_index].task_display.task_name == task_name {
                         execution_graph.add_node(task_index);
                     }
                 }
