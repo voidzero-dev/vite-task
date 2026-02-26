@@ -99,7 +99,13 @@ For each selector:
 
 ### 1.6 Merging Results
 
-If both `--filter` and `--filter-prod` selectors exist, their selected graphs are merged (union). The result is stored as `config.selectedProjectsGraph` — a subset of the full workspace graph.
+If both `--filter` and `--filter-prod` selectors exist, their selected graphs are merged. The merge is ([filterPkgsBySelectorObjects](workspace/filter-workspace-packages/src/index.ts#L132-L137)):
+
+```
+selectedProjectsGraph = { ...prodFilteredGraph, ...filteredGraph }
+```
+
+This is a JS object spread, so for any package that appears in **both** graphs, the node from `filteredGraph` (full graph, with devDep edges) **overwrites** the node from `prodFilteredGraph` (prod graph, without devDep edges). This creates an asymmetry: the **graph origin of each node** determines which dependency edges it carries into the final `selectedProjectsGraph`. See Examples 6-8 for the implications.
 
 ---
 
@@ -226,7 +232,30 @@ This means: if package b is in chunk N and package a is in chunk N+1, **all** of
 
 **Ordering note:** Even though `taskA` and `taskB` have different names, b's `taskB` still runs before a's `taskA` because the ordering is at the package level. Package b is in an earlier topological chunk than a (since a depends on b). All scripts matched in a package inherit that package's position in the execution order.
 
-### Example 4: `pnpm run --filter 'app...' --filter 'cli' build`
+### Example 4: `pnpm run --filter a --filter b build`
+
+**Setup:** a depends on b. Both have `build`.
+
+**Stage 1 — Package Selection:**
+
+1. Two `--filter` flags → two `WorkspaceFilter` objects, both `followProdDepsOnly: false`.
+2. Parse selectors:
+   - `"a"` → `{ namePattern: "a" }` (no `...`)
+   - `"b"` → `{ namePattern: "b" }` (no `...`)
+3. Both are include selectors. `_filterGraph` processes them sequentially:
+   - **Selector 1 (a):** Entry = [a]. Neither `includeDependencies` nor `includeDependents` → `cherryPickedPackages = [a]`.
+   - **Selector 2 (b):** Entry = [b]. Same → `cherryPickedPackages = [a, b]`.
+4. No graph walking occurs — both packages are cherry-picked.
+5. `selectedProjectsGraph = { a, b }` — both retain their original dependency edges from the full graph (a→b edge is preserved).
+
+**Stage 2 — Task Matching:**
+
+1. Topological sort over {a, b}. Edge a→b is within the selected set. Chunks: `[[b], [a]]`.
+2. Chunk [b]: run `build`. Chunk [a]: run `build`.
+
+**Key insight:** Even though neither filter used `...` (no dependency expansion), the topological sort still respects the a→b dependency edge. Cherry-picking packages does not remove their dependency relationships — the `selectedProjectsGraph` retains the original edges from the full graph, and [`sequenceGraph`](workspace/sort-packages/src/index.ts#L5-L16) filters edges to only those between selected packages. So b's `build` runs before a's `build`.
+
+### Example 5: `pnpm run --filter 'app...' --filter 'cli' build`
 
 **Setup:** Workspace has packages: app, lib, core, utils, cli. app→lib→core→utils (chain). cli→core (separate). All have `build`.
 
@@ -250,6 +279,42 @@ This means: if package b is in chunk N and package a is in chunk N+1, **all** of
 2. Chunk [utils]: run `build`. Chunk [core]: run `build`. Chunk [lib, cli]: run both `build` scripts concurrently. Chunk [app]: run `build`.
 
 **Key insight:** Even though `cli` was selected without `...` (cherry-picked, not graph-expanded), the topological sort still respects its dependency on `core` because the sort operates on the `selectedProjectsGraph` which retains the original dependency edges. Multiple `--filter` flags with the same `followProdDepsOnly` value contribute to the same `_filterGraph` call and their results are unioned together.
+
+### Examples 6-8: `--filter` / `--filter-prod` mix with devDependencies
+
+**Common setup for all three:** b is a **devDependency** of a. Both have `build`.
+
+Each selected package's node comes from the graph of whichever filter type selected it. The a→b edge only exists in the full graph (from `--filter`), not the prod graph (from `--filter-prod`). So the edge in the final `selectedProjectsGraph` depends on which graph **a's node** came from — since a is the package that _declares_ the dependency.
+
+### Example 6: `pnpm run --filter-prod a --filter-prod b build`
+
+**Stage 1:** Both selectors have `followProdDepsOnly: true`. A single prod graph is built (`ignoreDevDeps: true`). a's node has no edge to b. Both cherry-picked into `selectedProjectsGraph`.
+
+**Stage 2:** `sortPackages` sees no edge → **1 chunk** containing both. They run concurrently.
+
+### Example 7: `pnpm run --filter a --filter-prod b build`
+
+**Stage 1:** The selectors are split:
+
+- `"a"` → `allPackageSelectors` (full graph). a's node comes from the full graph → its `dependencies` array **includes** b (devDep edge present).
+- `"b"` → `prodPackageSelectors` (prod graph). b's node comes from the prod graph.
+
+Merge: `{ ...prodGraph(b), ...fullGraph(a) }`. No overlap, so a's node (with devDep edge) and b's node are both present.
+
+**Stage 2:** `sortPackages` sees edge a→b → **2 chunks**: `[[b], [a]]`. b's `build` runs first.
+
+### Example 8: `pnpm run --filter-prod a --filter b build`
+
+**Stage 1:** The selectors are split:
+
+- `"a"` → `prodPackageSelectors` (prod graph). a's node comes from the prod graph → its `dependencies` array **excludes** b (devDep edge absent).
+- `"b"` → `allPackageSelectors` (full graph). b's node comes from the full graph.
+
+Merge: `{ ...prodGraph(a), ...fullGraph(b) }`. a's node has no edge to b.
+
+**Stage 2:** `sortPackages` sees no edge → **1 chunk** containing both. They run concurrently.
+
+**Key insight across 6-8:** The dependency edge a→b exists in the final graph **only when a's node comes from the full graph** (i.e. a was selected via `--filter`, not `--filter-prod`). It does not matter which flag selected b. This asymmetry comes from the merge in `filterPkgsBySelectorObjects`: each node retains the edges from whichever graph (full vs prod) it was selected from.
 
 ---
 
