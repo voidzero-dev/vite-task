@@ -1,3 +1,4 @@
 [[plan]]
 name = "vpr expands to vp run"
 args = ["run", "all"]
+compact = true

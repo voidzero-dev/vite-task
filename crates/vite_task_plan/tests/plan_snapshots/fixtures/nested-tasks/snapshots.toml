@@ -3,3 +3,4 @@
 [[plan]]
 name = "nested vp run"
 args = ["run", "script2"]
+compact = true

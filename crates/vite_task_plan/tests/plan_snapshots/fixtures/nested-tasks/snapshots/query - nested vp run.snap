@@ -1,81 +1,15 @@
 ---
 source: crates/vite_task_plan/tests/plan_snapshots/main.rs
-expression: "&plan_json"
+expression: "&compact_plan"
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-tasks
 ---
-[
-  {
-    "key": [
-      "<workspace>/",
-      "script2"
+{
+  "#script2": {
+    "items": [
+      {
+        "#script1": []
+      }
     ],
-    "node": {
-      "task_display": {
-        "package_name": "",
-        "task_name": "script2",
-        "package_path": "<workspace>/"
-      },
-      "items": [
-        {
-          "execution_item_display": {
-            "task_display": {
-              "package_name": "",
-              "task_name": "script2",
-              "package_path": "<workspace>/"
-            },
-            "command": "vp run script1",
-            "and_item_index": null,
-            "cwd": "<workspace>/"
-          },
-          "kind": {
-            "Expanded": [
-              {
-                "key": [
-                  "<workspace>/",
-                  "script1"
-                ],
-                "node": {
-                  "task_display": {
-                    "package_name": "",
-                    "task_name": "script1",
-                    "package_path": "<workspace>/"
-                  },
-                  "items": [
-                    {
-                      "execution_item_display": {
-                        "task_display": {
-                          "package_name": "",
-                          "task_name": "script1",
-                          "package_path": "<workspace>/"
-                        },
-                        "command": "echo hello",
-                        "and_item_index": null,
-                        "cwd": "<workspace>/"
-                      },
-                      "kind": {
-                        "Leaf": {
-                          "InProcess": {
-                            "kind": {
-                              "Echo": {
-                                "strings": [
-                                  "hello"
-                                ],
-                                "trailing_newline": true
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
-                },
-                "neighbors": []
-              }
-            ]
-          }
-        }
-      ]
-    },
     "neighbors": []
   }
-]
+}
