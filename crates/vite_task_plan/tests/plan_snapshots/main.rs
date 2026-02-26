@@ -1,16 +1,23 @@
 mod redact;
 
-use std::{ffi::OsStr, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ffi::OsStr,
+    sync::Arc,
+};
 
 use clap::Parser;
 use copy_dir::copy_dir;
 use cow_utils::CowUtils as _;
 use redact::redact_snapshot;
 use rustc_hash::FxHashMap;
+use serde::Serialize;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use vite_task::{Command, Session};
+use vite_task_graph::display::TaskDisplay;
+use vite_task_plan::{ExecutionGraph, ExecutionItemKind};
 use vite_workspace::find_workspace_root;
 
 /// Local parser wrapper for `BuiltInCommand`
@@ -27,12 +34,76 @@ struct Plan {
     pub args: Vec<Str>,
     #[serde(default)]
     pub cwd: RelativePathBuf,
+    #[serde(default)]
+    pub compact: bool,
 }
 
 #[derive(serde::Deserialize, Default)]
 struct SnapshotsFile {
     #[serde(rename = "plan", default)] // toml usually uses singular for arrays
     pub plan_cases: Vec<Plan>,
+}
+
+/// Compact plan: maps `"relative_path#task_name"` to either just neighbors (simple)
+/// or `{ items, neighbors }` when the node has nested `Expanded` execution items.
+#[derive(Serialize)]
+#[serde(transparent)]
+struct CompactPlan(BTreeMap<Str, CompactNode>);
+
+/// Untagged enum so simple nodes serialize as just an array, and nodes with
+/// expanded items serialize as `{ "items": [...], "neighbors": [...] }`.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum CompactNode {
+    /// No nested `Expanded` items — just the neighbor list
+    Simple(BTreeSet<Str>),
+    /// Has nested `Expanded` items
+    WithItems { items: Vec<CompactPlan>, neighbors: BTreeSet<Str> },
+}
+
+impl CompactPlan {
+    fn from_execution_graph(graph: &ExecutionGraph, workspace_root: &AbsolutePath) -> Self {
+        use petgraph::visit::EdgeRef as _;
+        let mut map = BTreeMap::<Str, CompactNode>::new();
+        for node_idx in graph.node_indices() {
+            let node = &graph[node_idx];
+            let key = Self::task_key(&node.task_display, workspace_root);
+
+            let neighbors: BTreeSet<Str> = graph
+                .edges(node_idx)
+                .map(|edge| Self::task_key(&graph[edge.target()].task_display, workspace_root))
+                .collect();
+
+            let expanded_items: Vec<Self> = node
+                .items
+                .iter()
+                .filter_map(|item| {
+                    if let ExecutionItemKind::Expanded(sub_graph) = &item.kind {
+                        Some(Self::from_execution_graph(sub_graph, workspace_root))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let compact_node = if expanded_items.is_empty() {
+                CompactNode::Simple(neighbors)
+            } else {
+                CompactNode::WithItems { items: expanded_items, neighbors }
+            };
+            map.insert(key, compact_node);
+        }
+        Self(map)
+    }
+
+    fn task_key(task_display: &TaskDisplay, workspace_root: &AbsolutePath) -> Str {
+        let relative = task_display
+            .package_path
+            .strip_prefix(workspace_root)
+            .expect("strip_prefix should not produce invalid path data")
+            .expect("package_path must be under workspace_root");
+        vite_str::format!("{}#{}", relative, task_display.task_name)
+    }
 }
 
 #[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
@@ -157,6 +228,7 @@ fn run_case_inner(
 
         for plan in cases_file.plan_cases {
             let snapshot_name = vite_str::format!("query - {}", plan.name);
+            let compact = plan.compact;
 
             let cli = match Cli::try_parse_from(
                 std::iter::once("vp") // dummy program name
@@ -208,8 +280,13 @@ fn run_case_inner(
                 }
             };
 
-            let plan_json = redact_snapshot(&plan, workspace_root_str);
-            insta::assert_json_snapshot!(snapshot_name.as_str(), &plan_json);
+            if compact {
+                let compact_plan = CompactPlan::from_execution_graph(&plan, &workspace_root.path);
+                insta::assert_json_snapshot!(snapshot_name.as_str(), &compact_plan);
+            } else {
+                let plan_json = redact_snapshot(&plan, workspace_root_str);
+                insta::assert_json_snapshot!(snapshot_name.as_str(), &plan_json);
+            }
         }
     });
 }
