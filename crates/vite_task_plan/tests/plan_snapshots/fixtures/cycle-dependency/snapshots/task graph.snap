@@ -32,11 +32,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cycle-dependency
     },
     "neighbors": [
       [
-        [
-          "<workspace>/",
-          "task-b"
-        ],
-        null
+        "<workspace>/",
+        "task-b"
       ]
     ]
   },
@@ -68,11 +65,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cycle-dependency
     },
     "neighbors": [
       [
-        [
-          "<workspace>/",
-          "task-a"
-        ],
-        null
+        "<workspace>/",
+        "task-a"
       ]
     ]
   }

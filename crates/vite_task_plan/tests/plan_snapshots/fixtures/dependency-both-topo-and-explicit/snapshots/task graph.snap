@@ -32,11 +32,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/dependency-both-
     },
     "neighbors": [
       [
-        [
-          "<workspace>/packages/b",
-          "build"
-        ],
-        null
+        "<workspace>/packages/b",
+        "build"
       ]
     ]
   },
