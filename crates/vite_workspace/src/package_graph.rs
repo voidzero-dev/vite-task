@@ -298,9 +298,10 @@ impl IndexedPackageGraph {
                 }
             }
 
-            PackageNamePattern::Glob(_) => {
+            PackageNamePattern::Glob(glob) => {
+                use wax::Program as _;
                 for (pkg_name, indices) in &self.indices_by_name {
-                    if pattern.matches_name(pkg_name.as_str()) {
+                    if glob.is_match(pkg_name.as_str()) {
                         out.extend(indices.iter().copied());
                     }
                 }
