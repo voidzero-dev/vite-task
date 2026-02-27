@@ -1,59 +1,45 @@
 pub mod config;
 pub mod display;
 pub mod loader;
-mod package_graph;
 pub mod query;
 mod specifier;
 
 use std::{convert::Infallible, sync::Arc};
 
 use config::{ResolvedTaskConfig, UserRunConfig};
-use package_graph::IndexedPackageGraph;
-use petgraph::{
-    graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
-    visit::{Control, DfsEvent, depth_first_search},
-};
+use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::Serialize;
 pub use specifier::TaskSpecifier;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_workspace::{PackageNodeIndex, WorkspaceRoot};
+use vite_workspace::{PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph};
 
 use crate::display::TaskDisplay;
 
+/// The type of a task dependency edge in the task graph.
+///
+/// Currently only `Explicit` is produced (from `dependsOn` in `vite-task.json`).
+/// Topological ordering is handled at query time via the package subgraph rather
+/// than by pre-computing edges in the task graph.
 #[derive(Debug, Clone, Copy, Serialize)]
-enum TaskDependencyTypeInner {
-    /// The dependency is explicitly declared by user in `dependsOn`.
-    Explicit,
-    /// The dependency is added due to topological ordering based on package dependencies.
-    Topological,
-    /// The dependency is explicitly declared by user in `dependsOn` and also added due to topological ordering.
-    Both,
-}
+pub struct TaskDependencyType;
 
-/// The type of a task dependency, explaining why it's introduced.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(transparent)]
-pub struct TaskDependencyType(TaskDependencyTypeInner);
-
-// It hides `TaskDependencyTypeInner` and only expose `is_explicit`/`is_topological`
-// to avoid incorrectly matching only Explicit variant to check if it's explicit.
 impl TaskDependencyType {
+    /// Returns `true` — all task graph edges are explicit `dependsOn` dependencies.
+    ///
+    /// Kept as an associated function for use as a filter predicate in
+    /// `add_dependencies`. Always returns `true` since `TaskDependencyType`
+    /// only represents explicit edges now.
     #[must_use]
-    pub const fn is_explicit(self) -> bool {
-        matches!(self.0, TaskDependencyTypeInner::Explicit | TaskDependencyTypeInner::Both)
-    }
-
-    #[must_use]
-    pub const fn is_topological(self) -> bool {
-        matches!(self.0, TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both)
+    pub const fn is_explicit() -> bool {
+        true
     }
 }
 
 /// Uniquely identifies a task, by its name and the package where it's defined.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
-struct TaskId {
+pub(crate) struct TaskId {
     /// The index of the package where the task is defined.
     pub package_index: PackageNodeIndex,
 
@@ -181,7 +167,7 @@ pub struct IndexedTaskGraph {
     indexed_package_graph: IndexedPackageGraph,
 
     /// task indices by task id for quick lookup
-    node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex>,
+    pub(crate) node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex>,
 }
 
 pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
@@ -339,101 +325,14 @@ impl IndexedTaskGraph {
                         specifier,
                         task_display: me.display_task(from_node_index),
                     })?;
-                me.task_graph.update_edge(
-                    from_node_index,
-                    to_node_index,
-                    TaskDependencyType(TaskDependencyTypeInner::Explicit),
-                );
+                me.task_graph.update_edge(from_node_index, to_node_index, TaskDependencyType);
             }
         }
 
-        // Add topological dependencies based on package dependencies
-        for (task_id, task_index) in &me.node_indices_by_task_id {
-            let task_name = task_id.task_name.as_str();
-            let package_index = task_id.package_index;
-
-            // For every task, find nearest tasks with the same name.
-            // If there is a task with the same name in a deeper dependency, it will be connected via that nearer dependency's task.
-            let mut nearest_topological_tasks = Vec::<TaskNodeIndex>::new();
-            me.find_nearest_topological_tasks(
-                task_name,
-                package_index,
-                &mut nearest_topological_tasks,
-            );
-            for nearest_task_index in nearest_topological_tasks {
-                if let Some(existing_edge_index) =
-                    me.task_graph.find_edge(*task_index, nearest_task_index)
-                {
-                    // If an edge already exists,
-                    let existing_edge = &mut me.task_graph[existing_edge_index];
-                    match existing_edge.0 {
-                        TaskDependencyTypeInner::Explicit => {
-                            // upgrade from Explicit to Both
-                            existing_edge.0 = TaskDependencyTypeInner::Both;
-                        }
-                        TaskDependencyTypeInner::Topological | TaskDependencyTypeInner::Both => {
-                            // already has topological dependency, do nothing
-                        }
-                    }
-                } else {
-                    // add new topological edge if not exists
-                    me.task_graph.add_edge(
-                        *task_index,
-                        nearest_task_index,
-                        TaskDependencyType(TaskDependencyTypeInner::Topological),
-                    );
-                }
-            }
-        }
+        // Topological dependency edges are no longer pre-computed here.
+        // Ordering is now handled at query time via the package subgraph induced by
+        // `IndexedPackageGraph::resolve_query` in `query/mod.rs`.
         Ok(me)
-    }
-
-    /// Find the nearest tasks with the given name starting from the given package node index.
-    /// This method only considers the package graph topology. It doesn't rely on existing topological edges of
-    /// the task graph, because the starting package itself may not contain a task with the given name
-    ///
-    /// The task with the given name in the starting package won't be included in the result even if there's one.
-    ///
-    /// This performs a BFS on the package graph starting from `starting_from`,
-    /// and collects the first found tasks with the given name in each branch.
-    ///
-    /// For example, if the package graph is A -> B -> C and A -> D -> C,
-    /// and we are looking for task "build" starting from A,
-    ///
-    /// - No matter A contains "build" or not, it's not included in the result.
-    /// - If B and D both have a "build" task, both will be returned, but C's "build" task will not be returned
-    ///   because it's not the nearest in either branch.
-    /// - If B or D doesn't have a "build" task, then C's "build" task will be returned.
-    fn find_nearest_topological_tasks(
-        &self,
-        task_name: &str,
-        starting_from: PackageNodeIndex,
-        out: &mut Vec<TaskNodeIndex>,
-    ) {
-        // DFS the package graph starting from `starting_from`,
-        depth_first_search(
-            self.indexed_package_graph.package_graph(),
-            Some(starting_from),
-            |event| {
-                let DfsEvent::TreeEdge(_, dependency_package_index) = event else {
-                    return Control::<()>::Continue;
-                };
-
-                self.node_indices_by_task_id
-                    .get(&TaskId {
-                        package_index: dependency_package_index,
-                        task_name: task_name.into(),
-                    })
-                    .map_or(Control::Continue, |dependency_task_index| {
-                        // Encountered a package containing the task with the same name
-                        // collect the task index
-                        out.push(*dependency_task_index);
-
-                        // And stop searching further down this branch
-                        Control::Prune
-                    })
-            },
-        );
     }
 
     /// Lookup the node index of a task by a specifier.

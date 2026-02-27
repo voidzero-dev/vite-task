@@ -36,21 +36,14 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
           "<workspace>/packages/another-empty",
           "lint"
         ],
-        "Explicit"
-      ],
-      [
-        [
-          "<workspace>/packages/normal-package",
-          "build"
-        ],
-        "Topological"
+        null
       ],
       [
         [
           "<workspace>/packages/normal-package",
           "test"
         ],
-        "Explicit"
+        null
       ]
     ]
   },
@@ -79,14 +72,14 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
           "<workspace>/packages/another-empty",
           "build"
         ],
-        "Explicit"
+        null
       ],
       [
         [
           "<workspace>/packages/another-empty",
           "test"
         ],
-        "Explicit"
+        null
       ]
     ]
   },
@@ -144,15 +137,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/normal-package",
-          "test"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -186,7 +171,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
           "<workspace>/packages/empty-name",
           "test"
         ],
-        "Explicit"
+        null
       ]
     ]
   },

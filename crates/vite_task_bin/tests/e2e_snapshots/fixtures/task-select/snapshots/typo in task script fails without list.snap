@@ -6,6 +6,4 @@ expression: e2e_outputs
 Error: Failed to plan tasks from `vp run nonexistent-xyz` in task task-select-test#run-typo-task
 
 Caused by:
-    0: Failed to query tasks from task graph
-    1: Failed to look up task from specifier: nonexistent-xyz
-    2: Task 'nonexistent-xyz' not found in package task-select-test
+    no tasks matched the query

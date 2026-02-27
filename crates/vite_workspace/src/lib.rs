@@ -1,5 +1,7 @@
 mod error;
 pub mod package;
+pub mod package_filter;
+pub mod package_graph;
 mod package_manager;
 
 use std::{collections::hash_map::Entry, fs, io, sync::Arc};
