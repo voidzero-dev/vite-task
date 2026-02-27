@@ -35,6 +35,34 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/filter-workspace
   {
     "key": [
       "<workspace>/packages/app",
+      "deploy"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/app",
+        "task_name": "deploy",
+        "package_path": "<workspace>/packages/app"
+      },
+      "resolved_config": {
+        "command": "vp run --filter .... build",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/app",
       "test"
     ],
     "node": {
