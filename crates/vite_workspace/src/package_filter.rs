@@ -25,7 +25,9 @@
 //! The `ContainingPackage` selector variant is NOT produced by `parse_filter`.
 //! It is synthesized internally for `vp run build` (implicit cwd) and `vp run -t build`
 //! to walk up the directory tree and find the package that contains the given path.
-//! This mirrors pnpm's `findPrefix` behaviour (not `parsePackageSelector` behaviour).
+//! This mirrors pnpm's `findPrefix` behaviour (not [`parsePackageSelector`] behaviour).
+//!
+//! [`parsePackageSelector`]: https://github.com/pnpm/pnpm/blob/05dd45ea82fff9c0b687cdc8f478a1027077d343/workspace/filter-workspace-packages/src/parsePackageSelector.ts#L14-L61
 
 use std::{path::Component, sync::Arc};
 
@@ -43,7 +45,7 @@ pub enum PackageNamePattern {
     ///
     /// Scoped auto-completion applies during resolution: if `"bar"` has no exact match
     /// but exactly one `@*/bar` package exists, that package is matched.
-    /// This mirrors pnpm's matcher lines 303–306.
+    /// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L303-L306>
     Exact(Str),
 
     /// Glob pattern (e.g. `@scope/*`, `*-utils`). Iterates all packages.
@@ -51,6 +53,26 @@ pub enum PackageNamePattern {
     /// Only `*` and `?` wildcards are supported (pnpm semantics).
     /// Stored as an owned `Glob<'static>` so the filter can outlive the input string.
     Glob(Box<wax::Glob<'static>>),
+}
+
+/// Directory matching pattern for `--filter` selectors.
+///
+/// Follows pnpm v7+ glob-dir semantics: plain paths are exact-only,
+/// `*` / `**` opt in to descendant matching.
+///
+/// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L200-L202>
+#[derive(Debug, Clone)]
+pub enum DirectoryPattern {
+    /// Exact path match (no glob metacharacters in selector).
+    Exact(Arc<AbsolutePath>),
+
+    /// Glob: resolved base directory (non-glob prefix) + relative glob pattern.
+    ///
+    /// Matching strips `base` from a candidate path, then tests the remainder
+    /// against `pattern`. For example, `./packages/*` with cwd `/ws` produces
+    /// `base = /ws/packages`, `pattern = *`, which matches `/ws/packages/app`
+    /// (remainder `app` matches `*`).
+    Glob { base: Arc<AbsolutePath>, pattern: Box<wax::Glob<'static>> },
 }
 
 /// What packages to initially match.
@@ -64,10 +86,9 @@ pub enum PackageSelector {
 
     /// Match by directory. Produced by `--filter .`, `--filter ./path`, `--filter {dir}`.
     ///
-    /// One-way matching (pnpm `isSubdir` semantics): selects packages whose root is
-    /// **at or under** this path. Does NOT walk up — `--filter .` from
-    /// `packages/app/src/` matches nothing (no package root is inside `src/`).
-    Directory(Arc<AbsolutePath>),
+    /// Uses pnpm v7+ glob-dir semantics: plain paths are exact-match only,
+    /// `*` / `**` globs opt in to descendant matching.
+    Directory(DirectoryPattern),
 
     /// Find the package that **contains** this path (walks up the directory tree).
     ///
@@ -78,7 +99,7 @@ pub enum PackageSelector {
 
     /// Match by name AND directory (intersection).
     /// Produced by `--filter "pattern{./dir}"`.
-    NameAndDirectory { name: PackageNamePattern, directory: Arc<AbsolutePath> },
+    NameAndDirectory { name: PackageNamePattern, directory: DirectoryPattern },
 }
 
 /// Direction to traverse the package dependency graph from the initially matched packages.
@@ -91,7 +112,8 @@ pub enum TraversalDirection {
     Dependents,
 
     /// Both: walk dependents first, then walk all dependencies of every found dependent.
-    /// Produced by `...foo...`. Follows pnpm index.ts lines 265–267.
+    /// Produced by `...foo...`.
+    /// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L265-L267>
     Both,
 }
 
@@ -157,7 +179,9 @@ pub enum PackageFilterParseError {
 ///
 /// # Syntax
 ///
-/// Follows pnpm's `parsePackageSelector` algorithm. See module-level docs for examples.
+/// Follows pnpm's [`parsePackageSelector`] algorithm. See module-level docs for examples.
+///
+/// [`parsePackageSelector`]: https://github.com/pnpm/pnpm/blob/05dd45ea82fff9c0b687cdc8f478a1027077d343/workspace/filter-workspace-packages/src/parsePackageSelector.ts#L14-L61
 pub fn parse_filter(
     input: &str,
     cwd: &AbsolutePath,
@@ -207,7 +231,9 @@ pub fn parse_filter(
 
 /// Parse the core selector string (after stripping `!` and `...` markers).
 ///
-/// Implements pnpm's `SELECTOR_REGEX` logic: `^([^.][^{}[\]]*)?(\{[^}]+\})?$`
+/// Implements pnpm's [`SELECTOR_REGEX`] logic: `^([^.][^{}[\]]*)?(\{[^}]+\})?$`
+///
+/// [`SELECTOR_REGEX`]: https://github.com/pnpm/pnpm/blob/05dd45ea82fff9c0b687cdc8f478a1027077d343/workspace/filter-workspace-packages/src/parsePackageSelector.ts#L37
 ///
 /// Decision tree:
 /// 1. If the string ends with `}` and contains a `{`, split name and brace-directory.
@@ -230,7 +256,7 @@ fn parse_core_selector(
         // Per pnpm's regex: Group 1 (`[^.][^{}[\]]*`) must NOT start with `.`.
         // If name_part starts with `.`, fall through to the `.`-prefix check.
         if !name_part.starts_with('.') {
-            let directory = resolve_filter_path(dir_inner, cwd);
+            let directory = resolve_directory_pattern(dir_inner, cwd)?;
 
             return if name_part.is_empty() {
                 // Only a directory selector: `{./foo}` or `{packages/app}`.
@@ -245,9 +271,9 @@ fn parse_core_selector(
     }
 
     // If the core starts with `.`, it's a relative path to a directory.
-    // This handles `.`, `..`, `./foo`, `../foo`.
+    // This handles `.`, `..`, `./foo`, `../foo`, `./foo/*`, `./foo/**`.
     if core.starts_with('.') {
-        let directory = resolve_filter_path(core, cwd);
+        let directory = resolve_directory_pattern(core, cwd)?;
         return Ok(PackageSelector::Directory(directory));
     }
 
@@ -258,6 +284,42 @@ fn parse_core_selector(
 
     // Plain name or glob pattern.
     Ok(PackageSelector::Name(build_name_pattern(core)?))
+}
+
+/// Resolve a directory selector string into a [`DirectoryPattern`].
+///
+/// If the string contains glob metacharacters (`*`, `?`, `[`), it is split at the
+/// first glob component into a resolved base path and a relative glob pattern.
+/// Otherwise, the entire string is resolved as an exact path.
+fn resolve_directory_pattern(
+    path_str: &str,
+    cwd: &AbsolutePath,
+) -> Result<DirectoryPattern, PackageFilterParseError> {
+    if !path_str.contains(['*', '?', '[']) {
+        return Ok(DirectoryPattern::Exact(resolve_filter_path(path_str, cwd)));
+    }
+
+    // Split into non-glob base components and glob suffix components.
+    let mut base_parts: Vec<&str> = Vec::new();
+    let mut glob_parts: Vec<&str> = Vec::new();
+    let mut found_glob = false;
+
+    for part in path_str.split('/') {
+        if !found_glob && !part.contains(['*', '?', '[']) {
+            base_parts.push(part);
+        } else {
+            found_glob = true;
+            glob_parts.push(part);
+        }
+    }
+
+    let base_str = if base_parts.is_empty() { "." } else { &base_parts.join("/") };
+    let base = resolve_filter_path(base_str, cwd);
+
+    let glob_str = glob_parts.join("/");
+    let pattern = wax::Glob::new(&glob_str)?.into_owned();
+
+    Ok(DirectoryPattern::Glob { base, pattern: Box::new(pattern) })
 }
 
 /// Resolve a path string relative to `cwd`, normalising away `.` and `..`.
@@ -370,10 +432,26 @@ mod tests {
 
     fn assert_directory(filter: &PackageFilter, expected_path: &AbsolutePath) {
         match &filter.selector {
-            PackageSelector::Directory(dir) => {
+            PackageSelector::Directory(DirectoryPattern::Exact(dir)) => {
                 assert_eq!(dir.as_ref(), expected_path, "directory mismatch");
             }
-            other => panic!("expected Directory({expected_path:?}), got {other:?}"),
+            other => panic!("expected Directory(Exact({expected_path:?})), got {other:?}"),
+        }
+    }
+
+    fn assert_directory_glob(
+        filter: &PackageFilter,
+        expected_base: &AbsolutePath,
+        expected_pattern: &str,
+    ) {
+        match &filter.selector {
+            PackageSelector::Directory(DirectoryPattern::Glob { base, pattern }) => {
+                assert_eq!(base.as_ref(), expected_base, "base mismatch");
+                assert_eq!(pattern.to_string(), expected_pattern, "pattern mismatch");
+            }
+            other => panic!(
+                "expected Directory(Glob {{ base: {expected_base:?}, pattern: {expected_pattern:?} }}), got {other:?}"
+            ),
         }
     }
 
@@ -383,12 +461,36 @@ mod tests {
         expected_dir: &AbsolutePath,
     ) {
         match &filter.selector {
-            PackageSelector::NameAndDirectory { name: PackageNamePattern::Exact(n), directory } => {
+            PackageSelector::NameAndDirectory {
+                name: PackageNamePattern::Exact(n),
+                directory: DirectoryPattern::Exact(dir),
+            } => {
                 assert_eq!(n.as_str(), expected_name, "name mismatch");
-                assert_eq!(directory.as_ref(), expected_dir, "directory mismatch");
+                assert_eq!(dir.as_ref(), expected_dir, "directory mismatch");
             }
             other => panic!(
-                "expected NameAndDirectory(Exact({expected_name:?}), {expected_dir:?}), got {other:?}"
+                "expected NameAndDirectory(Exact({expected_name:?}), Exact({expected_dir:?})), got {other:?}"
+            ),
+        }
+    }
+
+    fn assert_name_and_directory_glob(
+        filter: &PackageFilter,
+        expected_name: &str,
+        expected_base: &AbsolutePath,
+        expected_pattern: &str,
+    ) {
+        match &filter.selector {
+            PackageSelector::NameAndDirectory {
+                name: PackageNamePattern::Exact(n),
+                directory: DirectoryPattern::Glob { base, pattern },
+            } => {
+                assert_eq!(n.as_str(), expected_name, "name mismatch");
+                assert_eq!(base.as_ref(), expected_base, "base mismatch");
+                assert_eq!(pattern.to_string(), expected_pattern, "pattern mismatch");
+            }
+            other => panic!(
+                "expected NameAndDirectory(Exact({expected_name:?}), Glob {{ base: {expected_base:?}, pattern: {expected_pattern:?} }}), got {other:?}"
             ),
         }
     }
@@ -572,5 +674,69 @@ mod tests {
         let cwd = abs("/workspace");
         let f = parse_filter("{./foo/.}", cwd).unwrap();
         assert_directory(&f, abs("/workspace/foo"));
+    }
+
+    // ── Directory glob tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn directory_glob_star() {
+        let cwd = abs("/workspace");
+        let f = parse_filter("./packages/*", cwd).unwrap();
+        assert!(!f.exclude);
+        assert_directory_glob(&f, abs("/workspace/packages"), "*");
+        assert_no_traversal(&f);
+    }
+
+    #[test]
+    fn directory_glob_double_star() {
+        let cwd = abs("/workspace");
+        let f = parse_filter("./packages/**", cwd).unwrap();
+        assert!(!f.exclude);
+        assert_directory_glob(&f, abs("/workspace/packages"), "**");
+        assert_no_traversal(&f);
+    }
+
+    #[test]
+    fn brace_directory_glob() {
+        let cwd = abs("/workspace");
+        let f = parse_filter("{./packages/*}", cwd).unwrap();
+        assert!(!f.exclude);
+        assert_directory_glob(&f, abs("/workspace/packages"), "*");
+        assert_no_traversal(&f);
+    }
+
+    #[test]
+    fn name_and_directory_glob_combined() {
+        let cwd = abs("/workspace");
+        let f = parse_filter("app{./packages/*}", cwd).unwrap();
+        assert!(!f.exclude);
+        assert_name_and_directory_glob(&f, "app", abs("/workspace/packages"), "*");
+        assert_no_traversal(&f);
+    }
+
+    #[test]
+    fn directory_glob_with_traversal() {
+        let cwd = abs("/workspace");
+        let f = parse_filter("...{./packages/*}", cwd).unwrap();
+        assert!(!f.exclude);
+        assert_directory_glob(&f, abs("/workspace/packages"), "*");
+        assert_traversal(&f, TraversalDirection::Dependents, false);
+    }
+
+    #[test]
+    fn directory_glob_parent_prefix() {
+        // `../*` from a subdirectory should resolve base to parent
+        let cwd = abs("/workspace/packages/app");
+        let f = parse_filter("../*", cwd).unwrap();
+        assert_directory_glob(&f, abs("/workspace/packages"), "*");
+    }
+
+    #[test]
+    fn directory_glob_dotdot_in_base() {
+        // `../foo/*` — `..` in the non-glob base is normalised before glob matching.
+        // Matches Node's path.join('/ws/packages/app', '../foo/*') → '/ws/packages/foo/*'.
+        let cwd = abs("/workspace/packages/app");
+        let f = parse_filter("../foo/*", cwd).unwrap();
+        assert_directory_glob(&f, abs("/workspace/packages/foo"), "*");
     }
 }
