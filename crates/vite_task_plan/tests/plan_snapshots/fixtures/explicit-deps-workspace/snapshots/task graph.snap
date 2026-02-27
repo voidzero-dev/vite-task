@@ -53,25 +53,16 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
     },
     "neighbors": [
       [
-        [
-          "<workspace>/packages/app",
-          "build"
-        ],
-        null
+        "<workspace>/packages/app",
+        "build"
       ],
       [
-        [
-          "<workspace>/packages/app",
-          "test"
-        ],
-        null
+        "<workspace>/packages/app",
+        "test"
       ],
       [
-        [
-          "<workspace>/packages/utils",
-          "lint"
-        ],
-        null
+        "<workspace>/packages/utils",
+        "lint"
       ]
     ]
   },
@@ -215,11 +206,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
     },
     "neighbors": [
       [
-        [
-          "<workspace>/packages/core",
-          "clean"
-        ],
-        null
+        "<workspace>/packages/core",
+        "clean"
       ]
     ]
   },
@@ -307,18 +295,12 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
     },
     "neighbors": [
       [
-        [
-          "<workspace>/packages/core",
-          "build"
-        ],
-        null
+        "<workspace>/packages/core",
+        "build"
       ],
       [
-        [
-          "<workspace>/packages/utils",
-          "build"
-        ],
-        null
+        "<workspace>/packages/utils",
+        "build"
       ]
     ]
   },

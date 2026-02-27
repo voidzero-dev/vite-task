@@ -17,17 +17,19 @@ pub trait GetKey {
 }
 
 #[derive(Serialize)]
-#[serde(bound = "E: Serialize, N: Serialize")]
-struct DiGraphNodeItem<'a, N: GetKey, E> {
+#[serde(bound = "N: Serialize")]
+struct DiGraphNodeItem<'a, N: GetKey> {
     key: N::Key<'a>,
     node: &'a N,
-    neighbors: Vec<(N::Key<'a>, &'a E)>,
+    neighbors: Vec<N::Key<'a>>,
 }
 
 /// A wrapper around `DiGraph` that serializes nodes by their keys.
+///
+/// Only node connectivity is recorded — edge weights are ignored in the output.
 #[derive(Serialize)]
 #[serde(transparent)]
-pub struct SerializeByKey<'a, N: GetKey + Serialize, E: Serialize, Ix: petgraph::graph::IndexType>(
+pub struct SerializeByKey<'a, N: GetKey + Serialize, E, Ix: petgraph::graph::IndexType>(
     #[serde(serialize_with = "serialize_by_key")] pub &'a DiGraph<N, E, Ix>,
 );
 
@@ -45,25 +47,20 @@ pub struct SerializeByKey<'a, N: GetKey + Serialize, E: Serialize, Ix: petgraph:
 ///
 /// # Panics
 /// Panics if an edge references a node index not present in the graph.
-pub fn serialize_by_key<
-    N: GetKey + Serialize,
-    E: Serialize,
-    Ix: petgraph::graph::IndexType,
-    S: Serializer,
->(
+pub fn serialize_by_key<N: GetKey + Serialize, E, Ix: petgraph::graph::IndexType, S: Serializer>(
     graph: &DiGraph<N, E, Ix>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    let mut items = Vec::<DiGraphNodeItem<'_, N, E>>::with_capacity(graph.node_count());
+    let mut items = Vec::<DiGraphNodeItem<'_, N>>::with_capacity(graph.node_count());
     for (node_idx, node) in graph.node_references() {
-        let mut neighbors = Vec::<(N::Key<'_>, &E)>::new();
+        let mut neighbors = Vec::<N::Key<'_>>::new();
 
         for edge in graph.edges(node_idx) {
             let target_idx = edge.target();
             let target_node = graph.node_weight(target_idx).unwrap();
-            neighbors.push((target_node.key().map_err(serde::ser::Error::custom)?, edge.weight()));
+            neighbors.push(target_node.key().map_err(serde::ser::Error::custom)?);
         }
-        neighbors.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        neighbors.sort_unstable();
         items.push(DiGraphNodeItem {
             key: node.key().map_err(serde::ser::Error::custom)?,
             node,
@@ -101,19 +98,19 @@ mod tests {
     #[derive(Serialize)]
     struct GraphWrapper {
         #[serde(serialize_with = "serialize_by_key")]
-        graph: DiGraph<TestNode, &'static str>,
+        graph: DiGraph<TestNode, ()>,
     }
 
     #[test]
     fn test_serialize_graph_happy_path() {
-        let mut graph = DiGraph::<TestNode, &'static str>::new();
+        let mut graph = DiGraph::<TestNode, ()>::new();
         let a = graph.add_node(TestNode { id: "a", value: 1 });
         let b = graph.add_node(TestNode { id: "b", value: 2 });
         let c = graph.add_node(TestNode { id: "c", value: 3 });
 
-        graph.add_edge(a, b, "a->b");
-        graph.add_edge(a, c, "a->c");
-        graph.add_edge(b, c, "b->c");
+        graph.add_edge(a, b, ());
+        graph.add_edge(a, c, ());
+        graph.add_edge(b, c, ());
 
         let json = serde_json::to_value(GraphWrapper { graph }).unwrap();
         assert_eq!(
@@ -123,12 +120,12 @@ mod tests {
                     {
                         "key": "a",
                         "node": {"id": "a", "value": 1},
-                        "neighbors": [["b", "a->b"], ["c", "a->c"]]
+                        "neighbors": ["b", "c"]
                     },
                     {
                         "key": "b",
                         "node": {"id": "b", "value": 2},
-                        "neighbors": [["c", "b->c"]]
+                        "neighbors": ["c"]
                     },
                     {
                         "key": "c",
