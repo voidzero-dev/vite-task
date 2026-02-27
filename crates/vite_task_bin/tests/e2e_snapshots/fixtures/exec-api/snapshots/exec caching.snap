@@ -1,7 +1,6 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-input_file: crates/vite_task_bin/tests/e2e_snapshots/fixtures/exec-api
 ---
 > FOO=bar vp lint # cache miss
 bar

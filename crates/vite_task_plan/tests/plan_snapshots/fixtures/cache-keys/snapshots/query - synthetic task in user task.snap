@@ -1,6 +1,10 @@
 ---
 source: crates/vite_task_plan/tests/plan_snapshots/main.rs
 expression: "&plan_json"
+info:
+  args:
+    - run
+    - lint
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
 ---
 [

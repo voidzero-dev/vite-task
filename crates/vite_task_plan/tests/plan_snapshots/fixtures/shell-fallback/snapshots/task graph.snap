@@ -1,6 +1,5 @@
 ---
 source: crates/vite_task_plan/tests/plan_snapshots/main.rs
-assertion_line: 106
 expression: task_graph_json
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/shell-fallback
 ---

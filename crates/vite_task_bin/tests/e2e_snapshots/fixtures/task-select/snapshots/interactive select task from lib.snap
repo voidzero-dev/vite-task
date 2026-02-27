@@ -1,6 +1,8 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
+info:
+  cwd: packages/lib
 ---
 > vp run
 @ expect-milestone: task-select::0

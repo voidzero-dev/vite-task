@@ -311,6 +311,14 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
             }
         }
 
+        let _info_guard = if e2e.cwd.as_str().is_empty() {
+            None
+        } else {
+            let mut case_settings = insta::Settings::clone_current();
+            case_settings.set_info(&serde_json::json!({ "cwd": e2e.cwd.as_str() }));
+            Some(case_settings.bind_to_scope())
+        };
+
         let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_e2e_stage_{e2e_count}"));
         e2e_count += 1;
         CopyOptions::new().copy_tree(fixture_path, e2e_stage_path.as_path()).unwrap();

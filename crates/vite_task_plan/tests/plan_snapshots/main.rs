@@ -230,6 +230,14 @@ fn run_case_inner(
             let snapshot_name = vite_str::format!("query - {}", plan.name);
             let compact = plan.compact;
 
+            let mut case_settings = insta::Settings::clone_current();
+            let mut info = serde_json::json!({ "args": plan.args });
+            if !plan.cwd.as_str().is_empty() {
+                info["cwd"] = serde_json::json!(plan.cwd.as_str());
+            }
+            case_settings.set_info(&info);
+            let _guard = case_settings.bind_to_scope();
+
             let cli = match Cli::try_parse_from(
                 std::iter::once("vp") // dummy program name
                     .chain(plan.args.iter().map(vite_str::Str::as_str)),
