@@ -24,7 +24,8 @@ use vite_str::Str;
 use crate::{
     DependencyType, PackageInfo, PackageIx, PackageNodeIndex,
     package_filter::{
-        GraphTraversal, PackageFilter, PackageNamePattern, PackageSelector, TraversalDirection,
+        DirectoryPattern, GraphTraversal, PackageFilter, PackageNamePattern, PackageSelector,
+        TraversalDirection,
     },
 };
 
@@ -43,7 +44,7 @@ pub enum PackageQuery {
     ///
     /// Inclusions are unioned; exclusions are subtracted from the union.
     /// If all filters are exclusions, the starting set is the full workspace
-    /// (pnpm behaviour: exclude-only = full set minus exclusions).
+    /// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L167-L168>
     Filters(Vec1<PackageFilter>),
 
     /// All packages in the workspace, in topological dependency order.
@@ -182,7 +183,9 @@ impl IndexedPackageGraph {
 
     /// Resolve a slice of package filters into a `FilterResolution`.
     ///
-    /// # Algorithm (follows pnpm's `filterWorkspacePackages`)
+    /// # Algorithm (follows pnpm's [`filterWorkspacePackages`])
+    ///
+    /// [`filterWorkspacePackages`]: https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L149-L178
     ///
     /// 1. Partition filters into inclusions (`!exclude = false`) and exclusions.
     /// 2. If there are no inclusions, start from ALL packages (exclude-only mode).
@@ -237,13 +240,8 @@ impl IndexedPackageGraph {
                 self.match_by_name_pattern(pattern, &mut matched);
             }
 
-            PackageSelector::Directory(dir) => {
-                // One-way isSubdir: package root must be at or under `dir`.
-                for idx in self.graph.node_indices() {
-                    if self.graph[idx].absolute_path.as_path().starts_with(dir.as_path()) {
-                        matched.insert(idx);
-                    }
-                }
+            PackageSelector::Directory(dir_pattern) => {
+                self.match_by_directory_pattern(dir_pattern, &mut matched);
             }
 
             PackageSelector::ContainingPackage(path) => {
@@ -257,11 +255,9 @@ impl IndexedPackageGraph {
                 // Intersection: packages satisfying both name AND directory.
                 let mut by_name = FxHashSet::default();
                 self.match_by_name_pattern(name, &mut by_name);
-                for idx in by_name {
-                    if self.graph[idx].absolute_path.as_path().starts_with(directory.as_path()) {
-                        matched.insert(idx);
-                    }
-                }
+                let mut by_dir = FxHashSet::default();
+                self.match_by_directory_pattern(directory, &mut by_dir);
+                matched.extend(by_name.intersection(&by_dir));
             }
         }
 
@@ -270,7 +266,8 @@ impl IndexedPackageGraph {
 
     /// Match packages by a name pattern, inserting into `out`.
     ///
-    /// For `Exact` names, scoped auto-completion applies (pnpm matcher lines 303–306):
+    /// For `Exact` names, scoped auto-completion applies
+    /// (pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L303-L306>):
     /// if `"bar"` has no exact match but exactly one `@*/bar` package exists,
     /// that package is used instead.
     fn match_by_name_pattern(
@@ -311,6 +308,35 @@ impl IndexedPackageGraph {
         }
     }
 
+    /// Match packages by a directory pattern, inserting into `out`.
+    ///
+    /// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L317-L324>
+    fn match_by_directory_pattern(
+        &self,
+        pattern: &DirectoryPattern,
+        out: &mut FxHashSet<PackageNodeIndex>,
+    ) {
+        match pattern {
+            DirectoryPattern::Exact(dir) => {
+                // O(1) exact lookup by path.
+                if let Some(&idx) = self.indices_by_path.get(dir) {
+                    out.insert(idx);
+                }
+            }
+            DirectoryPattern::Glob { base, pattern } => {
+                use wax::Pattern as _;
+                for idx in self.graph.node_indices() {
+                    let pkg_path = &self.graph[idx].absolute_path;
+                    if let Ok(remainder) = pkg_path.as_path().strip_prefix(base.as_path())
+                        && pattern.is_match(remainder)
+                    {
+                        out.insert(idx);
+                    }
+                }
+            }
+        }
+    }
+
     /// Expand a seed set of packages according to a graph traversal specification.
     ///
     /// Returns the final set, including or excluding the original seeds depending on
@@ -334,8 +360,9 @@ impl IndexedPackageGraph {
                 self.bfs_incoming(&seeds, &mut reachable);
             }
             TraversalDirection::Both => {
-                // pnpm lines 265–267: walk dependents first, then walk dependencies of
-                // ALL dependents found (including the original seeds).
+                // Walk dependents first, then walk dependencies of ALL dependents found
+                // (including the original seeds).
+                // pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L265-L267>
                 let mut dependents = FxHashSet::default();
                 self.bfs_incoming(&seeds, &mut dependents);
                 let all_dep_seeds: FxHashSet<_> =

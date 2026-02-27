@@ -68,11 +68,23 @@ compact = true
 name = "exclude only filter"
 args = ["run", "--filter", "!@test/core", "build"]
 
-# pnpm: "select by parentDir"
+# pnpm: "select by parentDir" — exact path, no glob
 [[plan]]
 compact = true
 name = "filter by directory"
 args = ["run", "--filter", "./packages/app", "build"]
+
+# pnpm glob-dir: one level under packages/
+[[plan]]
+compact = true
+name = "filter by directory glob star"
+args = ["run", "--filter", "./packages/*", "build"]
+
+# pnpm glob-dir: recursive under packages/
+[[plan]]
+compact = true
+name = "filter by directory glob double star"
+args = ["run", "--filter", "./packages/**", "build"]
 
 # transitive flag = --filter .…
 [[plan]]
