@@ -8,6 +8,7 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
+path-clean = { workspace = true }
 petgraph = { workspace = true, features = ["serde-1"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

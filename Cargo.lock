@@ -2254,6 +2254,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "path-clean"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17359afc20d7ab31fdb42bb844c8b3bb1dabd7dcf7e68428492da7f16966fcef"
+
+[[package]]
 name = "pathdiff"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3998,6 +4004,7 @@ dependencies = [
 name = "vite_workspace"
 version = "0.0.0"
 dependencies = [
+ "path-clean",
  "petgraph",
  "rustc-hash",
  "serde",

@@ -29,7 +29,7 @@
 //!
 //! [`parsePackageSelector`]: https://github.com/pnpm/pnpm/blob/05dd45ea82fff9c0b687cdc8f478a1027077d343/workspace/filter-workspace-packages/src/parsePackageSelector.ts#L14-L61
 
-use std::{path::Component, sync::Arc};
+use std::sync::Arc;
 
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
@@ -309,49 +309,19 @@ fn resolve_directory_pattern(
 /// Resolve a path string relative to `cwd`, normalising away `.` and `..`.
 ///
 /// `path_str` may be `"."`, `".."`, `"./foo"`, `"../foo"`, or a bare name like `"packages/app"`.
-fn resolve_filter_path(path_str: &str, cwd: &AbsolutePath) -> Arc<AbsolutePath> {
-    // `AbsolutePath::join` delegates to `PathBuf::push`, which does not normalise
-    // `.` or `..` components. We must normalise manually so that the resulting path
-    // compares equal to the package root paths stored in `IndexedPackageGraph`.
-    let raw = cwd.join(path_str);
-    normalize_absolute_path(&raw).into()
-}
-
-/// Normalise an [`AbsolutePath`] by resolving `.` and `..` components lexically.
 ///
-/// Does NOT hit the filesystem. If `..` would go above the root,
-/// the pop is silently ignored (empty stack stays empty).
+/// Uses lexical normalization (no filesystem access), which can produce incorrect
+/// results when symlinks are involved (e.g. `/a/symlink/../b` → `/a/b`). This
+/// matches pnpm's behaviour.
 #[expect(
     clippy::disallowed_types,
-    reason = "PathBuf used as temporary builder; only AbsolutePathBuf is returned"
+    reason = "PathBuf returned by path_clean::clean; only AbsolutePathBuf is kept"
 )]
-fn normalize_absolute_path(path: &AbsolutePath) -> AbsolutePathBuf {
-    let mut result = std::path::PathBuf::new();
-    // Collect normal components into an owned Vec so we can pop `..` safely
-    // without worrying about borrowing `path` while mutating `result`.
-    let mut normal_parts: Vec<std::ffi::OsString> = Vec::new();
-
-    for component in path.as_path().components() {
-        match component {
-            // Root and prefix always appear first; push them directly.
-            Component::RootDir | Component::Prefix(_) => result.push(component),
-            Component::Normal(name) => normal_parts.push(name.to_os_string()),
-            Component::ParentDir => {
-                // Pop the last normal component; never underflow past root.
-                let _ = normal_parts.pop();
-            }
-            Component::CurDir => {} // skip `.`
-        }
-    }
-
-    for name in normal_parts {
-        result.push(name);
-    }
-
-    // SAFETY: The input was an AbsolutePathBuf (is_absolute() = true).
-    // Removing `.` and `..` from an absolute path cannot make it relative.
-    AbsolutePathBuf::new(result)
-        .expect("invariant: normalising an absolute path preserves absoluteness")
+fn resolve_filter_path(path_str: &str, cwd: &AbsolutePath) -> Arc<AbsolutePath> {
+    let cleaned = path_clean::clean(cwd.join(path_str).as_path());
+    let normalized = AbsolutePathBuf::new(cleaned)
+        .expect("invariant: cleaning an absolute path preserves absoluteness");
+    normalized.into()
 }
 
 impl PackageNamePattern {
@@ -722,5 +692,107 @@ mod tests {
         let cwd = abs("/workspace/packages/app");
         let f = parse_filter("../foo/*", cwd).unwrap();
         assert_directory_glob(&f, abs("/workspace/packages/foo"), "*");
+    }
+
+    // ── Direct resolve_directory_pattern tests ──────────────────────────────
+
+    #[test]
+    fn dir_pattern_plain_path() {
+        let cwd = abs("/workspace");
+        let dp = resolve_directory_pattern("./packages/app", cwd).unwrap();
+        assert!(
+            matches!(&dp, DirectoryPattern::Exact(p) if p.as_ref() == abs("/workspace/packages/app"))
+        );
+    }
+
+    #[test]
+    fn dir_pattern_dot() {
+        let cwd = abs("/workspace/packages/app");
+        let dp = resolve_directory_pattern(".", cwd).unwrap();
+        assert!(
+            matches!(&dp, DirectoryPattern::Exact(p) if p.as_ref() == abs("/workspace/packages/app"))
+        );
+    }
+
+    #[test]
+    fn dir_pattern_dotdot() {
+        let cwd = abs("/workspace/packages/app");
+        let dp = resolve_directory_pattern("..", cwd).unwrap();
+        assert!(
+            matches!(&dp, DirectoryPattern::Exact(p) if p.as_ref() == abs("/workspace/packages"))
+        );
+    }
+
+    #[test]
+    fn dir_pattern_normalises_dotdot_in_middle() {
+        let cwd = abs("/workspace");
+        let dp = resolve_directory_pattern("./foo/../bar", cwd).unwrap();
+        assert!(matches!(&dp, DirectoryPattern::Exact(p) if p.as_ref() == abs("/workspace/bar")));
+    }
+
+    #[test]
+    fn dir_pattern_glob_star() {
+        let cwd = abs("/workspace");
+        let dp = resolve_directory_pattern("./packages/*", cwd).unwrap();
+        match &dp {
+            DirectoryPattern::Glob { base, pattern } => {
+                assert_eq!(base.as_ref(), abs("/workspace/packages"));
+                assert_eq!(pattern.to_string(), "*");
+            }
+            other => panic!("expected Glob, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dir_pattern_glob_double_star() {
+        let cwd = abs("/workspace");
+        let dp = resolve_directory_pattern("./packages/**", cwd).unwrap();
+        match &dp {
+            DirectoryPattern::Glob { base, pattern } => {
+                assert_eq!(base.as_ref(), abs("/workspace/packages"));
+                assert_eq!(pattern.to_string(), "**");
+            }
+            other => panic!("expected Glob, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dir_pattern_bare_glob_star() {
+        // `*` with no path prefix — base should resolve to cwd
+        let cwd = abs("/workspace");
+        let dp = resolve_directory_pattern("*", cwd).unwrap();
+        match &dp {
+            DirectoryPattern::Glob { base, pattern } => {
+                assert_eq!(base.as_ref(), abs("/workspace"));
+                assert_eq!(pattern.to_string(), "*");
+            }
+            other => panic!("expected Glob, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dir_pattern_dotdot_before_glob() {
+        let cwd = abs("/workspace/packages/app");
+        let dp = resolve_directory_pattern("../*", cwd).unwrap();
+        match &dp {
+            DirectoryPattern::Glob { base, pattern } => {
+                assert_eq!(base.as_ref(), abs("/workspace/packages"));
+                assert_eq!(pattern.to_string(), "*");
+            }
+            other => panic!("expected Glob, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dir_pattern_nested_glob() {
+        let cwd = abs("/workspace");
+        let dp = resolve_directory_pattern("./packages/*/src", cwd).unwrap();
+        match &dp {
+            DirectoryPattern::Glob { base, pattern } => {
+                assert_eq!(base.as_ref(), abs("/workspace/packages"));
+                assert_eq!(pattern.to_string(), "*/src");
+            }
+            other => panic!("expected Glob, got {other:?}"),
+        }
     }
 }
