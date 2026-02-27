@@ -32,3 +32,11 @@ compact = true
 name = "transitive from package without task"
 args = ["run", "-t", "build"]
 cwd = "packages/middle"
+
+# -t with package#task: middle has no build, but its dep bottom does.
+# Equivalent to --filter @test/middle... build.
+# Result: bottom#build only.
+[[plan]]
+compact = true
+name = "transitive with package specifier lacking task"
+args = ["run", "-t", "@test/middle#build"]
