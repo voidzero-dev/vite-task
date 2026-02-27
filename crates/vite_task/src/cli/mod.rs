@@ -169,6 +169,9 @@ pub enum CLITaskQueryError {
     #[error("cannot specify package '{package_name}' for task '{task_name}' with --filter")]
     PackageNameSpecifiedWithFilter { package_name: Str, task_name: Str },
 
+    #[error("--filter value contains no selectors (whitespace-only)")]
+    EmptyFilter,
+
     #[error("invalid --filter expression")]
     InvalidFilter(#[from] PackageFilterParseError),
 }
@@ -208,8 +211,8 @@ impl ResolvedRunCommand {
                 });
             }
             PackageQuery::All
-        } else if let Ok(raw_filters) = Vec1::try_from_vec(filter) {
-            // `raw_filters: Vec1<Str>` — at least one --filter was specified.
+        } else if !filter.is_empty() {
+            // At least one --filter was specified.
             if transitive {
                 return Err(CLITaskQueryError::FilterWithTransitive);
             }
@@ -219,7 +222,16 @@ impl ResolvedRunCommand {
                     task_name: task_specifier.task_name,
                 });
             }
-            let parsed: Vec1<PackageFilter> = raw_filters.try_mapped(|f| parse_filter(&f, cwd))?;
+            // Normalize: split each --filter value by whitespace into individual tokens.
+            // This makes `--filter "a b"` equivalent to `--filter a --filter b` (pnpm behaviour).
+            let tokens: Vec1<Str> = Vec1::try_from_vec(
+                filter
+                    .into_iter()
+                    .flat_map(|f| f.split_ascii_whitespace().map(Str::from).collect::<Vec<_>>())
+                    .collect(),
+            )
+            .map_err(|_| CLITaskQueryError::EmptyFilter)?;
+            let parsed: Vec1<PackageFilter> = tokens.try_mapped(|f| parse_filter(&f, cwd))?;
             PackageQuery::Filters(parsed)
         } else {
             // No --filter, no --recursive: implicit cwd or package-name specifier.

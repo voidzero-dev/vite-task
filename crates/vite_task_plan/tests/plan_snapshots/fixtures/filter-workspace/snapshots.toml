@@ -56,6 +56,12 @@ compact = true
 name = "multiple filters union"
 args = ["run", "--filter", "@test/app", "--filter", "@test/cli", "build"]
 
+# pnpm: space-separated selectors in a single --filter value
+[[plan]]
+compact = true
+name = "filter space-separated in single value"
+args = ["run", "--filter", "@test/app @test/cli", "build"]
+
 # pnpm: "select by parentDir and exclude one package by pattern"
 [[plan]]
 compact = true
