@@ -4,7 +4,7 @@ mod error;
 use std::path::Path;
 
 pub use error::Error;
-use wax::{Glob, Pattern};
+use wax::{Glob, Program};
 
 /// If there are no negated patterns, it will follow the first match wins semantics.
 /// Otherwise, it will follow the last match wins semantics.

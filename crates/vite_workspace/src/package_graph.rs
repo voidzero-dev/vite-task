@@ -324,7 +324,7 @@ impl IndexedPackageGraph {
                 }
             }
             DirectoryPattern::Glob { base, pattern } => {
-                use wax::Pattern as _;
+                use wax::Program as _;
                 for idx in self.graph.node_indices() {
                     let pkg_path = &self.graph[idx].absolute_path;
                     if let Ok(remainder) = pkg_path.as_path().strip_prefix(base.as_path())

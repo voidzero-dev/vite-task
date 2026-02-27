@@ -53,7 +53,7 @@ pub enum Error {
     WaxBuild(#[from] wax::BuildError),
 
     #[error(transparent)]
-    WaxWalk(#[from] wax::WalkError),
+    WaxWalk(#[from] wax::walk::WalkError),
 
     #[error(transparent)]
     Glob(#[from] vite_glob::Error),
