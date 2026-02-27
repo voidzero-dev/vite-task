@@ -305,6 +305,9 @@ fn run_case_inner(
     reason = "current_dir needed because insta::glob! requires std PathBuf"
 )]
 fn main() {
+    // SAFETY: Called before any threads are spawned; insta reads this lazily on first assertion.
+    unsafe { std::env::set_var("INSTA_REQUIRE_FULL_MATCH", "1") };
+
     let filter = std::env::args().nth(1);
 
     let tokio_runtime = Runtime::new().unwrap();
