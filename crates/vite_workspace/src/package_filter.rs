@@ -288,38 +288,22 @@ fn parse_core_selector(
 
 /// Resolve a directory selector string into a [`DirectoryPattern`].
 ///
-/// If the string contains glob metacharacters (`*`, `?`, `[`), it is split at the
-/// first glob component into a resolved base path and a relative glob pattern.
-/// Otherwise, the entire string is resolved as an exact path.
+/// Uses [`wax::Glob::partition`] to split into an invariant base path and an
+/// optional glob pattern. If `partition` yields no pattern, the result is an
+/// exact path match; otherwise it is a glob match.
 fn resolve_directory_pattern(
     path_str: &str,
     cwd: &AbsolutePath,
 ) -> Result<DirectoryPattern, PackageFilterParseError> {
-    if !path_str.contains(['*', '?', '[']) {
-        return Ok(DirectoryPattern::Exact(resolve_filter_path(path_str, cwd)));
+    let glob = wax::Glob::new(path_str)?.into_owned();
+    let (base_pathbuf, pattern) = glob.partition();
+    let base_str = base_pathbuf.to_str().expect("filter paths are always valid UTF-8");
+    let base = resolve_filter_path(if base_str.is_empty() { "." } else { base_str }, cwd);
+
+    match pattern {
+        Some(pattern) => Ok(DirectoryPattern::Glob { base, pattern: Box::new(pattern) }),
+        None => Ok(DirectoryPattern::Exact(base)),
     }
-
-    // Split into non-glob base components and glob suffix components.
-    let mut base_parts: Vec<&str> = Vec::new();
-    let mut glob_parts: Vec<&str> = Vec::new();
-    let mut found_glob = false;
-
-    for part in path_str.split('/') {
-        if !found_glob && !part.contains(['*', '?', '[']) {
-            base_parts.push(part);
-        } else {
-            found_glob = true;
-            glob_parts.push(part);
-        }
-    }
-
-    let base_str = if base_parts.is_empty() { "." } else { &base_parts.join("/") };
-    let base = resolve_filter_path(base_str, cwd);
-
-    let glob_str = glob_parts.join("/");
-    let pattern = wax::Glob::new(&glob_str)?.into_owned();
-
-    Ok(DirectoryPattern::Glob { base, pattern: Box::new(pattern) })
 }
 
 /// Resolve a path string relative to `cwd`, normalising away `.` and `..`.
@@ -377,7 +361,7 @@ impl PackageNamePattern {
         match self {
             Self::Exact(n) => n.as_str() == name,
             Self::Glob(glob) => {
-                use wax::Pattern as _;
+                use wax::Program as _;
                 glob.is_match(name)
             }
         }

@@ -145,7 +145,7 @@ vite_task_graph = { path = "crates/vite_task_graph" }
 vite_task_plan = { path = "crates/vite_task_plan" }
 vite_workspace = { path = "crates/vite_workspace" }
 vt100 = "0.16.2"
-wax = "0.6.0"
+wax = "0.7.0"
 which = "8.0.0"
 widestring = "1.2.0"
 winapi = "0.3.9"
