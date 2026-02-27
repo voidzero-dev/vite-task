@@ -324,20 +324,6 @@ fn resolve_filter_path(path_str: &str, cwd: &AbsolutePath) -> Arc<AbsolutePath> 
     normalized.into()
 }
 
-impl PackageNamePattern {
-    /// Returns `true` if this pattern matches the given package name.
-    #[must_use]
-    pub fn matches_name(&self, name: &str) -> bool {
-        match self {
-            Self::Exact(n) => n.as_str() == name,
-            Self::Glob(glob) => {
-                use wax::Program as _;
-                glob.is_match(name)
-            }
-        }
-    }
-}
-
 /// Build a [`PackageNamePattern`] from a name or glob string.
 ///
 /// A string containing `*`, `?`, or `[` is treated as a glob; otherwise exact.
