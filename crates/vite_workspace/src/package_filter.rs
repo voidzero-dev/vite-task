@@ -313,10 +313,6 @@ fn resolve_directory_pattern(
 /// Uses lexical normalization (no filesystem access), which can produce incorrect
 /// results when symlinks are involved (e.g. `/a/symlink/../b` → `/a/b`). This
 /// matches pnpm's behaviour.
-#[expect(
-    clippy::disallowed_types,
-    reason = "PathBuf returned by path_clean::clean; only AbsolutePathBuf is kept"
-)]
 fn resolve_filter_path(path_str: &str, cwd: &AbsolutePath) -> Arc<AbsolutePath> {
     let cleaned = path_clean::clean(cwd.join(path_str).as_path());
     let normalized = AbsolutePathBuf::new(cleaned)
@@ -345,9 +341,26 @@ fn build_name_pattern(name: &str) -> Result<PackageNamePattern, PackageFilterPar
 mod tests {
     use super::*;
 
-    /// Construct an [`AbsolutePath`] from a literal string (test helper).
+    /// Construct an [`AbsolutePath`] from a Unix-style literal (test helper).
+    ///
+    /// On Windows, a `C:` prefix is prepended so `/workspace` becomes `C:/workspace`.
+    #[cfg_attr(
+        windows,
+        expect(
+            clippy::disallowed_macros,
+            reason = "test helper constructs Windows paths from Unix-style literals"
+        )
+    )]
     fn abs(path: &'static str) -> &'static AbsolutePath {
-        AbsolutePath::new(path).expect("test path must be absolute")
+        #[cfg(unix)]
+        {
+            AbsolutePath::new(path).expect("test path must be absolute")
+        }
+        #[cfg(windows)]
+        {
+            let leaked = Box::leak(std::format!("C:{path}").into_boxed_str());
+            AbsolutePath::new(leaked).expect("test path must be absolute")
+        }
     }
 
     // ── Helpers to assert selector shapes ───────────────────────────────────
@@ -725,7 +738,7 @@ mod tests {
                 assert_eq!(base.as_ref(), abs("/workspace/packages"));
                 assert_eq!(pattern.to_string(), "*");
             }
-            other => panic!("expected Glob, got {other:?}"),
+            DirectoryPattern::Exact(p) => panic!("expected Glob, got Exact({p:?})"),
         }
     }
 
@@ -738,7 +751,7 @@ mod tests {
                 assert_eq!(base.as_ref(), abs("/workspace/packages"));
                 assert_eq!(pattern.to_string(), "**");
             }
-            other => panic!("expected Glob, got {other:?}"),
+            DirectoryPattern::Exact(p) => panic!("expected Glob, got Exact({p:?})"),
         }
     }
 
@@ -752,7 +765,7 @@ mod tests {
                 assert_eq!(base.as_ref(), abs("/workspace"));
                 assert_eq!(pattern.to_string(), "*");
             }
-            other => panic!("expected Glob, got {other:?}"),
+            DirectoryPattern::Exact(p) => panic!("expected Glob, got Exact({p:?})"),
         }
     }
 
@@ -765,7 +778,7 @@ mod tests {
                 assert_eq!(base.as_ref(), abs("/workspace/packages"));
                 assert_eq!(pattern.to_string(), "*");
             }
-            other => panic!("expected Glob, got {other:?}"),
+            DirectoryPattern::Exact(p) => panic!("expected Glob, got Exact({p:?})"),
         }
     }
 
@@ -778,7 +791,7 @@ mod tests {
                 assert_eq!(base.as_ref(), abs("/workspace/packages"));
                 assert_eq!(pattern.to_string(), "*/src");
             }
-            other => panic!("expected Glob, got {other:?}"),
+            DirectoryPattern::Exact(p) => panic!("expected Glob, got Exact({p:?})"),
         }
     }
 }
