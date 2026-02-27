@@ -80,6 +80,26 @@ compact = true
 name = "filter by directory"
 args = ["run", "--filter", "./packages/app", "build"]
 
+# directory filter with dependency expansion
+[[plan]]
+compact = true
+name = "filter by directory with dependencies"
+args = ["run", "--filter", "./packages/app...", "build"]
+
+# --filter .... = . (cwd) + ... (deps) — from inside a package directory
+[[plan]]
+compact = true
+name = "filter dot with dependencies from package"
+args = ["run", "--filter", "....", "build"]
+cwd = "packages/app"
+
+# --filter ..... = .. (parent dir) + ... (deps) — from inside a package subdir
+[[plan]]
+compact = true
+name = "filter dotdot with dependencies"
+args = ["run", "--filter", ".....", "build"]
+cwd = "packages/app/src"
+
 # pnpm glob-dir: one level under packages/
 [[plan]]
 compact = true
@@ -132,3 +152,9 @@ args = ["run", "--filter", "@test/app...", "--filter", "@test/cli", "build"]
 compact = true
 name = "filter deps skips packages without task"
 args = ["run", "--filter", "@test/app...", "test"]
+
+# script containing "vp run --filter .... build" — expanded in plan
+[[plan]]
+compact = true
+name = "nested vp run with filter in script"
+args = ["run", "--filter", "@test/app", "deploy"]
