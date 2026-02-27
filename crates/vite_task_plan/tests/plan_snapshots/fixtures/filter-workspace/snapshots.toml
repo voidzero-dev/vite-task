@@ -88,6 +88,12 @@ name = "transitive flag from package subfolder"
 args = ["run", "-t", "build"]
 cwd = "packages/app/src/components"
 
+# -t with package#task specifier = --filter package... task
+[[plan]]
+compact = true
+name = "transitive with package specifier"
+args = ["run", "-t", "@test/app#build"]
+
 # recursive flag = All
 [[plan]]
 compact = true
