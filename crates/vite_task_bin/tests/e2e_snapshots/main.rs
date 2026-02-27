@@ -463,6 +463,9 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
 }
 
 fn main() {
+    // SAFETY: Called before any threads are spawned; insta reads this lazily on first assertion.
+    unsafe { std::env::set_var("INSTA_REQUIRE_FULL_MATCH", "1") };
+
     let filter = std::env::args().nth(1);
 
     let tmp_dir = tempfile::tempdir().unwrap();
