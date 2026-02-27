@@ -92,7 +92,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/conflict-test
           "<workspace>/packages/scope-a-b",
           "c"
         ],
-        "Explicit"
+        null
       ]
     ]
   }

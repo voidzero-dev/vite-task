@@ -30,22 +30,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/config",
-          "build"
-        ],
-        "Topological"
-      ],
-      [
-        [
-          "<workspace>/packages/shared",
-          "build"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -129,15 +114,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/shared",
-          "test"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -165,36 +142,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/api",
-          "build"
-        ],
-        "Topological"
-      ],
-      [
-        [
-          "<workspace>/packages/pkg#special",
-          "build"
-        ],
-        "Topological"
-      ],
-      [
-        [
-          "<workspace>/packages/shared",
-          "build"
-        ],
-        "Topological"
-      ],
-      [
-        [
-          "<workspace>/packages/ui",
-          "build"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -250,15 +198,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/api",
-          "dev"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -314,36 +254,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/api",
-          "test"
-        ],
-        "Topological"
-      ],
-      [
-        [
-          "<workspace>/packages/pkg#special",
-          "test"
-        ],
-        "Topological"
-      ],
-      [
-        [
-          "<workspace>/packages/shared",
-          "test"
-        ],
-        "Topological"
-      ],
-      [
-        [
-          "<workspace>/packages/ui",
-          "test"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -427,15 +338,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/shared",
-          "build"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -463,15 +366,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/shared",
-          "test"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -639,15 +534,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/config",
-          "validate"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -675,15 +562,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/shared",
-          "build"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -711,15 +590,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/shared",
-          "lint"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -775,14 +646,6 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/comprehensive-ta
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/shared",
-          "test"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   }
 ]

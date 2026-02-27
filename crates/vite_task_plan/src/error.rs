@@ -113,13 +113,6 @@ pub enum Error {
     #[error(transparent)]
     PathFingerprint(#[from] PathFingerprintError),
 
-    #[error("Failed to query tasks from task graph")]
-    TaskQuery(
-        #[source]
-        #[from]
-        vite_task_graph::query::TaskQueryError,
-    ),
-
     #[error(transparent)]
     TaskRecursionDetected(#[from] TaskRecursionError),
 
@@ -144,6 +137,13 @@ pub enum Error {
     #[error("No task specifier provided for 'run' command")]
     MissingTaskSpecifier,
 
+    /// No tasks matched the query in a nested `vp run` call inside a task script.
+    ///
+    /// At the top level, an empty execution graph triggers the task selector UI.
+    /// In a nested context there is no UI, so this is returned as an error instead.
+    #[error("no tasks matched the query")]
+    NoTasksMatched,
+
     /// A cycle was detected in the task dependency graph during planning.
     ///
     /// This is caught by `AcyclicGraph::try_from_graph`, which validates that the
@@ -157,22 +157,5 @@ impl Error {
     #[must_use]
     pub const fn is_missing_task_specifier(&self) -> bool {
         matches!(self, Self::MissingTaskSpecifier)
-    }
-
-    /// If this error represents a top-level task-not-found lookup failure,
-    /// returns the task name that the user typed.
-    ///
-    /// Returns `None` if the error occurred in a nested task (wrapped in `NestPlan`),
-    /// since nested task errors should propagate as-is rather than triggering
-    /// interactive task selection.
-    #[must_use]
-    pub fn task_not_found_name(&self) -> Option<&str> {
-        match self {
-            Self::TaskQuery(vite_task_graph::query::TaskQueryError::SpecifierLookupError {
-                specifier,
-                ..
-            }) => Some(specifier.task_name.as_str()),
-            _ => None,
-        }
     }
 }

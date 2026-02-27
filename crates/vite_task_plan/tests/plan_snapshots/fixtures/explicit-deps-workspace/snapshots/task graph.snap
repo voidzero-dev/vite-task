@@ -30,15 +30,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/utils",
-          "build"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -65,21 +57,21 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
           "<workspace>/packages/app",
           "build"
         ],
-        "Explicit"
+        null
       ],
       [
         [
           "<workspace>/packages/app",
           "test"
         ],
-        "Explicit"
+        null
       ],
       [
         [
           "<workspace>/packages/utils",
           "lint"
         ],
-        "Explicit"
+        null
       ]
     ]
   },
@@ -137,15 +129,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/utils",
-          "test"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -235,7 +219,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
           "<workspace>/packages/core",
           "clean"
         ],
-        "Explicit"
+        null
       ]
     ]
   },
@@ -293,15 +277,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/core",
-          "build"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   },
   {
     "key": [
@@ -335,21 +311,14 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
           "<workspace>/packages/core",
           "build"
         ],
-        "Explicit"
-      ],
-      [
-        [
-          "<workspace>/packages/core",
-          "lint"
-        ],
-        "Topological"
+        null
       ],
       [
         [
           "<workspace>/packages/utils",
           "build"
         ],
-        "Explicit"
+        null
       ]
     ]
   },
@@ -379,14 +348,6 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
         }
       }
     },
-    "neighbors": [
-      [
-        [
-          "<workspace>/packages/core",
-          "test"
-        ],
-        "Topological"
-      ]
-    ]
+    "neighbors": []
   }
 ]

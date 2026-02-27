@@ -1,65 +1,9 @@
 ---
 source: crates/vite_task_plan/tests/plan_snapshots/main.rs
 expression: task_graph_json
-input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topological-workspace
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/filter-workspace
 ---
 [
-  {
-    "key": [
-      "<workspace>/apps/web",
-      "build"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/web",
-        "task_name": "build",
-        "package_path": "<workspace>/apps/web"
-      },
-      "resolved_config": {
-        "command": "echo 'Building @test/web'",
-        "resolved_options": {
-          "cwd": "<workspace>/apps/web",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
-        }
-      }
-    },
-    "neighbors": []
-  },
-  {
-    "key": [
-      "<workspace>/apps/web",
-      "dev"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/web",
-        "task_name": "dev",
-        "package_path": "<workspace>/apps/web"
-      },
-      "resolved_config": {
-        "command": "echo 'Running @test/web in dev mode'",
-        "resolved_options": {
-          "cwd": "<workspace>/apps/web",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
-        }
-      }
-    },
-    "neighbors": []
-  },
   {
     "key": [
       "<workspace>/packages/app",
@@ -103,6 +47,62 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
         "command": "echo 'Testing @test/app'",
         "resolved_options": {
           "cwd": "<workspace>/packages/app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/cli",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/cli",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/cli"
+      },
+      "resolved_config": {
+        "command": "echo 'Building @test/cli'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/cli",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/cli",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/cli",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/cli"
+      },
+      "resolved_config": {
+        "command": "echo 'Testing @test/cli'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/cli",
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
@@ -174,19 +174,47 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
   },
   {
     "key": [
-      "<workspace>/packages/utils",
+      "<workspace>/packages/lib",
       "build"
     ],
     "node": {
       "task_display": {
-        "package_name": "@test/utils",
+        "package_name": "@test/lib",
         "task_name": "build",
-        "package_path": "<workspace>/packages/utils"
+        "package_path": "<workspace>/packages/lib"
       },
       "resolved_config": {
-        "command": "echo 'Preparing @test/utils' && echo 'Building @test/utils' && echo 'Done @test/utils'",
+        "command": "echo 'Building @test/lib'",
         "resolved_options": {
-          "cwd": "<workspace>/packages/utils",
+          "cwd": "<workspace>/packages/lib",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/lib",
+      "test"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/lib",
+        "task_name": "test",
+        "package_path": "<workspace>/packages/lib"
+      },
+      "resolved_config": {
+        "command": "echo 'Testing @test/lib'",
+        "resolved_options": {
+          "cwd": "<workspace>/packages/lib",
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
@@ -203,16 +231,16 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
   {
     "key": [
       "<workspace>/packages/utils",
-      "test"
+      "build"
     ],
     "node": {
       "task_display": {
         "package_name": "@test/utils",
-        "task_name": "test",
+        "task_name": "build",
         "package_path": "<workspace>/packages/utils"
       },
       "resolved_config": {
-        "command": "echo 'Testing @test/utils'",
+        "command": "echo 'Building @test/utils'",
         "resolved_options": {
           "cwd": "<workspace>/packages/utils",
           "cache_config": {

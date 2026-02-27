@@ -1,10 +1,18 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use vec1::Vec1;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{TaskSpecifier, query::TaskQueryKind};
+use vite_task_graph::{
+    TaskSpecifier,
+    query::{PackageQuery, TaskQuery},
+};
 use vite_task_plan::plan_request::{PlanOptions, QueryPlanRequest};
+use vite_workspace::package_filter::{
+    GraphTraversal, PackageFilter, PackageFilterParseError, PackageNamePattern, PackageSelector,
+    TraversalDirection, parse_filter,
+};
 
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum CacheSubcommand {
@@ -13,10 +21,7 @@ pub enum CacheSubcommand {
 }
 
 /// Flags that control how a `run` command selects tasks.
-///
-/// Extracted as a separate struct so they can be cheaply `Copy`-ed
-/// before `RunCommand` is consumed.
-#[derive(Debug, Clone, Copy, clap::Args)]
+#[derive(Debug, Clone, clap::Args)]
 #[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
 pub struct RunFlags {
     /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
@@ -34,6 +39,10 @@ pub struct RunFlags {
     /// Show full detailed summary after execution.
     #[clap(default_value = "false", short = 'v', long)]
     pub verbose: bool,
+
+    /// Filter packages (pnpm --filter syntax). Can be specified multiple times.
+    #[clap(short = 'F', long, num_args = 1)]
+    pub filter: Vec<Str>,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -150,6 +159,18 @@ pub enum CLITaskQueryError {
 
     #[error("cannot specify package '{package_name}' for task '{task_name}' with --recursive")]
     PackageNameSpecifiedWithRecursive { package_name: Str, task_name: Str },
+
+    #[error("--filter and --transitive cannot be used together")]
+    FilterWithTransitive,
+
+    #[error("--filter and --recursive cannot be used together")]
+    FilterWithRecursive,
+
+    #[error("cannot specify package '{package_name}' for task '{task_name}' with --filter")]
+    PackageNameSpecifiedWithFilter { package_name: Str, task_name: Str },
+
+    #[error("invalid --filter expression")]
+    InvalidFilter(#[from] PackageFilterParseError),
 }
 
 impl ResolvedRunCommand {
@@ -157,15 +178,15 @@ impl ResolvedRunCommand {
     ///
     /// # Errors
     ///
-    /// Returns an error if `--recursive` and `--transitive` are both set,
-    /// or if a package name is specified with `--recursive`.
+    /// Returns an error if conflicting flags are set or if a `--filter` expression
+    /// cannot be parsed.
     pub fn into_query_plan_request(
         self,
         cwd: &Arc<AbsolutePath>,
     ) -> Result<QueryPlanRequest, CLITaskQueryError> {
         let Self {
             task_specifier,
-            flags: RunFlags { recursive, transitive, ignore_depends_on, .. },
+            flags: RunFlags { recursive, transitive, ignore_depends_on, filter, .. },
             additional_args,
         } = self;
 
@@ -173,28 +194,56 @@ impl ResolvedRunCommand {
 
         let include_explicit_deps = !ignore_depends_on;
 
-        let query_kind = if recursive {
+        let package_query = if recursive {
             if transitive {
                 return Err(CLITaskQueryError::RecursiveTransitiveConflict);
             }
-            let task_name = if let Some(package_name) = task_specifier.package_name {
+            if !filter.is_empty() {
+                return Err(CLITaskQueryError::FilterWithRecursive);
+            }
+            if let Some(package_name) = task_specifier.package_name {
                 return Err(CLITaskQueryError::PackageNameSpecifiedWithRecursive {
                     package_name,
                     task_name: task_specifier.task_name,
                 });
-            } else {
-                task_specifier.task_name
-            };
-            TaskQueryKind::Recursive { task_name }
-        } else {
-            TaskQueryKind::Normal {
-                task_specifier,
-                cwd: Arc::clone(cwd),
-                include_topological_deps: transitive,
             }
+            PackageQuery::All
+        } else if let Ok(raw_filters) = Vec1::try_from_vec(filter) {
+            // `raw_filters: Vec1<Str>` — at least one --filter was specified.
+            if transitive {
+                return Err(CLITaskQueryError::FilterWithTransitive);
+            }
+            if let Some(package_name) = task_specifier.package_name {
+                return Err(CLITaskQueryError::PackageNameSpecifiedWithFilter {
+                    package_name,
+                    task_name: task_specifier.task_name,
+                });
+            }
+            let parsed: Vec1<PackageFilter> = raw_filters.try_mapped(|f| parse_filter(&f, cwd))?;
+            PackageQuery::Filters(parsed)
+        } else {
+            // No --filter, no --recursive: implicit cwd or package-name specifier.
+            let selector = task_specifier.package_name.map_or_else(
+                || PackageSelector::ContainingPackage(Arc::clone(cwd)),
+                |name| PackageSelector::Name(PackageNamePattern::Exact(name)),
+            );
+            let traversal = if transitive {
+                Some(GraphTraversal {
+                    direction: TraversalDirection::Dependencies,
+                    exclude_self: false,
+                })
+            } else {
+                None
+            };
+            PackageQuery::Filters(Vec1::new(PackageFilter { exclude: false, selector, traversal }))
         };
+
         Ok(QueryPlanRequest {
-            query: vite_task_graph::query::TaskQuery { kind: query_kind, include_explicit_deps },
+            query: TaskQuery {
+                package_query,
+                task_name: task_specifier.task_name,
+                include_explicit_deps,
+            },
             plan_options: PlanOptions { extra_args: additional_args.into() },
         })
     }

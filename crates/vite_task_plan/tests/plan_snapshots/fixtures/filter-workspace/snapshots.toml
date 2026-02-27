@@ -1,0 +1,110 @@
+# Tests pnpm-style --filter package selection
+
+# pnpm: "select just a package by name"
+[[plan]]
+compact = true
+name = "filter by exact name"
+args = ["run", "--filter", "@test/app", "build"]
+
+# pnpm: name pattern matching with *
+[[plan]]
+compact = true
+name = "filter by glob"
+args = ["run", "--filter", "@test/*", "build"]
+
+# pnpm: "select package with dependencies"
+[[plan]]
+compact = true
+name = "filter with dependencies"
+args = ["run", "--filter", "@test/app...", "build"]
+
+# pnpm: "select only package dependencies (excluding the package itself)"
+[[plan]]
+compact = true
+name = "filter dependencies only exclude self"
+args = ["run", "--filter", "@test/app^...", "build"]
+
+# pnpm: "select package with dependents"
+[[plan]]
+compact = true
+name = "filter with dependents"
+args = ["run", "--filter", "...@test/core", "build"]
+
+# pnpm: "select dependents excluding package itself"
+[[plan]]
+compact = true
+name = "filter dependents only exclude self"
+args = ["run", "--filter", "...^@test/core", "build"]
+
+# pnpm: "select package with dependencies and dependents, including dependent dependencies"
+[[plan]]
+compact = true
+name = "filter both deps and dependents"
+args = ["run", "--filter", "...@test/lib...", "build"]
+
+# pnpm Example 4: two cherry-picked packages with a dependency between them.
+# app depends on lib. Both cherry-picked (no "..."). The induced subgraph
+# still preserves the app→lib edge — lib#build runs before app#build.
+[[plan]]
+compact = true
+name = "cherry picked filters respect dependency order"
+args = ["run", "--filter", "@test/app", "--filter", "@test/lib", "build"]
+
+# pnpm: "filter using two selectors" (independent packages)
+[[plan]]
+compact = true
+name = "multiple filters union"
+args = ["run", "--filter", "@test/app", "--filter", "@test/cli", "build"]
+
+# pnpm: "select by parentDir and exclude one package by pattern"
+[[plan]]
+compact = true
+name = "filter include and exclude"
+args = ["run", "--filter", "@test/app...", "--filter", "!@test/utils", "build"]
+
+# pnpm: "select all packages except one"
+[[plan]]
+compact = true
+name = "exclude only filter"
+args = ["run", "--filter", "!@test/core", "build"]
+
+# pnpm: "select by parentDir"
+[[plan]]
+compact = true
+name = "filter by directory"
+args = ["run", "--filter", "./packages/app", "build"]
+
+# transitive flag = --filter .…
+[[plan]]
+compact = true
+name = "transitive flag"
+args = ["run", "-t", "build"]
+cwd = "packages/app"
+
+# -t from a subfolder inside a package — ContainingPackage walks up to find app.
+[[plan]]
+compact = true
+name = "transitive flag from package subfolder"
+args = ["run", "-t", "build"]
+cwd = "packages/app/src/components"
+
+# recursive flag = All
+[[plan]]
+compact = true
+name = "recursive flag"
+args = ["run", "-r", "build"]
+
+# pnpm Example 5: app... selects {app,lib,core,utils}. cli is cherry-picked.
+# ALL original edges between selected packages are preserved (induced subgraph).
+# cli→core edge IS present — cli#build waits for core#build.
+[[plan]]
+compact = true
+name = "mixed traversal filters"
+args = ["run", "--filter", "@test/app...", "--filter", "@test/cli", "build"]
+
+# pnpm Example 1 (partial): packages without the task are silently skipped.
+# @test/utils has no "test" — silently skipped; app, lib, core run in order.
+[[plan]]
+compact = true
+name = "filter deps skips packages without task"
+args = ["run", "--filter", "@test/app...", "test"]

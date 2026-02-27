@@ -238,7 +238,7 @@ impl<'a> Session<'a> {
                 // Save task name and flags before consuming run_command
                 let task_name = run_command.task_specifier.as_ref().map(|s| s.task_name.clone());
                 let show_details = run_command.flags.verbose;
-                let flags = run_command.flags;
+                let flags = run_command.flags.clone();
                 let additional_args = run_command.additional_args.clone();
 
                 match self.plan_from_cli_run_resolved(cwd, run_command).await {
@@ -268,20 +268,7 @@ impl<'a> Session<'a> {
                     Err(err) if err.is_missing_task_specifier() => {
                         self.handle_no_task(is_interactive, None, flags, additional_args).await
                     }
-                    Err(err) => {
-                        if let Some(task_name) = err.task_not_found_name() {
-                            let task_name = task_name.to_owned();
-                            self.handle_no_task(
-                                is_interactive,
-                                Some(&task_name),
-                                flags,
-                                additional_args,
-                            )
-                            .await
-                        } else {
-                            Err(err.into())
-                        }
-                    }
+                    Err(err) => Err(err.into()),
                 }
             }
         }

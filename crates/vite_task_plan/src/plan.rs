@@ -186,6 +186,16 @@ async fn plan_task_as_execution_node(
                             command: Str::from(&command_str[add_item_span.clone()]),
                             error: Box::new(error),
                         })?;
+                    // An empty execution graph means no tasks matched the query.
+                    // At the top level the session shows the task selector UI,
+                    // but in a nested context there is no UI — propagate as an error.
+                    if execution_graph.node_count() == 0 {
+                        return Err(Error::NestPlan {
+                            task_display: task_node.task_display.clone(),
+                            command: Str::from(&command_str[add_item_span]),
+                            error: Box::new(Error::NoTasksMatched),
+                        });
+                    }
                     ExecutionItemKind::Expanded(execution_graph)
                 }
                 // Synthetic task (from CommandHandler)
@@ -508,11 +518,11 @@ pub async fn plan_query_request(
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {
     context.set_extra_args(Arc::clone(&query_plan_request.plan_options.extra_args));
-    // Query matching tasks from the task graph
-    let task_node_index_graph = context
-        .indexed_task_graph()
-        .query_tasks(query_plan_request.query)
-        .map_err(Error::TaskQuery)?;
+    // Query matching tasks from the task graph.
+    // `query_tasks` is infallible — an empty graph means no tasks matched;
+    // the caller (session) handles empty graphs by showing the task selector.
+    let task_query_result = context.indexed_task_graph().query_tasks(&query_plan_request.query);
+    let task_node_index_graph = task_query_result.execution_graph;
 
     let mut execution_node_indices_by_task_index =
         FxHashMap::<TaskNodeIndex, ExecutionNodeIndex>::with_capacity_and_hasher(
