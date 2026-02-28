@@ -141,13 +141,13 @@ compact = true
 name = "recursive flag"
 args = ["run", "-r", "build"]
 
-# pnpm Example 5: app... selects {app,lib,core,utils}. cli is cherry-picked.
+# pnpm Example 5: lib... selects {lib,core}. cli is cherry-picked.
 # ALL original edges between selected packages are preserved (induced subgraph).
 # cli→core edge IS present — cli#build waits for core#build.
 [[plan]]
 compact = true
 name = "mixed traversal filters"
-args = ["run", "--filter", "@test/app...", "--filter", "@test/cli", "build"]
+args = ["run", "--filter", "@test/lib...", "--filter", "@test/cli", "build"]
 
 # pnpm Example 1 (partial): packages without the task are silently skipped.
 # @test/utils has no "test" — silently skipped; app, lib, core run in order.
@@ -212,11 +212,12 @@ compact = true
 name = "workspace root with filter"
 args = ["run", "-w", "--filter", "@test/app", "check"]
 
-# -w with -r: redundant (all packages already includes root). Same as -r alone.
+# -w with -r: redundant (all packages already includes root).
+# Root, app, and core all have "check" — root appears, proving -r already covers it.
 [[plan]]
 compact = true
 name = "workspace root with recursive"
-args = ["run", "-w", "-r", "build"]
+args = ["run", "-w", "-r", "check"]
 
 # -w with -t: workspace root with transitive dependencies.
 # Root depends on @test/core; both have "check", so core#check → root#check.

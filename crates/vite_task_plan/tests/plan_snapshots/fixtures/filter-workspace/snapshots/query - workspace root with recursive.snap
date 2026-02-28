@@ -6,20 +6,15 @@ info:
     - run
     - "-w"
     - "-r"
-    - build
+    - check
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/filter-workspace
 ---
 {
-  "packages/app#build": [
-    "packages/lib#build",
-    "packages/utils#build"
+  "#check": [
+    "packages/core#check"
   ],
-  "packages/cli#build": [
-    "packages/core#build"
+  "packages/app#check": [
+    "packages/core#check"
   ],
-  "packages/core#build": [],
-  "packages/lib#build": [
-    "packages/core#build"
-  ],
-  "packages/utils#build": []
+  "packages/core#check": []
 }
