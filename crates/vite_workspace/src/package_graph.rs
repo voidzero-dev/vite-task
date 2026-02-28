@@ -86,11 +86,11 @@ pub struct FilterResolution {
     /// stage (construction time), keeping all downstream code edge-type-agnostic.
     pub package_subgraph: DiGraphMap<PackageNodeIndex, ()>,
 
-    /// Indices into the input `filters` slice for selectors that matched no packages.
+    /// Original `--filter` strings for inclusion selectors that matched no packages.
     ///
-    /// The caller maps each index back to the original `--filter` string to emit
-    /// typo warnings. Empty when `PackageQuery::All` is used.
-    pub unmatched_selectors: Vec<usize>,
+    /// Omits synthetic filters (implicit cwd, `-w`) since the user didn't type them.
+    /// Empty when `PackageQuery::All` is used.
+    pub unmatched_selectors: Vec<Str>,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -213,8 +213,7 @@ impl IndexedPackageGraph {
     fn resolve_filters(&self, filters: &[PackageFilter]) -> FilterResolution {
         let mut unmatched_selectors = Vec::new();
 
-        let (inclusions, exclusions): (Vec<_>, Vec<_>) =
-            filters.iter().enumerate().partition(|(_, f)| !f.exclude);
+        let (inclusions, exclusions): (Vec<_>, Vec<_>) = filters.iter().partition(|f| !f.exclude);
 
         // Start from all packages when there are no inclusions (exclude-only mode).
         let mut selected: FxHashSet<PackageNodeIndex> = if inclusions.is_empty() {
@@ -224,17 +223,19 @@ impl IndexedPackageGraph {
         };
 
         // Apply inclusions: union each filter's resolved set into `selected`.
-        for (filter_idx, filter) in &inclusions {
+        for filter in &inclusions {
             let matched = self.resolve_selector_entries(&filter.selector);
-            if matched.is_empty() {
-                unmatched_selectors.push(*filter_idx);
+            if matched.is_empty()
+                && let Some(source) = &filter.source
+            {
+                unmatched_selectors.push(source.clone());
             }
             let expanded = self.expand_traversal(matched, filter.traversal.as_ref());
             selected.extend(expanded);
         }
 
         // Apply exclusions: subtract each filter's resolved set from `selected`.
-        for (_, filter) in &exclusions {
+        for filter in &exclusions {
             let matched = self.resolve_selector_entries(&filter.selector);
             let to_remove = self.expand_traversal(matched, filter.traversal.as_ref());
             for pkg in to_remove {

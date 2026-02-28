@@ -53,12 +53,11 @@ pub struct TaskQueryResult {
     /// decide whether to show task-not-found UI.
     pub execution_graph: TaskExecutionGraph,
 
-    /// Indices into the original `PackageQuery::Filters` slice for selectors that
-    /// matched no packages. The caller maps each index back to the original
-    /// `--filter` string for typo warnings.
+    /// Original `--filter` strings for inclusion selectors that matched no packages.
     ///
+    /// Omits synthetic filters (implicit cwd, `-w`) since the user didn't type them.
     /// Always empty when `PackageQuery::All` was used.
-    pub unmatched_selectors: Vec<usize>,
+    pub unmatched_selectors: Vec<Str>,
 }
 
 impl IndexedTaskGraph {

@@ -155,6 +155,10 @@ pub(crate) struct PackageFilter {
     /// Optional graph expansion from the initial match.
     /// `None` = exact match only (no traversal).
     pub(crate) traversal: Option<GraphTraversal>,
+
+    /// Original `--filter` token that produced this filter.
+    /// `None` for synthetic filters (implicit cwd, package name, `-w`).
+    pub(crate) source: Option<Str>,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -280,6 +284,7 @@ impl PackageQueryArgs {
                     exclude: false,
                     selector: PackageSelector::WorkspaceRoot,
                     traversal: None,
+                    source: None,
                 });
             }
             return Ok(PackageQuery::filters(parsed));
@@ -304,6 +309,7 @@ impl PackageQueryArgs {
                 exclude: false,
                 selector: PackageSelector::WorkspaceRoot,
                 traversal,
+                source: None,
             })));
         }
 
@@ -320,7 +326,12 @@ impl PackageQueryArgs {
         } else {
             None
         };
-        Ok(PackageQuery::filters(Vec1::new(PackageFilter { exclude: false, selector, traversal })))
+        Ok(PackageQuery::filters(Vec1::new(PackageFilter {
+            exclude: false,
+            selector,
+            traversal,
+            source: None,
+        })))
     }
 }
 
@@ -391,7 +402,7 @@ pub(crate) fn parse_filter(
     // Ref: https://github.com/pnpm/pnpm/issues/1651
     let traversal = if supports_traversal { traversal } else { None };
 
-    Ok(PackageFilter { exclude, selector, traversal })
+    Ok(PackageFilter { exclude, selector, traversal, source: Some(Str::from(input)) })
 }
 
 /// Parse the core selector string (after stripping `!` and `...` markers).
@@ -1112,5 +1123,73 @@ mod tests {
             args.into_package_query(Some(Str::from("app")), &cwd),
             Err(PackageQueryError::PackageNameWithWorkspaceRoot { .. })
         ));
+    }
+
+    // ── source field ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_filter_sets_source() {
+        let cwd = abs("/workspace");
+        let f = parse_filter("@test/app...", cwd).unwrap();
+        assert_eq!(f.source.as_deref(), Some("@test/app..."));
+    }
+
+    #[test]
+    fn filter_source_preserved_after_whitespace_split() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filter: vec![Str::from("a b")],
+        };
+        let query = args.into_package_query(None, &cwd).unwrap();
+        match &query.0 {
+            crate::package_graph::PackageQueryKind::Filters(filters) => {
+                assert_eq!(filters.len(), 2);
+                assert_eq!(filters[0].source.as_deref(), Some("a"));
+                assert_eq!(filters[1].source.as_deref(), Some("b"));
+            }
+            other => panic!("expected Filters, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn synthetic_workspace_root_filter_has_no_source() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: true,
+            filter: vec![Str::from("foo")],
+        };
+        let query = args.into_package_query(None, &cwd).unwrap();
+        match &query.0 {
+            crate::package_graph::PackageQueryKind::Filters(filters) => {
+                assert_eq!(filters.len(), 2);
+                assert_eq!(filters[0].source.as_deref(), Some("foo"));
+                assert!(filters[1].source.is_none());
+            }
+            other => panic!("expected Filters, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implicit_cwd_filter_has_no_source() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace/packages/app"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filter: Vec::new(),
+        };
+        let query = args.into_package_query(None, &cwd).unwrap();
+        match &query.0 {
+            crate::package_graph::PackageQueryKind::Filters(filters) => {
+                assert_eq!(filters.len(), 1);
+                assert!(filters[0].source.is_none());
+            }
+            other => panic!("expected Filters, got {other:?}"),
+        }
     }
 }
