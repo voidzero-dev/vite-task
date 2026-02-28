@@ -215,19 +215,19 @@ pub enum PackageQueryError {
 pub struct PackageQueryArgs {
     /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
     #[clap(default_value = "false", short, long)]
-    pub recursive: bool,
+    recursive: bool,
 
     /// Run tasks found in the current package and all its transitive dependencies, in topological order based on package dependencies.
     #[clap(default_value = "false", short, long)]
-    pub transitive: bool,
+    transitive: bool,
 
     /// Run task in the workspace root package.
     #[clap(default_value = "false", short = 'w', long = "workspace-root")]
-    pub workspace_root: bool,
+    workspace_root: bool,
 
     /// Filter packages (pnpm --filter syntax). Can be specified multiple times.
     #[clap(short = 'F', long, num_args = 1)]
-    pub filter: Vec<Str>,
+    filter: Vec<Str>,
 }
 
 impl PackageQueryArgs {
