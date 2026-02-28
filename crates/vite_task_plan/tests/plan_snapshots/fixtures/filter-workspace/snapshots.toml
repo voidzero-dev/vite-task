@@ -80,23 +80,25 @@ compact = true
 name = "filter by directory"
 args = ["run", "--filter", "./packages/app", "build"]
 
-# directory filter with dependency expansion
+# pnpm silently discards `...` on unbraced path selectors (ambiguity with `..`).
+# `./packages/app...` is equivalent to `./packages/app`. Use `{./packages/app}...` for traversal.
+# Ref: https://github.com/pnpm/pnpm/issues/1651
 [[plan]]
 compact = true
-name = "filter by directory with dependencies"
+name = "filter by directory ignores trailing dots"
 args = ["run", "--filter", "./packages/app...", "build"]
 
-# --filter .... = . (cwd) + ... (deps) — from inside a package directory
+# `....` = `.` + `...` — traversal discarded on unbraced path, equivalent to `--filter .`
 [[plan]]
 compact = true
-name = "filter dot with dependencies from package"
+name = "filter dot ignores trailing dots from package"
 args = ["run", "--filter", "....", "build"]
 cwd = "packages/app"
 
-# --filter ..... = .. (parent dir) + ... (deps) — from inside a package subdir
+# `.....` = `..` + `...` — traversal discarded on unbraced path, equivalent to `--filter ..`
 [[plan]]
 compact = true
-name = "filter dotdot with dependencies"
+name = "filter dotdot ignores trailing dots"
 args = ["run", "--filter", ".....", "build"]
 cwd = "packages/app/src"
 
@@ -112,7 +114,8 @@ compact = true
 name = "filter by directory glob double star"
 args = ["run", "--filter", "./packages/**", "build"]
 
-# transitive flag = --filter .…
+# -t flag: current package + transitive deps (NOT equivalent to `--filter ....`
+# because pnpm discards traversal on unbraced paths; -t bypasses parse_filter).
 [[plan]]
 compact = true
 name = "transitive flag"

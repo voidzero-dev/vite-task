@@ -5,19 +5,10 @@ info:
   args:
     - run
     - "--filter"
-    - "...."
+    - "./packages/app..."
     - build
-  cwd: packages/app
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/filter-workspace
 ---
 {
-  "packages/app#build": [
-    "packages/lib#build",
-    "packages/utils#build"
-  ],
-  "packages/core#build": [],
-  "packages/lib#build": [
-    "packages/core#build"
-  ],
-  "packages/utils#build": []
+  "packages/app#build": []
 }

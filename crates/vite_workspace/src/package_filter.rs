@@ -342,7 +342,12 @@ pub(crate) fn parse_filter(
     };
 
     // Step 6–9: parse the remaining core selector.
-    let selector = parse_core_selector(core, cwd)?;
+    let (selector, supports_traversal) = parse_core_selector(core, cwd)?;
+
+    // pnpm discards traversal on unbraced path selectors — `..` (parent dir)
+    // and `...` (traversal) are ambiguous. Braces disambiguate: `{./path}...`.
+    // Ref: https://github.com/pnpm/pnpm/issues/1651
+    let traversal = if supports_traversal { traversal } else { None };
 
     Ok(PackageFilter { exclude, selector, traversal })
 }
@@ -359,10 +364,13 @@ pub(crate) fn parse_filter(
 ///    (per the regex rule that Group 1 must not start with `.`).
 /// 2. If the string starts with `.`, treat the whole thing as a relative path.
 /// 3. Otherwise treat as a name pattern (exact or glob).
+///
+/// Returns `(selector, supports_traversal)`. Unbraced `.`-prefix path selectors
+/// return `false` because pnpm discards `...` traversal on them (ambiguity with `..`).
 fn parse_core_selector(
     core: &str,
     cwd: &AbsolutePath,
-) -> Result<PackageSelector, PackageFilterParseError> {
+) -> Result<(PackageSelector, bool), PackageFilterParseError> {
     // Try to extract a brace-enclosed directory suffix: `{...}`.
     // The name part before the brace must not start with `.` (pnpm regex Group 1 constraint).
     if let Some(without_closing) = core.strip_suffix('}')
@@ -378,11 +386,11 @@ fn parse_core_selector(
 
             return if name_part.is_empty() {
                 // Only a directory selector: `{./foo}` or `{packages/app}`.
-                Ok(PackageSelector::Directory(directory))
+                Ok((PackageSelector::Directory(directory), true))
             } else {
                 // Name and directory combined: `foo{./bar}`.
                 let name = build_name_pattern(name_part)?;
-                Ok(PackageSelector::NameAndDirectory { name, directory })
+                Ok((PackageSelector::NameAndDirectory { name, directory }, true))
             };
         }
         // name_part starts with `.`: fall through — treat entire core as a relative path.
@@ -390,9 +398,10 @@ fn parse_core_selector(
 
     // If the core starts with `.`, it's a relative path to a directory.
     // This handles `.`, `..`, `./foo`, `../foo`, `./foo/*`, `./foo/**`.
+    // Traversal is NOT supported — pnpm discards `...` on unbraced path selectors.
     if core.starts_with('.') {
         let directory = resolve_directory_pattern(core, cwd)?;
-        return Ok(PackageSelector::Directory(directory));
+        return Ok((PackageSelector::Directory(directory), false));
     }
 
     // Guard against an empty selector reaching here.
@@ -401,7 +410,7 @@ fn parse_core_selector(
     }
 
     // Plain name or glob pattern.
-    Ok(PackageSelector::Name(build_name_pattern(core)?))
+    Ok((PackageSelector::Name(build_name_pattern(core)?), true))
 }
 
 /// Resolve a directory selector string into a [`DirectoryPattern`].
@@ -911,5 +920,45 @@ mod tests {
             }
             DirectoryPattern::Exact(p) => panic!("expected Glob, got Exact({p:?})"),
         }
+    }
+
+    // ── Unbraced path selectors discard traversal (pnpm compat) ─────────
+
+    #[test]
+    fn unbraced_path_discards_trailing_dots() {
+        // `./foo...` — `...` is stripped but traversal is discarded for unbraced paths.
+        let cwd = abs("/workspace");
+        let f = parse_filter("./foo...", cwd).unwrap();
+        assert_directory(&f, abs("/workspace/foo"));
+        assert_no_traversal(&f);
+    }
+
+    #[test]
+    fn unbraced_dot_discards_trailing_dots() {
+        // `....` = `.` (cwd) + `...` — traversal discarded.
+        let cwd = abs("/workspace/packages/app");
+        let f = parse_filter("....", cwd).unwrap();
+        assert_directory(&f, abs("/workspace/packages/app"));
+        assert_no_traversal(&f);
+    }
+
+    #[test]
+    fn unbraced_dotdot_discards_leading_dots() {
+        // `......` = `...` (dependents) + `...` (remaining = `...`)
+        // After stripping both `...` markers, core = empty → error? No:
+        // `...../foo` = `...` (dependents) + `../foo` — traversal discarded.
+        let cwd = abs("/workspace/packages/app");
+        let f = parse_filter("...../foo", cwd).unwrap();
+        assert_directory(&f, abs("/workspace/packages/foo"));
+        assert_no_traversal(&f);
+    }
+
+    #[test]
+    fn braced_path_preserves_traversal() {
+        // `{./foo}...` — braces make traversal work.
+        let cwd = abs("/workspace");
+        let f = parse_filter("{./foo}...", cwd).unwrap();
+        assert_directory(&f, abs("/workspace/foo"));
+        assert_traversal(&f, TraversalDirection::Dependencies, false);
     }
 }
