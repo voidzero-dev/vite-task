@@ -1,18 +1,11 @@
 use std::sync::Arc;
 
 use clap::Parser;
-use vec1::Vec1;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{
-    TaskSpecifier,
-    query::{PackageQuery, TaskQuery},
-};
+use vite_task_graph::{TaskSpecifier, query::TaskQuery};
 use vite_task_plan::plan_request::{PlanOptions, QueryPlanRequest};
-use vite_workspace::package_filter::{
-    GraphTraversal, PackageFilter, PackageFilterParseError, PackageNamePattern, PackageSelector,
-    TraversalDirection, parse_filter,
-};
+use vite_workspace::package_filter::{PackageQueryArgs, PackageQueryError};
 
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum CacheSubcommand {
@@ -22,15 +15,9 @@ pub enum CacheSubcommand {
 
 /// Flags that control how a `run` command selects tasks.
 #[derive(Debug, Clone, clap::Args)]
-#[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
 pub struct RunFlags {
-    /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
-    #[clap(default_value = "false", short, long)]
-    pub recursive: bool,
-
-    /// Run tasks found in the current package and all its transitive dependencies, in topological order based on package dependencies.
-    #[clap(default_value = "false", short, long)]
-    pub transitive: bool,
+    #[clap(flatten)]
+    pub package_query: PackageQueryArgs,
 
     /// Do not run dependencies specified in `dependsOn` fields.
     #[clap(default_value = "false", long)]
@@ -39,10 +26,6 @@ pub struct RunFlags {
     /// Show full detailed summary after execution.
     #[clap(default_value = "false", short = 'v', long)]
     pub verbose: bool,
-
-    /// Filter packages (pnpm --filter syntax). Can be specified multiple times.
-    #[clap(short = 'F', long, num_args = 1)]
-    pub filter: Vec<Str>,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -154,26 +137,8 @@ pub enum CLITaskQueryError {
     #[error("no task specifier provided")]
     MissingTaskSpecifier,
 
-    #[error("--recursive and --transitive cannot be used together")]
-    RecursiveTransitiveConflict,
-
-    #[error("cannot specify package '{package_name}' for task '{task_name}' with --recursive")]
-    PackageNameSpecifiedWithRecursive { package_name: Str, task_name: Str },
-
-    #[error("--filter and --transitive cannot be used together")]
-    FilterWithTransitive,
-
-    #[error("--filter and --recursive cannot be used together")]
-    FilterWithRecursive,
-
-    #[error("cannot specify package '{package_name}' for task '{task_name}' with --filter")]
-    PackageNameSpecifiedWithFilter { package_name: Str, task_name: Str },
-
-    #[error("--filter value contains no selectors (whitespace-only)")]
-    EmptyFilter,
-
-    #[error("invalid --filter expression")]
-    InvalidFilter(#[from] PackageFilterParseError),
+    #[error(transparent)]
+    PackageQuery(#[from] PackageQueryError),
 }
 
 impl ResolvedRunCommand {
@@ -187,68 +152,12 @@ impl ResolvedRunCommand {
         self,
         cwd: &Arc<AbsolutePath>,
     ) -> Result<QueryPlanRequest, CLITaskQueryError> {
-        let Self {
-            task_specifier,
-            flags: RunFlags { recursive, transitive, ignore_depends_on, filter, .. },
-            additional_args,
-        } = self;
+        let task_specifier = self.task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
 
-        let task_specifier = task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
+        let package_query =
+            self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;
 
-        let include_explicit_deps = !ignore_depends_on;
-
-        let package_query = if recursive {
-            if transitive {
-                return Err(CLITaskQueryError::RecursiveTransitiveConflict);
-            }
-            if !filter.is_empty() {
-                return Err(CLITaskQueryError::FilterWithRecursive);
-            }
-            if let Some(package_name) = task_specifier.package_name {
-                return Err(CLITaskQueryError::PackageNameSpecifiedWithRecursive {
-                    package_name,
-                    task_name: task_specifier.task_name,
-                });
-            }
-            PackageQuery::All
-        } else if !filter.is_empty() {
-            // At least one --filter was specified.
-            if transitive {
-                return Err(CLITaskQueryError::FilterWithTransitive);
-            }
-            if let Some(package_name) = task_specifier.package_name {
-                return Err(CLITaskQueryError::PackageNameSpecifiedWithFilter {
-                    package_name,
-                    task_name: task_specifier.task_name,
-                });
-            }
-            // Normalize: split each --filter value by whitespace into individual tokens.
-            // This makes `--filter "a b"` equivalent to `--filter a --filter b` (pnpm behaviour).
-            let tokens: Vec1<Str> = Vec1::try_from_vec(
-                filter
-                    .into_iter()
-                    .flat_map(|f| f.split_ascii_whitespace().map(Str::from).collect::<Vec<_>>())
-                    .collect(),
-            )
-            .map_err(|_| CLITaskQueryError::EmptyFilter)?;
-            let parsed: Vec1<PackageFilter> = tokens.try_mapped(|f| parse_filter(&f, cwd))?;
-            PackageQuery::Filters(parsed)
-        } else {
-            // No --filter, no --recursive: implicit cwd or package-name specifier.
-            let selector = task_specifier.package_name.map_or_else(
-                || PackageSelector::ContainingPackage(Arc::clone(cwd)),
-                |name| PackageSelector::Name(PackageNamePattern::Exact(name)),
-            );
-            let traversal = if transitive {
-                Some(GraphTraversal {
-                    direction: TraversalDirection::Dependencies,
-                    exclude_self: false,
-                })
-            } else {
-                None
-            };
-            PackageQuery::Filters(Vec1::new(PackageFilter { exclude: false, selector, traversal }))
-        };
+        let include_explicit_deps = !self.flags.ignore_depends_on;
 
         Ok(QueryPlanRequest {
             query: TaskQuery {
@@ -256,7 +165,7 @@ impl ResolvedRunCommand {
                 task_name: task_specifier.task_name,
                 include_explicit_deps,
             },
-            plan_options: PlanOptions { extra_args: additional_args.into() },
+            plan_options: PlanOptions { extra_args: self.additional_args.into() },
         })
     }
 }
