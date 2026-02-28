@@ -213,20 +213,34 @@ pub enum PackageQueryError {
 /// Call [`into_package_query`](Self::into_package_query) to convert into an opaque [`PackageQuery`].
 #[derive(Debug, Clone, clap::Args)]
 pub struct PackageQueryArgs {
-    /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
+    /// Select all packages in the workspace.
     #[clap(default_value = "false", short, long)]
     recursive: bool,
 
-    /// Run tasks found in the current package and all its transitive dependencies, in topological order based on package dependencies.
+    /// Select the current package and its transitive dependencies.
     #[clap(default_value = "false", short, long)]
     transitive: bool,
 
-    /// Run task in the workspace root package.
+    /// Select the workspace root package.
     #[clap(default_value = "false", short = 'w', long = "workspace-root")]
     workspace_root: bool,
 
-    /// Filter packages (pnpm --filter syntax). Can be specified multiple times.
-    #[clap(short = 'F', long, num_args = 1)]
+    /// Match packages by name, directory, or glob pattern.
+    #[clap(
+        short = 'F',
+        long,
+        num_args = 1,
+        long_help = "\
+Match packages by name, directory, or glob pattern.
+
+  --filter <pattern>        Select by package name (e.g. foo, @scope/*)
+  --filter ./<dir>          Select packages under a directory
+  --filter {<dir>}          Same as ./<dir>, but allows traversal suffixes
+  --filter <pattern>...     Select package and its dependencies
+  --filter ...<pattern>     Select package and its dependents
+  --filter <pattern>^...    Select only the dependencies (exclude the package itself)
+  --filter !<pattern>       Exclude packages matching the pattern"
+    )]
     filter: Vec<Str>,
 }
 
