@@ -153,6 +153,43 @@ compact = true
 name = "filter deps skips packages without task"
 args = ["run", "--filter", "@test/app...", "test"]
 
+# pnpm: braced path selector — `{./path}` is equivalent to `./path` for exact directories
+[[plan]]
+compact = true
+name = "filter by braced path"
+args = ["run", "--filter", "{./packages/app}", "build"]
+
+# braced path with dependency traversal — `{./path}...`
+[[plan]]
+compact = true
+name = "filter by braced path with dependencies"
+args = ["run", "--filter", "{./packages/app}...", "build"]
+
+# braced path with dependents traversal — `...{./path}`
+[[plan]]
+compact = true
+name = "filter by braced path with dependents"
+args = ["run", "--filter", "...{./packages/core}", "build"]
+
+# pnpm: name AND directory intersection — `pattern{./dir}` matches packages
+# whose name matches the glob AND whose directory matches the path.
+[[plan]]
+compact = true
+name = "filter by name and directory intersection"
+args = ["run", "--filter", "@test/*{./packages/lib}", "build"]
+
+# pnpm: multiple exclusion-only filters — each exclusion subtracts from the full set.
+[[plan]]
+compact = true
+name = "multiple exclusion-only filters"
+args = ["run", "--filter", "!@test/app", "--filter", "!@test/core", "build"]
+
+# pnpm: excluding a package that doesn't exist — no-op, returns all packages.
+[[plan]]
+compact = true
+name = "exclude nonexistent package"
+args = ["run", "--filter", "!nonexistent", "build"]
+
 # script containing "vp run --filter .... build" — expanded in plan
 [[plan]]
 compact = true
