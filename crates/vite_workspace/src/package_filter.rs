@@ -440,11 +440,11 @@ fn resolve_filter_path(path_str: &str, cwd: &AbsolutePath) -> Arc<AbsolutePath> 
 
 /// Build a [`PackageNamePattern`] from a name or glob string.
 ///
-/// A string containing `*`, `?`, or `[` is treated as a glob; otherwise exact.
+/// Uses [`wax::Glob::partition`] to determine if the pattern contains variant
+/// (non-literal) components. If it does, the pattern is a glob; otherwise exact.
 fn build_name_pattern(name: &str) -> Result<PackageNamePattern, PackageFilterParseError> {
-    if name.contains(['*', '?', '[']) {
-        // Validate and compile the glob, then make it owned (lifetime: 'static).
-        let glob = wax::Glob::new(name)?.into_owned();
+    let glob = wax::Glob::new(name)?.into_owned();
+    if glob.clone().partition().1.is_some() {
         Ok(PackageNamePattern::Glob(Box::new(glob)))
     } else {
         Ok(PackageNamePattern::Exact(name.into()))
