@@ -31,8 +31,11 @@
 
 use std::sync::Arc;
 
+use vec1::Vec1;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
+
+use crate::package_graph::PackageQuery;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -40,7 +43,7 @@ use vite_str::Str;
 
 /// Exact name or glob pattern for matching package names.
 #[derive(Debug, Clone)]
-pub enum PackageNamePattern {
+pub(crate) enum PackageNamePattern {
     /// Exact name (e.g. `foo`, `@scope/pkg`). O(1) hash lookup.
     ///
     /// Scoped auto-completion applies during resolution: if `"bar"` has no exact match
@@ -62,7 +65,7 @@ pub enum PackageNamePattern {
 ///
 /// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L200-L202>
 #[derive(Debug, Clone)]
-pub enum DirectoryPattern {
+pub(crate) enum DirectoryPattern {
     /// Exact path match (no glob metacharacters in selector).
     Exact(Arc<AbsolutePath>),
 
@@ -80,7 +83,7 @@ pub enum DirectoryPattern {
 /// The enum prevents the all-`None` invalid state that would arise from a struct
 /// with all optional fields (as in pnpm's independent optional fields).
 #[derive(Debug, Clone)]
-pub enum PackageSelector {
+pub(crate) enum PackageSelector {
     /// Match by name only. Produced by `--filter foo` or `--filter "@scope/*"`.
     Name(PackageNamePattern),
 
@@ -104,7 +107,7 @@ pub enum PackageSelector {
 
 /// Direction to traverse the package dependency graph from the initially matched packages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TraversalDirection {
+pub(crate) enum TraversalDirection {
     /// Transitive dependencies (outgoing edges). Produced by `foo...`.
     Dependencies,
 
@@ -122,14 +125,14 @@ pub enum TraversalDirection {
 /// Only present when `...` appears in the filter. The absence of this struct prevents
 /// the invalid state of `exclude_self = true` without any expansion.
 #[derive(Debug, Clone)]
-pub struct GraphTraversal {
-    pub direction: TraversalDirection,
+pub(crate) struct GraphTraversal {
+    pub(crate) direction: TraversalDirection,
 
     /// Exclude the initially matched packages from the result.
     ///
     /// Produced by `^` in `foo^...` (keep dependencies, drop foo)
     /// or `...^foo` (keep dependents, drop foo).
-    pub exclude_self: bool,
+    pub(crate) exclude_self: bool,
 }
 
 /// A single package filter, corresponding to one `--filter` argument.
@@ -137,17 +140,17 @@ pub struct GraphTraversal {
 /// Multiple filters are composed at the `PackageQuery` level:
 /// inclusions are unioned, then exclusions are subtracted.
 #[derive(Debug, Clone)]
-pub struct PackageFilter {
+pub(crate) struct PackageFilter {
     /// When `true`, packages matching this filter are **excluded** from the result.
     /// Produced by a leading `!` in the filter string.
-    pub exclude: bool,
+    pub(crate) exclude: bool,
 
     /// Which packages to initially match.
-    pub selector: PackageSelector,
+    pub(crate) selector: PackageSelector,
 
     /// Optional graph expansion from the initial match.
     /// `None` = exact match only (no traversal).
-    pub traversal: Option<GraphTraversal>,
+    pub(crate) traversal: Option<GraphTraversal>,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -162,6 +165,121 @@ pub enum PackageFilterParseError {
 
     #[error("Invalid glob pattern: {0}")]
     InvalidGlob(#[from] wax::BuildError),
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLI package query
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Errors that can occur when converting [`PackageQueryArgs`] into a [`PackageQuery`].
+#[derive(Debug, thiserror::Error)]
+pub enum PackageQueryError {
+    #[error("--recursive and --transitive cannot be used together")]
+    RecursiveTransitiveConflict,
+
+    #[error("--filter and --transitive cannot be used together")]
+    FilterWithTransitive,
+
+    #[error("--filter and --recursive cannot be used together")]
+    FilterWithRecursive,
+
+    #[error("cannot specify package name with --recursive")]
+    PackageNameWithRecursive { package_name: Str },
+
+    #[error("cannot specify package name with --filter")]
+    PackageNameWithFilter { package_name: Str },
+
+    #[error("--filter value contains no selectors (whitespace-only)")]
+    EmptyFilter,
+
+    #[error("invalid --filter expression")]
+    InvalidFilter(#[from] PackageFilterParseError),
+}
+
+/// CLI arguments for selecting which packages a command applies to.
+///
+/// Use `#[clap(flatten)]` to embed these in a parent clap struct.
+/// Call [`into_package_query`](Self::into_package_query) to convert into an opaque [`PackageQuery`].
+#[derive(Debug, Clone, clap::Args)]
+pub struct PackageQueryArgs {
+    /// Run tasks found in all packages in the workspace, in topological order based on package dependencies.
+    #[clap(default_value = "false", short, long)]
+    pub recursive: bool,
+
+    /// Run tasks found in the current package and all its transitive dependencies, in topological order based on package dependencies.
+    #[clap(default_value = "false", short, long)]
+    pub transitive: bool,
+
+    /// Filter packages (pnpm --filter syntax). Can be specified multiple times.
+    #[clap(short = 'F', long, num_args = 1)]
+    pub filter: Vec<Str>,
+}
+
+impl PackageQueryArgs {
+    /// Convert CLI arguments into an opaque [`PackageQuery`].
+    ///
+    /// `package_name` is the optional package name from a `package#task` specifier.
+    /// `cwd` is the working directory (used as fallback when no package name or filter is given).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PackageQueryError`] if conflicting flags are set, a package name
+    /// is specified with `--recursive` or `--filter`, or a filter expression is invalid.
+    pub fn into_package_query(
+        self,
+        package_name: Option<Str>,
+        cwd: &Arc<AbsolutePath>,
+    ) -> Result<PackageQuery, PackageQueryError> {
+        let Self { recursive, transitive, filter } = self;
+
+        if recursive {
+            if transitive {
+                return Err(PackageQueryError::RecursiveTransitiveConflict);
+            }
+            if !filter.is_empty() {
+                return Err(PackageQueryError::FilterWithRecursive);
+            }
+            if let Some(package_name) = package_name {
+                return Err(PackageQueryError::PackageNameWithRecursive { package_name });
+            }
+            return Ok(PackageQuery::all());
+        }
+
+        if !filter.is_empty() {
+            if transitive {
+                return Err(PackageQueryError::FilterWithTransitive);
+            }
+            if let Some(package_name) = package_name {
+                return Err(PackageQueryError::PackageNameWithFilter { package_name });
+            }
+            // Normalize: split each --filter value by whitespace into individual tokens.
+            // This makes `--filter "a b"` equivalent to `--filter a --filter b` (pnpm behaviour).
+            let tokens: Vec1<Str> = Vec1::try_from_vec(
+                filter
+                    .into_iter()
+                    .flat_map(|f| f.split_ascii_whitespace().map(Str::from).collect::<Vec<_>>())
+                    .collect(),
+            )
+            .map_err(|_| PackageQueryError::EmptyFilter)?;
+            let parsed: Vec1<PackageFilter> = tokens.try_mapped(|f| parse_filter(&f, cwd))?;
+            return Ok(PackageQuery::filters(parsed));
+        }
+
+        // No --filter, no --recursive: implicit cwd or package-name specifier.
+        let selector = package_name.map_or_else(
+            || PackageSelector::ContainingPackage(Arc::clone(cwd)),
+            |name| PackageSelector::Name(PackageNamePattern::Exact(name)),
+        );
+        let traversal = if transitive {
+            Some(GraphTraversal {
+                direction: TraversalDirection::Dependencies,
+                exclude_self: false,
+            })
+        } else {
+            None
+        };
+        Ok(PackageQuery::filters(Vec1::new(PackageFilter { exclude: false, selector, traversal })))
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -182,7 +300,7 @@ pub enum PackageFilterParseError {
 /// Follows pnpm's [`parsePackageSelector`] algorithm. See module-level docs for examples.
 ///
 /// [`parsePackageSelector`]: https://github.com/pnpm/pnpm/blob/05dd45ea82fff9c0b687cdc8f478a1027077d343/workspace/filter-workspace-packages/src/parsePackageSelector.ts#L14-L61
-pub fn parse_filter(
+pub(crate) fn parse_filter(
     input: &str,
     cwd: &AbsolutePath,
 ) -> Result<PackageFilter, PackageFilterParseError> {

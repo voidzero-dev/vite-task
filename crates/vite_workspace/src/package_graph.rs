@@ -35,11 +35,15 @@ use crate::{
 
 /// Specifies which packages a task query applies to.
 ///
-/// The two variants prevent the invalid state where no packages are targeted:
-/// - `Filters` carries at least one filter (enforced by `Vec1`).
-/// - `All` is the explicit "run everywhere" variant, produced by `--recursive`.
+/// This type is opaque — construct it via [`PackageQueryArgs::into_package_query`]
+/// (from `package_filter`).
+///
+/// [`PackageQueryArgs::into_package_query`]: crate::package_filter::PackageQueryArgs::into_package_query
 #[derive(Debug)]
-pub enum PackageQuery {
+pub struct PackageQuery(pub(crate) PackageQueryKind);
+
+#[derive(Debug)]
+pub(crate) enum PackageQueryKind {
     /// One or more `--filter` expressions.
     ///
     /// Inclusions are unioned; exclusions are subtracted from the union.
@@ -51,6 +55,18 @@ pub enum PackageQuery {
     ///
     /// Produced by `--recursive` / `-r`.
     All,
+}
+
+impl PackageQuery {
+    /// All packages in the workspace.
+    pub(crate) const fn all() -> Self {
+        Self(PackageQueryKind::All)
+    }
+
+    /// One or more filter expressions.
+    pub(crate) const fn filters(filters: Vec1<PackageFilter>) -> Self {
+        Self(PackageQueryKind::Filters(filters))
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -158,12 +174,12 @@ impl IndexedPackageGraph {
     /// of the matching packages.
     #[must_use]
     pub fn resolve_query(&self, query: &PackageQuery) -> FilterResolution {
-        match query {
-            PackageQuery::All => FilterResolution {
+        match &query.0 {
+            PackageQueryKind::All => FilterResolution {
                 package_subgraph: self.full_subgraph(),
                 unmatched_selectors: Vec::new(),
             },
-            PackageQuery::Filters(filters) => self.resolve_filters(filters.as_slice()),
+            PackageQueryKind::Filters(filters) => self.resolve_filters(filters.as_slice()),
         }
     }
 
