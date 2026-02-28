@@ -1038,7 +1038,7 @@ mod tests {
                 );
                 assert_no_traversal(&filters[0]);
             }
-            other => panic!("expected Filters, got {other:?}"),
+            crate::package_graph::PackageQueryKind::All => panic!("expected Filters, got All"),
         }
     }
 
@@ -1081,7 +1081,7 @@ mod tests {
                 );
                 assert_traversal(&filters[0], TraversalDirection::Dependencies, false);
             }
-            other => panic!("expected Filters, got {other:?}"),
+            crate::package_graph::PackageQueryKind::All => panic!("expected Filters, got All"),
         }
     }
 
@@ -1106,7 +1106,7 @@ mod tests {
                     filters[1].selector
                 );
             }
-            other => panic!("expected Filters, got {other:?}"),
+            crate::package_graph::PackageQueryKind::All => panic!("expected Filters, got All"),
         }
     }
 
@@ -1150,7 +1150,7 @@ mod tests {
                 assert_eq!(filters[0].source.as_deref(), Some("a"));
                 assert_eq!(filters[1].source.as_deref(), Some("b"));
             }
-            other => panic!("expected Filters, got {other:?}"),
+            crate::package_graph::PackageQueryKind::All => panic!("expected Filters, got All"),
         }
     }
 
@@ -1170,7 +1170,7 @@ mod tests {
                 assert_eq!(filters[0].source.as_deref(), Some("foo"));
                 assert!(filters[1].source.is_none());
             }
-            other => panic!("expected Filters, got {other:?}"),
+            crate::package_graph::PackageQueryKind::All => panic!("expected Filters, got All"),
         }
     }
 
@@ -1189,7 +1189,7 @@ mod tests {
                 assert_eq!(filters.len(), 1);
                 assert!(filters[0].source.is_none());
             }
-            other => panic!("expected Filters, got {other:?}"),
+            crate::package_graph::PackageQueryKind::All => panic!("expected Filters, got All"),
         }
     }
 }
