@@ -1,4 +1,4 @@
-use fspy_shared::ipc::{AccessMode, NativeStr, PathAccess};
+use fspy_shared::ipc::{AccessMode, NativePath, PathAccess};
 use ntapi::ntioapi::{
     FILE_INFORMATION_CLASS, NtQueryDirectoryFile, NtQueryFullAttributesFile,
     NtQueryInformationByName, PFILE_BASIC_INFORMATION, PFILE_NETWORK_OPEN_INFORMATION,
@@ -157,7 +157,7 @@ unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath)
                     // SAFETY: converting access mask to AccessMode via FFI-aware trait
                     PathAccess {
                         mode: access_mode.to_access_mode(),
-                        path: NativeStr::from_wide(path),
+                        path: NativePath::from_wide(path),
                     }
                 },
                 |wildcard_pos| {
@@ -168,7 +168,7 @@ unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath)
                         .unwrap_or(0);
                     PathAccess {
                         mode: AccessMode::READ_DIR,
-                        path: NativeStr::from_wide(&path[..slash_pos]),
+                        path: NativePath::from_wide(&path[..slash_pos]),
                     }
                 },
             );

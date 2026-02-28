@@ -11,7 +11,7 @@ use std::{
 };
 
 use bstr::{BStr, BString, ByteSlice};
-use fspy_shared::ipc::{AccessMode, PathAccess};
+use fspy_shared::ipc::AccessMode;
 use nix::unistd::{AccessFlags, access};
 use shebang::{ParseShebangOptions, parse_shebang};
 
@@ -103,7 +103,7 @@ impl Exec {
     /// - Shebang parsing fails due to I/O errors (`EIO`)
     pub fn resolve(
         &mut self,
-        mut on_path_access: impl FnMut(PathAccess<'_>),
+        mut on_path_access: impl FnMut(AccessMode, &Path),
         config: ExecResolveConfig,
     ) -> nix::Result<()> {
         if let Some(search_path) = config.search_path {
@@ -120,10 +120,7 @@ impl Exec {
                 self.program.as_ref(),
                 path,
                 |path| {
-                    on_path_access(PathAccess {
-                        path: OsStr::from_bytes(path).into(),
-                        mode: AccessMode::READ,
-                    });
+                    on_path_access(AccessMode::READ, Path::new(OsStr::from_bytes(path)));
                     access(OsStr::from_bytes(path), AccessFlags::X_OK)
                 },
                 |program| Ok(program.to_owned()),
@@ -138,12 +135,12 @@ impl Exec {
 
     fn parse_shebang(
         &mut self,
-        mut on_path_access: impl FnMut(PathAccess<'_>),
+        mut on_path_access: impl FnMut(AccessMode, &Path),
         options: ParseShebangOptions,
     ) -> nix::Result<()> {
         if let Some(shebang) = parse_shebang(
             |path, buf| {
-                on_path_access(PathAccess::read(path));
+                on_path_access(AccessMode::READ, path);
                 peek_executable(path, buf)
             },
             Path::new(OsStr::from_bytes(&self.program)),

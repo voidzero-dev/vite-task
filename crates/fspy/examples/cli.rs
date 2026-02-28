@@ -29,13 +29,9 @@ async fn main() -> anyhow::Result<()> {
 
     for acc in termination.path_accesses.iter() {
         path_count += 1;
+        let path_str = format!("{:?}", acc.path);
         let mode_str = format!("{:?}", acc.mode);
-        csv_writer
-            .write_record(&[
-                acc.path.to_cow_os_str().to_string_lossy().as_ref().as_bytes(),
-                mode_str.as_bytes(),
-            ])
-            .await?;
+        csv_writer.write_record(&[path_str.as_bytes(), mode_str.as_bytes()]).await?;
     }
     csv_writer.flush().await?;
 

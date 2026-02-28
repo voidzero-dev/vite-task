@@ -15,7 +15,7 @@ use fspy_seccomp_unotify::{
     impl_handler,
     supervisor::handler::arg::{CStrPtr, Caller, Fd},
 };
-use fspy_shared::ipc::{AccessMode, NativeStr, PathAccess};
+use fspy_shared::ipc::{AccessMode, PathAccess};
 
 use crate::arena::PathAccessArena;
 
@@ -63,7 +63,7 @@ impl SyscallHandler {
                 libc::O_WRONLY => AccessMode::WRITE,
                 _ => AccessMode::READ,
             },
-            path: NativeStr::from_bytes(path.as_os_str().as_bytes()),
+            path: path.as_os_str().into(),
         });
         Ok(())
     }
@@ -72,7 +72,7 @@ impl SyscallHandler {
         let path = fd.get_path(caller)?;
         self.arena.add(PathAccess {
             mode: AccessMode::READ_DIR,
-            path: NativeStr::from_bytes(path.as_bytes()),
+            path: OsStr::from_bytes(path.as_bytes()).into(),
         });
         Ok(())
     }

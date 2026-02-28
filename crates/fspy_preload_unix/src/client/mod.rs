@@ -2,7 +2,8 @@ pub mod convert;
 pub mod raw_exec;
 
 use std::{
-    ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _, sync::OnceLock,
+    ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _, path::Path,
+    sync::OnceLock,
 };
 
 use bincode::{enc::write::SizeWriter, encode_into_slice, encode_into_writer};
@@ -58,18 +59,19 @@ impl Client {
         Self { encoded_payload, ipc_sender }
     }
 
-    fn send(&self, path_access: PathAccess<'_>) -> anyhow::Result<()> {
+    fn send(&self, mode: fspy_shared::ipc::AccessMode, path: &Path) -> anyhow::Result<()> {
         let Some(ipc_sender) = &self.ipc_sender else {
             // ipc channel not available, skip sending
             return Ok(());
         };
-        let path = path_access.path.as_os_str().as_bytes();
-        if path.starts_with(b"/dev/")
+        let path_bytes = path.as_os_str().as_bytes();
+        if path_bytes.starts_with(b"/dev/")
             || (cfg!(target_os = "linux")
-                && (path.starts_with(b"/proc/") || path.starts_with(b"/sys/")))
+                && (path_bytes.starts_with(b"/proc/") || path_bytes.starts_with(b"/sys/")))
         {
             return Ok(());
         }
+        let path_access = PathAccess { mode, path: path.into() };
         let mut size_writer = SizeWriter::default();
         encode_into_writer(path_access, &mut size_writer, BINCODE_CONFIG)?;
 
@@ -93,8 +95,8 @@ impl Client {
     ) -> nix::Result<R> {
         // SAFETY: raw_exec contains valid pointers to C strings and null-terminated arrays, as provided by the caller
         let mut exec = unsafe { raw_exec.to_exec() };
-        let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |path_access| {
-            self.send(path_access).unwrap();
+        let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |mode, path| {
+            self.send(mode, path).unwrap();
         })?;
         RawExec::from_exec(exec, |raw_command| f(raw_command, pre_exec))
     }
@@ -112,7 +114,7 @@ impl Client {
                 let Some(abs_path) = abs_path else {
                     return Ok(Ok(()));
                 };
-                Ok(self.send(PathAccess { mode, path: OsStr::from_bytes(abs_path).into() }))
+                Ok(self.send(mode, Path::new(OsStr::from_bytes(abs_path))))
             })
         }??;
 

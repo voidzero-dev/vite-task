@@ -6,12 +6,7 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::windows::ffi::OsStrExt as _;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStringExt as _;
-use std::{
-    borrow::Cow,
-    ffi::OsStr,
-    fmt::Debug,
-    path::{Path, StripPrefixError},
-};
+use std::{borrow::Cow, ffi::OsStr, fmt::Debug};
 
 use allocator_api2::alloc::Allocator;
 use bincode::{
@@ -140,48 +135,6 @@ impl NativeStr {
         data.extend_from_slice(&self.data);
         let data = data.leak::<'new_alloc>();
         Self::wrap_ref(data)
-    }
-
-    pub fn strip_path_prefix<P: AsRef<Path>, R, F: FnOnce(Result<&Path, StripPrefixError>) -> R>(
-        &self,
-        base: P,
-        f: F,
-    ) -> R {
-        /// Strip the `\\?\`, `\\.\`, `\??\` prefix from a Windows path, if present.
-        /// Does nothing on non-Windows platforms.
-        ///
-        /// \\?\ and \\.\ are used to enable long paths and access to device paths.
-        /// \??\ is used in Nt* calls.
-        /// The resulting path is not necessarily valid or points to the same location,
-        /// but it's good enough for sanitizing paths in `NativeStr::strip_path_prefix`.
-        #[cfg_attr(
-            not(windows),
-            expect(
-                clippy::missing_const_for_fn,
-                reason = "uses non-const for loop and strip_prefix on Windows"
-            )
-        )]
-        fn strip_windows_path_prefix(p: &OsStr) -> &OsStr {
-            #[cfg(windows)]
-            {
-                use os_str_bytes::OsStrBytesExt as _;
-                for prefix in [r"\\?\", r"\\.\", r"\??\"] {
-                    if let Some(stripped) = p.strip_prefix(prefix) {
-                        return stripped;
-                    }
-                }
-                p
-            }
-            #[cfg(not(windows))]
-            {
-                p
-            }
-        }
-
-        let me = self.to_cow_os_str();
-        let me = strip_windows_path_prefix(&me);
-        let base = strip_windows_path_prefix(base.as_ref().as_os_str());
-        f(Path::new(me).strip_prefix(base))
     }
 }
 

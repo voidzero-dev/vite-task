@@ -102,9 +102,9 @@ declare const _foo: Foo;
     // Run oxlint without --type-aware first
     let accesses = track_oxlint(&tmpdir_path, &[""]).await?;
     let access_to_types_ts = accesses.iter().find(|access| {
-        let os_str = access.path.to_cow_os_str();
-        os_str.as_encoded_bytes().ends_with(b"\\types.ts")
-            || os_str.as_encoded_bytes().ends_with(b"/types.ts")
+        access
+            .path
+            .strip_path_prefix(&tmpdir_path, |result| result.is_ok_and(|p| p.ends_with("types.ts")))
     });
     assert_eq!(access_to_types_ts, None, "oxlint should not read types.ts without --type-aware");
 

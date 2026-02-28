@@ -1,10 +1,12 @@
 pub mod channel;
-mod native_str;
+mod native_path;
+pub(crate) mod native_str;
 
 use std::fmt::Debug;
 
 use bincode::{BorrowDecode, Encode, config::Configuration};
 use bitflags::bitflags;
+pub use native_path::NativePath;
 pub use native_str::NativeStr;
 
 pub const BINCODE_CONFIG: Configuration = bincode::config::standard();
@@ -35,16 +37,16 @@ impl Debug for AccessMode {
 #[derive(Encode, BorrowDecode, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathAccess<'a> {
     pub mode: AccessMode,
-    pub path: &'a NativeStr,
+    pub path: &'a NativePath,
     // TODO: add follow_symlinks (O_NOFOLLOW)
 }
 
 impl<'a> PathAccess<'a> {
-    pub fn read(path: impl Into<&'a NativeStr>) -> Self {
+    pub fn read(path: impl Into<&'a NativePath>) -> Self {
         Self { mode: AccessMode::READ, path: path.into() }
     }
 
-    pub fn read_dir(path: impl Into<&'a NativeStr>) -> Self {
+    pub fn read_dir(path: impl Into<&'a NativePath>) -> Self {
         Self { mode: AccessMode::READ_DIR, path: path.into() }
     }
 }

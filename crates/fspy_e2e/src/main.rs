@@ -38,18 +38,18 @@ impl AccessCollector {
     }
 
     pub fn add(&mut self, access: PathAccess) {
-        let path = PathBuf::from(access.path.to_cow_os_str().to_os_string());
-        if let Ok(relative_path) = path.strip_prefix(&self.dir) {
-            let relative_path =
-                relative_path.to_str().expect("relative path should be valid UTF-8").to_owned();
-            match self.accesses.entry(relative_path) {
-                Entry::Vacant(vacant) => {
-                    vacant.insert(access.mode);
-                }
-                Entry::Occupied(mut occupied) => {
-                    let occupied_mode = occupied.get_mut();
-                    occupied_mode.insert(access.mode);
-                }
+        let Some(relative_path) = access.path.strip_path_prefix(&self.dir, |result| {
+            result.ok().and_then(|p| p.to_str().map(str::to_owned))
+        }) else {
+            return;
+        };
+        match self.accesses.entry(relative_path) {
+            Entry::Vacant(vacant) => {
+                vacant.insert(access.mode);
+            }
+            Entry::Occupied(mut occupied) => {
+                let occupied_mode = occupied.get_mut();
+                occupied_mode.insert(access.mode);
             }
         }
     }
