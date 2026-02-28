@@ -198,3 +198,29 @@ args = ["run", "--filter", "!nonexistent", "build"]
 compact = true
 name = "nested vp run with filter in script"
 args = ["run", "--filter", "@test/app", "deploy"]
+
+# -w / --workspace-root: run task on workspace root package only
+[[plan]]
+compact = true
+name = "workspace root flag"
+args = ["run", "-w", "check"]
+
+# pnpm: -w is additive — workspace root is unioned with filtered packages.
+# Both root and app have "check", so both appear (no dependency edge between them).
+[[plan]]
+compact = true
+name = "workspace root with filter"
+args = ["run", "-w", "--filter", "@test/app", "check"]
+
+# -w with -r: redundant (all packages already includes root). Same as -r alone.
+[[plan]]
+compact = true
+name = "workspace root with recursive"
+args = ["run", "-w", "-r", "build"]
+
+# -w with -t: workspace root with transitive dependencies.
+# Root depends on @test/core; both have "check", so core#check → root#check.
+[[plan]]
+compact = true
+name = "workspace root with transitive"
+args = ["run", "-w", "-t", "check"]

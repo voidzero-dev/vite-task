@@ -103,6 +103,10 @@ pub(crate) enum PackageSelector {
     /// Match by name AND directory (intersection).
     /// Produced by `--filter "pattern{./dir}"`.
     NameAndDirectory { name: PackageNamePattern, directory: DirectoryPattern },
+
+    /// Select the workspace root package (the package with empty relative path).
+    /// Produced by `-w` / `--workspace-root`.
+    WorkspaceRoot,
 }
 
 /// Direction to traverse the package dependency graph from the initially matched packages.
@@ -189,6 +193,9 @@ pub enum PackageQueryError {
     #[error("cannot specify package name with --filter")]
     PackageNameWithFilter { package_name: Str },
 
+    #[error("cannot specify package name with --workspace-root")]
+    PackageNameWithWorkspaceRoot { package_name: Str },
+
     #[error("--filter value contains no selectors (whitespace-only)")]
     EmptyFilter,
 
@@ -210,6 +217,10 @@ pub struct PackageQueryArgs {
     #[clap(default_value = "false", short, long)]
     pub transitive: bool,
 
+    /// Run task in the workspace root package.
+    #[clap(default_value = "false", short = 'w', long = "workspace-root")]
+    pub workspace_root: bool,
+
     /// Filter packages (pnpm --filter syntax). Can be specified multiple times.
     #[clap(short = 'F', long, num_args = 1)]
     pub filter: Vec<Str>,
@@ -230,7 +241,7 @@ impl PackageQueryArgs {
         package_name: Option<Str>,
         cwd: &Arc<AbsolutePath>,
     ) -> Result<PackageQuery, PackageQueryError> {
-        let Self { recursive, transitive, filter } = self;
+        let Self { recursive, transitive, workspace_root, filter } = self;
 
         if recursive {
             if transitive {
@@ -242,6 +253,7 @@ impl PackageQueryArgs {
             if let Some(package_name) = package_name {
                 return Err(PackageQueryError::PackageNameWithRecursive { package_name });
             }
+            // -w is redundant with -r (all packages already includes root).
             return Ok(PackageQuery::all());
         }
 
@@ -261,11 +273,41 @@ impl PackageQueryArgs {
                     .collect(),
             )
             .map_err(|_| PackageQueryError::EmptyFilter)?;
-            let parsed: Vec1<PackageFilter> = tokens.try_mapped(|f| parse_filter(&f, cwd))?;
+            let mut parsed: Vec1<PackageFilter> = tokens.try_mapped(|f| parse_filter(&f, cwd))?;
+            // pnpm: `-w` adds workspace root to the filter list (additive).
+            if workspace_root {
+                parsed.push(PackageFilter {
+                    exclude: false,
+                    selector: PackageSelector::WorkspaceRoot,
+                    traversal: None,
+                });
+            }
             return Ok(PackageQuery::filters(parsed));
         }
 
-        // No --filter, no --recursive: implicit cwd or package-name specifier.
+        // No --filter, no --recursive.
+        // -w replaces the implicit cwd target with the workspace root.
+        // -w -t: workspace root with transitive dependencies.
+        if workspace_root {
+            if let Some(package_name) = package_name {
+                return Err(PackageQueryError::PackageNameWithWorkspaceRoot { package_name });
+            }
+            let traversal = if transitive {
+                Some(GraphTraversal {
+                    direction: TraversalDirection::Dependencies,
+                    exclude_self: false,
+                })
+            } else {
+                None
+            };
+            return Ok(PackageQuery::filters(Vec1::new(PackageFilter {
+                exclude: false,
+                selector: PackageSelector::WorkspaceRoot,
+                traversal,
+            })));
+        }
+
+        // No --filter, no --recursive, no -w: implicit cwd or package-name specifier.
         let selector = package_name.map_or_else(
             || PackageSelector::ContainingPackage(Arc::clone(cwd)),
             |name| PackageSelector::Name(PackageNamePattern::Exact(name)),
@@ -960,5 +1002,115 @@ mod tests {
         let f = parse_filter("{./foo}...", cwd).unwrap();
         assert_directory(&f, abs("/workspace/foo"));
         assert_traversal(&f, TraversalDirection::Dependencies, false);
+    }
+
+    // ── -w / --workspace-root flag ──────────────────────────────────────────
+
+    #[test]
+    fn workspace_root_produces_selector() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace/packages/app"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: true,
+            filter: Vec::new(),
+        };
+        let query = args.into_package_query(None, &cwd).unwrap();
+        match &query.0 {
+            crate::package_graph::PackageQueryKind::Filters(filters) => {
+                assert_eq!(filters.len(), 1);
+                assert!(!filters[0].exclude);
+                assert!(
+                    matches!(&filters[0].selector, PackageSelector::WorkspaceRoot),
+                    "expected WorkspaceRoot, got {:?}",
+                    filters[0].selector
+                );
+                assert_no_traversal(&filters[0]);
+            }
+            other => panic!("expected Filters, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workspace_root_with_recursive_returns_all() {
+        // -w is redundant with -r (all packages already includes root).
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: true,
+            transitive: false,
+            workspace_root: true,
+            filter: Vec::new(),
+        };
+        let query = args.into_package_query(None, &cwd).unwrap();
+        assert!(
+            matches!(&query.0, crate::package_graph::PackageQueryKind::All),
+            "expected All, got {:?}",
+            query.0
+        );
+    }
+
+    #[test]
+    fn workspace_root_with_transitive() {
+        // -w -t: workspace root with transitive dependencies.
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace/packages/app"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: true,
+            workspace_root: true,
+            filter: Vec::new(),
+        };
+        let query = args.into_package_query(None, &cwd).unwrap();
+        match &query.0 {
+            crate::package_graph::PackageQueryKind::Filters(filters) => {
+                assert_eq!(filters.len(), 1);
+                assert!(
+                    matches!(&filters[0].selector, PackageSelector::WorkspaceRoot),
+                    "expected WorkspaceRoot, got {:?}",
+                    filters[0].selector
+                );
+                assert_traversal(&filters[0], TraversalDirection::Dependencies, false);
+            }
+            other => panic!("expected Filters, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workspace_root_with_filter_unions() {
+        // -w --filter foo: workspace root + parsed filter.
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: true,
+            filter: vec![Str::from("foo")],
+        };
+        let query = args.into_package_query(None, &cwd).unwrap();
+        match &query.0 {
+            crate::package_graph::PackageQueryKind::Filters(filters) => {
+                assert_eq!(filters.len(), 2);
+                assert_exact_name(&filters[0], "foo");
+                assert!(
+                    matches!(&filters[1].selector, PackageSelector::WorkspaceRoot),
+                    "expected WorkspaceRoot, got {:?}",
+                    filters[1].selector
+                );
+            }
+            other => panic!("expected Filters, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workspace_root_conflicts_with_package_name() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: true,
+            filter: Vec::new(),
+        };
+        assert!(matches!(
+            args.into_package_query(Some(Str::from("app")), &cwd),
+            Err(PackageQueryError::PackageNameWithWorkspaceRoot { .. })
+        ));
     }
 }

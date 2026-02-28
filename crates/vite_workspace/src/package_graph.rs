@@ -275,6 +275,16 @@ impl IndexedPackageGraph {
                 self.match_by_directory_pattern(directory, &mut by_dir);
                 matched.extend(by_name.intersection(&by_dir));
             }
+
+            PackageSelector::WorkspaceRoot => {
+                // The workspace root package has an empty relative path.
+                for idx in self.graph.node_indices() {
+                    if self.graph[idx].path.as_str().is_empty() {
+                        matched.insert(idx);
+                        break;
+                    }
+                }
+            }
         }
 
         matched

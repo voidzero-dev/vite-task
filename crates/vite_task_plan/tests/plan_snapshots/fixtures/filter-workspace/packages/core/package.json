@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "build": "echo 'Building @test/core'",
+    "check": "echo 'Checking @test/core'",
     "test": "echo 'Testing @test/core'"
   }
 }
