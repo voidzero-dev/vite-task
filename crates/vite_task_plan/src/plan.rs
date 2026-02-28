@@ -522,6 +522,12 @@ pub async fn plan_query_request(
     // `query_tasks` is infallible — an empty graph means no tasks matched;
     // the caller (session) handles empty graphs by showing the task selector.
     let task_query_result = context.indexed_task_graph().query_tasks(&query_plan_request.query);
+
+    #[expect(clippy::print_stderr, reason = "user-facing warning for typos in --filter")]
+    for selector in &task_query_result.unmatched_selectors {
+        eprintln!("No packages matched the filter: {selector}");
+    }
+
     let task_node_index_graph = task_query_result.execution_graph;
 
     let mut execution_node_indices_by_task_index =
