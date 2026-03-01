@@ -94,6 +94,19 @@ pub struct FilterResolution {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// PackageQueryResolveError
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Errors that can occur when resolving a [`PackageQuery`] against the workspace.
+#[derive(Debug, thiserror::Error)]
+pub enum PackageQueryResolveError {
+    #[error(
+        "Package name '{package_name}' is ambiguous; found in multiple locations: {package_paths:?}"
+    )]
+    AmbiguousPackageName { package_name: Str, package_paths: Box<[Arc<AbsolutePath>]> },
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // IndexedPackageGraph
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -172,13 +185,20 @@ impl IndexedPackageGraph {
     /// For `All`, returns the full induced subgraph (every package, every edge).
     /// For `Filters`, applies the filter algorithm and returns the induced subgraph
     /// of the matching packages.
-    #[must_use]
-    pub fn resolve_query(&self, query: &PackageQuery) -> FilterResolution {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PackageQueryResolveError::AmbiguousPackageName`] when an exact
+    /// package name (from a `pkg#task` specifier) matches multiple packages.
+    pub fn resolve_query(
+        &self,
+        query: &PackageQuery,
+    ) -> Result<FilterResolution, PackageQueryResolveError> {
         match &query.0 {
-            PackageQueryKind::All => FilterResolution {
+            PackageQueryKind::All => Ok(FilterResolution {
                 package_subgraph: self.full_subgraph(),
                 unmatched_selectors: Vec::new(),
-            },
+            }),
             PackageQueryKind::Filters(filters) => self.resolve_filters(filters.as_slice()),
         }
     }
@@ -210,7 +230,10 @@ impl IndexedPackageGraph {
     /// 4. For each exclusion: resolve + expand, then subtract from `selected`.
     /// 5. Build the induced subgraph: every original edge whose both endpoints are
     ///    in `selected` is preserved, regardless of how each endpoint was selected.
-    fn resolve_filters(&self, filters: &[PackageFilter]) -> FilterResolution {
+    fn resolve_filters(
+        &self,
+        filters: &[PackageFilter],
+    ) -> Result<FilterResolution, PackageQueryResolveError> {
         let mut unmatched_selectors = Vec::new();
 
         let (inclusions, exclusions): (Vec<_>, Vec<_>) = filters.iter().partition(|f| !f.exclude);
@@ -224,7 +247,7 @@ impl IndexedPackageGraph {
 
         // Apply inclusions: union each filter's resolved set into `selected`.
         for filter in &inclusions {
-            let matched = self.resolve_selector_entries(&filter.selector);
+            let matched = self.resolve_selector_entries(&filter.selector)?;
             if matched.is_empty()
                 && let Some(source) = &filter.source
             {
@@ -236,7 +259,7 @@ impl IndexedPackageGraph {
 
         // Apply exclusions: subtract each filter's resolved set from `selected`.
         for filter in &exclusions {
-            let matched = self.resolve_selector_entries(&filter.selector);
+            let matched = self.resolve_selector_entries(&filter.selector)?;
             let to_remove = self.expand_traversal(matched, filter.traversal.as_ref());
             for pkg in to_remove {
                 selected.remove(&pkg);
@@ -244,17 +267,20 @@ impl IndexedPackageGraph {
         }
 
         let package_subgraph = self.build_induced_subgraph(&selected);
-        FilterResolution { package_subgraph, unmatched_selectors }
+        Ok(FilterResolution { package_subgraph, unmatched_selectors })
     }
 
     /// Resolve a `PackageSelector` to the set of directly matched packages
     /// (before any graph traversal expansion).
-    fn resolve_selector_entries(&self, selector: &PackageSelector) -> FxHashSet<PackageNodeIndex> {
+    fn resolve_selector_entries(
+        &self,
+        selector: &PackageSelector,
+    ) -> Result<FxHashSet<PackageNodeIndex>, PackageQueryResolveError> {
         let mut matched = FxHashSet::default();
 
         match selector {
             PackageSelector::Name(pattern) => {
-                self.match_by_name_pattern(pattern, &mut matched);
+                self.match_by_name_pattern(pattern, &mut matched)?;
             }
 
             PackageSelector::Directory(dir_pattern) => {
@@ -271,7 +297,7 @@ impl IndexedPackageGraph {
             PackageSelector::NameAndDirectory { name, directory } => {
                 // Intersection: packages satisfying both name AND directory.
                 let mut by_name = FxHashSet::default();
-                self.match_by_name_pattern(name, &mut by_name);
+                self.match_by_name_pattern(name, &mut by_name)?;
                 let mut by_dir = FxHashSet::default();
                 self.match_by_directory_pattern(directory, &mut by_dir);
                 matched.extend(by_name.intersection(&by_dir));
@@ -288,7 +314,7 @@ impl IndexedPackageGraph {
             }
         }
 
-        matched
+        Ok(matched)
     }
 
     /// Match packages by a name pattern, inserting into `out`.
@@ -301,10 +327,19 @@ impl IndexedPackageGraph {
         &self,
         pattern: &PackageNamePattern,
         out: &mut FxHashSet<PackageNodeIndex>,
-    ) {
+    ) -> Result<(), PackageQueryResolveError> {
         match pattern {
-            PackageNamePattern::Exact(name) => {
+            PackageNamePattern::Exact { name, unique } => {
                 if let Some(indices) = self.get_package_indices_by_name(name) {
+                    if *unique && indices.len() > 1 {
+                        return Err(PackageQueryResolveError::AmbiguousPackageName {
+                            package_name: name.clone(),
+                            package_paths: indices
+                                .iter()
+                                .map(|i| Arc::clone(&self.graph[*i].absolute_path))
+                                .collect(),
+                        });
+                    }
                     out.extend(indices.iter().copied());
                 } else {
                     // Scoped auto-completion: `"bar"` → `"@scope/bar"` if exactly one match.
@@ -334,6 +369,7 @@ impl IndexedPackageGraph {
                 }
             }
         }
+        Ok(())
     }
 
     /// Match packages by a directory pattern, inserting into `out`.

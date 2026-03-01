@@ -519,9 +519,9 @@ pub async fn plan_query_request(
 ) -> Result<ExecutionGraph, Error> {
     context.set_extra_args(Arc::clone(&query_plan_request.plan_options.extra_args));
     // Query matching tasks from the task graph.
-    // `query_tasks` is infallible — an empty graph means no tasks matched;
-    // the caller (session) handles empty graphs by showing the task selector.
-    let task_query_result = context.indexed_task_graph().query_tasks(&query_plan_request.query);
+    // An empty graph means no tasks matched; the caller (session) handles
+    // empty graphs by showing the task selector.
+    let task_query_result = context.indexed_task_graph().query_tasks(&query_plan_request.query)?;
 
     #[expect(clippy::print_stderr, reason = "user-facing warning for typos in --filter")]
     for selector in &task_query_result.unmatched_selectors {

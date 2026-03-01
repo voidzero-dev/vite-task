@@ -20,7 +20,7 @@ use petgraph::{Direction, prelude::DiGraphMap, visit::EdgeRef};
 use rustc_hash::{FxHashMap, FxHashSet};
 use vite_str::Str;
 use vite_workspace::PackageNodeIndex;
-pub use vite_workspace::package_graph::PackageQuery;
+pub use vite_workspace::package_graph::{PackageQuery, PackageQueryResolveError};
 
 use crate::{IndexedTaskGraph, TaskDependencyType, TaskId, TaskNodeIndex};
 
@@ -67,18 +67,25 @@ impl IndexedTaskGraph {
     /// unmatched selectors. The execution graph may be empty — the caller decides
     /// what to do in that case (show task selector, emit warnings, etc.).
     ///
+    /// # Errors
+    ///
+    /// Returns [`PackageQueryResolveError::AmbiguousPackageName`] when an exact
+    /// package name (from a `pkg#task` specifier) matches multiple packages.
+    ///
     /// # Order of operations
     ///
     /// 1. Resolve `PackageQuery` → package subgraph (Stage 1).
     /// 2. Map package subgraph → task execution graph, reconnecting task-lacking
     ///    packages (Stage 2).
     /// 3. Expand explicit `dependsOn` edges (if `include_explicit_deps`).
-    #[must_use]
-    pub fn query_tasks(&self, query: &TaskQuery) -> TaskQueryResult {
+    pub fn query_tasks(
+        &self,
+        query: &TaskQuery,
+    ) -> Result<TaskQueryResult, PackageQueryResolveError> {
         let mut execution_graph = TaskExecutionGraph::default();
 
         // Stage 1: resolve package selection.
-        let resolution = self.indexed_package_graph.resolve_query(&query.package_query);
+        let resolution = self.indexed_package_graph.resolve_query(&query.package_query)?;
 
         // Stage 2: map each selected package to its task node (with reconnection).
         self.map_subgraph_to_tasks(
@@ -92,7 +99,7 @@ impl IndexedTaskGraph {
             self.add_dependencies(&mut execution_graph, |_| TaskDependencyType::is_explicit());
         }
 
-        TaskQueryResult { execution_graph, unmatched_selectors: resolution.unmatched_selectors }
+        Ok(TaskQueryResult { execution_graph, unmatched_selectors: resolution.unmatched_selectors })
     }
 
     /// Map a package subgraph to a task execution graph.

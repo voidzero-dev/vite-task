@@ -49,7 +49,10 @@ pub(crate) enum PackageNamePattern {
     /// Scoped auto-completion applies during resolution: if `"bar"` has no exact match
     /// but exactly one `@*/bar` package exists, that package is matched.
     /// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L303-L306>
-    Exact(Str),
+    ///
+    /// When `unique` is true, resolution errors if multiple packages share the
+    /// name. Set for `pkg#task` CLI specifiers; false for `--filter`.
+    Exact { name: Str, unique: bool },
 
     /// Glob pattern (e.g. `@scope/*`, `*-utils`). Iterates all packages.
     ///
@@ -228,7 +231,7 @@ pub struct PackageQueryArgs {
     /// Match packages by name, directory, or glob pattern.
     #[clap(
         short = 'F',
-        long,
+        long = "filter",
         num_args = 1,
         long_help = "\
 Match packages by name, directory, or glob pattern.
@@ -258,6 +261,7 @@ impl PackageQueryArgs {
     ///
     /// Returns [`PackageQueryError`] if conflicting flags are set, a package name
     /// is specified with `--recursive` or `--filter`, or a filter expression is invalid.
+    #[expect(clippy::too_many_lines, reason = "single exhaustive match")]
     pub fn into_package_query(
         self,
         package_name: Option<Str>,
@@ -357,7 +361,10 @@ impl PackageQueryArgs {
                 Ok((
                     PackageQuery::filters(Vec1::new(PackageFilter {
                         exclude: false,
-                        selector: PackageSelector::Name(PackageNamePattern::Exact(name)),
+                        selector: PackageSelector::Name(PackageNamePattern::Exact {
+                            name,
+                            unique: true,
+                        }),
                         traversal,
                         source: None,
                     })),
@@ -565,7 +572,7 @@ fn build_name_pattern(name: &str) -> Result<PackageNamePattern, PackageFilterPar
     if glob.clone().partition().1.is_some() {
         Ok(PackageNamePattern::Glob(Box::new(glob)))
     } else {
-        Ok(PackageNamePattern::Exact(name.into()))
+        Ok(PackageNamePattern::Exact { name: name.into(), unique: false })
     }
 }
 
@@ -603,7 +610,7 @@ mod tests {
 
     fn assert_exact_name(filter: &PackageFilter, expected: &str) {
         match &filter.selector {
-            PackageSelector::Name(PackageNamePattern::Exact(n)) => {
+            PackageSelector::Name(PackageNamePattern::Exact { name: n, .. }) => {
                 assert_eq!(n.as_str(), expected, "exact name mismatch");
             }
             other => panic!("expected Name(Exact({expected:?})), got {other:?}"),
@@ -651,7 +658,7 @@ mod tests {
     ) {
         match &filter.selector {
             PackageSelector::NameAndDirectory {
-                name: PackageNamePattern::Exact(n),
+                name: PackageNamePattern::Exact { name: n, .. },
                 directory: DirectoryPattern::Exact(dir),
             } => {
                 assert_eq!(n.as_str(), expected_name, "name mismatch");
@@ -671,7 +678,7 @@ mod tests {
     ) {
         match &filter.selector {
             PackageSelector::NameAndDirectory {
-                name: PackageNamePattern::Exact(n),
+                name: PackageNamePattern::Exact { name: n, .. },
                 directory: DirectoryPattern::Glob { base, pattern },
             } => {
                 assert_eq!(n.as_str(), expected_name, "name mismatch");

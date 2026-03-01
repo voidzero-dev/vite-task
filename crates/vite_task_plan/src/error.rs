@@ -93,6 +93,9 @@ pub enum Error {
         error: Box<Self>,
     },
 
+    #[error(transparent)]
+    PackageQueryResolve(#[from] vite_task_graph::query::PackageQueryResolveError),
+
     #[error("Failed to load task graph")]
     TaskGraphLoad(
         #[source]
