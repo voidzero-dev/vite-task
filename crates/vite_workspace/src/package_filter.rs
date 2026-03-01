@@ -200,7 +200,7 @@ pub enum PackageQueryError {
     #[error("cannot specify package name with --workspace-root")]
     PackageNameWithWorkspaceRoot { package_name: Str },
 
-    #[error("--filter value contains no selectors (whitespace-only)")]
+    #[error("--filter value is empty")]
     EmptyFilter,
 
     #[error("invalid --filter expression")]
@@ -241,7 +241,7 @@ Match packages by name, directory, or glob pattern.
   --filter <pattern>^...    Select only the dependencies (exclude the package itself)
   --filter !<pattern>       Exclude packages matching the pattern"
     )]
-    filter: Vec<Str>,
+    filters: Vec<Str>,
 }
 
 impl PackageQueryArgs {
@@ -263,100 +263,103 @@ impl PackageQueryArgs {
         package_name: Option<Str>,
         cwd: &Arc<AbsolutePath>,
     ) -> Result<(PackageQuery, bool), PackageQueryError> {
-        let Self { recursive, transitive, workspace_root, filter } = self;
+        let Self { recursive, transitive, workspace_root, filters } = self;
 
-        if recursive {
-            if transitive {
-                return Err(PackageQueryError::RecursiveTransitiveConflict);
+        // Collect filter tokens from all `--filter` arguments, splitting on whitespace.
+        let mut filter_tokens = Vec::<Str>::with_capacity(filters.len());
+        for filter in filters {
+            let mut is_empty = true;
+            for filter_token in filter.split_ascii_whitespace() {
+                is_empty = false;
+                filter_tokens.push(filter_token.into());
             }
-            if !filter.is_empty() {
-                return Err(PackageQueryError::FilterWithRecursive);
+            // Error if any --filter value is empty or whitespace-only.
+            if is_empty {
+                return Err(PackageQueryError::EmptyFilter);
             }
-            if let Some(package_name) = package_name {
-                return Err(PackageQueryError::PackageNameWithRecursive { package_name });
-            }
+        }
+        // We have checked that filter_tokens is non-empty if any filters were provided,
+        // If no tokens are collected, it means no filters were provided.
+        let filter_tokens: Option<Vec1<Str>> = Vec1::try_from_vec(filter_tokens).ok();
+
+        match (recursive, transitive, workspace_root, filter_tokens) {
+            (true, true, _, _) => Err(PackageQueryError::RecursiveTransitiveConflict),
+            (true, _, _, Some(_)) => Err(PackageQueryError::FilterWithRecursive),
             // -w is redundant with -r (all packages already includes root).
-            return Ok((PackageQuery::all(), false));
+            (true, false, _, None) => {
+                if let Some(package_name) = package_name {
+                    return Err(PackageQueryError::PackageNameWithRecursive { package_name });
+                }
+                Ok((PackageQuery::all(), false))
+            }
+            (false, true, _, Some(_)) => Err(PackageQueryError::FilterWithTransitive),
+            (false, _, _, Some(filter_tokens)) => {
+                if let Some(package_name) = package_name {
+                    return Err(PackageQueryError::PackageNameWithFilter { package_name });
+                }
+                let mut parsed: Vec1<PackageFilter> =
+                    filter_tokens.try_mapped(|f| parse_filter(&f, cwd))?;
+                // pnpm: `-w` adds workspace root to the filter list (additive).
+                if workspace_root {
+                    parsed.push(PackageFilter {
+                        exclude: false,
+                        selector: PackageSelector::WorkspaceRoot,
+                        traversal: None,
+                        source: None,
+                    });
+                }
+                Ok((PackageQuery::filters(parsed), false))
+            }
+            // -w replaces the implicit cwd target with the workspace root.
+            // -w -t: workspace root with transitive dependencies.
+            (false, _, true, None) => {
+                if let Some(package_name) = package_name {
+                    return Err(PackageQueryError::PackageNameWithWorkspaceRoot { package_name });
+                }
+                let traversal = if transitive {
+                    Some(GraphTraversal {
+                        direction: TraversalDirection::Dependencies,
+                        exclude_self: false,
+                    })
+                } else {
+                    None
+                };
+                Ok((
+                    PackageQuery::filters(Vec1::new(PackageFilter {
+                        exclude: false,
+                        selector: PackageSelector::WorkspaceRoot,
+                        traversal,
+                        source: None,
+                    })),
+                    false,
+                ))
+            }
+            // No flags: implicit cwd or package-name specifier.
+            (false, _, false, None) => {
+                let is_cwd_only = !transitive && package_name.is_none();
+                let selector = package_name.map_or_else(
+                    || PackageSelector::ContainingPackage(Arc::clone(cwd)),
+                    |name| PackageSelector::Name(PackageNamePattern::Exact(name)),
+                );
+                let traversal = if transitive {
+                    Some(GraphTraversal {
+                        direction: TraversalDirection::Dependencies,
+                        exclude_self: false,
+                    })
+                } else {
+                    None
+                };
+                Ok((
+                    PackageQuery::filters(Vec1::new(PackageFilter {
+                        exclude: false,
+                        selector,
+                        traversal,
+                        source: None,
+                    })),
+                    is_cwd_only,
+                ))
+            }
         }
-
-        if !filter.is_empty() {
-            if transitive {
-                return Err(PackageQueryError::FilterWithTransitive);
-            }
-            if let Some(package_name) = package_name {
-                return Err(PackageQueryError::PackageNameWithFilter { package_name });
-            }
-            // Normalize: split each --filter value by whitespace into individual tokens.
-            // This makes `--filter "a b"` equivalent to `--filter a --filter b` (pnpm behaviour).
-            let tokens: Vec1<Str> = Vec1::try_from_vec(
-                filter
-                    .into_iter()
-                    .flat_map(|f| f.split_ascii_whitespace().map(Str::from).collect::<Vec<_>>())
-                    .collect(),
-            )
-            .map_err(|_| PackageQueryError::EmptyFilter)?;
-            let mut parsed: Vec1<PackageFilter> = tokens.try_mapped(|f| parse_filter(&f, cwd))?;
-            // pnpm: `-w` adds workspace root to the filter list (additive).
-            if workspace_root {
-                parsed.push(PackageFilter {
-                    exclude: false,
-                    selector: PackageSelector::WorkspaceRoot,
-                    traversal: None,
-                    source: None,
-                });
-            }
-            return Ok((PackageQuery::filters(parsed), false));
-        }
-
-        // No --filter, no --recursive.
-        // -w replaces the implicit cwd target with the workspace root.
-        // -w -t: workspace root with transitive dependencies.
-        if workspace_root {
-            if let Some(package_name) = package_name {
-                return Err(PackageQueryError::PackageNameWithWorkspaceRoot { package_name });
-            }
-            let traversal = if transitive {
-                Some(GraphTraversal {
-                    direction: TraversalDirection::Dependencies,
-                    exclude_self: false,
-                })
-            } else {
-                None
-            };
-            return Ok((
-                PackageQuery::filters(Vec1::new(PackageFilter {
-                    exclude: false,
-                    selector: PackageSelector::WorkspaceRoot,
-                    traversal,
-                    source: None,
-                })),
-                false,
-            ));
-        }
-
-        // No --filter, no --recursive, no -w: implicit cwd or package-name specifier.
-        let is_cwd_only = !transitive && package_name.is_none();
-        let selector = package_name.map_or_else(
-            || PackageSelector::ContainingPackage(Arc::clone(cwd)),
-            |name| PackageSelector::Name(PackageNamePattern::Exact(name)),
-        );
-        let traversal = if transitive {
-            Some(GraphTraversal {
-                direction: TraversalDirection::Dependencies,
-                exclude_self: false,
-            })
-        } else {
-            None
-        };
-        Ok((
-            PackageQuery::filters(Vec1::new(PackageFilter {
-                exclude: false,
-                selector,
-                traversal,
-                source: None,
-            })),
-            is_cwd_only,
-        ))
     }
 }
 
@@ -1049,7 +1052,7 @@ mod tests {
             recursive: false,
             transitive: false,
             workspace_root: true,
-            filter: Vec::new(),
+            filters: Vec::new(),
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1075,7 +1078,7 @@ mod tests {
             recursive: true,
             transitive: false,
             workspace_root: true,
-            filter: Vec::new(),
+            filters: Vec::new(),
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         assert!(
@@ -1093,7 +1096,7 @@ mod tests {
             recursive: false,
             transitive: true,
             workspace_root: true,
-            filter: Vec::new(),
+            filters: Vec::new(),
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1118,7 +1121,7 @@ mod tests {
             recursive: false,
             transitive: false,
             workspace_root: true,
-            filter: vec![Str::from("foo")],
+            filters: vec![Str::from("foo")],
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1142,7 +1145,7 @@ mod tests {
             recursive: false,
             transitive: false,
             workspace_root: true,
-            filter: Vec::new(),
+            filters: Vec::new(),
         };
         assert!(matches!(
             args.into_package_query(Some(Str::from("app")), &cwd),
@@ -1166,7 +1169,7 @@ mod tests {
             recursive: false,
             transitive: false,
             workspace_root: false,
-            filter: vec![Str::from("a b")],
+            filters: vec![Str::from("a b")],
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1186,7 +1189,7 @@ mod tests {
             recursive: false,
             transitive: false,
             workspace_root: true,
-            filter: vec![Str::from("foo")],
+            filters: vec![Str::from("foo")],
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1206,7 +1209,7 @@ mod tests {
             recursive: false,
             transitive: false,
             workspace_root: false,
-            filter: Vec::new(),
+            filters: Vec::new(),
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1216,5 +1219,147 @@ mod tests {
             }
             crate::package_graph::PackageQueryKind::All => panic!("expected Filters, got All"),
         }
+    }
+
+    // ── empty filter validation ─────────────────────────────────────────────
+
+    #[test]
+    fn empty_filter_string_errors() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: vec![Str::from("")],
+        };
+        assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
+    }
+
+    #[test]
+    fn whitespace_only_filter_errors() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: vec![Str::from("   ")],
+        };
+        assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
+    }
+
+    #[test]
+    fn second_filter_empty_errors() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: vec![Str::from("foo"), Str::from("")],
+        };
+        assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
+    }
+
+    #[test]
+    fn first_filter_empty_with_valid_second_errors() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: vec![Str::from(""), Str::from("foo")],
+        };
+        assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
+    }
+
+    #[test]
+    fn valid_filter_with_whitespace_only_second_errors() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: vec![Str::from("foo"), Str::from("  \t  ")],
+        };
+        assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
+    }
+
+    // ── is_cwd_only flag ─────────────────────────────────────────────────────
+
+    #[test]
+    fn is_cwd_only_true_for_bare_invocation() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace/packages/app"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: Vec::new(),
+        };
+        let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
+        assert!(is_cwd_only);
+    }
+
+    #[test]
+    fn is_cwd_only_false_with_package_name() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: Vec::new(),
+        };
+        let (_, is_cwd_only) = args.into_package_query(Some(Str::from("app")), &cwd).unwrap();
+        assert!(!is_cwd_only);
+    }
+
+    #[test]
+    fn is_cwd_only_false_with_transitive() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace/packages/app"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: true,
+            workspace_root: false,
+            filters: Vec::new(),
+        };
+        let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
+        assert!(!is_cwd_only);
+    }
+
+    #[test]
+    fn is_cwd_only_false_with_recursive() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: true,
+            transitive: false,
+            workspace_root: false,
+            filters: Vec::new(),
+        };
+        let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
+        assert!(!is_cwd_only);
+    }
+
+    #[test]
+    fn is_cwd_only_false_with_filter() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: vec![Str::from("foo")],
+        };
+        let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
+        assert!(!is_cwd_only);
+    }
+
+    #[test]
+    fn is_cwd_only_false_with_workspace_root() {
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: true,
+            filters: Vec::new(),
+        };
+        let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
+        assert!(!is_cwd_only);
     }
 }
