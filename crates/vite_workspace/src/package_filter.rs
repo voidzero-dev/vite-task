@@ -282,24 +282,27 @@ impl PackageQueryArgs {
         // If no tokens are collected, it means no filters were provided.
         let filter_tokens: Option<Vec1<Str>> = Vec1::try_from_vec(filter_tokens).ok();
 
-        match (recursive, transitive, workspace_root, filter_tokens) {
-            (true, true, _, _) => Err(PackageQueryError::RecursiveTransitiveConflict),
-            (true, _, _, Some(_)) => Err(PackageQueryError::FilterWithRecursive),
-            // -w is redundant with -r (all packages already includes root).
-            (true, false, _, None) => {
-                if let Some(package_name) = package_name {
-                    return Err(PackageQueryError::PackageNameWithRecursive { package_name });
-                }
-                Ok((PackageQuery::all(), false))
+        match (recursive, transitive, workspace_root, filter_tokens, package_name) {
+            // --recursive --transitive
+            (true, true, _, _, _) => Err(PackageQueryError::RecursiveTransitiveConflict),
+            // --recursive --filter
+            (true, _, _, Some(_), _) => Err(PackageQueryError::FilterWithRecursive),
+            // --recursive <pkg>#<task>
+            (true, false, _, None, Some(package_name)) => {
+                Err(PackageQueryError::PackageNameWithRecursive { package_name })
             }
-            (false, true, _, Some(_)) => Err(PackageQueryError::FilterWithTransitive),
-            (false, _, _, Some(filter_tokens)) => {
-                if let Some(package_name) = package_name {
-                    return Err(PackageQueryError::PackageNameWithFilter { package_name });
-                }
+            // --recursive (--workspace-root is redundant)
+            (true, false, _, None, None) => Ok((PackageQuery::all(), false)),
+            // --transitive --filter
+            (false, true, _, Some(_), _) => Err(PackageQueryError::FilterWithTransitive),
+            // --filter <pkg>#<task>
+            (false, _, _, Some(_), Some(package_name)) => {
+                Err(PackageQueryError::PackageNameWithFilter { package_name })
+            }
+            // --filter [--workspace-root]
+            (false, _, _, Some(filter_tokens), None) => {
                 let mut parsed: Vec1<PackageFilter> =
                     filter_tokens.try_mapped(|f| parse_filter(&f, cwd))?;
-                // pnpm: `-w` adds workspace root to the filter list (additive).
                 if workspace_root {
                     parsed.push(PackageFilter {
                         exclude: false,
@@ -310,12 +313,12 @@ impl PackageQueryArgs {
                 }
                 Ok((PackageQuery::filters(parsed), false))
             }
-            // -w replaces the implicit cwd target with the workspace root.
-            // -w -t: workspace root with transitive dependencies.
-            (false, _, true, None) => {
-                if let Some(package_name) = package_name {
-                    return Err(PackageQueryError::PackageNameWithWorkspaceRoot { package_name });
-                }
+            // --workspace-root <pkg>#<task>
+            (false, _, true, None, Some(package_name)) => {
+                Err(PackageQueryError::PackageNameWithWorkspaceRoot { package_name })
+            }
+            // --workspace-root [--transitive]
+            (false, _, true, None, None) => {
                 let traversal = if transitive {
                     Some(GraphTraversal {
                         direction: TraversalDirection::Dependencies,
@@ -334,13 +337,8 @@ impl PackageQueryArgs {
                     false,
                 ))
             }
-            // No flags: implicit cwd or package-name specifier.
-            (false, _, false, None) => {
-                let is_cwd_only = !transitive && package_name.is_none();
-                let selector = package_name.map_or_else(
-                    || PackageSelector::ContainingPackage(Arc::clone(cwd)),
-                    |name| PackageSelector::Name(PackageNamePattern::Exact(name)),
-                );
+            // [--transitive] <pkg>#<task>
+            (false, _, false, None, Some(name)) => {
                 let traversal = if transitive {
                     Some(GraphTraversal {
                         direction: TraversalDirection::Dependencies,
@@ -352,13 +350,36 @@ impl PackageQueryArgs {
                 Ok((
                     PackageQuery::filters(Vec1::new(PackageFilter {
                         exclude: false,
-                        selector,
+                        selector: PackageSelector::Name(PackageNamePattern::Exact(name)),
                         traversal,
                         source: None,
                     })),
-                    is_cwd_only,
+                    false,
                 ))
             }
+            // --transitive
+            (false, true, false, None, None) => Ok((
+                PackageQuery::filters(Vec1::new(PackageFilter {
+                    exclude: false,
+                    selector: PackageSelector::ContainingPackage(Arc::clone(cwd)),
+                    traversal: Some(GraphTraversal {
+                        direction: TraversalDirection::Dependencies,
+                        exclude_self: false,
+                    }),
+                    source: None,
+                })),
+                false,
+            )),
+            // (no flags, implicit cwd)
+            (false, false, false, None, None) => Ok((
+                PackageQuery::filters(Vec1::new(PackageFilter {
+                    exclude: false,
+                    selector: PackageSelector::ContainingPackage(Arc::clone(cwd)),
+                    traversal: None,
+                    source: None,
+                })),
+                true,
+            )),
         }
     }
 }
