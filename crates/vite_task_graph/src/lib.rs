@@ -180,6 +180,7 @@ impl IndexedTaskGraph {
     /// Returns [`TaskGraphLoadError`] if the package graph fails to load, a config file
     /// cannot be read, a task config cannot be resolved, a dependency specifier is invalid,
     /// or `cacheScripts` is set in a non-root package.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
         clippy::too_many_lines,
         reason = "graph loading is inherently sequential and multi-step"

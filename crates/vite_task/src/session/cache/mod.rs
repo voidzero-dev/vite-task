@@ -75,6 +75,7 @@ impl Display for FingerprintMismatch {
 }
 
 impl ExecutionCache {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
         tracing::info!("Creating task cache directory at {:?}", path);
         std::fs::create_dir_all(path)?;
@@ -130,6 +131,7 @@ impl ExecutionCache {
 
     /// Try to hit cache with spawn fingerprint.
     /// Returns `Ok(Ok(cache_value))` on cache hit, `Ok(Err(cache_miss))` on miss.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn try_hit(
         &self,
         cache_metadata: &CacheMetadata,
@@ -175,6 +177,7 @@ impl ExecutionCache {
     }
 
     /// Update cache after successful execution.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn update(
         &self,
         cache_metadata: &CacheMetadata,

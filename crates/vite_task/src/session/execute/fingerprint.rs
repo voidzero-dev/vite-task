@@ -73,6 +73,7 @@ impl PostRunFingerprint {
     /// * `path_reads` - Map of paths that were read during execution
     /// * `base_dir` - Workspace root for resolving relative paths
     /// * `fingerprint_ignores` - Optional glob patterns to exclude from fingerprinting
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn create(
         path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
@@ -102,6 +103,7 @@ impl PostRunFingerprint {
 
     /// Validates the fingerprint against current filesystem state.
     /// Returns `Some(mismatch)` if validation fails, `None` if valid.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn validate(
         &self,
         base_dir: &AbsolutePath,

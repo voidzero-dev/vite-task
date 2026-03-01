@@ -64,6 +64,7 @@ pub struct SpawnTrackResult {
 /// - stdin is always `/dev/null` (piped mode is for non-interactive execution).
 /// - `stdout_writer`/`stderr_writer` receive the child's stdout/stderr output in real-time.
 /// - `track_result` if provided, will be populated with captured outputs and path accesses for caching. If `None`, tracking is disabled.
+#[tracing::instrument(level = "debug", skip_all)]
 #[expect(clippy::future_not_send, reason = "uses !Send dyn AsyncWrite writers internally")]
 #[expect(
     clippy::too_many_lines,

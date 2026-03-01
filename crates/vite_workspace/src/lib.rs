@@ -198,6 +198,7 @@ pub type PackageEdgeIndex = EdgeIndex<DefaultIx>;
 ///
 /// # Errors
 /// Returns an error if the workspace cannot be found or the package graph cannot be loaded.
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn discover_package_graph(
     cwd: impl AsRef<AbsolutePath>,
 ) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
@@ -212,6 +213,7 @@ pub fn discover_package_graph(
 ///
 /// # Panics
 /// Panics if a `package.json` path has no parent directory (should not happen for valid paths).
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn load_package_graph(
     workspace_root: &WorkspaceRoot,
 ) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {

@@ -42,6 +42,7 @@ impl TaskGraphLoader for LazyTaskGraph<'_> {
     async fn load_task_graph(
         &mut self,
     ) -> Result<&vite_task_graph::IndexedTaskGraph, TaskGraphLoadError> {
+        let _span = tracing::debug_span!("load_task_graph").entered();
         Ok(match self {
             Self::Uninitialized { workspace_root, config_loader } => {
                 let graph = IndexedTaskGraph::load(workspace_root, *config_loader).await?;
@@ -159,6 +160,7 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the current directory cannot be determined or
     /// if workspace initialization fails.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn init(callbacks: SessionCallbacks<'a>) -> anyhow::Result<Self> {
         let envs = std::env::vars_os()
             .map(|(k, v)| (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str())))
@@ -171,6 +173,7 @@ impl<'a> Session<'a> {
     /// # Errors
     ///
     /// Returns an error if the task graph cannot be loaded from the workspace configuration.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
@@ -186,6 +189,7 @@ impl<'a> Session<'a> {
     /// # Errors
     ///
     /// Returns an error if workspace root cannot be found or PATH env cannot be prepended.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
         clippy::needless_pass_by_value,
         reason = "cwd is an Arc that gets cloned internally, pass by value is intentional"
@@ -222,6 +226,7 @@ impl<'a> Session<'a> {
     /// # Errors
     ///
     /// Returns an error if planning or execution fails.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
@@ -500,6 +505,7 @@ impl<'a> Session<'a> {
     /// # Errors
     ///
     /// Returns an error if planning or execution of the synthetic command fails.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
@@ -531,14 +537,14 @@ impl<'a> Session<'a> {
             reporter::PlainReporter::new(silent_if_cache_hit, Box::new(tokio::io::stdout()));
 
         // Execute the spawn directly using the free function, bypassing the graph pipeline
-        match execute::execute_spawn(
+        let outcome = execute::execute_spawn(
             Box::new(plain_reporter),
             &spawn_execution,
             cache,
             &self.workspace_path,
         )
-        .await
-        {
+        .await;
+        match outcome {
             // Cache hit — no process was spawned, success
             execute::SpawnOutcome::CacheHit => Ok(ExitStatus::SUCCESS),
             // Process ran successfully
@@ -562,6 +568,7 @@ impl<'a> Session<'a> {
     /// # Errors
     ///
     /// Returns an error if the plan request cannot be parsed or if planning fails.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
@@ -575,6 +582,7 @@ impl<'a> Session<'a> {
     }
 
     /// Internal: plans execution from a resolved run command.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"

@@ -72,6 +72,7 @@ impl ExecutionContext<'_> {
     ///
     /// Leaf-level errors are reported through the reporter and do not abort the graph.
     /// Cycle detection is handled at plan time, so this function cannot encounter cycles.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_expanded_graph(
         &mut self,
@@ -117,6 +118,7 @@ impl ExecutionContext<'_> {
     ///
     /// Creates a [`LeafExecutionReporter`] from the graph reporter and delegates
     /// to the appropriate execution method.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_leaf(
         &mut self,
@@ -174,6 +176,7 @@ impl ExecutionContext<'_> {
 ///
 /// Errors (cache lookup failure, spawn failure, cache update failure) are reported
 /// through `leaf_reporter.finish()` and do not abort the caller.
+#[tracing::instrument(level = "debug", skip_all)]
 #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
 #[expect(
     clippy::too_many_lines,
@@ -371,6 +374,7 @@ pub async fn execute_spawn(
 ///
 /// The child process will see `is_terminal() == true` for stdout/stderr when the
 /// parent is running in a terminal. This is expected behavior.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn spawn_inherited(spawn_command: &SpawnCommand) -> anyhow::Result<SpawnResult> {
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
     cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
@@ -427,6 +431,7 @@ impl Session<'_> {
     ///
     /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
     /// Returns `Ok(())` when all tasks succeeded.
+    #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     pub(crate) async fn execute_graph(
         &self,
