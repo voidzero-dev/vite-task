@@ -101,7 +101,8 @@ pub struct FilterResolution {
 #[derive(Debug, thiserror::Error)]
 pub enum PackageQueryResolveError {
     #[error(
-        "Package name '{package_name}' is ambiguous; found in multiple locations: {package_paths:?}"
+        "Package name '{package_name}' is ambiguous; found in multiple locations: {}",
+        package_paths.iter().map(|p| p.as_path().display().to_string()).collect::<Vec<_>>().join(", ")
     )]
     AmbiguousPackageName { package_name: Str, package_paths: Box<[Arc<AbsolutePath>]> },
 }

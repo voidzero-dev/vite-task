@@ -8,4 +8,4 @@ info:
     - "@test/duplicate#build"
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/duplicate-package-names
 ---
-Package name '@test/duplicate' is ambiguous; found in multiple locations: ["<workspace>/packages/pkg-a", "<workspace>/packages/pkg-b"]
+Package name '@test/duplicate' is ambiguous; found in multiple locations: <workspace>/packages/pkg-a, <workspace>/packages/pkg-b
