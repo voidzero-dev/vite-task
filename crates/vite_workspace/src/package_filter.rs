@@ -250,6 +250,10 @@ impl PackageQueryArgs {
     /// `package_name` is the optional package name from a `package#task` specifier.
     /// `cwd` is the working directory (used as fallback when no package name or filter is given).
     ///
+    /// Returns `(query, is_cwd_only)` where `is_cwd_only` is `true` when the query
+    /// falls through to the implicit-cwd path (no `-r`, `-t`, `-w`, `--filter`,
+    /// or explicit package name).
+    ///
     /// # Errors
     ///
     /// Returns [`PackageQueryError`] if conflicting flags are set, a package name
@@ -258,7 +262,7 @@ impl PackageQueryArgs {
         self,
         package_name: Option<Str>,
         cwd: &Arc<AbsolutePath>,
-    ) -> Result<PackageQuery, PackageQueryError> {
+    ) -> Result<(PackageQuery, bool), PackageQueryError> {
         let Self { recursive, transitive, workspace_root, filter } = self;
 
         if recursive {
@@ -272,7 +276,7 @@ impl PackageQueryArgs {
                 return Err(PackageQueryError::PackageNameWithRecursive { package_name });
             }
             // -w is redundant with -r (all packages already includes root).
-            return Ok(PackageQuery::all());
+            return Ok((PackageQuery::all(), false));
         }
 
         if !filter.is_empty() {
@@ -301,7 +305,7 @@ impl PackageQueryArgs {
                     source: None,
                 });
             }
-            return Ok(PackageQuery::filters(parsed));
+            return Ok((PackageQuery::filters(parsed), false));
         }
 
         // No --filter, no --recursive.
@@ -319,15 +323,19 @@ impl PackageQueryArgs {
             } else {
                 None
             };
-            return Ok(PackageQuery::filters(Vec1::new(PackageFilter {
-                exclude: false,
-                selector: PackageSelector::WorkspaceRoot,
-                traversal,
-                source: None,
-            })));
+            return Ok((
+                PackageQuery::filters(Vec1::new(PackageFilter {
+                    exclude: false,
+                    selector: PackageSelector::WorkspaceRoot,
+                    traversal,
+                    source: None,
+                })),
+                false,
+            ));
         }
 
         // No --filter, no --recursive, no -w: implicit cwd or package-name specifier.
+        let is_cwd_only = !transitive && package_name.is_none();
         let selector = package_name.map_or_else(
             || PackageSelector::ContainingPackage(Arc::clone(cwd)),
             |name| PackageSelector::Name(PackageNamePattern::Exact(name)),
@@ -340,12 +348,15 @@ impl PackageQueryArgs {
         } else {
             None
         };
-        Ok(PackageQuery::filters(Vec1::new(PackageFilter {
-            exclude: false,
-            selector,
-            traversal,
-            source: None,
-        })))
+        Ok((
+            PackageQuery::filters(Vec1::new(PackageFilter {
+                exclude: false,
+                selector,
+                traversal,
+                source: None,
+            })),
+            is_cwd_only,
+        ))
     }
 }
 
@@ -1040,7 +1051,7 @@ mod tests {
             workspace_root: true,
             filter: Vec::new(),
         };
-        let query = args.into_package_query(None, &cwd).unwrap();
+        let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
             crate::package_graph::PackageQueryKind::Filters(filters) => {
                 assert_eq!(filters.len(), 1);
@@ -1066,7 +1077,7 @@ mod tests {
             workspace_root: true,
             filter: Vec::new(),
         };
-        let query = args.into_package_query(None, &cwd).unwrap();
+        let (query, _) = args.into_package_query(None, &cwd).unwrap();
         assert!(
             matches!(&query.0, crate::package_graph::PackageQueryKind::All),
             "expected All, got {:?}",
@@ -1084,7 +1095,7 @@ mod tests {
             workspace_root: true,
             filter: Vec::new(),
         };
-        let query = args.into_package_query(None, &cwd).unwrap();
+        let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
             crate::package_graph::PackageQueryKind::Filters(filters) => {
                 assert_eq!(filters.len(), 1);
@@ -1109,7 +1120,7 @@ mod tests {
             workspace_root: true,
             filter: vec![Str::from("foo")],
         };
-        let query = args.into_package_query(None, &cwd).unwrap();
+        let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
             crate::package_graph::PackageQueryKind::Filters(filters) => {
                 assert_eq!(filters.len(), 2);
@@ -1157,7 +1168,7 @@ mod tests {
             workspace_root: false,
             filter: vec![Str::from("a b")],
         };
-        let query = args.into_package_query(None, &cwd).unwrap();
+        let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
             crate::package_graph::PackageQueryKind::Filters(filters) => {
                 assert_eq!(filters.len(), 2);
@@ -1177,7 +1188,7 @@ mod tests {
             workspace_root: true,
             filter: vec![Str::from("foo")],
         };
-        let query = args.into_package_query(None, &cwd).unwrap();
+        let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
             crate::package_graph::PackageQueryKind::Filters(filters) => {
                 assert_eq!(filters.len(), 2);
@@ -1197,7 +1208,7 @@ mod tests {
             workspace_root: false,
             filter: Vec::new(),
         };
-        let query = args.into_package_query(None, &cwd).unwrap();
+        let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
             crate::package_graph::PackageQueryKind::Filters(filters) => {
                 assert_eq!(filters.len(), 1);

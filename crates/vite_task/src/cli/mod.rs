@@ -154,7 +154,7 @@ impl ResolvedRunCommand {
     ) -> Result<QueryPlanRequest, CLITaskQueryError> {
         let task_specifier = self.task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
 
-        let package_query =
+        let (package_query, _is_cwd_only) =
             self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;
 
         let include_explicit_deps = !self.flags.ignore_depends_on;
