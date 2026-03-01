@@ -282,25 +282,36 @@ impl PackageQueryArgs {
         // If no tokens are collected, it means no filters were provided.
         let filter_tokens: Option<Vec1<Str>> = Vec1::try_from_vec(filter_tokens).ok();
 
+        // Error arms only match the conflicting fields (wildcards for the rest).
+        // Success arms explicitly match every field — no wildcards.
         match (recursive, transitive, workspace_root, filter_tokens, package_name) {
+            // ------------------------- error cases --------------------------------
+
             // --recursive --transitive
             (true, true, _, _, _) => Err(PackageQueryError::RecursiveTransitiveConflict),
             // --recursive --filter
             (true, _, _, Some(_), _) => Err(PackageQueryError::FilterWithRecursive),
             // --recursive <pkg>#<task>
-            (true, false, _, None, Some(package_name)) => {
+            (true, false, _, _, Some(package_name)) => {
                 Err(PackageQueryError::PackageNameWithRecursive { package_name })
             }
-            // --recursive (--workspace-root is redundant)
-            (true, false, _, None, None) => Ok((PackageQuery::all(), false)),
             // --transitive --filter
             (false, true, _, Some(_), _) => Err(PackageQueryError::FilterWithTransitive),
             // --filter <pkg>#<task>
-            (false, _, _, Some(_), Some(package_name)) => {
+            (_, _, _, Some(_), Some(package_name)) => {
                 Err(PackageQueryError::PackageNameWithFilter { package_name })
             }
+            // --workspace-root <pkg>#<task>
+            (_, _, true, _, Some(package_name)) => {
+                Err(PackageQueryError::PackageNameWithWorkspaceRoot { package_name })
+            }
+
+            // ------------------------ success cases -------------------------------
+
+            // --recursive (--workspace-root is redundant)
+            (true, false, true | false, None, None) => Ok((PackageQuery::all(), false)),
             // --filter [--workspace-root]
-            (false, _, _, Some(filter_tokens), None) => {
+            (false, false, workspace_root, Some(filter_tokens), None) => {
                 let mut parsed: Vec1<PackageFilter> =
                     filter_tokens.try_mapped(|f| parse_filter(&f, cwd))?;
                 if workspace_root {
@@ -313,12 +324,8 @@ impl PackageQueryArgs {
                 }
                 Ok((PackageQuery::filters(parsed), false))
             }
-            // --workspace-root <pkg>#<task>
-            (false, _, true, None, Some(package_name)) => {
-                Err(PackageQueryError::PackageNameWithWorkspaceRoot { package_name })
-            }
             // --workspace-root [--transitive]
-            (false, _, true, None, None) => {
+            (false, transitive, true, None, None) => {
                 let traversal = if transitive {
                     Some(GraphTraversal {
                         direction: TraversalDirection::Dependencies,
@@ -338,7 +345,7 @@ impl PackageQueryArgs {
                 ))
             }
             // [--transitive] <pkg>#<task>
-            (false, _, false, None, Some(name)) => {
+            (false, transitive, false, None, Some(name)) => {
                 let traversal = if transitive {
                     Some(GraphTraversal {
                         direction: TraversalDirection::Dependencies,
