@@ -30,7 +30,7 @@ use vite_task_plan::{
 };
 use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
-use crate::cli::{CacheSubcommand, Command, ResolvedCommand, RunCommand, RunFlags};
+use crate::cli::{CacheSubcommand, Command, ResolvedCommand, ResolvedRunCommand, RunCommand};
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
@@ -249,25 +249,16 @@ impl<'a> Session<'a> {
                     .into_resolved();
                 let is_bare = run_command == bare;
 
-                // Save task name and flags before consuming run_command
-                let task_name = run_command.task_specifier.clone();
-                let show_details = run_command.flags.verbose;
-                let flags = run_command.flags.clone();
-                let additional_args = run_command.additional_args.clone();
+                // Clone before consuming — needed for handle_no_task and error paths
+                let saved_run_command = run_command.clone();
 
                 match self.plan_from_cli_run_resolved(cwd, run_command).await {
                     Ok((ref graph, is_cwd_only)) if graph.node_count() == 0 => {
                         if is_cwd_only {
-                            self.handle_no_task(
-                                is_interactive,
-                                task_name.as_deref(),
-                                flags,
-                                additional_args,
-                            )
-                            .await
+                            self.handle_no_task(is_interactive, saved_run_command).await
                         } else {
                             return Err(vite_task_plan::Error::NoTasksMatched(
-                                task_name.unwrap_or_default(),
+                                saved_run_command.task_specifier.unwrap_or_default(),
                             )
                             .into());
                         }
@@ -276,7 +267,7 @@ impl<'a> Session<'a> {
                         let builder = LabeledReporterBuilder::new(
                             self.workspace_path(),
                             Box::new(tokio::io::stdout()),
-                            show_details,
+                            saved_run_command.flags.verbose,
                             Some(self.make_summary_writer()),
                         );
                         Ok(self
@@ -287,7 +278,7 @@ impl<'a> Session<'a> {
                     }
                     Err(err) if err.is_missing_task_specifier() => {
                         if is_bare {
-                            self.handle_no_task(is_interactive, None, flags, additional_args).await
+                            self.handle_no_task(is_interactive, saved_run_command).await
                         } else {
                             return Err(vite_task_plan::Error::MissingTaskSpecifier.into());
                         }
@@ -320,10 +311,9 @@ impl<'a> Session<'a> {
     async fn handle_no_task(
         &mut self,
         is_interactive: bool,
-        not_found_name: Option<&str>,
-        flags: RunFlags,
-        additional_args: Vec<Str>,
+        run_command: ResolvedRunCommand,
     ) -> anyhow::Result<ExitStatus> {
+        let not_found_name = run_command.task_specifier.as_deref();
         let cwd = Arc::clone(&self.cwd);
         let task_graph = self.ensure_task_graph_loaded().await?;
         let current_package_path = task_graph.get_package_path_from_cwd(&cwd).cloned();
@@ -419,16 +409,12 @@ impl<'a> Session<'a> {
                 selected_label,
             )?;
         }
-        let show_details = flags.verbose;
-        let run_command = RunCommand {
-            task_specifier: Some(selected_label.clone()),
-            flags,
-            additional_args,
-            last_details: false,
-        };
+        let mut run_command = run_command;
+        let show_details = run_command.flags.verbose;
+        run_command.task_specifier = Some(selected_label.clone());
 
         let cwd = Arc::clone(&self.cwd);
-        let graph = self.plan_from_cli_run(cwd, run_command).await?;
+        let graph = self.plan_from_cli_run_resolved(cwd, run_command).await?.0;
         let builder = LabeledReporterBuilder::new(
             self.workspace_path(),
             Box::new(tokio::io::stdout()),

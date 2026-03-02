@@ -109,7 +109,7 @@ pub enum ResolvedCommand {
 ///
 /// Does not contain `last_details` — that case is represented by
 /// [`ResolvedCommand::RunLastDetails`] instead.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRunCommand {
     /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
     pub task_specifier: Option<Str>,
