@@ -32,6 +32,25 @@ use vite_workspace::{WorkspaceRoot, find_workspace_root};
 
 use crate::cli::{CacheSubcommand, Command, ResolvedCommand, ResolvedRunCommand, RunCommand};
 
+/// Error type for [`Session::main`].
+///
+/// `EarlyExit` represents a non-error exit (e.g. printing a task list) and
+/// the caller should exit with the contained status without printing an error.
+/// It exists only for easier `?` control flow.
+pub enum SessionError {
+    Anyhow(anyhow::Error),
+    EarlyExit(ExitStatus),
+}
+
+impl<T> From<T> for SessionError
+where
+    anyhow::Error: From<T>,
+{
+    fn from(err: T) -> Self {
+        Self::Anyhow(anyhow::Error::from(err))
+    }
+}
+
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
     Uninitialized { workspace_root: WorkspaceRoot, config_loader: &'a dyn UserConfigLoader },
@@ -234,7 +253,7 @@ impl<'a> Session<'a> {
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
     )]
-    pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
+    pub async fn main(mut self, command: Command) -> Result<(), SessionError> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
@@ -252,11 +271,7 @@ impl<'a> Session<'a> {
                         // No tasks matched. With is_cwd_only (no scope flags) the
                         // task name is a typo — show the selector. Otherwise error.
                         if is_cwd_only {
-                            if let Some(status) =
-                                self.handle_no_task(is_interactive, &mut run_command).await?
-                            {
-                                return Ok(status);
-                            }
+                            self.handle_no_task(is_interactive, &mut run_command).await?;
                             let cwd = Arc::clone(&self.cwd);
                             self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
                         } else {
@@ -277,11 +292,7 @@ impl<'a> Session<'a> {
                     if run_command != bare {
                         return Err(vite_task_plan::Error::MissingTaskSpecifier.into());
                     }
-                    if let Some(status) =
-                        self.handle_no_task(is_interactive, &mut run_command).await?
-                    {
-                        return Ok(status);
-                    }
+                    self.handle_no_task(is_interactive, &mut run_command).await?;
                     let cwd = Arc::clone(&self.cwd);
                     self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
                 };
@@ -292,34 +303,32 @@ impl<'a> Session<'a> {
                     run_command.flags.verbose,
                     Some(self.make_summary_writer()),
                 );
-                Ok(self
-                    .execute_graph(graph, Box::new(builder))
+                self.execute_graph(graph, Box::new(builder))
                     .await
-                    .err()
-                    .unwrap_or(ExitStatus::SUCCESS))
+                    .map_err(|status| SessionError::EarlyExit(status))
             }
         }
     }
 
-    fn handle_cache_command(&self, subcmd: &CacheSubcommand) -> anyhow::Result<ExitStatus> {
+    fn handle_cache_command(&self, subcmd: &CacheSubcommand) -> Result<(), SessionError> {
         match subcmd {
             CacheSubcommand::Clean => {
                 if self.cache_path.as_path().exists() {
                     std::fs::remove_dir_all(&self.cache_path)?;
                 }
-                Ok(ExitStatus::SUCCESS)
             }
         }
+        Ok(())
     }
 
     /// Show the task selector or list, and update the run command with the selected task.
     ///
     /// In interactive mode, shows a fuzzy-searchable selection list. On selection,
-    /// updates `run_command.task_specifier` and returns `Ok(None)` so the caller
+    /// updates `run_command.task_specifier` and returns `Ok(())` so the caller
     /// can plan and execute the selected task.
     ///
     /// In non-interactive mode, prints the task list (or "did you mean" suggestions)
-    /// and returns `Ok(Some(ExitStatus))` — no further execution needed.
+    /// and returns `Err(SessionError::EarlyExit(_))` — no further execution needed.
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
@@ -328,7 +337,7 @@ impl<'a> Session<'a> {
         &mut self,
         is_interactive: bool,
         run_command: &mut ResolvedRunCommand,
-    ) -> anyhow::Result<Option<ExitStatus>> {
+    ) -> Result<(), SessionError> {
         let not_found_name = run_command.task_specifier.as_deref();
         let cwd = Arc::clone(&self.cwd);
         let task_graph = self.ensure_task_graph_loaded().await?;
@@ -404,12 +413,14 @@ impl<'a> Session<'a> {
         )?;
 
         let Some(selected_index) = selected_index else {
-            // Non-interactive: if no task was found, return failure. Otherwise, print the list and return
-            return if not_found_name.is_some() {
-                Ok(Some(ExitStatus::FAILURE))
+            // Non-interactive, the list was printed.
+            return Err(SessionError::EarlyExit(if not_found_name.is_some() {
+                // For `vp run typo`, return FAILURE status
+                ExitStatus::FAILURE
             } else {
-                Ok(Some(ExitStatus::SUCCESS))
-            };
+                // For bare `vp run`, return SUCCESS status
+                ExitStatus::SUCCESS
+            }));
         };
 
         // Interactive: print selected task and run it
@@ -426,7 +437,7 @@ impl<'a> Session<'a> {
             )?;
         }
         run_command.task_specifier = Some(selected_label.clone());
-        Ok(None)
+        Ok(())
     }
 
     /// Lazily initializes and returns the execution cache.
@@ -467,7 +478,7 @@ impl<'a> Session<'a> {
         clippy::print_stderr,
         reason = "--last-details error messages are user-facing diagnostics, not debug output"
     )]
-    fn show_last_run_details(&self) -> anyhow::Result<ExitStatus> {
+    fn show_last_run_details(&self) -> Result<(), SessionError> {
         let path = self.summary_file_path();
         match LastRunSummary::read_from_path(&path) {
             Ok(Some(summary)) => {
@@ -478,18 +489,18 @@ impl<'a> Session<'a> {
                     stdout.write_all(&buf)?;
                     stdout.flush()?;
                 }
-                Ok(ExitStatus(summary.exit_code))
+                Err(SessionError::EarlyExit(ExitStatus(summary.exit_code)))
             }
             Ok(None) => {
                 eprintln!("No previous run summary found. Run a task first to generate a summary.");
-                Ok(ExitStatus::FAILURE)
+                Err(SessionError::EarlyExit(ExitStatus::FAILURE))
             }
             Err(ReadSummaryError::IncompatibleVersion) => {
                 eprintln!(
                     "Summary data was saved by a different version of vite-task and cannot be read. \
                      Run a task to generate a new summary."
                 );
-                Ok(ExitStatus::FAILURE)
+                Err(SessionError::EarlyExit(ExitStatus::FAILURE))
             }
             Err(ReadSummaryError::Io(err)) => Err(err.into()),
         }
