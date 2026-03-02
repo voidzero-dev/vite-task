@@ -39,7 +39,7 @@ pub struct RunFlags {
 #[derive(Debug, clap::Parser)]
 pub struct RunCommand {
     /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
-    pub(crate) task_specifier: Option<TaskSpecifier>,
+    pub(crate) task_specifier: Option<Str>,
 
     #[clap(flatten)]
     pub(crate) flags: RunFlags,
@@ -112,7 +112,7 @@ pub enum ResolvedCommand {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ResolvedRunCommand {
     /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
-    pub task_specifier: Option<TaskSpecifier>,
+    pub task_specifier: Option<Str>,
 
     pub flags: RunFlags,
 
@@ -152,7 +152,8 @@ impl ResolvedRunCommand {
         self,
         cwd: &Arc<AbsolutePath>,
     ) -> Result<(QueryPlanRequest, bool), CLITaskQueryError> {
-        let task_specifier = self.task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
+        let raw_specifier = self.task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
+        let task_specifier = TaskSpecifier::parse_raw(&raw_specifier);
 
         let (package_query, is_cwd_only) =
             self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;

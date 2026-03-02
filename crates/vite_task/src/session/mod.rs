@@ -20,7 +20,7 @@ use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_select::SelectItem;
 use vite_str::Str;
 use vite_task_graph::{
-    IndexedTaskGraph, TaskGraph, TaskGraphLoadError, TaskSpecifier, config::user::UserCacheConfig,
+    IndexedTaskGraph, TaskGraph, TaskGraphLoadError, config::user::UserCacheConfig,
     loader::UserConfigLoader,
 };
 use vite_task_plan::{
@@ -250,7 +250,7 @@ impl<'a> Session<'a> {
                 let is_bare = run_command == bare;
 
                 // Save task name and flags before consuming run_command
-                let task_name = run_command.task_specifier.as_ref().map(|s| s.task_name.clone());
+                let task_name = run_command.task_specifier.clone();
                 let show_details = run_command.flags.verbose;
                 let flags = run_command.flags.clone();
                 let additional_args = run_command.additional_args.clone();
@@ -419,10 +419,9 @@ impl<'a> Session<'a> {
                 selected_label,
             )?;
         }
-        let task_specifier = TaskSpecifier::parse_raw(selected_label);
         let show_details = flags.verbose;
         let run_command = RunCommand {
-            task_specifier: Some(task_specifier),
+            task_specifier: Some(selected_label.clone()),
             flags,
             additional_args,
             last_details: false,
