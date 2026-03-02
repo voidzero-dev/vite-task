@@ -244,7 +244,9 @@ impl<'a> Session<'a> {
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
                 // Detect bare `vp run` (no task, no flags, no extra args)
-                let bare = RunCommand::parse_from(["vp"]).into_resolved();
+                let bare = RunCommand::try_parse_from::<_, &str>([])
+                    .expect("parsing hardcoded bare command should never fail")
+                    .into_resolved();
                 let is_bare = run_command == bare;
 
                 // Save task name and flags before consuming run_command
