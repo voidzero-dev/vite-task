@@ -155,10 +155,3 @@ pub enum Error {
     #[error("Cycle dependency detected: {}", _0.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(" -> "))]
     CycleDependencyDetected(Vec<TaskDisplay>),
 }
-
-impl Error {
-    #[must_use]
-    pub const fn is_missing_task_specifier(&self) -> bool {
-        matches!(self, Self::MissingTaskSpecifier)
-    }
-}

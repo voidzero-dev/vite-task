@@ -239,23 +239,18 @@ impl<'a> Session<'a> {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
             ResolvedCommand::Run(mut run_command) => {
-                let cwd = Arc::clone(&self.cwd);
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
-                // Detect bare `vp run` (no task, no flags, no extra args).
-                // Only bare invocations enter the selector on MissingTaskSpecifier;
-                // non-bare invocations like `vp run --verbose` error instead.
-                let bare = RunCommand::try_parse_from::<_, &str>([])
-                    .expect("parsing hardcoded bare command should never fail")
-                    .into_resolved();
-                let is_bare = run_command == bare;
+                let graph = if let Some(ref task_specifier) = run_command.task_specifier {
+                    // Task specifier provided — plan it.
+                    let cwd = Arc::clone(&self.cwd);
+                    let (graph, is_cwd_only) =
+                        self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?;
 
-                let graph = match self.plan_from_cli_run_resolved(cwd, run_command.clone()).await {
-                    // Planning succeeded but matched zero tasks.
-                    // With is_cwd_only (no scope flags) the task name is a typo
-                    // or missing — show the selector. With scope flags, error.
-                    Ok((ref graph, is_cwd_only)) if graph.node_count() == 0 => {
+                    if graph.node_count() == 0 {
+                        // No tasks matched. With is_cwd_only (no scope flags) the
+                        // task name is a typo — show the selector. Otherwise error.
                         if is_cwd_only {
                             if let Some(status) =
                                 self.handle_no_task(is_interactive, &mut run_command).await?
@@ -266,29 +261,29 @@ impl<'a> Session<'a> {
                             self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
                         } else {
                             return Err(vite_task_plan::Error::NoTasksMatched(
-                                run_command.task_specifier.unwrap_or_default(),
+                                task_specifier.clone(),
                             )
                             .into());
                         }
+                    } else {
+                        graph
                     }
-                    // Planning succeeded with tasks — execute them.
-                    Ok((graph, _)) => graph,
-                    // No task specifier at all (e.g. `vp run` or `vp run --verbose`).
-                    // Bare invocations enter the selector; non-bare ones error.
-                    Err(err) if err.is_missing_task_specifier() => {
-                        if is_bare {
-                            if let Some(status) =
-                                self.handle_no_task(is_interactive, &mut run_command).await?
-                            {
-                                return Ok(status);
-                            }
-                            let cwd = Arc::clone(&self.cwd);
-                            self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
-                        } else {
-                            return Err(vite_task_plan::Error::MissingTaskSpecifier.into());
-                        }
+                } else {
+                    // No task specifier (e.g. `vp run` or `vp run --verbose`).
+                    // Only bare `vp run` enters the selector; with extra flags, error.
+                    let bare = RunCommand::try_parse_from::<_, &str>([])
+                        .expect("parsing hardcoded bare command should never fail")
+                        .into_resolved();
+                    if run_command != bare {
+                        return Err(vite_task_plan::Error::MissingTaskSpecifier.into());
                     }
-                    Err(err) => return Err(err.into()),
+                    if let Some(status) =
+                        self.handle_no_task(is_interactive, &mut run_command).await?
+                    {
+                        return Ok(status);
+                    }
+                    let cwd = Arc::clone(&self.cwd);
+                    self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
                 };
 
                 let builder = LabeledReporterBuilder::new(
