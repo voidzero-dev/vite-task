@@ -26,5 +26,6 @@ Search task (↑/↓ to move, enter to select): lin
 > lint: echo lint app
   lib#lint: echo lint lib
 @ write-key: enter
+Selected task: lint
 ~/packages/app$ echo lint app ⊘ cache disabled
 lint app

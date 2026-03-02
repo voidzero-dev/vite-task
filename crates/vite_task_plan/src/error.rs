@@ -144,8 +144,8 @@ pub enum Error {
     ///
     /// At the top level, an empty execution graph triggers the task selector UI.
     /// In a nested context there is no UI, so this is returned as an error instead.
-    #[error("no tasks matched the query")]
-    NoTasksMatched,
+    #[error("Task \"{0}\" not found")]
+    NoTasksMatched(Str),
 
     /// A cycle was detected in the task dependency graph during planning.
     ///

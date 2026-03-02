@@ -14,7 +14,7 @@ pub enum CacheSubcommand {
 }
 
 /// Flags that control how a `run` command selects tasks.
-#[derive(Debug, Clone, clap::Args)]
+#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 pub struct RunFlags {
     #[clap(flatten)]
     pub package_query: PackageQueryArgs,
@@ -36,7 +36,7 @@ pub struct RunFlags {
 ///
 /// Contains the `--last-details` flag which is resolved into a separate
 /// `ResolvedCommand::RunLastDetails` variant internally.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Parser)]
 pub struct RunCommand {
     /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
     pub(crate) task_specifier: Option<TaskSpecifier>,
@@ -109,7 +109,7 @@ pub enum ResolvedCommand {
 ///
 /// Does not contain `last_details` — that case is represented by
 /// [`ResolvedCommand::RunLastDetails`] instead.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ResolvedRunCommand {
     /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
     pub task_specifier: Option<TaskSpecifier>,
@@ -151,21 +151,24 @@ impl ResolvedRunCommand {
     pub fn into_query_plan_request(
         self,
         cwd: &Arc<AbsolutePath>,
-    ) -> Result<QueryPlanRequest, CLITaskQueryError> {
+    ) -> Result<(QueryPlanRequest, bool), CLITaskQueryError> {
         let task_specifier = self.task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
 
-        let (package_query, _is_cwd_only) =
+        let (package_query, is_cwd_only) =
             self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;
 
         let include_explicit_deps = !self.flags.ignore_depends_on;
 
-        Ok(QueryPlanRequest {
-            query: TaskQuery {
-                package_query,
-                task_name: task_specifier.task_name,
-                include_explicit_deps,
+        Ok((
+            QueryPlanRequest {
+                query: TaskQuery {
+                    package_query,
+                    task_name: task_specifier.task_name,
+                    include_explicit_deps,
+                },
+                plan_options: PlanOptions { extra_args: self.additional_args.into() },
             },
-            plan_options: PlanOptions { extra_args: self.additional_args.into() },
-        })
+            is_cwd_only,
+        ))
     }
 }

@@ -8,6 +8,7 @@ use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, sync::Arc};
 
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
+use clap::Parser as _;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
 use reporter::{
@@ -109,7 +110,9 @@ impl vite_task_plan::PlanRequestParser for PlanRequestParser<'_> {
                 }
                 ResolvedCommand::Run(run_command) => {
                     match run_command.into_query_plan_request(&command.cwd) {
-                        Ok(query_plan_request) => Ok(Some(PlanRequest::Query(query_plan_request))),
+                        Ok((query_plan_request, _)) => {
+                            Ok(Some(PlanRequest::Query(query_plan_request)))
+                        }
                         Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
                             Ok(Some(PlanRequest::Synthetic(
                                 command.to_synthetic_plan_request(UserCacheConfig::disabled()),
@@ -240,6 +243,10 @@ impl<'a> Session<'a> {
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
+                // Detect bare `vp run` (no task, no flags, no extra args)
+                let bare = RunCommand::parse_from(["vp"]).into_resolved();
+                let is_bare = run_command == bare;
+
                 // Save task name and flags before consuming run_command
                 let task_name = run_command.task_specifier.as_ref().map(|s| s.task_name.clone());
                 let show_details = run_command.flags.verbose;
@@ -247,17 +254,23 @@ impl<'a> Session<'a> {
                 let additional_args = run_command.additional_args.clone();
 
                 match self.plan_from_cli_run_resolved(cwd, run_command).await {
-                    Ok(ref graph) if graph.node_count() == 0 => {
-                        // No tasks matched the query — show task selector / "did you mean"
-                        self.handle_no_task(
-                            is_interactive,
-                            task_name.as_deref(),
-                            flags,
-                            additional_args,
-                        )
-                        .await
+                    Ok((ref graph, is_cwd_only)) if graph.node_count() == 0 => {
+                        if is_cwd_only {
+                            self.handle_no_task(
+                                is_interactive,
+                                task_name.as_deref(),
+                                flags,
+                                additional_args,
+                            )
+                            .await
+                        } else {
+                            return Err(vite_task_plan::Error::NoTasksMatched(
+                                task_name.unwrap_or_default(),
+                            )
+                            .into());
+                        }
                     }
-                    Ok(graph) => {
+                    Ok((graph, _)) => {
                         let builder = LabeledReporterBuilder::new(
                             self.workspace_path(),
                             Box::new(tokio::io::stdout()),
@@ -271,7 +284,11 @@ impl<'a> Session<'a> {
                             .unwrap_or(ExitStatus::SUCCESS))
                     }
                     Err(err) if err.is_missing_task_specifier() => {
-                        self.handle_no_task(is_interactive, None, flags, additional_args).await
+                        if is_bare {
+                            self.handle_no_task(is_interactive, None, flags, additional_args).await
+                        } else {
+                            return Err(vite_task_plan::Error::MissingTaskSpecifier.into());
+                        }
                     }
                     Err(err) => Err(err.into()),
                 }
@@ -387,8 +404,19 @@ impl<'a> Session<'a> {
             };
         };
 
-        // Interactive: run the selected task
+        // Interactive: print selected task and run it
         let selected_label = &select_items[selected_index].label;
+        {
+            use std::io::Write as _;
+
+            use owo_colors::{OwoColorize as _, Stream};
+            writeln!(
+                stdout,
+                "{}{}",
+                "Selected task: ".if_supports_color(Stream::Stdout, |s| s.bold()),
+                selected_label,
+            )?;
+        }
         let task_specifier = TaskSpecifier::parse_raw(selected_label);
         let show_details = flags.verbose;
         let run_command = RunCommand {
@@ -578,7 +606,8 @@ impl<'a> Session<'a> {
         cwd: Arc<AbsolutePath>,
         command: RunCommand,
     ) -> Result<ExecutionGraph, vite_task_plan::Error> {
-        self.plan_from_cli_run_resolved(cwd, command.into_resolved()).await
+        let (graph, _) = self.plan_from_cli_run_resolved(cwd, command.into_resolved()).await?;
+        Ok(graph)
     }
 
     /// Internal: plans execution from a resolved run command.
@@ -591,9 +620,9 @@ impl<'a> Session<'a> {
         &mut self,
         cwd: Arc<AbsolutePath>,
         command: crate::cli::ResolvedRunCommand,
-    ) -> Result<ExecutionGraph, vite_task_plan::Error> {
-        let query_plan_request = match command.into_query_plan_request(&cwd) {
-            Ok(query_plan_request) => query_plan_request,
+    ) -> Result<(ExecutionGraph, bool), vite_task_plan::Error> {
+        let (query_plan_request, is_cwd_only) = match command.into_query_plan_request(&cwd) {
+            Ok(result) => result,
             Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
                 return Err(vite_task_plan::Error::MissingTaskSpecifier);
             }
@@ -606,7 +635,7 @@ impl<'a> Session<'a> {
                 });
             }
         };
-        vite_task_plan::plan_query(
+        let graph = vite_task_plan::plan_query(
             query_plan_request,
             &self.workspace_path,
             &cwd,
@@ -614,6 +643,7 @@ impl<'a> Session<'a> {
             &mut self.plan_request_parser,
             &mut self.lazy_task_graph,
         )
-        .await
+        .await?;
+        Ok((graph, is_cwd_only))
     }
 }

@@ -177,6 +177,8 @@ async fn plan_task_as_execution_node(
             let execution_item_kind: ExecutionItemKind = match plan_request {
                 // Expand task query like `vp run -r build`
                 Some(PlanRequest::Query(query_plan_request)) => {
+                    // Save task name before consuming the request
+                    let task_name = query_plan_request.query.task_name.clone();
                     // Add prefix envs to the context
                     context.add_envs(and_item.envs.iter());
                     let execution_graph = plan_query_request(query_plan_request, context)
@@ -193,7 +195,7 @@ async fn plan_task_as_execution_node(
                         return Err(Error::NestPlan {
                             task_display: task_node.task_display.clone(),
                             command: Str::from(&command_str[add_item_span]),
-                            error: Box::new(Error::NoTasksMatched),
+                            error: Box::new(Error::NoTasksMatched(task_name)),
                         });
                     }
                     ExecutionItemKind::Expanded(execution_graph)

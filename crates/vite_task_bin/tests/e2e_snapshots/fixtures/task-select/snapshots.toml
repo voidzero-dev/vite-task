@@ -12,9 +12,9 @@ steps = [
   "echo '' | vp run buid",
 ]
 
-# Non-interactive: typo with -r flag
+# Non-interactive: typo with -r flag errors (not cwd_only)
 [[e2e]]
-name = "non-interactive did you mean with recursive"
+name = "non-interactive recursive typo errors"
 steps = [
   "echo '' | vp run -r buid",
 ]
@@ -51,20 +51,20 @@ steps = [
   { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "lin" }, { "expect-milestone" = "task-select:lin:0" }, { "write-key" = "escape" }, { "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
 ]
 
-# Interactive: -r flag preserved
+# -r flag without task errors (not bare)
 [[e2e]]
-name = "interactive select with recursive"
+name = "recursive without task errors"
 cwd = "packages/app"
 steps = [
-  { command = "vp run -r", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
+  "vp run -r",
 ]
 
-# Interactive: -t flag + typo
+# -t flag + typo errors (not cwd_only)
 [[e2e]]
-name = "interactive select with typo and transitive"
+name = "transitive typo errors"
 cwd = "packages/app"
 steps = [
-  { command = "vp run -t buid", interactions = [{ "expect-milestone" = "task-select:buid:0" }, { "write-key" = "enter" }] },
+  "vp run -t buid",
 ]
 
 # Interactive: scroll down past visible page, then select a task beyond the initial viewport
@@ -130,4 +130,20 @@ steps = [
 name = "typo in task script fails without list"
 steps = [
   "vp run run-typo-task",
+]
+
+# --verbose without task: not bare, errors with "no task specifier provided"
+[[e2e]]
+name = "verbose without task errors"
+cwd = "packages/app"
+steps = [
+  "vp run --verbose",
+]
+
+# --verbose with typo: is_cwd_only is true, shows interactive selector
+[[e2e]]
+name = "verbose with typo enters selector"
+cwd = "packages/app"
+steps = [
+  { command = "vp run buid --verbose", interactions = [{ "expect-milestone" = "task-select:buid:0" }, { "write-key" = "enter" }] },
 ]

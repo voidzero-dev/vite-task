@@ -28,5 +28,6 @@ Search task (↑/↓ to move, enter to select): lib#
   lib#test: echo test lib
   lib#typecheck: echo typecheck lib
 @ write-key: enter
+Selected task: lib#build
 ~/packages/lib$ echo build lib ⊘ cache disabled
 build lib

@@ -14,5 +14,6 @@ Search task (↑/↓ to move, enter to select):
   lib#build: echo build lib
 @ write-key: enter
 $ vp run ⊘ cache disabled
+Selected task: hello
 $ echo hello from root ⊘ cache disabled
 hello from root

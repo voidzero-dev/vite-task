@@ -214,7 +214,7 @@ pub enum PackageQueryError {
 ///
 /// Use `#[clap(flatten)]` to embed these in a parent clap struct.
 /// Call [`into_package_query`](Self::into_package_query) to convert into an opaque [`PackageQuery`].
-#[derive(Debug, Clone, clap::Args)]
+#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 pub struct PackageQueryArgs {
     /// Select all packages in the workspace.
     #[clap(default_value = "false", short, long)]
