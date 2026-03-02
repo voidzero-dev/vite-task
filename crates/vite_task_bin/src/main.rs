@@ -3,7 +3,7 @@ use std::{process::ExitCode, sync::Arc};
 use clap::Parser;
 use vite_str::Str;
 use vite_task::{
-    EnabledCacheConfig, ExitStatus, Session, SessionError, UserCacheConfig, get_path_env,
+    EnabledCacheConfig, ExitStatus, Session, UserCacheConfig, get_path_env,
     plan_request::SyntheticPlanRequest,
 };
 use vite_task_bin::{Args, OwnedSessionCallbacks, find_executable};
@@ -11,15 +11,12 @@ use vite_task_bin::{Args, OwnedSessionCallbacks, find_executable};
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
     #[expect(clippy::large_futures, reason = "top-level await in main, no alternative")]
-    match run().await {
-        Ok(()) => Ok(ExitCode::SUCCESS),
-        Err(SessionError::EarlyExit(status)) => Ok(ExitCode::from(status.0 as u8)),
-        Err(SessionError::Anyhow(anyhow_err)) => Err(anyhow_err),
-    }
+    let exit_status = run().await?;
+    Ok(exit_status.0.into())
 }
 
 #[expect(clippy::future_not_send, reason = "Session contains !Send types; single-threaded runtime")]
-async fn run() -> Result<(), SessionError> {
+async fn run() -> anyhow::Result<ExitStatus> {
     let args = Args::parse();
     let mut owned_callbacks = OwnedSessionCallbacks::default();
     let session = Session::init(owned_callbacks.as_callbacks())?;
@@ -49,14 +46,14 @@ async fn run() -> Result<(), SessionError> {
                 )]
                 let status = session.execute_synthetic(request, cache_key, true).await?;
                 if status != ExitStatus::SUCCESS {
-                    return Err(SessionError::EarlyExit(status));
+                    return Ok(status);
                 }
             }
             #[expect(clippy::print_stdout, reason = "CLI binary output for non-task commands")]
             {
                 println!("{args:?}");
             }
-            Ok(())
+            Ok(ExitStatus::SUCCESS)
         }
     }
 }

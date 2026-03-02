@@ -37,7 +37,7 @@ use crate::cli::{CacheSubcommand, Command, ResolvedCommand, ResolvedRunCommand, 
 /// `EarlyExit` represents a non-error exit (e.g. printing a task list) and
 /// the caller should exit with the contained status without printing an error.
 /// It exists only for easier `?` control flow.
-pub enum SessionError {
+enum SessionError {
     Anyhow(anyhow::Error),
     EarlyExit(ExitStatus),
 }
@@ -253,7 +253,22 @@ impl<'a> Session<'a> {
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
     )]
-    pub async fn main(mut self, command: Command) -> Result<(), SessionError> {
+    pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
+        match self.main_inner(command).await {
+            Ok(()) => Ok(ExitStatus::SUCCESS),
+            Err(SessionError::EarlyExit(status)) => Ok(status),
+            Err(SessionError::Anyhow(err)) => Err(err),
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
+    #[expect(
+        clippy::future_not_send,
+        reason = "session is single-threaded, futures do not need to be Send"
+    )]
+    async fn main_inner(&mut self, command: Command) -> Result<(), SessionError> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
@@ -303,9 +318,7 @@ impl<'a> Session<'a> {
                     run_command.flags.verbose,
                     Some(self.make_summary_writer()),
                 );
-                self.execute_graph(graph, Box::new(builder))
-                    .await
-                    .map_err(|status| SessionError::EarlyExit(status))
+                self.execute_graph(graph, Box::new(builder)).await.map_err(SessionError::EarlyExit)
             }
         }
     }
