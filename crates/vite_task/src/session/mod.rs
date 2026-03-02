@@ -238,53 +238,70 @@ impl<'a> Session<'a> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
-            ResolvedCommand::Run(run_command) => {
+            ResolvedCommand::Run(mut run_command) => {
                 let cwd = Arc::clone(&self.cwd);
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
-                // Detect bare `vp run` (no task, no flags, no extra args)
+                // Detect bare `vp run` (no task, no flags, no extra args).
+                // Only bare invocations enter the selector on MissingTaskSpecifier;
+                // non-bare invocations like `vp run --verbose` error instead.
                 let bare = RunCommand::try_parse_from::<_, &str>([])
                     .expect("parsing hardcoded bare command should never fail")
                     .into_resolved();
                 let is_bare = run_command == bare;
 
-                // Clone before consuming — needed for handle_no_task and error paths
-                let saved_run_command = run_command.clone();
-
-                match self.plan_from_cli_run_resolved(cwd, run_command).await {
+                let graph = match self.plan_from_cli_run_resolved(cwd, run_command.clone()).await {
+                    // Planning succeeded but matched zero tasks.
+                    // With is_cwd_only (no scope flags) the task name is a typo
+                    // or missing — show the selector. With scope flags, error.
                     Ok((ref graph, is_cwd_only)) if graph.node_count() == 0 => {
                         if is_cwd_only {
-                            self.handle_no_task(is_interactive, saved_run_command).await
+                            if let Some(status) =
+                                self.handle_no_task(is_interactive, &mut run_command).await?
+                            {
+                                return Ok(status);
+                            }
+                            let cwd = Arc::clone(&self.cwd);
+                            self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
                         } else {
                             return Err(vite_task_plan::Error::NoTasksMatched(
-                                saved_run_command.task_specifier.unwrap_or_default(),
+                                run_command.task_specifier.unwrap_or_default(),
                             )
                             .into());
                         }
                     }
-                    Ok((graph, _)) => {
-                        let builder = LabeledReporterBuilder::new(
-                            self.workspace_path(),
-                            Box::new(tokio::io::stdout()),
-                            saved_run_command.flags.verbose,
-                            Some(self.make_summary_writer()),
-                        );
-                        Ok(self
-                            .execute_graph(graph, Box::new(builder))
-                            .await
-                            .err()
-                            .unwrap_or(ExitStatus::SUCCESS))
-                    }
+                    // Planning succeeded with tasks — execute them.
+                    Ok((graph, _)) => graph,
+                    // No task specifier at all (e.g. `vp run` or `vp run --verbose`).
+                    // Bare invocations enter the selector; non-bare ones error.
                     Err(err) if err.is_missing_task_specifier() => {
                         if is_bare {
-                            self.handle_no_task(is_interactive, saved_run_command).await
+                            if let Some(status) =
+                                self.handle_no_task(is_interactive, &mut run_command).await?
+                            {
+                                return Ok(status);
+                            }
+                            let cwd = Arc::clone(&self.cwd);
+                            self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
                         } else {
                             return Err(vite_task_plan::Error::MissingTaskSpecifier.into());
                         }
                     }
-                    Err(err) => Err(err.into()),
-                }
+                    Err(err) => return Err(err.into()),
+                };
+
+                let builder = LabeledReporterBuilder::new(
+                    self.workspace_path(),
+                    Box::new(tokio::io::stdout()),
+                    run_command.flags.verbose,
+                    Some(self.make_summary_writer()),
+                );
+                Ok(self
+                    .execute_graph(graph, Box::new(builder))
+                    .await
+                    .err()
+                    .unwrap_or(ExitStatus::SUCCESS))
             }
         }
     }
@@ -300,10 +317,14 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// Handle the case where no task was specified or a task name was not found.
+    /// Show the task selector or list, and update the run command with the selected task.
     ///
-    /// In interactive mode, shows a fuzzy-searchable selection list.
-    /// In non-interactive mode, prints the task list or "did you mean" suggestions.
+    /// In interactive mode, shows a fuzzy-searchable selection list. On selection,
+    /// updates `run_command.task_specifier` and returns `Ok(None)` so the caller
+    /// can plan and execute the selected task.
+    ///
+    /// In non-interactive mode, prints the task list (or "did you mean" suggestions)
+    /// and returns `Ok(Some(ExitStatus))` — no further execution needed.
     #[expect(
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
@@ -311,8 +332,8 @@ impl<'a> Session<'a> {
     async fn handle_no_task(
         &mut self,
         is_interactive: bool,
-        run_command: ResolvedRunCommand,
-    ) -> anyhow::Result<ExitStatus> {
+        run_command: &mut ResolvedRunCommand,
+    ) -> anyhow::Result<Option<ExitStatus>> {
         let not_found_name = run_command.task_specifier.as_deref();
         let cwd = Arc::clone(&self.cwd);
         let task_graph = self.ensure_task_graph_loaded().await?;
@@ -390,9 +411,9 @@ impl<'a> Session<'a> {
         let Some(selected_index) = selected_index else {
             // Non-interactive: if no task was found, return failure. Otherwise, print the list and return
             return if not_found_name.is_some() {
-                Ok(ExitStatus::FAILURE)
+                Ok(Some(ExitStatus::FAILURE))
             } else {
-                Ok(ExitStatus::SUCCESS)
+                Ok(Some(ExitStatus::SUCCESS))
             };
         };
 
@@ -409,19 +430,8 @@ impl<'a> Session<'a> {
                 selected_label,
             )?;
         }
-        let mut run_command = run_command;
-        let show_details = run_command.flags.verbose;
         run_command.task_specifier = Some(selected_label.clone());
-
-        let cwd = Arc::clone(&self.cwd);
-        let graph = self.plan_from_cli_run_resolved(cwd, run_command).await?.0;
-        let builder = LabeledReporterBuilder::new(
-            self.workspace_path(),
-            Box::new(tokio::io::stdout()),
-            show_details,
-            Some(self.make_summary_writer()),
-        );
-        Ok(self.execute_graph(graph, Box::new(builder)).await.err().unwrap_or(ExitStatus::SUCCESS))
+        Ok(None)
     }
 
     /// Lazily initializes and returns the execution cache.
