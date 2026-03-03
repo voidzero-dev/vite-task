@@ -7,7 +7,7 @@ Vite Task (the `vp run` command) is the monorepo task runner built into vite+. I
 - **Dependency-aware execution** — tasks run in the correct order based on your `package.json` dependency graph and explicit `dependsOn` declarations.
 - **Intelligent caching** — task outputs are cached automatically. When nothing changes, tasks complete in milliseconds by replaying cached output.
 - **File system tracking** — instead of manually declaring inputs, Vite Task monitors which files each command actually reads and uses that information to determine cache validity.
-- **Compound command caching** — multi-command scripts like `tsc && rollup` are split into sub-tasks, each cached independently.
+- **Compound command caching** — multi-command scripts like `tsc && vp build` are split into sub-tasks, each cached independently.
 - **Familiar CLI** — if you've used pnpm, the package selection flags and workflow feel right at home.
 
 ## Documentation Map
@@ -50,7 +50,7 @@ export default defineConfig({
   run: {
     tasks: {
       build: {
-        command: 'tsc && rollup -c',
+        command: 'tsc && vp build',
         dependsOn: ['lint'],
       },
       lint: {
@@ -69,19 +69,19 @@ Running `vp run -r build` executes across all packages in dependency order. Comp
 ...
 ~/packages/core$ tsc
 ...
-~/packages/core$ rollup -c
+~/packages/core$ vp build
 ...
 ~/packages/lib$ vp lint
 ...
 ~/packages/lib$ tsc
 ...
-~/packages/lib$ rollup -c
+~/packages/lib$ vp build
 ...
 ~/packages/app$ vp lint
 ...
 ~/packages/app$ tsc
 ...
-~/packages/app$ rollup -c
+~/packages/app$ vp build
 ...
 ---
 [vp run] 0/9 cache hit (0%). (Run `vp run --last-details` for full details)
@@ -93,7 +93,7 @@ Run it again — everything is cached individually:
 > vp run -r build
 ~/packages/core$ vp lint ✓ cache hit, replaying
 ~/packages/core$ tsc ✓ cache hit, replaying
-~/packages/core$ rollup -c ✓ cache hit, replaying
+~/packages/core$ vp build ✓ cache hit, replaying
 ~/packages/lib$ vp lint ✓ cache hit, replaying
 ...
 ---

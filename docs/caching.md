@@ -59,7 +59,7 @@ The execution key is **not** consulted during cache hits — a hit is determined
 {
   "scripts": {
     "check": "tsc --noEmit && vp lint",
-    "build": "tsc --noEmit && rollup -c"
+    "build": "tsc --noEmit && vp build"
   }
 }
 ```
@@ -76,8 +76,8 @@ $ vp lint
 $ tsc --noEmit ✓ cache hit, replaying          # shared with check's first sub-command
 ... tsc output ...
 
-$ rollup -c
-... rollup output ...
+$ vp build
+... vp build output ...
 ```
 
 Both `check` and `build` split into compound sub-commands. The first sub-command (`tsc --noEmit`) is identical in both, so it produces the same pre-run fingerprint and shares the cache entry. After both tasks run, the database has three rows (not four):
@@ -87,7 +87,7 @@ Pre-run fingerprint (unique)     Last execution key   Cached output
 ────────────────────────────     ──────────────────   ─────────────────
 fingerprint("tsc --noEmit")      build#0              cached output of tsc
 fingerprint("vp lint")           check#1              cached output of lint
-fingerprint("rollup -c")         build#1              cached output of rollup
+fingerprint("vp build")         build#1              cached output of vp build
 ```
 
 The `tsc --noEmit` row was created by `check#0` and later updated by `build#0`. Both tasks look it up by fingerprint, so both get a cache hit.

@@ -75,7 +75,7 @@ Commands joined with `&&` follow standard bash semantics — they run sequential
 ```json
 {
   "scripts": {
-    "build": "tsc && rollup -c"
+    "build": "tsc && vp build"
   }
 }
 ```
@@ -85,22 +85,22 @@ Commands joined with `&&` follow standard bash semantics — they run sequential
 $ tsc
 ... tsc output ...
 
-$ rollup -c
-... rollup output ...
+$ vp build
+... vp build output ...
 
 ---
 [vp run] 0/2 cache hit (0%).
 ```
 
-Each sub-task has its own cache entry. On the next run, if only `rollup.config.js` changed:
+Each sub-task has its own cache entry. On the next run, if only a `.d.ts` file changed:
 
 ```
 > vp run build
-$ tsc ✓ cache hit, replaying
+$ tsc ✗ cache miss: content of input 'src/types.d.ts' changed, executing
 ... tsc output ...
 
-$ rollup -c ✗ cache miss: content of input 'rollup.config.js' changed, executing
-... rollup output ...
+$ vp build ✓ cache hit, replaying
+... vp build output ...
 
 ---
 [vp run] 1/2 cache hit (50%), 2.3s saved.
