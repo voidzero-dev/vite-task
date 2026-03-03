@@ -14,7 +14,7 @@ Caching uses a two-level fingerprint system:
 On the next run, the cache lookup works as follows:
 
 ```
-Does the pre-run fingerprint match?
+Does the pre-run fingerprint match an existing cache entry?
 │
 ├─ YES → Is there a post-run fingerprint?
 │        ├─ YES → Do inferred file hashes still match?
@@ -22,7 +22,9 @@ Does the pre-run fingerprint match?
 │        │        └─ NO  → CACHE MISS: "content of input 'foo.ts' changed"
 │        └─ NO  → CACHE HIT (replay output)
 │
-└─ NO  → CACHE MISS: "args changed" / "envs changed" / "content of input changed" / etc.
+└─ NO  → Does the execution key have an old fingerprint?
+         ├─ YES → diff old vs new → CACHE MISS: "args changed" / "envs changed" / etc.
+         └─ NO  → CACHE MISS (first run, no inline message)
 ```
 
 Only **successful** task executions (exit code 0) are cached. Failed tasks are never cached.
@@ -42,6 +44,89 @@ The pre-run fingerprint is a composite of:
 | Globbed input files     | `{ "src/index.ts": <hash> }`                | Content change → miss                          |
 
 Globbed input files are resolved from explicit glob patterns in the `inputs` configuration before the command runs. Their content hashes (xxHash3) are part of the pre-run fingerprint, so changes are detected without executing the command.
+
+### Pre-Run Fingerprint and Execution Key
+
+The pre-run fingerprint is purely content-based — it's derived from what the command _does_, not which task it belongs to. This means two different tasks that run the exact same command produce the same pre-run fingerprint and **share a single cache entry**.
+
+To track which fingerprint each task used on its last run, the cache also stores an **execution key** alongside each pre-run fingerprint. The execution key identifies the task (package path, task name, compound command index, and extra CLI args). Only the last run's execution key is remembered.
+
+The execution key is **not** consulted during cache hits — a hit is determined solely by the pre-run fingerprint (and post-run validation). The execution key only comes into play **after** a pre-run fingerprint miss: Vite Task uses it to find the old fingerprint, diff old vs. new, and report what changed. This is the key to solving both problems:
+
+#### Cache Sharing
+
+```json
+{
+  "scripts": {
+    "check": "tsc --noEmit && vp lint",
+    "build": "tsc --noEmit && rollup -c"
+  }
+}
+```
+
+```
+> vp run check                                 # first run
+$ tsc --noEmit
+... tsc output ...
+
+$ vp lint
+... lint output ...
+
+> vp run build                                 # different task, same first sub-command
+$ tsc --noEmit ✓ cache hit, replaying          # shared with check's first sub-command
+... tsc output ...
+
+$ rollup -c
+... rollup output ...
+```
+
+Both `check` and `build` split into compound sub-commands. The first sub-command (`tsc --noEmit`) is identical in both, so it produces the same pre-run fingerprint and shares the cache entry. After both tasks run, the database has three rows (not four):
+
+```
+Pre-run fingerprint (unique)     Last execution key   Cached output
+────────────────────────────     ──────────────────   ─────────────────
+fingerprint("tsc --noEmit")      build#0              cached output of tsc
+fingerprint("vp lint")           check#1              cached output of lint
+fingerprint("rollup -c")         build#1              cached output of rollup
+```
+
+The `tsc --noEmit` row was created by `check#0` and later updated by `build#0`. Both tasks look it up by fingerprint, so both get a cache hit.
+
+#### Miss Reporting
+
+When a task's fingerprint changes between runs, the execution key lets Vite Task find the _old_ fingerprint, diff it against the new one, and report exactly what changed.
+
+```json
+{
+  "scripts": {
+    "build": "tsc"
+  }
+}
+```
+
+```
+> NODE_ENV=development vp run build            # first run
+$ tsc
+... output ...
+```
+
+After this run, the database stores:
+
+```
+Pre-run fingerprint (unique)                     Last execution key   Cached output
+──────────────────────────────────────────       ──────────────────   ─────────────
+fingerprint("tsc", NODE_ENV=development)         build#0              cached output
+```
+
+Now change `NODE_ENV`:
+
+```
+> NODE_ENV=production vp run build             # env changed
+$ tsc ✗ cache miss: envs changed, executing
+... output ...
+```
+
+The new pre-run fingerprint (`tsc` with `NODE_ENV=production`) doesn't match any cache entry. Vite Task then finds the old fingerprint stored under execution key `build#0` (`NODE_ENV=development`), and diffs the two to report "envs changed". Without the execution key, it could only say "no previous cache".
 
 ## What Goes Into the Post-Run Fingerprint
 
@@ -279,10 +364,6 @@ When a cache miss occurs, Vite Task tells you exactly why. For now, validation s
 - **working directory changed** — task cwd differs
 - **pass-through env added/removed** — the `passThroughEnvs` list changed (not values, just names)
 
-## Shared Cache Entries
-
-Two tasks with identical pre-run fingerprints (same command, args, cwd, env config, input config, and globbed file hashes) share the same cache entry. In practice, this is most useful for compound commands where sub-tasks share commands across different parent tasks.
-
 ## Cache Storage
 
 Cache data is stored in a SQLite database at:
@@ -321,7 +402,9 @@ Here's the complete lifecycle of a cached task execution:
    │   │   │   ├─ Valid   → CACHE HIT: replay stored stdout/stderr
    │   │   │   └─ Invalid → CACHE MISS: input file changed
    │   │   └─ NO  → CACHE HIT: replay stored stdout/stderr
-   │   └─ Not found → CACHE MISS
+   │   └─ Not found → look up execution key for old fingerprint
+   │       ├─ Found → diff old vs new → CACHE MISS: "args changed" / etc.
+   │       └─ Not found → CACHE MISS: no previous cache
 
 3. EXECUTION (on cache miss)
    ├─ Spawn process (with fspy if auto-inference enabled)
@@ -330,7 +413,8 @@ Here's the complete lifecycle of a cached task execution:
 
 4. CACHE UPDATE (only if exit code 0)
    ├─ Hash files fspy recorded (if auto-inference enabled) as post-run fingerprint
-   └─ Store: pre-run fingerprint + stdout/stderr + post-run fingerprint
+   ├─ Store: pre-run fingerprint → stdout/stderr + post-run fingerprint
+   └─ Store: execution key → pre-run fingerprint
 ```
 
 ## Practical Examples
