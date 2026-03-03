@@ -25,40 +25,7 @@ Search task (↑/↓ to move, enter to select):
   (…3 more)
 ```
 
-### Navigation
-
-- **↑/↓** — move the cursor
-- **Enter** — select the highlighted task and run it
-- **Type text** — filter tasks by name (fuzzy search)
-- **Escape** — clear the search query
-
-### Search / Filtering
-
-Typing narrows the list. For example, typing `lin`:
-
-```
-Search task (↑/↓ to move, enter to select): lin
-> lint: echo lint app
-  lib#lint: echo lint lib
-```
-
-### Smart Ranking
-
-Tasks from the **current package** appear first (without the `#` prefix). Tasks from other packages appear below with the `package#task` format. When your search query contains `#`, this reordering is skipped — you get results sorted by relevance instead.
-
-### Pagination
-
-The selector shows up to 12 items at a time. If there are more, a `(…N more)` indicator appears at the bottom. Scrolling moves the visible window.
-
-### After Selection
-
-Once you select a task, it runs immediately:
-
-```
-Selected task: lint
-~/packages/app$ echo lint app
-lint app
-```
+Tasks from the **current package** appear first (without the `#` prefix), followed by tasks from other packages in `package#task` format. Press **Enter** to select and run. Fuzzy search is supported (keyword `buid` matches task `build`).
 
 ### Non-Interactive Mode
 
@@ -102,13 +69,6 @@ Search task (↑/↓ to move, enter to select): buid
 Task "buid" not found. Did you mean:
   app#build: echo build app
   lib#build: echo build lib
-```
-
-**Important:** The interactive selector is only available for bare `vp run` (no flags like `-r`, `-t`, `-v`). When used with flags, a missing task is an error:
-
-```
-> vp run -r nonexistent
-error: Task "nonexistent" not found in any package
 ```
 
 ### `vp run` in Scripts
