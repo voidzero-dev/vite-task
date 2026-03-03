@@ -1,6 +1,6 @@
-# Package Selection
+# Task Selection
 
-When running tasks, you need to tell Vite Task _which packages_ to run them in. This document covers all the ways to select packages: CLI flags, the `--filter` syntax, and how it compares to pnpm.
+This document covers how to select which tasks to run: CLI flags (`-r`, `-t`, `--filter`), the `package#task` syntax, and pnpm filter compatibility.
 
 ## Basic Modes
 
@@ -237,7 +237,7 @@ Vite Task includes the root like any other package. Recursion is prevented struc
 | Extra flags needed      | `--workspace-root`, `--include-workspace-root` | None\*                                 |
 | User model              | "root is special"                              | "all packages are equal"\*             |
 
-**`--filter` cannot be combined with `-r` or `-t`:** `--filter` is a standalone package selection mechanism. Combining it with `-r` or `-t` is an error — use `--filter "pkg..."` instead if you need transitive dependencies.
+**`--filter` cannot be combined with `-r` or `-t`:** `--filter` is a standalone selection mechanism. Combining it with `-r` or `-t` is an error — use `--filter "pkg..."` instead if you need transitive dependencies.
 
 ## CLI Flags Reference
 

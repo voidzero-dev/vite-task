@@ -1,6 +1,6 @@
 # CLI Experience
 
-This document covers the interactive terminal experience — what you see when running tasks, how output is displayed, and the various UI behaviors.
+This document covers the interactive terminal experience — what you see when running tasks, how output is displayed, and the various UI behaviors. For CLI flags controlling task selection (`-r`, `-t`, `--filter`, `-w`), see [Task Selection](./task-selection.md).
 
 ## Interactive Task Selector
 

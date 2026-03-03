@@ -16,7 +16,7 @@ Vite Task is the monorepo task runner built into vite+ (the `vp run` command). I
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | [Task Configuration](./task-configuration.md) | How to define tasks, the config schema, scripts vs tasks, and cache options                     |
 | [Task Orchestration](./task-orchestration.md) | Dependency resolution, execution order, compound commands, nested `vp run`                      |
-| [Package Selection](./package-selection.md)   | CLI flags (`-r`, `-t`, `--filter`), pnpm compatibility, filter syntax                           |
+| [Task Selection](./task-selection.md)         | CLI flags (`-r`, `-t`, `--filter`), pnpm compatibility, filter syntax                           |
 | [Caching](./caching.md)                       | How caching works internally, fingerprinting, fspy, inputs configuration, environment variables |
 | [CLI Experience](./cli-experience.md)         | Interactive task selector, terminal output, summary modes, error handling                       |
 
