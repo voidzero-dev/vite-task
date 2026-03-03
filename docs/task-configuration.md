@@ -21,7 +21,7 @@ export default defineConfig({
         passThroughEnvs: ['CI'],
       },
       lint: {
-        command: 'eslint src',
+        command: 'vp lint',
       },
       deploy: {
         command: 'deploy-script --prod',

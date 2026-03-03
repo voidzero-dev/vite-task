@@ -54,7 +54,7 @@ export default defineConfig({
         dependsOn: ['lint'],
       },
       lint: {
-        command: 'eslint src',
+        command: 'vp lint',
       },
     },
   },
@@ -65,15 +65,15 @@ Running `vp run -r build` executes across all packages in dependency order:
 
 ```
 > vp run -r build
-~/packages/core$ eslint src
+~/packages/core$ vp lint
 ...
 ~/packages/core$ tsc && rollup -c
 ...
-~/packages/lib$ eslint src
+~/packages/lib$ vp lint
 ...
 ~/packages/lib$ tsc && rollup -c
 ...
-~/packages/app$ eslint src
+~/packages/app$ vp lint
 ...
 ~/packages/app$ tsc && rollup -c
 ...
@@ -85,9 +85,9 @@ Run it again — everything is cached:
 
 ```
 > vp run -r build
-~/packages/core$ eslint src ✓ cache hit, replaying
+~/packages/core$ vp lint ✓ cache hit, replaying
 ~/packages/core$ tsc && rollup -c ✓ cache hit, replaying
-~/packages/lib$ eslint src ✓ cache hit, replaying
+~/packages/lib$ vp lint ✓ cache hit, replaying
 ...
 ---
 [vp run] 6/6 cache hit (100%), 3.2s saved in total

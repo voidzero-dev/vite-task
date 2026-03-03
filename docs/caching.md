@@ -29,7 +29,7 @@ The spawn fingerprint is a composite of:
 
 | Component               | Example                                     | Effect on cache                                |
 | ----------------------- | ------------------------------------------- | ---------------------------------------------- |
-| Command program         | `tsc`, `eslint`                             | Program path change → miss                     |
+| Command program         | `tsc`, `vp lint`                            | Program path change → miss                     |
 | Arguments               | `["run", "--reporter", "verbose"]`          | Any arg change → miss                          |
 | Working directory       | `packages/app` (relative to workspace root) | cwd change → miss                              |
 | Fingerprinted envs      | `{ "NODE_ENV": "production" }`              | Value change → miss                            |
