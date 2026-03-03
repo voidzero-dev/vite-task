@@ -55,44 +55,11 @@ The `dependsOn` format is `[package#]taskName`:
 
 ### Both Combined
 
-In a recursive run, both dependency types apply simultaneously. Given:
-
-```ts
-export default defineConfig({
-  run: {
-    tasks: {
-      lint: {
-        command: 'eslint src',
-        dependsOn: ['clean'], // lint depends on clean in same package
-      },
-    },
-  },
-});
-```
-
-Running `vp run -r lint`:
-
-```
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  core#clean  │  │  utils#clean │  │  app#clean   │
-└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-       │                 │                 │
-┌──────▼───────┐  ┌──────▼───────┐         │
-│  core#lint   │  │  utils#lint  │         │
-└──────┬───────┘  └──────┬───────┘         │
-       │                 │                 │
-       └─────────────────┼─────────────────┘
-                         │
-                  ┌──────▼───────┐
-                  │   app#lint   │
-                  └──────────────┘
-```
-
-Here, topological order (core#lint and utils#lint before app#lint) combines with explicit deps (clean before lint in each package). Notice that `app#clean` can start immediately — it doesn't wait for upstream packages. Only `app#lint` waits for both its explicit dependency (`app#clean`) and its topological dependencies (`core#lint`, `utils#lint`).
+In a recursive run, both dependency types apply simultaneously. Topological edges connect the same task across packages, while `dependsOn` edges connect different tasks within a package. They're independent — a `dependsOn` target in a downstream package can start immediately without waiting for upstream packages.
 
 ## Compound Commands
 
-Commands joined with `&&` are split into independently-cached sub-tasks that run sequentially within the same task:
+Commands joined with `&&` follow standard bash semantics — they run sequentially and short-circuit on failure. Vite Task splits them into independently-cached sub-tasks:
 
 ```ts
 export default defineConfig({
@@ -138,7 +105,6 @@ When a task script contains a `vp run` call, it is **expanded at plan time** —
 
 - **Full visibility** — the execution plan shows every task that will run, even through layers of nesting
 - **Per-task caching** — each expanded task is cached independently
-- **Deduplication** — if two nested expansions resolve to the same task, it runs once
 - **No process overhead** — no extra `vp` processes are spawned
 
 ### Basic Expansion
@@ -212,17 +178,19 @@ The `build` tasks benefit from per-task caching — if only one package changed,
 
 ### Working Directory Behavior
 
-When `cd` precedes a nested `vp run` in a compound command, the expanded task uses its **own defined cwd**, not the shell's current directory:
+`cd` in a compound command affects the cwd of all subsequent segments, following standard bash semantics:
 
 ```json
 {
   "scripts": {
-    "cd-build": "cd src && vp run build"
+    "test-src": "cd src && vp lint"
   }
 }
 ```
 
-The `cd src` has no effect on the expanded `build` task — `build` runs in the package root as configured. This is because the expansion resolves the task from the task graph, where cwd is already defined.
+Here `vp lint` runs with cwd set to `src/`.
+
+> **Note:** `vp run` expansions always run tasks in the package root regardless of the current cwd — the expanded task's cwd comes from the task graph, not the shell. For example, `cd src && vp run build` still runs `build` in the package root.
 
 ### Cache Independence
 
