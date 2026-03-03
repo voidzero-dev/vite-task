@@ -71,20 +71,6 @@ Task "buid" not found. Did you mean:
   lib#build: echo build lib
 ```
 
-### `vp run` in Scripts
-
-`vp run` commands within task scripts also trigger the interactive selector if they don't specify a task:
-
-```json
-{
-  "scripts": {
-    "pick-task": "vp run"
-  }
-}
-```
-
-Running `vp run pick-task` shows the selector, and the selected task runs as a sub-task.
-
 ## Task Output Display
 
 ### Single Task
@@ -131,42 +117,8 @@ Building app
 **Stdio piping:** With multiple concurrent tasks, output is captured (piped) rather than inherited. This means:
 
 - Interactive programs won't receive stdin
-- Output is grouped and displayed in order
+- Output is grouped and displayed in order without interleaving
 - Colors are still enabled via `FORCE_COLOR`
-
-```
-> vp run -r check-tty
-
-~/packages/other$ check-tty
-stdin:not-tty
-stdout:not-tty
-stderr:not-tty
-
-$ check-tty
-stdin:not-tty
-stdout:not-tty
-stderr:not-tty
-```
-
-### Cache Status Indicators
-
-Each task line shows its cache status:
-
-| Symbol                            | Meaning                                  | Styling        |
-| --------------------------------- | ---------------------------------------- | -------------- |
-| ✓ cache hit, replaying            | Output replayed from cache               | Green, dimmed  |
-| ✗ cache miss: _reason_, executing | Cache invalidated                        | Purple, dimmed |
-| ⊘ cache disabled                  | Task has `cache: false` or is a built-in | Gray           |
-| _(nothing)_                       | First run, no previous cache             | Clean output   |
-
-Examples:
-
-```
-$ tsc ✓ cache hit, replaying              # cached
-$ tsc ✗ cache miss: args changed, executing  # changed
-$ echo hello ⊘ cache disabled             # not cacheable
-$ tsc                                      # first time
-```
 
 ## Summary Output
 
@@ -306,15 +258,3 @@ error: No previous run details found
 ---
 [vp run] 0/2 cache hit (0%), 2 failed.
 ```
-
-## Color Handling
-
-- Vite Task respects the `NO_COLOR` environment variable (disables all color output)
-- `FORCE_COLOR` is auto-detected based on terminal capability
-- When spawning child processes, `FORCE_COLOR` is passed through so that tools like Jest, Vitest, and ESLint preserve their colored output even when piped
-
-## Output Ordering
-
-Tasks run in topological order (dependencies first). Within each dependency level, output appears in the order tasks complete. Stdout and stderr from each task are grouped together — you won't see interleaved output from different tasks.
-
-When replaying cached output (cache hit), stdout and stderr chunks are replayed in the same chronological order they were originally captured, preserving the original output interleaving pattern within a single task.
