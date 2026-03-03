@@ -21,7 +21,7 @@ These are implicit. When you run a task across multiple packages (with `-r` or `
 These are declared in your config and represent task-level dependencies — a task that must complete before another task starts:
 
 ```ts
-// vite.config.ts
+// packages/app/vite.config.ts
 export default defineConfig({
   run: {
     tasks: {
@@ -35,7 +35,7 @@ export default defineConfig({
 });
 ```
 
-The execution plan for `vp run deploy` (from the app package):
+The execution plan for `vp run deploy` (from `packages/app`):
 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐

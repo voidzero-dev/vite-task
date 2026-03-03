@@ -4,13 +4,14 @@ Tasks are configured in the `run` section of your `vite.config.ts`. There are tw
 
 ## Configuration Location
 
+Each package can have its own `vite.config.ts` that configures tasks for that package:
+
 ```ts
-// vite.config.ts (workspace root)
+// packages/app/vite.config.ts
 import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
   run: {
-    cache: { scripts: false, tasks: true }, // global cache settings*
     tasks: {
       build: {
         command: 'tsc',
@@ -69,18 +70,18 @@ These scripts can be run directly with `vp run build` (from within the `packages
 
 ### 2. Explicit Task Definitions
 
-Tasks defined in `vite.config.ts` are shared across all packages. A task definition applies to every package that has:
+Tasks defined in a package's `vite.config.ts` only affect that package. A task definition applies when:
 
-- A matching script in `package.json`, or
+- The package has a matching script in `package.json`, or
 - The task itself specifies a `command`
 
 ```ts
-// vite.config.ts
+// packages/app/vite.config.ts
 export default defineConfig({
   run: {
     tasks: {
       build: {
-        // No command — uses each package's own "build" script
+        // No command — uses this package's "build" script from package.json
         dependsOn: ['lint'],
         envs: ['NODE_ENV'],
       },
@@ -89,15 +90,16 @@ export default defineConfig({
 });
 ```
 
-In this example, `build` will run each package's own `package.json` `"build"` script but with the added `dependsOn` and cache configuration from the task definition.
+In this example, `build` runs `@my/app`'s own `package.json` `"build"` script but with the added `dependsOn` and cache configuration.
 
 **Conflict rule:** If both the task definition and the `package.json` script specify a command, it's an error. Either define the command in `vite.config.ts` or in `package.json` — not both.
 
 ## Global Cache Configuration\*
 
-The top-level `cache` field in the `run` config controls workspace-wide cache behavior:
+The `cache` field is only allowed in the **workspace root** `vite.config.ts` and controls workspace-wide cache behavior:
 
 ```ts
+// vite.config.ts (workspace root only)
 export default defineConfig({
   run: {
     cache: { scripts: true, tasks: true },

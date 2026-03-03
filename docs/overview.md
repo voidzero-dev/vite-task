@@ -26,20 +26,24 @@ Given a workspace:
 
 ```
 my-app/
-├── vite.config.ts
 ├── pnpm-workspace.yaml
 ├── package.json
 ├── packages/
 │   ├── core/
-│   │   └── package.json        # @my/core
+│   │   ├── package.json        # @my/core
+│   │   └── vite.config.ts
 │   ├── lib/
-│   │   └── package.json        # @my/lib  →  depends on @my/core
+│   │   ├── package.json        # @my/lib  →  depends on @my/core
+│   │   └── vite.config.ts
 │   └── app/
-│       └── package.json        # @my/app  →  depends on @my/lib
+│       ├── package.json        # @my/app  →  depends on @my/lib
+│       └── vite.config.ts
 ```
 
+Each package has its own `vite.config.ts` that configures tasks for that package:
+
 ```ts
-// vite.config.ts
+// packages/app/vite.config.ts
 import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
