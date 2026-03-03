@@ -110,9 +110,10 @@ $ vp build ✓ cache hit, replaying
 
 When a command contains a `vp run` call — whether in a `package.json` script or a task `command` field — it is **expanded at plan time**, not spawned as a separate child process. The planner parses the nested command and incorporates its tasks directly into the execution graph. This is fundamentally different from how other task runners handle nested invocations, and it unlocks several benefits:
 
-- **Full visibility** — the execution plan shows every task that will run, even through layers of nesting
+- **Flat output** — the terminal shows every sub-task at the top level instead of hiding them inside a nested process
 - **Per-task caching** — each expanded task is cached independently
 - **No process overhead** — no extra `vp` processes are spawned
+- **Static recursion detection** — the planner detects self-referential loops at plan time and [handles them gracefully](#recursive-self-reference-handling) instead of spinning up infinite processes
 
 ### Basic Expansion
 
