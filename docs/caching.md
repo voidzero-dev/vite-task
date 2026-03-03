@@ -22,7 +22,7 @@ Does the pre-run fingerprint match an existing cache entry?
 │        │        └─ NO  → CACHE MISS: "content of input 'foo.ts' changed"
 │        └─ NO  → CACHE HIT (replay output)
 │
-└─ NO  → Does the execution key have an old fingerprint?
+└─ NO  → Does the execution key (same package path + task name + `&&` item index) have an old fingerprint?
          ├─ YES → diff old vs new → CACHE MISS: "args changed" / "envs changed" / etc.
          └─ NO  → CACHE MISS (first run, no inline message)
 ```
@@ -132,13 +132,15 @@ The new pre-run fingerprint (`tsc` with `NODE_ENV=production`) doesn't match any
 
 After a task runs successfully with auto-inference enabled, Vite Task records which files the command read and their content hashes. On the next run (when the pre-run fingerprint matches), these hashes are re-validated:
 
-| Tracked item      | How it's checked                                |
-| ----------------- | ----------------------------------------------- |
-| File content      | xxHash3 content hash (fast, ~10GB/s)            |
-| File existence    | File exists vs. doesn't exist                   |
-| Directory entries | List of entries in directories that were listed |
+| Tracked item       | How it's checked                                |
+| ------------------ | ----------------------------------------------- |
+| File content       | xxHash3 content hash (fast, ~10GB/s)            |
+| File non-existence | File that was absent is still absent            |
+| Directory entries  | List of entries in directories that were listed |
 
-If any tracked file has changed content, been added, or been deleted, it's a cache miss.
+**File non-existence** matters because many tools probe for files that may not exist. For example, Node's module resolver tries `./utils.ts`, `./utils/index.ts`, `./utils.js`, etc. in order. If none of those existed and the command succeeded, fspy records that those paths were absent. If you later create `utils.ts`, the cache correctly invalidates — the resolution would now find a file it didn't before.
+
+**Directory entries** are fingerprinted when a command lists a directory (readdir). This captures programs that do their own globbing internally — for example, a test runner scanning `tests/` for `*.test.ts` files. fspy records the directory listing, so adding or removing a test file invalidates the cache even though no existing file's content changed.
 
 When auto-inference is disabled (explicit globs only), no post-run fingerprint is stored — the pre-run fingerprint alone determines cache validity.
 
@@ -394,6 +396,7 @@ Here's the complete lifecycle of a cached task execution:
    ├─ Resolve environment variables, working directory
    ├─ Hash explicitly-globbed input files
    └─ Build pre-run fingerprint
+       (command, args, cwd, envs, input config, globbed file hashes)
 
 2. CACHE LOOKUP
    ├─ Look up by pre-run fingerprint
@@ -402,7 +405,7 @@ Here's the complete lifecycle of a cached task execution:
    │   │   │   ├─ Valid   → CACHE HIT: replay stored stdout/stderr
    │   │   │   └─ Invalid → CACHE MISS: input file changed
    │   │   └─ NO  → CACHE HIT: replay stored stdout/stderr
-   │   └─ Not found → look up execution key for old fingerprint
+   │   └─ Not found → look up execution key (same package path + task name + `&&` item index) for old fingerprint
    │       ├─ Found → diff old vs new → CACHE MISS: "args changed" / etc.
    │       └─ Not found → CACHE MISS: no previous cache
 
@@ -412,9 +415,9 @@ Here's the complete lifecycle of a cached task execution:
    └─ Process exits
 
 4. CACHE UPDATE (only if exit code 0)
-   ├─ Hash files fspy recorded (if auto-inference enabled) as post-run fingerprint
-   ├─ Store: pre-run fingerprint → stdout/stderr + post-run fingerprint
-   └─ Store: execution key → pre-run fingerprint
+   ├─ Build post-run fingerprint from fspy data (if auto-inference enabled)
+   │   (file content hashes, non-existent paths, directory listings)
+   ├─ Store: pre-run fingerprint + execution key + post-run fingerprint + stdout/stderr
 ```
 
 ## Practical Examples
