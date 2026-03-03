@@ -270,55 +270,14 @@ Environment variables matching sensitive patterns are automatically hashed with 
 
 ## Cache Miss Reasons
 
-When a cache miss occurs, Vite Task tells you exactly why. Here are all possible reasons:
+When a cache miss occurs, Vite Task tells you exactly why. For now, validation short-circuits on the first mismatch, so only one reason is reported:
 
-### First Run (No Previous Cache)
-
-```
-$ tsc
-... output ...
-```
-
-No inline message — the task runs normally.
-
-### Command Changed
-
-```
-$ tsc --strict ✗ cache miss: args changed, executing
-... output ...
-```
-
-### Environment Changed
-
-```
-$ tsc ✗ cache miss: envs changed, executing
-```
-
-Specifically detected changes include:
-
-- `env added` — a new fingerprinted env was set
-- `env removed` — a previously set fingerprinted env is now absent
-- `env value changed` — a fingerprinted env's value differs
-
-### Input File Changed
-
-```
-$ tsc ✗ cache miss: content of input 'src/index.ts' changed, executing
-```
-
-### Working Directory Changed
-
-```
-$ tsc ✗ cache miss: working directory changed, executing
-```
-
-### Pass-Through Env Config Changed
-
-```
-$ tsc ✗ cache miss: pass-through env added, executing
-```
-
-This happens when the `passThroughEnvs` list itself changes (names added/removed), not when values change.
+- **No previous cache** — first run, no inline message shown
+- **`args changed`** — command or arguments differ
+- **`envs changed`** — a fingerprinted env was added, removed, or changed value
+- **`content of input 'src/index.ts' changed`** — a tracked file was modified
+- **`working directory changed`** — task cwd differs
+- **`pass-through env added/removed`** — the `passThroughEnvs` list changed (not values, just names)
 
 ## Shared Cache Entries
 
