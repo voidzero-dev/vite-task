@@ -4,7 +4,7 @@ This document covers the interactive terminal experience — what you see when r
 
 ## Interactive Task Selector
 
-When you run bare `vp run` (no task name) from within a package directory, an interactive task selector appears:
+When you run bare `vp run` (no task name) from within a package, an interactive task selector appears:
 
 ```
 > vp run

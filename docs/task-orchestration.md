@@ -70,18 +70,14 @@ The two edge types are independent — topological edges connect the same task a
 
 ## Compound Commands
 
-Commands joined with `&&` follow standard bash semantics — they run sequentially and short-circuit on failure. Vite Task splits them into independently-cached sub-tasks:
+Commands joined with `&&` follow standard bash semantics — they run sequentially and short-circuit on failure. This works in both task `command` fields and `package.json` scripts. Vite Task splits them into independently-cached sub-tasks:
 
-```ts
-export default defineConfig({
-  run: {
-    tasks: {
-      build: {
-        command: 'tsc && rollup -c',
-      },
-    },
-  },
-});
+```json
+{
+  "scripts": {
+    "build": "tsc && rollup -c"
+  }
+}
 ```
 
 ```
@@ -112,7 +108,7 @@ $ rollup -c ✗ cache miss: content of input 'rollup.config.js' changed, executi
 
 ## Nested `vp run` Expansion
 
-When a task script contains a `vp run` call, it is **expanded at plan time** — not spawned as a separate child process. The planner parses the nested command and incorporates its tasks directly into the execution graph. This is fundamentally different from how other task runners handle nested invocations, and it unlocks several benefits:
+When a command contains a `vp run` call — whether in a `package.json` script or a task `command` field — it is **expanded at plan time**, not spawned as a separate child process. The planner parses the nested command and incorporates its tasks directly into the execution graph. This is fundamentally different from how other task runners handle nested invocations, and it unlocks several benefits:
 
 - **Full visibility** — the execution plan shows every task that will run, even through layers of nesting
 - **Per-task caching** — each expanded task is cached independently

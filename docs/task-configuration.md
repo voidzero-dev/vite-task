@@ -127,50 +127,9 @@ vp run build --cache        # Force all caching on (scripts + tasks)
 vp run build --no-cache     # Force all caching off
 ```
 
-## Compound Commands
+## Compound Commands and Nested `vp run`
 
-Commands joined with `&&` are automatically split into independent sub-tasks, each cached separately:
-
-```ts
-export default defineConfig({
-  run: {
-    tasks: {
-      build: {
-        command: 'tsc && rollup -c && terser dist/index.js',
-      },
-    },
-  },
-});
-```
-
-When you run `vp run build`, this becomes three cached sub-tasks. If you change only the terser config, `tsc` and `rollup` remain cached:
-
-```
-> vp run build
-$ tsc ✓ cache hit, replaying
-...
-$ rollup -c ✓ cache hit, replaying
-...
-$ terser dist/index.js ✗ cache miss: content of input 'terser.config.js' changed, executing
-...
----
-[vp run] 2/3 cache hit (67%), 4.1s saved.
-```
-
-## Nested `vp run` in Scripts
-
-Task scripts can contain `vp run` calls, which are **expanded at plan time** rather than spawned as child processes. This means the planner has full visibility into nested task execution and can optimize accordingly.
-
-```json
-// package.json
-{
-  "scripts": {
-    "ci": "vp run lint && vp run test && vp run build"
-  }
-}
-```
-
-Running `vp run ci` expands all nested `vp run` calls into the execution plan. Each expanded task maintains its own caching. See [Task Orchestration — Nested Execution](./task-orchestration.md#nested-vp-run-expansion) for details.
+Commands joined with `&&` are split into independently-cached sub-tasks. Commands containing `vp run` calls are expanded at plan time into the execution graph. Both features work in task `command` fields and `package.json` scripts. See [Task Orchestration](./task-orchestration.md#compound-commands) for details.
 
 ## Environment Variables
 
