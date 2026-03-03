@@ -6,53 +6,9 @@ This document explains how Vite Task determines which tasks to run and in what o
 
 ### 1. Topological Dependencies (from `package.json`)
 
-These are implicit. When you run a task across multiple packages (with `-r` or `-t`), Vite Task looks at `package.json` `dependencies` and `devDependencies` to determine the order. If `@my/app` depends on `@my/lib`, and `@my/lib` depends on `@my/core`, then `build` runs in order: core → lib → app.
+These are implicit. When you run a task across multiple packages (with `-r` or `-t`), Vite Task uses `package.json` `dependencies` and `devDependencies` to determine the order — just like Turborepo or Nx. If `@my/app` depends on `@my/lib` depends on `@my/core`, then `build` runs: core → lib → app.
 
-**Example workspace:**
-
-```json
-// packages/core/package.json
-{ "name": "@my/core" }
-
-// packages/lib/package.json
-{ "name": "@my/lib", "dependencies": { "@my/core": "workspace:*" } }
-
-// packages/app/package.json
-{ "name": "@my/app", "dependencies": { "@my/lib": "workspace:*" } }
-```
-
-Each package has a `"build": "echo 'Building <name>'"` script.
-
-```
-> vp run -r build
-
-~/packages/core$ echo 'Building core'
-Building core
-
-~/packages/lib$ echo 'Building lib'
-Building lib
-
-~/packages/app$ echo 'Building app'
-Building app
-```
-
-The execution plan looks like:
-
-```
-┌───────────┐
-│ core#build│
-└─────┬─────┘
-      │
-┌─────▼─────┐
-│ lib#build │
-└─────┬─────┘
-      │
-┌─────▼─────┐
-│ app#build │
-└───────────┘
-```
-
-Topological ordering is **automatically enabled** when using `-r` (recursive) or `-t` (transitive). It is **not applied** for single-package runs.
+When a package in the dependency chain doesn't have the requested task, it's transparently skipped — predecessors wire directly to successors.
 
 ### 2. Explicit Dependencies (`dependsOn`)
 
@@ -134,35 +90,6 @@ Running `vp run -r lint`:
 
 Here, topological order (core#lint and utils#lint before app#lint) combines with explicit deps (clean before lint in each package). Notice that `app#clean` can start immediately — it doesn't wait for upstream packages. Only `app#lint` waits for both its explicit dependency (`app#clean`) and its topological dependencies (`core#lint`, `utils#lint`).
 
-## Skip-Intermediate Reconnection
-
-When running a task recursively or transitively, some packages in the dependency chain might not have that task. Vite Task handles this gracefully by "bridging" across the gap.
-
-**Example:**
-
-```
-packages/top      → depends on packages/middle
-packages/middle   → depends on packages/bottom
-```
-
-- `top` has a `build` script
-- `middle` does NOT have a `build` script
-- `bottom` has a `build` script
-
-Running `vp run -t build` from `packages/top`:
-
-```
-┌───────────────┐
-│ bottom#build  │       middle is skipped — it has no build task
-└───────┬───────┘
-        │
-┌───────▼───────┐
-│  top#build    │
-└───────────────┘
-```
-
-The dependency chain `top → middle → bottom` is preserved as `top → bottom` for the `build` task, with `middle` transparently skipped. This means the topological ordering is still correct: `bottom#build` runs before `top#build`.
-
 ## Compound Commands
 
 Commands joined with `&&` are split into independently-cached sub-tasks that run sequentially within the same task:
@@ -207,7 +134,14 @@ $ rollup -c ✗ cache miss: content of input 'rollup.config.js' changed, executi
 
 ## Nested `vp run` Expansion
 
-When a task script contains a `vp run` call, it is **expanded at plan time** — not spawned as a separate child process. The planner parses the nested command and incorporates its tasks directly into the execution graph.
+When a task script contains a `vp run` call, it is **expanded at plan time** — not spawned as a separate child process. The planner parses the nested command and incorporates its tasks directly into the execution graph. This is fundamentally different from how other task runners handle nested invocations, and it unlocks several benefits:
+
+- **Full visibility** — the execution plan shows every task that will run, even through layers of nesting
+- **Per-task caching** — each expanded task is cached independently
+- **Deduplication** — if two nested expansions resolve to the same task, it runs once
+- **No process overhead** — no extra `vp` processes are spawned
+
+### Basic Expansion
 
 ```json
 // package.json (workspace root)
@@ -234,17 +168,84 @@ Running `vp run ci` from the root package expands to:
 └──────────────┘
 ```
 
-This expansion is recursive — nested `vp run` calls within nested calls are also expanded. Features like `--filter` and `-r` within nested scripts work correctly:
+Each `vp run` call is replaced with the actual tasks it would produce. The `&&` between them preserves sequential ordering — `#test` won't start until `#lint` finishes.
+
+### Flags Work Inside Nested Scripts
+
+All CLI flags (`-r`, `-t`, `--filter`) are parsed and evaluated during expansion:
 
 ```json
 {
   "scripts": {
-    "build-all": "vp run -r build"
+    "build-all": "vp run -r build",
+    "test-app": "vp run --filter @my/app... test"
   }
 }
 ```
 
-Running `vp run build-all` expands `vp run -r build` at plan time, producing tasks for every package.
+`vp run build-all` expands `vp run -r build` at plan time, producing individual `build` tasks for every package in topological order — as if you'd run `vp run -r build` directly.
+
+`vp run test-app` expands `vp run --filter @my/app... test` and produces `test` tasks for `@my/app` and all its transitive dependencies.
+
+### Expansion is Recursive
+
+Nesting works through multiple levels. If `script-a` calls `vp run script-b` and `script-b` calls `vp run script-c`, all layers are expanded into a single flat execution graph at plan time.
+
+### Compound Commands with Nested Expansion
+
+Compound commands (`&&`) and nested `vp run` interact naturally. Each segment is processed independently:
+
+```json
+{
+  "scripts": {
+    "release": "vp run -r build && deploy-script --prod"
+  }
+}
+```
+
+This expands into:
+
+1. All package `build` tasks from `vp run -r build` (expanded, cached individually)
+2. Then `deploy-script --prod` (run as a normal command)
+
+The `build` tasks benefit from per-task caching — if only one package changed, only that package rebuilds. The `deploy-script` always runs after all builds complete.
+
+### Working Directory Behavior
+
+When `cd` precedes a nested `vp run` in a compound command, the expanded task uses its **own defined cwd**, not the shell's current directory:
+
+```json
+{
+  "scripts": {
+    "cd-build": "cd src && vp run build"
+  }
+}
+```
+
+The `cd src` has no effect on the expanded `build` task — `build` runs in the package root as configured. This is because the expansion resolves the task from the task graph, where cwd is already defined.
+
+### Cache Independence
+
+Each expanded task retains its own cache configuration. A parent task disabling caching doesn't affect the expanded children:
+
+```ts
+export default defineConfig({
+  run: {
+    tasks: {
+      build: {
+        command: 'tsc',
+        cache: true,
+      },
+      deploy: {
+        command: 'vp run build && deploy-script',
+        cache: false,
+      },
+    },
+  },
+});
+```
+
+Running `vp run deploy`: the `deploy` task itself isn't cached, but the expanded `build` task inside it still uses caching. If `build` has a cache hit, `tsc` is skipped even though it's invoked through a non-cached parent.
 
 ### Recursive Self-Reference Handling\*
 
@@ -304,85 +305,3 @@ vp run -r build --ignore-depends-on
 ```
 
 This runs `build` across all packages respecting only the topological (package.json) dependency order — ignoring any `dependsOn` declarations. Useful when you know dependencies are already satisfied and want a faster run.
-
-## Execution Order Visualization
-
-For a workspace with this package structure:
-
-```
-@my/core        (no dependencies)
-@my/utils       (no dependencies)
-@my/lib         → depends on @my/core
-@my/cli         → depends on @my/core
-@my/app         → depends on @my/lib, @my/utils
-```
-
-### `vp run -r build` (recursive)
-
-All packages, topological order:
-
-```
-┌──────────────┐                      ┌──────────────┐
-│  core#build  │                      │ utils#build  │
-└──────┬───────┘                      └──────┬───────┘
-       │                                     │
-       ├──────────────────┐                  │
-       │                  │                  │
-┌──────▼───────┐   ┌──────▼───────┐          │
-│  lib#build   │   │  cli#build   │          │
-└──────┬───────┘   └──────────────┘          │
-       │                                     │
-       └──────────────┬──────────────────────┘
-                      │
-               ┌──────▼───────┐
-               │  app#build   │
-               └──────────────┘
-```
-
-Execution plan (dependencies → dependents):
-
-```json
-{
-  "core#build": [],
-  "utils#build": [],
-  "lib#build": ["core#build"],
-  "cli#build": ["core#build"],
-  "app#build": ["lib#build", "utils#build"]
-}
-```
-
-### `vp run -t build` (transitive, from app/)
-
-Only `@my/app` and its transitive dependencies:
-
-```
-┌──────────────┐     ┌──────────────┐
-│  core#build  │     │ utils#build  │
-└──────┬───────┘     └──────────┬───┘
-       │                        │
-┌──────▼───────┐                │
-│  lib#build   │                │
-└──────┬───────┘                │
-       │                        │
-       └────────┬───────────────┘
-                │
-         ┌──────▼───────┐
-         │  app#build   │
-         └──────────────┘
-```
-
-Notice `cli#build` is not included — it's not a dependency of `@my/app`.
-
-### `vp run -t build` (transitive, from lib/)
-
-Only `@my/lib` and its transitive dependencies:
-
-```
-┌──────────────┐
-│  core#build  │
-└──────┬───────┘
-       │
-┌──────▼───────┐
-│  lib#build   │
-└──────────────┘
-```
