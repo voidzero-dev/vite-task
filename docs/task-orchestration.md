@@ -178,7 +178,7 @@ The `build` tasks benefit from per-task caching — if only one package changed,
 
 ### Working Directory Behavior
 
-`cd` in a compound command affects the cwd of all subsequent segments, following standard bash semantics:
+Following standard bash semantics, `cd` affects the cwd of all subsequent segments.
 
 ```json
 {
