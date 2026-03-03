@@ -2,30 +2,34 @@
 
 Vite Task caches task execution results. When you re-run a task and nothing relevant has changed, the cached output is replayed instantly — the command never actually runs. This document explains how caching works internally, how cache validity is determined, and how to configure it.
 
+> **Note:** Currently, only stdout/stderr is cached and replayed. Output file restoration (restoring files the command wrote) is not yet implemented.
+
 ## How It Works: Two-Level Fingerprinting
 
 Caching uses a two-level fingerprint system:
 
-1. **Spawn fingerprint** — computed _before_ execution. Captures the command, arguments, working directory, and environment variables.
-2. **Post-run fingerprint** — computed _after_ execution. Captures the content hashes of all files the command actually read.
+1. **Pre-run fingerprint** — computed _before_ execution. Captures the command, arguments, working directory, environment variables, input configuration, and content hashes of explicitly-globbed files.
+2. **Post-run fingerprint** — computed _after_ execution (only when auto-inference is enabled). Captures the content hashes of all files the command actually read.
 
 On the next run, the cache lookup works as follows:
 
 ```
-Does the spawn fingerprint match?
+Does the pre-run fingerprint match?
 │
-├─ YES → Do input file hashes still match? (post-run fingerprint)
-│        ├─ YES → CACHE HIT (replay output)
-│        └─ NO  → CACHE MISS: "content of input 'foo.ts' changed"
+├─ YES → Is auto-inference enabled?
+│        ├─ YES → Do inferred file hashes still match? (post-run fingerprint)
+│        │        ├─ YES → CACHE HIT (replay output)
+│        │        └─ NO  → CACHE MISS: "content of input 'foo.ts' changed"
+│        └─ NO  → CACHE HIT (replay output)
 │
-└─ NO  → CACHE MISS: "args changed" / "envs changed" / etc.
+└─ NO  → CACHE MISS: "args changed" / "envs changed" / "content of input changed" / etc.
 ```
 
 Only **successful** task executions (exit code 0) are cached. Failed tasks are never cached.
 
-## What Goes Into the Spawn Fingerprint
+## What Goes Into the Pre-Run Fingerprint
 
-The spawn fingerprint is a composite of:
+The pre-run fingerprint is a composite of:
 
 | Component               | Example                                     | Effect on cache                                |
 | ----------------------- | ------------------------------------------- | ---------------------------------------------- |
@@ -34,11 +38,14 @@ The spawn fingerprint is a composite of:
 | Working directory       | `packages/app` (relative to workspace root) | cwd change → miss                              |
 | Fingerprinted envs      | `{ "NODE_ENV": "production" }`              | Value change → miss                            |
 | Pass-through env config | `["CI", "PATH"]` (names only)               | Config change → miss (but value changes don't) |
-| Fingerprint ignores     | `["dist/**", "*.tsbuildinfo"]`              | Pattern change → miss                          |
+| Input configuration     | `{ auto: true, globs: ["src/**"] }`         | Config change → miss                           |
+| Globbed input files     | `{ "src/index.ts": <hash> }`                | Content change → miss                          |
+
+Globbed input files are resolved from explicit glob patterns in the `inputs` configuration before the command runs. Their content hashes (xxHash3) are part of the pre-run fingerprint, so changes are detected without executing the command.
 
 ## What Goes Into the Post-Run Fingerprint
 
-After a task runs successfully, Vite Task records which files the command read and their content hashes. On the next run (when the spawn fingerprint matches), these hashes are re-validated:
+When auto-inference is enabled (the default), Vite Task records which files the command read and their content hashes after execution. On the next run (when the pre-run fingerprint matches), these hashes are re-validated:
 
 | Tracked item      | How it's checked                                |
 | ----------------- | ----------------------------------------------- |
@@ -48,32 +55,35 @@ After a task runs successfully, Vite Task records which files the command read a
 
 If any tracked file has changed content, been added, or been deleted, it's a cache miss.
 
+When auto-inference is disabled (explicit globs only), the post-run fingerprint is skipped entirely — the pre-run fingerprint alone determines cache validity.
+
 ## File System Tracking with fspy
 
 Vite Task doesn't require you to declare which files your command reads. Instead, it uses **fspy** (file system spy) to automatically track file access during execution.
 
-When caching is enabled for a task, the spawned process's file system calls are intercepted and every file read is recorded. This happens transparently — the command runs normally, but Vite Task also captures what it touched.
+When auto-inference is enabled (the default), the spawned process's file system calls are intercepted and every file read is recorded. This happens transparently — the command runs normally, but Vite Task also captures what it touched.
 
 **What fspy tracks:**
 
 - File reads (opening a file for reading)
 - Directory listings (readdir)
-- Write access (noted but not used for cache invalidation)
+- Write access (opening a file for writing. will be used for output restoration in the future)
 
 **What fspy ignores:**
 
 - File access outside the workspace directory
-- Anything under `.git/`
 
 This means the cache "just works" for most commands — `tsc` reads `.ts` files and `tsconfig.json`, so those become the cache inputs automatically. No configuration needed.
+
+**When fspy is disabled:** If a task uses only explicit glob patterns in `inputs` (no `{ auto: true }`), fspy is completely disabled — no syscall interception, no file access tracking.
 
 ### When fspy Adds Too Much
 
 fspy is intentionally cautious — it tracks _everything_ the command reads. Sometimes a command reads auxiliary files that you don't want to trigger cache invalidation (like `.tsbuildinfo` incremental files or build outputs that are also read during builds).
 
-For these cases, you can use **negative patterns** in the inputs configuration or **fingerprint ignore patterns**.
+For these cases, use **negative patterns** in the `inputs` configuration to exclude files from cache invalidation.
 
-## Task Inputs Configuration\*
+## Task Inputs\*
 
 The `inputs` field controls which files are tracked for cache invalidation. In most cases you don't need to configure this — fspy handles it automatically.
 
@@ -258,19 +268,6 @@ Environment variables matching sensitive patterns are automatically hashed with 
 - `AWS_*`, `GITHUB_*`, `NPM_*TOKEN`
 - `DATABASE_URL`, `MONGODB_URI`, `REDIS_URL`
 
-These values are also automatically masked in console output: `API_KEY=***`.
-
-### FORCE_COLOR Auto-Detection
-
-Vite Task automatically sets `FORCE_COLOR` based on the terminal's color support level:
-
-- `0` — no color
-- `1` — basic ANSI (16 colors)
-- `2` — 256 colors
-- `3` — true color (16M colors)
-
-This is applied unless `FORCE_COLOR` is already set or `NO_COLOR` is present.
-
 ## Cache Miss Reasons
 
 When a cache miss occurs, Vite Task tells you exactly why. Here are all possible reasons:
@@ -325,9 +322,7 @@ This happens when the `passThroughEnvs` list itself changes (names added/removed
 
 ## Shared Cache Entries
 
-Two tasks with identical commands (same program, args, cwd, env config) share the same cache entry. This means if `@my/app#build` and `@my/lib#build` both run `tsc` with the same configuration, a cache hit for one can benefit the other — but only if they read the same files.
-
-In practice, this is most useful for compound commands where sub-tasks share commands across different parent tasks.
+Two tasks with identical pre-run fingerprints (same command, args, cwd, env config, input config, and globbed file hashes) share the same cache entry. In practice, this is most useful for compound commands where sub-tasks share commands across different parent tasks.
 
 ## Cache Storage
 
@@ -360,29 +355,28 @@ Here's the complete lifecycle of a cached task execution:
 ```
 1. PLAN PHASE
    ├─ Parse task config
-   ├─ Resolve environment variables
-   ├─ Resolve working directory
-   └─ Build spawn fingerprint
+   ├─ Resolve environment variables, working directory
+   ├─ Hash explicitly-globbed input files
+   └─ Build pre-run fingerprint
 
 2. CACHE LOOKUP
-   ├─ Look up by spawn fingerprint
-   │   ├─ Found → validate post-run fingerprint (check input files)
-   │   │   ├─ Valid   → CACHE HIT: replay stored stdout/stderr
-   │   │   └─ Invalid → CACHE MISS: input file changed
-   │   └─ Not found → check old execution key mapping
-   │       ├─ Old mapping exists → CACHE MISS: spawn fingerprint mismatch
-   │       └─ No mapping → CACHE MISS: no previous cache entry
+   ├─ Look up by pre-run fingerprint
+   │   ├─ Found → auto-inference enabled?
+   │   │   ├─ YES → validate post-run fingerprint (check inferred files)
+   │   │   │   ├─ Valid   → CACHE HIT: replay stored stdout/stderr
+   │   │   │   └─ Invalid → CACHE MISS: input file changed
+   │   │   └─ NO  → CACHE HIT: replay stored stdout/stderr
+   │   └─ Not found → CACHE MISS
 
 3. EXECUTION (on cache miss)
-   ├─ Spawn process with fspy tracking
+   ├─ Spawn process (with fspy if auto-inference enabled)
    ├─ Capture stdout/stderr in real-time
-   ├─ fspy records all file accesses
    └─ Process exits
 
 4. CACHE UPDATE (only if exit code 0)
-   ├─ Build post-run fingerprint (hash input files)
-   ├─ Store spawn fingerprint → (outputs + post-run fingerprint)
-   └─ Store execution key → spawn fingerprint
+   ├─ Build post-run fingerprint (hash inferred files, if auto-inference)
+   ├─ Store pre-run fingerprint → (outputs + post-run fingerprint)
+   └─ Store execution key → pre-run fingerprint
 ```
 
 ## Practical Examples
