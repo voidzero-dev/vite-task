@@ -6,9 +6,15 @@ This document explains how Vite Task determines which tasks to run and in what o
 
 ### 1. Topological Dependencies (from `package.json`)
 
-These are implicit. When you run a task across multiple packages (with `-r` or `-t`), Vite Task uses `package.json` `dependencies` and `devDependencies` to determine the order — just like Turborepo or Nx. If `@my/app` depends on `@my/lib` depends on `@my/core`, then `build` runs: core → lib → app.
+These are implicit. When you run a task across multiple packages (with `-r` or `-t`), Vite Task uses `package.json` `dependencies` and `devDependencies` to determine the order.
 
-When a package in the dependency chain doesn't have the requested task, it's transparently skipped — predecessors wire directly to successors.
+```
+> vp run -r build
+
+~/packages/core$ tsc        # @my/core — no dependencies, runs first
+~/packages/lib$ tsc         # @my/lib — depends on @my/core
+~/packages/app$ tsc         # @my/app — depends on @my/lib
+```
 
 ### 2. Explicit Dependencies (`dependsOn`)
 
@@ -43,7 +49,7 @@ The execution plan for `vp run deploy` (from the app package):
                   └──────────────┘
 ```
 
-Explicit dependencies are **always applied** (unless `--ignore-depends-on` is passed).
+Explicit dependencies are **always applied**, unless you pass `--ignore-depends-on` to skip them and rely only on topological ordering.
 
 The `dependsOn` format is `[package#]taskName`:
 
@@ -228,29 +234,7 @@ A common pattern is having the workspace root orchestrate recursive builds:
 }
 ```
 
-This creates a potential recursion: root's `build` → `vp run -r build` → includes root's `build` → ...
-
-Vite Task handles this with two rules:
-
-**Rule 1 — Skip duplicate commands.** When a task's command is the **same `vp run` invocation** already running, that command is skipped:
-
-```bash
-$ vp run -r build
-# root#build's command is "vp run -r build" — identical to the current invocation
-# → command skipped. root#build becomes a passthrough.
-# Other packages' build tasks run normally.
-```
-
-**Rule 2 — Prune self from nested expansions.** When a task's command expands to a **different** `vp run` invocation whose results include the task itself, the self-reference is removed:
-
-```bash
-$ vp run build      # (from workspace root)
-# root#build's command "vp run -r build" is different from "vp run build"
-# → expanded normally, but root#build is pruned from the expansion results.
-# Result: root#build orchestrates other packages' build tasks.
-```
-
-Multi-command scripts work naturally — only the matching subcommand is skipped:
+This creates a potential recursion: root's `build` → `vp run -r build` → includes root's `build` → ... Vite Task detects this and prunes the self-reference so other packages' builds run normally:
 
 ```json
 {
@@ -260,16 +244,16 @@ Multi-command scripts work naturally — only the matching subcommand is skipped
 }
 ```
 
-`tsc` runs, and the recursive `vp run -r build` is skipped (Rule 1). The `dependsOn` edges through the passthrough still work.
+```
+> vp run -r build
 
-**Note:** Mutual recursion through different tasks (e.g., `build` → `vp run -r test` → `vp run -r build`) remains a fatal error.
-
-## `--ignore-depends-on`
-
-You can skip all explicit `dependsOn` edges for a run:
-
-```bash
-vp run -r build --ignore-depends-on
+~/$ tsc                            # root's own build step runs
+...
+~/packages/core$ tsc               # other packages' build tasks run
+...
+~/packages/lib$ tsc
+...
+# root's "vp run -r build" is pruned — no infinite loop
 ```
 
-This runs `build` across all packages respecting only the topological (package.json) dependency order — ignoring any `dependsOn` declarations. Useful when you know dependencies are already satisfied and want a faster run.
+Cycles across different tasks (e.g., `build` calls `vp run -r test` which calls `vp run -r build`) are also detected statically at plan time — Vite Task will report an error rather than hang.
