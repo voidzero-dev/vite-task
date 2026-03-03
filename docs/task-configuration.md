@@ -127,6 +127,40 @@ vp run build --cache        # Force all caching on (scripts + tasks)
 vp run build --no-cache     # Force all caching off
 ```
 
+### When Is Caching Enabled?
+
+A command run by `vp run` is either a **task** (has an entry in `vite.config.ts`) or a **script** (only exists in `package.json` with no corresponding task entry). A script that has a matching task entry is treated as a task.
+
+```
+--no-cache* on the command line?
+├─ YES → NOT CACHED (overrides everything)
+└─ NO
+   │
+   Does the command have a task entry in vite.config.ts?
+   │
+   ├─ YES (task) ─────────────────────────────────────────────
+   │   │
+   │   Global cache.tasks set to false? (default: true)
+   │   ├─ YES → NOT CACHED (global kill switch)
+   │   └─ NO (default)
+   │       │
+   │       Per-task cache set to false?
+   │       ├─ YES → NOT CACHED (--cache does NOT override this)
+   │       └─ NO or not set → CACHED <----- this is the default for tasks
+   │
+   └─ NO (script) ───────────────────────────────────────────
+       │
+       --cache on the command line?
+       ├─ YES → CACHED
+       └─ NO
+           │
+           Global cache.scripts set to true? (default: false)
+           ├─ YES → CACHED
+           └─ NO (default) → NOT CACHED <----- this is the default for scripts
+```
+
+In short: **tasks are cached by default, scripts are not.** `--no-cache` turns off caching for everything; `--cache` opts in scripts but cannot override a task's `cache: false`.
+
 ## Compound Commands and Nested `vp run`
 
 Commands joined with `&&` are split into independently-cached sub-tasks. Commands containing `vp run` calls are expanded at plan time into the execution graph. Both features work in task `command` fields and `package.json` scripts. See [Task Orchestration](./task-orchestration.md#compound-commands) for details.
