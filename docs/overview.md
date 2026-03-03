@@ -1,6 +1,6 @@
 # Vite Task — Overview
 
-Vite Task is the monorepo task runner built into vite+ (the `vp run` command). It orchestrates scripts across your workspace packages. Think of it as an alternative to Turborepo or Nx — but integrated directly into your vite+ workflow and designed around pnpm workspaces.
+Vite Task (the `vp run` command) is the monorepo task runner built into vite+. It orchestrates scripts across your workspace packages.
 
 **Key capabilities:**
 
@@ -40,10 +40,10 @@ my-app/
 │       └── vite.config.ts
 ```
 
-Each package has its own `vite.config.ts` that configures tasks for that package:
+Each package has its own `vite.config.ts` that configures tasks for that package. Suppose every package defines the same tasks:
 
 ```ts
-// packages/app/vite.config.ts
+// packages/*/vite.config.ts
 import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
@@ -61,36 +61,43 @@ export default defineConfig({
 });
 ```
 
-Running `vp run -r build` executes across all packages in dependency order:
+Running `vp run -r build` executes across all packages in dependency order. Compound commands (`&&`) are split into individually-cached sub-tasks:
 
 ```
 > vp run -r build
 ~/packages/core$ vp lint
 ...
-~/packages/core$ tsc && rollup -c
+~/packages/core$ tsc
+...
+~/packages/core$ rollup -c
 ...
 ~/packages/lib$ vp lint
 ...
-~/packages/lib$ tsc && rollup -c
+~/packages/lib$ tsc
+...
+~/packages/lib$ rollup -c
 ...
 ~/packages/app$ vp lint
 ...
-~/packages/app$ tsc && rollup -c
+~/packages/app$ tsc
+...
+~/packages/app$ rollup -c
 ...
 ---
-[vp run] 0/6 cache hit (0%). (Run `vp run --last-details` for full details)
+[vp run] 0/9 cache hit (0%). (Run `vp run --last-details` for full details)
 ```
 
-Run it again — everything is cached:
+Run it again — everything is cached individually:
 
 ```
 > vp run -r build
 ~/packages/core$ vp lint ✓ cache hit, replaying
-~/packages/core$ tsc && rollup -c ✓ cache hit, replaying
+~/packages/core$ tsc ✓ cache hit, replaying
+~/packages/core$ rollup -c ✓ cache hit, replaying
 ~/packages/lib$ vp lint ✓ cache hit, replaying
 ...
 ---
-[vp run] 6/6 cache hit (100%), 3.2s saved in total
+[vp run] 9/9 cache hit (100%), 3.2s saved in total
 ```
 
-> **Note:** Features marked with \* are planned but not yet shipped.
+> **Note:** Features marked with \* are not yet merged.
