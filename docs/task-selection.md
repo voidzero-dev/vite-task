@@ -237,6 +237,8 @@ Vite Task includes the root like any other package. Recursion is prevented struc
 | Extra flags needed      | `--workspace-root`, `--include-workspace-root` | None\*                                 |
 | User model              | "root is special"                              | "all packages are equal"\*             |
 
+**`--transitive` (`-t`):** pnpm does not have a built-in equivalent. The closest pnpm workflow is `--filter "pkg..."`, which selects the package and its transitive dependencies. Vite Task provides `-t` as a dedicated shorthand for this common pattern.
+
 **`--filter` cannot be combined with `-r` or `-t`:** `--filter` is a standalone selection mechanism. Combining it with `-r` or `-t` is an error — use `--filter "pkg..."` instead if you need transitive dependencies.
 
 ## CLI Flags Reference
