@@ -61,7 +61,12 @@ The `dependsOn` format is `[package#]taskName`:
 
 ### Both Combined
 
-In a recursive run, both dependency types apply simultaneously. Topological edges connect the same task across packages, while `dependsOn` edges connect different tasks within a package. They're independent — a `dependsOn` target in a downstream package can start immediately without waiting for upstream packages.
+The planner resolves dependencies in two stages:
+
+1. **Package selection** — determine which packages to run in (from `-r`, `-t`, or `--filter`), then add topological edges between the same task across those packages
+2. **Explicit dependencies** — expand `dependsOn` edges, potentially pulling in tasks from packages outside the original selection
+
+The two edge types are independent — topological edges connect the same task across packages, while `dependsOn` edges connect different tasks within or across packages.
 
 ## Compound Commands
 
