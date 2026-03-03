@@ -1,6 +1,6 @@
 # Task Orchestration
 
-This document explains how Vite Task determines which tasks to run and in what order. Understanding this is essential for setting up efficient build pipelines in a monorepo.
+This document explains how Vite Task determines which tasks to run and in what order.
 
 ## Two Kinds of Dependencies
 

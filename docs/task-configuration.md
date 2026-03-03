@@ -155,22 +155,6 @@ $ terser dist/index.js ✗ cache miss: content of input 'terser.config.js' chang
 [vp run] 2/3 cache hit (67%), 4.1s saved.
 ```
 
-## Built-in Commands
-
-vite+ provides shorthand commands for common tools:
-
-| Command             | Equivalent                            | Tool   |
-| ------------------- | ------------------------------------- | ------ |
-| `vp test [args...]` | Finds `vitest` in `node_modules/.bin` | Vitest |
-| `vp lint [args...]` | Finds `oxlint` in `node_modules/.bin` | OxLint |
-
-These resolve the tool binary from the nearest `node_modules/.bin` (walking up directories) and execute it directly. They are not part of the task graph — they are standalone, on-the-fly executions.
-
-```bash
-vp test --reporter verbose     # → vitest --reporter verbose
-vp lint src/ --fix             # → oxlint src/ --fix
-```
-
 ## Nested `vp run` in Scripts
 
 Task scripts can contain `vp run` calls, which are **expanded at plan time** rather than spawned as child processes. This means the planner has full visibility into nested task execution and can optimize accordingly.
@@ -194,12 +178,3 @@ Quick summary:
 
 - **`envs`**: Included in the cache fingerprint. Changing a value here invalidates the cache.
 - **`passThroughEnvs`**: Passed to the process but NOT fingerprinted. Changing values here does NOT invalidate the cache.
-
-## `vpr` Shorthand
-
-`vpr` is a shorthand alias for `vp run`:
-
-```bash
-vpr build          # same as: vp run build
-vpr -r test        # same as: vp run -r test
-```
