@@ -9,15 +9,15 @@ Vite Task caches task execution results. When you re-run a task and nothing rele
 Caching uses a two-level fingerprint system:
 
 1. **Pre-run fingerprint** — computed _before_ execution. Captures the command, arguments, working directory, environment variables, input configuration, and content hashes of explicitly-globbed files.
-2. **Post-run fingerprint** — computed _after_ execution (only when auto-inference is enabled). Captures the content hashes of all files the command actually read.
+2. **Post-run fingerprint** — computed _after_ execution, when auto-inference is enabled. Captures the content hashes of all files the command actually read. When auto-inference is disabled (explicit globs only), no post-run fingerprint is stored.
 
 On the next run, the cache lookup works as follows:
 
 ```
 Does the pre-run fingerprint match?
 │
-├─ YES → Is auto-inference enabled?
-│        ├─ YES → Do inferred file hashes still match? (post-run fingerprint)
+├─ YES → Is there a post-run fingerprint?
+│        ├─ YES → Do inferred file hashes still match?
 │        │        ├─ YES → CACHE HIT (replay output)
 │        │        └─ NO  → CACHE MISS: "content of input 'foo.ts' changed"
 │        └─ NO  → CACHE HIT (replay output)
@@ -45,7 +45,7 @@ Globbed input files are resolved from explicit glob patterns in the `inputs` con
 
 ## What Goes Into the Post-Run Fingerprint
 
-When auto-inference is enabled (the default), Vite Task records which files the command read and their content hashes after execution. On the next run (when the pre-run fingerprint matches), these hashes are re-validated:
+After a task runs successfully with auto-inference enabled, Vite Task records which files the command read and their content hashes. On the next run (when the pre-run fingerprint matches), these hashes are re-validated:
 
 | Tracked item      | How it's checked                                |
 | ----------------- | ----------------------------------------------- |
@@ -55,7 +55,7 @@ When auto-inference is enabled (the default), Vite Task records which files the 
 
 If any tracked file has changed content, been added, or been deleted, it's a cache miss.
 
-When auto-inference is disabled (explicit globs only), the post-run fingerprint is skipped entirely — the pre-run fingerprint alone determines cache validity.
+When auto-inference is disabled (explicit globs only), no post-run fingerprint is stored — the pre-run fingerprint alone determines cache validity.
 
 ## File System Tracking with fspy
 
@@ -272,12 +272,12 @@ Environment variables matching sensitive patterns are automatically hashed with 
 
 When a cache miss occurs, Vite Task tells you exactly why. For now, validation short-circuits on the first mismatch, so only one reason is reported:
 
-- **No previous cache** — first run, no inline message shown
-- **`args changed`** — command or arguments differ
-- **`envs changed`** — a fingerprinted env was added, removed, or changed value
-- **`content of input 'src/index.ts' changed`** — a tracked file was modified
-- **`working directory changed`** — task cwd differs
-- **`pass-through env added/removed`** — the `passThroughEnvs` list changed (not values, just names)
+- **no previous cache** — first run, no inline message shown
+- **args changed** — command or arguments differ
+- **envs changed** — a fingerprinted env was added, removed, or changed value
+- **content of input 'src/index.ts' changed** — a tracked file was modified
+- **working directory changed** — task cwd differs
+- **pass-through env added/removed** — the `passThroughEnvs` list changed (not values, just names)
 
 ## Shared Cache Entries
 
@@ -294,10 +294,6 @@ node_modules/.vite/task-cache/cache.db
 This can be overridden with the `VITE_CACHE_PATH` environment variable.
 
 The database uses WAL (Write-Ahead Logging) mode for safe concurrent access — multiple `vp` processes can read the cache simultaneously without corruption.
-
-### Cache Initialization
-
-The cache is **lazily initialized** — it's not loaded until the first cache lookup. This avoids SQLite race conditions when multiple `vp` processes start simultaneously, and avoids overhead for commands that don't need caching.
 
 ### Clearing the Cache
 
@@ -320,8 +316,8 @@ Here's the complete lifecycle of a cached task execution:
 
 2. CACHE LOOKUP
    ├─ Look up by pre-run fingerprint
-   │   ├─ Found → auto-inference enabled?
-   │   │   ├─ YES → validate post-run fingerprint (check inferred files)
+   │   ├─ Found → has post-run fingerprint?
+   │   │   ├─ YES → validate it (check inferred file hashes)
    │   │   │   ├─ Valid   → CACHE HIT: replay stored stdout/stderr
    │   │   │   └─ Invalid → CACHE MISS: input file changed
    │   │   └─ NO  → CACHE HIT: replay stored stdout/stderr
@@ -333,9 +329,8 @@ Here's the complete lifecycle of a cached task execution:
    └─ Process exits
 
 4. CACHE UPDATE (only if exit code 0)
-   ├─ Build post-run fingerprint (hash inferred files, if auto-inference)
-   ├─ Store pre-run fingerprint → (outputs + post-run fingerprint)
-   └─ Store execution key → pre-run fingerprint
+   ├─ Hash files fspy recorded (if auto-inference enabled) as post-run fingerprint
+   └─ Store: pre-run fingerprint + stdout/stderr + post-run fingerprint
 ```
 
 ## Practical Examples
