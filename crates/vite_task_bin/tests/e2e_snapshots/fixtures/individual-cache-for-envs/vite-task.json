@@ -1,5 +1,5 @@
 {
-  "cacheScripts": true,
+  "cache": true,
   "tasks": {
     "hello": {
       "command": "print-env FOO",

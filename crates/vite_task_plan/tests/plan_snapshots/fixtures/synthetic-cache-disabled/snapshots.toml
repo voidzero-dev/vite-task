@@ -1,5 +1,5 @@
 [[plan]]
-name = "script without cacheScripts defaults to no cache"
+name = "script without cache.scripts defaults to no cache"
 args = ["run", "lint"]
 
 [[plan]]

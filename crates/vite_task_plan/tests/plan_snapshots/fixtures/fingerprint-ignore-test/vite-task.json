@@ -1,5 +1,5 @@
 {
-  "cacheScripts": true,
+  "cache": true,
   "tasks": {
     "create-files": {
       "command": "mkdir -p node_modules/pkg-a && echo '{\"name\":\"pkg-a\"}' > node_modules/pkg-a/package.json && echo 'content' > node_modules/pkg-a/index.js && mkdir -p dist && echo 'output' > dist/bundle.js",

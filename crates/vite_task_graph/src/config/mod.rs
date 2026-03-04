@@ -5,7 +5,10 @@ use std::sync::Arc;
 use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
-pub use user::{EnabledCacheConfig, UserCacheConfig, UserRunConfig, UserTaskConfig};
+pub use user::{
+    EnabledCacheConfig, ResolvedGlobalCacheConfig, UserCacheConfig, UserGlobalCacheConfig,
+    UserRunConfig, UserTaskConfig,
+};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 

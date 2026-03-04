@@ -1,0 +1,7 @@
+{
+  "name": "@test/cache-tasks-disabled",
+  "scripts": {
+    "build": "echo building",
+    "test": "echo testing"
+  }
+}

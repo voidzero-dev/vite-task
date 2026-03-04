@@ -1,0 +1,10 @@
+{
+  "cache": { "tasks": false },
+  "tasks": {
+    "build": {},
+    "deploy": {
+      "command": "echo deploying",
+      "cache": true
+    }
+  }
+}

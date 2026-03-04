@@ -312,7 +312,7 @@ pub enum ParentCacheConfig {
     /// The synthetic task uses its own default cache configuration.
     None,
 
-    /// Parent task has caching disabled (`cache: false` or `cacheScripts` not enabled).
+    /// Parent task has caching disabled (`cache: false` or `cache.scripts` not enabled).
     /// The synthetic task should also have caching disabled.
     Disabled,
 

@@ -1,4 +1,4 @@
 {
   // Enables caching for all package.json scripts in the workspace.
-  "cacheScripts": true
+  "cache": true
 }

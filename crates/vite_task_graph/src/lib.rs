@@ -98,10 +98,8 @@ pub enum TaskGraphLoadError {
         error: SpecifierLookupError,
     },
 
-    #[error(
-        "`cacheScripts` can only be set in the workspace root config, but found in {package_path}"
-    )]
-    CacheScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
+    #[error("`cache` can only be set in the workspace root config, but found in {package_path}")]
+    CacheInNonRootPackage { package_path: Arc<AbsolutePath> },
 }
 
 /// Error when looking up a task by its specifier.
@@ -179,7 +177,7 @@ impl IndexedTaskGraph {
     ///
     /// Returns [`TaskGraphLoadError`] if the package graph fails to load, a config file
     /// cannot be read, a task config cannot be resolved, a dependency specifier is invalid,
-    /// or `cacheScripts` is set in a non-root package.
+    /// or `cache` is set in a non-root package.
     #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
         clippy::too_many_lines,
@@ -204,8 +202,8 @@ impl IndexedTaskGraph {
         let mut node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex> =
             FxHashMap::with_capacity_and_hasher(task_graph.node_count(), FxBuildHasher);
 
-        // First pass: load all configs, extract cacheScripts from root, validate
-        let mut cache_scripts = false; // Default: disabled
+        // First pass: load all configs, extract root cache config, validate
+        let mut root_cache = None;
         let mut package_configs: Vec<(PackageNodeIndex, Arc<AbsolutePath>, UserRunConfig)> =
             Vec::with_capacity(package_graph.node_count());
 
@@ -214,7 +212,7 @@ impl IndexedTaskGraph {
             let package_dir: Arc<AbsolutePath> = workspace_root.path.join(&package.path).into();
             let is_workspace_root = package.path.as_str().is_empty();
 
-            let user_config = config_loader
+            let mut user_config = config_loader
                 .load_user_config_file(&package_dir)
                 .await
                 .map_err(|error| TaskGraphLoadError::ConfigLoadError {
@@ -223,11 +221,11 @@ impl IndexedTaskGraph {
                 })?
                 .unwrap_or_default();
 
-            if let Some(current_cache_scripts) = user_config.cache_scripts {
+            if user_config.cache.is_some() {
                 if is_workspace_root {
-                    cache_scripts = current_cache_scripts;
+                    root_cache = user_config.cache.take();
                 } else {
-                    return Err(TaskGraphLoadError::CacheScriptsInNonRootPackage {
+                    return Err(TaskGraphLoadError::CacheInNonRootPackage {
                         package_path: package_dir.clone(),
                     });
                 }
@@ -236,7 +234,11 @@ impl IndexedTaskGraph {
             package_configs.push((package_index, package_dir, user_config));
         }
 
-        // Second pass: create task nodes using cache_scripts value
+        let resolved_cache = config::ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
+        let cache_scripts = resolved_cache.scripts;
+        let cache_tasks = resolved_cache.tasks;
+
+        // Second pass: create task nodes using resolved cache config
         for (package_index, package_dir, user_config) in package_configs {
             let package = &package_graph[package_index];
 
@@ -248,7 +250,11 @@ impl IndexedTaskGraph {
                 .map(|(name, value)| (name.as_str(), value.as_str()))
                 .collect();
 
-            for (task_name, task_user_config) in user_config.tasks.unwrap_or_default() {
+            for (task_name, mut task_user_config) in user_config.tasks.unwrap_or_default() {
+                // Apply cache.tasks kill switch: when false, override all tasks to disable caching
+                if !cache_tasks {
+                    task_user_config.options.cache_config = config::UserCacheConfig::disabled();
+                }
                 // For each task defined in vite.config.*, look up the corresponding package.json script (if any)
                 let package_json_script = package_json_scripts.remove(task_name.as_str());
 

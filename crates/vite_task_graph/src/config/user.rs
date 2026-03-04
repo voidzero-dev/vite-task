@@ -111,17 +111,78 @@ pub struct UserTaskConfig {
     pub options: UserTaskOptions,
 }
 
+/// Root-level cache configuration.
+///
+/// Controls caching behavior for the entire workspace.
+///
+/// - `true` is equivalent to `{ scripts: true, tasks: true }` — enables caching for both
+///   package.json scripts and task entries.
+/// - `false` is equivalent to `{ scripts: false, tasks: false }` — disables all caching.
+/// - When omitted, defaults to `{ scripts: false, tasks: true }`.
+///
+/// This option can only be set in the workspace root's config file.
+/// Setting it in a package's config will result in an error.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
+#[serde(untagged, deny_unknown_fields)]
+pub enum UserGlobalCacheConfig {
+    Bool(bool),
+    /// Detailed cache configuration with separate control for scripts and tasks.
+    Detailed {
+        /// Enable caching for package.json scripts not defined in the `tasks` map.
+        ///
+        /// When `false`, package.json scripts will not be cached.
+        /// When `true`, package.json scripts will be cached with default settings.
+        ///
+        /// Default: `false`
+        scripts: Option<bool>,
+
+        /// Global cache kill switch for task entries.
+        ///
+        /// When `false`, overrides all tasks to disable caching, even tasks with `cache: true`.
+        /// When `true`, respects each task's individual `cache` setting
+        /// (each task's `cache` defaults to `true` if omitted).
+        ///
+        /// Default: `true`
+        tasks: Option<bool>,
+    },
+}
+
+/// Resolved global cache configuration with concrete boolean values.
+pub struct ResolvedGlobalCacheConfig {
+    pub scripts: bool,
+    pub tasks: bool,
+}
+
+impl ResolvedGlobalCacheConfig {
+    /// Resolve from an optional user config, using defaults when `None`.
+    ///
+    /// Default: `{ scripts: false, tasks: true }`
+    #[must_use]
+    pub fn resolve_from(config: Option<&UserGlobalCacheConfig>) -> Self {
+        match config {
+            None => Self { scripts: false, tasks: true },
+            Some(UserGlobalCacheConfig::Bool(true)) => Self { scripts: true, tasks: true },
+            Some(UserGlobalCacheConfig::Bool(false)) => Self { scripts: false, tasks: false },
+            Some(UserGlobalCacheConfig::Detailed { scripts, tasks }) => {
+                Self { scripts: scripts.unwrap_or(false), tasks: tasks.unwrap_or(true) }
+            }
+        }
+    }
+}
+
 /// User configuration structure for `run` field in `vite.config.*`
 #[derive(Debug, Default, Deserialize)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "RunConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct UserRunConfig {
-    /// Enable cache for all scripts from package.json.
+    /// Root-level cache configuration.
     ///
     /// This option can only be set in the workspace root's config file.
     /// Setting it in a package's config will result in an error.
-    pub cache_scripts: Option<bool>,
+    pub cache: Option<UserGlobalCacheConfig>,
 
     /// Task definitions
     pub tasks: Option<FxHashMap<Str, UserTaskConfig>>,
@@ -314,5 +375,64 @@ mod tests {
             "foo": 42,
         });
         assert!(serde_json::from_value::<UserCacheConfig>(user_config_json).is_err());
+    }
+
+    #[test]
+    fn test_global_cache_bool_true() {
+        let config: UserGlobalCacheConfig = serde_json::from_value(json!(true)).unwrap();
+        assert_eq!(config, UserGlobalCacheConfig::Bool(true));
+        let resolved = ResolvedGlobalCacheConfig::resolve_from(Some(&config));
+        assert!(resolved.scripts);
+        assert!(resolved.tasks);
+    }
+
+    #[test]
+    fn test_global_cache_bool_false() {
+        let config: UserGlobalCacheConfig = serde_json::from_value(json!(false)).unwrap();
+        assert_eq!(config, UserGlobalCacheConfig::Bool(false));
+        let resolved = ResolvedGlobalCacheConfig::resolve_from(Some(&config));
+        assert!(!resolved.scripts);
+        assert!(!resolved.tasks);
+    }
+
+    #[test]
+    fn test_global_cache_detailed_scripts_only() {
+        let config: UserGlobalCacheConfig =
+            serde_json::from_value(json!({ "scripts": true })).unwrap();
+        let resolved = ResolvedGlobalCacheConfig::resolve_from(Some(&config));
+        assert!(resolved.scripts);
+        assert!(resolved.tasks); // defaults to true
+    }
+
+    #[test]
+    fn test_global_cache_detailed_tasks_false() {
+        let config: UserGlobalCacheConfig =
+            serde_json::from_value(json!({ "tasks": false })).unwrap();
+        let resolved = ResolvedGlobalCacheConfig::resolve_from(Some(&config));
+        assert!(!resolved.scripts); // defaults to false
+        assert!(!resolved.tasks);
+    }
+
+    #[test]
+    fn test_global_cache_detailed_both() {
+        let config: UserGlobalCacheConfig =
+            serde_json::from_value(json!({ "scripts": true, "tasks": false })).unwrap();
+        let resolved = ResolvedGlobalCacheConfig::resolve_from(Some(&config));
+        assert!(resolved.scripts);
+        assert!(!resolved.tasks);
+    }
+
+    #[test]
+    fn test_global_cache_none_defaults() {
+        let resolved = ResolvedGlobalCacheConfig::resolve_from(None);
+        assert!(!resolved.scripts); // defaults to false
+        assert!(resolved.tasks); // defaults to true
+    }
+
+    #[test]
+    fn test_global_cache_detailed_unknown_field() {
+        assert!(
+            serde_json::from_value::<UserGlobalCacheConfig>(json!({ "unknown": true })).is_err()
+        );
     }
 }
