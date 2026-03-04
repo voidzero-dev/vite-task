@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 authors = ["Vite+ Authors"]
 edition = "2024"
-license = "BUSL-1.1"
+license = "MIT"
 rust-version = "1.88.0"
 
 [workspace.lints.rust]

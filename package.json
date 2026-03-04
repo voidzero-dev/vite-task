@@ -1,6 +1,6 @@
 {
   "name": "vite-task-monorepo",
-  "license": "BUSL-1.1",
+  "license": "MIT",
   "private": true,
   "packageManager": "pnpm@10.17.1",
   "engines": {
