@@ -1,7 +1,7 @@
 {
   "name": "@test/cache-tasks-disabled",
   "scripts": {
-    "build": "echo building",
-    "test": "echo testing"
+    "build": "print-file package.json",
+    "test": "print-file package.json"
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "@test/cache-true-no-force-enable",
   "scripts": {
-    "build": "echo building",
-    "test": "echo testing"
+    "build": "print-file package.json",
+    "test": "print-file package.json"
   }
 }

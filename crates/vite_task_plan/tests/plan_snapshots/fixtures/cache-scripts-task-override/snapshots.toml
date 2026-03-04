@@ -1,0 +1,16 @@
+# Verifies default cache behavior: tasks cached, scripts not cached
+
+# Task should be cached (tasks default to true)
+[[plan]]
+name = "task cached by default"
+args = ["run", "build"]
+
+# Task with explicit command should be cached
+[[plan]]
+name = "task with command cached by default"
+args = ["run", "deploy"]
+
+# Script not wrapped by a task should not be cached
+[[plan]]
+name = "script not cached by default"
+args = ["run", "test"]

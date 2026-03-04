@@ -5,7 +5,7 @@
       "cache": false
     },
     "deploy": {
-      "command": "echo deploying"
+      "command": "print-file package.json"
     }
   }
 }

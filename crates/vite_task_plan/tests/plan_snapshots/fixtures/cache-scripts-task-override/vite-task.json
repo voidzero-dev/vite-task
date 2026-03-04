@@ -2,7 +2,7 @@
   "tasks": {
     "build": {},
     "deploy": {
-      "command": "echo deploying"
+      "command": "print-file package.json"
     }
   }
 }
