@@ -47,19 +47,6 @@ impl UserCacheConfig {
     }
 }
 
-/// Configuration for cache output artifacts
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-// TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "CacheOutputs"))]
-#[serde(rename_all = "camelCase")]
-pub struct CacheOutputs {
-    /// Directories to cache (relative to the package root).
-    pub include: Option<Vec<Str>>,
-
-    /// Directories to exclude from the cache.
-    pub exclude: Option<Vec<Str>>,
-}
-
 /// Cache configuration fields when caching is enabled
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
@@ -71,9 +58,6 @@ pub struct EnabledCacheConfig {
 
     /// Environment variable names to be passed to the task without fingerprinting.
     pub pass_through_envs: Option<Vec<Str>>,
-
-    /// Output artifacts to cache.
-    pub outputs: Option<CacheOutputs>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -105,11 +89,7 @@ impl Default for UserTaskOptions {
             // Caching enabled with no fingerprinted envs
             cache_config: UserCacheConfig::Enabled {
                 cache: None,
-                enabled_cache_config: EnabledCacheConfig {
-                    envs: None,
-                    pass_through_envs: None,
-                    outputs: None,
-                },
+                enabled_cache_config: EnabledCacheConfig { envs: None, pass_through_envs: None },
             },
         }
     }
@@ -388,7 +368,6 @@ mod tests {
                 enabled_cache_config: EnabledCacheConfig {
                     envs: Some(std::iter::once("NODE_ENV".into()).collect()),
                     pass_through_envs: Some(std::iter::once("FOO".into()).collect()),
-                    outputs: None,
                 }
             },
         );

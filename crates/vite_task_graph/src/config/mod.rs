@@ -114,11 +114,7 @@ impl ResolvedTaskConfig {
         let cache_config = if cache_scripts {
             UserCacheConfig::Enabled {
                 cache: None,
-                enabled_cache_config: EnabledCacheConfig {
-                    envs: None,
-                    pass_through_envs: None,
-                    outputs: None,
-                },
+                enabled_cache_config: EnabledCacheConfig { envs: None, pass_through_envs: None },
             }
         } else {
             UserCacheConfig::Disabled { cache: MustBe!(false) }
