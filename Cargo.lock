@@ -3831,7 +3831,6 @@ dependencies = [
  "assert2",
  "crossterm",
  "nucleo-matcher",
- "owo-colors",
  "vite_str",
 ]
 

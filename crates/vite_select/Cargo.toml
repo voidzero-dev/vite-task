@@ -14,7 +14,6 @@ workspace = true
 anyhow = { workspace = true }
 crossterm = { workspace = true }
 nucleo-matcher = { workspace = true }
-owo-colors = { workspace = true }
 vite_str = { path = "../vite_str" }
 
 [dev-dependencies]

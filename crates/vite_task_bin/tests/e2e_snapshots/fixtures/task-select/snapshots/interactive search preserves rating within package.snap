@@ -6,35 +6,35 @@ info:
 ---
 > vp run
 @ expect-milestone: task-select::0
-Search task (↑/↓ to move, enter to select):
-> build: echo build lib
-  lint: echo lint lib
-  test: echo test lib
-  typecheck: echo typecheck lib
-  app#build: echo build app
-  app#lint: echo lint app
-  app#test: echo test app
-  task-select-test#check: echo check root
-  task-select-test#clean: echo clean root
-  task-select-test#deploy: echo deploy root
-  task-select-test#docs: echo docs root
-  task-select-test#format: echo format root
+Select a task (↑/↓, Enter to run, Esc to clear):
+  › build: echo build lib
+    lint: echo lint lib
+    test: echo test lib
+    typecheck: echo typecheck lib
+    app#build: echo build app
+    app#lint: echo lint app
+    app#test: echo test app
+    task-select-test#check: echo check root
+    task-select-test#clean: echo clean root
+    task-select-test#deploy: echo deploy root
+    task-select-test#docs: echo docs root
+    task-select-test#format: echo format root
   (…3 more)
 @ write: t
 @ expect-milestone: task-select:t:0
-Search task (↑/↓ to move, enter to select): t
-> test: echo test lib
-  typecheck: echo typecheck lib
-  lint: echo lint lib
-  task-select-test#check: echo check root
-  task-select-test#clean: echo clean root
-  task-select-test#deploy: echo deploy root
-  task-select-test#docs: echo docs root
-  task-select-test#format: echo format root
-  task-select-test#hello: echo hello from root
-  task-select-test#run-typo-task: vp run nonexistent-xyz
-  task-select-test#validate: echo validate root
-  app#test: echo test app
+Select a task (↑/↓, Enter to run, Esc to clear): t
+  › test: echo test lib
+    typecheck: echo typecheck lib
+    lint: echo lint lib
+    task-select-test#check: echo check root
+    task-select-test#clean: echo clean root
+    task-select-test#deploy: echo deploy root
+    task-select-test#docs: echo docs root
+    task-select-test#format: echo format root
+    task-select-test#hello: echo hello from root
+    task-select-test#run-typo-task: vp run nonexistent-xyz
+    task-select-test#validate: echo validate root
+    app#test: echo test app
   (…1 more)
 @ write-key: enter
 Selected task: test

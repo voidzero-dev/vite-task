@@ -3,10 +3,9 @@ use std::io::{Write, stdout};
 use crossterm::{
     cursor::{self, MoveToColumn},
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    style::{Attribute, SetAttribute},
+    style::{Attribute, Color, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
-use owo_colors::{OwoColorize, Stream};
 
 use crate::{RenderState, SelectItem, fuzzy::fuzzy_match};
 
@@ -144,21 +143,21 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         lines += 1;
     }
 
+    let is_interactive = query.is_some();
+
     // Prompt line (interactive only)
     if let Some(q) = query {
-        let bold = SetAttribute(Attribute::Bold);
-        let reset = SetAttribute(Attribute::Reset);
         // Print ": " separator before query only when query is non-empty,
         // to avoid a trailing space that Windows ConPTY would strip.
         if q.is_empty() {
             write!(
                 writer,
-                "{bold}Search task{reset} (\u{2191}/\u{2193} to move, enter to select):{line_ending}",
+                "Select a task (\u{2191}/\u{2193}, Enter to run, Esc to clear):{line_ending}",
             )?;
         } else {
             write!(
                 writer,
-                "{bold}Search task{reset} (\u{2191}/\u{2193} to move, enter to select): {q}{line_ending}",
+                "Select a task (\u{2191}/\u{2193}, Enter to run, Esc to clear): {q}{line_ending}",
             )?;
         }
         lines += 1;
@@ -171,8 +170,12 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         let is_selected = *selected_in_filtered == Some(vi);
 
         // Truncate description to prevent line wrapping.
-        // Line layout: prefix (2: "> " or "  ") + label + ": " (2) + description
-        let prefix_and_label_width = 2 + item.label.chars().count() + 2;
+        // Line layout:
+        // - interactive prefix is "  › " or "    " (4 chars)
+        // - non-interactive prefix is "  " (2 chars)
+        // then label + ": " + description
+        let prefix_width = if is_interactive { 4 } else { 2 };
+        let prefix_and_label_width = prefix_width + item.label.chars().count() + 2;
         let max_desc_chars = params.max_line_width.saturating_sub(prefix_and_label_width);
         let desc_str = item.description.as_str();
         let desc_char_count = desc_str.chars().count();
@@ -186,18 +189,37 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         } else {
             desc_str
         };
-        let desc = display_desc.if_supports_color(Stream::Stdout, |s| s.cyan());
 
-        if is_selected {
+        if is_selected && is_interactive {
+            write!(
+                writer,
+                "{blue}{bold}  \u{203a} {label}: {desc}{reset}{line_ending}",
+                blue = SetForegroundColor(Color::Blue),
+                bold = SetAttribute(Attribute::Bold),
+                label = item.label,
+                desc = display_desc,
+                reset = SetAttribute(Attribute::Reset),
+            )?;
+        } else if is_interactive {
+            write!(
+                writer,
+                "{marker_color}    {reset_color}{}:{command_color} {display_desc}{reset_color}{line_ending}",
+                item.label,
+                marker_color = SetForegroundColor(Color::DarkGrey),
+                command_color = SetForegroundColor(Color::Grey),
+                reset_color = ResetColor,
+            )?;
+        } else if is_selected {
             write!(
                 writer,
                 "{bold}> {label}: {desc}{reset}{line_ending}",
                 bold = SetAttribute(Attribute::Bold),
                 label = item.label,
+                desc = display_desc,
                 reset = SetAttribute(Attribute::Reset),
             )?;
         } else {
-            write!(writer, "  {}: {desc}{line_ending}", item.label)?;
+            write!(writer, "  {}: {display_desc}{line_ending}", item.label)?;
         }
         lines += 1;
     }
@@ -401,6 +423,33 @@ mod tests {
         strip_ansi(&String::from_utf8(buf).unwrap())
     }
 
+    #[expect(clippy::disallowed_types, reason = "test helper building arbitrary output string")]
+    fn render_interactive_to_string(
+        items: &[SelectItem],
+        query: &str,
+        max_line_width: usize,
+    ) -> String {
+        let filtered: Vec<usize> = (0..items.len()).collect();
+        let len = filtered.len();
+        let mut buf = Vec::new();
+        render_items(
+            &mut buf,
+            &RenderParams {
+                items,
+                filtered: &filtered,
+                selected_in_filtered: Some(0),
+                visible_range: 0..len,
+                hidden_count: 0,
+                header: None,
+                query: Some(query),
+                line_ending: "\n",
+                max_line_width,
+            },
+        )
+        .unwrap();
+        strip_ansi(&String::from_utf8(buf).unwrap())
+    }
+
     #[test]
     fn truncates_long_description() {
         let items = make_items(&[("build", "a]really long command that exceeds the width limit")]);
@@ -462,5 +511,18 @@ mod tests {
         let output = render_to_string(&items, 20);
         let line = output.lines().next().unwrap();
         assert!(line.contains("my-task"), "label should always be preserved: {line:?}");
+    }
+
+    #[test]
+    fn interactive_style_matches_vp_selector_marker_and_indent() {
+        let items = make_items(&[("build", "echo build"), ("lint", "echo lint")]);
+        let output = render_interactive_to_string(&items, "", 80);
+        let mut lines = output.lines();
+        let prompt = lines.next().unwrap();
+        let selected = lines.next().unwrap();
+        let unselected = lines.next().unwrap();
+        assert_eq!(prompt, "Select a task (↑/↓, Enter to run, Esc to clear):");
+        assert_eq!(selected, "  › build: echo build");
+        assert_eq!(unselected, "    lint: echo lint");
     }
 }

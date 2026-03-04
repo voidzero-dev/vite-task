@@ -194,7 +194,7 @@ impl<T: owo_colors::OwoColorize> ColorizeExt for T {
     }
 }
 
-const COMMAND_STYLE: Style = Style::new().cyan();
+const COMMAND_STYLE: Style = Style::new().blue();
 const CACHE_MISS_STYLE: Style = Style::new().purple();
 
 /// Format the display's cwd as a string relative to the workspace root.

@@ -6,35 +6,35 @@ info:
 ---
 > vp run
 @ expect-milestone: task-select::0
-Search task (↑/↓ to move, enter to select):
-> build: echo build app
-  lint: echo lint app
-  test: echo test app
-  lib#build: echo build lib
-  lib#lint: echo lint lib
-  lib#test: echo test lib
-  lib#typecheck: echo typecheck lib
-  task-select-test#check: echo check root
-  task-select-test#clean: echo clean root
-  task-select-test#deploy: echo deploy root
-  task-select-test#docs: echo docs root
-  task-select-test#format: echo format root
+Select a task (↑/↓, Enter to run, Esc to clear):
+  › build: echo build app
+    lint: echo lint app
+    test: echo test app
+    lib#build: echo build lib
+    lib#lint: echo lint lib
+    lib#test: echo test lib
+    lib#typecheck: echo typecheck lib
+    task-select-test#check: echo check root
+    task-select-test#clean: echo clean root
+    task-select-test#deploy: echo deploy root
+    task-select-test#docs: echo docs root
+    task-select-test#format: echo format root
   (…3 more)
 @ write-key: down
 @ expect-milestone: task-select::1
-Search task (↑/↓ to move, enter to select):
-  build: echo build app
-> lint: echo lint app
-  test: echo test app
-  lib#build: echo build lib
-  lib#lint: echo lint lib
-  lib#test: echo test lib
-  lib#typecheck: echo typecheck lib
-  task-select-test#check: echo check root
-  task-select-test#clean: echo clean root
-  task-select-test#deploy: echo deploy root
-  task-select-test#docs: echo docs root
-  task-select-test#format: echo format root
+Select a task (↑/↓, Enter to run, Esc to clear):
+    build: echo build app
+  › lint: echo lint app
+    test: echo test app
+    lib#build: echo build lib
+    lib#lint: echo lint lib
+    lib#test: echo test lib
+    lib#typecheck: echo typecheck lib
+    task-select-test#check: echo check root
+    task-select-test#clean: echo clean root
+    task-select-test#deploy: echo deploy root
+    task-select-test#docs: echo docs root
+    task-select-test#format: echo format root
   (…3 more)
 @ write-key: enter
 Selected task: lint

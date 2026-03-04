@@ -402,7 +402,7 @@ fn project_directory() -> Option<ProjectDirs> {
 // Some(Color::Indexed(12))
 // } else if s == "bold magenta" {
 // Some(Color::Indexed(13))
-// } else if s == "bold cyan" {
+// } else if s == "bold blue" {
 // Some(Color::Indexed(14))
 // } else if s == "bold white" {
 // Some(Color::Indexed(15))
@@ -418,7 +418,7 @@ fn project_directory() -> Option<ProjectDirs> {
 // Some(Color::Indexed(4))
 // } else if s == "magenta" {
 // Some(Color::Indexed(5))
-// } else if s == "cyan" {
+// } else if s == "blue" {
 // Some(Color::Indexed(6))
 // } else if s == "white" {
 // Some(Color::Indexed(7))
