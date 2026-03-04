@@ -111,8 +111,7 @@ jobs:
           components: clippy rust-docs rustfmt
 
       - run: dprint check
-      # cargo-shear currently misflags the `fspy_test_bin` artifact bindep in crates/fspy.
-      - run: cargo shear --exclude fspy
+      - run: cargo shear
       - run: cargo fmt --check
       - run: RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --document-private-items
 

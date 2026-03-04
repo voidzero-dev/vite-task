@@ -25,8 +25,7 @@ watch *args='':
   watchexec --no-vcs-ignore {{args}}
 
 fmt:
-  # cargo-shear currently misflags the `fspy_test_bin` artifact bindep in crates/fspy.
-  cargo shear --fix --exclude fspy
+  cargo shear --fix
   cargo fmt --all
   dprint fmt
 
