@@ -212,7 +212,7 @@ impl IndexedTaskGraph {
             let package_dir: Arc<AbsolutePath> = workspace_root.path.join(&package.path).into();
             let is_workspace_root = package.path.as_str().is_empty();
 
-            let mut user_config = config_loader
+            let user_config = config_loader
                 .load_user_config_file(&package_dir)
                 .await
                 .map_err(|error| TaskGraphLoadError::ConfigLoadError {
@@ -221,7 +221,7 @@ impl IndexedTaskGraph {
                 })?
                 .unwrap_or_default();
 
-            if let Some(cache) = user_config.cache.take() {
+            if let Some(cache) = user_config.cache {
                 if is_workspace_root {
                     root_cache = Some(cache);
                 } else {

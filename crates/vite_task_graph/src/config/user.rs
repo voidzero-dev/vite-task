@@ -122,7 +122,7 @@ pub struct UserTaskConfig {
 ///
 /// This option can only be set in the workspace root's config file.
 /// Setting it in a package's config will result in an error.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
 #[serde(untagged, deny_unknown_fields)]
