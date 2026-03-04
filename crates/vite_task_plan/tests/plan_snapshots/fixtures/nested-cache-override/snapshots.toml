@@ -15,6 +15,11 @@ args = ["run", "outer-cache"]
 name = "nested run without flags inherits parent cache"
 args = ["run", "outer-inherit"]
 
+# Outer --cache propagates to nested run without flags
+[[plan]]
+name = "outer --cache propagates to nested run without flags"
+args = ["run", "--cache", "outer-inherit"]
+
 # Outer --no-cache with nested --cache: inner overrides outer
 [[plan]]
 name = "outer --no-cache does not propagate into nested --cache"

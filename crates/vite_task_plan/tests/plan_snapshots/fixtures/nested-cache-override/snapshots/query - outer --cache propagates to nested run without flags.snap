@@ -4,6 +4,7 @@ expression: "&plan_json"
 info:
   args:
     - run
+    - "--cache"
     - outer-inherit
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-override
 ---
@@ -59,7 +60,34 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                       "kind": {
                         "Leaf": {
                           "Spawn": {
-                            "cache_metadata": null,
+                            "cache_metadata": {
+                              "spawn_fingerprint": {
+                                "cwd": "",
+                                "program_fingerprint": {
+                                  "OutsideWorkspace": {
+                                    "program_name": "print-file"
+                                  }
+                                },
+                                "args": [
+                                  "package.json"
+                                ],
+                                "env_fingerprints": {
+                                  "fingerprinted_envs": {},
+                                  "pass_through_env_config": [
+                                    "<default pass-through envs>"
+                                  ]
+                                },
+                                "fingerprint_ignores": null
+                              },
+                              "execution_cache_key": {
+                                "UserTask": {
+                                  "task_name": "inner",
+                                  "and_item_index": 0,
+                                  "extra_args": [],
+                                  "package_path": ""
+                                }
+                              }
+                            },
                             "spawn_command": {
                               "program_path": "<tools>/node_modules/.bin/print-file",
                               "args": [
