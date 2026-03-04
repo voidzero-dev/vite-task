@@ -225,6 +225,9 @@ impl UserRunConfig {
         let mut collector = DeclCollector(Vec::new());
         Self::visit_dependencies(&mut collector);
 
+        // Sort declarations for deterministic output order
+        collector.0.sort();
+
         // Export all types
         let mut types: String = collector
             .0
