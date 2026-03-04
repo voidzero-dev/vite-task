@@ -140,23 +140,23 @@ A command run by `vp run` is either a **task** (has an entry in `vite.config.ts`
    ├─ YES → acts as cache: true (sets scripts: true, tasks: true)
    └─ NO  → uses workspace config
    │
-   Per-task cache set to false?
-   ├─ YES → NOT CACHED (--cache does NOT override this)
-   └─ NO or not set
+   Does the command have a task entry in vite.config.ts?
+   │
+   ├─ YES (task) ──────────────────────────────────────────
+   │   │
+   │   Global cache.tasks enabled? (default: true, or true via --cache)
+   │   ├─ NO  → NOT CACHED
+   │   └─ YES
+   │       │
+   │       Per-task cache set to false?
+   │       ├─ YES → NOT CACHED (--cache does NOT override this)
+   │       └─ NO or not set → CACHED <----- this is the default for tasks
+   │
+   └─ NO (script) ─────────────────────────────────────────
        │
-       Does the command have a task entry in vite.config.ts?
-       │
-       ├─ YES (task) ──────────────────────────────────────────
-       │   │
-       │   Global cache.tasks enabled? (default: true, or true via --cache)
-       │   ├─ NO  → NOT CACHED
-       │   └─ YES → CACHED <----- this is the default for tasks
-       │
-       └─ NO (script) ─────────────────────────────────────────
-           │
-           Global cache.scripts enabled? (default: false, or true via --cache)
-           ├─ YES → CACHED
-           └─ NO  → NOT CACHED <----- this is the default for scripts
+       Global cache.scripts enabled? (default: false, or true via --cache)
+       ├─ YES → CACHED
+       └─ NO  → NOT CACHED <----- this is the default for scripts
 ```
 
 In short: **tasks are cached by default, scripts are not.** `--no-cache` turns off caching for everything. `--cache` is equivalent to `cache: true` — it enables both `cache.tasks` and `cache.scripts`, but cannot override a task's per-task `cache: false`.
