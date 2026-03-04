@@ -557,10 +557,17 @@ pub async fn plan_query_request(
     query_plan_request: QueryPlanRequest,
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {
-    // Apply cache override from this request (nested `vp run --no-cache` etc.)
-    // If the nested command has no override, inherit the parent's resolved config.
+    // Apply cache override from `--cache` / `--no-cache` flags on this request.
+    //
+    // When `None`, we skip the update so the context keeps whatever the parent
+    // resolved — this is how `vp run --cache outer` propagates to a nested
+    // `vp run inner` that has no flags of its own.
     let cache_override = query_plan_request.plan_options.cache_override;
     if cache_override != CacheOverride::None {
+        // Override is relative to the *workspace* config, not the parent's
+        // resolved config. This means `vp run --no-cache outer` where outer
+        // runs `vp run --cache inner` re-enables caching from the workspace
+        // defaults, rather than from the parent's disabled state.
         let final_cache = resolve_cache_with_override(
             *context.indexed_task_graph().global_cache_config(),
             cache_override,

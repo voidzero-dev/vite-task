@@ -34,7 +34,9 @@ impl ScriptCommand {
 /// CLI-level cache override from `--cache` / `--no-cache` flags.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CacheOverride {
-    /// No override — use the resolved config from the task graph.
+    /// No override — inherit the parent's resolved cache config.
+    /// For a top-level `vp run`, this is the workspace config.
+    /// For a nested `vp run` inside a script, this is whatever the parent resolved.
     #[default]
     None,
     /// Force all caching on (`--cache` flag).
