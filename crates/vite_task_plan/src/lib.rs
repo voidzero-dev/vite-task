@@ -16,7 +16,7 @@ pub use execution_graph::ExecutionGraph;
 pub use in_process::InProcessExecution;
 pub use path_env::{get_path_env, prepend_path_env};
 use plan::{ParentCacheConfig, plan_query_request, plan_synthetic_request};
-use plan_request::{PlanRequest, QueryPlanRequest, SyntheticPlanRequest};
+use plan_request::{CacheOverride, PlanRequest, QueryPlanRequest, SyntheticPlanRequest};
 use rustc_hash::FxHashMap;
 use serde::{Serialize, ser::SerializeMap as _};
 use vite_path::AbsolutePath;
@@ -200,14 +200,35 @@ pub async fn plan_query(
 ) -> Result<ExecutionGraph, Error> {
     let indexed_task_graph = task_graph_loader.load_task_graph().await?;
 
+    let resolved_global_cache = resolve_cache_with_override(
+        *indexed_task_graph.global_cache_config(),
+        query_plan_request.plan_options.cache_override,
+    );
+
     let context = PlanContext::new(
         workspace_path,
         Arc::clone(cwd),
         envs.clone(),
         plan_request_parser,
         indexed_task_graph,
+        resolved_global_cache,
     );
     plan_query_request(query_plan_request, context).await
+}
+
+const fn resolve_cache_with_override(
+    graph_cache: vite_task_graph::config::ResolvedGlobalCacheConfig,
+    cache_override: CacheOverride,
+) -> vite_task_graph::config::ResolvedGlobalCacheConfig {
+    match cache_override {
+        CacheOverride::ForceEnabled => {
+            vite_task_graph::config::ResolvedGlobalCacheConfig { scripts: true, tasks: true }
+        }
+        CacheOverride::ForceDisabled => {
+            vite_task_graph::config::ResolvedGlobalCacheConfig { scripts: false, tasks: false }
+        }
+        CacheOverride::None => graph_cache,
+    }
 }
 
 /// Plan a synthetic task execution, returning the resolved [`SpawnExecution`] directly.

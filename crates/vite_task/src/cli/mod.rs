@@ -4,7 +4,7 @@ use clap::Parser;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskSpecifier, query::TaskQuery};
-use vite_task_plan::plan_request::{PlanOptions, QueryPlanRequest};
+use vite_task_plan::plan_request::{CacheOverride, PlanOptions, QueryPlanRequest};
 use vite_workspace::package_filter::{PackageQueryArgs, PackageQueryError};
 
 #[derive(Debug, Clone, clap::Subcommand)]
@@ -15,6 +15,7 @@ pub enum CacheSubcommand {
 
 /// Flags that control how a `run` command selects tasks.
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
+#[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
 pub struct RunFlags {
     #[clap(flatten)]
     pub package_query: PackageQueryArgs,
@@ -26,6 +27,27 @@ pub struct RunFlags {
     /// Show full detailed summary after execution.
     #[clap(default_value = "false", short = 'v', long)]
     pub verbose: bool,
+
+    /// Force caching on for all tasks and scripts.
+    #[clap(long, conflicts_with = "no_cache")]
+    pub cache: bool,
+
+    /// Force caching off for all tasks and scripts.
+    #[clap(long, conflicts_with = "cache")]
+    pub no_cache: bool,
+}
+
+impl RunFlags {
+    #[must_use]
+    pub const fn cache_override(&self) -> CacheOverride {
+        if self.cache {
+            CacheOverride::ForceEnabled
+        } else if self.no_cache {
+            CacheOverride::ForceDisabled
+        } else {
+            CacheOverride::None
+        }
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -155,10 +177,11 @@ impl ResolvedRunCommand {
         let raw_specifier = self.task_specifier.ok_or(CLITaskQueryError::MissingTaskSpecifier)?;
         let task_specifier = TaskSpecifier::parse_raw(&raw_specifier);
 
+        let cache_override = self.flags.cache_override();
+        let include_explicit_deps = !self.flags.ignore_depends_on;
+
         let (package_query, is_cwd_only) =
             self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;
-
-        let include_explicit_deps = !self.flags.ignore_depends_on;
 
         Ok((
             QueryPlanRequest {
@@ -167,7 +190,10 @@ impl ResolvedRunCommand {
                     task_name: task_specifier.task_name,
                     include_explicit_deps,
                 },
-                plan_options: PlanOptions { extra_args: self.additional_args.into() },
+                plan_options: PlanOptions {
+                    extra_args: self.additional_args.into(),
+                    cache_override,
+                },
             },
             is_cwd_only,
         ))

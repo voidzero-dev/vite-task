@@ -28,7 +28,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": [
       [
@@ -58,7 +59,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
           "cwd": "<workspace>/packages/another-empty",
           "cache_config": null
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": [
       [
@@ -95,7 +97,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -123,7 +126,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -151,7 +155,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": [
       [
@@ -184,7 +189,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -212,7 +218,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -240,7 +247,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -268,7 +276,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/empty-package-te
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   }

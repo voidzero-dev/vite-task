@@ -28,7 +28,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -56,7 +57,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -84,7 +86,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -112,7 +115,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -140,7 +144,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -168,7 +173,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -196,7 +202,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -224,7 +231,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/recursive-topolo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   }

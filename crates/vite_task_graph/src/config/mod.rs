@@ -100,29 +100,18 @@ pub enum ResolveTaskConfigError {
 }
 
 impl ResolvedTaskConfig {
-    /// Resolve from package.json script only (no vite-task.json config for this task)
+    /// Resolve from package.json script only (no config entry for this task).
     ///
-    /// The `cache_scripts` parameter determines whether caching is enabled for the script.
-    /// When `true`, caching is enabled with default settings.
-    /// When `false`, caching is disabled.
+    /// Always resolves with caching enabled (default settings).
+    /// The global cache config is applied at plan time, not here.
     #[must_use]
     pub fn resolve_package_json_script(
         package_dir: &Arc<AbsolutePath>,
         package_json_script: &str,
-        cache_scripts: bool,
     ) -> Self {
-        let cache_config = if cache_scripts {
-            UserCacheConfig::Enabled {
-                cache: None,
-                enabled_cache_config: EnabledCacheConfig { envs: None, pass_through_envs: None },
-            }
-        } else {
-            UserCacheConfig::Disabled { cache: MustBe!(false) }
-        };
-        let options = UserTaskOptions { cache_config, ..Default::default() };
         Self {
             command: package_json_script.into(),
-            resolved_options: ResolvedTaskOptions::resolve(options, package_dir),
+            resolved_options: ResolvedTaskOptions::resolve(UserTaskOptions::default(), package_dir),
         }
     }
 

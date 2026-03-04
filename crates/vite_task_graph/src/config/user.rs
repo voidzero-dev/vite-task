@@ -150,6 +150,7 @@ pub enum UserGlobalCacheConfig {
 }
 
 /// Resolved global cache configuration with concrete boolean values.
+#[derive(Debug, Clone, Copy)]
 pub struct ResolvedGlobalCacheConfig {
     pub scripts: bool,
     pub tasks: bool,

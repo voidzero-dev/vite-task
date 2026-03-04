@@ -28,7 +28,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/dependency-both-
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": [
       [
@@ -61,7 +62,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/dependency-both-
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   }

@@ -6,7 +6,7 @@ mod specifier;
 
 use std::{convert::Infallible, sync::Arc};
 
-use config::{ResolvedTaskConfig, UserRunConfig};
+use config::{ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig};
 use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::Serialize;
@@ -47,6 +47,15 @@ pub(crate) struct TaskId {
     pub task_name: Str,
 }
 
+/// Whether a task originates from the `tasks` map or from a package.json script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum TaskSource {
+    /// Defined in the `tasks` map in the workspace config.
+    TaskConfig,
+    /// Pure package.json script (not in the tasks map).
+    PackageJsonScript,
+}
+
 /// A node in the task graph, representing a task with its resolved configuration.
 #[derive(Debug, Serialize)]
 pub struct TaskNode {
@@ -60,6 +69,9 @@ pub struct TaskNode {
     ///
     /// However, it does not contain external factors like additional args from cli and env vars.
     pub resolved_config: ResolvedTaskConfig,
+
+    /// Whether this task comes from the tasks map or a package.json script.
+    pub source: TaskSource,
 }
 
 impl vite_graph_ser::GetKey for TaskNode {
@@ -166,6 +178,9 @@ pub struct IndexedTaskGraph {
 
     /// task indices by task id for quick lookup
     pub(crate) node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex>,
+
+    /// Global cache configuration resolved from the workspace root config.
+    resolved_global_cache: ResolvedGlobalCacheConfig,
 }
 
 pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
@@ -234,11 +249,9 @@ impl IndexedTaskGraph {
             package_configs.push((package_index, package_dir, user_config));
         }
 
-        let resolved_cache = config::ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
-        let cache_scripts = resolved_cache.scripts;
-        let cache_tasks = resolved_cache.tasks;
+        let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
 
-        // Second pass: create task nodes using resolved cache config
+        // Second pass: create task nodes (cache is NOT applied here; it's applied at plan time)
         for (package_index, package_dir, user_config) in package_configs {
             let package = &package_graph[package_index];
 
@@ -250,19 +263,15 @@ impl IndexedTaskGraph {
                 .map(|(name, value)| (name.as_str(), value.as_str()))
                 .collect();
 
-            for (task_name, mut task_user_config) in user_config.tasks.unwrap_or_default() {
-                // Apply cache.tasks kill switch: when false, override all tasks to disable caching
-                if !cache_tasks {
-                    task_user_config.options.cache_config = config::UserCacheConfig::disabled();
-                }
-                // For each task defined in vite.config.*, look up the corresponding package.json script (if any)
+            for (task_name, task_user_config) in user_config.tasks.unwrap_or_default() {
+                // For each task defined in the config, look up the corresponding package.json script (if any)
                 let package_json_script = package_json_scripts.remove(task_name.as_str());
 
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
                 let dependency_specifiers = task_user_config.options.depends_on.clone();
 
-                // Resolve the task configuration combining vite.config.* and package.json script
+                // Resolve the task configuration combining config and package.json script
                 let resolved_config = ResolvedTaskConfig::resolve(
                     task_user_config,
                     &package_dir,
@@ -284,6 +293,7 @@ impl IndexedTaskGraph {
                         package_path: Arc::clone(&package_dir),
                     },
                     resolved_config,
+                    source: TaskSource::TaskConfig,
                 };
 
                 let node_index = task_graph.add_node(task_node);
@@ -291,13 +301,12 @@ impl IndexedTaskGraph {
                 node_indices_by_task_id.insert(task_id, node_index);
             }
 
-            // For remaining package.json scripts not defined in vite.config.*, create tasks with default config
+            // For remaining package.json scripts not in the tasks map, create tasks with default config
             for (script_name, package_json_script) in package_json_scripts {
                 let task_id = TaskId { task_name: Str::from(script_name), package_index };
                 let resolved_config = ResolvedTaskConfig::resolve_package_json_script(
                     &package_dir,
                     package_json_script,
-                    cache_scripts,
                 );
                 let node_index = task_graph.add_node(TaskNode {
                     task_display: TaskDisplay {
@@ -306,6 +315,7 @@ impl IndexedTaskGraph {
                         package_path: Arc::clone(&package_dir),
                     },
                     resolved_config,
+                    source: TaskSource::PackageJsonScript,
                 });
                 node_indices_by_task_id.insert(task_id, node_index);
             }
@@ -316,6 +326,7 @@ impl IndexedTaskGraph {
             task_graph,
             indexed_package_graph: IndexedPackageGraph::index(package_graph),
             node_indices_by_task_id,
+            resolved_global_cache,
         };
 
         // Add explicit dependencies
@@ -419,5 +430,10 @@ impl IndexedTaskGraph {
     pub fn get_package_path_from_cwd(&self, cwd: &AbsolutePath) -> Option<&Arc<AbsolutePath>> {
         let index = self.indexed_package_graph.get_package_index_from_cwd(cwd)?;
         Some(self.get_package_path(index))
+    }
+
+    #[must_use]
+    pub const fn global_cache_config(&self) -> &ResolvedGlobalCacheConfig {
+        &self.resolved_global_cache
     }
 }

@@ -31,9 +31,22 @@ impl ScriptCommand {
     }
 }
 
+/// CLI-level cache override from `--cache` / `--no-cache` flags.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CacheOverride {
+    /// No override — use the resolved config from the task graph.
+    #[default]
+    None,
+    /// Force all caching on (`--cache` flag).
+    ForceEnabled,
+    /// Force all caching off (`--no-cache` flag).
+    ForceDisabled,
+}
+
 #[derive(Debug)]
 pub struct PlanOptions {
     pub extra_args: Arc<[Str]>,
+    pub cache_override: CacheOverride,
 }
 
 #[derive(Debug)]

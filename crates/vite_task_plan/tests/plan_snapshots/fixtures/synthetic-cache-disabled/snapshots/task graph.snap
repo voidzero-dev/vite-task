@@ -28,7 +28,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -47,9 +48,17 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "command": "vp lint",
         "resolved_options": {
           "cwd": "<workspace>/",
-          "cache_config": null
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -70,7 +79,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
           "cwd": "<workspace>/",
           "cache_config": null
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -98,7 +108,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -127,7 +138,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   },
@@ -146,9 +158,17 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "command": "vp run build",
         "resolved_options": {
           "cwd": "<workspace>/",
-          "cache_config": null
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -169,7 +189,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
           "cwd": "<workspace>/",
           "cache_config": null
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": []
   }

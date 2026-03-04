@@ -28,7 +28,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -49,7 +50,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
           "cwd": "<workspace>/packages/app",
           "cache_config": null
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": [
       [
@@ -90,7 +92,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -118,7 +121,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -146,7 +150,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -174,7 +179,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -202,7 +208,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": [
       [
@@ -235,7 +242,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -263,7 +271,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -291,7 +300,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "TaskConfig"
     },
     "neighbors": [
       [
@@ -328,7 +338,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/explicit-deps-wo
             }
           }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   }

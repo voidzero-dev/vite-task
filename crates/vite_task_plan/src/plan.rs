@@ -17,9 +17,9 @@ use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::Invali
 use vite_shell::try_parse_as_and_list;
 use vite_str::Str;
 use vite_task_graph::{
-    TaskNodeIndex,
+    TaskNodeIndex, TaskSource,
     config::{
-        CacheConfig, ResolvedTaskOptions,
+        CacheConfig, ResolvedGlobalCacheConfig, ResolvedTaskOptions,
         user::{UserCacheConfig, UserTaskOptions},
     },
 };
@@ -33,7 +33,10 @@ use crate::{
     execution_graph::{ExecutionGraph, ExecutionNodeIndex, InnerExecutionGraph},
     in_process::InProcessExecution,
     path_env::get_path_env,
-    plan_request::{PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest},
+    plan_request::{
+        CacheOverride, PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest,
+    },
+    resolve_cache_with_override,
 };
 
 /// Locate the executable path for a given program name in the provided envs and cwd.
@@ -54,6 +57,23 @@ fn which(
     Ok(AbsolutePathBuf::new(executable_path)
         .expect("path returned by which::which_in should always be absolute")
         .into())
+}
+
+/// Compute the effective cache config for a task, applying the global cache config.
+///
+/// The task graph stores per-task cache config without applying the global kill switch.
+/// This function applies the global config at plan time, checking `cache.scripts` for
+/// package.json scripts and `cache.tasks` for task-map entries.
+fn effective_cache_config(
+    task_cache_config: Option<&CacheConfig>,
+    source: TaskSource,
+    resolved_global_cache: ResolvedGlobalCacheConfig,
+) -> Option<CacheConfig> {
+    let enabled = match source {
+        TaskSource::PackageJsonScript => resolved_global_cache.scripts,
+        TaskSource::TaskConfig => resolved_global_cache.tasks,
+    };
+    if enabled { task_cache_config.cloned() } else { None }
 }
 
 #[expect(clippy::too_many_lines, reason = "sequential planning steps are clearer in one function")]
@@ -202,10 +222,12 @@ async fn plan_task_as_execution_node(
                 }
                 // Synthetic task (from CommandHandler)
                 Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
-                    let parent_cache_config = task_node
-                        .resolved_config
-                        .resolved_options
-                        .cache_config
+                    let task_effective_cache = effective_cache_config(
+                        task_node.resolved_config.resolved_options.cache_config.as_ref(),
+                        task_node.source,
+                        *context.resolved_global_cache(),
+                    );
+                    let parent_cache_config = task_effective_cache
                         .as_ref()
                         .map_or(ParentCacheConfig::Disabled, |config| {
                             ParentCacheConfig::Inherited(config.clone())
@@ -227,11 +249,19 @@ async fn plan_task_as_execution_node(
                         &script_command.envs,
                         &script_command.cwd,
                     )?;
+                    let resolved_options = ResolvedTaskOptions {
+                        cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
+                        cache_config: effective_cache_config(
+                            task_node.resolved_config.resolved_options.cache_config.as_ref(),
+                            task_node.source,
+                            *context.resolved_global_cache(),
+                        ),
+                    };
                     let spawn_execution = plan_spawn_execution(
                         context.workspace_path(),
                         Some(task_execution_cache_key),
                         &and_item.envs,
-                        &task_node.resolved_config.resolved_options,
+                        &resolved_options,
                         &script_command.envs,
                         program_path,
                         script_command.args,
@@ -275,6 +305,14 @@ async fn plan_task_as_execution_node(
             script.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
         }
 
+        let resolved_options = ResolvedTaskOptions {
+            cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
+            cache_config: effective_cache_config(
+                task_node.resolved_config.resolved_options.cache_config.as_ref(),
+                task_node.source,
+                *context.resolved_global_cache(),
+            ),
+        };
         let spawn_execution = plan_spawn_execution(
             context.workspace_path(),
             Some(ExecutionCacheKey::UserTask {
@@ -288,7 +326,7 @@ async fn plan_task_as_execution_node(
                     })?,
             }),
             &BTreeMap::new(),
-            &task_node.resolved_config.resolved_options,
+            &resolved_options,
             context.envs(),
             Arc::clone(&*SHELL_PROGRAM_PATH),
             SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
@@ -519,6 +557,16 @@ pub async fn plan_query_request(
     query_plan_request: QueryPlanRequest,
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {
+    // Apply cache override from this request (nested `vp run --no-cache` etc.)
+    // If the nested command has no override, inherit the parent's resolved config.
+    let cache_override = query_plan_request.plan_options.cache_override;
+    if cache_override != CacheOverride::None {
+        let final_cache = resolve_cache_with_override(
+            *context.indexed_task_graph().global_cache_config(),
+            cache_override,
+        );
+        context.set_resolved_global_cache(final_cache);
+    }
     context.set_extra_args(Arc::clone(&query_plan_request.plan_options.extra_args));
     // Query matching tasks from the task graph.
     // An empty graph means no tasks matched; the caller (session) handles
