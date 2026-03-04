@@ -1,3 +1,14 @@
+export type CacheOutputs = {
+  /**
+   * Directories to cache (relative to the package root).
+   */
+  include?: Array<string>;
+  /**
+   * Directories to exclude from the cache.
+   */
+  exclude?: Array<string>;
+};
+
 export type Task = {
   /**
    * The command to run for the task.
@@ -27,6 +38,10 @@ export type Task = {
        * Environment variable names to be passed to the task without fingerprinting.
        */
       passThroughEnvs?: Array<string>;
+      /**
+       * Output artifacts to cache.
+       */
+      outputs?: CacheOutputs;
     }
   | {
       /**

@@ -64,6 +64,7 @@ fn synthesize_node_modules_bin_task(
         cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
             envs: None,
             pass_through_envs: None,
+            outputs: None,
         }),
         envs: Arc::clone(envs),
     })
@@ -125,7 +126,11 @@ impl vite_task::CommandHandler for CommandHandler {
                     program: find_executable(get_path_env(&envs), &command.cwd, "print-env")?,
                     args: [name.clone()].into(),
                     cache_config: UserCacheConfig::with_config({
-                        EnabledCacheConfig { envs: None, pass_through_envs: Some(vec![name]) }
+                        EnabledCacheConfig {
+                            envs: None,
+                            pass_through_envs: Some(vec![name]),
+                            outputs: None,
+                        }
                     }),
                     envs: Arc::new(envs),
                 }))

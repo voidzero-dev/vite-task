@@ -35,6 +35,7 @@ async fn run() -> anyhow::Result<ExitStatus> {
                         EnabledCacheConfig {
                             envs: Some(Box::from([Str::from("FOO")])),
                             pass_through_envs: None,
+                            outputs: None,
                         }
                     }),
                     envs: Arc::clone(envs),

@@ -47,6 +47,19 @@ impl UserCacheConfig {
     }
 }
 
+/// Configuration for cache output artifacts
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "CacheOutputs"))]
+#[serde(rename_all = "camelCase")]
+pub struct CacheOutputs {
+    /// Directories to cache (relative to the package root).
+    pub include: Option<Vec<Str>>,
+
+    /// Directories to exclude from the cache.
+    pub exclude: Option<Vec<Str>>,
+}
+
 /// Cache configuration fields when caching is enabled
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
@@ -58,6 +71,9 @@ pub struct EnabledCacheConfig {
 
     /// Environment variable names to be passed to the task without fingerprinting.
     pub pass_through_envs: Option<Vec<Str>>,
+
+    /// Output artifacts to cache.
+    pub outputs: Option<CacheOutputs>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -89,7 +105,11 @@ impl Default for UserTaskOptions {
             // Caching enabled with no fingerprinted envs
             cache_config: UserCacheConfig::Enabled {
                 cache: None,
-                enabled_cache_config: EnabledCacheConfig { envs: None, pass_through_envs: None },
+                enabled_cache_config: EnabledCacheConfig {
+                    envs: None,
+                    pass_through_envs: None,
+                    outputs: None,
+                },
             },
         }
     }
@@ -204,25 +224,35 @@ impl UserRunConfig {
     #[expect(clippy::disallowed_types, reason = "test code uses std types for convenience")]
     pub fn generate_ts_definition() -> String {
         use std::{
+            any::TypeId,
+            collections::HashSet,
             io::Write,
             process::{Command, Stdio},
         };
 
         use ts_rs::TypeVisitor;
 
-        struct DeclCollector(Vec<String>);
+        struct DeclCollector {
+            decls: Vec<String>,
+            visited: HashSet<TypeId>,
+        }
 
         impl TypeVisitor for DeclCollector {
             fn visit<T: TS + 'static + ?Sized>(&mut self) {
+                if !self.visited.insert(TypeId::of::<T>()) {
+                    return;
+                }
                 // Only collect declarations from types that are exportable
                 // (i.e., have an output path - built-in types like HashMap don't)
                 if T::output_path().is_some() {
-                    self.0.push(T::decl());
+                    self.decls.push(T::decl());
                 }
+                // Recursively visit dependencies of T
+                T::visit_dependencies(self);
             }
         }
 
-        let mut collector = DeclCollector(Vec::new());
+        let mut collector = DeclCollector { decls: Vec::new(), visited: HashSet::new() };
         Self::visit_dependencies(&mut collector);
 
         // Sort declarations for deterministic output order
@@ -230,7 +260,7 @@ impl UserRunConfig {
 
         // Export all types
         let mut types: String = collector
-            .0
+            .decls
             .iter()
             .map(|decl| vite_str::format!("export {decl}"))
             .collect::<Vec<_>>()
@@ -358,6 +388,7 @@ mod tests {
                 enabled_cache_config: EnabledCacheConfig {
                     envs: Some(std::iter::once("NODE_ENV".into()).collect()),
                     pass_through_envs: Some(std::iter::once("FOO".into()).collect()),
+                    outputs: None,
                 }
             },
         );
