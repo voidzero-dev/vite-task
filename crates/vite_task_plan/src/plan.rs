@@ -12,6 +12,7 @@ use std::{
 };
 
 use futures_util::FutureExt;
+use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::InvalidPathDataError};
 use vite_shell::try_parse_as_and_list;
@@ -22,6 +23,7 @@ use vite_task_graph::{
         CacheConfig, ResolvedGlobalCacheConfig, ResolvedTaskOptions,
         user::{UserCacheConfig, UserTaskOptions},
     },
+    query::TaskQuery,
 };
 
 use crate::{
@@ -34,7 +36,8 @@ use crate::{
     in_process::InProcessExecution,
     path_env::get_path_env,
     plan_request::{
-        CacheOverride, PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest,
+        CacheOverride, PlanOptions, PlanRequest, QueryPlanRequest, ScriptCommand,
+        SyntheticPlanRequest,
     },
     resolve_cache_with_override,
 };
@@ -197,17 +200,27 @@ async fn plan_task_as_execution_node(
             let execution_item_kind: ExecutionItemKind = match plan_request {
                 // Expand task query like `vp run -r build`
                 Some(PlanRequest::Query(query_plan_request)) => {
+                    // Rule 1: skip if this nested query is the same as the parent expansion.
+                    // This handles workspace root tasks like `"build": "vp run -r build"` —
+                    // re-entering the same query would just re-expand the same tasks.
+                    if query_plan_request.query == *context.parent_query() {
+                        continue;
+                    }
+
                     // Save task name before consuming the request
                     let task_name = query_plan_request.query.task_name.clone();
                     // Add prefix envs to the context
                     context.add_envs(and_item.envs.iter());
-                    let execution_graph = plan_query_request(query_plan_request, context)
-                        .await
-                        .map_err(|error| Error::NestPlan {
-                            task_display: task_node.task_display.clone(),
-                            command: Str::from(&command_str[add_item_span.clone()]),
-                            error: Box::new(error),
-                        })?;
+                    let QueryPlanRequest { query, plan_options } = query_plan_request;
+                    let query = Arc::new(query);
+                    let execution_graph =
+                        plan_query_request(Arc::clone(&query), plan_options, context)
+                            .await
+                            .map_err(|error| Error::NestPlan {
+                                task_display: task_node.task_display.clone(),
+                                command: Str::from(&command_str[add_item_span.clone()]),
+                                error: Box::new(error),
+                            })?;
                     // An empty execution graph means no tasks matched the query.
                     // At the top level the session shows the task selector UI,
                     // but in a nested context there is no UI — propagate as an error.
@@ -552,9 +565,16 @@ fn plan_spawn_execution(
 ///
 /// Builds a `DiGraph` of task executions, then validates it is acyclic via
 /// `ExecutionGraph::try_from_graph`. Returns `CycleDependencyDetected` if a cycle is found.
+///
+/// **Rule 2 (prune self):** If the expanding task (the task whose command triggered
+/// this nested query) appears in the expansion result, it is pruned from the graph
+/// and its predecessors are wired directly to its successors. This prevents
+/// workspace root tasks like `"build": "vp run build"` from infinitely re-expanding
+/// themselves when a different query reaches them.
 #[expect(clippy::future_not_send, reason = "PlanContext contains !Send dyn PlanRequestParser")]
 pub async fn plan_query_request(
-    query_plan_request: QueryPlanRequest,
+    query: Arc<TaskQuery>,
+    plan_options: PlanOptions,
     mut context: PlanContext<'_>,
 ) -> Result<ExecutionGraph, Error> {
     // Apply cache override from `--cache` / `--no-cache` flags on this request.
@@ -562,7 +582,7 @@ pub async fn plan_query_request(
     // When `None`, we skip the update so the context keeps whatever the parent
     // resolved — this is how `vp run --cache outer` propagates to a nested
     // `vp run inner` that has no flags of its own.
-    let cache_override = query_plan_request.plan_options.cache_override;
+    let cache_override = plan_options.cache_override;
     if cache_override != CacheOverride::None {
         // Override is relative to the *workspace* config, not the parent's
         // resolved config. This means `vp run --no-cache outer` where outer
@@ -574,11 +594,13 @@ pub async fn plan_query_request(
         );
         context.set_resolved_global_cache(final_cache);
     }
-    context.set_extra_args(Arc::clone(&query_plan_request.plan_options.extra_args));
+    context.set_extra_args(plan_options.extra_args);
+    context.set_parent_query(Arc::clone(&query));
+
     // Query matching tasks from the task graph.
     // An empty graph means no tasks matched; the caller (session) handles
     // empty graphs by showing the task selector.
-    let task_query_result = context.indexed_task_graph().query_tasks(&query_plan_request.query)?;
+    let task_query_result = context.indexed_task_graph().query_tasks(&query)?;
 
     #[expect(clippy::print_stderr, reason = "user-facing warning for typos in --filter")]
     for selector in &task_query_result.unmatched_selectors {
@@ -586,6 +608,12 @@ pub async fn plan_query_request(
     }
 
     let task_node_index_graph = task_query_result.execution_graph;
+
+    // Rule 2: if the expanding task appears in the expansion, prune it.
+    // This handles cases like root `"build": "vp run build"` — the root's build
+    // task is in the result but expanding it would recurse, so we remove it and
+    // reconnect its predecessors directly to its successors.
+    let pruned_task = context.expanding_task().filter(|t| task_node_index_graph.contains_node(*t));
 
     let mut execution_node_indices_by_task_index =
         FxHashMap::<TaskNodeIndex, ExecutionNodeIndex>::with_capacity_and_hasher(
@@ -599,21 +627,46 @@ pub async fn plan_query_request(
         task_node_index_graph.edge_count(),
     );
 
-    // Plan each task node as execution nodes
+    // Plan each task node as execution nodes, skipping the pruned task
     for task_index in task_node_index_graph.nodes() {
+        if Some(task_index) == pruned_task {
+            continue;
+        }
         let task_execution =
             plan_task_as_execution_node(task_index, context.duplicate()).boxed_local().await?;
         execution_node_indices_by_task_index
             .insert(task_index, inner_graph.add_node(task_execution));
     }
 
-    // Add edges between execution nodes according to task dependencies
+    // Add edges between execution nodes according to task dependencies,
+    // skipping edges involving the pruned task.
     for (from_task_index, to_task_index, ()) in task_node_index_graph.all_edges() {
+        if Some(from_task_index) == pruned_task || Some(to_task_index) == pruned_task {
+            continue;
+        }
         inner_graph.add_edge(
             execution_node_indices_by_task_index[&from_task_index],
             execution_node_indices_by_task_index[&to_task_index],
             (),
         );
+    }
+
+    // Reconnect through the pruned node: wire each predecessor directly to each successor.
+    if let Some(pruned) = pruned_task {
+        let preds: Vec<_> =
+            task_node_index_graph.neighbors_directed(pruned, Direction::Incoming).collect();
+        let succs: Vec<_> =
+            task_node_index_graph.neighbors_directed(pruned, Direction::Outgoing).collect();
+        for &pred in &preds {
+            for &succ in &succs {
+                if let (Some(&pe), Some(&se)) = (
+                    execution_node_indices_by_task_index.get(&pred),
+                    execution_node_indices_by_task_index.get(&succ),
+                ) {
+                    inner_graph.add_edge(pe, se, ());
+                }
+            }
+        }
     }
 
     // Validate the graph is acyclic.

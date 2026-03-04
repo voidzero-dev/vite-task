@@ -31,7 +31,7 @@ use crate::{IndexedTaskGraph, TaskDependencyType, TaskId, TaskNodeIndex};
 pub type TaskExecutionGraph = DiGraphMap<TaskNodeIndex, ()>;
 
 /// A query for which tasks to run.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TaskQuery {
     /// Which packages to select.
     pub package_query: PackageQuery,

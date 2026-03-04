@@ -3,7 +3,9 @@ use std::{env::JoinPathsError, ffi::OsStr, ops::Range, sync::Arc};
 use rustc_hash::FxHashMap;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_task_graph::{IndexedTaskGraph, TaskNodeIndex, config::ResolvedGlobalCacheConfig};
+use vite_task_graph::{
+    IndexedTaskGraph, TaskNodeIndex, config::ResolvedGlobalCacheConfig, query::TaskQuery,
+};
 
 use crate::{PlanRequestParser, path_env::prepend_path_env};
 
@@ -42,6 +44,10 @@ pub struct PlanContext<'a> {
 
     /// Final resolved global cache config, combining the graph's config with any CLI override.
     resolved_global_cache: ResolvedGlobalCacheConfig,
+
+    /// The query that caused the current expansion.
+    /// Used by the skip rule to detect and skip duplicate nested expansions.
+    parent_query: Arc<TaskQuery>,
 }
 
 impl<'a> PlanContext<'a> {
@@ -52,6 +58,7 @@ impl<'a> PlanContext<'a> {
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
         indexed_task_graph: &'a IndexedTaskGraph,
         resolved_global_cache: ResolvedGlobalCacheConfig,
+        parent_query: Arc<TaskQuery>,
     ) -> Self {
         Self {
             workspace_path,
@@ -62,6 +69,7 @@ impl<'a> PlanContext<'a> {
             indexed_task_graph,
             extra_args: Arc::default(),
             resolved_global_cache,
+            parent_query,
         }
     }
 
@@ -128,6 +136,20 @@ impl<'a> PlanContext<'a> {
         self.resolved_global_cache = config;
     }
 
+    pub fn parent_query(&self) -> &TaskQuery {
+        &self.parent_query
+    }
+
+    pub fn set_parent_query(&mut self, query: Arc<TaskQuery>) {
+        self.parent_query = query;
+    }
+
+    /// Returns the task currently being expanded (whose command triggered a nested query).
+    /// This is the last task on the call stack, or `None` at the top level.
+    pub fn expanding_task(&self) -> Option<TaskNodeIndex> {
+        self.task_call_stack.last().map(|(idx, _)| *idx)
+    }
+
     pub fn duplicate(&mut self) -> PlanContext<'_> {
         PlanContext {
             workspace_path: self.workspace_path,
@@ -138,6 +160,7 @@ impl<'a> PlanContext<'a> {
             indexed_task_graph: self.indexed_task_graph,
             extra_args: Arc::clone(&self.extra_args),
             resolved_global_cache: self.resolved_global_cache,
+            parent_query: Arc::clone(&self.parent_query),
         }
     }
 }

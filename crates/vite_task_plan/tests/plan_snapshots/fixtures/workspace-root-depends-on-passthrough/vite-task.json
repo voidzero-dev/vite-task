@@ -1,0 +1,8 @@
+{
+  "cacheScripts": true,
+  "tasks": {
+    "build": {
+      "dependsOn": ["lint"]
+    }
+  }
+}

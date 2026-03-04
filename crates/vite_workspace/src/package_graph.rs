@@ -39,10 +39,10 @@ use crate::{
 /// (from `package_filter`).
 ///
 /// [`PackageQueryArgs::into_package_query`]: crate::package_filter::PackageQueryArgs::into_package_query
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PackageQuery(pub(crate) PackageQueryKind);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum PackageQueryKind {
     /// One or more `--filter` expressions.
     ///

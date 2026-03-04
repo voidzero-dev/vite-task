@@ -1,0 +1,8 @@
+{
+  "name": "test-workspace",
+  "private": true,
+  "scripts": {
+    "build": "vp run -r build",
+    "lint": "echo linting"
+  }
+}

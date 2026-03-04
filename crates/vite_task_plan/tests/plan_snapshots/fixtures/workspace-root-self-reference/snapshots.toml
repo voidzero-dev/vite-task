@@ -1,0 +1,18 @@
+# Tests workspace root self-reference handling (Rule 1 and Rule 2)
+
+# Rule 1: root's build command is `vp run -r build`, which is the same query
+# as the top-level `vp run -r build`. The nested `vp run -r build` is skipped,
+# so root#build becomes a passthrough (no items expand). Siblings a and b run.
+[[plan]]
+name = "recursive build skips self"
+args = ["run", "-r", "build"]
+compact = true
+
+# Rule 2: root's build command is `vp run -r build`, but top-level query is
+# `vp run build` (current package = root, no -r). The nested query differs
+# (All vs ContainingPackage), so it expands. Root appears in the expansion
+# result and is pruned — only a and b remain in the nested graph.
+[[plan]]
+name = "build from root expands without self"
+args = ["run", "build"]
+compact = true

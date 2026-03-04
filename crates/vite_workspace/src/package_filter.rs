@@ -29,7 +29,7 @@
 //!
 //! [`parsePackageSelector`]: https://github.com/pnpm/pnpm/blob/05dd45ea82fff9c0b687cdc8f478a1027077d343/workspace/filter-workspace-packages/src/parsePackageSelector.ts#L14-L61
 
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use vec1::Vec1;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
@@ -37,12 +37,42 @@ use vite_str::Str;
 
 use crate::package_graph::PackageQuery;
 
+/// Compiled glob pattern with its source string preserved for equality comparison.
+///
+/// `wax::Glob` does not implement `PartialEq`, so this wrapper compares
+/// patterns by their source string representation.
+#[derive(Debug, Clone)]
+pub(crate) struct GlobPattern {
+    glob: wax::Glob<'static>,
+    source: Str,
+}
+
+impl GlobPattern {
+    pub(crate) const fn new(glob: wax::Glob<'static>, source: Str) -> Self {
+        Self { glob, source }
+    }
+}
+
+impl PartialEq for GlobPattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+    }
+}
+
+impl Deref for GlobPattern {
+    type Target = wax::Glob<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.glob
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Exact name or glob pattern for matching package names.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PackageNamePattern {
     /// Exact name (e.g. `foo`, `@scope/pkg`). O(1) hash lookup.
     ///
@@ -58,7 +88,7 @@ pub(crate) enum PackageNamePattern {
     ///
     /// Only `*` and `?` wildcards are supported (pnpm semantics).
     /// Stored as an owned `Glob<'static>` so the filter can outlive the input string.
-    Glob(Box<wax::Glob<'static>>),
+    Glob(Box<GlobPattern>),
 }
 
 /// Directory matching pattern for `--filter` selectors.
@@ -67,7 +97,7 @@ pub(crate) enum PackageNamePattern {
 /// `*` / `**` opt in to descendant matching.
 ///
 /// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L200-L202>
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DirectoryPattern {
     /// Exact path match (no glob metacharacters in selector).
     Exact(Arc<AbsolutePath>),
@@ -78,14 +108,14 @@ pub(crate) enum DirectoryPattern {
     /// against `pattern`. For example, `./packages/*` with cwd `/ws` produces
     /// `base = /ws/packages`, `pattern = *`, which matches `/ws/packages/app`
     /// (remainder `app` matches `*`).
-    Glob { base: Arc<AbsolutePath>, pattern: Box<wax::Glob<'static>> },
+    Glob { base: Arc<AbsolutePath>, pattern: Box<GlobPattern> },
 }
 
 /// What packages to initially match.
 ///
 /// The enum prevents the all-`None` invalid state that would arise from a struct
 /// with all optional fields (as in pnpm's independent optional fields).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PackageSelector {
     /// Match by name only. Produced by `--filter foo` or `--filter "@scope/*"`.
     Name(PackageNamePattern),
@@ -131,7 +161,7 @@ pub(crate) enum TraversalDirection {
 ///
 /// Only present when `...` appears in the filter. The absence of this struct prevents
 /// the invalid state of `exclude_self = true` without any expansion.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GraphTraversal {
     pub(crate) direction: TraversalDirection,
 
@@ -146,7 +176,7 @@ pub(crate) struct GraphTraversal {
 ///
 /// Multiple filters are composed at the `PackageQuery` level:
 /// inclusions are unioned, then exclusions are subtracted.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PackageFilter {
     /// When `true`, packages matching this filter are **excluded** from the result.
     /// Produced by a leading `!` in the filter string.
@@ -544,7 +574,10 @@ fn resolve_directory_pattern(
     let base = resolve_filter_path(if base_str.is_empty() { "." } else { base_str }, cwd);
 
     match pattern {
-        Some(pattern) => Ok(DirectoryPattern::Glob { base, pattern: Box::new(pattern) }),
+        Some(pattern) => Ok(DirectoryPattern::Glob {
+            base,
+            pattern: Box::new(GlobPattern::new(pattern, path_str.into())),
+        }),
         None => Ok(DirectoryPattern::Exact(base)),
     }
 }
@@ -570,7 +603,7 @@ fn resolve_filter_path(path_str: &str, cwd: &AbsolutePath) -> Arc<AbsolutePath> 
 fn build_name_pattern(name: &str) -> Result<PackageNamePattern, PackageFilterParseError> {
     let glob = wax::Glob::new(name)?.into_owned();
     if glob.clone().partition().1.is_some() {
-        Ok(PackageNamePattern::Glob(Box::new(glob)))
+        Ok(PackageNamePattern::Glob(Box::new(GlobPattern::new(glob, name.into()))))
     } else {
         Ok(PackageNamePattern::Exact { name: name.into(), unique: false })
     }

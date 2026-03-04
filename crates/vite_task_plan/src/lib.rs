@@ -205,6 +205,8 @@ pub async fn plan_query(
         query_plan_request.plan_options.cache_override,
     );
 
+    let QueryPlanRequest { query, plan_options } = query_plan_request;
+    let query = Arc::new(query);
     let context = PlanContext::new(
         workspace_path,
         Arc::clone(cwd),
@@ -212,8 +214,9 @@ pub async fn plan_query(
         plan_request_parser,
         indexed_task_graph,
         resolved_global_cache,
+        Arc::clone(&query),
     );
-    plan_query_request(query_plan_request, context).await
+    plan_query_request(query, plan_options, context).await
 }
 
 const fn resolve_cache_with_override(
