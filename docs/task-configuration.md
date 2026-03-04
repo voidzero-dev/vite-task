@@ -132,34 +132,34 @@ vp run build --no-cache     # Force all caching off
 A command run by `vp run` is either a **task** (has an entry in `vite.config.ts`) or a **script** (only exists in `package.json` with no corresponding task entry). A script that has a matching task entry is treated as a task.
 
 ```
---no-cache* on the command line?
+--no-cache on the command line?
 ├─ YES → NOT CACHED (overrides everything)
 └─ NO
    │
+   --cache on the command line?
+   ├─ YES → acts as cache: true (sets scripts: true, tasks: true)
+   └─ NO  → uses workspace config
+   │
    Does the command have a task entry in vite.config.ts?
    │
-   ├─ YES (task) ─────────────────────────────────────────────
+   ├─ YES (task) ──────────────────────────────────────────
    │   │
-   │   Global cache.tasks set to false? (default: true)
-   │   ├─ YES → NOT CACHED (global kill switch)
-   │   └─ NO (default)
+   │   Global cache.tasks enabled? (default: true, or true via --cache)
+   │   ├─ NO  → NOT CACHED
+   │   └─ YES
    │       │
    │       Per-task cache set to false?
    │       ├─ YES → NOT CACHED (--cache does NOT override this)
    │       └─ NO or not set → CACHED <----- this is the default for tasks
    │
-   └─ NO (script) ───────────────────────────────────────────
+   └─ NO (script) ─────────────────────────────────────────
        │
-       --cache on the command line?
+       Global cache.scripts enabled? (default: false, or true via --cache)
        ├─ YES → CACHED
-       └─ NO
-           │
-           Global cache.scripts set to true? (default: false)
-           ├─ YES → CACHED
-           └─ NO (default) → NOT CACHED <----- this is the default for scripts
+       └─ NO  → NOT CACHED <----- this is the default for scripts
 ```
 
-In short: **tasks are cached by default, scripts are not.** `--no-cache` turns off caching for everything; `--cache` opts in scripts but cannot override a task's `cache: false`.
+In short: **tasks are cached by default, scripts are not.** `--no-cache` turns off caching for everything. `--cache` is equivalent to `cache: true` — it enables both `cache.tasks` and `cache.scripts`, but cannot override a task's per-task `cache: false`.
 
 ## Compound Commands and Nested `vp run`
 
