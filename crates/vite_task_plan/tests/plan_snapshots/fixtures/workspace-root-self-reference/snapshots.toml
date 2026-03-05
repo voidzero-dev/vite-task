@@ -1,18 +1,36 @@
-# Tests workspace root self-reference handling (skip rule and prune rule)
+# Tests workspace root self-reference handling (skip rule and prune rule).
+# Root build = `vp run -r build`.
+#
+# The skip rule compares TaskQuery (package_query + task_name + include_explicit_deps).
+# Extra args are in PlanOptions, not TaskQuery, so they don't affect skip/prune.
 
-# Skip rule: root's build command is `vp run -r build`, which is the same query
-# as the top-level `vp run -r build`. The nested `vp run -r build` is skipped,
-# so root#build becomes a passthrough (no items expand). Siblings a and b run.
+# Skip rule: the nested `vp run -r build` produces the same query as the
+# top-level `vp run -r build`, so the expansion is skipped. Root#build
+# becomes a passthrough (no items). Siblings a and b run normally.
 [[plan]]
 name = "recursive build skips self"
 args = ["run", "-r", "build"]
 compact = true
 
-# Prune rule: root's build command is `vp run -r build`, but top-level query is
-# `vp run build` (current package = root, no -r). The nested query differs
-# (All vs ContainingPackage), so it expands. Root appears in the expansion
-# result and is pruned — only a and b remain in the nested graph.
+# Skip rule with extra_arg: same as above — extra_arg goes into PlanOptions,
+# not TaskQuery, so the query still matches and the skip rule fires.
+[[plan]]
+name = "recursive build with extra arg skips self"
+args = ["run", "-r", "build", "extra_arg"]
+compact = true
+
+# Prune rule: top-level query is `vp run build` (ContainingPackage), but root's
+# script produces `vp run -r build` (All). The queries differ, so the skip rule
+# does not fire. The nested All query finds root + a + b; the prune rule removes
+# root (the expanding task) from the result, leaving a and b.
 [[plan]]
 name = "build from root expands without self"
 args = ["run", "build"]
+compact = true
+
+# Prune rule with extra_arg: same as above — extra_arg doesn't affect the query,
+# so the prune rule still fires.
+[[plan]]
+name = "build from root with extra arg expands without self"
+args = ["run", "build", "extra_arg"]
 compact = true

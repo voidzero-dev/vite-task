@@ -203,6 +203,13 @@ async fn plan_task_as_execution_node(
                     // Skip rule: skip if this nested query is the same as the parent expansion.
                     // This handles workspace root tasks like `"build": "vp run -r build"` —
                     // re-entering the same query would just re-expand the same tasks.
+                    //
+                    // The comparison is on TaskQuery only (package_query + task_name +
+                    // include_explicit_deps). Extra args live in PlanOptions, so
+                    // `vp run -r build extra_arg` still matches `vp run -r build`.
+                    // Conversely, `cd packages/a && vp run build` does NOT match a
+                    // parent `vp run build` from root because `cd` changes the cwd,
+                    // producing a different ContainingPackage in the PackageQuery.
                     if query_plan_request.query == *context.parent_query() {
                         continue;
                     }
@@ -569,8 +576,11 @@ fn plan_spawn_execution(
 /// **Prune rule:** If the expanding task (the task whose command triggered
 /// this nested query) appears in the expansion result, it is pruned from the graph
 /// and its predecessors are wired directly to its successors. This prevents
-/// workspace root tasks like `"build": "vp run build"` from infinitely re-expanding
-/// themselves when a different query reaches them.
+/// workspace root tasks like `"build": "vp run -r build"` from infinitely
+/// re-expanding themselves when a different query reaches them (e.g.,
+/// `vp run build` produces a different query than the script's `vp run -r build`,
+/// so the skip rule doesn't fire, but the prune rule catches root in the result).
+/// Like the skip rule, extra args don't affect this — only the TaskQuery matters.
 #[expect(clippy::future_not_send, reason = "PlanContext contains !Send dyn PlanRequestParser")]
 pub async fn plan_query_request(
     query: Arc<TaskQuery>,

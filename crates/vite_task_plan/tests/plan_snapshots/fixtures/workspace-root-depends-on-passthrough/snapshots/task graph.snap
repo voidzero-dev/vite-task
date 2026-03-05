@@ -52,14 +52,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-d
         "command": "echo linting",
         "resolved_options": {
           "cwd": "<workspace>/",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
+          "cache_config": null
         }
       }
     },
@@ -80,14 +73,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-d
         "command": "echo building-a",
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
+          "cache_config": null
         }
       }
     },
@@ -108,14 +94,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-d
         "command": "echo linting-a",
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
-              ]
-            }
-          }
+          "cache_config": null
         }
       }
     },
