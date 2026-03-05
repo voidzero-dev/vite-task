@@ -200,7 +200,7 @@ async fn plan_task_as_execution_node(
             let execution_item_kind: ExecutionItemKind = match plan_request {
                 // Expand task query like `vp run -r build`
                 Some(PlanRequest::Query(query_plan_request)) => {
-                    // Rule 1: skip if this nested query is the same as the parent expansion.
+                    // Skip rule: skip if this nested query is the same as the parent expansion.
                     // This handles workspace root tasks like `"build": "vp run -r build"` —
                     // re-entering the same query would just re-expand the same tasks.
                     if query_plan_request.query == *context.parent_query() {
@@ -566,7 +566,7 @@ fn plan_spawn_execution(
 /// Builds a `DiGraph` of task executions, then validates it is acyclic via
 /// `ExecutionGraph::try_from_graph`. Returns `CycleDependencyDetected` if a cycle is found.
 ///
-/// **Rule 2 (prune self):** If the expanding task (the task whose command triggered
+/// **Prune rule:** If the expanding task (the task whose command triggered
 /// this nested query) appears in the expansion result, it is pruned from the graph
 /// and its predecessors are wired directly to its successors. This prevents
 /// workspace root tasks like `"build": "vp run build"` from infinitely re-expanding
@@ -609,7 +609,7 @@ pub async fn plan_query_request(
 
     let task_node_index_graph = task_query_result.execution_graph;
 
-    // Rule 2: if the expanding task appears in the expansion, prune it.
+    // Prune rule: if the expanding task appears in the expansion, prune it.
     // This handles cases like root `"build": "vp run build"` — the root's build
     // task is in the result but expanding it would recurse, so we remove it and
     // reconnect its predecessors directly to its successors.
