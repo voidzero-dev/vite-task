@@ -240,7 +240,7 @@ impl SavedCacheMissReason {
                 FingerprintMismatch::SpawnFingerprintMismatch { old, new } => {
                     Self::SpawnFingerprintChanged(detect_spawn_fingerprint_changes(old, new))
                 }
-                FingerprintMismatch::ConfigChanged => Self::ConfigChanged,
+                FingerprintMismatch::InputConfigChanged => Self::ConfigChanged,
                 FingerprintMismatch::GlobbedInputChanged { path } => {
                     Self::InputContentChanged { path: Str::from(path.as_str()) }
                 }
@@ -432,7 +432,7 @@ impl TaskResult {
                         }
                     }
                     SavedCacheMissReason::ConfigChanged => {
-                        Str::from("→ Cache miss: configuration changed")
+                        Str::from("→ Cache miss: inputs configuration changed")
                     }
                     SavedCacheMissReason::InputContentChanged { path } => {
                         vite_str::format!("→ Cache miss: content of input '{path}' changed")

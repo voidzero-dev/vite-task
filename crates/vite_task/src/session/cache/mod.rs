@@ -108,7 +108,7 @@ pub enum FingerprintMismatch {
         new: SpawnFingerprint,
     },
     /// Found a previous cache entry key for the same task, but `input_config` or `glob_base` differs.
-    ConfigChanged,
+    InputConfigChanged,
     /// Found the cache entry with the same spawn fingerprint, but an explicit globbed input changed
     GlobbedInputChanged { path: RelativePathBuf },
     /// Found the cache entry with the same spawn fingerprint, but the post-run fingerprint mismatches
@@ -121,8 +121,8 @@ impl Display for FingerprintMismatch {
             Self::SpawnFingerprintMismatch { old, new } => {
                 write!(f, "Spawn fingerprint changed: old={old:?}, new={new:?}")
             }
-            Self::ConfigChanged => {
-                write!(f, "configuration changed")
+            Self::InputConfigChanged => {
+                write!(f, "inputs configuration changed")
             }
             Self::GlobbedInputChanged { path } => {
                 write!(f, "content of input '{path}' changed")
@@ -244,7 +244,7 @@ impl ExecutionCache {
                 }
             } else {
                 // spawn fingerprint is the same but input_config or glob_base changed
-                FingerprintMismatch::ConfigChanged
+                FingerprintMismatch::InputConfigChanged
             };
             return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
         }
