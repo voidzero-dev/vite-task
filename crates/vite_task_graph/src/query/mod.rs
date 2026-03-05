@@ -31,6 +31,19 @@ use crate::{IndexedTaskGraph, TaskDependencyType, TaskId, TaskNodeIndex};
 pub type TaskExecutionGraph = DiGraphMap<TaskNodeIndex, ()>;
 
 /// A query for which tasks to run.
+///
+/// A `TaskQuery` must be **self-contained**: it fully describes which tasks
+/// will be selected, without relying on ambient state such as cwd or
+/// environment variables. For example, the implicit cwd is captured as a
+/// `ContainingPackage(path)` selector inside [`PackageQuery`], so two
+/// queries from different directories compare as unequal even though the
+/// user typed the same CLI arguments.
+///
+/// This property is essential for the **skip rule** in task planning, which
+/// compares the nested query against the parent query with `==`. If any
+/// external context leaked into the comparison (or was excluded from it),
+/// the skip rule would either miss legitimate recursion or incorrectly
+/// suppress distinct expansions.
 #[derive(Debug, PartialEq)]
 pub struct TaskQuery {
     /// Which packages to select.
