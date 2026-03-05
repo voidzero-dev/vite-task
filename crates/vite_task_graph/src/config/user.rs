@@ -177,7 +177,7 @@ impl ResolvedGlobalCacheConfig {
 #[derive(Debug, Default, Deserialize)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "RunConfig"))]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserRunConfig {
     /// Root-level cache configuration.
     ///
@@ -452,6 +452,19 @@ mod tests {
     fn test_global_cache_detailed_unknown_field() {
         assert!(
             serde_json::from_value::<UserGlobalCacheConfig>(json!({ "unknown": true })).is_err()
+        );
+    }
+
+    #[test]
+    fn test_run_config_unknown_top_level_field() {
+        assert!(serde_json::from_value::<UserRunConfig>(json!({ "unknown": true })).is_err());
+    }
+
+    #[test]
+    fn test_task_config_unknown_field() {
+        assert!(
+            serde_json::from_value::<UserTaskConfig>(json!({ "command": "echo", "unknown": true }))
+                .is_err()
         );
     }
 }

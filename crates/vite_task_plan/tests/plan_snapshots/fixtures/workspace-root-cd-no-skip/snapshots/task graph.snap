@@ -19,9 +19,17 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-c
         "command": "cd packages/a && vp run deploy",
         "resolved_options": {
           "cwd": "<workspace>/",
-          "cache_config": null
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   },
@@ -40,9 +48,17 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-c
         "command": "echo deploying-a",
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
-          "cache_config": null
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "pass_through_envs": [
+                "<default pass-through envs>"
+              ]
+            }
+          }
         }
-      }
+      },
+      "source": "PackageJsonScript"
     },
     "neighbors": []
   }

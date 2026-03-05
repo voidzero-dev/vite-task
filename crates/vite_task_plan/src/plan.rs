@@ -580,7 +580,7 @@ fn plan_spawn_execution(
 /// re-expanding themselves when a different query reaches them (e.g.,
 /// `vp run build` produces a different query than the script's `vp run -r build`,
 /// so the skip rule doesn't fire, but the prune rule catches root in the result).
-/// Like the skip rule, extra args don't affect this — only the TaskQuery matters.
+/// Like the skip rule, extra args don't affect this — only the `TaskQuery` matters.
 #[expect(clippy::future_not_send, reason = "PlanContext contains !Send dyn PlanRequestParser")]
 pub async fn plan_query_request(
     query: Arc<TaskQuery>,
