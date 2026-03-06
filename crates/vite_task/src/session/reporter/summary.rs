@@ -112,7 +112,7 @@ pub enum SavedCacheMissReason {
     NotFound,
     /// Spawn fingerprint changed (command, envs, cwd, etc.).
     SpawnFingerprintChanged(Vec<SpawnFingerprintChange>),
-    /// Task configuration changed (input_config or glob_base).
+    /// Task configuration changed (`input_config` or `glob_base`).
     ConfigChanged,
     /// Content of an input file changed.
     InputContentChanged { path: Str },
@@ -237,14 +237,14 @@ impl SavedCacheMissReason {
         match cache_miss {
             CacheMiss::NotFound => Self::NotFound,
             CacheMiss::FingerprintMismatch(mismatch) => match mismatch {
-                FingerprintMismatch::SpawnFingerprintMismatch { old, new } => {
+                FingerprintMismatch::SpawnFingerprint { old, new } => {
                     Self::SpawnFingerprintChanged(detect_spawn_fingerprint_changes(old, new))
                 }
-                FingerprintMismatch::InputConfigChanged => Self::ConfigChanged,
-                FingerprintMismatch::GlobbedInputChanged { path } => {
+                FingerprintMismatch::InputConfig => Self::ConfigChanged,
+                FingerprintMismatch::GlobbedInput { path } => {
                     Self::InputContentChanged { path: Str::from(path.as_str()) }
                 }
-                FingerprintMismatch::PostRunFingerprintMismatch(diff) => {
+                FingerprintMismatch::PostRunFingerprint(diff) => {
                     use crate::session::execute::fingerprint::PostRunFingerprintMismatch;
                     match diff {
                         PostRunFingerprintMismatch::InputContentChanged { path } => {

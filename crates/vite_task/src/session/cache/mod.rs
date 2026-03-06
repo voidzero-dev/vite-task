@@ -101,33 +101,33 @@ pub enum CacheMiss {
 pub enum FingerprintMismatch {
     /// Found a previous cache entry key for the same task, but the spawn fingerprint differs.
     /// This happens when the command itself or an env changes.
-    SpawnFingerprintMismatch {
+    SpawnFingerprint {
         /// The fingerprint from the cached entry
         old: SpawnFingerprint,
         /// The fingerprint of the current execution
         new: SpawnFingerprint,
     },
     /// Found a previous cache entry key for the same task, but `input_config` or `glob_base` differs.
-    InputConfigChanged,
+    InputConfig,
     /// Found the cache entry with the same spawn fingerprint, but an explicit globbed input changed
-    GlobbedInputChanged { path: RelativePathBuf },
+    GlobbedInput { path: RelativePathBuf },
     /// Found the cache entry with the same spawn fingerprint, but the post-run fingerprint mismatches
-    PostRunFingerprintMismatch(PostRunFingerprintMismatch),
+    PostRunFingerprint(PostRunFingerprintMismatch),
 }
 
 impl Display for FingerprintMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SpawnFingerprintMismatch { old, new } => {
+            Self::SpawnFingerprint { old, new } => {
                 write!(f, "Spawn fingerprint changed: old={old:?}, new={new:?}")
             }
-            Self::InputConfigChanged => {
+            Self::InputConfig => {
                 write!(f, "inputs configuration changed")
             }
-            Self::GlobbedInputChanged { path } => {
+            Self::GlobbedInput { path } => {
                 write!(f, "content of input '{path}' changed")
             }
-            Self::PostRunFingerprintMismatch(diff) => Display::fmt(diff, f),
+            Self::PostRunFingerprint(diff) => Display::fmt(diff, f),
         }
     }
 }
@@ -222,7 +222,7 @@ impl ExecutionCache {
                     cache_value.post_run_fingerprint.validate(workspace_root)?
             {
                 return Ok(Err(CacheMiss::FingerprintMismatch(
-                    FingerprintMismatch::PostRunFingerprintMismatch(post_run_fingerprint_mismatch),
+                    FingerprintMismatch::PostRunFingerprint(post_run_fingerprint_mismatch),
                 )));
             }
             // Associate the execution key to the cache entry key if not already,
@@ -237,14 +237,14 @@ impl ExecutionCache {
             self.get_cache_key_by_execution_key(execution_cache_key).await?
         {
             // Determine what changed: spawn fingerprint or config (input_config / glob_base)
-            let mismatch = if old_cache_key.spawn_fingerprint != *spawn_fingerprint {
-                FingerprintMismatch::SpawnFingerprintMismatch {
+            let mismatch = if old_cache_key.spawn_fingerprint == *spawn_fingerprint {
+                // spawn fingerprint is the same but input_config or glob_base changed
+                FingerprintMismatch::InputConfig
+            } else {
+                FingerprintMismatch::SpawnFingerprint {
                     old: old_cache_key.spawn_fingerprint,
                     new: spawn_fingerprint.clone(),
                 }
-            } else {
-                // spawn fingerprint is the same but input_config or glob_base changed
-                FingerprintMismatch::InputConfigChanged
             };
             return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
         }
@@ -291,21 +291,21 @@ fn detect_globbed_input_change(
         match (s, c) {
             (None, None) => return None,
             (Some((path, _)), None) | (None, Some((path, _))) => {
-                return Some(FingerprintMismatch::GlobbedInputChanged { path: path.clone() });
+                return Some(FingerprintMismatch::GlobbedInput { path: path.clone() });
             }
             (Some((sp, sh)), Some((cp, ch))) => match sp.cmp(cp) {
                 std::cmp::Ordering::Equal => {
                     if sh != ch {
-                        return Some(FingerprintMismatch::GlobbedInputChanged { path: sp.clone() });
+                        return Some(FingerprintMismatch::GlobbedInput { path: sp.clone() });
                     }
                     s = stored_iter.next();
                     c = current_iter.next();
                 }
                 std::cmp::Ordering::Less => {
-                    return Some(FingerprintMismatch::GlobbedInputChanged { path: sp.clone() });
+                    return Some(FingerprintMismatch::GlobbedInput { path: sp.clone() });
                 }
                 std::cmp::Ordering::Greater => {
-                    return Some(FingerprintMismatch::GlobbedInputChanged { path: cp.clone() });
+                    return Some(FingerprintMismatch::GlobbedInput { path: cp.clone() });
                 }
             },
         }

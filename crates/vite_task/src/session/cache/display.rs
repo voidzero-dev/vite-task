@@ -155,7 +155,7 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
         CacheStatus::Miss(CacheMiss::FingerprintMismatch(mismatch)) => {
             // Show "cache miss" with reason why cache couldn't be used
             let reason = match mismatch {
-                FingerprintMismatch::SpawnFingerprintMismatch { old, new } => {
+                FingerprintMismatch::SpawnFingerprint { old, new } => {
                     let changes = detect_spawn_fingerprint_changes(old, new);
                     match changes.first() {
                         Some(
@@ -173,13 +173,13 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                         None => "configuration changed",
                     }
                 }
-                FingerprintMismatch::InputConfigChanged => "inputs configuration changed",
-                FingerprintMismatch::GlobbedInputChanged { path } => {
+                FingerprintMismatch::InputConfig => "inputs configuration changed",
+                FingerprintMismatch::GlobbedInput { path } => {
                     return Some(vite_str::format!(
                         "✗ cache miss: content of input '{path}' changed, executing"
                     ));
                 }
-                FingerprintMismatch::PostRunFingerprintMismatch(diff) => {
+                FingerprintMismatch::PostRunFingerprint(diff) => {
                     use crate::session::execute::fingerprint::PostRunFingerprintMismatch;
                     match diff {
                         PostRunFingerprintMismatch::InputContentChanged { path } => {
