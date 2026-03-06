@@ -150,15 +150,6 @@ impl ResolvedInputConfig {
 
         Self { includes_auto, positive_globs, negative_globs }
     }
-
-    /// Returns true if inference should be disabled.
-    ///
-    /// Inference is disabled when `includes_auto` is false.
-    #[inline]
-    #[must_use]
-    pub const fn inference_disabled(&self) -> bool {
-        !self.includes_auto
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -295,7 +286,6 @@ mod tests {
         assert!(config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
-        assert!(!config.inference_disabled());
     }
 
     #[test]
@@ -315,7 +305,6 @@ mod tests {
         assert!(!config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
-        assert!(config.inference_disabled());
     }
 
     #[test]
@@ -349,7 +338,6 @@ mod tests {
         assert!(config.positive_globs.contains("src/**/*.ts"));
         assert!(config.positive_globs.contains("package.json"));
         assert!(config.negative_globs.is_empty());
-        assert!(config.inference_disabled());
     }
 
     #[test]
@@ -379,7 +367,6 @@ mod tests {
         assert!(config.positive_globs.contains("package.json"));
         assert_eq!(config.negative_globs.len(), 1);
         assert!(config.negative_globs.contains("node_modules/**"));
-        assert!(!config.inference_disabled());
     }
 
     #[test]
@@ -389,6 +376,5 @@ mod tests {
             vec![UserInputEntry::Glob("src/**/*.ts".into()), UserInputEntry::Auto { auto: true }];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
         assert!(config.includes_auto);
-        assert!(!config.inference_disabled());
     }
 }

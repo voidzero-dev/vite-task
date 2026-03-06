@@ -77,13 +77,13 @@ impl PostRunFingerprint {
     /// * `input_config` - Resolved input configuration controlling what to fingerprint
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
-        path_reads: &HashMap<RelativePathBuf, PathRead>,
+        inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
         glob_base: &AbsolutePath,
         input_config: &ResolvedInputConfig,
     ) -> anyhow::Result<Self> {
         // If inference is disabled, return empty inferred_inputs
-        if input_config.inference_disabled() {
+        if !input_config.includes_auto {
             return Ok(Self { inferred_inputs: HashMap::default() });
         }
 
@@ -93,7 +93,7 @@ impl PostRunFingerprint {
             .map(|p| ResolvedGlob::new(p.as_str(), glob_base))
             .collect::<anyhow::Result<_>>()?;
 
-        let inferred_inputs = path_reads
+        let inferred_inputs = inferred_path_reads
             .par_iter()
             .filter_map(|(relative_path, path_read)| {
                 // Clean the absolute path to normalize `..` from fspy-tracked paths
