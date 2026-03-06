@@ -200,7 +200,6 @@ impl ExecutionCache {
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
         let execution_cache_key = &cache_metadata.execution_cache_key;
-        let input_config = &cache_metadata.input_config;
 
         let cache_key = CacheEntryKey::from_metadata(cache_metadata, workspace_root)?;
 
@@ -213,10 +212,9 @@ impl ExecutionCache {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
             }
 
-            // Validate post-run fingerprint (inferred inputs) only if auto inference is enabled
-            if input_config.includes_auto
-                && let Some(post_run_fingerprint_mismatch) =
-                    cache_value.post_run_fingerprint.validate(workspace_root)?
+            // Validate post-run fingerprint (inferred inputs from fspy)
+            if let Some(post_run_fingerprint_mismatch) =
+                cache_value.post_run_fingerprint.validate(workspace_root)?
             {
                 return Ok(Err(CacheMiss::FingerprintMismatch(
                     FingerprintMismatch::PostRunFingerprint(post_run_fingerprint_mismatch),
