@@ -238,13 +238,18 @@ impl ExecutionCache {
         if let Some(old_cache_key) =
             self.get_cache_key_by_execution_key(execution_cache_key).await?
         {
-            // Determine what changed: spawn fingerprint or config (input_config / glob_base)
-            let mismatch = if old_cache_key.spawn_fingerprint == *spawn_fingerprint {
+            // Destructure to ensure we handle all fields when new ones are added
+            let CacheEntryKey {
+                spawn_fingerprint: old_spawn_fingerprint,
+                input_config: _,
+                glob_base: _,
+            } = old_cache_key;
+            let mismatch = if old_spawn_fingerprint == *spawn_fingerprint {
                 // spawn fingerprint is the same but input_config or glob_base changed
                 FingerprintMismatch::InputConfig
             } else {
                 FingerprintMismatch::SpawnFingerprint {
-                    old: old_cache_key.spawn_fingerprint,
+                    old: old_spawn_fingerprint,
                     new: spawn_fingerprint.clone(),
                 }
             };
