@@ -22,9 +22,16 @@ use super::execute::{
 
 /// Cache lookup key identifying a task's execution configuration.
 ///
-/// Contains the spawn fingerprint (command, env, cwd), input configuration,
-/// and glob base directory. Explicit input file hashes are stored in
-/// [`CacheEntryValue`] so that changes can be detected and reported.
+/// # Key vs value design
+///
+/// Put a field in the **key** if each distinct value should have its own
+/// cache entry (e.g., different env values → different entries, so
+/// reverting an env change can still hit the old entry).
+///
+/// Put a field in the **value** ([`CacheEntryValue`]) if changes should
+/// overwrite the existing entry (e.g., input file hashes — there's no
+/// reason to keep the old hash around, and storing them in the value
+/// lets us report exactly *which file* changed).
 #[derive(Debug, Encode, Decode, Serialize, PartialEq, Eq, Clone)]
 pub struct CacheEntryKey {
     /// The spawn fingerprint (command, args, cwd, envs)
