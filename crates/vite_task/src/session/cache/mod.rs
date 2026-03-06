@@ -66,8 +66,10 @@ impl CacheEntryKey {
     }
 }
 
-/// Command cache value, for validating post-run fingerprint after the spawn fingerprint is matched,
-/// and replaying the std outputs if validated.
+/// Cached execution result for a task.
+///
+/// Contains the post-run fingerprint (from fspy), captured outputs,
+/// execution duration, and explicit input file hashes.
 #[derive(Debug, Encode, Decode, Serialize)]
 pub struct CacheEntryValue {
     pub post_run_fingerprint: PostRunFingerprint,
@@ -187,13 +189,8 @@ impl ExecutionCache {
         Ok(())
     }
 
-    /// Try to hit cache with pre-run fingerprint (spawn + globbed inputs).
+    /// Try to hit cache by looking up the cache entry key and validating inputs.
     /// Returns `Ok(Ok(cache_value))` on cache hit, `Ok(Err(cache_miss))` on miss.
-    ///
-    /// # Arguments
-    /// * `cache_metadata` - Cache metadata from plan stage
-    /// * `globbed_inputs` - Hashes of explicit input files computed from positive globs
-    /// * `workspace_root` - Workspace root for converting paths and validating fingerprints
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn try_hit(
         &self,
@@ -207,7 +204,7 @@ impl ExecutionCache {
 
         let cache_key = CacheEntryKey::from_metadata(cache_metadata, workspace_root)?;
 
-        // Try to directly find the cache by pre-run fingerprint first
+        // Try to find the cache entry by key (spawn fingerprint + input config + glob base)
         if let Some(cache_value) = self.get_by_cache_key(&cache_key).await? {
             // Validate explicit globbed inputs against the stored values
             if let Some(mismatch) =
@@ -253,12 +250,6 @@ impl ExecutionCache {
     }
 
     /// Update cache after successful execution.
-    ///
-    /// # Arguments
-    /// * `cache_metadata` - Cache metadata from plan stage
-    /// * `globbed_inputs` - Hashes of explicit input files computed from positive globs
-    /// * `workspace_root` - Workspace root for converting absolute paths to relative
-    /// * `cache_value` - The cache value to store (outputs and post-run fingerprint)
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn update(
         &self,
