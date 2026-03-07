@@ -18,7 +18,7 @@
 
 Vite Task is a high-performance monorepo task runner written in Rust, designed for JavaScript/TypeScript projects. Think [Nx](https://nx.dev/) or [Turborepo](https://turbo.build/), but faster — with intelligent caching, dependency resolution, and precise file system tracking.
 
-> **Note:** Vite Task is officially released as part of [vite-plus](https://github.com/voidzero-dev/vite-plus). This repository contains the source code for development and contribution purposes. See the [Contributing Guide](CONTRIBUTING.md) for details on how to work with the development binary.
+> **Note:** Vite Task is officially released as part of [Vite+](https://github.com/voidzero-dev/vite-plus), the unified toolchain for the web. End users access Vite Task through the `vp run` command in Vite+. This repository contains the standalone source code for development and contribution purposes — see the [Contributing Guide](CONTRIBUTING.md) for details.
 
 ## Features
 
