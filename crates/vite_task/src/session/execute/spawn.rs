@@ -11,6 +11,7 @@ use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use vite_glob::AnchoredGlob;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 
@@ -54,12 +55,6 @@ pub struct TrackedPathAccesses {
     pub path_writes: FxHashSet<RelativePathBuf>,
 }
 
-/// Resolved negative glob pattern for filtering fspy-tracked paths.
-/// The `PathBuf` is the resolved absolute prefix (glob base + invariant prefix, cleaned).
-/// The `Option<Glob>` is the variant (dynamic) part of the pattern, if any.
-#[expect(clippy::disallowed_types, reason = "wax partition returns std::path::PathBuf")]
-pub type ResolvedNegativeGlob = (std::path::PathBuf, Option<wax::Glob<'static>>);
-
 /// Spawn a command with optional file system tracking via fspy, using piped stdio.
 ///
 /// Returns the execution result including exit status and duration.
@@ -82,7 +77,7 @@ pub async fn spawn_with_tracking(
     stderr_writer: &mut (dyn AsyncWrite + Unpin),
     std_outputs: Option<&mut Vec<StdOutput>>,
     path_accesses: Option<&mut TrackedPathAccesses>,
-    resolved_negatives: &[ResolvedNegativeGlob],
+    resolved_negatives: &[AnchoredGlob],
 ) -> anyhow::Result<SpawnResult> {
     /// The tracking state of the spawned process.
     /// Determined by whether `path_accesses` is `Some` (fspy enabled) or `None` (fspy disabled).
@@ -217,19 +212,13 @@ pub async fn spawn_with_tracking(
 
         // Filter against resolved negative globs.
         // Clean the path to normalize `..` only for matching purposes, since
-        // resolved negatives are cleaned absolute paths.
+        // AnchoredGlob prefixes are cleaned absolute paths.
         if !resolved_negatives.is_empty() {
             let cleaned_abs =
                 path_clean::PathClean::clean(workspace_root.join(&relative_path).as_path());
-            if resolved_negatives.iter().any(|(resolved_prefix, variant)| {
-                let Ok(remainder) = cleaned_abs.strip_prefix(resolved_prefix) else {
-                    return false;
-                };
-                variant.as_ref().map_or(remainder.as_os_str().is_empty(), |v| {
-                    use wax::Program as _;
-                    v.is_match(remainder)
-                })
-            }) {
+            if let Some(cleaned) = AbsolutePath::new(&cleaned_abs)
+                && resolved_negatives.iter().any(|neg| neg.is_match(cleaned))
+            {
                 continue;
             }
         }

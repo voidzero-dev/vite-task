@@ -15,7 +15,7 @@ use vite_task_plan::{
 use self::{
     fingerprint::PostRunFingerprint,
     glob_inputs::compute_globbed_inputs,
-    spawn::{ResolvedNegativeGlob, SpawnResult, TrackedPathAccesses, spawn_with_tracking},
+    spawn::{SpawnResult, TrackedPathAccesses, spawn_with_tracking},
 };
 use super::{
     cache::{CacheEntryValue, ExecutionCache},
@@ -422,25 +422,14 @@ pub async fn execute_spawn(
     SpawnOutcome::Spawned(result.exit_status)
 }
 
-/// Resolve negative glob patterns into absolute prefix + optional variant for fspy path filtering.
-///
-/// Each negative glob is partitioned into an invariant prefix and a variant (dynamic) part.
-/// The prefix is joined with `glob_base` and cleaned to produce an absolute path for efficient
-/// prefix-based filtering in `spawn_with_tracking`.
+/// Resolve negative glob patterns into [`AnchoredGlob`]s for filtering.
 fn resolve_negative_globs(
     glob_base: &AbsolutePath,
     negative_globs: &std::collections::BTreeSet<vite_str::Str>,
-) -> anyhow::Result<Vec<ResolvedNegativeGlob>> {
-    use path_clean::PathClean as _;
-
+) -> anyhow::Result<Vec<vite_glob::AnchoredGlob>> {
     negative_globs
         .iter()
-        .map(|p| {
-            let glob = wax::Glob::new(p.as_str())?.into_owned();
-            let (prefix, variant) = glob.partition();
-            let resolved = glob_base.as_path().join(&prefix).clean();
-            Ok((resolved, variant.map(wax::Glob::into_owned)))
-        })
+        .map(|p| Ok(vite_glob::AnchoredGlob::new(p.as_str(), glob_base)?))
         .collect()
 }
 

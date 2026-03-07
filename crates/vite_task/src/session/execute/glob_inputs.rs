@@ -10,13 +10,12 @@ use std::{
     io::{self, Read},
 };
 
+use vite_glob::AnchoredGlob;
 #[cfg(test)]
 use vite_path::AbsolutePathBuf;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use wax::{Glob, walk::Entry as _};
-
-use super::spawn::ResolvedNegativeGlob;
 
 /// Collect walk entries into the result map, filtering against resolved negatives.
 ///
@@ -28,11 +27,10 @@ use super::spawn::ResolvedNegativeGlob;
 fn collect_walk_entries(
     walk: impl Iterator<Item = Result<wax::walk::GlobEntry, wax::walk::WalkError>>,
     workspace_root: &AbsolutePath,
-    resolved_negatives: &[ResolvedNegativeGlob],
+    resolved_negatives: &[AnchoredGlob],
     result: &mut BTreeMap<RelativePathBuf, u64>,
 ) -> anyhow::Result<()> {
     use path_clean::PathClean as _;
-    use wax::Program as _;
 
     for entry in walk {
         let entry = match entry {
@@ -53,21 +51,18 @@ fn collect_walk_entries(
         // Clean the path to normalize `..` components (from globs like `../shared/src/**`)
         let cleaned_path = entry.path().clean();
 
+        // Convert to AbsolutePath for negative matching and workspace-relative stripping
+        let Some(cleaned_abs) = AbsolutePath::new(&cleaned_path) else {
+            continue;
+        };
+
         // Filter against resolved negatives
-        if resolved_negatives.iter().any(|(prefix, variant)| {
-            let Ok(remainder) = cleaned_path.strip_prefix(prefix) else {
-                return false;
-            };
-            variant.as_ref().map_or(remainder.as_os_str().is_empty(), |v| v.is_match(remainder))
-        }) {
+        if resolved_negatives.iter().any(|neg| neg.is_match(cleaned_abs)) {
             continue;
         }
 
         // Compute path relative to workspace_root for the result
-        let Some(relative_to_workspace) = cleaned_path
-            .strip_prefix(workspace_root.as_path())
-            .ok()
-            .and_then(|p| RelativePathBuf::new(p).ok())
+        let Some(relative_to_workspace) = cleaned_abs.strip_prefix(workspace_root).ok().flatten()
         else {
             continue; // Skip if path is outside workspace_root
         };
@@ -116,15 +111,9 @@ pub fn compute_globbed_inputs(
         return Ok(BTreeMap::new());
     }
 
-    // Resolve negatives: partition + clean to get (absolute_prefix, variant)
-    let resolved_negatives: Vec<ResolvedNegativeGlob> = negative_globs
+    let resolved_negatives: Vec<AnchoredGlob> = negative_globs
         .iter()
-        .map(|p| {
-            let glob = Glob::new(p.as_str())?.into_owned();
-            let (prefix, variant) = glob.partition();
-            let resolved = base_dir.as_path().join(&prefix).clean();
-            Ok((resolved, variant.map(Glob::into_owned)))
-        })
+        .map(|p| Ok(AnchoredGlob::new(p.as_str(), base_dir)?))
         .collect::<anyhow::Result<_>>()?;
 
     let mut result = BTreeMap::new();

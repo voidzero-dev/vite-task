@@ -1,8 +1,10 @@
+mod anchored;
 mod error;
 
 #[expect(clippy::disallowed_types, reason = "wax::Glob::is_match requires std::path::Path")]
 use std::path::Path;
 
+pub use anchored::AnchoredGlob;
 pub use error::Error;
 use wax::{Glob, Program};
 
