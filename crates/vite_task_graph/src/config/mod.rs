@@ -90,12 +90,12 @@ pub struct CacheConfig {
 /// Resolved input configuration for cache fingerprinting.
 ///
 /// This is the normalized form after parsing user config.
-/// - `includes_auto`: Whether automatic inference from fspy is enabled
+/// - `includes_auto`: Whether automatic file tracking is enabled
 /// - `positive_globs`: Glob patterns for files to include (without `!` prefix)
 /// - `negative_globs`: Glob patterns for files to exclude (without `!` prefix)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Encode, Decode)]
 pub struct ResolvedInputConfig {
-    /// Whether automatic file access inference (via fspy) is enabled
+    /// Whether automatic file tracking is enabled
     pub includes_auto: bool,
 
     /// Positive glob patterns (files to include).

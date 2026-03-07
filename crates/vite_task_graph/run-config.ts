@@ -30,21 +30,21 @@ export type Task = {
        */
       passThroughEnvs?: Array<string>;
       /**
-       * Input patterns for cache fingerprinting.
+       * Files to include in the cache fingerprint.
        *
-       * - Omitted: defaults to `[{auto: true}]` - infer from file accesses
-       * - Empty array: no inputs, inference disabled
-       * - Glob strings: explicit files to fingerprint
-       * - `{auto: true}`: enable automatic inference via fspy
-       * - Negative globs: exclude files (prefix with `!`)
+       * - Omitted: automatically tracks which files the task reads
+       * - `[]` (empty): disables file tracking entirely
+       * - Glob patterns (e.g. `"src/**"`) select specific files
+       * - `{auto: true}` enables automatic file tracking
+       * - Negative patterns (e.g. `"!dist/**"`) exclude matched files
        *
-       * Globs are relative to the package directory where the task is defined.
+       * Patterns are relative to the package directory.
        */
       inputs?: Array<
         | string
         | {
             /**
-             * Whether automatic file access inference (via fspy) is enabled
+             * Automatically track which files the task reads
              */
             auto: boolean;
           }
