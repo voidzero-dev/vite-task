@@ -4,6 +4,12 @@ Thank you for your interest in contributing to Vite Task!
 
 We welcome and appreciate any form of contributions.
 
+## Development Binary vs Official Release
+
+This repository builds the `vp` development binary via the `vite_task_bin` crate. This binary is intended for **development and testing only**.
+
+The official Vite Task is released as part of [vite-plus](https://github.com/voidzero-dev/vite-plus). When contributing, you'll use the `vp` dev binary to test your changes locally, but end users consume Vite Task through vite-plus.
+
 ## Getting Started
 
 ### Prerequisites
