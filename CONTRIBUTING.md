@@ -8,9 +8,9 @@ We welcome and appreciate any form of contributions.
 
 This repository builds the `vp` development binary via the `vite_task_bin` crate. This binary is a **standalone dev build** for testing Vite Task in isolation.
 
-In production, Vite Task is integrated into [Vite+](https://github.com/voidzero-dev/vite-plus) — the unified toolchain for the web. End users access Vite Task functionality through the `vp run` command in Vite+, where it provides monorepo task execution with caching and dependency-aware scheduling alongside Vite+'s other capabilities (dev server, testing, linting, building, etc.).
+In production, Vite Task is integrated into [Vite+](https://github.com/voidzero-dev/vite-plus) — the unified toolchain for the web. Vite+ depends on the `vite_task` library crate (not `vite_task_bin`) to provide monorepo task execution with caching and dependency-aware scheduling alongside its other capabilities (dev server, testing, linting, building, etc.).
 
-When contributing to this repository, use the dev binary built by `vite_task_bin` (`cargo run -p vite_task_bin`) to test your changes locally.
+When contributing to this repository, use the dev binary built by `vite_task_bin` (`cargo run -p vite_task_bin`) to test your changes locally. **If your changes modify the `vite_task` public API, you must also open a corresponding PR in [vite-plus](https://github.com/voidzero-dev/vite-plus) to update its usage.**
 
 ## Getting Started
 
