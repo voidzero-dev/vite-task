@@ -10,71 +10,90 @@ use std::{
     io::{self, Read},
 };
 
-use path_clean::PathClean;
 #[cfg(test)]
 use vite_path::AbsolutePathBuf;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
-use wax::{Glob, Program as _};
+use wax::{Glob, walk::Entry as _};
 
-/// A glob pattern resolved to an absolute base directory.
-///
-/// Uses [`wax::Glob::partition`] to separate the invariant prefix from the
-/// wildcard suffix, then resolves the prefix to an absolute path via
-/// [`path_clean`] (normalizing components like `..`).
-///
-/// For example, `../shared/src/**` relative to `/ws/packages/app` resolves to:
-/// - `resolved_base`: `/ws/packages/shared/src`
-/// - `variant`: `Some(Glob("**"))`
-#[expect(clippy::disallowed_types, reason = "path_clean returns std::path::PathBuf")]
-pub struct ResolvedGlob {
-    resolved_base: std::path::PathBuf,
-    variant: Option<Glob<'static>>,
-}
+use super::spawn::ResolvedNegativeGlob;
 
-impl ResolvedGlob {
-    /// Resolve a glob pattern relative to `base_dir`.
-    pub fn new(pattern: &str, base_dir: &AbsolutePath) -> anyhow::Result<Self> {
-        let glob = Glob::new(pattern)?.into_owned();
-        let (base_pathbuf, variant) = glob.partition();
-        let base_str = base_pathbuf.to_str().unwrap_or(".");
-        let resolved_base = if base_str.is_empty() {
-            base_dir.as_path().to_path_buf()
-        } else {
-            base_dir.join(base_str).as_path().clean()
+/// Collect walk entries into the result map, filtering against resolved negatives.
+///
+/// Each positive glob is partitioned into an invariant prefix and a variant pattern.
+/// The prefix is joined with `base_dir` and cleaned (normalizing `..`) to get the walk root.
+/// The variant pattern is then walked from the cleaned root.
+///
+/// Walk errors for non-existent directories are skipped gracefully.
+fn collect_walk_entries(
+    walk: impl Iterator<Item = Result<wax::walk::GlobEntry, wax::walk::WalkError>>,
+    workspace_root: &AbsolutePath,
+    resolved_negatives: &[ResolvedNegativeGlob],
+    result: &mut BTreeMap<RelativePathBuf, u64>,
+) -> anyhow::Result<()> {
+    use path_clean::PathClean as _;
+    use wax::Program as _;
+
+    for entry in walk {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                // WalkError -> io::Error preserves the error kind
+                let io_err: io::Error = err.into();
+                if io_err.kind() == io::ErrorKind::NotFound {
+                    continue;
+                }
+                return Err(io_err.into());
+            }
         };
-        Ok(Self { resolved_base, variant: variant.map(Glob::into_owned) })
-    }
+        if !entry.file_type().is_file() {
+            continue;
+        }
 
-    /// Walk the filesystem and yield matching file paths.
-    #[expect(clippy::disallowed_types, reason = "yields std::path::PathBuf from wax walker")]
-    pub fn walk(&self) -> Box<dyn Iterator<Item = std::path::PathBuf> + '_> {
-        match &self.variant {
-            Some(variant_glob) => Box::new(
-                variant_glob
-                    .walk(&self.resolved_base)
-                    .filter_map(Result::ok)
-                    .map(wax::walk::Entry::into_path),
-            ),
-            None => Box::new(std::iter::once(self.resolved_base.clone())),
+        // Clean the path to normalize `..` components (from globs like `../shared/src/**`)
+        let cleaned_path = entry.path().clean();
+
+        // Filter against resolved negatives
+        if resolved_negatives.iter().any(|(prefix, variant)| {
+            let Ok(remainder) = cleaned_path.strip_prefix(prefix) else {
+                return false;
+            };
+            variant.as_ref().map_or(remainder.as_os_str().is_empty(), |v| v.is_match(remainder))
+        }) {
+            continue;
+        }
+
+        // Compute path relative to workspace_root for the result
+        let Some(relative_to_workspace) = cleaned_path
+            .strip_prefix(workspace_root.as_path())
+            .ok()
+            .and_then(|p| RelativePathBuf::new(p).ok())
+        else {
+            continue; // Skip if path is outside workspace_root
+        };
+
+        // Hash file content
+        match hash_file_content(&cleaned_path) {
+            Ok(hash) => {
+                result.insert(relative_to_workspace, hash);
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                // File was deleted between walk and hash, skip it
+            }
+            Err(err) => {
+                return Err(err.into());
+            }
         }
     }
-
-    /// Check if an absolute path matches this resolved glob.
-    #[expect(clippy::disallowed_types, reason = "matching against std::path::Path")]
-    pub fn matches(&self, path: &std::path::Path) -> bool {
-        path.strip_prefix(&self.resolved_base).ok().is_some_and(|remainder| {
-            self.variant
-                .as_ref()
-                .map_or(remainder.as_os_str().is_empty(), |v| v.is_match(remainder))
-        })
-    }
+    Ok(())
 }
 
 /// Compute globbed inputs by walking positive glob patterns and filtering with negative patterns.
 ///
-/// Glob patterns may contain `..` to reference files outside the package directory
-/// (e.g., `../shared/src/**` to include a sibling package's source files).
+/// Each glob is partitioned into an invariant prefix and a variant pattern. The prefix is
+/// joined with `base_dir` and cleaned to normalize `..` components, producing the walk root.
+/// The variant pattern walks the cleaned root. Negative patterns are resolved the same way
+/// and used to filter walked entries by matching against cleaned absolute paths.
 ///
 /// # Arguments
 /// * `base_dir` - The package directory where the task is defined (globs are relative to this)
@@ -85,69 +104,59 @@ impl ResolvedGlob {
 /// # Returns
 /// A sorted map of relative paths (from `workspace_root`) to their content hashes.
 /// Only files are included (directories are skipped).
-///
-/// # Example
-/// ```ignore
-/// // For a task defined in `packages/foo/` with inputs: ["src/**/*.ts", "!**/*.test.ts"]
-/// let inputs = compute_globbed_inputs(
-///     &packages_foo_path,
-///     &workspace_root,
-///     &["src/**/*.ts".into()].into_iter().collect(),
-///     &["**/*.test.ts".into()].into_iter().collect(),
-/// )?;
-/// // Returns: { "packages/foo/src/index.ts" => 0x1234..., ... }
-/// ```
 pub fn compute_globbed_inputs(
     base_dir: &AbsolutePath,
     workspace_root: &AbsolutePath,
     positive_globs: &std::collections::BTreeSet<Str>,
     negative_globs: &std::collections::BTreeSet<Str>,
 ) -> anyhow::Result<BTreeMap<RelativePathBuf, u64>> {
-    // If no positive globs, return empty result
+    use path_clean::PathClean as _;
+
     if positive_globs.is_empty() {
         return Ok(BTreeMap::new());
     }
 
-    let negatives: Vec<ResolvedGlob> = negative_globs
+    // Resolve negatives: partition + clean to get (absolute_prefix, variant)
+    let resolved_negatives: Vec<ResolvedNegativeGlob> = negative_globs
         .iter()
-        .map(|p| ResolvedGlob::new(p.as_str(), base_dir))
+        .map(|p| {
+            let glob = Glob::new(p.as_str())?.into_owned();
+            let (prefix, variant) = glob.partition();
+            let resolved = base_dir.as_path().join(&prefix).clean();
+            Ok((resolved, variant.map(Glob::into_owned)))
+        })
         .collect::<anyhow::Result<_>>()?;
 
     let mut result = BTreeMap::new();
 
     for pattern in positive_globs {
-        let resolved = ResolvedGlob::new(pattern.as_str(), base_dir)?;
+        let pos = Glob::new(pattern.as_str())?.into_owned();
+        let (pos_prefix, pos_variant) = pos.partition();
+        let walk_root = base_dir.as_path().join(&pos_prefix).clean();
 
-        for absolute_path in resolved.walk() {
-            // Skip non-files
-            if !absolute_path.is_file() {
-                continue;
+        if let Some(variant_glob) = pos_variant {
+            if walk_root.is_dir() {
+                collect_walk_entries(
+                    variant_glob.into_owned().walk(&walk_root),
+                    workspace_root,
+                    &resolved_negatives,
+                    &mut result,
+                )?;
             }
-
-            // Apply negative patterns
-            if negatives.iter().any(|neg| neg.matches(&absolute_path)) {
-                continue;
-            }
-
-            // Compute path relative to workspace_root for the result
-            let Some(relative_to_workspace) = absolute_path
-                .strip_prefix(workspace_root.as_path())
-                .ok()
-                .and_then(|p| RelativePathBuf::new(p).ok())
-            else {
-                continue; // Skip if path is outside workspace_root
-            };
-
-            // Hash file content
-            match hash_file_content(&absolute_path) {
-                Ok(hash) => {
-                    result.insert(relative_to_workspace, hash);
-                }
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                    // File was deleted between walk and hash, skip it
-                }
-                Err(err) => {
-                    return Err(err.into());
+        } else {
+            // Invariant-only glob (specific file path) — hash directly if it exists
+            if walk_root.is_file()
+                && let Some(relative) = walk_root
+                    .strip_prefix(workspace_root.as_path())
+                    .ok()
+                    .and_then(|p| RelativePathBuf::new(p).ok())
+            {
+                match hash_file_content(&walk_root) {
+                    Ok(hash) => {
+                        result.insert(relative, hash);
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err.into()),
                 }
             }
         }

@@ -15,7 +15,7 @@ use vite_task_plan::{
 use self::{
     fingerprint::PostRunFingerprint,
     glob_inputs::compute_globbed_inputs,
-    spawn::{SpawnResult, TrackedPathAccesses, spawn_with_tracking},
+    spawn::{ResolvedNegativeGlob, SpawnResult, TrackedPathAccesses, spawn_with_tracking},
 };
 use super::{
     cache::{CacheEntryValue, ExecutionCache},
@@ -320,6 +320,28 @@ pub async fn execute_spawn(
             (Some(Vec::new()), path_accesses, Some((cache_metadata, globbed_inputs)))
         });
 
+    // Resolve negative globs for fspy path filtering
+    let resolved_negatives = if let Some((cache_metadata, _)) = &cache_metadata_and_inputs {
+        match resolve_negative_globs(
+            &cache_metadata.glob_base,
+            &cache_metadata.input_config.negative_globs,
+        ) {
+            Ok(negs) => negs,
+            Err(err) => {
+                leaf_reporter
+                    .finish(
+                        None,
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                        Some(ExecutionError::PostRunFingerprint(err)),
+                    )
+                    .await;
+                return SpawnOutcome::Failed;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
     #[expect(
         clippy::large_futures,
         reason = "spawn_with_tracking manages process I/O and creates a large future"
@@ -331,6 +353,7 @@ pub async fn execute_spawn(
         &mut stdio_config.stderr_writer,
         std_outputs.as_mut(),
         path_accesses.as_mut(),
+        &resolved_negatives,
     )
     .await
     {
@@ -358,12 +381,7 @@ pub async fn execute_spawn(
             let path_reads = path_accesses.as_ref().map_or(&empty_path_reads, |pa| &pa.path_reads);
 
             // Execution succeeded — attempt to create fingerprint and update cache
-            match PostRunFingerprint::create(
-                path_reads,
-                cache_base_path,
-                &cache_metadata.glob_base,
-                &cache_metadata.input_config,
-            ) {
+            match PostRunFingerprint::create(path_reads, cache_base_path) {
                 Ok(post_run_fingerprint) => {
                     let new_cache_value = CacheEntryValue {
                         post_run_fingerprint,
@@ -402,6 +420,28 @@ pub async fn execute_spawn(
     leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error).await;
 
     SpawnOutcome::Spawned(result.exit_status)
+}
+
+/// Resolve negative glob patterns into absolute prefix + optional variant for fspy path filtering.
+///
+/// Each negative glob is partitioned into an invariant prefix and a variant (dynamic) part.
+/// The prefix is joined with `glob_base` and cleaned to produce an absolute path for efficient
+/// prefix-based filtering in `spawn_with_tracking`.
+fn resolve_negative_globs(
+    glob_base: &AbsolutePath,
+    negative_globs: &std::collections::BTreeSet<vite_str::Str>,
+) -> anyhow::Result<Vec<ResolvedNegativeGlob>> {
+    use path_clean::PathClean as _;
+
+    negative_globs
+        .iter()
+        .map(|p| {
+            let glob = wax::Glob::new(p.as_str())?.into_owned();
+            let (prefix, variant) = glob.partition();
+            let resolved = glob_base.as_path().join(&prefix).clean();
+            Ok((resolved, variant.map(wax::Glob::into_owned)))
+        })
+        .collect()
 }
 
 /// Spawn a command with all three stdio file descriptors inherited from the parent.

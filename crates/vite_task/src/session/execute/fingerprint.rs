@@ -15,9 +15,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
-use vite_task_graph::config::ResolvedInputConfig;
 
-use super::{glob_inputs::ResolvedGlob, spawn::PathRead};
+use super::spawn::PathRead;
 use crate::collections::HashMap;
 
 /// Post-run fingerprint capturing file state after execution.
@@ -70,41 +69,25 @@ impl std::fmt::Display for PostRunFingerprintMismatch {
 impl PostRunFingerprint {
     /// Creates a new fingerprint from path accesses after task execution.
     ///
+    /// Negative glob filtering is done upstream in `spawn_with_tracking`.
+    /// Paths may contain `..` components from fspy, so this method cleans them
+    /// before fingerprinting.
+    ///
     /// # Arguments
-    /// * `path_reads` - Map of paths that were read during execution (from fspy)
+    /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
     /// * `base_dir` - Workspace root for resolving relative paths
-    /// * `glob_base` - Package directory where the task is defined (negative globs are relative to this)
-    /// * `input_config` - Resolved input configuration controlling what to fingerprint
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
-        glob_base: &AbsolutePath,
-        input_config: &ResolvedInputConfig,
     ) -> anyhow::Result<Self> {
-        // If inference is disabled, return empty inferred_inputs
-        if !input_config.includes_auto {
-            return Ok(Self { inferred_inputs: HashMap::default() });
-        }
-
-        let negatives: Vec<ResolvedGlob> = input_config
-            .negative_globs
-            .iter()
-            .map(|p| ResolvedGlob::new(p.as_str(), glob_base))
-            .collect::<anyhow::Result<_>>()?;
-
         let inferred_inputs = inferred_path_reads
             .par_iter()
-            .filter_map(|(relative_path, path_read)| {
+            .map(|(relative_path, path_read)| {
                 // Clean the absolute path to normalize `..` from fspy-tracked paths
                 // (e.g., `packages/sub-pkg/../shared/dist/output.js`).
                 let cleaned_abs =
                     path_clean::PathClean::clean(base_dir.join(relative_path).as_path());
-
-                // Apply negative globs against the cleaned path
-                if negatives.iter().any(|neg| neg.matches(&cleaned_abs)) {
-                    return None;
-                }
 
                 // Derive a cleaned workspace-relative key so stored paths are normalized
                 let clean_key = cleaned_abs
@@ -114,11 +97,8 @@ impl PostRunFingerprint {
                     .unwrap_or_else(|| relative_path.clone());
 
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(&clean_key));
-                let fingerprint = match fingerprint_path(&full_path, *path_read) {
-                    Ok(f) => f,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok((clean_key, fingerprint)))
+                let fingerprint = fingerprint_path(&full_path, *path_read)?;
+                Ok((clean_key, fingerprint))
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 

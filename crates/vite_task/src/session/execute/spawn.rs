@@ -54,6 +54,12 @@ pub struct TrackedPathAccesses {
     pub path_writes: FxHashSet<RelativePathBuf>,
 }
 
+/// Resolved negative glob pattern for filtering fspy-tracked paths.
+/// The `PathBuf` is the resolved absolute prefix (glob base + invariant prefix, cleaned).
+/// The `Option<Glob>` is the variant (dynamic) part of the pattern, if any.
+#[expect(clippy::disallowed_types, reason = "wax partition returns std::path::PathBuf")]
+pub type ResolvedNegativeGlob = (std::path::PathBuf, Option<wax::Glob<'static>>);
+
 /// Spawn a command with optional file system tracking via fspy, using piped stdio.
 ///
 /// Returns the execution result including exit status and duration.
@@ -62,6 +68,7 @@ pub struct TrackedPathAccesses {
 /// - `stdout_writer`/`stderr_writer` receive the child's stdout/stderr output in real-time.
 /// - `std_outputs` if provided, will be populated with captured outputs for cache replay.
 /// - `path_accesses` if provided, fspy will be used to track file accesses. If `None`, fspy is disabled.
+/// - `resolved_negatives` - resolved negative glob patterns for filtering fspy-tracked paths.
 #[tracing::instrument(level = "debug", skip_all)]
 #[expect(clippy::future_not_send, reason = "uses !Send dyn AsyncWrite writers internally")]
 #[expect(
@@ -75,6 +82,7 @@ pub async fn spawn_with_tracking(
     stderr_writer: &mut (dyn AsyncWrite + Unpin),
     std_outputs: Option<&mut Vec<StdOutput>>,
     path_accesses: Option<&mut TrackedPathAccesses>,
+    resolved_negatives: &[ResolvedNegativeGlob],
 ) -> anyhow::Result<SpawnResult> {
     /// The tracking state of the spawned process.
     /// Determined by whether `path_accesses` is `Some` (fspy enabled) or `None` (fspy disabled).
@@ -205,6 +213,25 @@ pub async fn spawn_with_tracking(
         // Skip .git directory accesses (workaround for tools like oxlint)
         if relative_path.as_path().strip_prefix(".git").is_ok() {
             continue;
+        }
+
+        // Filter against resolved negative globs.
+        // Clean the path to normalize `..` only for matching purposes, since
+        // resolved negatives are cleaned absolute paths.
+        if !resolved_negatives.is_empty() {
+            let cleaned_abs =
+                path_clean::PathClean::clean(workspace_root.join(&relative_path).as_path());
+            if resolved_negatives.iter().any(|(resolved_prefix, variant)| {
+                let Ok(remainder) = cleaned_abs.strip_prefix(resolved_prefix) else {
+                    return false;
+                };
+                variant.as_ref().map_or(remainder.as_os_str().is_empty(), |v| {
+                    use wax::Program as _;
+                    v.is_match(remainder)
+                })
+            }) {
+                continue;
+            }
         }
 
         if access.mode.contains(AccessMode::READ) {
