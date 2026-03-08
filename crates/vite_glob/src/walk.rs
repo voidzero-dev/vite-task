@@ -55,16 +55,11 @@
 //   N descendant P → negative gets a bridge, positive may not
 //   unrelated     → negative cannot affect this walk, skip it
 
-use std::borrow::Cow;
-
 use rustc_hash::FxHashSet;
-use vite_path::{AbsolutePath, AbsolutePathBuf};
-use wax::{
-    Glob,
-    walk::{Entry as _, FileIterator as _},
-};
+use vite_path::AbsolutePathBuf;
+use wax::walk::{Entry as _, FileIterator as _};
 
-use crate::{AnchoredGlob, Error};
+use crate::{AnchoredGlob, Error, anchored::common_ancestor};
 
 /// Walk the filesystem, returning files matching any of the `positive_globs`
 /// while excluding those matching any of the `negative_globs`.
@@ -95,7 +90,7 @@ fn walk_positive(
 ) -> Result<(), Error> {
     let pos_prefix = pos.prefix();
 
-    let Some(pos_variant) = pos.variant() else {
+    let Some(_) = pos.variant() else {
         // Exact path — include if file exists and no negative matches it
         if pos_prefix.as_path().is_file() && !negatives.iter().any(|neg| neg.is_match(pos_prefix)) {
             results.insert(pos_prefix.to_absolute_path_buf());
@@ -112,36 +107,20 @@ fn walk_positive(
     // unnecessary traversal.
     let walk_root = negatives
         .iter()
-        .filter(|neg| {
-            pos_prefix.as_path().starts_with(neg.prefix().as_path())
-                || neg.prefix().as_path().starts_with(pos_prefix.as_path())
-        })
+        .filter(|neg| neg.has_related_prefix(pos_prefix))
         .fold(pos_prefix.to_absolute_path_buf(), |acc, neg| common_ancestor(&acc, neg.prefix()));
 
     // Reroot the positive glob: prepend the bridge (walk_root → pos_prefix)
     // to the variant so wax walks from walk_root but descends into pos_prefix.
-    let pos_bridge =
-        path_bridge(&walk_root, pos_prefix).expect("walk root is an ancestor of pos prefix");
-    let pos_pattern = rerooted_pattern(&pos_bridge, pos_variant);
-    let pos_glob = Glob::new(&pos_pattern)?.into_owned();
+    let pos_glob = pos.reroot(&walk_root)?.expect("walk root is an ancestor of pos prefix");
 
     // Reroot each negative glob the same way: prepend its bridge
     // (walk_root → neg_prefix) to the variant. Negatives with unrelated
-    // prefixes fail path_bridge and are skipped.
+    // prefixes return None and are skipped.
     let mut neg_globs = Vec::new();
     for neg in negatives {
-        let Some(bridge) = path_bridge(&walk_root, neg.prefix()) else {
-            continue;
-        };
-        match neg.variant() {
-            Some(variant) => {
-                let pattern = rerooted_pattern(&bridge, variant);
-                neg_globs.push(Glob::new(&pattern)?.into_owned());
-            }
-            None if !bridge.is_empty() => {
-                neg_globs.push(Glob::new(&escape_glob(&bridge))?.into_owned());
-            }
-            None => {} // variant-less negative at the walk root itself — cannot exclude files
+        if let Some(rerooted) = neg.reroot(&walk_root)? {
+            neg_globs.push(rerooted);
         }
     }
 
@@ -168,67 +147,6 @@ fn collect_entries(
         }
     }
     Ok(())
-}
-
-/// Compute the "bridge" — the relative path from `ancestor` to `path` — as a
-/// `/`-separated string. Returns `None` if `path` is not under `ancestor`
-/// (i.e. the prefixes are unrelated and no rerooting is possible).
-#[expect(
-    clippy::disallowed_types,
-    clippy::disallowed_methods,
-    reason = "bridge computation requires std String and str::replace for wax glob patterns"
-)]
-fn path_bridge(ancestor: &AbsolutePath, path: &AbsolutePath) -> Option<String> {
-    let remainder = path.as_path().strip_prefix(ancestor.as_path()).ok()?;
-    Some(remainder.to_string_lossy().replace('\\', "/"))
-}
-
-/// Build a rerooted glob pattern by joining an escaped bridge path with a
-/// variant glob. When the bridge is empty (prefix == walk root), the variant
-/// is returned unchanged.
-#[expect(clippy::disallowed_types, reason = "building glob pattern string for wax requires String")]
-fn rerooted_pattern(bridge: &str, variant: &Glob<'_>) -> String {
-    if bridge.is_empty() {
-        variant.to_string()
-    } else {
-        [&*escape_glob(bridge), "/", &variant.to_string()].concat()
-    }
-}
-
-/// Compute the longest common ancestor of two absolute paths.
-#[expect(
-    clippy::disallowed_types,
-    reason = "collecting std::path::Components requires std::path::PathBuf"
-)]
-fn common_ancestor(a: &AbsolutePath, b: &AbsolutePath) -> AbsolutePathBuf {
-    let common: std::path::PathBuf = a
-        .as_path()
-        .components()
-        .zip(b.as_path().components())
-        .take_while(|(a, b)| a == b)
-        .map(|(a, _)| a)
-        .collect();
-    AbsolutePathBuf::new(common).expect("common ancestor of absolute paths is absolute")
-}
-
-/// Escape wax glob metacharacters in a literal path string. The bridge is
-/// always a literal path (derived from invariant prefixes), but it may
-/// contain characters that wax interprets as glob syntax.
-fn escape_glob(s: &str) -> Cow<'_, str> {
-    const GLOB_CHARS: &[char] = &['?', '*', '$', ':', '<', '>', '(', ')', '[', ']', '{', '}', ','];
-    if !s.contains(GLOB_CHARS) {
-        return Cow::Borrowed(s);
-    }
-    let mut escaped = s.to_owned();
-    escaped.clear();
-    escaped.reserve(s.len() + 4);
-    for c in s.chars() {
-        if GLOB_CHARS.contains(&c) {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
-    Cow::Owned(escaped)
 }
 
 #[cfg(test)]
