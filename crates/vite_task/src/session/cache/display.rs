@@ -191,11 +191,17 @@ pub fn format_input_change_str(kind: InputChangeKind, path: &str) -> Str {
         InputChangeKind::ContentModified => vite_str::format!("'{path}' modified"),
         InputChangeKind::Added => {
             let (dir, filename) = split_path(path);
-            vite_str::format!("'{filename}' added in {dir}")
+            dir.map_or_else(
+                || vite_str::format!("'{filename}' added in workspace root"),
+                |dir| vite_str::format!("'{filename}' added in '{dir}'"),
+            )
         }
         InputChangeKind::Removed => {
             let (dir, filename) = split_path(path);
-            vite_str::format!("'{filename}' removed from {dir}")
+            dir.map_or_else(
+                || vite_str::format!("'{filename}' removed from workspace root"),
+                |dir| vite_str::format!("'{filename}' removed from '{dir}'"),
+            )
         }
     }
 }

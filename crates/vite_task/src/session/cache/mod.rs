@@ -129,11 +129,11 @@ impl Display for FingerprintMismatch {
 }
 
 /// Split a relative path into `(parent_dir, filename)`.
-/// Returns `("workspace root", path)` if there is no parent directory.
-pub fn split_path(path: &str) -> (&str, &str) {
+/// Returns `None` for the parent if the path has no `/` separator.
+pub fn split_path(path: &str) -> (Option<&str>, &str) {
     match path.rsplit_once('/') {
-        Some((parent, filename)) => (parent, filename),
-        None => ("workspace root", path),
+        Some((parent, filename)) => (Some(parent), filename),
+        None => (None, path),
     }
 }
 
