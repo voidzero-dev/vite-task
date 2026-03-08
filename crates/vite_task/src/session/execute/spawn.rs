@@ -206,14 +206,15 @@ pub async fn spawn_with_tracking(
                 return None;
             }
 
-            // Clean `..` components only for glob matching — fspy may report paths
-            // like `packages/sub-pkg/../shared/dist/output.js` that won't match
-            // workspace-root-relative negative globs without normalization.
-            if !resolved_negatives.is_empty() {
-                let cleaned = relative.clean();
-                if resolved_negatives.iter().any(|neg| neg.is_match(cleaned.as_str())) {
-                    return None;
-                }
+            // Clean `..` components — fspy may report paths like
+            // `packages/sub-pkg/../shared/dist/output.js`. Normalize them for
+            // consistent behavior across platforms and clean user-facing messages.
+            let relative = relative.clean();
+
+            if !resolved_negatives.is_empty()
+                && resolved_negatives.iter().any(|neg| neg.is_match(relative.as_str()))
+            {
+                return None;
             }
 
             Some(relative)
