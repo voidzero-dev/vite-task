@@ -194,8 +194,6 @@ fn resolve_glob_to_workspace_relative(
     package_dir: &AbsolutePath,
     workspace_root: &AbsolutePath,
 ) -> Result<Str, ResolveTaskConfigError> {
-    use cow_utils::CowUtils as _;
-
     let glob = wax::Glob::new(pattern).map_err(|source| ResolveTaskConfigError::InvalidGlob {
         pattern: Str::from(pattern),
         source: Box::new(source),
@@ -203,17 +201,16 @@ fn resolve_glob_to_workspace_relative(
     let (invariant_prefix, variant) = glob.partition();
 
     let joined = package_dir.join(&invariant_prefix).clean();
-    let stripped = joined.as_path().strip_prefix(workspace_root.as_path()).map_err(|_| {
+    let stripped = joined.strip_prefix(workspace_root).map_err(|_| {
         ResolveTaskConfigError::GlobOutsideWorkspace { pattern: Str::from(pattern) }
     })?;
 
     // Re-escape the prefix path for use in a glob pattern
-    let stripped_str = stripped.to_str().ok_or_else(|| {
-        ResolveTaskConfigError::GlobOutsideWorkspace { pattern: Str::from(pattern) }
+    let stripped = stripped.ok_or_else(|| ResolveTaskConfigError::GlobOutsideWorkspace {
+        pattern: Str::from(pattern),
     })?;
-    // Normalize backslashes to forward slashes for cross-platform compatibility
-    let escaped = wax::escape(stripped_str);
-    let escaped_prefix = escaped.cow_replace('\\', "/");
+
+    let escaped_prefix = wax::escape(stripped.as_str());
 
     let result = match variant {
         Some(variant_glob) if escaped_prefix.is_empty() => {
