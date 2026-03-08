@@ -9,11 +9,13 @@ rust-version.workspace = true
 
 [dependencies]
 path-clean = { workspace = true }
+rustc-hash = { workspace = true }
 thiserror = { workspace = true }
 vite_path = { workspace = true }
 wax = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 vite_str = { workspace = true }
 
 [lints]

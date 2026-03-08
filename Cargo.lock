@@ -3796,6 +3796,8 @@ name = "vite_glob"
 version = "0.0.0"
 dependencies = [
  "path-clean",
+ "rustc-hash",
+ "tempfile",
  "thiserror 2.0.18",
  "vite_path",
  "vite_str",

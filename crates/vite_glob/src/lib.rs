@@ -1,5 +1,6 @@
 mod anchored;
 mod error;
+pub mod walk;
 
 #[expect(clippy::disallowed_types, reason = "wax::Glob::is_match requires std::path::Path")]
 use std::path::Path;

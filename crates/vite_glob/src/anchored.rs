@@ -47,6 +47,18 @@ impl AnchoredGlob {
         Ok(Self { prefix, variant: variant.map(Glob::into_owned) })
     }
 
+    /// The invariant prefix directory of this glob.
+    #[must_use]
+    pub(crate) fn prefix(&self) -> &AbsolutePath {
+        &self.prefix
+    }
+
+    /// The variant (dynamic) portion of this glob, if any.
+    #[must_use]
+    pub(crate) const fn variant(&self) -> Option<&Glob<'static>> {
+        self.variant.as_ref()
+    }
+
     /// Check if an absolute path matches this anchored glob.
     #[must_use]
     pub fn is_match(&self, path: &AbsolutePath) -> bool {
