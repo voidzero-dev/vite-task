@@ -110,11 +110,11 @@ pub struct ResolvedInputConfig {
     /// Whether automatic file tracking is enabled
     pub includes_auto: bool,
 
-    /// Positive glob patterns (files to include).
+    /// Positive glob patterns (files to include), relative to the workspace root.
     /// Sorted for deterministic cache keys.
     pub positive_globs: BTreeSet<Str>,
 
-    /// Negative glob patterns (files to exclude, without the `!` prefix).
+    /// Negative glob patterns (files to exclude, without the `!` prefix), relative to the workspace root.
     /// Sorted for deterministic cache keys.
     pub negative_globs: BTreeSet<Str>,
 }
