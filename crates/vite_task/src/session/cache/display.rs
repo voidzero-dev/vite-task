@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use vite_str::Str;
 use vite_task_plan::cache_metadata::SpawnFingerprint;
 
-use super::{CacheMiss, FingerprintMismatch};
+use super::{CacheMiss, FingerprintMismatch, InputChangeKind, split_path};
 use crate::session::event::CacheStatus;
 
 /// Describes a single atomic change between two spawn fingerprints.
@@ -174,24 +174,28 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                     }
                 }
                 FingerprintMismatch::InputConfig => "inputs configuration changed",
-                FingerprintMismatch::GlobbedInput { path } => {
-                    return Some(vite_str::format!(
-                        "✗ cache miss: content of input '{path}' changed, executing"
-                    ));
-                }
-                FingerprintMismatch::PostRunFingerprint(diff) => {
-                    use crate::session::execute::fingerprint::PostRunFingerprintMismatch;
-                    match diff {
-                        PostRunFingerprintMismatch::InputContentChanged { path } => {
-                            return Some(vite_str::format!(
-                                "✗ cache miss: content of input '{path}' changed, executing"
-                            ));
-                        }
-                    }
+                FingerprintMismatch::InputChanged { kind, path } => {
+                    let desc = format_input_change_str(*kind, path.as_str());
+                    return Some(vite_str::format!("✗ cache miss: {desc}, executing"));
                 }
             };
             Some(vite_str::format!("✗ cache miss: {reason}, executing"))
         }
         CacheStatus::Disabled(_) => Some(Str::from("⊘ cache disabled")),
+    }
+}
+
+/// Format an input change as a [`Str`] for inline display.
+pub fn format_input_change_str(kind: InputChangeKind, path: &str) -> Str {
+    match kind {
+        InputChangeKind::ContentModified => vite_str::format!("'{path}' modified"),
+        InputChangeKind::Added => {
+            let (dir, filename) = split_path(path);
+            vite_str::format!("'{filename}' added in {dir}")
+        }
+        InputChangeKind::Removed => {
+            let (dir, filename) = split_path(path);
+            vite_str::format!("'{filename}' removed from {dir}")
+        }
     }
 }

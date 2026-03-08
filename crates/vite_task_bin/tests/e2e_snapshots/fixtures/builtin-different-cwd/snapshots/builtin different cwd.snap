@@ -46,7 +46,7 @@ Finished in <duration> on 2 files with 90 rules using <n> threads.
 > echo 'console.log(1);' > folder2/a.js # modify folder2
 
 > cd folder1 && vp run lint # cache hit
-$ vp lint ✗ cache miss: content of input 'folder2/a.js' changed, executing
+$ vp lint ✗ cache miss: 'folder2/a.js' modified, executing
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[folder1/a.js:1:1]

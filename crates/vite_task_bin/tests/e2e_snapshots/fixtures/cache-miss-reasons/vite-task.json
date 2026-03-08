@@ -5,6 +5,11 @@
       "command": "print-file test.txt",
       "envs": ["MY_ENV"],
       "cache": true
+    },
+    "glob-test": {
+      "command": "print glob-test",
+      "inputs": ["*.txt"],
+      "cache": true
     }
   }
 }

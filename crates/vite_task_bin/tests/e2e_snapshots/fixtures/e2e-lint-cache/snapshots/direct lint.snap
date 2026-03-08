@@ -9,7 +9,7 @@ Finished in <duration> on 0 files with 90 rules using <n> threads.
 > echo debugger > main.js # add lint error
 
 > vp run lint # cache miss, lint fails
-$ vp lint ✗ cache miss: content of input '' changed, executing
+$ vp lint ✗ cache miss: 'main.js' added in workspace root, executing
 
   ! eslint(no-debugger): `debugger` statement is not allowed
    ,-[main.js:1:1]

@@ -8,5 +8,5 @@ export const main = 'initial';
 > replace-file-content package.json inputs-cache-test modified-pkg
 
 > vp run positive-auto-negative
-$ print-file src/main.ts ✗ cache miss: content of input 'package.json' changed, executing
+$ print-file src/main.ts ✗ cache miss: 'package.json' modified, executing
 export const main = 'initial';

@@ -14,7 +14,7 @@ initial content
 > replace-file-content foo.txt initial modified # modify shared input
 
 > vp run script2 # cache miss, input changed
-$ print-file foo.txt ✗ cache miss: content of input 'foo.txt' changed, executing
+$ print-file foo.txt ✗ cache miss: 'foo.txt' modified, executing
 modified content
 > vp run script1 # cache hit, script2 already warmed cache
 $ print-file foo.txt ✓ cache hit, replaying

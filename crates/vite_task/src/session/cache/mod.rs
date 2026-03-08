@@ -7,7 +7,10 @@ use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, t
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 // Re-export display functions for convenience
 pub use display::format_cache_status_inline;
-pub use display::{SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_spawn_change};
+pub use display::{
+    SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
+    format_spawn_change,
+};
 use rusqlite::{Connection, OptionalExtension as _, config::DbConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -15,10 +18,7 @@ use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_graph::config::ResolvedInputConfig;
 use vite_task_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
 
-use super::execute::{
-    fingerprint::{PostRunFingerprint, PostRunFingerprintMismatch},
-    spawn::StdOutput,
-};
+use super::execute::{fingerprint::PostRunFingerprint, spawn::StdOutput};
 
 /// Cache lookup key identifying a task's execution configuration.
 ///
@@ -83,6 +83,16 @@ pub enum CacheMiss {
     FingerprintMismatch(FingerprintMismatch),
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum InputChangeKind {
+    /// File content changed but path is the same
+    ContentModified,
+    /// New file or folder added
+    Added,
+    /// Existing file or folder removed
+    Removed,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum FingerprintMismatch {
     /// Found a previous cache entry key for the same task, but the spawn fingerprint differs.
@@ -95,10 +105,11 @@ pub enum FingerprintMismatch {
     },
     /// Found a previous cache entry key for the same task, but `input_config` differs.
     InputConfig,
-    /// Found the cache entry with the same spawn fingerprint, but an explicit globbed input changed
-    GlobbedInput { path: RelativePathBuf },
-    /// Found the cache entry with the same spawn fingerprint, but the post-run fingerprint mismatches
-    PostRunFingerprint(PostRunFingerprintMismatch),
+
+    InputChanged {
+        kind: InputChangeKind,
+        path: RelativePathBuf,
+    },
 }
 
 impl Display for FingerprintMismatch {
@@ -110,11 +121,19 @@ impl Display for FingerprintMismatch {
             Self::InputConfig => {
                 write!(f, "inputs configuration changed")
             }
-            Self::GlobbedInput { path } => {
-                write!(f, "content of input '{path}' changed")
+            Self::InputChanged { kind, path } => {
+                write!(f, "{}", display::format_input_change_str(*kind, path.as_str()))
             }
-            Self::PostRunFingerprint(diff) => Display::fmt(diff, f),
         }
+    }
+}
+
+/// Split a relative path into `(parent_dir, filename)`.
+/// Returns `("workspace root", path)` if there is no parent directory.
+pub fn split_path(path: &str) -> (&str, &str) {
+    match path.rsplit_once('/') {
+        Some((parent, filename)) => (parent, filename),
+        None => ("workspace root", path),
     }
 }
 
@@ -197,11 +216,9 @@ impl ExecutionCache {
             }
 
             // Validate post-run fingerprint (inferred inputs from fspy)
-            if let Some(post_run_fingerprint_mismatch) =
-                cache_value.post_run_fingerprint.validate(workspace_root)?
-            {
+            if let Some((kind, path)) = cache_value.post_run_fingerprint.validate(workspace_root)? {
                 return Ok(Err(CacheMiss::FingerprintMismatch(
-                    FingerprintMismatch::PostRunFingerprint(post_run_fingerprint_mismatch),
+                    FingerprintMismatch::InputChanged { kind, path },
                 )));
             }
             // Associate the execution key to the cache entry key if not already,
@@ -264,22 +281,40 @@ fn detect_globbed_input_change(
     loop {
         match (s, c) {
             (None, None) => return None,
-            (Some((path, _)), None) | (None, Some((path, _))) => {
-                return Some(FingerprintMismatch::GlobbedInput { path: path.clone() });
+            (Some((sp, _)), None) => {
+                return Some(FingerprintMismatch::InputChanged {
+                    kind: InputChangeKind::Removed,
+                    path: sp.clone(),
+                });
+            }
+            (None, Some((cp, _))) => {
+                return Some(FingerprintMismatch::InputChanged {
+                    kind: InputChangeKind::Added,
+                    path: cp.clone(),
+                });
             }
             (Some((sp, sh)), Some((cp, ch))) => match sp.cmp(cp) {
                 std::cmp::Ordering::Equal => {
                     if sh != ch {
-                        return Some(FingerprintMismatch::GlobbedInput { path: sp.clone() });
+                        return Some(FingerprintMismatch::InputChanged {
+                            kind: InputChangeKind::ContentModified,
+                            path: sp.clone(),
+                        });
                     }
                     s = stored_iter.next();
                     c = current_iter.next();
                 }
                 std::cmp::Ordering::Less => {
-                    return Some(FingerprintMismatch::GlobbedInput { path: sp.clone() });
+                    return Some(FingerprintMismatch::InputChanged {
+                        kind: InputChangeKind::Removed,
+                        path: sp.clone(),
+                    });
                 }
                 std::cmp::Ordering::Greater => {
-                    return Some(FingerprintMismatch::GlobbedInput { path: cp.clone() });
+                    return Some(FingerprintMismatch::InputChanged {
+                        kind: InputChangeKind::Added,
+                        path: cp.clone(),
+                    });
                 }
             },
         }

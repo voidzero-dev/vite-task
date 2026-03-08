@@ -14,5 +14,5 @@ export const lib = 'initial';
 > replace-file-content packages/[lib]/src/main.ts initial modified
 
 > vp run [lib]#build
-~/packages/[lib]$ print-file src/main.ts ✗ cache miss: content of input 'packages/[lib]/src/main.ts' changed, executing
+~/packages/[lib]$ print-file src/main.ts ✗ cache miss: 'packages/[lib]/src/main.ts' modified, executing
 export const lib = 'modified';

@@ -8,5 +8,5 @@ export const sub = 'initial';
 > replace-file-content packages/sub-pkg/src/sub.ts initial modified
 
 > vp run sub-pkg#sub-glob-with-cwd
-~/packages/sub-pkg/src$ print-file sub.ts ✗ cache miss: content of input 'packages/sub-pkg/src/sub.ts' changed, executing
+~/packages/sub-pkg/src$ print-file sub.ts ✗ cache miss: 'packages/sub-pkg/src/sub.ts' modified, executing
 export const sub = 'modified';

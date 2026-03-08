@@ -8,5 +8,5 @@ export const root = 'initial';
 > replace-file-content src/root.ts initial modified
 
 > vp run root-glob-test
-$ print-file src/root.ts ✗ cache miss: content of input 'src/root.ts' changed, executing
+$ print-file src/root.ts ✗ cache miss: 'src/root.ts' modified, executing
 export const root = 'modified';

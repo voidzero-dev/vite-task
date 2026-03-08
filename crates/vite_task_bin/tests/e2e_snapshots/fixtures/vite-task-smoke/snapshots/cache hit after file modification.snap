@@ -17,7 +17,7 @@ console.log('foo');
 $ echo hello ⊘ cache disabled
 hello
 
-$ print-file main.js ✗ cache miss: content of input 'main.js' changed, executing
+$ print-file main.js ✗ cache miss: 'main.js' modified, executing
 console.log('bar');
 
 ---

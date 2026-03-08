@@ -17,7 +17,7 @@ use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 
 use super::spawn::PathRead;
-use crate::collections::HashMap;
+use crate::{collections::HashMap, session::cache::InputChangeKind};
 
 /// Post-run fingerprint capturing file state after execution.
 /// Used to validate whether cached outputs are still valid.
@@ -50,22 +50,6 @@ pub enum DirEntryKind {
     Symlink,
 }
 
-/// Describes why the post-run fingerprint validation failed
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum PostRunFingerprintMismatch {
-    InputContentChanged { path: RelativePathBuf },
-}
-
-impl std::fmt::Display for PostRunFingerprintMismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InputContentChanged { path } => {
-                write!(f, "{path} content changed")
-            }
-        }
-    }
-}
-
 impl PostRunFingerprint {
     /// Creates a new fingerprint from path accesses after task execution.
     ///
@@ -94,12 +78,12 @@ impl PostRunFingerprint {
     }
 
     /// Validates the fingerprint against current filesystem state.
-    /// Returns `Some(mismatch)` if validation fails, `None` if valid.
+    /// Returns `Some((kind, path))` if an input changed, `None` if all valid.
     #[tracing::instrument(level = "debug", skip_all, name = "validate_post_run_fingerprint")]
     pub fn validate(
         &self,
         base_dir: &AbsolutePath,
-    ) -> anyhow::Result<Option<PostRunFingerprintMismatch>> {
+    ) -> anyhow::Result<Option<(InputChangeKind, RelativePathBuf)>> {
         let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
             |(input_relative_path, path_fingerprint)| {
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
@@ -113,13 +97,71 @@ impl PostRunFingerprint {
                 if path_fingerprint == &current_path_fingerprint {
                     None
                 } else {
-                    Some(Ok(PostRunFingerprintMismatch::InputContentChanged {
-                        path: input_relative_path.clone(),
-                    }))
+                    let (kind, entry_name) =
+                        determine_change_kind(path_fingerprint, &current_path_fingerprint);
+                    let path = if let Some(name) = entry_name {
+                        // For folder changes, build `dir/entry` path
+                        let entry = match RelativePathBuf::new(name.as_str()) {
+                            Ok(p) => p,
+                            Err(e) => return Some(Err(e.into())),
+                        };
+                        input_relative_path.as_relative_path().join(entry)
+                    } else {
+                        input_relative_path.clone()
+                    };
+                    Some(Ok((kind, path)))
                 }
             },
         );
         input_mismatch.transpose()
+    }
+}
+
+/// Determine the kind of change between two differing path fingerprints.
+/// Caller guarantees `stored != current`.
+///
+/// Returns `(kind, entry_name)` where `entry_name` is `Some` for folder changes
+/// when a specific added/removed entry can be identified.
+fn determine_change_kind<'a>(
+    stored: &'a PathFingerprint,
+    current: &'a PathFingerprint,
+) -> (InputChangeKind, Option<&'a Str>) {
+    match (stored, current) {
+        (PathFingerprint::NotFound, _) => (InputChangeKind::Added, None),
+        (_, PathFingerprint::NotFound) => (InputChangeKind::Removed, None),
+        (PathFingerprint::FileContentHash(_), PathFingerprint::FileContentHash(_)) => {
+            (InputChangeKind::ContentModified, None)
+        }
+        (PathFingerprint::Folder(old), PathFingerprint::Folder(new)) => {
+            determine_folder_change_kind(old.as_ref(), new.as_ref())
+        }
+        // Type changed (file ↔ folder)
+        _ => (InputChangeKind::Added, None),
+    }
+}
+
+/// Determine whether a folder change is an addition or removal by comparing entries.
+/// Returns the specific entry name that was added or removed, if identifiable.
+fn determine_folder_change_kind<'a>(
+    old: Option<&'a HashMap<Str, DirEntryKind>>,
+    new: Option<&'a HashMap<Str, DirEntryKind>>,
+) -> (InputChangeKind, Option<&'a Str>) {
+    match (old, new) {
+        (Some(old_entries), Some(new_entries)) => {
+            for key in old_entries.keys() {
+                if !new_entries.contains_key(key) {
+                    return (InputChangeKind::Removed, Some(key));
+                }
+            }
+            for key in new_entries.keys() {
+                if !old_entries.contains_key(key) {
+                    return (InputChangeKind::Added, Some(key));
+                }
+            }
+            // Same keys but different entry kinds — default to Added
+            (InputChangeKind::Added, None)
+        }
+        _ => (InputChangeKind::Added, None),
     }
 }
 

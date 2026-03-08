@@ -17,8 +17,8 @@ use vite_str::Str;
 use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
 use crate::session::{
     cache::{
-        CacheMiss, FingerprintMismatch, SpawnFingerprintChange, detect_spawn_fingerprint_changes,
-        format_spawn_change,
+        CacheMiss, FingerprintMismatch, InputChangeKind, SpawnFingerprintChange,
+        detect_spawn_fingerprint_changes, format_input_change_str, format_spawn_change,
     },
     event::{CacheDisabledReason, CacheErrorKind, CacheStatus, ExecutionError},
 };
@@ -114,8 +114,8 @@ pub enum SavedCacheMissReason {
     SpawnFingerprintChanged(Vec<SpawnFingerprintChange>),
     /// Task configuration changed (`input_config` or `glob_base`).
     ConfigChanged,
-    /// Content of an input file changed.
-    InputContentChanged { path: Str },
+    /// An input file or folder changed.
+    InputChanged { kind: InputChangeKind, path: Str },
 }
 
 /// An execution error, serializable for persistence.
@@ -241,16 +241,8 @@ impl SavedCacheMissReason {
                     Self::SpawnFingerprintChanged(detect_spawn_fingerprint_changes(old, new))
                 }
                 FingerprintMismatch::InputConfig => Self::ConfigChanged,
-                FingerprintMismatch::GlobbedInput { path } => {
-                    Self::InputContentChanged { path: Str::from(path.as_str()) }
-                }
-                FingerprintMismatch::PostRunFingerprint(diff) => {
-                    use crate::session::execute::fingerprint::PostRunFingerprintMismatch;
-                    match diff {
-                        PostRunFingerprintMismatch::InputContentChanged { path } => {
-                            Self::InputContentChanged { path: Str::from(path.as_str()) }
-                        }
-                    }
+                FingerprintMismatch::InputChanged { kind, path } => {
+                    Self::InputChanged { kind: *kind, path: Str::from(path.as_str()) }
                 }
             },
         }
@@ -434,8 +426,9 @@ impl TaskResult {
                     SavedCacheMissReason::ConfigChanged => {
                         Str::from("→ Cache miss: inputs configuration changed")
                     }
-                    SavedCacheMissReason::InputContentChanged { path } => {
-                        vite_str::format!("→ Cache miss: content of input '{path}' changed")
+                    SavedCacheMissReason::InputChanged { kind, path } => {
+                        let desc = format_input_change_str(*kind, path.as_str());
+                        vite_str::format!("→ Cache miss: {desc}")
                     }
                 },
             },
