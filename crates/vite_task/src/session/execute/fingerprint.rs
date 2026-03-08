@@ -4,6 +4,7 @@
 //! fingerprints of file system state after task execution.
 
 use std::{
+    collections::BTreeMap,
     fs::File,
     hash::Hasher as _,
     io::{self, BufRead, Read},
@@ -38,8 +39,8 @@ pub enum PathFingerprint {
     /// Directory with optional entry listing.
     /// `Folder(None)` means the directory was opened but entries were not read
     /// (e.g., for `openat` calls).
-    /// `Folder(Some(_))` contains the directory entries.
-    Folder(Option<HashMap<Str, DirEntryKind>>),
+    /// `Folder(Some(_))` contains the directory entries sorted by name.
+    Folder(Option<BTreeMap<Str, DirEntryKind>>),
 }
 
 /// Kind of directory entry
@@ -141,27 +142,38 @@ fn determine_change_kind<'a>(
 }
 
 /// Determine whether a folder change is an addition or removal by comparing entries.
+/// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
 /// Returns the specific entry name that was added or removed, if identifiable.
 fn determine_folder_change_kind<'a>(
-    old: Option<&'a HashMap<Str, DirEntryKind>>,
-    new: Option<&'a HashMap<Str, DirEntryKind>>,
+    old: Option<&'a BTreeMap<Str, DirEntryKind>>,
+    new: Option<&'a BTreeMap<Str, DirEntryKind>>,
 ) -> (InputChangeKind, Option<&'a Str>) {
-    match (old, new) {
-        (Some(old_entries), Some(new_entries)) => {
-            for key in old_entries.keys() {
-                if !new_entries.contains_key(key) {
-                    return (InputChangeKind::Removed, Some(key));
+    let (Some(old_entries), Some(new_entries)) = (old, new) else {
+        return (InputChangeKind::Added, None);
+    };
+
+    let mut old_iter = old_entries.iter();
+    let mut new_iter = new_entries.iter();
+    let mut o = old_iter.next();
+    let mut n = new_iter.next();
+
+    loop {
+        match (o, n) {
+            (None, None) => return (InputChangeKind::Added, None),
+            (Some((name, _)), None) => return (InputChangeKind::Removed, Some(name)),
+            (None, Some((name, _))) => return (InputChangeKind::Added, Some(name)),
+            (Some((ok, ov)), Some((nk, nv))) => match ok.cmp(nk) {
+                std::cmp::Ordering::Equal => {
+                    if ov != nv {
+                        return (InputChangeKind::Added, Some(ok));
+                    }
+                    o = old_iter.next();
+                    n = new_iter.next();
                 }
-            }
-            for key in new_entries.keys() {
-                if !old_entries.contains_key(key) {
-                    return (InputChangeKind::Added, Some(key));
-                }
-            }
-            // Same keys but different entry kinds — default to Added
-            (InputChangeKind::Added, None)
+                std::cmp::Ordering::Less => return (InputChangeKind::Removed, Some(ok)),
+                std::cmp::Ordering::Greater => return (InputChangeKind::Added, Some(nk)),
+            },
         }
-        _ => (InputChangeKind::Added, None),
     }
 }
 
@@ -248,7 +260,7 @@ fn process_directory(
         return Ok(PathFingerprint::Folder(None));
     }
 
-    let mut entries = HashMap::new();
+    let mut entries = BTreeMap::new();
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
         let name = entry.file_name();
@@ -286,7 +298,7 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
     let fd = file.as_fd();
     let mut dir = nix::dir::Dir::from_fd(fd.try_clone_to_owned()?)?;
 
-    let mut entries = HashMap::new();
+    let mut entries = BTreeMap::new();
     for entry in dir.iter() {
         let entry = entry?;
         let name = entry.file_name().to_bytes();
