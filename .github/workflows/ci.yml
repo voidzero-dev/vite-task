@@ -46,6 +46,12 @@ jobs:
           persist-credentials: false
           submodules: true
 
+      # Disable Windows Defender real-time scanning to speed up I/O-heavy builds (~30-50% faster)
+      - name: Disable Windows Defender
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - uses: oxc-project/setup-rust@d286d43bc1f606abbd98096666ff8be68c8d5f57 # v1.0.0
         with:
           save-cache: ${{ github.ref_name == 'main' }}
