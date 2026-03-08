@@ -488,4 +488,5 @@ fn main() {
     for case_path in &fixture_paths {
         run_case(&tmp_dir_path, case_path, filter.as_deref());
     }
+    println!("All cases passed.");
 }
