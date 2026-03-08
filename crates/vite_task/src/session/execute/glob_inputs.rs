@@ -16,15 +16,17 @@ use std::{
 use vite_path::AbsolutePathBuf;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
-use wax::{Glob, Program as _, walk::Entry as _};
+use wax::{
+    Glob,
+    walk::{Entry as _, FileIterator as _},
+};
 
-/// Collect walk entries into the result map, filtering against resolved negatives.
+/// Collect walk entries into the result map.
 ///
 /// Walk errors for non-existent directories are skipped gracefully.
 fn collect_walk_entries(
     walk: impl Iterator<Item = Result<wax::walk::GlobEntry, wax::walk::WalkError>>,
     workspace_root: &AbsolutePath,
-    resolved_negatives: &[Glob<'static>],
     result: &mut BTreeMap<RelativePathBuf, u64>,
 ) -> anyhow::Result<()> {
     for entry in walk {
@@ -53,11 +55,6 @@ fn collect_walk_entries(
         else {
             continue; // Skip if path is outside workspace_root
         };
-
-        // Filter against resolved negatives (both are workspace-root-relative)
-        if resolved_negatives.iter().any(|neg| neg.is_match(relative_to_workspace.as_str())) {
-            continue;
-        }
 
         // Hash file content
         match hash_file_content(path) {
@@ -97,46 +94,27 @@ pub fn compute_globbed_inputs(
         return Ok(BTreeMap::new());
     }
 
-    let resolved_negatives: Vec<Glob<'static>> = negative_globs
-        .iter()
-        .map(|p| Ok(Glob::new(p.as_str())?.into_owned()))
-        .collect::<anyhow::Result<_>>()?;
+    let negation = if negative_globs.is_empty() {
+        None
+    } else {
+        let negatives: Vec<Glob<'static>> = negative_globs
+            .iter()
+            .map(|p| Ok(Glob::new(p.as_str())?.into_owned()))
+            .collect::<anyhow::Result<_>>()?;
+        Some(wax::any(negatives)?)
+    };
 
     let mut result = BTreeMap::new();
 
     for pattern in positive_globs {
-        let pos = Glob::new(pattern.as_str())?.into_owned();
-        let (pos_prefix, pos_variant) = pos.partition();
-        let walk_root = workspace_root.as_path().join(&pos_prefix);
-
-        if let Some(variant_glob) = pos_variant {
-            if walk_root.is_dir() {
-                collect_walk_entries(
-                    variant_glob.into_owned().walk(&walk_root),
-                    workspace_root,
-                    &resolved_negatives,
-                    &mut result,
-                )?;
+        let glob = Glob::new(pattern.as_str())?.into_owned();
+        let walk = glob.walk(workspace_root.as_path());
+        match &negation {
+            Some(negation) => {
+                collect_walk_entries(walk.not(negation.clone())?, workspace_root, &mut result)?;
             }
-        } else {
-            // Invariant-only glob (specific file path) — hash directly if it exists
-            if walk_root.is_file()
-                && let Some(relative) = walk_root
-                    .strip_prefix(workspace_root.as_path())
-                    .ok()
-                    .and_then(|p| RelativePathBuf::new(p).ok())
-            {
-                // Check against negatives
-                if resolved_negatives.iter().any(|neg| neg.is_match(relative.as_str())) {
-                    continue;
-                }
-                match hash_file_content(&walk_root) {
-                    Ok(hash) => {
-                        result.insert(relative, hash);
-                    }
-                    Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-                    Err(err) => return Err(err.into()),
-                }
+            None => {
+                collect_walk_entries(walk, workspace_root, &mut result)?;
             }
         }
     }
