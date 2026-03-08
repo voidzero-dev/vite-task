@@ -48,18 +48,21 @@ fn collect_walk_entries(
         let path = entry.path();
 
         // Compute path relative to workspace_root for the result
-        let Some(relative_to_workspace) = path
-            .strip_prefix(workspace_root.as_path())
-            .ok()
-            .and_then(|p| RelativePathBuf::new(p).ok())
-        else {
+        let Some(stripped) = path.strip_prefix(workspace_root.as_path()).ok() else {
             continue; // Skip if path is outside workspace_root
+        };
+        let relative_to_workspace = RelativePathBuf::new(stripped)?;
+
+        let std::collections::btree_map::Entry::Vacant(vacant) =
+            result.entry(relative_to_workspace)
+        else {
+            continue; // Already hashed by a previous glob pattern
         };
 
         // Hash file content
         match hash_file_content(path) {
             Ok(hash) => {
-                result.insert(relative_to_workspace, hash);
+                vacant.insert(hash);
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 // File was deleted between walk and hash, skip it
