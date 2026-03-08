@@ -190,6 +190,8 @@ pub async fn spawn_with_tracking(
     let path_writes = &mut path_accesses.path_writes;
 
     for access in termination.path_accesses.iter() {
+        // Clean the path to normalize `..` components since fspy may report
+        // paths like `packages/sub-pkg/../shared/dist/output.js`.
         let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {
             let Ok(stripped_path) = strip_result else {
                 return None;
@@ -197,7 +199,8 @@ pub async fn spawn_with_tracking(
             // On Windows, paths are possible to be still absolute after stripping the workspace root.
             // For example: c:\workspace\subdir\c:\workspace\subdir
             // Just ignore those accesses.
-            RelativePathBuf::new(stripped_path).ok()
+            let cleaned = path_clean::PathClean::clean(stripped_path);
+            RelativePathBuf::new(cleaned).ok()
         });
 
         let Some(relative_path) = relative_path else {
@@ -211,15 +214,8 @@ pub async fn spawn_with_tracking(
         }
 
         // Filter against resolved negative globs (both are workspace-root-relative).
-        // Clean the relative path to normalize `..` components since fspy may report
-        // paths like `packages/sub-pkg/../shared/dist/output.js`.
-        if !resolved_negatives.is_empty() {
-            let cleaned = path_clean::PathClean::clean(relative_path.as_path());
-            if let Some(cleaned_str) = cleaned.to_str()
-                && resolved_negatives.iter().any(|neg| neg.is_match(cleaned_str))
-            {
-                continue;
-            }
+        if resolved_negatives.iter().any(|neg| neg.is_match(relative_path.as_str())) {
+            continue;
         }
 
         if access.mode.contains(AccessMode::READ) {

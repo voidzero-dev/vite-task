@@ -84,21 +84,9 @@ impl PostRunFingerprint {
         let inferred_inputs = inferred_path_reads
             .par_iter()
             .map(|(relative_path, path_read)| {
-                // Clean the absolute path to normalize `..` from fspy-tracked paths
-                // (e.g., `packages/sub-pkg/../shared/dist/output.js`).
-                let cleaned_abs =
-                    path_clean::PathClean::clean(base_dir.join(relative_path).as_path());
-
-                // Derive a cleaned workspace-relative key so stored paths are normalized
-                let clean_key = cleaned_abs
-                    .strip_prefix(base_dir.as_path())
-                    .ok()
-                    .and_then(|p| RelativePathBuf::new(p).ok())
-                    .unwrap_or_else(|| relative_path.clone());
-
-                let full_path = Arc::<AbsolutePath>::from(base_dir.join(&clean_key));
+                let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
                 let fingerprint = fingerprint_path(&full_path, *path_read)?;
-                Ok((clean_key, fingerprint))
+                Ok((relative_path.clone(), fingerprint))
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
