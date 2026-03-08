@@ -16,14 +16,13 @@ petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-path-clean = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-wax = { workspace = true }
 vite_graph_ser = { workspace = true }
 vite_path = { workspace = true }
 vite_str = { workspace = true }
 vite_workspace = { workspace = true }
+wax = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

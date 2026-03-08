@@ -62,6 +62,28 @@ impl RelativePath {
         relative_path_buf
     }
 
+    /// Lexically normalizes the path by resolving `..` components without
+    /// accessing the filesystem. (`.` components are already stripped by
+    /// [`RelativePathBuf::new`].)
+    ///
+    /// **Symlink limitation**: Because this is purely lexical, it can produce
+    /// incorrect results when symlinks are involved. For example, if
+    /// `a/link` is a symlink to `x/y`, then cleaning `a/link/../c`
+    /// yields `a/c` instead of the correct `x/c`. Use
+    /// [`std::fs::canonicalize`] when you need symlink-correct resolution.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cleaned path is no longer a valid relative path, which
+    /// should never happen in practice.
+    #[must_use]
+    pub fn clean(&self) -> RelativePathBuf {
+        use path_clean::PathClean as _;
+
+        let cleaned = self.as_path().clean();
+        RelativePathBuf::new(cleaned).expect("cleaning a relative path preserves relativity")
+    }
+
     /// Returns a path that, when joined onto `base`, yields `self`.
     ///
     /// If `base` is not a prefix of `self`, returns [`None`].

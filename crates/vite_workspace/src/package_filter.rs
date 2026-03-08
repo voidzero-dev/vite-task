@@ -32,7 +32,7 @@
 use std::{ops::Deref, sync::Arc};
 
 use vec1::Vec1;
-use vite_path::{AbsolutePath, AbsolutePathBuf};
+use vite_path::AbsolutePath;
 use vite_str::Str;
 
 use crate::package_graph::PackageQuery;
@@ -590,10 +590,7 @@ fn resolve_directory_pattern(
 /// results when symlinks are involved (e.g. `/a/symlink/../b` → `/a/b`). This
 /// matches pnpm's behaviour.
 fn resolve_filter_path(path_str: &str, cwd: &AbsolutePath) -> Arc<AbsolutePath> {
-    let cleaned = path_clean::clean(cwd.join(path_str).as_path());
-    let normalized = AbsolutePathBuf::new(cleaned)
-        .expect("invariant: cleaning an absolute path preserves absoluteness");
-    normalized.into()
+    cwd.join(path_str).clean().into()
 }
 
 /// Build a [`PackageNamePattern`] from a name or glob string.

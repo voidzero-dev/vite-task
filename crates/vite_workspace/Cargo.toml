@@ -9,7 +9,6 @@ rust-version.workspace = true
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
-path-clean = { workspace = true }
 petgraph = { workspace = true, features = ["serde-1"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

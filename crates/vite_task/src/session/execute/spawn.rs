@@ -210,10 +210,8 @@ pub async fn spawn_with_tracking(
             // like `packages/sub-pkg/../shared/dist/output.js` that won't match
             // workspace-root-relative negative globs without normalization.
             if !resolved_negatives.is_empty() {
-                let cleaned = path_clean::PathClean::clean(relative.as_path());
-                if let Some(cleaned_str) = cleaned.to_str()
-                    && resolved_negatives.iter().any(|neg| neg.is_match(cleaned_str))
-                {
+                let cleaned = relative.clean();
+                if resolved_negatives.iter().any(|neg| neg.is_match(cleaned.as_str())) {
                     return None;
                 }
             }

@@ -8,7 +8,6 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-path-clean = { workspace = true }
 rustc-hash = { workspace = true }
 thiserror = { workspace = true }
 vite_path = { workspace = true }

@@ -200,6 +200,24 @@ impl AbsolutePath {
     pub fn ends_with<P: AsRef<Path>>(&self, path: P) -> bool {
         self.0.ends_with(path.as_ref())
     }
+
+    /// Lexically normalizes the path by resolving `.` and `..` components
+    /// without accessing the filesystem.
+    ///
+    /// **Symlink limitation**: Because this is purely lexical, it can produce
+    /// incorrect results when symlinks are involved. For example, if
+    /// `/a/link` is a symlink to `/x/y`, then cleaning `/a/link/../c`
+    /// yields `/a/c` instead of the correct `/x/c`. Use
+    /// [`std::fs::canonicalize`] when you need symlink-correct resolution.
+    #[must_use]
+    pub fn clean(&self) -> AbsolutePathBuf {
+        use path_clean::PathClean as _;
+
+        let cleaned = self.0.clean();
+        // SAFETY: Lexical cleaning of an absolute path preserves absoluteness —
+        // it only removes `.`/`..` components and redundant separators.
+        unsafe { AbsolutePathBuf::assume_absolute(cleaned) }
+    }
 }
 
 /// An Error returned from [`AbsolutePath::strip_prefix`] if the stripped path is not a valid `RelativePath`

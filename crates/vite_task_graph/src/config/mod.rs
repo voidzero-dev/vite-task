@@ -195,7 +195,6 @@ fn resolve_glob_to_workspace_relative(
     workspace_root: &AbsolutePath,
 ) -> Result<Str, ResolveTaskConfigError> {
     use cow_utils::CowUtils as _;
-    use path_clean::PathClean as _;
 
     let glob = wax::Glob::new(pattern).map_err(|source| ResolveTaskConfigError::InvalidGlob {
         pattern: Str::from(pattern),
@@ -203,8 +202,8 @@ fn resolve_glob_to_workspace_relative(
     })?;
     let (invariant_prefix, variant) = glob.partition();
 
-    let joined = package_dir.as_path().join(&invariant_prefix).clean();
-    let stripped = joined.strip_prefix(workspace_root.as_path()).map_err(|_| {
+    let joined = package_dir.join(&invariant_prefix).clean();
+    let stripped = joined.as_path().strip_prefix(workspace_root.as_path()).map_err(|_| {
         ResolveTaskConfigError::GlobOutsideWorkspace { pattern: Str::from(pattern) }
     })?;
 
@@ -383,7 +382,6 @@ mod tests {
 
     use super::*;
 
-    #[expect(clippy::disallowed_types, reason = "PathBuf needed for AbsolutePathBuf::new in tests")]
     fn test_paths() -> (AbsolutePathBuf, AbsolutePathBuf) {
         if cfg!(windows) {
             (
