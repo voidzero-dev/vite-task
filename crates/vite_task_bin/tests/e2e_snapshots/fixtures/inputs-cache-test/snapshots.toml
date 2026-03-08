@@ -200,3 +200,20 @@ steps = [
   # Run task without auto inference - should see (undefined)
   "vp run check-fspy-env-without-auto",
 ]
+
+# 8. Folder path as input: inputs: ["src"]
+# - A bare directory name matches nothing (directories are not files)
+# - File changes inside the folder should NOT trigger cache invalidation
+[[e2e]]
+name = "folder input - hit despite file changes and folder deletion"
+steps = [
+  "vp run folder-input",
+  # Modify a file inside the folder
+  "replace-file-content src/main.ts initial modified",
+  # Cache hit: "src" matches the directory itself, not files inside it
+  "vp run folder-input",
+  # Delete the entire folder
+  "rm -rf src",
+  # Cache hit: folder removal doesn't affect fingerprint
+  "vp run folder-input",
+]

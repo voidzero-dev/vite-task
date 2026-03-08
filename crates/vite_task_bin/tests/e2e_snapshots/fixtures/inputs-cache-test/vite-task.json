@@ -44,6 +44,11 @@
       "command": "print-env FSPY",
       "inputs": ["src/**/*.ts"],
       "cache": true
+    },
+    "folder-input": {
+      "command": "print-file src/main.ts",
+      "inputs": ["src"],
+      "cache": true
     }
   }
 }
