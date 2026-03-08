@@ -201,7 +201,38 @@ steps = [
   "vp run check-fspy-env-without-auto",
 ]
 
-# 8. Folder path as input: inputs: ["src"]
+# 8. Trailing slash input: inputs: ["src/"]
+# - Trailing `/` is expanded to `/**`, matching all files under that directory
+# - Direct and nested file changes trigger cache invalidation
+# - Files outside the directory do NOT trigger cache invalidation
+[[e2e]]
+name = "folder slash input - miss on direct and nested file changes"
+steps = [
+  "vp run folder-slash-input",
+  # Modify a direct file in src/
+  "replace-file-content src/main.ts initial modified",
+  # Cache miss: direct file changed
+  "vp run folder-slash-input",
+  # Reset and run again to re-establish cache
+  "replace-file-content src/main.ts modified initial",
+  "vp run folder-slash-input",
+  # Modify a nested file in src/sub/
+  "replace-file-content src/sub/nested.ts initial modified",
+  # Cache miss: nested file changed
+  "vp run folder-slash-input",
+]
+
+[[e2e]]
+name = "folder slash input - hit on file outside directory"
+steps = [
+  "vp run folder-slash-input",
+  # Modify a file outside src/
+  "replace-file-content test/main.test.ts outside modified",
+  # Cache hit: file not under src/
+  "vp run folder-slash-input",
+]
+
+# 9. Folder path as input: inputs: ["src"]
 # - A bare directory name matches nothing (directories are not files)
 # - File changes inside the folder should NOT trigger cache invalidation
 [[e2e]]

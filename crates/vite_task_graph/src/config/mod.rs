@@ -194,6 +194,15 @@ fn resolve_glob_to_workspace_relative(
     package_dir: &AbsolutePath,
     workspace_root: &AbsolutePath,
 ) -> Result<Str, ResolveTaskConfigError> {
+    // A trailing `/` is shorthand for all files under that directory
+    let expanded;
+    let pattern = if let Some(prefix) = pattern.strip_suffix('/') {
+        expanded = vite_str::format!("{prefix}/**");
+        expanded.as_str()
+    } else {
+        pattern
+    };
+
     let glob = wax::Glob::new(pattern).map_err(|source| ResolveTaskConfigError::InvalidGlob {
         pattern: Str::from(pattern),
         source: Box::new(source),

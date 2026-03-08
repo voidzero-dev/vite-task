@@ -49,6 +49,11 @@
       "command": "print-file src/main.ts",
       "inputs": ["src"],
       "cache": true
+    },
+    "folder-slash-input": {
+      "command": "print-file src/main.ts",
+      "inputs": ["src/"],
+      "cache": true
     }
   }
 }

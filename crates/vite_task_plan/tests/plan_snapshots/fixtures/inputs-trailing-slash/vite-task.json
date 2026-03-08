@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "build": {
+      "command": "echo build",
+      "inputs": ["src/", "!dist/"],
+      "cache": true
+    }
+  }
+}
