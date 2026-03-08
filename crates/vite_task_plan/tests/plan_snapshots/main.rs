@@ -317,8 +317,11 @@ fn main() {
     let tests_dir = std::env::current_dir().unwrap().join("tests");
 
     insta::glob!(tests_dir, "plan_snapshots/fixtures/*", |case_path| {
-        run_case(&tokio_runtime, &tmp_dir_path, case_path, filter.as_deref())
+        run_case(&tokio_runtime, &tmp_dir_path, case_path, filter.as_deref());
     });
 
-    println!("All cases passed.");
+    #[expect(clippy::print_stdout, reason = "test summary")]
+    {
+        println!("All cases passed.");
+    }
 }
