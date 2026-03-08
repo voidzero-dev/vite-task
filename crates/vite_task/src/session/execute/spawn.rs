@@ -190,8 +190,8 @@ pub async fn spawn_with_tracking(
     let path_writes = &mut path_accesses.path_writes;
 
     for access in termination.path_accesses.iter() {
-        // Clean the path to normalize `..` components since fspy may report
-        // paths like `packages/sub-pkg/../shared/dist/output.js`.
+        // Strip workspace root, clean `..` components, and filter in one pass.
+        // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
         let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {
             let Ok(stripped_path) = strip_result else {
                 return None;
@@ -200,23 +200,24 @@ pub async fn spawn_with_tracking(
             // For example: c:\workspace\subdir\c:\workspace\subdir
             // Just ignore those accesses.
             let cleaned = path_clean::PathClean::clean(stripped_path);
-            RelativePathBuf::new(cleaned).ok()
+            let relative = RelativePathBuf::new(cleaned).ok()?;
+
+            // Skip .git directory accesses (workaround for tools like oxlint)
+            if relative.as_path().strip_prefix(".git").is_ok() {
+                return None;
+            }
+
+            // Filter against resolved negative globs (both are workspace-root-relative)
+            if resolved_negatives.iter().any(|neg| neg.is_match(relative.as_str())) {
+                return None;
+            }
+
+            Some(relative)
         });
 
         let Some(relative_path) = relative_path else {
-            // Ignore accesses outside the workspace
             continue;
         };
-
-        // Skip .git directory accesses (workaround for tools like oxlint)
-        if relative_path.as_path().strip_prefix(".git").is_ok() {
-            continue;
-        }
-
-        // Filter against resolved negative globs (both are workspace-root-relative).
-        if resolved_negatives.iter().any(|neg| neg.is_match(relative_path.as_str())) {
-            continue;
-        }
 
         if access.mode.contains(AccessMode::READ) {
             path_reads.entry(relative_path.clone()).or_insert(PathRead { read_dir_entries: false });
