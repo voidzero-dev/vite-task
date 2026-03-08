@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "build": {
+      "command": "print-file src/main.ts",
+      "inputs": ["src/**/*.ts"],
+      "cache": true
+    }
+  }
+}

@@ -94,29 +94,18 @@ pub fn compute_globbed_inputs(
         return Ok(BTreeMap::new());
     }
 
-    let negation = if negative_globs.is_empty() {
-        None
-    } else {
-        let negatives: Vec<Glob<'static>> = negative_globs
-            .iter()
-            .map(|p| Ok(Glob::new(p.as_str())?.into_owned()))
-            .collect::<anyhow::Result<_>>()?;
-        Some(wax::any(negatives)?)
-    };
+    let negatives: Vec<Glob<'static>> = negative_globs
+        .iter()
+        .map(|p| Ok(Glob::new(p.as_str())?.into_owned()))
+        .collect::<anyhow::Result<_>>()?;
+    let negation = wax::any(negatives)?;
 
     let mut result = BTreeMap::new();
 
     for pattern in positive_globs {
         let glob = Glob::new(pattern.as_str())?.into_owned();
         let walk = glob.walk(workspace_root.as_path());
-        match &negation {
-            Some(negation) => {
-                collect_walk_entries(walk.not(negation.clone())?, workspace_root, &mut result)?;
-            }
-            None => {
-                collect_walk_entries(walk, workspace_root, &mut result)?;
-            }
-        }
+        collect_walk_entries(walk.not(negation.clone())?, workspace_root, &mut result)?;
     }
 
     Ok(result)

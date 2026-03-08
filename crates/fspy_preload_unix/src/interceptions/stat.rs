@@ -2,10 +2,7 @@ use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int, stat as stat_struct};
 
 use crate::{
-    client::{
-        convert::{Fd, PathAt},
-        handle_open,
-    },
+    client::{convert::PathAt, handle_open},
     macros::intercept,
 };
 
@@ -28,16 +25,6 @@ unsafe extern "C" fn lstat(path: *const c_char, buf: *mut stat_struct) -> c_int 
     }
     // SAFETY: calling the original libc lstat() with the same arguments forwarded from the interposed function
     unsafe { lstat::original()(path, buf) }
-}
-
-intercept!(fstat(64): unsafe extern "C" fn(fd: c_int, buf: *mut stat_struct) -> c_int);
-unsafe extern "C" fn fstat(fd: c_int, buf: *mut stat_struct) -> c_int {
-    // SAFETY: fd is a valid file descriptor provided by the caller of the interposed function
-    unsafe {
-        handle_open(Fd(fd), AccessMode::READ);
-    }
-    // SAFETY: calling the original libc fstat() with the same arguments forwarded from the interposed function
-    unsafe { fstat::original()(fd, buf) }
 }
 
 intercept!(fstatat(64): unsafe extern "C" fn(dirfd: c_int, pathname: *const c_char, buf: *mut stat_struct, flags: c_int) -> c_int);
