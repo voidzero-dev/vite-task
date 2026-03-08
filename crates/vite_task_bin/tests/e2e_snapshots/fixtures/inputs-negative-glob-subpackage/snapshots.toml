@@ -7,20 +7,13 @@
 # - dist/ should be excluded even though the package is a subpackage
 # - Modifying dist/output.js should be a cache hit
 [[e2e]]
-name = "subpackage auto with negative - hit on excluded inferred file"
+name = "subpackage auto with negative"
 steps = [
   # First run - reads both src/main.ts and dist/output.js
   "vp run sub-pkg#auto-with-negative",
   # Modify file in excluded directory (dist/)
   "replace-file-content packages/sub-pkg/dist/output.js initial modified",
   # Cache hit: dist/ is excluded by negative glob
-  "vp run sub-pkg#auto-with-negative",
-]
-
-[[e2e]]
-name = "subpackage auto with negative - miss on non-excluded inferred file"
-steps = [
-  # First run
   "vp run sub-pkg#auto-with-negative",
   # Modify file NOT in excluded directory
   "replace-file-content packages/sub-pkg/src/main.ts initial modified",
@@ -32,8 +25,12 @@ steps = [
 # - Should find files in sibling package via ..
 # - Cache miss when sibling file changes, hit when unrelated file changes
 [[e2e]]
-name = "dotdot positive glob - miss on sibling file change"
+name = "dotdot positive glob"
 steps = [
+  "vp run sub-pkg#dotdot-positive",
+  # Modify a file NOT matched by ../shared/src/**
+  "replace-file-content packages/shared/dist/output.js initial modified",
+  # Cache hit: file not in inputs
   "vp run sub-pkg#dotdot-positive",
   # Modify a file that matches ../shared/src/**
   "replace-file-content packages/shared/src/utils.ts initial modified",
@@ -41,22 +38,16 @@ steps = [
   "vp run sub-pkg#dotdot-positive",
 ]
 
-[[e2e]]
-name = "dotdot positive glob - hit on unmatched file change"
-steps = [
-  "vp run sub-pkg#dotdot-positive",
-  # Modify a file NOT matched by ../shared/src/**
-  "replace-file-content packages/shared/dist/output.js initial modified",
-  # Cache hit: file not in inputs
-  "vp run sub-pkg#dotdot-positive",
-]
-
 # .. prefix positive + negative globs: inputs: ["../shared/**", "!../shared/dist/**"]
 # - Positive glob matches sibling package files via ..
 # - Negative glob excludes sibling dist/ via ..
 [[e2e]]
-name = "dotdot positive negative - miss on non-excluded sibling file"
+name = "dotdot positive negative"
 steps = [
+  "vp run sub-pkg#dotdot-positive-negative",
+  # Modify file in excluded sibling dist/
+  "replace-file-content packages/shared/dist/output.js initial modified",
+  # Cache hit: excluded by !../shared/dist/**
   "vp run sub-pkg#dotdot-positive-negative",
   # Modify file matching positive but NOT negative
   "replace-file-content packages/shared/src/utils.ts initial modified",
@@ -64,32 +55,16 @@ steps = [
   "vp run sub-pkg#dotdot-positive-negative",
 ]
 
-[[e2e]]
-name = "dotdot positive negative - hit on excluded sibling file"
-steps = [
-  "vp run sub-pkg#dotdot-positive-negative",
-  # Modify file in excluded sibling dist/
-  "replace-file-content packages/shared/dist/output.js initial modified",
-  # Cache hit: excluded by !../shared/dist/**
-  "vp run sub-pkg#dotdot-positive-negative",
-]
-
 # .. prefix auto + negative: inputs: [{ "auto": true }, "!../shared/dist/**"]
 # - Auto-inferred files from sibling package are tracked
 # - Negative glob excludes sibling dist/ from inferred inputs
 [[e2e]]
-name = "dotdot auto negative - hit on excluded sibling inferred file"
+name = "dotdot auto negative"
 steps = [
   "vp run sub-pkg#dotdot-auto-negative",
   # Modify file in excluded sibling dist/
   "replace-file-content packages/shared/dist/output.js initial modified",
   # Cache hit: excluded by !../shared/dist/**
-  "vp run sub-pkg#dotdot-auto-negative",
-]
-
-[[e2e]]
-name = "dotdot auto negative - miss on non-excluded sibling inferred file"
-steps = [
   "vp run sub-pkg#dotdot-auto-negative",
   # Modify non-excluded sibling file
   "replace-file-content packages/shared/src/utils.ts initial modified",

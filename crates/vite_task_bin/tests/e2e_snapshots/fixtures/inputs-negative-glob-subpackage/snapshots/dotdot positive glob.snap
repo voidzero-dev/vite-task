@@ -13,3 +13,8 @@ export const shared = 'initial';
 
 ---
 [vp run] cache hit, <duration> saved.
+> replace-file-content packages/shared/src/utils.ts initial modified
+
+> vp run sub-pkg#dotdot-positive
+~/packages/sub-pkg$ print-file ../shared/src/utils.ts ✗ cache miss: 'packages/shared/src/utils.ts' modified, executing
+export const shared = 'modified';
