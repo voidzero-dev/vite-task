@@ -3795,8 +3795,6 @@ checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 name = "vite_glob"
 version = "0.0.0"
 dependencies = [
- "rustc-hash",
- "tempfile",
  "thiserror 2.0.18",
  "vite_path",
  "vite_str",
@@ -3932,7 +3930,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
- "cow-utils",
  "monostate",
  "petgraph",
  "pretty_assertions",

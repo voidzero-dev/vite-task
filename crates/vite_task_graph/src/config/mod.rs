@@ -195,9 +195,9 @@ fn resolve_glob_to_workspace_relative(
     workspace_root: &AbsolutePath,
 ) -> Result<Str, ResolveTaskConfigError> {
     // A trailing `/` is shorthand for all files under that directory
-    let expanded;
-    let pattern = if let Some(prefix) = pattern.strip_suffix('/') {
-        expanded = vite_str::format!("{prefix}/**");
+    let expanded: Str;
+    let pattern = if pattern.ends_with('/') {
+        expanded = vite_str::format!("{pattern}**");
         expanded.as_str()
     } else {
         pattern

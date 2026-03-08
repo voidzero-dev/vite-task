@@ -391,6 +391,7 @@ pub enum ParentCacheConfig {
 ///   env config and merges in any additional envs the synthetic command needs.
 /// - If there is no parent (top-level invocation), the synthetic task's own
 ///   [`UserCacheConfig`] is resolved with defaults.
+#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
 fn resolve_synthetic_cache_config(
     parent: ParentCacheConfig,
     synthetic_cache_config: UserCacheConfig,

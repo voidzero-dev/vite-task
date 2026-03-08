@@ -8,13 +8,11 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-rustc-hash = { workspace = true }
 thiserror = { workspace = true }
 vite_path = { workspace = true }
 wax = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 vite_str = { workspace = true }
 
 [lints]
