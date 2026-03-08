@@ -276,6 +276,7 @@ impl IndexedTaskGraph {
                     task_user_config,
                     &package_dir,
                     package_json_script,
+                    &workspace_root.path,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
@@ -307,7 +308,16 @@ impl IndexedTaskGraph {
                 let resolved_config = ResolvedTaskConfig::resolve_package_json_script(
                     &package_dir,
                     package_json_script,
-                );
+                    &workspace_root.path,
+                )
+                .map_err(|err| TaskGraphLoadError::ResolveConfigError {
+                    error: err,
+                    task_display: TaskDisplay {
+                        package_name: package.package_json.name.clone(),
+                        task_name: script_name.into(),
+                        package_path: Arc::clone(&package_dir),
+                    },
+                })?;
                 let node_index = task_graph.add_node(TaskNode {
                     task_display: TaskDisplay {
                         package_name: package.package_json.name.clone(),

@@ -3889,7 +3889,6 @@ dependencies = [
  "tokio",
  "tracing",
  "twox-hash",
- "vite_glob",
  "vite_path",
  "vite_select",
  "vite_str",
@@ -3934,7 +3933,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
+ "cow-utils",
  "monostate",
+ "path-clean",
  "petgraph",
  "pretty_assertions",
  "rustc-hash",
@@ -3947,6 +3948,7 @@ dependencies = [
  "vite_path",
  "vite_str",
  "vite_workspace",
+ "wax",
  "which",
 ]
 

@@ -137,6 +137,13 @@ pub enum Error {
     #[error("Failed to resolve environment variables")]
     ResolveEnv(#[source] ResolveEnvError),
 
+    #[error("Failed to resolve task configuration")]
+    ResolveTaskConfig(
+        #[source]
+        #[from]
+        vite_task_graph::config::ResolveTaskConfigError,
+    ),
+
     #[error("No task specifier provided for 'run' command")]
     MissingTaskSpecifier,
 

@@ -10,13 +10,16 @@ rust-version.workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bincode = { workspace = true }
+cow-utils = { workspace = true }
 monostate = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+path-clean = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+wax = { workspace = true }
 vite_graph_ser = { workspace = true }
 vite_path = { workspace = true }
 vite_str = { workspace = true }

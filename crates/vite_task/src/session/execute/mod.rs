@@ -198,8 +198,8 @@ pub async fn execute_spawn(
     let (cache_status, cached_value, globbed_inputs) = if let Some(cache_metadata) = cache_metadata
     {
         // Compute globbed inputs from positive globs at execution time
+        // Globs are already workspace-root-relative (resolved at task graph stage)
         let globbed_inputs = match compute_globbed_inputs(
-            &cache_metadata.glob_base,
             cache_base_path,
             &cache_metadata.input_config.positive_globs,
             &cache_metadata.input_config.negative_globs,
@@ -320,27 +320,31 @@ pub async fn execute_spawn(
             (Some(Vec::new()), path_accesses, Some((cache_metadata, globbed_inputs)))
         });
 
-    // Resolve negative globs for fspy path filtering
-    let resolved_negatives = if let Some((cache_metadata, _)) = &cache_metadata_and_inputs {
-        match resolve_negative_globs(
-            &cache_metadata.glob_base,
-            &cache_metadata.input_config.negative_globs,
-        ) {
-            Ok(negs) => negs,
-            Err(err) => {
-                leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::PostRunFingerprint(err)),
-                    )
-                    .await;
-                return SpawnOutcome::Failed;
+    // Build negative globs for fspy path filtering (already workspace-root-relative)
+    let resolved_negatives: Vec<wax::Glob<'static>> =
+        if let Some((cache_metadata, _)) = &cache_metadata_and_inputs {
+            match cache_metadata
+                .input_config
+                .negative_globs
+                .iter()
+                .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
+                .collect::<anyhow::Result<Vec<_>>>()
+            {
+                Ok(negs) => negs,
+                Err(err) => {
+                    leaf_reporter
+                        .finish(
+                            None,
+                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                            Some(ExecutionError::PostRunFingerprint(err)),
+                        )
+                        .await;
+                    return SpawnOutcome::Failed;
+                }
             }
-        }
-    } else {
-        Vec::new()
-    };
+        } else {
+            Vec::new()
+        };
 
     #[expect(
         clippy::large_futures,
@@ -389,7 +393,7 @@ pub async fn execute_spawn(
                         duration: result.duration,
                         globbed_inputs,
                     };
-                    match cache.update(cache_metadata, cache_base_path, new_cache_value).await {
+                    match cache.update(cache_metadata, new_cache_value).await {
                         Ok(()) => (CacheUpdateStatus::Updated, None),
                         Err(err) => (
                             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
@@ -420,17 +424,6 @@ pub async fn execute_spawn(
     leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error).await;
 
     SpawnOutcome::Spawned(result.exit_status)
-}
-
-/// Resolve negative glob patterns into [`AnchoredGlob`]s for filtering.
-fn resolve_negative_globs(
-    glob_base: &AbsolutePath,
-    negative_globs: &std::collections::BTreeSet<vite_str::Str>,
-) -> anyhow::Result<Vec<vite_glob::AnchoredGlob>> {
-    negative_globs
-        .iter()
-        .map(|p| Ok(vite_glob::AnchoredGlob::new(p.as_str(), glob_base)?))
-        .collect()
 }
 
 /// Spawn a command with all three stdio file descriptors inherited from the parent.

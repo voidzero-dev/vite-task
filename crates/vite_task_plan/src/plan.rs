@@ -285,7 +285,6 @@ async fn plan_task_as_execution_node(
                         &script_command.envs,
                         program_path,
                         script_command.args,
-                        package_path,
                     )?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
@@ -351,7 +350,6 @@ async fn plan_task_as_execution_node(
             context.envs(),
             Arc::clone(&*SHELL_PROGRAM_PATH),
             SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
-            package_path,
         )?;
         items.push(ExecutionItem {
             execution_item_display,
@@ -397,25 +395,28 @@ fn resolve_synthetic_cache_config(
     parent: ParentCacheConfig,
     synthetic_cache_config: UserCacheConfig,
     cwd: &Arc<AbsolutePath>,
-) -> Option<CacheConfig> {
+    workspace_path: &AbsolutePath,
+) -> Result<Option<CacheConfig>, Error> {
     match parent {
         ParentCacheConfig::None => {
             // Top-level: resolve from synthetic's own config
-            ResolvedTaskOptions::resolve(
+            Ok(ResolvedTaskOptions::resolve(
                 UserTaskOptions {
                     cache_config: synthetic_cache_config,
                     cwd_relative_to_package: None,
                     depends_on: None,
                 },
                 cwd,
+                workspace_path,
             )
-            .cache_config
+            .map_err(Error::ResolveTaskConfig)?
+            .cache_config)
         }
-        ParentCacheConfig::Disabled => Option::None,
+        ParentCacheConfig::Disabled => Ok(Option::None),
         ParentCacheConfig::Inherited(mut parent_config) => {
             // Cache is enabled only if both parent and synthetic want it.
             // Merge synthetic's additions into parent's config.
-            match synthetic_cache_config {
+            Ok(match synthetic_cache_config {
                 UserCacheConfig::Disabled { .. } => Option::None,
                 UserCacheConfig::Enabled { enabled_cache_config, .. } => {
                     if let Some(extra_envs) = enabled_cache_config.envs {
@@ -426,7 +427,7 @@ fn resolve_synthetic_cache_config(
                     }
                     Some(parent_config)
                 }
-            }
+            })
         }
     }
 }
@@ -444,7 +445,7 @@ pub fn plan_synthetic_request(
 
     let program_path = which(&program, &envs, cwd)?;
     let resolved_cache_config =
-        resolve_synthetic_cache_config(parent_cache_config, cache_config, cwd);
+        resolve_synthetic_cache_config(parent_cache_config, cache_config, cwd, workspace_path)?;
     let resolved_options =
         ResolvedTaskOptions { cwd: Arc::clone(cwd), cache_config: resolved_cache_config };
 
@@ -456,7 +457,6 @@ pub fn plan_synthetic_request(
         &envs,
         program_path,
         args,
-        cwd, // For synthetic requests, the package path is the cwd
     )
 }
 
@@ -482,7 +482,6 @@ fn strip_prefix_for_cache(
     clippy::needless_pass_by_value,
     reason = "program_path ownership is needed for Arc construction"
 )]
-#[expect(clippy::too_many_arguments, reason = "internal function with closely-related parameters")]
 fn plan_spawn_execution(
     workspace_path: &Arc<AbsolutePath>,
     execution_cache_key: Option<ExecutionCacheKey>,
@@ -491,7 +490,6 @@ fn plan_spawn_execution(
     envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
     program_path: Arc<AbsolutePath>,
     args: Arc<[Str]>,
-    package_path: &Arc<AbsolutePath>,
 ) -> Result<SpawnExecution, Error> {
     // all envs available in the current context
     let mut all_envs = envs.clone();
@@ -555,7 +553,6 @@ fn plan_spawn_execution(
                 spawn_fingerprint,
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
-                glob_base: Arc::clone(package_path),
             });
         }
     }

@@ -47,7 +47,16 @@ impl ResolvedTaskOptions {
     /// Resolves from user-defined options and the directory path where the options are defined.
     /// For user-defined tasks or scripts in package.json, `dir` is the package directory
     /// For synthetic tasks, `dir` is the cwd of the original command (e.g. the cwd of `vp lint`).
-    pub fn resolve(user_options: UserTaskOptions, dir: &Arc<AbsolutePath>) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolveTaskConfigError`] if a glob pattern is invalid or resolves
+    /// outside the workspace root.
+    pub fn resolve(
+        user_options: UserTaskOptions,
+        dir: &Arc<AbsolutePath>,
+        workspace_root: &AbsolutePath,
+    ) -> Result<Self, ResolveTaskConfigError> {
         let cwd: Arc<AbsolutePath> = match user_options.cwd_relative_to_package {
             Some(ref cwd) if !cwd.as_str().is_empty() => dir.join(cwd).into(),
             _ => Arc::clone(dir),
@@ -62,8 +71,11 @@ impl ResolvedTaskOptions {
                     .collect();
                 pass_through_envs.extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
 
-                let input_config =
-                    ResolvedInputConfig::from_user_config(enabled_cache_config.inputs.as_ref());
+                let input_config = ResolvedInputConfig::from_user_config(
+                    enabled_cache_config.inputs.as_ref(),
+                    dir,
+                    workspace_root,
+                )?;
 
                 Some(CacheConfig {
                     env_config: EnvConfig {
@@ -77,7 +89,7 @@ impl ResolvedTaskOptions {
                 })
             }
         };
-        Self { cwd, cache_config }
+        Ok(Self { cwd, cache_config })
     }
 }
 
@@ -118,16 +130,24 @@ impl ResolvedInputConfig {
         }
     }
 
-    /// Resolve from user configuration.
+    /// Resolve from user configuration, making glob patterns workspace-root-relative.
     ///
     /// - `None`: defaults to auto-inference (`[{auto: true}]`)
     /// - `Some([])`: no inputs, inference disabled
-    /// - `Some([...])`: explicit patterns
-    #[must_use]
-    pub fn from_user_config(user_inputs: Option<&UserInputsConfig>) -> Self {
+    /// - `Some([...])`: explicit patterns resolved to workspace-root-relative
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolveTaskConfigError`] if a glob pattern is invalid or resolves
+    /// outside the workspace root.
+    pub fn from_user_config(
+        user_inputs: Option<&UserInputsConfig>,
+        package_dir: &AbsolutePath,
+        workspace_root: &AbsolutePath,
+    ) -> Result<Self, ResolveTaskConfigError> {
         let Some(entries) = user_inputs else {
             // None means default to auto-inference
-            return Self::default_auto();
+            return Ok(Self::default_auto());
         };
 
         let mut includes_auto = false;
@@ -140,16 +160,72 @@ impl ResolvedInputConfig {
                 UserInputEntry::Auto { auto: false } => {} // Ignore {auto: false}
                 UserInputEntry::Glob(pattern) => {
                     if let Some(negated) = pattern.strip_prefix('!') {
-                        negative_globs.insert(Str::from(negated));
+                        let resolved = resolve_glob_to_workspace_relative(
+                            negated,
+                            package_dir,
+                            workspace_root,
+                        )?;
+                        negative_globs.insert(resolved);
                     } else {
-                        positive_globs.insert(pattern.clone());
+                        let resolved = resolve_glob_to_workspace_relative(
+                            pattern.as_str(),
+                            package_dir,
+                            workspace_root,
+                        )?;
+                        positive_globs.insert(resolved);
                     }
                 }
             }
         }
 
-        Self { includes_auto, positive_globs, negative_globs }
+        Ok(Self { includes_auto, positive_globs, negative_globs })
     }
+}
+
+/// Resolve a single glob pattern to be workspace-root-relative.
+///
+/// The algorithm:
+/// 1. Partition the glob into an invariant prefix and a variant part
+/// 2. Join the invariant prefix with `package_dir` and clean the path
+/// 3. Strip the `workspace_root` prefix from the cleaned path
+/// 4. Re-escape the stripped prefix and rejoin with the variant
+fn resolve_glob_to_workspace_relative(
+    pattern: &str,
+    package_dir: &AbsolutePath,
+    workspace_root: &AbsolutePath,
+) -> Result<Str, ResolveTaskConfigError> {
+    use cow_utils::CowUtils as _;
+    use path_clean::PathClean as _;
+
+    let glob = wax::Glob::new(pattern).map_err(|source| ResolveTaskConfigError::InvalidGlob {
+        pattern: Str::from(pattern),
+        source: Box::new(source),
+    })?;
+    let (invariant_prefix, variant) = glob.partition();
+
+    let joined = package_dir.as_path().join(&invariant_prefix).clean();
+    let stripped = joined.strip_prefix(workspace_root.as_path()).map_err(|_| {
+        ResolveTaskConfigError::GlobOutsideWorkspace { pattern: Str::from(pattern) }
+    })?;
+
+    // Re-escape the prefix path for use in a glob pattern
+    let stripped_str = stripped.to_str().ok_or_else(|| {
+        ResolveTaskConfigError::GlobOutsideWorkspace { pattern: Str::from(pattern) }
+    })?;
+    // Normalize backslashes to forward slashes for cross-platform compatibility
+    let escaped = wax::escape(stripped_str);
+    let escaped_prefix = escaped.cow_replace('\\', "/");
+
+    let result = match variant {
+        Some(variant_glob) if escaped_prefix.is_empty() => {
+            Str::from(variant_glob.to_string().as_str())
+        }
+        Some(variant_glob) => vite_str::format!("{escaped_prefix}/{variant_glob}"),
+        None if escaped_prefix.is_empty() => Str::from("**"),
+        None => Str::from(escaped_prefix.as_ref()),
+    };
+
+    Ok(result)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -169,6 +245,18 @@ pub enum ResolveTaskConfigError {
     /// Neither package.json script nor vite.config.* task define a command for the task
     #[error("Neither package.json script nor vite.config.* task define a command for the task")]
     NoCommand,
+
+    /// A glob pattern resolves to a path outside the workspace root
+    #[error("glob pattern '{pattern}' resolves outside the workspace root")]
+    GlobOutsideWorkspace { pattern: Str },
+
+    /// A glob pattern is invalid
+    #[error("invalid glob pattern '{pattern}'")]
+    InvalidGlob {
+        pattern: Str,
+        #[source]
+        source: Box<wax::BuildError>,
+    },
 }
 
 impl ResolvedTaskConfig {
@@ -176,15 +264,23 @@ impl ResolvedTaskConfig {
     ///
     /// Always resolves with caching enabled (default settings).
     /// The global cache config is applied at plan time, not here.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolveTaskConfigError`] if glob resolution fails.
     pub fn resolve_package_json_script(
         package_dir: &Arc<AbsolutePath>,
         package_json_script: &str,
-    ) -> Self {
-        Self {
+        workspace_root: &AbsolutePath,
+    ) -> Result<Self, ResolveTaskConfigError> {
+        Ok(Self {
             command: package_json_script.into(),
-            resolved_options: ResolvedTaskOptions::resolve(UserTaskOptions::default(), package_dir),
-        }
+            resolved_options: ResolvedTaskOptions::resolve(
+                UserTaskOptions::default(),
+                package_dir,
+                workspace_root,
+            )?,
+        })
     }
 
     /// Resolves from user config, package dir, and package.json script (if any).
@@ -197,6 +293,7 @@ impl ResolvedTaskConfig {
         user_config: UserTaskConfig,
         package_dir: &Arc<AbsolutePath>,
         package_json_script: Option<&str>,
+        workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
         let command = match (&user_config.command, package_json_script) {
             (Some(_), Some(_)) => return Err(ResolveTaskConfigError::CommandConflict),
@@ -206,7 +303,11 @@ impl ResolvedTaskConfig {
         };
         Ok(Self {
             command: command.into(),
-            resolved_options: ResolvedTaskOptions::resolve(user_config.options, package_dir),
+            resolved_options: ResolvedTaskOptions::resolve(
+                user_config.options,
+                package_dir,
+                workspace_root,
+            )?,
         })
     }
 }
@@ -278,7 +379,24 @@ pub const DEFAULT_PASSTHROUGH_ENVS: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
+    use vite_path::AbsolutePathBuf;
+
     use super::*;
+
+    #[expect(clippy::disallowed_types, reason = "PathBuf needed for AbsolutePathBuf::new in tests")]
+    fn test_paths() -> (AbsolutePathBuf, AbsolutePathBuf) {
+        if cfg!(windows) {
+            (
+                AbsolutePathBuf::new("C:\\workspace\\packages\\my-pkg".into()).unwrap(),
+                AbsolutePathBuf::new("C:\\workspace".into()).unwrap(),
+            )
+        } else {
+            (
+                AbsolutePathBuf::new("/workspace/packages/my-pkg".into()).unwrap(),
+                AbsolutePathBuf::new("/workspace".into()).unwrap(),
+            )
+        }
+    }
 
     #[test]
     fn test_resolved_input_config_default_auto() {
@@ -290,8 +408,9 @@ mod tests {
 
     #[test]
     fn test_resolved_input_config_from_none() {
+        let (pkg, ws) = test_paths();
         // None means default to auto-inference
-        let config = ResolvedInputConfig::from_user_config(None);
+        let config = ResolvedInputConfig::from_user_config(None, &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
@@ -299,9 +418,10 @@ mod tests {
 
     #[test]
     fn test_resolved_input_config_empty_array() {
+        let (pkg, ws) = test_paths();
         // Empty array means no inputs, inference disabled
         let user_inputs = vec![];
-        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
@@ -309,8 +429,9 @@ mod tests {
 
     #[test]
     fn test_resolved_input_config_auto_only() {
+        let (pkg, ws) = test_paths();
         let user_inputs = vec![UserInputEntry::Auto { auto: true }];
-        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
@@ -318,8 +439,9 @@ mod tests {
 
     #[test]
     fn test_resolved_input_config_auto_false_ignored() {
+        let (pkg, ws) = test_paths();
         let user_inputs = vec![UserInputEntry::Auto { auto: false }];
-        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
@@ -327,54 +449,81 @@ mod tests {
 
     #[test]
     fn test_resolved_input_config_globs_only() {
+        let (pkg, ws) = test_paths();
         // Globs without auto means inference disabled
         let user_inputs = vec![
             UserInputEntry::Glob("src/**/*.ts".into()),
             UserInputEntry::Glob("package.json".into()),
         ];
-        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert_eq!(config.positive_globs.len(), 2);
-        assert!(config.positive_globs.contains("src/**/*.ts"));
-        assert!(config.positive_globs.contains("package.json"));
+        // Globs should now be workspace-root-relative
+        assert!(config.positive_globs.contains("packages/my-pkg/src/**/*.ts"));
+        assert!(config.positive_globs.contains("packages/my-pkg/package.json"));
         assert!(config.negative_globs.is_empty());
     }
 
     #[test]
     fn test_resolved_input_config_negative_globs() {
+        let (pkg, ws) = test_paths();
         let user_inputs = vec![
             UserInputEntry::Glob("src/**".into()),
             UserInputEntry::Glob("!src/**/*.test.ts".into()),
         ];
-        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert_eq!(config.positive_globs.len(), 1);
-        assert!(config.positive_globs.contains("src/**"));
+        assert!(config.positive_globs.contains("packages/my-pkg/src/**"));
         assert_eq!(config.negative_globs.len(), 1);
-        assert!(config.negative_globs.contains("src/**/*.test.ts")); // Without ! prefix
+        assert!(config.negative_globs.contains("packages/my-pkg/src/**/*.test.ts"));
     }
 
     #[test]
     fn test_resolved_input_config_mixed() {
+        let (pkg, ws) = test_paths();
         let user_inputs = vec![
             UserInputEntry::Glob("package.json".into()),
             UserInputEntry::Auto { auto: true },
             UserInputEntry::Glob("!node_modules/**".into()),
         ];
-        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert_eq!(config.positive_globs.len(), 1);
-        assert!(config.positive_globs.contains("package.json"));
+        assert!(config.positive_globs.contains("packages/my-pkg/package.json"));
         assert_eq!(config.negative_globs.len(), 1);
-        assert!(config.negative_globs.contains("node_modules/**"));
+        assert!(config.negative_globs.contains("packages/my-pkg/node_modules/**"));
     }
 
     #[test]
     fn test_resolved_input_config_globs_with_auto() {
+        let (pkg, ws) = test_paths();
         // Globs with auto keeps inference enabled
         let user_inputs =
             vec![UserInputEntry::Glob("src/**/*.ts".into()), UserInputEntry::Auto { auto: true }];
-        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs));
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
+    }
+
+    #[test]
+    fn test_resolved_input_config_dotdot_resolution() {
+        let (pkg, ws) = test_paths();
+        let user_inputs = vec![UserInputEntry::Glob("../shared/src/**".into())];
+        let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        assert_eq!(config.positive_globs.len(), 1);
+        assert!(
+            config.positive_globs.contains("packages/shared/src/**"),
+            "expected 'packages/shared/src/**', got {:?}",
+            config.positive_globs
+        );
+    }
+
+    #[test]
+    fn test_resolved_input_config_outside_workspace_error() {
+        let (pkg, ws) = test_paths();
+        let user_inputs = vec![UserInputEntry::Glob("../../../outside/**".into())];
+        let result = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ResolveTaskConfigError::GlobOutsideWorkspace { .. }));
     }
 }

@@ -62,8 +62,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cd-in-scripts
                     "includes_auto": true,
                     "positive_globs": [],
                     "negative_globs": []
-                  },
-                  "glob_base": "<workspace>/src"
+                  }
                 },
                 "spawn_command": {
                   "program_path": "<tools>/node_modules/.bin/oxlint",

@@ -37,39 +37,16 @@ pub struct CacheEntryKey {
     /// The spawn fingerprint (command, args, cwd, envs)
     pub spawn_fingerprint: SpawnFingerprint,
     /// Resolved input configuration that affects cache behavior.
+    /// Glob patterns are workspace-root-relative.
     pub input_config: ResolvedInputConfig,
-    /// Base directory for glob patterns, relative to workspace root.
-    /// This is where the task is defined (package path).
-    pub glob_base: RelativePathBuf,
 }
 
 impl CacheEntryKey {
-    #[expect(
-        clippy::disallowed_macros,
-        reason = "anyhow::anyhow! internally uses std::format! for error messages"
-    )]
-    fn from_metadata(
-        cache_metadata: &CacheMetadata,
-        workspace_root: &AbsolutePath,
-    ) -> anyhow::Result<Self> {
-        // Convert absolute glob_base to relative for cache key
-        let glob_base = cache_metadata
-            .glob_base
-            .strip_prefix(workspace_root)
-            .map_err(|e| anyhow::anyhow!("failed to strip prefix from glob_base: {e}"))?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "glob_base {:?} is not inside workspace {:?}",
-                    cache_metadata.glob_base,
-                    workspace_root
-                )
-            })?;
-
-        Ok(Self {
+    fn from_metadata(cache_metadata: &CacheMetadata) -> Self {
+        Self {
             spawn_fingerprint: cache_metadata.spawn_fingerprint.clone(),
             input_config: cache_metadata.input_config.clone(),
-            glob_base,
-        })
+        }
     }
 }
 
@@ -116,7 +93,7 @@ pub enum FingerprintMismatch {
         /// The fingerprint of the current execution
         new: SpawnFingerprint,
     },
-    /// Found a previous cache entry key for the same task, but `input_config` or `glob_base` differs.
+    /// Found a previous cache entry key for the same task, but `input_config` differs.
     InputConfig,
     /// Found the cache entry with the same spawn fingerprint, but an explicit globbed input changed
     GlobbedInput { path: RelativePathBuf },
@@ -172,16 +149,16 @@ impl ExecutionCache {
                         "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    conn.execute("PRAGMA user_version = 9", ())?;
+                    conn.execute("PRAGMA user_version = 10", ())?;
                 }
-                1..=8 => {
+                1..=9 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                9 => break, // current version
-                10.. => {
+                10 => break, // current version
+                11.. => {
                     return Err(anyhow::anyhow!("Unrecognized database version: {user_version}"));
                 }
             }
@@ -208,9 +185,9 @@ impl ExecutionCache {
         let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
-        let cache_key = CacheEntryKey::from_metadata(cache_metadata, workspace_root)?;
+        let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
-        // Try to find the cache entry by key (spawn fingerprint + input config + glob base)
+        // Try to find the cache entry by key (spawn fingerprint + input config)
         if let Some(cache_value) = self.get_by_cache_key(&cache_key).await? {
             // Validate explicit globbed inputs against the stored values
             if let Some(mismatch) =
@@ -239,11 +216,8 @@ impl ExecutionCache {
             self.get_cache_key_by_execution_key(execution_cache_key).await?
         {
             // Destructure to ensure we handle all fields when new ones are added
-            let CacheEntryKey {
-                spawn_fingerprint: old_spawn_fingerprint,
-                input_config: _,
-                glob_base: _,
-            } = old_cache_key;
+            let CacheEntryKey { spawn_fingerprint: old_spawn_fingerprint, input_config: _ } =
+                old_cache_key;
             let mismatch = if old_spawn_fingerprint == *spawn_fingerprint {
                 // spawn fingerprint is the same but input_config or glob_base changed
                 FingerprintMismatch::InputConfig
@@ -264,12 +238,11 @@ impl ExecutionCache {
     pub async fn update(
         &self,
         cache_metadata: &CacheMetadata,
-        workspace_root: &AbsolutePath,
         cache_value: CacheEntryValue,
     ) -> anyhow::Result<()> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
-        let cache_key = CacheEntryKey::from_metadata(cache_metadata, workspace_root)?;
+        let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
         self.upsert_cache_entry(&cache_key, &cache_value).await?;
         self.upsert_task_fingerprint(execution_cache_key, &cache_key).await?;

@@ -11,9 +11,9 @@ use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use vite_glob::AnchoredGlob;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
+use wax::Program as _;
 
 use crate::collections::HashMap;
 
@@ -77,7 +77,7 @@ pub async fn spawn_with_tracking(
     stderr_writer: &mut (dyn AsyncWrite + Unpin),
     std_outputs: Option<&mut Vec<StdOutput>>,
     path_accesses: Option<&mut TrackedPathAccesses>,
-    resolved_negatives: &[AnchoredGlob],
+    resolved_negatives: &[wax::Glob<'static>],
 ) -> anyhow::Result<SpawnResult> {
     /// The tracking state of the spawned process.
     /// Determined by whether `path_accesses` is `Some` (fspy enabled) or `None` (fspy disabled).
@@ -210,14 +210,13 @@ pub async fn spawn_with_tracking(
             continue;
         }
 
-        // Filter against resolved negative globs.
-        // Clean the path to normalize `..` only for matching purposes, since
-        // AnchoredGlob prefixes are cleaned absolute paths.
+        // Filter against resolved negative globs (both are workspace-root-relative).
+        // Clean the relative path to normalize `..` components since fspy may report
+        // paths like `packages/sub-pkg/../shared/dist/output.js`.
         if !resolved_negatives.is_empty() {
-            let cleaned_abs =
-                path_clean::PathClean::clean(workspace_root.join(&relative_path).as_path());
-            if let Some(cleaned) = AbsolutePath::new(&cleaned_abs)
-                && resolved_negatives.iter().any(|neg| neg.is_match(cleaned))
+            let cleaned = path_clean::PathClean::clean(relative_path.as_path());
+            if let Some(cleaned_str) = cleaned.to_str()
+                && resolved_negatives.iter().any(|neg| neg.is_match(cleaned_str))
             {
                 continue;
             }

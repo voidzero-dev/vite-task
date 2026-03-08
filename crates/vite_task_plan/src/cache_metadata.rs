@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_path::RelativePathBuf;
 use vite_str::{self, Str};
 use vite_task_graph::config::ResolvedInputConfig;
 
@@ -46,10 +46,6 @@ pub struct CacheMetadata {
     /// Resolved input configuration for cache fingerprinting.
     /// Used at execution time to determine what files to track.
     pub input_config: ResolvedInputConfig,
-
-    /// Absolute base directory for glob patterns.
-    /// This is the package path where the task is defined.
-    pub glob_base: Arc<AbsolutePath>,
 }
 
 /// Fingerprint for spawn execution that affects caching.
