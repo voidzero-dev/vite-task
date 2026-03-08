@@ -485,7 +485,25 @@ fn main() {
         .collect::<Vec<_>>();
     fixture_paths.sort();
 
+    let mut passed = 0u32;
+    let mut failed = 0u32;
+
     for case_path in &fixture_paths {
-        run_case(&tmp_dir_path, case_path, filter.as_deref());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_case(&tmp_dir_path, case_path, filter.as_deref());
+        }));
+        match result {
+            Ok(()) => passed += 1,
+            Err(_) => failed += 1,
+        }
+    }
+
+    #[expect(clippy::print_stdout, reason = "test summary output for e2e test runner")]
+    {
+        println!("\n{passed} passed, {failed} failed");
+    }
+
+    if failed > 0 {
+        std::process::exit(1);
     }
 }

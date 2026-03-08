@@ -299,11 +299,7 @@ fn run_case_inner(
     });
 }
 
-#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! macro callback")]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "current_dir needed because insta::glob! requires std PathBuf"
-)]
+#[expect(clippy::disallowed_types, reason = "Path required for fixture directory traversal")]
 fn main() {
     // SAFETY: Called before any threads are spawned; insta reads this lazily on first assertion.
     unsafe { std::env::set_var("INSTA_REQUIRE_FULL_MATCH", "1") };
@@ -314,12 +310,35 @@ fn main() {
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
-    let tests_dir = std::env::current_dir().unwrap().join("tests");
+    let fixtures_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("tests")
+        .join("plan_snapshots")
+        .join("fixtures");
+    let mut fixture_paths = std::fs::read_dir(fixtures_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    fixture_paths.sort();
 
-    insta::glob!(tests_dir, "plan_snapshots/fixtures/*", |case_path| run_case(
-        &tokio_runtime,
-        &tmp_dir_path,
-        case_path,
-        filter.as_deref()
-    ));
+    let mut passed = 0u32;
+    let mut failed = 0u32;
+
+    for case_path in &fixture_paths {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_case(&tokio_runtime, &tmp_dir_path, case_path, filter.as_deref());
+        }));
+        match result {
+            Ok(()) => passed += 1,
+            Err(_) => failed += 1,
+        }
+    }
+
+    #[expect(clippy::print_stdout, reason = "test summary output for plan snapshot test runner")]
+    {
+        println!("\n{passed} passed, {failed} failed");
+    }
+
+    if failed > 0 {
+        std::process::exit(1);
+    }
 }
