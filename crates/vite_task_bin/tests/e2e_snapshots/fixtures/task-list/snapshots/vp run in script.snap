@@ -1,12 +1,12 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 460
 expression: e2e_outputs
 ---
 > vp run list-tasks
 @ expect-milestone: task-select::0
 $ vp run ⊘ cache disabled
 Select a task (↑/↓, Enter to run, Esc to clear):
+
   › hello: echo hello from root
     list-tasks: vp run
     app#build: echo build app

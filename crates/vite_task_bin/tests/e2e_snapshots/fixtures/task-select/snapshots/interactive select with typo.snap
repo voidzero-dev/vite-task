@@ -8,6 +8,7 @@ info:
 @ expect-milestone: task-select:buid:0
 Task "buid" not found.
 Select a task (↑/↓, Enter to run, Esc to clear): buid
+
   › build: echo build app
     lib#build: echo build lib
 @ write-key: enter

@@ -160,7 +160,8 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
                 "Select a task (\u{2191}/\u{2193}, Enter to run, Esc to clear): {q}{line_ending}",
             )?;
         }
-        lines += 1;
+        write!(writer, "{line_ending}")?;
+        lines += 2;
     }
 
     // Items
@@ -519,9 +520,11 @@ mod tests {
         let output = render_interactive_to_string(&items, "", 80);
         let mut lines = output.lines();
         let prompt = lines.next().unwrap();
+        let spacer = lines.next().unwrap();
         let selected = lines.next().unwrap();
         let unselected = lines.next().unwrap();
         assert_eq!(prompt, "Select a task (↑/↓, Enter to run, Esc to clear):");
+        assert!(spacer.is_empty());
         assert_eq!(selected, "  › build: echo build");
         assert_eq!(unselected, "    lint: echo lint");
     }

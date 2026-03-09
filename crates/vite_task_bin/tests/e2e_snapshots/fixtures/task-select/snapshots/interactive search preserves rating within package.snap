@@ -7,6 +7,7 @@ info:
 > vp run
 @ expect-milestone: task-select::0
 Select a task (↑/↓, Enter to run, Esc to clear):
+
   › build: echo build lib
     lint: echo lint lib
     test: echo test lib
@@ -23,6 +24,7 @@ Select a task (↑/↓, Enter to run, Esc to clear):
 @ write: t
 @ expect-milestone: task-select:t:0
 Select a task (↑/↓, Enter to run, Esc to clear): t
+
   › test: echo test lib
     typecheck: echo typecheck lib
     lint: echo lint lib
