@@ -56,11 +56,10 @@ const PARSER_OPTIONS: ParserOptions = ParserOptions {
 /// (e.g. single quotes inside double quotes are preserved as literal characters).
 /// Returns `None` if the word contains expansions that cannot be statically resolved
 /// (parameter expansion, command substitution, arithmetic).
-#[expect(clippy::disallowed_types, reason = "brush_parser word API uses String")]
-fn unquote(word: &Word) -> Option<String> {
+fn unquote(word: &Word) -> Option<Str> {
     let Word { value, loc: _ } = word;
     let pieces = brush_parser::word::parse(value.as_str(), &PARSER_OPTIONS).ok()?;
-    let mut result = String::with_capacity(value.len());
+    let mut result = Str::with_capacity(value.len());
     flatten_pieces(&pieces, &mut result)?;
     Some(result)
 }
@@ -68,8 +67,7 @@ fn unquote(word: &Word) -> Option<String> {
 /// Recursively extract literal text from parsed word pieces.
 ///
 /// Returns `None` if any piece requires runtime expansion.
-#[expect(clippy::disallowed_types, reason = "brush_parser word API uses String")]
-fn flatten_pieces(pieces: &[WordPieceWithSource], result: &mut String) -> Option<()> {
+fn flatten_pieces(pieces: &[WordPieceWithSource], result: &mut Str) -> Option<()> {
     for piece in pieces {
         match &piece.piece {
             WordPiece::Text(s) | WordPiece::SingleQuotedText(s) | WordPiece::AnsiCQuotedText(s) => {
@@ -122,7 +120,7 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
             let AssignmentValue::Scalar(value) = value else {
                 return None;
             };
-            envs.insert(name.as_str().into(), unquote(value)?.into());
+            envs.insert(name.as_str().into(), unquote(value)?);
         }
     }
     let mut args = Vec::<Str>::new();
@@ -131,10 +129,10 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
             let CommandPrefixOrSuffixItem::Word(word) = suffix_item else {
                 return None;
             };
-            args.push(unquote(word)?.into());
+            args.push(unquote(word)?);
         }
     }
-    Some((TaskParsedCommand { envs, program: unquote(program)?.into(), args }, range))
+    Some((TaskParsedCommand { envs, program: unquote(program)?, args }, range))
 }
 
 #[must_use]
@@ -263,11 +261,9 @@ mod tests {
 
     #[test]
     fn test_flatten_pieces_recursion() {
-        #[expect(clippy::disallowed_types, reason = "flatten_pieces uses String")]
-        fn parse_and_flatten(input: &str) -> Option<String> {
+        fn parse_and_flatten(input: &str) -> Option<Str> {
             let pieces = brush_parser::word::parse(input, &PARSER_OPTIONS).ok()?;
-            #[expect(clippy::disallowed_types, reason = "flatten_pieces uses String")]
-            let mut result = String::new();
+            let mut result = Str::default();
             flatten_pieces(&pieces, &mut result)?;
             Some(result)
         }
