@@ -263,8 +263,10 @@ mod tests {
 
     #[test]
     fn test_flatten_pieces_recursion() {
+        #[expect(clippy::disallowed_types, reason = "flatten_pieces uses String")]
         fn parse_and_flatten(input: &str) -> Option<String> {
             let pieces = brush_parser::word::parse(input, &PARSER_OPTIONS).ok()?;
+            #[expect(clippy::disallowed_types, reason = "flatten_pieces uses String")]
             let mut result = String::new();
             flatten_pieces(&pieces, &mut result)?;
             Some(result)
