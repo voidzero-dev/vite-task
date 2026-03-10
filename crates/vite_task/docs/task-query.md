@@ -56,13 +56,14 @@ Stage 1: Which packages?     Stage 2: Which tasks?
 
 The CLI flags determine which packages participate:
 
-| Command                            | What it selects                               |
-| ---------------------------------- | --------------------------------------------- |
-| `vp run build`                     | Just the current package                      |
-| `vp run -r build`                  | All packages                                  |
-| `vp run -t build`                  | Current package + its transitive dependencies |
-| `vp run --filter app... build`     | `app` + its transitive dependencies           |
-| `vp run --filter '!core' -r build` | All packages except `core`                    |
+| Command                      | What it selects                               |
+| ---------------------------- | --------------------------------------------- |
+| `vp run build`               | Just the current package                      |
+| `vp run -r build`            | All packages                                  |
+| `vp run -t build`            | Current package + its transitive dependencies |
+| `vp run -w build`            | The workspace root package                    |
+| `vp run -F app... build`     | `app` + its transitive dependencies           |
+| `vp run -F '!core' -r build` | All packages except `core`                    |
 
 The result is a **package subgraph** — the selected packages plus all the dependency edges between them. This subgraph is a subset of the full package graph.
 

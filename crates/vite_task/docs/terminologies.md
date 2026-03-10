@@ -13,9 +13,10 @@
 ```
 
 ```jsonc
-// task.json
+// vite-task.json
 {
-  "lint": {
+  "tasks": {
+    "lint": {
     "command": "echo lint"
   }
 }

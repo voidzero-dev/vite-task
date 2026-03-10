@@ -78,16 +78,36 @@ vp run <task>                        # run task in current package
 vp run <package>#<task>              # run task in specific package
 vp run <task> -r                     # run task in all packages (recursive)
 vp run <task> -t                     # run task in current package + transitive deps
-vp run <task> --extra --args         # pass extra args to the task command
+vp run <task> -- --extra --args      # pass extra args to the task command
+vp run                               # interactive task selector (fuzzy search)
 
 # Built-in commands (run tools from node_modules/.bin)
 vp test [args...]                    # run vitest
 vp lint [args...]                    # run oxlint
 
-# Flags
--r, --recursive                      # run across all packages
--t, --transitive                     # run in current package and its dependencies
+# Cache management
+vp cache clean                       # remove the cache database
+
+# Package selection flags
+-r, --recursive                      # select all packages in the workspace
+-t, --transitive                     # select current package + transitive deps
+-w, --workspace-root                 # select the workspace root package
+-F, --filter <pattern>               # pnpm-style filter (repeatable, see below)
+
+# Run flags
 --ignore-depends-on                  # skip explicit dependsOn dependencies
+-v, --verbose                        # show full detailed summary after execution
+--cache                              # force caching on for all tasks and scripts
+--no-cache                           # force caching off for all tasks and scripts
+--last-details                       # show detailed summary of the last run
+
+# Filter patterns (pnpm-style)
+-F <name>                            # select by package name
+-F '@scope/*'                        # select by glob pattern
+-F ./<dir>                           # select packages under a directory
+-F '<pattern>...'                    # select package and its dependencies
+-F '...<pattern>'                    # select package and its dependents
+-F '!<pattern>'                      # exclude packages matching pattern
 ```
 
 ## Key Architecture
@@ -105,15 +125,29 @@ Tasks are defined in `vite-task.json`:
 
 ```json
 {
+  "cache": true | false | { "scripts": bool, "tasks": bool },
   "tasks": {
     "test": {
       "command": "vitest run",
-      "dependsOn": ["build", "lint"],
-      "cache": true
+      "cwd": "relative/path",
+      "dependsOn": ["build", "package#task"],
+      "cache": true,
+      "envs": ["NODE_ENV"],
+      "passThroughEnvs": ["CI"],
+      "inputs": ["src/**", "!dist/**", { "auto": true }]
     }
   }
 }
 ```
+
+- `cache` (root): workspace-wide cache toggle. Default: `{ "scripts": false, "tasks": true }`
+- `command`: shell command to run (falls back to package.json script if omitted)
+- `cwd`: working directory relative to the package root
+- `dependsOn`: explicit task dependencies (`taskName` or `package#task`)
+- `cache` (task): enable/disable caching for this task (default: `true`)
+- `envs`: env var names to fingerprint and pass to the task
+- `passThroughEnvs`: env var names to pass without fingerprinting
+- `inputs`: files for cache fingerprinting (globs, `{ "auto": true }`, negation patterns)
 
 ## Task Dependencies
 

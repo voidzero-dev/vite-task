@@ -8,9 +8,7 @@
   },
   "type": "module",
   "scripts": {
-    "prepare": "husky",
-    "hello": "bash -c pwd",
-    "lint": "vp lint"
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/node": "catalog:",

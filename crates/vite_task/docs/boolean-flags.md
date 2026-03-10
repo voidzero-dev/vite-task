@@ -1,80 +1,54 @@
-# Boolean Flags in vite-plus
+# Boolean Flags in Vite Task
 
-This document describes how boolean flags work in vite-plus commands.
-
-## Negation Pattern
-
-All boolean flags in vite-plus support a negation pattern using the `--no-` prefix. When a `--no-*` flag is used, it explicitly sets the corresponding boolean option to `false`.
+This document describes how boolean flags work in `vp` commands.
 
 ## Available Boolean Flags
 
-### Global Flags
-
-- `--debug` / `--no-debug` - Enable or disable cache debugging output
-  - Short form: `-d` (only for positive form)
-
 ### Run Command Flags
 
-- `--recursive` / `--no-recursive` - Enable or disable recursive task execution across all packages
-  - Short form: `-r` (only for positive form)
+- `--recursive` / `-r` — Run task in all packages in the workspace
+- `--transitive` / `-t` — Run task in the current package and its transitive dependencies
+- `--workspace-root` / `-w` — Run task in the workspace root package
+- `--ignore-depends-on` — Skip explicit `dependsOn` dependencies
+- `--verbose` / `-v` — Show full detailed summary after execution
+- `--cache` / `--no-cache` — Force caching on or off for all tasks and scripts
 
-- `--parallel` / `--no-parallel` - Enable or disable parallel task execution
-  - Short form: `-p` (only for positive form)
+### Negation Pattern
 
-- `--sequential` / `--no-sequential` - Enable or disable sequential task execution
-  - Short form: `-s` (only for positive form)
-
-- `--topological` / `--no-topological` - Enable or disable topological ordering based on package dependencies
-  - Short form: `-t` (only for positive form)
-
-## Behavior
-
-### Conflicts
-
-The positive and negative forms of a flag are mutually exclusive. You cannot use both `--flag` and `--no-flag` in the same command:
+The `--cache` flag supports a `--no-cache` negation form. When `--no-cache` is used, caching is explicitly disabled for all tasks in that run:
 
 ```bash
-# This will result in an error
-vp run --recursive --no-recursive build
+# Force caching off
+vp run build --no-cache
+
+# Force caching on (even for scripts that default to uncached)
+vp run build --cache
 ```
 
-### Precedence
-
-When only the negative form is used, it takes precedence and explicitly sets the value to `false`:
-
-```bash
-# Explicitly disable topological ordering
-vp run build -r --no-topological
-```
-
-### Default Values
-
-The negative flags are particularly useful for overriding default behaviors:
-
-- `--recursive` with `--no-topological`: By default, recursive runs enable topological ordering. Use `--no-topological` to disable it:
-  ```bash
-  # Recursive run WITHOUT topological ordering
-  vp run build -r --no-topological
-  ```
+The positive and negative forms are mutually exclusive — you cannot use both `--cache` and `--no-cache` in the same command.
 
 ## Examples
 
 ```bash
-# Run with debugging disabled (useful if debug is enabled by default in config)
-vp --no-debug build
+# Recursive build (all packages in dependency order)
+vp run build -r
 
-# Recursive build without topological ordering
-vp run build --recursive --no-topological
+# Current package + transitive dependencies
+vp run build -t
 
-# Explicitly disable parallel execution
-vp run build --no-parallel
+# Run in workspace root
+vp run build -w
 
-# Run tests sequentially, not in parallel
-vp run test --no-parallel
+# Skip explicit dependsOn edges
+vp run build --ignore-depends-on
+
+# Verbose output
+vp run build -v
+
+# Force caching off for this run
+vp run build --no-cache
 ```
 
 ## Implementation Details
 
-The `--no-*` flags use clap's `conflicts_with` attribute to ensure they cannot be used together with their positive counterparts. When processing flags, vite-plus uses a `resolve_bool_flag` function that gives precedence to the negative form when present.
-
-This pattern provides a consistent and intuitive way to explicitly disable features that might be enabled by default or through configuration files.
+The flags use clap's argument parsing. The `--cache`/`--no-cache` pair uses clap's `conflicts_with` attribute to ensure they cannot be used together.

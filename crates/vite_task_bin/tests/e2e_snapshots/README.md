@@ -1,6 +1,6 @@
 # E2E Snapshot Tests
 
-End-to-end tests that execute the `vite` binary and verify its output.
+End-to-end tests that execute the `vp` binary and verify its output.
 
 ## When to add tests here
 
