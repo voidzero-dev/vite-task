@@ -22,7 +22,7 @@ Does the pre-run fingerprint match an existing cache entry?
 │        │        └─ NO  → CACHE MISS: "'foo.ts' modified"
 │        └─ NO  → CACHE HIT (replay output)
 │
-└─ NO  → Does the execution key (same package path + task name + `&&` item index) have an old fingerprint?
+└─ NO  → Does the execution key (same package path + task name + `&&` item index + extra args) have an old fingerprint?
          ├─ YES → diff old vs new → CACHE MISS: "args changed" / "envs changed" / etc.
          └─ NO  → CACHE MISS (first run, no inline message)
 ```
@@ -49,7 +49,7 @@ Globbed input files are resolved from explicit glob patterns in the `inputs` con
 
 The pre-run fingerprint is purely content-based — it's derived from what the command _does_, not which task it belongs to. This means two different tasks that run the exact same command produce the same pre-run fingerprint and **share a single cache entry**.
 
-To track which fingerprint each task used on its last run, the cache also stores an **execution key** alongside each pre-run fingerprint. The execution key identifies the task (package path, task name, compound command index, and extra CLI args). Only the last run's execution key is remembered.
+To track which fingerprint each task used on its last run, the cache maintains a separate mapping from **execution key** to pre-run fingerprint. The execution key identifies the task (package path, task name, compound command index, and extra CLI args). For each execution key, only the last pre-run fingerprint is remembered — multiple execution keys can point to the same cache entry simultaneously.
 
 The execution key is **not** consulted during cache hits — a hit is determined solely by the pre-run fingerprint (and post-run validation). The execution key only comes into play **after** a pre-run fingerprint miss: Vite Task uses it to find the old fingerprint, diff old vs. new, and report what changed. This is the key to solving both problems:
 
@@ -80,17 +80,28 @@ $ vp build
 ... vp build output ...
 ```
 
-Both `check` and `build` split into compound sub-commands. The first sub-command (`tsc --noEmit`) is identical in both, so it produces the same pre-run fingerprint and shares the cache entry. After both tasks run, the database has three rows (not four):
+Both `check` and `build` split into compound sub-commands. The first sub-command (`tsc --noEmit`) is identical in both, so it produces the same pre-run fingerprint and shares the cache entry. After both tasks run, the database looks like this:
 
 ```
-Pre-run fingerprint (unique)     Last execution key   Cached output
-────────────────────────────     ──────────────────   ─────────────────
-fingerprint("tsc --noEmit")      build#0              cached output of tsc
-fingerprint("vp lint")           check#1              cached output of lint
-fingerprint("vp build")         build#1              cached output of vp build
+Table: cache_entries (3 rows — shared entry means 3, not 4)
+
+Pre-run fingerprint (unique)     Cached output
+────────────────────────────     ─────────────────
+fingerprint("tsc --noEmit")      cached output of tsc
+fingerprint("vp lint")           cached output of lint
+fingerprint("vp build")          cached output of vp build
+
+Table: task_fingerprints (4 rows — maps each task to its last pre-run fingerprint)
+
+Execution key (unique)           Pre-run fingerprint
+──────────────────               ────────────────────────────
+check#0                          fingerprint("tsc --noEmit")
+check#1                          fingerprint("vp lint")
+build#0                          fingerprint("tsc --noEmit")   ← same entry as check#0
+build#1                          fingerprint("vp build")
 ```
 
-The `tsc --noEmit` row was created by `check#0` and later updated by `build#0`. Both tasks look it up by fingerprint, so both get a cache hit.
+Both `check#0` and `build#0` point to the same `cache_entries` row. Cache hits are found by looking up the pre-run fingerprint in `cache_entries`. The `task_fingerprints` table is only consulted on misses — to find the old pre-run fingerprint and report what changed.
 
 #### Miss Reporting
 
@@ -113,9 +124,8 @@ $ tsc
 After this run, the database stores:
 
 ```
-Pre-run fingerprint (unique)                     Last execution key   Cached output
-──────────────────────────────────────────       ──────────────────   ─────────────
-fingerprint("tsc", NODE_ENV=development)         build#0              cached output
+cache_entries:       fingerprint("tsc", NODE_ENV=development) → cached output
+task_fingerprints:   build#0 → fingerprint("tsc", NODE_ENV=development)
 ```
 
 Now change `NODE_ENV`:
@@ -411,7 +421,7 @@ Here's the complete lifecycle of a cached task execution:
    │   │   │   ├─ Valid   → CACHE HIT: replay stored stdout/stderr
    │   │   │   └─ Invalid → CACHE MISS: 'file.ts' modified
    │   │   └─ NO  → CACHE HIT: replay stored stdout/stderr
-   │   └─ Not found → look up execution key (same package path + task name + `&&` item index) for old fingerprint
+   │   └─ Not found → look up execution key (same package path + task name + `&&` item index + extra args) for old fingerprint
    │       ├─ Found → diff old vs new → CACHE MISS: "args changed" / etc.
    │       └─ Not found → CACHE MISS: no previous cache
 
