@@ -73,7 +73,7 @@ fn flatten_pieces(pieces: &[WordPieceWithSource], result: &mut String) -> Option
     for piece in pieces {
         match &piece.piece {
             WordPiece::Text(s) | WordPiece::SingleQuotedText(s) | WordPiece::AnsiCQuotedText(s) => {
-                result.push_str(s)
+                result.push_str(s);
             }
             // EscapeSequence contains the raw sequence (e.g. `\"` as two chars);
             // the escaped character is everything after the leading backslash.
