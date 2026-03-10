@@ -18,7 +18,6 @@ bincode = { workspace = true, features = ["derive"] }
 bstr = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 derive_more = { workspace = true, features = ["from"] }
-diff-struct = { workspace = true }
 fspy = { workspace = true }
 futures-util = { workspace = true }
 once_cell = { workspace = true }

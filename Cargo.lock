@@ -3869,7 +3869,6 @@ dependencies = [
  "bstr",
  "clap",
  "derive_more",
- "diff-struct",
  "fspy",
  "futures-util",
  "nix 0.30.1",
