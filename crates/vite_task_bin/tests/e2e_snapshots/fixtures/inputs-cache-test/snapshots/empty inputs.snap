@@ -13,3 +13,8 @@ export const main = 'initial';
 
 ---
 [vp run] cache hit, <duration> saved.
+> json-edit vite-task.json "_.tasks['empty-inputs'].command = 'print-file src/utils.ts'"
+
+> vp run empty-inputs
+$ print-file src/utils.ts ✗ cache miss: args changed, executing
+export const utils = 'initial';

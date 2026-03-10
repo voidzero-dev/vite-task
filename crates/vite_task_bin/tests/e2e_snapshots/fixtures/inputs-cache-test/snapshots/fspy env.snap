@@ -2,6 +2,9 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
+> vp run check-fspy-env-with-auto
+$ print-env FSPY
+1
 > vp run check-fspy-env-without-auto
 $ print-env FSPY
 (undefined)

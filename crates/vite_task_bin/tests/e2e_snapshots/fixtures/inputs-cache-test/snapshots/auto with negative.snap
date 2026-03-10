@@ -15,3 +15,9 @@ export const main = 'initial';
 
 ---
 [vp run] cache hit, <duration> saved.
+> replace-file-content src/main.ts initial modified
+
+> vp run auto-with-negative
+$ print-file src/main.ts dist/output.js ✗ cache miss: 'src/main.ts' modified, executing
+export const main = 'modified';
+// modified output

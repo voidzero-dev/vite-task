@@ -2,14 +2,19 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run positive-negative-globs
+> vp run positive-auto-negative
 $ print-file src/main.ts
 export const main = 'initial';
 > replace-file-content src/main.test.ts main modified
 
-> vp run positive-negative-globs
+> vp run positive-auto-negative
 $ print-file src/main.ts ✓ cache hit, replaying
 export const main = 'initial';
 
 ---
 [vp run] cache hit, <duration> saved.
+> replace-file-content src/main.ts initial modified
+
+> vp run positive-auto-negative
+$ print-file src/main.ts ✗ cache miss: 'src/main.ts' modified, executing
+export const main = 'modified';
