@@ -262,6 +262,31 @@ mod tests {
     }
 
     #[test]
+    fn test_flatten_pieces_recursion() {
+        fn parse_and_flatten(input: &str) -> Option<String> {
+            let pieces = brush_parser::word::parse(input, &PARSER_OPTIONS).ok()?;
+            let mut result = String::new();
+            flatten_pieces(&pieces, &mut result)?;
+            Some(result)
+        }
+
+        // DoubleQuotedSequence containing Text + EscapeSequence + Text
+        assert_eq!(parse_and_flatten(r#""hello\"world""#).unwrap(), "hello\"world");
+
+        // DoubleQuotedSequence with single quotes preserved as literal text
+        assert_eq!(parse_and_flatten(r#""it's a 'test'""#).unwrap(), "it's a 'test'");
+
+        // Nested escape sequences inside double quotes
+        assert_eq!(parse_and_flatten(r#""a\\b""#).unwrap(), "a\\b");
+
+        // DoubleQuotedSequence bails on parameter expansion inside
+        assert!(parse_and_flatten(r#""hello $VAR""#).is_none());
+
+        // DoubleQuotedSequence bails on command substitution inside
+        assert!(parse_and_flatten(r#""hello $(cmd)""#).is_none());
+    }
+
+    #[test]
     fn test_parse_urllib_prepare() {
         let cmd = r#"node -e "const v = parseInt(process.versions.node, 10); if (v >= 20) require('child_process').execSync('vp config', {stdio: 'inherit'});""#;
         let result = try_parse_as_and_list(cmd);
