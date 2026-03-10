@@ -316,6 +316,20 @@ fn duration_to_ms(d: Duration) -> u64 {
     d.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
+fn format_summary_duration(d: Duration) -> Str {
+    let formatted = vite_str::format!("{d:.2?}");
+
+    for (suffix, unit) in
+        [(".00ms", "ms"), (".00s", "s"), (".00us", "us"), (".00µs", "µs"), (".00ns", "ns")]
+    {
+        if let Some(prefix) = formatted.as_str().strip_suffix(suffix) {
+            return vite_str::format!("{prefix}{unit}");
+        }
+    }
+
+    formatted
+}
+
 impl LastRunSummary {
     // ── Persistence ──────────────────────────────────────────────────────
 
@@ -404,7 +418,8 @@ impl TaskResult {
         match self {
             Self::CacheHit { saved_duration_ms } => {
                 let d = Duration::from_millis(*saved_duration_ms);
-                vite_str::format!("→ Cache hit - output replayed - {d:.2?} saved")
+                let formatted_duration = format_summary_duration(d);
+                vite_str::format!("→ Cache hit - output replayed - {formatted_duration} saved")
             }
             Self::InProcess => Str::from("→ Cache disabled for built-in command"),
             Self::Spawned { cache_status, .. } => match cache_status {
@@ -559,10 +574,11 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
     );
 
     if stats.total_saved > Duration::ZERO {
+        let formatted_total_saved = format_summary_duration(stats.total_saved);
         let _ = write!(
             buf,
-            ", {:.2?} saved in total",
-            stats.total_saved.style(Style::new().green().bold())
+            ", {} saved in total",
+            formatted_total_saved.style(Style::new().green().bold())
         );
     }
     let _ = writeln!(buf);
@@ -647,8 +663,8 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
 ///
 /// Rules:
 /// - Single task + not cache hit → empty (no summary at all)
-/// - Single task + cache hit → thin line + "[vp run] cache hit, {duration} saved."
-/// - Multi-task → thin line + "[vp run] {hits}/{total} cache hit ({rate}%), {duration} saved."
+/// - Single task + cache hit → thin line + "vp run: cache hit, {duration} saved."
+/// - Multi-task → thin line + "vp run: {hits}/{total} cache hit ({rate}%), {duration} saved."
 ///   with optional failure count and `--verbose` hint.
 pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
     let stats = SummaryStats::compute(&summary.tasks);
@@ -667,11 +683,12 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
 
     if is_single_task {
         // Single task cache hit
+        let formatted_total_saved = format_summary_duration(stats.total_saved);
         let _ = writeln!(
             buf,
-            "{} cache hit, {:.2?} saved.",
-            "[vp run]".style(Style::new().bright_black()),
-            stats.total_saved.style(Style::new().green().bold()),
+            "{} cache hit, {} saved.",
+            "vp run:".style(Style::new().blue().bold()),
+            formatted_total_saved.style(Style::new().green().bold()),
         );
     } else {
         // Multi-task
@@ -692,14 +709,15 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
         let _ = write!(
             buf,
             "{} {hits}/{total} cache hit ({rate}%)",
-            "[vp run]".style(Style::new().bright_black()),
+            "vp run:".style(Style::new().blue().bold()),
         );
 
         if stats.total_saved > Duration::ZERO {
+            let formatted_total_saved = format_summary_duration(stats.total_saved);
             let _ = write!(
                 buf,
-                ", {:.2?} saved",
-                stats.total_saved.style(Style::new().green().bold()),
+                ", {} saved",
+                formatted_total_saved.style(Style::new().green().bold()),
             );
         }
 
@@ -708,11 +726,9 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
             let _ = write!(buf, ", {} failed", n.style(Style::new().red()));
         }
 
-        let _ = write!(
-            buf,
-            ". {}",
-            "(Run `vp run --last-details` for full details)".style(Style::new().bright_black()),
-        );
+        let _ = write!(buf, ". {}", "(Run ".style(Style::new().bright_black()));
+        let _ = write!(buf, "{}", "`vp run --last-details`".style(COMMAND_STYLE));
+        let _ = write!(buf, "{}", " for full details)".style(Style::new().bright_black()));
         let _ = writeln!(buf);
     }
 

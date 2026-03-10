@@ -14,4 +14,4 @@ stdout:not-tty
 stderr:not-tty
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.

@@ -10,7 +10,7 @@ $ print-file foo.txt ✓ cache hit, replaying
 initial content
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.
 > replace-file-content foo.txt initial modified # modify shared input
 
 > vp run script2 # cache miss, input changed
@@ -21,4 +21,4 @@ $ print-file foo.txt ✓ cache hit, replaying
 modified content
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.

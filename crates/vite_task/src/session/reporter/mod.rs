@@ -227,13 +227,25 @@ fn format_command_with_cache_status(
     format_cache_status_inline(cache_status).map_or_else(
         || vite_str::format!("{}\n", command_str.style(COMMAND_STYLE)),
         |inline_status| {
-            // Apply styling based on cache status type
-            let styled_status = match cache_status {
-                CacheStatus::Hit { .. } => inline_status.style(Style::new().green().dimmed()),
-                CacheStatus::Miss(_) => inline_status.style(CACHE_MISS_STYLE.dimmed()),
-                CacheStatus::Disabled(_) => inline_status.style(Style::new().bright_black()),
-            };
-            vite_str::format!("{} {}\n", command_str.style(COMMAND_STYLE), styled_status)
+            let styled_status = inline_status.split_once(' ').map_or_else(
+                || inline_status.style(Style::new().bright_black()).to_string(),
+                |(symbol, text)| {
+                    let (symbol_style, text_style) = match cache_status {
+                        CacheStatus::Hit { .. } => {
+                            (Style::new().green(), Style::new().bright_black())
+                        }
+                        CacheStatus::Miss(_) => (CACHE_MISS_STYLE, Style::new().bright_black()),
+                        CacheStatus::Disabled(_) => {
+                            (Style::new().black(), Style::new().bright_black())
+                        }
+                    };
+
+                    vite_str::format!("{} {}", symbol.style(symbol_style), text.style(text_style))
+                        .to_string()
+                },
+            );
+
+            vite_str::format!("{} {styled_status}\n", command_str.style(COMMAND_STYLE))
         },
     )
 }

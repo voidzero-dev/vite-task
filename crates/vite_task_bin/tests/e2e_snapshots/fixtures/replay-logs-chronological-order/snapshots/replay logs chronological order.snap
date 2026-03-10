@@ -194,7 +194,7 @@ $ node build.js ✓ cache hit, replaying
 [build.js] main process end
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.
 > vp run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------
@@ -292,4 +292,4 @@ $ node build.js ✓ cache hit, replaying
 [build.js] main process end
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.

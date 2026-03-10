@@ -32,4 +32,4 @@ Found 1 warning and 0 errors.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.

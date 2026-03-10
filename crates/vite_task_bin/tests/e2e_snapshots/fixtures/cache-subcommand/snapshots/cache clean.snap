@@ -10,7 +10,7 @@ $ print-file test.txt ✓ cache hit, replaying
 test content
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.
 > vp cache clean
 
 > vp run cached-task # cache miss after clean

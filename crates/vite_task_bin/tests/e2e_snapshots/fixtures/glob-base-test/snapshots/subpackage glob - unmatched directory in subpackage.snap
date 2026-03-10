@@ -12,4 +12,4 @@ export const sub = 'initial';
 export const sub = 'initial';
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.

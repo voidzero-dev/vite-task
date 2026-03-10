@@ -10,7 +10,7 @@ export const lib = 'initial';
 export const lib = 'initial';
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.
 > replace-file-content packages/[lib]/src/main.ts initial modified
 
 > vp run [lib]#build

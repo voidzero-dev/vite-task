@@ -13,10 +13,10 @@ $ print-env FOO ✓ cache hit, replaying
 1
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.
 > FOO=2 vp run hello # cache hit
 $ print-env FOO ✓ cache hit, replaying
 2
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.

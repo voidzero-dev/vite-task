@@ -12,4 +12,4 @@ $ print-file src/root.ts ✓ cache hit, replaying
 export const root = 'initial';
 
 ---
-[vp run] cache hit, <duration> saved.
+vp run: cache hit, <duration> saved.

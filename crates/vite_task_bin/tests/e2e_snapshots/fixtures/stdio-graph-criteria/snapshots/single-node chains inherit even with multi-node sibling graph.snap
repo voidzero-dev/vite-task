@@ -24,4 +24,4 @@ stdout:not-tty
 stderr:not-tty
 
 ---
-[vp run] 0/4 cache hit (0%). (Run `vp run --last-details` for full details)
+vp run: 0/4 cache hit (0%). (Run `vp run --last-details` for full details)

@@ -46,7 +46,7 @@ struct SharedReporterState {
 ///
 /// ## Compact Summary (default)
 /// - Single task + not cache hit → no summary at all
-/// - Single task + cache hit → thin line + "[vp run] cache hit, {duration} saved."
+/// - Single task + cache hit → thin line + "vp run: cache hit, {duration} saved."
 /// - Multi-task → thin line + one-liner with stats
 ///
 /// ## Full Summary (`--verbose`)
