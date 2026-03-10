@@ -163,17 +163,11 @@ ignored = [
   "ctor",
 ]
 
-[profile.dev]
-# Disabling debug info speeds up local and CI builds,
-# and we don't rely on it for debugging that much.
-debug = false
-
 [profile.release]
 # Configurations explicitly listed here for clarity.
 # Using the best options for performance.
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-strip = "symbols" # set to `false` for debug information
-debug = false # set to `true` for debug information
+strip = "symbols"
 panic = "abort" # Let it crash and force ourselves to write safe Rust.
