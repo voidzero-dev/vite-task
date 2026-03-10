@@ -4,34 +4,36 @@ Vite Task caches task execution results. When you re-run a task and nothing rele
 
 > **Note:** Currently, only stdout/stderr is cached and replayed. Output file restoration (restoring files the command wrote) is not yet implemented.
 
-## How It Works: Two-Level Fingerprinting
+## How It Works: Key Lookup + Input Validation
 
-Caching uses a two-level fingerprint system:
+Caching uses a two-level system:
 
-1. **Pre-run fingerprint** — computed _before_ execution. Captures the command, arguments, working directory, environment variables, input configuration, and content hashes of explicitly-globbed files.
-2. **Post-run fingerprint** — computed _after_ execution, when auto-inference is enabled. Captures the content hashes of all files the command actually read. When auto-inference is disabled (explicit globs only), no post-run fingerprint is stored.
+1. **Cache entry key** — computed _before_ execution. Captures the command, arguments, working directory, environment variables, and input configuration. Used to look up the cache entry.
+2. **Input validation** — after a cache entry is found, two sets of file hashes are validated:
+   - **Globbed input hashes** — content hashes of files matching explicit `inputs` globs, computed before execution and stored in the cache entry value (not the key) so that changes can be reported precisely.
+   - **Inferred input hashes** — content hashes of files the command actually read (tracked by fspy during the previous run). Only present when auto-inference is enabled.
 
 On the next run, the cache lookup works as follows:
 
 ```
-Does the pre-run fingerprint match an existing cache entry?
+Does the cache entry key (spawn fingerprint + input config) match?
 │
-├─ YES → Is there a post-run fingerprint?
-│        ├─ YES → Do inferred file hashes still match?
-│        │        ├─ YES → CACHE HIT (replay output)
-│        │        └─ NO  → CACHE MISS: "'foo.ts' modified"
-│        └─ NO  → CACHE HIT (replay output)
+├─ YES → Do globbed input file hashes still match?
+│        ├─ NO  → CACHE MISS: "'src/main.ts' modified"
+│        └─ YES → Do inferred input hashes still match? (from fspy)
+│                 ├─ NO  → CACHE MISS: "'foo.ts' modified"
+│                 └─ YES → CACHE HIT (replay output)
 │
-└─ NO  → Does the execution key (same package path + task name + `&&` item index + extra args) have an old fingerprint?
+└─ NO  → Does the execution key (same package path + task name + `&&` item index + extra args) have an old cache entry key?
          ├─ YES → diff old vs new → CACHE MISS: "args changed" / "envs changed" / etc.
          └─ NO  → CACHE MISS (first run, no inline message)
 ```
 
 Only **successful** task executions (exit code 0) are cached. Failed tasks are never cached.
 
-## What Goes Into the Pre-Run Fingerprint
+## What Goes Into the Cache Entry Key
 
-The pre-run fingerprint is a composite of:
+The cache entry key (used for lookup) is a composite of:
 
 | Component               | Example                                     | Effect on cache                                |
 | ----------------------- | ------------------------------------------- | ---------------------------------------------- |
@@ -41,17 +43,16 @@ The pre-run fingerprint is a composite of:
 | Fingerprinted envs      | `{ "NODE_ENV": "production" }`              | Value change → miss                            |
 | Pass-through env config | `["CI", "PATH"]` (names only)               | Config change → miss (but value changes don't) |
 | Input configuration     | `{ auto: true, globs: ["src/**"] }`         | Config change → miss                           |
-| Globbed input files     | `{ "src/index.ts": <hash> }`                | Content change → miss                          |
 
-Globbed input files are resolved from explicit glob patterns in the `inputs` configuration before the command runs. Their content hashes (xxHash3) are part of the pre-run fingerprint, so changes are detected without executing the command.
+Globbed input file hashes are **not** part of the cache entry key — they are stored in the cache entry value and validated after a key match. This is deliberate: by keeping hashes in the value, Vite Task can diff old vs. new hashes and report exactly which file changed (e.g., "'src/main.ts' modified") rather than just "no previous cache".
 
-### Pre-Run Fingerprint and Execution Key
+### Cache Entry Key and Execution Key
 
-The pre-run fingerprint is purely content-based — it's derived from what the command _does_, not which task it belongs to. This means two different tasks that run the exact same command produce the same pre-run fingerprint and **share a single cache entry**.
+The cache entry key is purely content-based — it's derived from what the command _does_, not which task it belongs to. This means two different tasks that run the exact same command produce the same cache entry key and **share a single cache entry**.
 
-To track which fingerprint each task used on its last run, the cache maintains a separate mapping from **execution key** to pre-run fingerprint. The execution key identifies the task (package path, task name, compound command index, and extra CLI args). For each execution key, only the last pre-run fingerprint is remembered — multiple execution keys can point to the same cache entry simultaneously.
+To track which cache entry key each task used on its last run, the cache maintains a separate mapping from **execution key** to cache entry key. The execution key identifies the task (package path, task name, compound command index, and extra CLI args). For each execution key, only the last cache entry key is remembered — multiple execution keys can point to the same cache entry simultaneously.
 
-The execution key is **not** consulted during cache hits — a hit is determined solely by the pre-run fingerprint (and post-run validation). The execution key only comes into play **after** a pre-run fingerprint miss: Vite Task uses it to find the old fingerprint, diff old vs. new, and report what changed. This is the key to solving both problems:
+The execution key is **not** consulted during cache hits — a hit is determined solely by the cache entry key (and input validation). The execution key only comes into play **after** a cache entry key miss: Vite Task uses it to find the old cache entry key, diff old vs. new, and report what changed. This is the key to solving both problems:
 
 #### Cache Sharing
 
@@ -80,20 +81,20 @@ $ vp build
 ... vp build output ...
 ```
 
-Both `check` and `build` split into compound sub-commands. The first sub-command (`tsc --noEmit`) is identical in both, so it produces the same pre-run fingerprint and shares the cache entry. After both tasks run, the database looks like this:
+Both `check` and `build` split into compound sub-commands. The first sub-command (`tsc --noEmit`) is identical in both, so it produces the same cache entry key and shares the cache entry. After both tasks run, the database looks like this:
 
 ```
 Table: cache_entries (3 rows — shared entry means 3, not 4)
 
-Pre-run fingerprint (unique)     Cached output
+Cache entry key (unique)         Cached output
 ────────────────────────────     ─────────────────
 fingerprint("tsc --noEmit")      cached output of tsc
 fingerprint("vp lint")           cached output of lint
 fingerprint("vp build")          cached output of vp build
 
-Table: task_fingerprints (4 rows — maps each task to its last pre-run fingerprint)
+Table: task_fingerprints (4 rows — maps each task to its last cache entry key)
 
-Execution key (unique)           Pre-run fingerprint
+Execution key (unique)           Cache entry key
 ──────────────────               ────────────────────────────
 check#0                          fingerprint("tsc --noEmit")
 check#1                          fingerprint("vp lint")
@@ -101,11 +102,11 @@ build#0                          fingerprint("tsc --noEmit")   ← same entry as
 build#1                          fingerprint("vp build")
 ```
 
-Both `check#0` and `build#0` point to the same `cache_entries` row. Cache hits are found by looking up the pre-run fingerprint in `cache_entries`. The `task_fingerprints` table is only consulted on misses — to find the old pre-run fingerprint and report what changed.
+Both `check#0` and `build#0` point to the same `cache_entries` row. Cache hits are found by looking up the cache entry key in `cache_entries`. The `task_fingerprints` table is only consulted on misses — to find the old cache entry key and report what changed.
 
 #### Miss Reporting
 
-When a task's fingerprint changes between runs, the execution key lets Vite Task find the _old_ fingerprint, diff it against the new one, and report exactly what changed.
+When a task's cache entry key changes between runs, the execution key lets Vite Task find the _old_ cache entry key, diff it against the new one, and report exactly what changed.
 
 ```json
 {
@@ -136,11 +137,11 @@ $ tsc ✗ cache miss: envs changed, executing
 ... output ...
 ```
 
-The new pre-run fingerprint (`tsc` with `NODE_ENV=production`) doesn't match any cache entry. Vite Task then finds the old fingerprint stored under execution key `build#0` (`NODE_ENV=development`), and diffs the two to report "envs changed". Without the execution key, it could only say "no previous cache".
+The new cache entry key (`tsc` with `NODE_ENV=production`) doesn't match any existing entry. Vite Task then finds the old cache entry key stored under execution key `build#0` (`NODE_ENV=development`), and diffs the two to report "envs changed". Without the execution key, it could only say "no previous cache".
 
-## What Goes Into the Post-Run Fingerprint
+## What Goes Into the Inferred Input Hashes
 
-After a task runs successfully with auto-inference enabled, Vite Task records which files the command read and their content hashes. On the next run (when the pre-run fingerprint matches), these hashes are re-validated:
+After a task runs successfully with auto-inference enabled, Vite Task records which files the command read and their content hashes. On the next run (when the cache entry key matches and globbed inputs pass), these hashes are re-validated:
 
 | Tracked item       | How it's checked                                |
 | ------------------ | ----------------------------------------------- |
@@ -152,7 +153,7 @@ After a task runs successfully with auto-inference enabled, Vite Task records wh
 
 **Directory entries** are fingerprinted when a command lists a directory (readdir). This captures programs that do their own globbing internally — for example, a test runner scanning `tests/` for `*.test.ts` files. fspy records the directory listing, so adding or removing a test file invalidates the cache even though no existing file's content changed.
 
-When auto-inference is disabled (explicit globs only), no post-run fingerprint is stored — the pre-run fingerprint alone determines cache validity.
+When auto-inference is disabled (explicit globs only), no inferred inputs are recorded — cache validity is determined by the cache entry key and globbed input hashes alone.
 
 ## File System Tracking with fspy
 
@@ -410,18 +411,17 @@ Here's the complete lifecycle of a cached task execution:
 1. PLAN PHASE
    ├─ Parse task config
    ├─ Resolve environment variables, working directory
-   ├─ Hash explicitly-globbed input files
-   └─ Build pre-run fingerprint
-       (command, args, cwd, envs, input config, globbed file hashes)
+   ├─ Build cache entry key (command, args, cwd, envs, input config)
+   └─ Hash explicitly-globbed input files (stored separately for miss reporting)
 
 2. CACHE LOOKUP
-   ├─ Look up by pre-run fingerprint
-   │   ├─ Found → has post-run fingerprint?
-   │   │   ├─ YES → validate it (check inferred file hashes)
-   │   │   │   ├─ Valid   → CACHE HIT: replay stored stdout/stderr
-   │   │   │   └─ Invalid → CACHE MISS: 'file.ts' modified
-   │   │   └─ NO  → CACHE HIT: replay stored stdout/stderr
-   │   └─ Not found → look up execution key (same package path + task name + `&&` item index + extra args) for old fingerprint
+   ├─ Look up by cache entry key
+   │   ├─ Found → validate globbed input hashes
+   │   │   ├─ Changed → CACHE MISS: "'src/main.ts' modified"
+   │   │   └─ Valid   → validate inferred input hashes (from fspy)
+   │   │       ├─ Changed → CACHE MISS: "'foo.ts' modified"
+   │   │       └─ Valid   → CACHE HIT: replay stored stdout/stderr
+   │   └─ Not found → look up execution key for old cache entry key
    │       ├─ Found → diff old vs new → CACHE MISS: "args changed" / etc.
    │       └─ Not found → CACHE MISS: no previous cache
 
@@ -431,9 +431,10 @@ Here's the complete lifecycle of a cached task execution:
    └─ Process exits
 
 4. CACHE UPDATE (only if exit code 0)
-   ├─ Build post-run fingerprint from fspy data (if auto-inference enabled)
+   ├─ Record inferred inputs from fspy data (if auto-inference enabled)
    │   (file content hashes, non-existent paths, directory listings)
-   ├─ Store: pre-run fingerprint + execution key + post-run fingerprint + stdout/stderr
+   ├─ Store in cache_entries: cache entry key → outputs + globbed input hashes + inferred inputs
+   └─ Store in task_fingerprints: execution key → cache entry key
 ```
 
 ## Practical Examples
