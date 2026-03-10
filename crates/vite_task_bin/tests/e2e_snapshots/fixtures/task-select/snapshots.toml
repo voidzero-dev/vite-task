@@ -12,6 +12,13 @@ steps = [
   "echo '' | vp run buid",
 ]
 
+# Non-interactive: typo with no fuzzy matches hides "did you mean"
+[[e2e]]
+name = "non-interactive no suggestions"
+steps = [
+  "echo '' | vp run zzzzz",
+]
+
 # Non-interactive: typo with -r flag errors (not cwd_only)
 [[e2e]]
 name = "non-interactive recursive typo errors"

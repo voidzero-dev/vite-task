@@ -95,6 +95,16 @@ fn non_interactive(
     before_render(&mut filtered, query.unwrap_or_default());
     let len = filtered.len();
 
+    // When there are no matching items, just print the header (if any) and
+    // return early — avoids showing a redundant "No matching tasks." line
+    // after a "not found" header.
+    if filtered.is_empty() {
+        if let Some(h) = header {
+            writeln!(writer, "{h}")?;
+        }
+        return Ok(());
+    }
+
     render_items(
         writer,
         &RenderParams {

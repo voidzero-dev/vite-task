@@ -378,12 +378,20 @@ impl<'a> Session<'a> {
             })
             .collect();
 
-        // Build header: interactive says "not found.", non-interactive "did you mean:" suffix
+        // Build header: interactive says "not found.", non-interactive adds
+        // "Did you mean:" suffix only when there are fuzzy matches to show.
         let header = not_found_name.map(|name| {
             if is_interactive {
                 vite_str::format!("Task \"{name}\" not found.")
             } else {
-                vite_str::format!("Task \"{name}\" not found. Did you mean:")
+                let labels: Vec<&str> =
+                    select_items.iter().map(|item| item.label.as_str()).collect();
+                let has_suggestions = !vite_select::fuzzy_match(name, &labels).is_empty();
+                if has_suggestions {
+                    vite_str::format!("Task \"{name}\" not found. Did you mean:")
+                } else {
+                    vite_str::format!("Task \"{name}\" not found.")
+                }
             }
         });
 
