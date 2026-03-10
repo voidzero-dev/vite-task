@@ -19,7 +19,7 @@ Does the pre-run fingerprint match an existing cache entry?
 ├─ YES → Is there a post-run fingerprint?
 │        ├─ YES → Do inferred file hashes still match?
 │        │        ├─ YES → CACHE HIT (replay output)
-│        │        └─ NO  → CACHE MISS: "content of input 'foo.ts' changed"
+│        │        └─ NO  → CACHE MISS: "'foo.ts' modified"
 │        └─ NO  → CACHE HIT (replay output)
 │
 └─ NO  → Does the execution key (same package path + task name + `&&` item index) have an old fingerprint?
@@ -170,7 +170,7 @@ fspy is intentionally cautious — it tracks _everything_ the command reads. Som
 
 For these cases, use **negative patterns** in the `inputs` configuration to exclude files from cache invalidation.
 
-## Task Inputs\*
+## Task Inputs
 
 The `inputs` field controls which files are tracked for cache invalidation. In most cases you don't need to configure this — fspy handles it automatically.
 
@@ -299,7 +299,7 @@ export default defineConfig({
 });
 ```
 
-**Wildcard patterns\*:** `envs` supports glob-style wildcards:
+**Wildcard patterns:** `envs` supports glob-style wildcards:
 
 - `NODE_*` — matches `NODE_ENV`, `NODE_PATH`, etc.
 - `VITE_*` — matches all Vite environment variables
@@ -347,13 +347,15 @@ Even without explicit configuration, a set of common environment variables are a
 - **IDEs:** `VSCODE_*`, `JB_IDE_*`
 - **Docker:** `DOCKER_*`, `BUILDKIT_*`
 
-### Sensitive Environment Variables\*
+### Sensitive Environment Variables
 
 Environment variables matching sensitive patterns are automatically hashed with SHA-256 before being stored in the cache database. The plaintext value is never persisted. Sensitive patterns include:
 
-- `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`
+- `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_PASS`, `*_PWD`
+- `*_CREDENTIAL*`, `*_API_KEY`, `*_PRIVATE_*`, `*_CERT*`
 - `AWS_*`, `GITHUB_*`, `NPM_*TOKEN`
 - `DATABASE_URL`, `MONGODB_URI`, `REDIS_URL`
+- `PASSWORD`, `SECRET`, `TOKEN` (exact matches)
 
 ## Cache Miss Reasons
 
@@ -362,9 +364,13 @@ When a cache miss occurs, Vite Task tells you exactly why. For now, validation s
 - **no previous cache** — first run, no inline message shown
 - **args changed** — command or arguments differ
 - **envs changed** — a fingerprinted env was added, removed, or changed value
-- **content of input 'src/index.ts' changed** — a tracked file was modified
+- **'src/index.ts' modified** — a tracked file's content changed
+- **'utils.ts' added in 'src'** — a new file appeared in a tracked directory
+- **'old.ts' removed from 'src'** — a tracked file was deleted
 - **working directory changed** — task cwd differs
-- **pass-through env added/removed** — the `passThroughEnvs` list changed (not values, just names)
+- **pass-through env config changed** — the `passThroughEnvs` list changed (not values, just names)
+- **inputs configuration changed** — the `inputs` field itself was modified
+- **program changed** — the command program differs
 
 ## Cache Storage
 
@@ -403,7 +409,7 @@ Here's the complete lifecycle of a cached task execution:
    │   ├─ Found → has post-run fingerprint?
    │   │   ├─ YES → validate it (check inferred file hashes)
    │   │   │   ├─ Valid   → CACHE HIT: replay stored stdout/stderr
-   │   │   │   └─ Invalid → CACHE MISS: input file changed
+   │   │   │   └─ Invalid → CACHE MISS: 'file.ts' modified
    │   │   └─ NO  → CACHE HIT: replay stored stdout/stderr
    │   └─ Not found → look up execution key (same package path + task name + `&&` item index) for old fingerprint
    │       ├─ Found → diff old vs new → CACHE MISS: "args changed" / etc.
@@ -518,7 +524,7 @@ $ vitest run
 # Edit src/utils.ts
 
 > vp run test                                   # second run
-$ vitest run ✗ cache miss: content of input 'src/utils.ts' changed, executing
+$ vitest run ✗ cache miss: 'src/utils.ts' modified, executing
 ... test output ...
 ```
 

@@ -96,7 +96,7 @@ Each sub-task has its own cache entry. On the next run, if only a `.d.ts` file c
 
 ```
 > vp run build
-$ tsc ✗ cache miss: content of input 'src/types.d.ts' changed, executing
+$ tsc ✗ cache miss: 'src/types.d.ts' modified, executing
 ... tsc output ...
 
 $ vp build ✓ cache hit, replaying
@@ -223,7 +223,7 @@ export default defineConfig({
 
 Running `vp run deploy`: the `deploy` task itself isn't cached, but the expanded `build` task inside it still uses caching. If `build` has a cache hit, `tsc` is skipped even though it's invoked through a non-cached parent.
 
-### Recursive Self-Reference Handling\*
+### Recursive Self-Reference Handling
 
 A common pattern is having the workspace root orchestrate recursive builds:
 

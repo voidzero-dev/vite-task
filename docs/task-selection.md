@@ -224,18 +224,18 @@ The `--filter` syntax is designed to be pnpm-compatible. Most pnpm filter expres
 
 ### What's Different
 
-**Workspace root handling\*:**
+**Workspace root handling:**
 
 pnpm excludes the workspace root from `-r` / `--recursive` by default (since v7) to prevent infinite loops. It requires `--include-workspace-root` or `-w` to include it.
 
 Vite Task includes the root like any other package. Recursion is prevented structurally by detecting and pruning self-referential `vp run` commands at plan time (see [Task Orchestration — Recursive Self-Reference](./task-orchestration.md#recursive-self-reference-handling)). This means:
 
-| Aspect                  | pnpm                                           | Vite Task                              |
-| ----------------------- | ---------------------------------------------- | -------------------------------------- |
-| Root in `-r` by default | Excluded                                       | Included\*                             |
-| Recursion prevention    | Exclude root from selection                    | Skip/prune self-referential commands\* |
-| Extra flags needed      | `--workspace-root`, `--include-workspace-root` | None\*                                 |
-| User model              | "root is special"                              | "all packages are equal"\*             |
+| Aspect                  | pnpm                                           | Vite Task                            |
+| ----------------------- | ---------------------------------------------- | ------------------------------------ |
+| Root in `-r` by default | Excluded                                       | Included                             |
+| Recursion prevention    | Exclude root from selection                    | Skip/prune self-referential commands |
+| Extra flags needed      | `--workspace-root`, `--include-workspace-root` | None                                 |
+| User model              | "root is special"                              | "all packages are equal"             |
 
 **`--transitive` (`-t`):** pnpm does not have a built-in equivalent. The closest pnpm workflow is `--filter "pkg..."`, which selects the package and its transitive dependencies. Vite Task provides `-t` as a dedicated shorthand for this common pattern.
 
@@ -252,5 +252,5 @@ Vite Task includes the root like any other package. Recursion is prevented struc
 | `--ignore-depends-on` | —     | Skip explicit `dependsOn` dependencies               |
 | `--verbose`           | `-v`  | Show full execution summary                          |
 | `--last-details`      | —     | Show saved summary from last run                     |
-| `--cache`\*           | —     | Force all caching on for this run                    |
-| `--no-cache`\*        | —     | Force all caching off for this run                   |
+| `--cache`             | —     | Force all caching on for this run                    |
+| `--no-cache`          | —     | Force all caching off for this run                   |

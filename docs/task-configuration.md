@@ -44,7 +44,7 @@ Each task supports these fields:
 | `cache`           | `boolean`  | `true`              | Whether to cache this task's output.                                                           |
 | `envs`            | `string[]` | `[]`                | Environment variables to include in the cache fingerprint.                                     |
 | `passThroughEnvs` | `string[]` | (built-in defaults) | Environment variables passed to the process but NOT included in the cache fingerprint.         |
-| `inputs`\*        | `Array`    | auto-inferred       | Which files to track for cache invalidation. See [Caching — Inputs](./caching.md#task-inputs). |
+| `inputs`          | `Array`    | auto-inferred       | Which files to track for cache invalidation. See [Caching — Inputs](./caching.md#task-inputs). |
 
 ## Scripts vs Tasks
 
@@ -94,7 +94,7 @@ In this example, `build` runs `@my/app`'s own `package.json` `"build"` script bu
 
 **Conflict rule:** If both the task definition and the `package.json` script specify a command, it's an error. Either define the command in `vite.config.ts` or in `package.json` — not both.
 
-## Global Cache Configuration\*
+## Global Cache Configuration
 
 The `cache` field is only allowed in the **workspace root** `vite.config.ts` and controls workspace-wide cache behavior:
 
@@ -118,7 +118,7 @@ Shorthands:
 - `cache: true` → `{ scripts: true, tasks: true }`
 - `cache: false` → `{ scripts: false, tasks: false }`
 
-### CLI Overrides\*
+### CLI Overrides
 
 You can override the global cache config per invocation:
 

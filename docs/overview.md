@@ -99,5 +99,3 @@ Run it again — everything is cached individually:
 ---
 [vp run] 9/9 cache hit (100%), 3.2s saved in total
 ```
-
-> **Note:** Features marked with \* are not yet merged.
