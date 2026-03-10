@@ -9,23 +9,24 @@ When you run bare `vp run` (no task name) from within a package, an interactive 
 ```
 > vp run
 
-Search task (↑/↓ to move, enter to select):
-> build: echo build app
-  lint: echo lint app
-  test: echo test app
-  lib#build: echo build lib
-  lib#lint: echo lint lib
-  lib#test: echo test lib
-  lib#typecheck: echo typecheck lib
-  root#check: echo check root
-  root#clean: echo clean root
-  root#deploy: echo deploy root
-  root#docs: echo docs root
-  root#format: echo format root
+Select a task (↑/↓, Enter to run, Esc to clear):
+
+  › build: echo build app
+    lint: echo lint app
+    test: echo test app
+    lib#build: echo build lib
+    lib#lint: echo lint lib
+    lib#test: echo test lib
+    lib#typecheck: echo typecheck lib
+    root#check: echo check root
+    root#clean: echo clean root
+    root#deploy: echo deploy root
+    root#docs: echo docs root
+    root#format: echo format root
   (…3 more)
 ```
 
-Tasks from the **current package** appear first (without the `#` prefix), followed by tasks from other packages in `package#task` format. Press **Enter** to select and run. Fuzzy search is supported (keyword `buid` matches task `build`).
+Tasks from the **current package** appear first (without the `#` prefix), followed by tasks from other packages in `package#task` format. The `›` marker indicates the currently highlighted item. Press **Enter** to run the selected task, or **Esc** to clear the search query. Fuzzy search is supported (keyword `buid` matches task `build`).
 
 ### Non-Interactive Mode
 
@@ -56,9 +57,10 @@ When you specify a task that doesn't exist, Vite Task suggests alternatives:
 > vp run buid
 
 Task "buid" not found.
-Search task (↑/↓ to move, enter to select): buid
-> app#build: echo build app
-  lib#build: echo build lib
+Select a task (↑/↓, Enter to run, Esc to clear): buid
+
+  › build: echo build app
+    lib#build: echo build lib
 ```
 
 **Non-interactive mode** — prints suggestions:
@@ -237,7 +239,7 @@ If no previous run exists:
 
 ```
 > vp run --last-details
-error: No previous run details found
+No previous run summary found. Run a task first to generate a summary.
 ```
 
 ## Exit Codes

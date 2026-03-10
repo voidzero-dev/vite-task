@@ -189,7 +189,7 @@ When a filter doesn't match any package, Vite Task warns you:
 
 ```
 > vp run --filter nonexistent build
-WARN  No packages matched filter "nonexistent"
+No packages matched the filter: nonexistent
 ```
 
 Exclusion-only filters that don't match anything do NOT produce warnings (since the intent to exclude is still valid).
