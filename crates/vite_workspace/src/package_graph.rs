@@ -67,6 +67,19 @@ impl PackageQuery {
     pub(crate) const fn filters(filters: Vec1<PackageFilter>) -> Self {
         Self(PackageQueryKind::Filters(filters))
     }
+
+    /// Select the single package whose root is `path`.
+    ///
+    /// Used by the interactive task selector to match by filesystem path
+    /// instead of package name.
+    pub fn containing_package(path: Arc<AbsolutePath>) -> Self {
+        Self(PackageQueryKind::Filters(Vec1::new(PackageFilter {
+            exclude: false,
+            selector: PackageSelector::ContainingPackage(path),
+            traversal: None,
+            source: None,
+        })))
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

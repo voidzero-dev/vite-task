@@ -21,14 +21,16 @@ use vite_select::SelectItem;
 use vite_str::Str;
 use vite_task_graph::{
     IndexedTaskGraph, TaskGraph, TaskGraphLoadError, config::user::UserCacheConfig,
-    loader::UserConfigLoader,
+    loader::UserConfigLoader, query::TaskQuery,
 };
 use vite_task_plan::{
     ExecutionGraph, TaskGraphLoader,
-    plan_request::{PlanRequest, ScriptCommand, SyntheticPlanRequest},
+    plan_request::{
+        PlanOptions, PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest,
+    },
     prepend_path_env,
 };
-use vite_workspace::{WorkspaceRoot, find_workspace_root};
+use vite_workspace::{WorkspaceRoot, find_workspace_root, package_graph::PackageQuery};
 
 use crate::cli::{CacheSubcommand, Command, ResolvedCommand, ResolvedRunCommand, RunCommand};
 
@@ -272,7 +274,7 @@ impl<'a> Session<'a> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
-            ResolvedCommand::Run(mut run_command) => {
+            ResolvedCommand::Run(run_command) => {
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
@@ -286,9 +288,8 @@ impl<'a> Session<'a> {
                         // No tasks matched. With is_cwd_only (no scope flags) the
                         // task name is a typo — show the selector. Otherwise error.
                         if is_cwd_only {
-                            self.handle_no_task(is_interactive, &mut run_command).await?;
-                            let cwd = Arc::clone(&self.cwd);
-                            self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
+                            let qpr = self.handle_no_task(is_interactive, &run_command).await?;
+                            self.plan_from_query(qpr).await?
                         } else {
                             return Err(vite_task_plan::Error::NoTasksMatched(
                                 task_specifier.clone(),
@@ -307,9 +308,8 @@ impl<'a> Session<'a> {
                     if run_command != bare {
                         return Err(vite_task_plan::Error::MissingTaskSpecifier.into());
                     }
-                    self.handle_no_task(is_interactive, &mut run_command).await?;
-                    let cwd = Arc::clone(&self.cwd);
-                    self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?.0
+                    let qpr = self.handle_no_task(is_interactive, &run_command).await?;
+                    self.plan_from_query(qpr).await?
                 };
 
                 let builder = LabeledReporterBuilder::new(
@@ -334,11 +334,11 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    /// Show the task selector or list, and update the run command with the selected task.
+    /// Show the task selector or list, and return a plan request for the selected task.
     ///
     /// In interactive mode, shows a fuzzy-searchable selection list. On selection,
-    /// updates `run_command.task_specifier` and returns `Ok(())` so the caller
-    /// can plan and execute the selected task.
+    /// returns `Ok(QueryPlanRequest)` using the selected entry's filesystem path
+    /// (not its display name) for package matching.
     ///
     /// In non-interactive mode, prints the task list (or "did you mean" suggestions)
     /// and returns `Err(SessionError::EarlyExit(_))` — no further execution needed.
@@ -349,8 +349,8 @@ impl<'a> Session<'a> {
     async fn handle_no_task(
         &mut self,
         is_interactive: bool,
-        run_command: &mut ResolvedRunCommand,
-    ) -> Result<(), SessionError> {
+        run_command: &ResolvedRunCommand,
+    ) -> Result<QueryPlanRequest, SessionError> {
         let not_found_name = run_command.task_specifier.as_deref();
         let cwd = Arc::clone(&self.cwd);
         let task_graph = self.ensure_task_graph_loaded().await?;
@@ -444,7 +444,9 @@ impl<'a> Session<'a> {
             }));
         };
 
-        // Interactive: print selected task and run it
+        // Interactive: print selected task and build a QueryPlanRequest using the
+        // entry's filesystem path (not its display name) for package matching.
+        let entry = &entries[selected_index];
         let selected_label = &select_items[selected_index].label;
         {
             use std::io::Write as _;
@@ -457,8 +459,20 @@ impl<'a> Session<'a> {
                 selected_label,
             )?;
         }
-        run_command.task_specifier = Some(selected_label.clone());
-        Ok(())
+
+        let package_query =
+            PackageQuery::containing_package(Arc::clone(&entry.task_display.package_path));
+        Ok(QueryPlanRequest {
+            query: TaskQuery {
+                package_query,
+                task_name: entry.task_display.task_name.clone(),
+                include_explicit_deps: !run_command.flags.ignore_depends_on,
+            },
+            plan_options: PlanOptions {
+                extra_args: run_command.additional_args.clone().into(),
+                cache_override: run_command.flags.cache_override(),
+            },
+        })
     }
 
     /// Lazily initializes and returns the execution cache.
@@ -669,5 +683,29 @@ impl<'a> Session<'a> {
         )
         .await?;
         Ok((graph, is_cwd_only))
+    }
+
+    /// Plan execution from a pre-built [`QueryPlanRequest`].
+    ///
+    /// Used by the interactive task selector, which constructs the request
+    /// directly (bypassing CLI specifier parsing).
+    #[expect(
+        clippy::future_not_send,
+        reason = "session is single-threaded, futures do not need to be Send"
+    )]
+    async fn plan_from_query(
+        &mut self,
+        request: QueryPlanRequest,
+    ) -> Result<ExecutionGraph, vite_task_plan::Error> {
+        let cwd = Arc::clone(&self.cwd);
+        vite_task_plan::plan_query(
+            request,
+            &self.workspace_path,
+            &cwd,
+            &self.envs,
+            &mut self.plan_request_parser,
+            &mut self.lazy_task_graph,
+        )
+        .await
     }
 }
