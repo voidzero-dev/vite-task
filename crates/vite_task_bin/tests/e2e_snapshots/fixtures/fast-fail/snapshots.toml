@@ -1,0 +1,10 @@
+# Tests fast-fail: execution stops on first failure and cancels in-flight tasks.
+# Dependency graph: pkg-a depends on pkg-b and pkg-c.
+# pkg-b#build exits immediately with 1, pkg-c#build hangs forever.
+# Expected: pkg-b fails, pkg-c is cancelled, pkg-a never starts.
+
+[[e2e]]
+name = "failure cancels in-flight tasks and skips dependents"
+steps = [
+  "vp run -r build # pkg-b fails, pkg-c cancelled, pkg-a skipped",
+]

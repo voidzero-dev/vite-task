@@ -1,0 +1,10 @@
+{
+  "name": "pkg-a",
+  "dependencies": {
+    "pkg-b": "workspace:*",
+    "pkg-c": "workspace:*"
+  },
+  "scripts": {
+    "build": "echo 'Building A'"
+  }
+}

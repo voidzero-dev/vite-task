@@ -1,0 +1,6 @@
+{
+  "name": "pkg-c",
+  "scripts": {
+    "build": "node -e \"setTimeout(() => {}, 999999)\""
+  }
+}
