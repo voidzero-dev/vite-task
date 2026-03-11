@@ -1,0 +1,8 @@
+{
+  "name": "@test/nested-concurrency",
+  "scripts": {
+    "inner": "print-file package.json",
+    "outer-concurrency-2": "vp run --concurrency=2 inner",
+    "outer-inherit": "vp run inner"
+  }
+}

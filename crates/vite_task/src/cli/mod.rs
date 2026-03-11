@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{num::NonZeroUsize, str::FromStr, sync::Arc};
 
 use clap::Parser;
 use vite_path::AbsolutePath;
@@ -6,6 +6,35 @@ use vite_str::Str;
 use vite_task_graph::{TaskSpecifier, query::TaskQuery};
 use vite_task_plan::plan_request::{CacheOverride, PlanOptions, QueryPlanRequest};
 use vite_workspace::package_filter::{PackageQueryArgs, PackageQueryError};
+
+/// Parsed `--concurrency` value: a positive integer or a percentage of logical CPUs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Concurrency(pub usize);
+
+impl FromStr for Concurrency {
+    type Err = ConcurrencyParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(pct) = s.strip_suffix('%') {
+            let pct_val: u32 = pct.parse().map_err(|_| ConcurrencyParseError(s.into()))?;
+            let cpus = std::thread::available_parallelism().map(NonZeroUsize::get).unwrap_or(1);
+            let result = (cpus as u64 * u64::from(pct_val) / 100).max(1) as usize;
+            Ok(Self(result))
+        } else {
+            let val: usize = s.parse().map_err(|_| ConcurrencyParseError(s.into()))?;
+            if val == 0 {
+                return Err(ConcurrencyParseError(s.into()));
+            }
+            Ok(Self(val))
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "invalid concurrency value '{0}': expected a positive integer or a percentage (e.g. '4' or '50%')"
+)]
+pub struct ConcurrencyParseError(Str);
 
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum CacheSubcommand {
@@ -35,6 +64,11 @@ pub struct RunFlags {
     /// Force caching off for all tasks and scripts.
     #[clap(long, conflicts_with = "cache")]
     pub no_cache: bool,
+
+    /// Maximum number of tasks to run concurrently (default: 10).
+    /// Accepts a number (e.g. 4) or a percentage of logical CPUs (e.g. 50%).
+    #[clap(long)]
+    pub concurrency: Option<Concurrency>,
 }
 
 impl RunFlags {
@@ -193,6 +227,7 @@ impl ResolvedRunCommand {
                 plan_options: PlanOptions {
                     extra_args: self.additional_args.into(),
                     cache_override,
+                    concurrency: self.flags.concurrency.map(|c| c.0),
                 },
             },
             is_cwd_only,

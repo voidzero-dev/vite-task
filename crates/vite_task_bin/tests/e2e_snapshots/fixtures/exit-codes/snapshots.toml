@@ -8,6 +8,7 @@ steps = [
 
 [[e2e]]
 name = "multiple task failures returns exit code 1"
+# --concurrency=1: deterministic output ordering for snapshot stability
 steps = [
-  "vt run -r fail # multiple failures -> exit code 1",
+  "vt run -r fail --concurrency=1 # multiple failures -> exit code 1",
 ]

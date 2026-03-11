@@ -231,7 +231,7 @@ async fn plan_task_as_execution_node(
                     // An empty execution graph means no tasks matched the query.
                     // At the top level the session shows the task selector UI,
                     // but in a nested context there is no UI — propagate as an error.
-                    if execution_graph.node_count() == 0 {
+                    if execution_graph.graph.node_count() == 0 {
                         return Err(Error::NestPlan {
                             task_display: task_node.task_display.clone(),
                             command: Str::from(&command_str[add_item_span]),
@@ -610,6 +610,11 @@ pub async fn plan_query_request(
         );
         context.set_resolved_global_cache(final_cache);
     }
+    // Apply concurrency override from `--concurrency` flag on this request.
+    // When `None`, keep the parent context's concurrency (inheritance).
+    if let Some(c) = plan_options.concurrency {
+        context.set_concurrency(c);
+    }
     context.set_extra_args(plan_options.extra_args);
     context.set_parent_query(Arc::clone(&query));
 
@@ -688,7 +693,7 @@ pub async fn plan_query_request(
     // Validate the graph is acyclic.
     // `try_from_graph` performs a DFS; if a cycle is found, it returns
     // `CycleError` containing the full cycle path as node indices.
-    ExecutionGraph::try_from_graph(inner_graph).map_err(|cycle| {
+    ExecutionGraph::try_from_graph(inner_graph, context.concurrency()).map_err(|cycle| {
         // Map each execution node index in the cycle path to its human-readable TaskDisplay.
         // Every node in the cycle was added via `inner_graph.add_node()` above,
         // with a corresponding entry in `execution_node_indices_by_task_index`.

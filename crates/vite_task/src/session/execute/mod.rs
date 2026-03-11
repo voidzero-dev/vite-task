@@ -2,14 +2,16 @@ pub mod fingerprint;
 pub mod glob_inputs;
 pub mod spawn;
 
-use std::{collections::BTreeMap, process::Stdio, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, process::Stdio, rc::Rc, sync::Arc};
 
-use futures_util::FutureExt;
+use futures_util::{FutureExt, StreamExt as _, stream::FuturesUnordered};
+use petgraph::Direction;
+use rustc_hash::FxHashMap;
 use tokio::io::AsyncWriteExt as _;
 use vite_path::AbsolutePath;
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
-    SpawnExecution,
+    SpawnExecution, execution_graph::ExecutionNodeIndex,
 };
 
 use self::{
@@ -46,13 +48,16 @@ pub enum SpawnOutcome {
     Failed,
 }
 
-/// Holds mutable references needed during graph execution.
+/// Holds shared references needed during graph execution.
 ///
-/// The `reporter` field is used to create leaf reporters for individual executions.
+/// The `reporter` field is wrapped in `Rc<RefCell<>>` to allow concurrent task
+/// futures to create leaf reporters from the shared graph reporter.
 /// Cache fields are passed through to [`execute_spawn`] for cache-aware execution.
 struct ExecutionContext<'a> {
     /// The graph-level reporter, used to create leaf reporters via `new_leaf_execution()`.
-    reporter: &'a mut dyn GraphExecutionReporter,
+    /// Wrapped in `Rc<RefCell<>>` so concurrent task futures can briefly borrow it
+    /// to create leaf reporters without holding the borrow across await points.
+    reporter: Rc<RefCell<&'a mut dyn GraphExecutionReporter>>,
     /// The execution cache for looking up and storing cached results.
     cache: &'a ExecutionCache,
     /// Base path for resolving relative paths in cache entries.
@@ -61,75 +66,183 @@ struct ExecutionContext<'a> {
 }
 
 impl ExecutionContext<'_> {
-    /// Execute all tasks in an execution graph in dependency order.
+    /// Execute all tasks in an execution graph, respecting dependency order
+    /// and the graph's concurrency limit.
     ///
-    /// `ExecutionGraph` guarantees acyclicity at construction time.
-    /// We compute a topological order and iterate in reverse to get execution order
-    /// (dependencies before dependents).
+    /// **Single-node fast path:** When the graph has at most one node, tasks are
+    /// executed sequentially to preserve `StdioSuggestion::Inherited` (allowing
+    /// direct terminal I/O for a single task).
     ///
-    /// `all_ancestors_single_node` tracks whether every graph in the ancestry chain
-    /// (from the root down to this level) contains exactly one node. The initial call
-    /// passes `graph.node_count() == 1`; recursive calls AND with the nested graph's
-    /// node count.
+    /// **Multi-node concurrent path:** Independent tasks (no dependency relationship)
+    /// run concurrently up to `graph.concurrency`. A task only starts after all its
+    /// dependencies have completed. On any failure, all in-flight tasks are cancelled
+    /// and no new tasks are started (fail-fast).
     ///
-    /// Leaf-level errors are reported through the reporter and do not abort the graph.
-    /// Cycle detection is handled at plan time, so this function cannot encounter cycles.
+    /// Returns `true` if all tasks succeeded, `false` if any task failed.
     #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_expanded_graph(
-        &mut self,
+        &self,
         graph: &ExecutionGraph,
         all_ancestors_single_node: bool,
-    ) {
-        // `compute_topological_order()` returns nodes in topological order: for every
-        // edge A→B, A appears before B. Since our edges mean "A depends on B",
-        // dependencies (B) appear after their dependents (A). We iterate in reverse
-        // to get execution order where dependencies run first.
+    ) -> bool {
+        // Single-node fast path: preserve Inherited stdio for the sole task.
+        if graph.graph.node_count() <= 1 {
+            if let Some(node_ix) = graph.graph.node_indices().next()
+                && !self.execute_node(graph, node_ix, all_ancestors_single_node).boxed_local().await
+            {
+                return false;
+            }
+            return true;
+        }
 
-        // Execute tasks in dependency-first order. Each task may have multiple items
-        // (from `&&`-split commands), which are executed sequentially.
-        let topo_order = graph.compute_topological_order();
-        for &node_ix in topo_order.iter().rev() {
-            let task_execution = &graph[node_ix];
+        // Multi-node concurrent execution.
+        self.execute_concurrent(graph).await
+    }
 
-            for item in &task_execution.items {
-                match &item.kind {
-                    ExecutionItemKind::Leaf(leaf_kind) => {
-                        self.execute_leaf(
-                            &item.execution_item_display,
-                            leaf_kind,
-                            all_ancestors_single_node,
-                        )
-                        .boxed_local()
-                        .await;
-                    }
-                    ExecutionItemKind::Expanded(nested_graph) => {
-                        self.execute_expanded_graph(
-                            nested_graph,
-                            all_ancestors_single_node && nested_graph.node_count() == 1,
-                        )
-                        .boxed_local()
-                        .await;
+    /// Concurrent scheduler: runs independent tasks in parallel up to the concurrency limit.
+    ///
+    /// Uses a ready-queue + `FuturesUnordered` approach:
+    /// 1. Compute initial dependency counts (outgoing neighbor count per node).
+    /// 2. Seed the ready queue with nodes that have zero dependencies.
+    /// 3. Launch ready tasks into `FuturesUnordered`, up to the concurrency limit.
+    /// 4. When a task completes, decrement dependency counts for its dependents
+    ///    (incoming neighbors) and enqueue newly-ready tasks.
+    /// 5. On failure: drop `FuturesUnordered` to cancel all in-flight tasks (fail-fast).
+    #[tracing::instrument(level = "debug", skip_all)]
+    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
+    async fn execute_concurrent(&self, graph: &ExecutionGraph) -> bool {
+        let concurrency = graph.concurrency;
+
+        // Compute dependency counts: for each node, count outgoing neighbors (dependencies).
+        let mut remaining_deps = FxHashMap::<ExecutionNodeIndex, usize>::with_capacity_and_hasher(
+            graph.graph.node_count(),
+            rustc_hash::FxBuildHasher,
+        );
+        let mut ready: Vec<ExecutionNodeIndex> = Vec::new();
+
+        for node_ix in graph.graph.node_indices() {
+            let dep_count = graph.graph.neighbors_directed(node_ix, Direction::Outgoing).count();
+            if dep_count == 0 {
+                ready.push(node_ix);
+            } else {
+                remaining_deps.insert(node_ix, dep_count);
+            }
+        }
+
+        let mut in_flight = FuturesUnordered::new();
+
+        loop {
+            // Fill up to concurrency limit from the ready queue.
+            while in_flight.len() < concurrency {
+                if let Some(node_ix) = ready.pop() {
+                    // Multi-node graph: all_ancestors_single_node is always false.
+                    in_flight.push(
+                        async move {
+                            let success = self.execute_node(graph, node_ix, false).await;
+                            (node_ix, success)
+                        }
+                        .boxed_local(),
+                    );
+                } else {
+                    break;
+                }
+            }
+
+            if in_flight.is_empty() {
+                break;
+            }
+
+            // Wait for any task to complete.
+            let Some((completed_ix, success)) = in_flight.next().await else {
+                break;
+            };
+
+            if !success {
+                // Fail-fast: drop all in-flight futures (cancels running tasks)
+                // and stop scheduling new ones.
+                drop(in_flight);
+                return false;
+            }
+
+            // Notify dependents: decrement their remaining dependency counts.
+            // Incoming neighbors of `completed_ix` are nodes that depend on it.
+            for dependent in graph.graph.neighbors_directed(completed_ix, Direction::Incoming) {
+                if let Some(count) = remaining_deps.get_mut(&dependent) {
+                    *count -= 1;
+                    if *count == 0 {
+                        remaining_deps.remove(&dependent);
+                        ready.push(dependent);
                     }
                 }
             }
         }
+
+        true
+    }
+
+    /// Execute all items within a single task node sequentially.
+    ///
+    /// A task's command may be split by `&&` into multiple items. Each item is
+    /// executed in order; if any item fails, the remaining items are skipped.
+    ///
+    /// Returns `true` if all items succeeded, `false` if any failed.
+    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
+    async fn execute_node(
+        &self,
+        graph: &ExecutionGraph,
+        node_ix: ExecutionNodeIndex,
+        all_ancestors_single_node: bool,
+    ) -> bool {
+        let task_execution = &graph.graph[node_ix];
+
+        for item in &task_execution.items {
+            let success = match &item.kind {
+                ExecutionItemKind::Leaf(leaf_kind) => {
+                    self.execute_leaf(
+                        &item.execution_item_display,
+                        leaf_kind,
+                        all_ancestors_single_node,
+                    )
+                    .boxed_local()
+                    .await
+                }
+                ExecutionItemKind::Expanded(nested_graph) => {
+                    self.execute_expanded_graph(
+                        nested_graph,
+                        all_ancestors_single_node && nested_graph.graph.node_count() == 1,
+                    )
+                    .boxed_local()
+                    .await
+                }
+            };
+            if !success {
+                return false;
+            }
+        }
+        true
     }
 
     /// Execute a single leaf item (in-process command or spawned process).
     ///
-    /// Creates a [`LeafExecutionReporter`] from the graph reporter and delegates
-    /// to the appropriate execution method.
+    /// Creates a [`LeafExecutionReporter`] from the graph reporter (briefly borrowing
+    /// the `RefCell`) and delegates to the appropriate execution method.
+    ///
+    /// Returns `true` on success, `false` on failure.
     #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_leaf(
-        &mut self,
+        &self,
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
-    ) {
-        let mut leaf_reporter =
-            self.reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node);
+    ) -> bool {
+        // Briefly borrow the reporter to create a leaf reporter, then drop the borrow.
+        let mut leaf_reporter = self.reporter.borrow_mut().new_leaf_execution(
+            display,
+            leaf_kind,
+            all_ancestors_single_node,
+        );
 
         match leaf_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
@@ -150,15 +263,25 @@ impl ExecutionContext<'_> {
                         None,
                     )
                     .await;
+                true
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
                 #[expect(
                     clippy::large_futures,
                     reason = "spawn execution with cache management creates large futures"
                 )]
-                let _ =
-                    execute_spawn(leaf_reporter, spawn_execution, self.cache, self.cache_base_path)
-                        .await;
+                match execute_spawn(
+                    leaf_reporter,
+                    spawn_execution,
+                    self.cache,
+                    self.cache_base_path,
+                )
+                .await
+                {
+                    SpawnOutcome::CacheHit => true,
+                    SpawnOutcome::Spawned(status) => status.success(),
+                    SpawnOutcome::Failed => false,
+                }
             }
         }
     }
@@ -513,15 +636,15 @@ impl Session<'_> {
 
         let mut reporter = builder.build();
 
-        let mut execution_context = ExecutionContext {
-            reporter: &mut *reporter,
+        let execution_context = ExecutionContext {
+            reporter: Rc::new(RefCell::new(&mut *reporter)),
             cache,
             cache_base_path: &self.workspace_path,
         };
 
-        // Execute the graph. Leaf-level errors are reported through the reporter
-        // and do not abort the graph. Cycle detection is handled at plan time.
-        let all_single_node = execution_graph.node_count() == 1;
+        // Execute the graph. On failure, remaining tasks are cancelled (fail-fast).
+        // Cycle detection is handled at plan time.
+        let all_single_node = execution_graph.graph.node_count() == 1;
         execution_context.execute_expanded_graph(&execution_graph, all_single_node).await;
 
         // Leaf-level errors and non-zero exit statuses are tracked internally

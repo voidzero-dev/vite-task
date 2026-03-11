@@ -8,12 +8,14 @@
 
 [[e2e]]
 name = "single-node chains inherit even with multi-node sibling graph"
+# --concurrency=1: deterministic output ordering for snapshot stability
 steps = [
-  "vt run foo",
+  "vt run foo --concurrency=1",
 ]
 
 [[e2e]]
 name = "multi-node ancestor forces piped for nested single-node graph"
+# --concurrency=1: deterministic output ordering for snapshot stability
 steps = [
-  "vt run -r foo-nested",
+  "vt run -r foo-nested --concurrency=1",
 ]

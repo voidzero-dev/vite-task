@@ -7,114 +7,120 @@ info:
     - cd-build
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cd-in-scripts
 ---
-[
-  {
-    "key": [
-      "<workspace>/",
-      "cd-build"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "",
-        "task_name": "cd-build",
-        "package_path": "<workspace>/"
-      },
-      "items": [
-        {
-          "execution_item_display": {
-            "task_display": {
-              "package_name": "",
-              "task_name": "cd-build",
-              "package_path": "<workspace>/"
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "cd-build"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "",
+          "task_name": "cd-build",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "",
+                "task_name": "cd-build",
+                "package_path": "<workspace>/"
+              },
+              "command": "vp run build",
+              "and_item_index": 1,
+              "cwd": "<workspace>/src"
             },
-            "command": "vt run build",
-            "and_item_index": 1,
-            "cwd": "<workspace>/src"
-          },
-          "kind": {
-            "Expanded": [
-              {
-                "key": [
-                  "<workspace>/",
-                  "build"
-                ],
-                "node": {
-                  "task_display": {
-                    "package_name": "",
-                    "task_name": "build",
-                    "package_path": "<workspace>/"
-                  },
-                  "items": [
-                    {
-                      "execution_item_display": {
-                        "task_display": {
-                          "package_name": "",
-                          "task_name": "build",
-                          "package_path": "<workspace>/"
-                        },
-                        "command": "print-file package.json",
-                        "and_item_index": null,
-                        "cwd": "<workspace>/"
+            "kind": {
+              "Expanded": {
+                "graph": [
+                  {
+                    "key": [
+                      "<workspace>/",
+                      "build"
+                    ],
+                    "node": {
+                      "task_display": {
+                        "package_name": "",
+                        "task_name": "build",
+                        "package_path": "<workspace>/"
                       },
-                      "kind": {
-                        "Leaf": {
-                          "Spawn": {
-                            "cache_metadata": {
-                              "spawn_fingerprint": {
-                                "cwd": "",
-                                "program_fingerprint": {
-                                  "OutsideWorkspace": {
-                                    "program_name": "print-file"
+                      "items": [
+                        {
+                          "execution_item_display": {
+                            "task_display": {
+                              "package_name": "",
+                              "task_name": "build",
+                              "package_path": "<workspace>/"
+                            },
+                            "command": "print-file package.json",
+                            "and_item_index": null,
+                            "cwd": "<workspace>/"
+                          },
+                          "kind": {
+                            "Leaf": {
+                              "Spawn": {
+                                "cache_metadata": {
+                                  "spawn_fingerprint": {
+                                    "cwd": "",
+                                    "program_fingerprint": {
+                                      "OutsideWorkspace": {
+                                        "program_name": "print-file"
+                                      }
+                                    },
+                                    "args": [
+                                      "package.json"
+                                    ],
+                                    "env_fingerprints": {
+                                      "fingerprinted_envs": {},
+                                      "pass_through_env_config": [
+                                        "<default pass-through envs>"
+                                      ]
+                                    }
+                                  },
+                                  "execution_cache_key": {
+                                    "UserTask": {
+                                      "task_name": "build",
+                                      "and_item_index": 0,
+                                      "extra_args": [],
+                                      "package_path": ""
+                                    }
+                                  },
+                                  "input_config": {
+                                    "includes_auto": true,
+                                    "positive_globs": [],
+                                    "negative_globs": []
                                   }
                                 },
-                                "args": [
-                                  "package.json"
-                                ],
-                                "env_fingerprints": {
-                                  "fingerprinted_envs": {},
-                                  "untracked_env_config": [
-                                    "<default untracked envs>"
-                                  ]
+                                "spawn_command": {
+                                  "program_path": "<tools>/node_modules/.bin/print-file",
+                                  "args": [
+                                    "package.json"
+                                  ],
+                                  "all_envs": {
+                                    "NO_COLOR": "1",
+                                    "PATH": "<workspace>/node_modules/.bin:<tools>/node_modules/.bin"
+                                  },
+                                  "cwd": "<workspace>/"
                                 }
-                              },
-                              "execution_cache_key": {
-                                "UserTask": {
-                                  "task_name": "build",
-                                  "and_item_index": 0,
-                                  "extra_args": [],
-                                  "package_path": ""
-                                }
-                              },
-                              "input_config": {
-                                "includes_auto": true,
-                                "positive_globs": [],
-                                "negative_globs": []
                               }
-                            },
-                            "spawn_command": {
-                              "program_path": "<tools>/node_modules/.bin/print-file",
-                              "args": [
-                                "package.json"
-                              ],
-                              "all_envs": {
-                                "NO_COLOR": "1",
-                                "PATH": "<workspace>/node_modules/.bin:<tools>/node_modules/.bin"
-                              },
-                              "cwd": "<workspace>/"
                             }
                           }
                         }
-                      }
-                    }
-                  ]
-                },
-                "neighbors": []
+                      ]
+                    },
+                    "neighbors": []
+                  }
+                ],
+                "concurrency": 10
               }
-            ]
+            }
           }
-        }
-      ]
-    },
-    "neighbors": []
-  }
-]
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency": 10
+}

@@ -48,9 +48,14 @@ pub struct PlanContext<'a> {
     /// The query that caused the current expansion.
     /// Used by the skip rule to detect and skip duplicate nested expansions.
     parent_query: Arc<TaskQuery>,
+
+    /// Maximum number of tasks to run concurrently in the execution graph.
+    /// Inherited by nested expansions unless overridden by an explicit `--concurrency` flag.
+    concurrency: usize,
 }
 
 impl<'a> PlanContext<'a> {
+    #[expect(clippy::too_many_arguments, reason = "context bundles all planning state")]
     pub fn new(
         workspace_path: &'a Arc<AbsolutePath>,
         cwd: Arc<AbsolutePath>,
@@ -59,6 +64,7 @@ impl<'a> PlanContext<'a> {
         indexed_task_graph: &'a IndexedTaskGraph,
         resolved_global_cache: ResolvedGlobalCacheConfig,
         parent_query: Arc<TaskQuery>,
+        concurrency: usize,
     ) -> Self {
         Self {
             workspace_path,
@@ -70,6 +76,7 @@ impl<'a> PlanContext<'a> {
             extra_args: Arc::default(),
             resolved_global_cache,
             parent_query,
+            concurrency,
         }
     }
 
@@ -144,6 +151,14 @@ impl<'a> PlanContext<'a> {
         self.parent_query = query;
     }
 
+    pub const fn concurrency(&self) -> usize {
+        self.concurrency
+    }
+
+    pub const fn set_concurrency(&mut self, concurrency: usize) {
+        self.concurrency = concurrency;
+    }
+
     /// Returns the task currently being expanded (whose command triggered a nested query).
     /// This is the last task on the call stack, or `None` at the top level.
     pub fn expanding_task(&self) -> Option<TaskNodeIndex> {
@@ -161,6 +176,7 @@ impl<'a> PlanContext<'a> {
             extra_args: Arc::clone(&self.extra_args),
             resolved_global_cache: self.resolved_global_cache,
             parent_query: Arc::clone(&self.parent_query),
+            concurrency: self.concurrency,
         }
     }
 }

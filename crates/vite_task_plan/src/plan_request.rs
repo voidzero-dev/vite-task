@@ -49,6 +49,10 @@ pub enum CacheOverride {
 pub struct PlanOptions {
     pub extra_args: Arc<[Str]>,
     pub cache_override: CacheOverride,
+    /// Maximum number of tasks to run concurrently.
+    /// `None` means inherit from the parent `PlanContext` (for nested `vp run`).
+    /// Top-level callers should always set `Some(N)`.
+    pub concurrency: Option<usize>,
 }
 
 #[derive(Debug)]

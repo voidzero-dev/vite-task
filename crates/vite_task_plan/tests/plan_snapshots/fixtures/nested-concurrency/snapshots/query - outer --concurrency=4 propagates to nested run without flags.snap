@@ -4,31 +4,32 @@ expression: "&plan_json"
 info:
   args:
     - run
-    - outer-no-cache
-input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-override
+    - "--concurrency=4"
+    - outer-inherit
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-concurrency
 ---
 {
   "graph": [
     {
       "key": [
         "<workspace>/",
-        "outer-no-cache"
+        "outer-inherit"
       ],
       "node": {
         "task_display": {
-          "package_name": "@test/nested-cache-override",
-          "task_name": "outer-no-cache",
+          "package_name": "@test/nested-concurrency",
+          "task_name": "outer-inherit",
           "package_path": "<workspace>/"
         },
         "items": [
           {
             "execution_item_display": {
               "task_display": {
-                "package_name": "@test/nested-cache-override",
-                "task_name": "outer-no-cache",
+                "package_name": "@test/nested-concurrency",
+                "task_name": "outer-inherit",
                 "package_path": "<workspace>/"
               },
-              "command": "vp run --no-cache inner",
+              "command": "vp run inner",
               "and_item_index": null,
               "cwd": "<workspace>/"
             },
@@ -42,7 +43,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                     ],
                     "node": {
                       "task_display": {
-                        "package_name": "@test/nested-cache-override",
+                        "package_name": "@test/nested-concurrency",
                         "task_name": "inner",
                         "package_path": "<workspace>/"
                       },
@@ -50,7 +51,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                         {
                           "execution_item_display": {
                             "task_display": {
-                              "package_name": "@test/nested-cache-override",
+                              "package_name": "@test/nested-concurrency",
                               "task_name": "inner",
                               "package_path": "<workspace>/"
                             },
@@ -82,7 +83,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                     "neighbors": []
                   }
                 ],
-                "concurrency": 10
+                "concurrency": 4
               }
             }
           }
@@ -91,5 +92,5 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
       "neighbors": []
     }
   ],
-  "concurrency": 10
+  "concurrency": 4
 }
