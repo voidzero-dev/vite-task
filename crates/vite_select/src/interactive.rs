@@ -329,8 +329,8 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
     // Compute the absolute column where commands start (interactive only).
     // All items — root and grouped — align their descriptions to the same column.
     let max_prefix = if has_groups { GROUP_PREFIX_WIDTH } else { ROOT_PREFIX_WIDTH };
-    // command_col = max_prefix + max_name_width + ": "
-    let command_col = if is_interactive { max_prefix + max_name_width + 2 } else { 0 };
+    // command_col = max_prefix + max_name_width + " "
+    let command_col = if is_interactive { max_prefix + max_name_width + 1 } else { 0 };
 
     // Render visible display rows
     for ri in visible_row_range.clone() {
@@ -368,9 +368,9 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
                     2
                 };
 
-                // Padding after colon to align all commands at `command_col`.
+                // Padding after name to align all commands at `command_col`.
                 let name_padding =
-                    if is_interactive { command_col - prefix_width - name_width - 2 } else { 0 };
+                    if is_interactive { command_col - prefix_width - name_width - 1 } else { 0 };
                 let max_desc_chars = params.max_line_width.saturating_sub(if is_interactive {
                     command_col
                 } else {
@@ -395,7 +395,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
                         let bold = SetAttribute(Attribute::Bold);
                         write!(
                             writer,
-                            "{dark_grey}{prefix}{reset}{blue}{bold}{name}:{reset}{dark_grey}{:>pad$} {desc}{reset}{line_ending}",
+                            "{dark_grey}{prefix}{reset}{blue}{bold}{name}{reset}{dark_grey}{:>pad$} {desc}{reset}{line_ending}",
                             "",
                             pad = name_padding,
                             desc = display_desc,
@@ -403,7 +403,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
                     } else {
                         write!(
                             writer,
-                            "{prefix}{name}:{dark_grey}{:>pad$} {desc}{reset}{line_ending}",
+                            "{prefix}{name}{dark_grey}{:>pad$} {desc}{reset}{line_ending}",
                             "",
                             pad = name_padding,
                             desc = display_desc,
@@ -742,8 +742,8 @@ mod tests {
         let unselected = lines.next().unwrap();
         assert_eq!(prompt, "Select a task (\u{2191}/\u{2193}, Enter to run, Esc to clear):");
         assert!(spacer.is_empty());
-        assert_eq!(selected, "  \u{203a} build: echo build");
-        assert_eq!(unselected, "    lint:  echo lint");
+        assert_eq!(selected, "  \u{203a} build echo build");
+        assert_eq!(unselected, "    lint  echo lint");
     }
 
     #[test]
@@ -753,10 +753,10 @@ mod tests {
         let output = render_interactive_to_string(&items, "", 80);
         let item_lines: Vec<&str> = output.lines().skip(2).collect();
         // max_name_width = 5 ("build")
-        // prefix(4) + max_name(5) + ":" + padding + " " + desc
-        assert_eq!(item_lines[0], "  \u{203a} build: echo build");
-        assert_eq!(item_lines[1], "    lint:  echo lint");
-        assert_eq!(item_lines[2], "    test:  vitest run");
+        // prefix(4) + max_name(5) + padding + " " + desc
+        assert_eq!(item_lines[0], "  \u{203a} build echo build");
+        assert_eq!(item_lines[1], "    lint  echo lint");
+        assert_eq!(item_lines[2], "    test  vitest run");
     }
 
     #[test]
@@ -765,7 +765,7 @@ mod tests {
             ("build", "a really long command that exceeds the width limit"),
             ("lint", "short"),
         ]);
-        // max_name_width = 5, prefix(4) + max_name(5) + sep(2) = 11
+        // max_name_width = 5, prefix(4) + max_name(5) + sep(1) = 10
         // max_line_width = 30 => max_desc = 30 - 11 = 19 chars
         let output = render_interactive_to_string(&items, "", 30);
         for line in output.lines().skip(2) {
@@ -792,15 +792,15 @@ mod tests {
         ]);
         let output = render_interactive_to_string(&items, "", 80);
         let item_lines: Vec<&str> = output.lines().skip(2).collect();
-        // max_name=5, has_groups → max_prefix=6, command_col=13
+        // max_name=5, has_groups → max_prefix=6, command_col=12
         // Root items get extra padding to align with grouped items
-        assert_eq!(item_lines[0], "  \u{203a} build:   echo build app");
-        assert_eq!(item_lines[1], "    lint:    echo lint app");
+        assert_eq!(item_lines[0], "  \u{203a} build   echo build app");
+        assert_eq!(item_lines[1], "    lint    echo lint app");
         // Group header
         assert_eq!(item_lines[2], "    lib (packages/lib)");
         // Grouped items (indented by 2 more, less padding)
-        assert_eq!(item_lines[3], "      build: echo build lib");
-        assert_eq!(item_lines[4], "      lint:  echo lint lib");
+        assert_eq!(item_lines[3], "      build echo build lib");
+        assert_eq!(item_lines[4], "      lint  echo lint lib");
     }
 
     #[test]
@@ -812,12 +812,12 @@ mod tests {
         ]);
         let output = render_interactive_to_string(&items, "", 80);
         let item_lines: Vec<&str> = output.lines().skip(2).collect();
-        // max_name=9, has_groups → max_prefix=6, command_col=17
-        // All commands start at column 17 regardless of indent level
-        assert_eq!(item_lines[0], "  \u{203a} build:       echo build");
-        assert_eq!(item_lines[1], "    typecheck:   echo tc");
+        // max_name=9, has_groups → max_prefix=6, command_col=16
+        // All commands start at column 16 regardless of indent level
+        assert_eq!(item_lines[0], "  \u{203a} build       echo build");
+        assert_eq!(item_lines[1], "    typecheck   echo tc");
         assert_eq!(item_lines[2], "    lib");
-        assert_eq!(item_lines[3], "      build:     echo build lib");
+        assert_eq!(item_lines[3], "      build     echo build lib");
     }
 
     #[test]

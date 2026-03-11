@@ -8,35 +8,35 @@ info:
 @ expect-milestone: task-select::0
 Select a task (↑/↓, Enter to run, Esc to clear):
 
-  › build:           echo build lib
-    lint:            echo lint lib
-    test:            echo test lib
-    typecheck:       echo typecheck lib
+  › build           echo build lib
+    lint            echo lint lib
+    test            echo test lib
+    typecheck       echo typecheck lib
     app (packages/app)
-      build:         echo build app
-      lint:          echo lint app
-      test:          echo test app
+      build         echo build app
+      lint          echo lint app
+      test          echo test app
     task-select-test (workspace root)
-      check:         echo check root
-      clean:         echo clean root
-      deploy:        echo deploy root
+      check         echo check root
+      clean         echo clean root
+      deploy        echo deploy root
   (…5 more)
 @ write: t
 @ expect-milestone: task-select:t:0
 Select a task (↑/↓, Enter to run, Esc to clear): t
 
-  › test:            echo test lib
-    typecheck:       echo typecheck lib
-    lint:            echo lint lib
+  › test            echo test lib
+    typecheck       echo typecheck lib
+    lint            echo lint lib
     task-select-test (workspace root)
-      check:         echo check root
-      clean:         echo clean root
-      deploy:        echo deploy root
-      docs:          echo docs root
-      format:        echo format root
-      hello:         echo hello from root
-      run-typo-task: vp run nonexistent-xyz
-      validate:      echo validate root
+      check         echo check root
+      clean         echo clean root
+      deploy        echo deploy root
+      docs          echo docs root
+      format        echo format root
+      hello         echo hello from root
+      run-typo-task vp run nonexistent-xyz
+      validate      echo validate root
   (…2 more)
 @ write-key: enter
 Selected task: test
