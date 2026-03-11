@@ -8,9 +8,7 @@
   },
   "type": "module",
   "scripts": {
-    "prepare": "husky",
-    "build": "echo build",
-    "build2": "echo build"
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/node": "catalog:",
