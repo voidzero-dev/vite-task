@@ -12,11 +12,11 @@ Select a task (↑/↓, Enter to run, Esc to clear):
     lint:            echo lint lib
     test:            echo test lib
     typecheck:       echo typecheck lib
-  app (packages/app)
+    app (packages/app)
       build:         echo build app
       lint:          echo lint app
       test:          echo test app
-  task-select-test (workspace root)
+    task-select-test (workspace root)
       check:         echo check root
       clean:         echo clean root
       deploy:        echo deploy root

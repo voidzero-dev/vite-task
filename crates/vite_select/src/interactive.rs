@@ -343,7 +343,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
                 if is_interactive {
                     write!(
                         writer,
-                        "  {dim}{name}{reset}{line_ending}",
+                        "    {dim}{name}{reset}{line_ending}",
                         dim = SetAttribute(Attribute::Dim),
                         name = group_name,
                         reset = SetAttribute(Attribute::Reset),
@@ -797,7 +797,7 @@ mod tests {
         assert_eq!(item_lines[0], "  \u{203a} build:   echo build app");
         assert_eq!(item_lines[1], "    lint:    echo lint app");
         // Group header
-        assert_eq!(item_lines[2], "  lib (packages/lib)");
+        assert_eq!(item_lines[2], "    lib (packages/lib)");
         // Grouped items (indented by 2 more, less padding)
         assert_eq!(item_lines[3], "      build: echo build lib");
         assert_eq!(item_lines[4], "      lint:  echo lint lib");
@@ -816,7 +816,7 @@ mod tests {
         // All commands start at column 17 regardless of indent level
         assert_eq!(item_lines[0], "  \u{203a} build:       echo build");
         assert_eq!(item_lines[1], "    typecheck:   echo tc");
-        assert_eq!(item_lines[2], "  lib");
+        assert_eq!(item_lines[2], "    lib");
         assert_eq!(item_lines[3], "      build:     echo build lib");
     }
 
