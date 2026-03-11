@@ -583,7 +583,7 @@ mod tests {
             .collect()
     }
 
-    /// Create items with explicit groups: (label, display_name, description, group)
+    /// Create items with explicit groups: (label, `display_name`, description, group)
     fn make_grouped_items(items: &[(&str, &str, &str, Option<&str>)]) -> Vec<SelectItem> {
         items
             .iter()
@@ -591,7 +591,7 @@ mod tests {
                 label: (*label).into(),
                 display_name: (*display_name).into(),
                 description: (*desc).into(),
-                group: group.map(|g| Str::from(g)),
+                group: group.map(Str::from),
             })
             .collect()
     }
