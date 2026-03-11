@@ -389,21 +389,21 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
                         (false, false) => "    ",
                     };
                     let reset = SetAttribute(Attribute::Reset);
+                    let dark_grey = SetForegroundColor(Color::DarkGrey);
                     if is_selected {
+                        let blue = SetForegroundColor(Color::Blue);
                         let bold = SetAttribute(Attribute::Bold);
                         write!(
                             writer,
-                            "{bold}{prefix}{name}:{:>pad$} {desc}{reset}{line_ending}",
+                            "{dark_grey}{prefix}{reset}{blue}{bold}{name}:{reset}{dark_grey}{:>pad$} {desc}{reset}{line_ending}",
                             "",
                             pad = name_padding,
                             desc = display_desc,
                         )?;
                     } else {
-                        // Color only the name, not the colon/description.
-                        let cyan = SetForegroundColor(Color::Cyan);
                         write!(
                             writer,
-                            "{prefix}{cyan}{name}{reset}:{:>pad$} {desc}{line_ending}",
+                            "{prefix}{name}:{dark_grey}{:>pad$} {desc}{reset}{line_ending}",
                             "",
                             pad = name_padding,
                             desc = display_desc,
