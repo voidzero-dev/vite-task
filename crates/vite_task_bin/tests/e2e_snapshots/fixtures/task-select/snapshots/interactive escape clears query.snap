@@ -6,7 +6,7 @@ info:
 ---
 > vp run
 @ expect-milestone: task-select::0
-Select a task (↑/↓, Enter to run, Type to search):
+Select a task (↑/↓, Enter to run, type to search):
 
   › build:           echo build app
     lint:            echo lint app
@@ -23,14 +23,14 @@ Select a task (↑/↓, Enter to run, Type to search):
   (…5 more)
 @ write: lin
 @ expect-milestone: task-select:lin:0
-Select a task (↑/↓, Enter to run, Type to search): lin
+Select a task (↑/↓, Enter to run, type to search): lin
 
   › lint:   echo lint app
     lib (packages/lib)
       lint: echo lint lib
 @ write-key: escape
 @ expect-milestone: task-select::0
-Select a task (↑/↓, Enter to run, Type to search):
+Select a task (↑/↓, Enter to run, type to search):
 
   › build:           echo build app
     lint:            echo lint app

@@ -5,7 +5,7 @@ expression: e2e_outputs
 > vp run list-tasks
 @ expect-milestone: task-select::0
 $ vp run ⊘ cache disabled
-Select a task (↑/↓, Enter to run, Type to search):
+Select a task (↑/↓, Enter to run, type to search):
 
   › hello:        echo hello from root
     list-tasks:   vp run

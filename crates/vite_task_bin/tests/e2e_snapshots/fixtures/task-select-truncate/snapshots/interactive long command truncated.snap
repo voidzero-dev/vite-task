@@ -6,7 +6,7 @@ info:
 ---
 > vp run
 @ expect-milestone: task-select::0
-Select a task (↑/↓, Enter to run, Type to search):
+Select a task (↑/↓, Enter to run, type to search):
 
   › build:    echo build app
     lint:     echo lint app
@@ -14,7 +14,7 @@ Select a task (↑/↓, Enter to run, Type to search):
     test:     echo test app
 @ write-key: down
 @ expect-milestone: task-select::1
-Select a task (↑/↓, Enter to run, Type to search):
+Select a task (↑/↓, Enter to run, type to search):
 
     build:    echo build app
   › lint:     echo lint app
@@ -22,7 +22,7 @@ Select a task (↑/↓, Enter to run, Type to search):
     test:     echo test app
 @ write-key: down
 @ expect-milestone: task-select::2
-Select a task (↑/↓, Enter to run, Type to search):
+Select a task (↑/↓, Enter to run, type to search):
 
     build:    echo build app
     lint:     echo lint app
@@ -30,7 +30,7 @@ Select a task (↑/↓, Enter to run, Type to search):
     test:     echo test app
 @ write-key: down
 @ expect-milestone: task-select::3
-Select a task (↑/↓, Enter to run, Type to search):
+Select a task (↑/↓, Enter to run, type to search):
 
     build:    echo build app
     lint:     echo lint app
@@ -38,7 +38,7 @@ Select a task (↑/↓, Enter to run, Type to search):
   › test:     echo test app
 @ write-key: up
 @ expect-milestone: task-select::2
-Select a task (↑/↓, Enter to run, Type to search):
+Select a task (↑/↓, Enter to run, type to search):
 
     build:    echo build app
     lint:     echo lint app
