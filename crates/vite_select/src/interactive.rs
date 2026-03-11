@@ -382,48 +382,41 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
                     truncate_desc(item.description.as_str(), max_desc_chars, &mut truncated);
 
                 if is_interactive {
-                    let (prefix, start_style, end_style) = if is_selected {
-                        let p = if is_in_group { "  \u{203a}   " } else { "  \u{203a} " };
-                        (
-                            p,
-                            SetAttribute(Attribute::Bold).to_string(),
-                            SetAttribute(Attribute::Reset).to_string(),
-                        )
-                    } else {
-                        let p = if is_in_group { "      " } else { "    " };
-                        #[expect(
-                            clippy::disallowed_types,
-                            reason = "building ANSI style string for crossterm formatting"
-                        )]
-                        let cyan: std::string::String = SetForegroundColor(Color::Cyan).to_string();
-                        (p, cyan, SetAttribute(Attribute::Reset).to_string())
+                    let prefix = match (is_selected, is_in_group) {
+                        (true, true) => "  \u{203a}   ",
+                        (true, false) => "  \u{203a} ",
+                        (false, true) => "      ",
+                        (false, false) => "    ",
                     };
+                    let reset = SetAttribute(Attribute::Reset);
                     if is_selected {
+                        let bold = SetAttribute(Attribute::Bold);
                         write!(
                             writer,
-                            "{start_style}{prefix}{name}:{:>pad$} {desc}{end_style}{line_ending}",
+                            "{bold}{prefix}{name}:{:>pad$} {desc}{reset}{line_ending}",
                             "",
                             pad = name_padding,
                             desc = display_desc,
                         )?;
                     } else {
                         // Color only the name, not the colon/description.
+                        let cyan = SetForegroundColor(Color::Cyan);
                         write!(
                             writer,
-                            "{prefix}{start_style}{name}{end_style}:{:>pad$} {desc}{line_ending}",
+                            "{prefix}{cyan}{name}{reset}:{:>pad$} {desc}{line_ending}",
                             "",
                             pad = name_padding,
                             desc = display_desc,
                         )?;
                     }
                 } else if is_selected {
+                    let bold = SetAttribute(Attribute::Bold);
+                    let reset = SetAttribute(Attribute::Reset);
                     write!(
                         writer,
                         "{bold}> {name}: {desc}{reset}{line_ending}",
-                        bold = SetAttribute(Attribute::Bold),
                         name = item.display_name,
                         desc = display_desc,
-                        reset = SetAttribute(Attribute::Reset),
                     )?;
                 } else {
                     write!(writer, "  {}: {display_desc}{line_ending}", item.display_name)?;
