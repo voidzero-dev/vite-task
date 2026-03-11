@@ -97,6 +97,12 @@ impl<'a> State<'a> {
     }
 }
 
+/// Split a label like `"package#task"` into `("package#", "task")`.
+/// Labels without `#` return `("", label)`.
+fn split_label(label: &str) -> (&str, &str) {
+    label.find('#').map_or(("", label), |pos| (&label[..=pos], &label[pos + 1..]))
+}
+
 /// Parameters for rendering a task list.
 pub struct RenderParams<'a> {
     pub items: &'a [SelectItem],
@@ -122,6 +128,7 @@ pub struct RenderParams<'a> {
 /// and non-interactive modes (via [`crate::non_interactive`]).
 ///
 /// Returns the number of lines written.
+#[expect(clippy::too_many_lines, reason = "single rendering function with sequential layout logic")]
 pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyhow::Result<usize> {
     let RenderParams {
         items,
@@ -164,6 +171,13 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         lines += 2;
     }
 
+    // Compute max label width for interactive column alignment
+    let max_label_width = if is_interactive {
+        visible_range.clone().map(|vi| items[filtered[vi]].label.chars().count()).max().unwrap_or(0)
+    } else {
+        0
+    };
+
     // Items
     for vi in visible_range.clone() {
         let item_idx = filtered[vi];
@@ -174,9 +188,12 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         // Line layout:
         // - interactive prefix is "  › " or "    " (4 chars)
         // - non-interactive prefix is "  " (2 chars)
-        // then label + ": " + description
+        // then label (padded to max_label_width in interactive) + ": " + description
+        let label_width = item.label.chars().count();
+        let padded_label_width = if is_interactive { max_label_width } else { label_width };
+        let label_padding = padded_label_width - label_width;
         let prefix_width = if is_interactive { 4 } else { 2 };
-        let prefix_and_label_width = prefix_width + item.label.chars().count() + 2;
+        let prefix_and_label_width = prefix_width + padded_label_width + 2;
         let max_desc_chars = params.max_line_width.saturating_sub(prefix_and_label_width);
         let desc_str = item.description.as_str();
         let desc_char_count = desc_str.chars().count();
@@ -191,25 +208,31 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
             desc_str
         };
 
-        if is_selected && is_interactive {
-            write!(
-                writer,
-                "{blue}{bold}  \u{203a} {label}: {desc}{reset}{line_ending}",
-                blue = SetForegroundColor(Color::Blue),
-                bold = SetAttribute(Attribute::Bold),
-                label = item.label,
-                desc = display_desc,
-                reset = SetAttribute(Attribute::Reset),
-            )?;
-        } else if is_interactive {
-            write!(
-                writer,
-                "{marker_color}    {reset_color}{}:{command_color} {display_desc}{reset_color}{line_ending}",
-                item.label,
-                marker_color = SetForegroundColor(Color::DarkGrey),
-                command_color = SetForegroundColor(Color::Grey),
-                reset_color = ResetColor,
-            )?;
+        if is_interactive {
+            let (pkg, task) = split_label(&item.label);
+            if is_selected {
+                write!(
+                    writer,
+                    "{bold}  \u{203a} {:>pad$}{pkg}{task}: {desc}{no_attr}{line_ending}",
+                    "",
+                    pad = label_padding,
+                    bold = SetAttribute(Attribute::Bold),
+                    no_attr = SetAttribute(Attribute::Reset),
+                    desc = display_desc,
+                )?;
+            } else {
+                write!(
+                    writer,
+                    "    {:>pad$}{light_cyan}{pkg}{no_color}{cyan}{task}{no_attr}: {desc}{line_ending}",
+                    "",
+                    pad = label_padding,
+                    light_cyan = SetForegroundColor(Color::Rgb { r: 130, g: 200, b: 210 }),
+                    cyan = SetForegroundColor(Color::Cyan),
+                    no_color = ResetColor,
+                    no_attr = SetAttribute(Attribute::Reset),
+                    desc = display_desc,
+                )?;
+            }
         } else if is_selected {
             write!(
                 writer,
@@ -526,6 +549,107 @@ mod tests {
         assert_eq!(prompt, "Select a task (↑/↓, Enter to run, Esc to clear):");
         assert!(spacer.is_empty());
         assert_eq!(selected, "  › build: echo build");
-        assert_eq!(unselected, "    lint: echo lint");
+        assert_eq!(unselected, "     lint: echo lint");
+    }
+
+    #[test]
+    fn interactive_commands_are_aligned() {
+        let items =
+            make_items(&[("build", "echo build"), ("lint", "echo lint"), ("test", "vitest run")]);
+        let output = render_interactive_to_string(&items, "", 80);
+        let item_lines: Vec<&str> = output.lines().skip(2).collect();
+        // max_label_width = 5 ("build"), descriptions should all start at column 11
+        // prefix(4) + max_label(5) + ": "(2) = 11
+        assert_eq!(item_lines[0], "  \u{203a} build: echo build");
+        assert_eq!(item_lines[1], "     lint: echo lint");
+        assert_eq!(item_lines[2], "     test: vitest run");
+    }
+
+    #[test]
+    fn interactive_alignment_with_package_labels() {
+        let items = make_items(&[("app#build", "echo build"), ("lint", "echo lint")]);
+        let output = render_interactive_to_string(&items, "", 80);
+        let item_lines: Vec<&str> = output.lines().skip(2).collect();
+        // max_label_width = 9 ("app#build"), padding for "lint" = 5
+        assert_eq!(item_lines[0], "  \u{203a} app#build: echo build");
+        assert_eq!(item_lines[1], "         lint: echo lint");
+    }
+
+    #[test]
+    fn interactive_truncation_accounts_for_padding() {
+        let items = make_items(&[
+            ("build", "a really long command that exceeds the width limit"),
+            ("lint", "short"),
+        ]);
+        // max_label_width = 5, prefix(4) + max_label(5) + sep(2) = 11
+        // max_line_width = 30 => max_desc = 30 - 11 = 19 chars
+        let output = render_interactive_to_string(&items, "", 30);
+        for line in output.lines().skip(2) {
+            assert!(
+                line.chars().count() <= 30,
+                "line exceeds 30 chars: ({}) {line:?}",
+                line.chars().count()
+            );
+        }
+        let build_line = output.lines().nth(2).unwrap();
+        assert!(
+            build_line.contains('\u{2026}'),
+            "long description should be truncated: {build_line:?}"
+        );
+    }
+
+    #[test]
+    fn interactive_left_padding_aligns_commands() {
+        let items = make_items(&[
+            ("app#build", "echo build"),
+            ("app#lint", "echo lint"),
+            ("lib#typecheck", "echo tc"),
+        ]);
+        let output = render_interactive_to_string(&items, "", 80);
+        let item_lines: Vec<&str> = output.lines().skip(2).collect();
+        // max_label_width = 13 ("lib#typecheck")
+        // "app#build" = 9, padding = 4; "app#lint" = 8, padding = 5
+        // Padding goes before the label (left side), colon always followed by single space
+        // "lib#typecheck" = 13 (max), "app#build" = 9 (pad 4), "app#lint" = 8 (pad 5)
+        assert_eq!(item_lines[0], "  \u{203a}     app#build: echo build");
+        assert_eq!(item_lines[1], "         app#lint: echo lint");
+        assert_eq!(item_lines[2], "    lib#typecheck: echo tc");
+
+        // Verify all ": " separators are at the same char column
+        let colon_columns: Vec<usize> =
+            item_lines.iter().map(|l| l.chars().take_while(|&c| c != ':').count()).collect();
+        assert!(
+            colon_columns.windows(2).all(|w| w[0] == w[1]),
+            "colon columns should be aligned: {colon_columns:?}"
+        );
+    }
+
+    #[test]
+    fn interactive_left_padding_with_truncation_preserves_ellipsis() {
+        let items = make_items(&[
+            ("app#build", "a really long command that exceeds the width limit"),
+            ("lint", "short"),
+        ]);
+        // max_label_width = 9 ("app#build"), prefix(4) + 9 + sep(2) = 15
+        // max_line_width = 30 => max_desc = 30 - 15 = 15 chars
+        let output = render_interactive_to_string(&items, "", 30);
+        for line in output.lines().skip(2) {
+            assert!(
+                line.chars().count() <= 30,
+                "line exceeds 30 chars: ({}) {line:?}",
+                line.chars().count()
+            );
+        }
+        let build_line = output.lines().nth(2).unwrap();
+        assert!(
+            build_line.contains('\u{2026}'),
+            "truncated line should contain ellipsis: {build_line:?}"
+        );
+        // "lint" has 5 chars of left padding (9 - 4)
+        let lint_line = output.lines().nth(3).unwrap();
+        assert!(
+            lint_line.contains("     lint: short"),
+            "short label should have left padding: {lint_line:?}"
+        );
     }
 }
