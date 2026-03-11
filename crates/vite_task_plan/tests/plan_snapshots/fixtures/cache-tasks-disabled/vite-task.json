@@ -1,7 +1,9 @@
 {
   "cache": { "tasks": false },
   "tasks": {
-    "build": {},
+    "build": {
+      "command": "print-file package.json"
+    },
     "deploy": {
       "command": "print-file package.json",
       "cache": true

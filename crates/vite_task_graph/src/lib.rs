@@ -264,18 +264,18 @@ impl IndexedTaskGraph {
                 .collect();
 
             for (task_name, task_user_config) in user_config.tasks.unwrap_or_default() {
-                // For each task defined in the config, look up the corresponding package.json script (if any)
-                let package_json_script = package_json_scripts.remove(task_name.as_str());
+                // Remove any package.json script with the same name so it won't be
+                // duplicated as a standalone PackageJsonScript task below.
+                package_json_scripts.remove(task_name.as_str());
 
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
                 let dependency_specifiers = task_user_config.options.depends_on.clone();
 
-                // Resolve the task configuration combining config and package.json script
+                // Resolve the task configuration from the user config
                 let resolved_config = ResolvedTaskConfig::resolve(
                     task_user_config,
                     &package_dir,
-                    package_json_script,
                     &workspace_root.path,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {

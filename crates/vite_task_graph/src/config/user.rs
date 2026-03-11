@@ -141,9 +141,7 @@ impl Default for UserTaskOptions {
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskConfig {
     /// The command to run for the task.
-    ///
-    /// If omitted, the script from `package.json` with the same name will be used
-    pub command: Option<Box<str>>,
+    pub command: Box<str>,
 
     /// Fields other than the command
     #[serde(flatten)]
@@ -365,22 +363,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_defaults() {
+    fn test_command_required() {
         let user_config_json = json!({});
+        assert!(
+            serde_json::from_value::<UserTaskConfig>(user_config_json).is_err(),
+            "task config without command should fail to deserialize"
+        );
+    }
+
+    #[test]
+    fn test_command_with_defaults() {
+        let user_config_json = json!({
+            "command": "echo hello"
+        });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
         assert_eq!(
             user_config,
-            UserTaskConfig {
-                command: None,
-                // A empty task config (`{}`) should be equivalent to not specifying any config at all (just package.json script)
-                options: UserTaskOptions::default(),
-            }
+            UserTaskConfig { command: "echo hello".into(), options: UserTaskOptions::default() }
         );
     }
 
     #[test]
     fn test_cwd_rename() {
         let user_config_json = json!({
+            "command": "echo test",
             "cwd": "src"
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
@@ -390,6 +396,7 @@ mod tests {
     #[test]
     fn test_cache_disabled() {
         let user_config_json = json!({
+            "command": "echo test",
             "cache": false
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();

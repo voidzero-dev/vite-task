@@ -141,7 +141,7 @@ Tasks are defined in `vite-task.json`:
 ```
 
 - `cache` (root): workspace-wide cache toggle. Default: `{ "scripts": false, "tasks": true }`
-- `command`: shell command to run (falls back to package.json script if omitted)
+- `command`: shell command to run (required)
 - `cwd`: working directory relative to the package root
 - `dependsOn`: explicit task dependencies (`taskName` or `package#task`)
 - `cache` (task): enable/disable caching for this task (default: `true`)

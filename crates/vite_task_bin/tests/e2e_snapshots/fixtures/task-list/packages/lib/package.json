@@ -1,6 +1,3 @@
 {
-  "name": "lib",
-  "scripts": {
-    "build": "echo build lib"
-  }
+  "name": "lib"
 }

@@ -5,12 +5,12 @@
 name = "task cached by default"
 args = ["run", "build"]
 
-# Task with explicit command should be cached
+# Another task should also be cached
 [[plan]]
-name = "task with command cached by default"
+name = "another task cached by default"
 args = ["run", "deploy"]
 
-# Script not wrapped by a task should not be cached
+# Script not in the tasks map should not be cached
 [[plan]]
 name = "script not cached by default"
 args = ["run", "test"]

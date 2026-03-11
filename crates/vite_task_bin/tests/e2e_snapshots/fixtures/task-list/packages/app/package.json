@@ -1,9 +1,5 @@
 {
   "name": "app",
-  "scripts": {
-    "build": "echo build app",
-    "test": "echo test app"
-  },
   "dependencies": {
     "lib": "workspace:*"
   }

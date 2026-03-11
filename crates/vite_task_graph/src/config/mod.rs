@@ -243,14 +243,6 @@ pub struct EnvConfig {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveTaskConfigError {
-    /// Both package.json script and vite.config.* task define commands for the task
-    #[error("Both package.json script and vite.config.* task define commands for the task")]
-    CommandConflict,
-
-    /// Neither package.json script nor vite.config.* task define a command for the task
-    #[error("Neither package.json script nor vite.config.* task define a command for the task")]
-    NoCommand,
-
     /// A glob pattern resolves to a path outside the workspace root
     #[error("glob pattern '{pattern}' resolves outside the workspace root")]
     GlobOutsideWorkspace { pattern: Str },
@@ -288,26 +280,18 @@ impl ResolvedTaskConfig {
         })
     }
 
-    /// Resolves from user config, package dir, and package.json script (if any).
+    /// Resolves from user config and package dir.
     ///
     /// # Errors
     ///
-    /// Returns [`ResolveTaskConfigError::CommandConflict`] if both the user config and
-    /// package.json define a command, or [`ResolveTaskConfigError::NoCommand`] if neither does.
+    /// Returns [`ResolveTaskConfigError`] if glob resolution fails.
     pub fn resolve(
         user_config: UserTaskConfig,
         package_dir: &Arc<AbsolutePath>,
-        package_json_script: Option<&str>,
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
-        let command = match (&user_config.command, package_json_script) {
-            (Some(_), Some(_)) => return Err(ResolveTaskConfigError::CommandConflict),
-            (None, None) => return Err(ResolveTaskConfigError::NoCommand),
-            (Some(cmd), None) => cmd.as_ref(),
-            (None, Some(script)) => script,
-        };
         Ok(Self {
-            command: command.into(),
+            command: Str::from(user_config.command.as_ref()),
             resolved_options: ResolvedTaskOptions::resolve(
                 user_config.options,
                 package_dir,

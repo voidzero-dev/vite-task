@@ -3,10 +3,8 @@
 export type Task = {
   /**
    * The command to run for the task.
-   *
-   * If omitted, the script from `package.json` with the same name will be used
    */
-  command?: string;
+  command: string;
   /**
    * The working directory for the task, relative to the package root (not workspace root).
    */

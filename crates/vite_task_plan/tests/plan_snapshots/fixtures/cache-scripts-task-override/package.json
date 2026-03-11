@@ -1,7 +1,6 @@
 {
   "name": "@test/cache-scripts-task-override",
   "scripts": {
-    "build": "print-file package.json",
     "test": "print-file package.json"
   }
 }
