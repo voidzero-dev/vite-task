@@ -11,6 +11,10 @@
     "read-stdin": "./src/read-stdin.js",
     "replace-file-content": "./src/replace-file-content.ts"
   },
+  "scripts": {
+    "build": "echo foo",
+    "lint": "vp lint"
+  },
   "dependencies": {
     "cross-env": "^10.1.0",
     "oxfmt": "0.26.0",
