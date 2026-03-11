@@ -346,6 +346,10 @@ impl<'a> Session<'a> {
         clippy::future_not_send,
         reason = "session is single-threaded, futures do not need to be Send"
     )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "builds interactive/non-interactive select items and handles selection"
+    )]
     async fn handle_no_task(
         &mut self,
         is_interactive: bool,
@@ -363,18 +367,48 @@ impl<'a> Session<'a> {
                 .then_with(|| a.task_display.task_name.cmp(&b.task_display.task_name))
         });
 
+        let workspace_path = self.workspace_path();
+
         // Build items: current package tasks use unqualified names (no '#'),
         // other packages use qualified "package#task" names.
+        // Interactive mode uses tree view (grouped by package); non-interactive is flat.
         let select_items: Vec<SelectItem> = entries
             .iter()
             .map(|entry| {
-                let label =
-                    if current_package_path.as_ref() == Some(&entry.task_display.package_path) {
-                        entry.task_display.task_name.clone()
+                let is_current =
+                    current_package_path.as_ref() == Some(&entry.task_display.package_path);
+                let label = if is_current {
+                    entry.task_display.task_name.clone()
+                } else {
+                    vite_str::format!("{}", entry.task_display)
+                };
+
+                let group = if is_current {
+                    None
+                } else {
+                    let rel_path = entry
+                        .task_display
+                        .package_path
+                        .strip_prefix(&*workspace_path)
+                        .ok()
+                        .flatten()
+                        .map(|p| Str::from(p.as_str()))
+                        .unwrap_or_default();
+                    let pkg_name = &entry.task_display.package_name;
+                    let display_path =
+                        if rel_path.is_empty() { Str::from("workspace root") } else { rel_path };
+                    Some(if pkg_name.is_empty() {
+                        display_path
                     } else {
-                        vite_str::format!("{}", entry.task_display)
-                    };
-                SelectItem { label, description: entry.command.clone() }
+                        vite_str::format!("{pkg_name} ({display_path})")
+                    })
+                };
+                let display_name = if is_interactive {
+                    entry.task_display.task_name.clone()
+                } else {
+                    label.clone()
+                };
+                SelectItem { label, display_name, description: entry.command.clone(), group }
             })
             .collect();
 
@@ -410,28 +444,15 @@ impl<'a> Session<'a> {
             page_size: 12,
         };
 
-        vite_select::select_list(
-            &mut stdout,
-            &params,
-            mode,
-            |filtered, query| {
-                // When the query doesn't contain '#', move current-package tasks (those
-                // without '#' in their label) to the top. `sort_by_key` is a stable sort,
-                // so the fuzzy rating order is preserved within each group.
-                if !query.contains('#') {
-                    filtered.sort_by_key(|&idx| select_items[idx].label.contains('#'));
-                }
-            },
-            |state| {
-                use std::io::Write;
-                let milestone_name =
-                    vite_str::format!("task-select:{}:{}", state.query, state.selected_index);
-                let milestone_bytes = pty_terminal_test_client::encoded_milestone(&milestone_name);
-                let mut out = std::io::stdout();
-                let _ = out.write_all(&milestone_bytes);
-                let _ = out.flush();
-            },
-        )?;
+        vite_select::select_list(&mut stdout, &params, mode, |state| {
+            use std::io::Write;
+            let milestone_name =
+                vite_str::format!("task-select:{}:{}", state.query, state.selected_index);
+            let milestone_bytes = pty_terminal_test_client::encoded_milestone(&milestone_name);
+            let mut out = std::io::stdout();
+            let _ = out.write_all(&milestone_bytes);
+            let _ = out.flush();
+        })?;
 
         let Some(selected_index) = selected_index else {
             // Non-interactive, the list was printed.

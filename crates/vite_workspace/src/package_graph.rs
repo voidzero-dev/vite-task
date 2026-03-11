@@ -72,6 +72,7 @@ impl PackageQuery {
     ///
     /// Used by the interactive task selector to match by filesystem path
     /// instead of package name.
+    #[must_use]
     pub fn containing_package(path: Arc<AbsolutePath>) -> Self {
         Self(PackageQueryKind::Filters(Vec1::new(PackageFilter {
             exclude: false,

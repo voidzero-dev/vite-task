@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "echo foo",
-    "lint": "vp lint"
+    "lint": "vp lint",
+    "test": "echo test"
   },
   "dependencies": {
     "cross-env": "^10.1.0",

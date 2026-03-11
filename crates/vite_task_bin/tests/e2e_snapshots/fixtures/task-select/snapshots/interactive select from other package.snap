@@ -21,15 +21,25 @@ Select a task (↑/↓, Enter to run, Esc to clear):
       clean:         echo clean root
       deploy:        echo deploy root
   (…5 more)
-@ write: lib#
-@ expect-milestone: task-select:lib#:0
-Select a task (↑/↓, Enter to run, Esc to clear): lib#
+@ write-key: down
+@ write-key: down
+@ write-key: down
+@ expect-milestone: task-select::3
+Select a task (↑/↓, Enter to run, Esc to clear):
 
+    build:           echo build app
+    lint:            echo lint app
+    test:            echo test app
   lib (packages/lib)
-  ›   build:     echo build lib
-      lint:      echo lint lib
-      test:      echo test lib
-      typecheck: echo typecheck lib
+  ›   build:         echo build lib
+      lint:          echo lint lib
+      test:          echo test lib
+      typecheck:     echo typecheck lib
+  task-select-test (workspace root)
+      check:         echo check root
+      clean:         echo clean root
+      deploy:        echo deploy root
+  (…5 more)
 @ write-key: enter
 Selected task: lib#build
 ~/packages/lib$ echo build lib ⊘ cache disabled

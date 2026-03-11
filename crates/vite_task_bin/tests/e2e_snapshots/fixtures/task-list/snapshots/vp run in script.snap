@@ -7,12 +7,14 @@ expression: e2e_outputs
 $ vp run ⊘ cache disabled
 Select a task (↑/↓, Enter to run, Esc to clear):
 
-  › hello:      echo hello from root
-    list-tasks: vp run
-    app#build:  echo build app
-    app#lint:   echo lint app
-    app#test:   echo test app
-    lib#build:  echo build lib
+  › hello:        echo hello from root
+    list-tasks:   vp run
+  app (packages/app)
+      build:      echo build app
+      lint:       echo lint app
+      test:       echo test app
+  lib (packages/lib)
+      build:      echo build lib
 @ write-key: enter
 $ vp run ⊘ cache disabled
 Selected task: hello

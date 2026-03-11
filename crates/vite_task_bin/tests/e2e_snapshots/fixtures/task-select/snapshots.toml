@@ -132,6 +132,14 @@ steps = [
   { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write" = "zzzzz" }, { "expect-milestone" = "task-select:zzzzz:0" }, { "write-key" = "enter" }, { "write-key" = "escape" }, { "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
 ]
 
+# Interactive: navigate into a package group, select a non-current-package task
+[[e2e]]
+name = "interactive select from other package"
+cwd = "packages/app"
+steps = [
+  { command = "vp run", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "down" }, { "write-key" = "down" }, { "write-key" = "down" }, { "expect-milestone" = "task-select::3" }, { "write-key" = "enter" }] },
+]
+
 # Typo inside a task script should fail with an error, NOT show a list
 [[e2e]]
 name = "typo in task script fails without list"

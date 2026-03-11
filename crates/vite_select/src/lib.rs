@@ -4,15 +4,20 @@ mod interactive;
 use std::io::Write;
 
 pub use fuzzy::fuzzy_match;
-use interactive::{RenderParams, render_items};
+use interactive::{RenderParams, build_display_rows, render_items};
 use vite_str::Str;
 
 /// An item in the selection list.
 pub struct SelectItem {
-    /// Display label, e.g. `"build"` or `"app#build"`.
+    /// Searchable label, e.g. `"build"` or `"app#build"`. Used for fuzzy matching.
     pub label: Str,
-    /// Description shown next to the label, e.g. `"echo build app"`.
+    /// Display name shown in the list, e.g. `"build"` (tree view) or `"app#build"` (flat).
+    pub display_name: Str,
+    /// Description shown next to the display name, e.g. `"echo build app"`.
     pub description: Str,
+    /// Group header text. Items sharing the same group render together under a
+    /// header line. `None` = top-level (no header).
+    pub group: Option<Str>,
 }
 
 /// Selection mode.
@@ -63,7 +68,6 @@ pub fn select_list(
     writer: &mut impl Write,
     params: &SelectParams<'_>,
     mode: Mode<'_>,
-    before_render: impl FnMut(&mut Vec<usize>, &str),
     after_render: impl FnMut(&RenderState<'_>),
 ) -> anyhow::Result<()> {
     match mode {
@@ -73,12 +77,9 @@ pub fn select_list(
             selected_index,
             params.header,
             params.page_size,
-            before_render,
             after_render,
         ),
-        Mode::NonInteractive => {
-            non_interactive(writer, params.items, params.query, params.header, before_render)
-        }
+        Mode::NonInteractive => non_interactive(writer, params.items, params.query, params.header),
     }
 }
 
@@ -87,34 +88,33 @@ fn non_interactive(
     items: &[SelectItem],
     query: Option<&str>,
     header: Option<&str>,
-    mut before_render: impl FnMut(&mut Vec<usize>, &str),
 ) -> anyhow::Result<()> {
-    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
-    let mut filtered: Vec<usize> =
-        query.map_or_else(|| (0..items.len()).collect(), |q| fuzzy_match(q, &labels));
-    before_render(&mut filtered, query.unwrap_or_default());
-    let len = filtered.len();
+    let display_rows = build_display_rows(items, query.unwrap_or_default());
 
     // When there are no matching items, just print the header (if any) and
     // return early — avoids showing a redundant "No matching tasks." line
     // after a "not found" header.
-    if filtered.is_empty() {
+    let has_items = display_rows.iter().any(interactive::DisplayRow::is_item);
+    if !has_items {
         if let Some(h) = header {
             writeln!(writer, "{h}")?;
         }
         return Ok(());
     }
 
+    let row_count = display_rows.len();
+
     render_items(
         writer,
         &RenderParams {
             items,
-            filtered: &filtered,
-            selected_in_filtered: None,
-            visible_range: 0..len,
+            display_rows: &display_rows,
+            selected: None,
+            visible_row_range: 0..row_count,
             hidden_count: 0,
             header,
             query: None,
+            show_group_headers: false,
             line_ending: "\n",
             max_line_width: usize::MAX,
         },

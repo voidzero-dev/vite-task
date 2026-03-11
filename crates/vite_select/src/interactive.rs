@@ -3,11 +3,17 @@ use std::io::{Write, stdout};
 use crossterm::{
     cursor::{self, MoveToColumn},
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    style::{Attribute, Color, ResetColor, SetAttribute, SetForegroundColor},
+    style::{Attribute, Color, SetAttribute, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
+use vite_str::Str;
 
 use crate::{RenderState, SelectItem, fuzzy::fuzzy_match};
+
+/// Prefix width for root-level items (`"  › "` or `"    "`).
+const ROOT_PREFIX_WIDTH: usize = 4;
+/// Prefix width for grouped items (`"    › "` or `"      "`).
+const GROUP_PREFIX_WIDTH: usize = 6;
 
 struct RawModeGuard;
 
@@ -24,19 +30,93 @@ impl Drop for RawModeGuard {
     }
 }
 
+/// A row in the flattened display list.
+pub enum DisplayRow {
+    /// Non-selectable group header line.
+    Header(Str),
+    /// Selectable item. `item_index` is the index into the original `items` slice.
+    Item { item_index: usize },
+}
+
+impl DisplayRow {
+    pub const fn is_item(&self) -> bool {
+        matches!(self, Self::Item { .. })
+    }
+}
+
+/// Filter, group, and flatten items into display rows.
+///
+/// Pipeline: fuzzy match → group by `SelectItem::group` (current-package first)
+/// → insert header rows at group boundaries.
+pub fn build_display_rows(items: &[SelectItem], query: &str) -> Vec<DisplayRow> {
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    let mut filtered = fuzzy_match(query, &labels);
+    group_filtered(items, &mut filtered);
+
+    let mut rows = Vec::new();
+    let mut current_group: Option<Option<&str>> = None;
+    for &item_idx in &filtered {
+        let group = items[item_idx].group.as_deref();
+        if current_group != Some(group) {
+            current_group = Some(group);
+            if let Some(g) = group {
+                rows.push(DisplayRow::Header(Str::from(g)));
+            }
+        }
+        rows.push(DisplayRow::Item { item_index: item_idx });
+    }
+    rows
+}
+
+/// Reorder `filtered` so items are grouped by `SelectItem::group`.
+///
+/// Groups are ordered by the position of their best-matching item in the
+/// original fuzzy-scored `filtered` list. Items with `group: None`
+/// (current-package tasks) are always placed first.
+fn group_filtered(items: &[SelectItem], filtered: &mut Vec<usize>) {
+    // Collect group ordering: first-seen order preserves fuzzy rank.
+    let mut group_order: Vec<Option<&str>> = Vec::new();
+    for &idx in filtered.iter() {
+        let group = items[idx].group.as_deref();
+        if !group_order.contains(&group) {
+            group_order.push(group);
+        }
+    }
+    // Always put current-package group (None) first.
+    if let Some(pos) = group_order.iter().position(Option::is_none)
+        && pos != 0
+    {
+        let g = group_order.remove(pos);
+        group_order.insert(0, g);
+    }
+    let mut new_filtered = Vec::with_capacity(filtered.len());
+    for &group in &group_order {
+        for &idx in filtered.iter() {
+            if items[idx].group.as_deref() == group {
+                new_filtered.push(idx);
+            }
+        }
+    }
+    *filtered = new_filtered;
+}
+
 struct State<'a> {
     items: &'a [SelectItem],
-    /// Indices into `items` that match the current query, in score order.
-    filtered: Vec<usize>,
+    /// Flattened display rows (headers + items): the single source of truth
+    /// after filtering + grouping.
+    display_rows: Vec<DisplayRow>,
+    /// Cached count of selectable items in `display_rows`.
+    item_count: usize,
     #[expect(
         clippy::disallowed_types,
         reason = "crossterm key events push chars one at a time; String is natural here"
     )]
     query: String,
-    /// Index into `filtered`.
+    /// Index among selectable items (0 = first Item row, 1 = second, etc.).
     selected: usize,
-    /// First visible row in the filtered list (scroll offset).
+    /// Index into `display_rows` — first visible row.
     scroll_offset: usize,
+    /// Max visible lines (display rows) in the viewport.
     page_size: usize,
     /// Number of lines rendered in the last frame (for clearing).
     rendered_lines: usize,
@@ -45,83 +125,131 @@ struct State<'a> {
 impl<'a> State<'a> {
     fn new(items: &'a [SelectItem], initial_query: Option<&str>, page_size: usize) -> Self {
         let query = initial_query.unwrap_or_default().to_owned();
-        let mut state = Self {
+        let display_rows = build_display_rows(items, &query);
+        let item_count = display_rows.iter().filter(|r| r.is_item()).count();
+        Self {
             items,
-            filtered: Vec::new(),
+            display_rows,
+            item_count,
             query,
             selected: 0,
             scroll_offset: 0,
             page_size,
             rendered_lines: 0,
-        };
-        state.refilter();
-        state
+        }
     }
 
     fn refilter(&mut self) {
-        let labels: Vec<&str> = self.items.iter().map(|i| i.label.as_str()).collect();
-        self.filtered = fuzzy_match(&self.query, &labels);
+        self.display_rows = build_display_rows(self.items, &self.query);
+        self.item_count = self.display_rows.iter().filter(|r| r.is_item()).count();
         self.selected = 0;
         self.scroll_offset = 0;
     }
 
-    const fn move_up(&mut self) {
+    /// Find the display row index for the Nth selectable item.
+    fn display_row_of_selected(&self) -> Option<usize> {
+        let mut count = 0;
+        for (i, row) in self.display_rows.iter().enumerate() {
+            if row.is_item() {
+                if count == self.selected {
+                    return Some(i);
+                }
+                count += 1;
+            }
+        }
+        None
+    }
+
+    /// Get the original item index for the currently selected item.
+    fn selected_item_index(&self) -> Option<usize> {
+        let row_idx = self.display_row_of_selected()?;
+        match &self.display_rows[row_idx] {
+            DisplayRow::Item { item_index } => Some(*item_index),
+            DisplayRow::Header(_) => None,
+        }
+    }
+
+    /// Ensure the selected item is within the visible viewport.
+    fn ensure_selected_visible(&mut self) {
+        let Some(row_idx) = self.display_row_of_selected() else {
+            self.scroll_offset = 0;
+            return;
+        };
+        if row_idx < self.scroll_offset {
+            // If the selected item is a first item in a group, also show the header above it
+            self.scroll_offset =
+                if row_idx > 0 && matches!(self.display_rows[row_idx - 1], DisplayRow::Header(_)) {
+                    row_idx - 1
+                } else {
+                    row_idx
+                };
+        } else if row_idx >= self.scroll_offset + self.page_size {
+            self.scroll_offset = row_idx + 1 - self.page_size;
+        }
+    }
+
+    fn move_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
-            if self.selected < self.scroll_offset {
-                self.scroll_offset = self.selected;
-            }
+            self.ensure_selected_visible();
         }
     }
 
-    const fn move_down(&mut self) {
-        if !self.filtered.is_empty() && self.selected < self.filtered.len() - 1 {
+    fn move_down(&mut self) {
+        if self.item_count > 0 && self.selected < self.item_count - 1 {
             self.selected += 1;
-            if self.selected >= self.scroll_offset + self.page_size {
-                self.scroll_offset = self.selected + 1 - self.page_size;
-            }
+            self.ensure_selected_visible();
         }
     }
 
-    fn selected_original_index(&self) -> Option<usize> {
-        self.filtered.get(self.selected).copied()
-    }
-
-    fn visible_range(&self) -> std::ops::Range<usize> {
-        let end = (self.scroll_offset + self.page_size).min(self.filtered.len());
+    fn visible_display_rows(&self) -> std::ops::Range<usize> {
+        let end = (self.scroll_offset + self.page_size).min(self.display_rows.len());
         self.scroll_offset..end
     }
 
-    const fn hidden_count(&self) -> usize {
-        self.filtered.len().saturating_sub(self.scroll_offset + self.page_size)
+    /// Count selectable items (not headers) beyond the visible window.
+    fn hidden_item_count(&self) -> usize {
+        let visible_end = (self.scroll_offset + self.page_size).min(self.display_rows.len());
+        self.display_rows[visible_end..].iter().filter(|r| r.is_item()).count()
     }
-}
-
-/// Split a label like `"package#task"` into `("package#", "task")`.
-/// Labels without `#` return `("", label)`.
-fn split_label(label: &str) -> (&str, &str) {
-    label.find('#').map_or(("", label), |pos| (&label[..=pos], &label[pos + 1..]))
 }
 
 /// Parameters for rendering a task list.
 pub struct RenderParams<'a> {
     pub items: &'a [SelectItem],
-    pub filtered: &'a [usize],
-    /// Index into `filtered` of the highlighted item, or `None` for non-interactive.
-    pub selected_in_filtered: Option<usize>,
-    /// Which slice of `filtered` to display.
-    pub visible_range: std::ops::Range<usize>,
-    /// Number of items beyond the visible range.
+    pub display_rows: &'a [DisplayRow],
+    /// Which selectable item is highlighted (0-based among Item rows),
+    /// or `None` for non-interactive.
+    pub selected: Option<usize>,
+    /// Which slice of `display_rows` to show.
+    pub visible_row_range: std::ops::Range<usize>,
+    /// Number of selectable items beyond the visible range.
     pub hidden_count: usize,
     pub header: Option<&'a str>,
     /// Current search text. `Some` enables the prompt line (interactive only).
     pub query: Option<&'a str>,
+    /// Whether to render group header lines. When `false`, items are still
+    /// grouped/sorted by `SelectItem::group` but headers are hidden.
+    pub show_group_headers: bool,
     /// `"\r\n"` for raw mode, `"\n"` for normal.
     pub line_ending: &'a str,
     /// Maximum visible width per line. Descriptions are truncated to prevent
     /// line wrapping, which would break cursor-based clearing in interactive mode.
     /// Use `usize::MAX` to disable truncation (non-interactive / piped output).
     pub max_line_width: usize,
+}
+
+/// Truncate a description string to fit within `max_chars`, appending ellipsis if needed.
+fn truncate_desc<'a>(desc: &'a str, max_chars: usize, buf: &'a mut Str) -> &'a str {
+    let char_count = desc.chars().count();
+    if char_count <= max_chars {
+        return desc;
+    }
+    let take = max_chars.saturating_sub(1); // room for "…"
+    #[expect(clippy::disallowed_types, reason = "intermediate collect for char truncation")]
+    let prefix: std::string::String = desc.chars().take(take).collect();
+    *buf = vite_str::format!("{prefix}\u{2026}");
+    buf.as_str()
 }
 
 /// Render the item list. Shared rendering logic used by both interactive
@@ -132,12 +260,13 @@ pub struct RenderParams<'a> {
 pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyhow::Result<usize> {
     let RenderParams {
         items,
-        filtered,
-        selected_in_filtered,
-        visible_range,
+        display_rows,
+        selected,
+        visible_row_range,
         hidden_count,
         header,
         query,
+        show_group_headers,
         line_ending,
         max_line_width: _,
     } = params;
@@ -171,81 +300,137 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         lines += 2;
     }
 
-    // Compute max label width for interactive column alignment
-    let max_label_width = if is_interactive {
-        visible_range.clone().map(|vi| items[filtered[vi]].label.chars().count()).max().unwrap_or(0)
-    } else {
-        0
-    };
-
-    // Items
-    for vi in visible_range.clone() {
-        let item_idx = filtered[vi];
-        let item = &items[item_idx];
-        let is_selected = *selected_in_filtered == Some(vi);
-
-        // Truncate description to prevent line wrapping.
-        // Line layout:
-        // - interactive prefix is "  › " or "    " (4 chars)
-        // - non-interactive prefix is "  " (2 chars)
-        // then label (padded to max_label_width in interactive) + ": " + description
-        let label_width = item.label.chars().count();
-        let padded_label_width = if is_interactive { max_label_width } else { label_width };
-        let label_padding = padded_label_width - label_width;
-        let prefix_width = if is_interactive { 4 } else { 2 };
-        let prefix_and_label_width = prefix_width + padded_label_width + 2;
-        let max_desc_chars = params.max_line_width.saturating_sub(prefix_and_label_width);
-        let desc_str = item.description.as_str();
-        let desc_char_count = desc_str.chars().count();
-        let truncated;
-        let display_desc = if desc_char_count > max_desc_chars {
-            let take = max_desc_chars.saturating_sub(1); // room for "…"
-            #[expect(clippy::disallowed_types, reason = "intermediate collect for char truncation")]
-            let prefix: std::string::String = desc_str.chars().take(take).collect();
-            truncated = vite_str::format!("{prefix}\u{2026}");
-            truncated.as_str()
-        } else {
-            desc_str
-        };
-
-        if is_interactive {
-            let (pkg, task) = split_label(&item.label);
-            if is_selected {
-                write!(
-                    writer,
-                    "{bold}  \u{203a} {pkg}{task}:{:>pad$} {desc}{no_attr}{line_ending}",
-                    "",
-                    pad = label_padding,
-                    bold = SetAttribute(Attribute::Bold),
-                    no_attr = SetAttribute(Attribute::Reset),
-                    desc = display_desc,
-                )?;
-            } else {
-                write!(
-                    writer,
-                    "    {light_cyan}{pkg}{no_color}{cyan}{task}{no_attr}:{:>pad$} {desc}{line_ending}",
-                    "",
-                    pad = label_padding,
-                    light_cyan = SetForegroundColor(Color::Rgb { r: 130, g: 200, b: 210 }),
-                    cyan = SetForegroundColor(Color::Cyan),
-                    no_color = ResetColor,
-                    no_attr = SetAttribute(Attribute::Reset),
-                    desc = display_desc,
-                )?;
+    // Single pre-pass: compute has_groups, max_name_width, has_items, and
+    // item_ordinal (count of Item rows before the visible range) together.
+    let mut has_groups = false;
+    let mut max_name_width = 0usize;
+    let mut has_items = false;
+    let mut item_ordinal = 0usize;
+    if is_interactive {
+        for (i, row) in display_rows.iter().enumerate() {
+            match row {
+                DisplayRow::Header(_) => has_groups = *show_group_headers,
+                DisplayRow::Item { item_index } => {
+                    has_items = true;
+                    let w = items[*item_index].display_name.chars().count();
+                    if w > max_name_width {
+                        max_name_width = w;
+                    }
+                    if i < visible_row_range.start {
+                        item_ordinal += 1;
+                    }
+                }
             }
-        } else if is_selected {
-            write!(
-                writer,
-                "{bold}> {label}: {desc}{reset}{line_ending}",
-                bold = SetAttribute(Attribute::Bold),
-                label = item.label,
-                desc = display_desc,
-                reset = SetAttribute(Attribute::Reset),
-            )?;
-        } else {
-            write!(writer, "  {}: {display_desc}{line_ending}", item.label)?;
         }
-        lines += 1;
+    } else {
+        has_items = display_rows.iter().any(DisplayRow::is_item);
+    }
+
+    // Compute the absolute column where commands start (interactive only).
+    // All items — root and grouped — align their descriptions to the same column.
+    let max_prefix = if has_groups { GROUP_PREFIX_WIDTH } else { ROOT_PREFIX_WIDTH };
+    // command_col = max_prefix + max_name_width + ": "
+    let command_col = if is_interactive { max_prefix + max_name_width + 2 } else { 0 };
+
+    // Render visible display rows
+    for ri in visible_row_range.clone() {
+        let row = &display_rows[ri];
+        match row {
+            DisplayRow::Header(group_name) => {
+                if !show_group_headers {
+                    continue;
+                }
+                if is_interactive {
+                    write!(
+                        writer,
+                        "  {dim}{name}{reset}{line_ending}",
+                        dim = SetAttribute(Attribute::Dim),
+                        name = group_name,
+                        reset = SetAttribute(Attribute::Reset),
+                    )?;
+                } else {
+                    write!(writer, "  {group_name}{line_ending}")?;
+                }
+                lines += 1;
+            }
+            DisplayRow::Item { item_index } => {
+                let item = &items[*item_index];
+                let is_selected = *selected == Some(item_ordinal);
+                item_ordinal += 1;
+                let is_in_group = item.group.is_some();
+
+                let name = item.display_name.as_str();
+                let name_width = name.chars().count();
+
+                let prefix_width = if is_interactive {
+                    if is_in_group { GROUP_PREFIX_WIDTH } else { ROOT_PREFIX_WIDTH }
+                } else {
+                    2
+                };
+
+                // Padding after colon to align all commands at `command_col`.
+                let name_padding =
+                    if is_interactive { command_col - prefix_width - name_width - 2 } else { 0 };
+                let max_desc_chars = params.max_line_width.saturating_sub(if is_interactive {
+                    command_col
+                } else {
+                    prefix_width + name_width + 2
+                });
+
+                let mut truncated = Str::default();
+                let display_desc =
+                    truncate_desc(item.description.as_str(), max_desc_chars, &mut truncated);
+
+                if is_interactive {
+                    let (prefix, start_style, end_style) = if is_selected {
+                        let p = if is_in_group { "  \u{203a}   " } else { "  \u{203a} " };
+                        (
+                            p,
+                            SetAttribute(Attribute::Bold).to_string(),
+                            SetAttribute(Attribute::Reset).to_string(),
+                        )
+                    } else {
+                        let p = if is_in_group { "      " } else { "    " };
+                        #[expect(
+                            clippy::disallowed_types,
+                            reason = "building ANSI style string for crossterm formatting"
+                        )]
+                        let cyan: std::string::String = SetForegroundColor(Color::Cyan).to_string();
+                        (p, cyan, SetAttribute(Attribute::Reset).to_string())
+                    };
+                    if is_selected {
+                        write!(
+                            writer,
+                            "{start_style}{prefix}{name}:{:>pad$} {desc}{end_style}{line_ending}",
+                            "",
+                            pad = name_padding,
+                            desc = display_desc,
+                        )?;
+                    } else {
+                        // Color only the name, not the colon/description.
+                        write!(
+                            writer,
+                            "{prefix}{start_style}{name}{end_style}:{:>pad$} {desc}{line_ending}",
+                            "",
+                            pad = name_padding,
+                            desc = display_desc,
+                        )?;
+                    }
+                } else if is_selected {
+                    write!(
+                        writer,
+                        "{bold}> {name}: {desc}{reset}{line_ending}",
+                        bold = SetAttribute(Attribute::Bold),
+                        name = item.display_name,
+                        desc = display_desc,
+                        reset = SetAttribute(Attribute::Reset),
+                    )?;
+                } else {
+                    write!(writer, "  {}: {display_desc}{line_ending}", item.display_name)?;
+                }
+                lines += 1;
+            }
+        }
     }
 
     // Footer: hidden items count
@@ -255,7 +440,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
     }
 
     // Empty state
-    if filtered.is_empty() {
+    if !has_items {
         write!(writer, "  No matching tasks.{line_ending}")?;
         lines += 1;
     }
@@ -288,12 +473,13 @@ fn render(
         stdout,
         &RenderParams {
             items: state.items,
-            filtered: &state.filtered,
-            selected_in_filtered: Some(state.selected),
-            visible_range: state.visible_range(),
-            hidden_count: state.hidden_count(),
+            display_rows: &state.display_rows,
+            selected: Some(state.selected),
+            visible_row_range: state.visible_display_rows(),
+            hidden_count: state.hidden_item_count(),
             header,
             query: Some(&state.query),
+            show_group_headers: true,
             line_ending: "\r\n",
             max_line_width,
         },
@@ -309,7 +495,6 @@ pub fn run(
     selected_index: &mut usize,
     header: Option<&str>,
     page_size: usize,
-    mut before_render: impl FnMut(&mut Vec<usize>, &str),
     mut after_render: impl FnMut(&RenderState<'_>),
 ) -> anyhow::Result<()> {
     if items.is_empty() {
@@ -322,7 +507,6 @@ pub fn run(
     crossterm::execute!(out, cursor::Hide)?;
 
     let mut state = State::new(items, initial_query, page_size);
-    before_render(&mut state.filtered, &state.query);
 
     // Initial render
     render(&mut out, &mut state, header)?;
@@ -336,14 +520,13 @@ pub fn run(
                     // Clear the search query and reset the filter
                     state.query.clear();
                     state.refilter();
-                    before_render(&mut state.filtered, &state.query);
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                     cleanup(&mut out, &state)?;
                     std::process::exit(130);
                 }
                 KeyCode::Enter => {
-                    let Some(idx) = state.selected_original_index() else {
+                    let Some(idx) = state.selected_item_index() else {
                         continue;
                     };
                     *selected_index = idx;
@@ -359,12 +542,10 @@ pub fn run(
                 KeyCode::Char(c) => {
                     state.query.push(c);
                     state.refilter();
-                    before_render(&mut state.filtered, &state.query);
                 }
                 KeyCode::Backspace => {
                     state.query.pop();
                     state.refilter();
-                    before_render(&mut state.filtered, &state.query);
                 }
                 _ => continue,
             },
@@ -400,7 +581,25 @@ mod tests {
     fn make_items(items: &[(&str, &str)]) -> Vec<SelectItem> {
         items
             .iter()
-            .map(|(label, desc)| SelectItem { label: (*label).into(), description: (*desc).into() })
+            .map(|(label, desc)| SelectItem {
+                label: (*label).into(),
+                display_name: (*label).into(),
+                description: (*desc).into(),
+                group: None,
+            })
+            .collect()
+    }
+
+    /// Create items with explicit groups: (label, display_name, description, group)
+    fn make_grouped_items(items: &[(&str, &str, &str, Option<&str>)]) -> Vec<SelectItem> {
+        items
+            .iter()
+            .map(|(label, display_name, desc, group)| SelectItem {
+                label: (*label).into(),
+                display_name: (*display_name).into(),
+                description: (*desc).into(),
+                group: group.map(|g| Str::from(g)),
+            })
             .collect()
     }
 
@@ -426,19 +625,20 @@ mod tests {
 
     #[expect(clippy::disallowed_types, reason = "test helper building arbitrary output string")]
     fn render_to_string(items: &[SelectItem], max_line_width: usize) -> String {
-        let filtered: Vec<usize> = (0..items.len()).collect();
-        let len = filtered.len();
+        let display_rows = build_display_rows(items, "");
+        let len = display_rows.len();
         let mut buf = Vec::new();
         render_items(
             &mut buf,
             &RenderParams {
                 items,
-                filtered: &filtered,
-                selected_in_filtered: Some(0),
-                visible_range: 0..len,
+                display_rows: &display_rows,
+                selected: Some(0),
+                visible_row_range: 0..len,
                 hidden_count: 0,
                 header: None,
                 query: None,
+                show_group_headers: false,
                 line_ending: "\n",
                 max_line_width,
             },
@@ -453,19 +653,20 @@ mod tests {
         query: &str,
         max_line_width: usize,
     ) -> String {
-        let filtered: Vec<usize> = (0..items.len()).collect();
-        let len = filtered.len();
+        let display_rows = build_display_rows(items, query);
+        let len = display_rows.len();
         let mut buf = Vec::new();
         render_items(
             &mut buf,
             &RenderParams {
                 items,
-                filtered: &filtered,
-                selected_in_filtered: Some(0),
-                visible_range: 0..len,
+                display_rows: &display_rows,
+                selected: Some(0),
+                visible_row_range: 0..len,
                 hidden_count: 0,
                 header: None,
                 query: Some(query),
+                show_group_headers: true,
                 line_ending: "\n",
                 max_line_width,
             },
@@ -476,7 +677,7 @@ mod tests {
 
     #[test]
     fn truncates_long_description() {
-        let items = make_items(&[("build", "a]really long command that exceeds the width limit")]);
+        let items = make_items(&[("build", "a really long command that exceeds the width limit")]);
         //                        "  build: a really long..." = 2 + 5 + 2 + desc
         // max_line_width = 30 => max_desc = 30 - 9 = 21 chars
         let output = render_to_string(&items, 30);
@@ -546,9 +747,9 @@ mod tests {
         let spacer = lines.next().unwrap();
         let selected = lines.next().unwrap();
         let unselected = lines.next().unwrap();
-        assert_eq!(prompt, "Select a task (↑/↓, Enter to run, Esc to clear):");
+        assert_eq!(prompt, "Select a task (\u{2191}/\u{2193}, Enter to run, Esc to clear):");
         assert!(spacer.is_empty());
-        assert_eq!(selected, "  › build: echo build");
+        assert_eq!(selected, "  \u{203a} build: echo build");
         assert_eq!(unselected, "    lint:  echo lint");
     }
 
@@ -558,21 +759,11 @@ mod tests {
             make_items(&[("build", "echo build"), ("lint", "echo lint"), ("test", "vitest run")]);
         let output = render_interactive_to_string(&items, "", 80);
         let item_lines: Vec<&str> = output.lines().skip(2).collect();
-        // max_label_width = 5 ("build")
-        // prefix(4) + max_label(5) + ":" + padding + " " + desc
+        // max_name_width = 5 ("build")
+        // prefix(4) + max_name(5) + ":" + padding + " " + desc
         assert_eq!(item_lines[0], "  \u{203a} build: echo build");
         assert_eq!(item_lines[1], "    lint:  echo lint");
         assert_eq!(item_lines[2], "    test:  vitest run");
-    }
-
-    #[test]
-    fn interactive_alignment_with_package_labels() {
-        let items = make_items(&[("app#build", "echo build"), ("lint", "echo lint")]);
-        let output = render_interactive_to_string(&items, "", 80);
-        let item_lines: Vec<&str> = output.lines().skip(2).collect();
-        // max_label_width = 9 ("app#build"), padding for "lint" = 5
-        assert_eq!(item_lines[0], "  \u{203a} app#build: echo build");
-        assert_eq!(item_lines[1], "    lint:      echo lint");
     }
 
     #[test]
@@ -581,7 +772,7 @@ mod tests {
             ("build", "a really long command that exceeds the width limit"),
             ("lint", "short"),
         ]);
-        // max_label_width = 5, prefix(4) + max_label(5) + sep(2) = 11
+        // max_name_width = 5, prefix(4) + max_name(5) + sep(2) = 11
         // max_line_width = 30 => max_desc = 30 - 11 = 19 chars
         let output = render_interactive_to_string(&items, "", 30);
         for line in output.lines().skip(2) {
@@ -599,64 +790,113 @@ mod tests {
     }
 
     #[test]
-    fn interactive_padding_aligns_commands() {
-        let items = make_items(&[
-            ("app#build", "echo build"),
-            ("app#lint", "echo lint"),
-            ("lib#typecheck", "echo tc"),
+    fn interactive_tree_view_with_groups() {
+        let items = make_grouped_items(&[
+            ("build", "build", "echo build app", None),
+            ("lint", "lint", "echo lint app", None),
+            ("lib#build", "build", "echo build lib", Some("lib (packages/lib)")),
+            ("lib#lint", "lint", "echo lint lib", Some("lib (packages/lib)")),
         ]);
         let output = render_interactive_to_string(&items, "", 80);
         let item_lines: Vec<&str> = output.lines().skip(2).collect();
-        // max_label_width = 13 ("lib#typecheck")
-        // Padding goes after ":" to align commands
-        assert_eq!(item_lines[0], "  \u{203a} app#build:     echo build");
-        assert_eq!(item_lines[1], "    app#lint:      echo lint");
-        assert_eq!(item_lines[2], "    lib#typecheck: echo tc");
-
-        // Verify all commands start at the same char column
-        // prefix(4) + max_label(13) + ":" + padding + " " = commands start at column 19
-        let cmd_columns: Vec<usize> = item_lines
-            .iter()
-            .map(|l| {
-                let colon_pos = l.chars().take_while(|&c| c != ':').count();
-                // skip colon, then count padding spaces + the separator space
-                colon_pos
-                    + 1
-                    + l[l.find(':').unwrap() + 1..].chars().take_while(|&c| c == ' ').count()
-            })
-            .collect();
-        assert!(
-            cmd_columns.windows(2).all(|w| w[0] == w[1]),
-            "command columns should be aligned: {cmd_columns:?}"
-        );
+        // max_name=5, has_groups → max_prefix=6, command_col=13
+        // Root items get extra padding to align with grouped items
+        assert_eq!(item_lines[0], "  \u{203a} build:   echo build app");
+        assert_eq!(item_lines[1], "    lint:    echo lint app");
+        // Group header
+        assert_eq!(item_lines[2], "  lib (packages/lib)");
+        // Grouped items (indented by 2 more, less padding)
+        assert_eq!(item_lines[3], "      build: echo build lib");
+        assert_eq!(item_lines[4], "      lint:  echo lint lib");
     }
 
     #[test]
-    fn interactive_padding_with_truncation_preserves_ellipsis() {
-        let items = make_items(&[
-            ("app#build", "a really long command that exceeds the width limit"),
-            ("lint", "short"),
+    fn interactive_tree_view_alignment_across_groups() {
+        let items = make_grouped_items(&[
+            ("build", "build", "echo build", None),
+            ("typecheck", "typecheck", "echo tc", None),
+            ("lib#build", "build", "echo build lib", Some("lib")),
         ]);
-        // max_label_width = 9 ("app#build"), prefix(4) + 9 + sep(2) = 15
-        // max_line_width = 30 => max_desc = 30 - 15 = 15 chars
+        let output = render_interactive_to_string(&items, "", 80);
+        let item_lines: Vec<&str> = output.lines().skip(2).collect();
+        // max_name=9, has_groups → max_prefix=6, command_col=17
+        // All commands start at column 17 regardless of indent level
+        assert_eq!(item_lines[0], "  \u{203a} build:       echo build");
+        assert_eq!(item_lines[1], "    typecheck:   echo tc");
+        assert_eq!(item_lines[2], "  lib");
+        assert_eq!(item_lines[3], "      build:     echo build lib");
+    }
+
+    #[test]
+    fn interactive_tree_view_truncation_with_groups() {
+        let items = make_grouped_items(&[
+            ("build", "build", "a really long command that exceeds the limit", None),
+            (
+                "lib#build",
+                "build",
+                "another really long command that exceeds the limit",
+                Some("lib"),
+            ),
+        ]);
         let output = render_interactive_to_string(&items, "", 30);
         for line in output.lines().skip(2) {
-            assert!(
-                line.chars().count() <= 30,
-                "line exceeds 30 chars: ({}) {line:?}",
-                line.chars().count()
-            );
+            if !line.is_empty() {
+                assert!(
+                    line.chars().count() <= 30,
+                    "line exceeds 30 chars: ({}) {line:?}",
+                    line.chars().count()
+                );
+            }
         }
-        let build_line = output.lines().nth(2).unwrap();
+    }
+
+    #[test]
+    fn display_rows_built_correctly() {
+        let items = make_grouped_items(&[
+            ("build", "build", "echo build", None),
+            ("lib#build", "build", "echo build lib", Some("lib")),
+            ("lib#lint", "lint", "echo lint lib", Some("lib")),
+            ("app#build", "build", "echo build app", Some("app")),
+        ]);
+        let rows = build_display_rows(&items, "");
+        assert_eq!(rows.len(), 6); // 4 items + 2 headers ("lib", "app")
+        assert!(matches!(&rows[0], DisplayRow::Item { item_index: 0 }));
+        assert!(matches!(&rows[1], DisplayRow::Header(h) if h.as_str() == "lib"));
+        assert!(matches!(&rows[2], DisplayRow::Item { item_index: 1 }));
+        assert!(matches!(&rows[3], DisplayRow::Item { item_index: 2 }));
+        assert!(matches!(&rows[4], DisplayRow::Header(h) if h.as_str() == "app"));
+        assert!(matches!(&rows[5], DisplayRow::Item { item_index: 3 }));
+    }
+
+    /// Mirrors the E2E scenario: items sorted alphabetically by package name
+    /// (app before lib), with lib being the current package (group: None).
+    /// Verifies that None-group items come first despite appearing later in input.
+    #[test]
+    fn display_rows_none_group_first_when_not_first_in_input() {
+        let items = make_grouped_items(&[
+            // app items first (alphabetically before lib)
+            ("app#build", "app#build", "echo build app", Some("app (packages/app)")),
+            ("app#lint", "app#lint", "echo lint app", Some("app (packages/app)")),
+            // lib items (current package, group: None)
+            ("build", "build", "echo build lib", None),
+            ("lint", "lint", "echo lint lib", None),
+            // root items
+            ("root#check", "root#check", "echo check", Some("root (workspace root)")),
+        ]);
+        let rows = build_display_rows(&items, "");
+        // None-group (lib) should come first, then app, then root
         assert!(
-            build_line.contains('\u{2026}'),
-            "truncated line should contain ellipsis: {build_line:?}"
+            matches!(&rows[0], DisplayRow::Item { item_index: 2 }),
+            "first item should be lib build (idx 2)"
         );
-        // "lint" (4) has padding of 5 after colon (9 - 4)
-        let lint_line = output.lines().nth(3).unwrap();
         assert!(
-            lint_line.contains("lint:      short"),
-            "short label should have padding after colon: {lint_line:?}"
+            matches!(&rows[1], DisplayRow::Item { item_index: 3 }),
+            "second item should be lib lint (idx 3)"
         );
+        assert!(matches!(&rows[2], DisplayRow::Header(h) if h.as_str() == "app (packages/app)"));
+        assert!(matches!(&rows[3], DisplayRow::Item { item_index: 0 }));
+        assert!(matches!(&rows[4], DisplayRow::Item { item_index: 1 }));
+        assert!(matches!(&rows[5], DisplayRow::Header(h) if h.as_str() == "root (workspace root)"));
+        assert!(matches!(&rows[6], DisplayRow::Item { item_index: 4 }));
     }
 }
