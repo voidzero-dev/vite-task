@@ -213,7 +213,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
             if is_selected {
                 write!(
                     writer,
-                    "{bold}  \u{203a} {:>pad$}{pkg}{task}: {desc}{no_attr}{line_ending}",
+                    "{bold}  \u{203a} {pkg}{task}:{:>pad$} {desc}{no_attr}{line_ending}",
                     "",
                     pad = label_padding,
                     bold = SetAttribute(Attribute::Bold),
@@ -223,7 +223,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
             } else {
                 write!(
                     writer,
-                    "    {:>pad$}{light_cyan}{pkg}{no_color}{cyan}{task}{no_attr}: {desc}{line_ending}",
+                    "    {light_cyan}{pkg}{no_color}{cyan}{task}{no_attr}:{:>pad$} {desc}{line_ending}",
                     "",
                     pad = label_padding,
                     light_cyan = SetForegroundColor(Color::Rgb { r: 130, g: 200, b: 210 }),
@@ -549,7 +549,7 @@ mod tests {
         assert_eq!(prompt, "Select a task (↑/↓, Enter to run, Esc to clear):");
         assert!(spacer.is_empty());
         assert_eq!(selected, "  › build: echo build");
-        assert_eq!(unselected, "     lint: echo lint");
+        assert_eq!(unselected, "    lint:  echo lint");
     }
 
     #[test]
@@ -558,11 +558,11 @@ mod tests {
             make_items(&[("build", "echo build"), ("lint", "echo lint"), ("test", "vitest run")]);
         let output = render_interactive_to_string(&items, "", 80);
         let item_lines: Vec<&str> = output.lines().skip(2).collect();
-        // max_label_width = 5 ("build"), descriptions should all start at column 11
-        // prefix(4) + max_label(5) + ": "(2) = 11
+        // max_label_width = 5 ("build")
+        // prefix(4) + max_label(5) + ":" + padding + " " + desc
         assert_eq!(item_lines[0], "  \u{203a} build: echo build");
-        assert_eq!(item_lines[1], "     lint: echo lint");
-        assert_eq!(item_lines[2], "     test: vitest run");
+        assert_eq!(item_lines[1], "    lint:  echo lint");
+        assert_eq!(item_lines[2], "    test:  vitest run");
     }
 
     #[test]
@@ -572,7 +572,7 @@ mod tests {
         let item_lines: Vec<&str> = output.lines().skip(2).collect();
         // max_label_width = 9 ("app#build"), padding for "lint" = 5
         assert_eq!(item_lines[0], "  \u{203a} app#build: echo build");
-        assert_eq!(item_lines[1], "         lint: echo lint");
+        assert_eq!(item_lines[1], "    lint:      echo lint");
     }
 
     #[test]
@@ -599,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn interactive_left_padding_aligns_commands() {
+    fn interactive_padding_aligns_commands() {
         let items = make_items(&[
             ("app#build", "echo build"),
             ("app#lint", "echo lint"),
@@ -608,24 +608,31 @@ mod tests {
         let output = render_interactive_to_string(&items, "", 80);
         let item_lines: Vec<&str> = output.lines().skip(2).collect();
         // max_label_width = 13 ("lib#typecheck")
-        // "app#build" = 9, padding = 4; "app#lint" = 8, padding = 5
-        // Padding goes before the label (left side), colon always followed by single space
-        // "lib#typecheck" = 13 (max), "app#build" = 9 (pad 4), "app#lint" = 8 (pad 5)
-        assert_eq!(item_lines[0], "  \u{203a}     app#build: echo build");
-        assert_eq!(item_lines[1], "         app#lint: echo lint");
+        // Padding goes after ":" to align commands
+        assert_eq!(item_lines[0], "  \u{203a} app#build:     echo build");
+        assert_eq!(item_lines[1], "    app#lint:      echo lint");
         assert_eq!(item_lines[2], "    lib#typecheck: echo tc");
 
-        // Verify all ": " separators are at the same char column
-        let colon_columns: Vec<usize> =
-            item_lines.iter().map(|l| l.chars().take_while(|&c| c != ':').count()).collect();
+        // Verify all commands start at the same char column
+        // prefix(4) + max_label(13) + ":" + padding + " " = commands start at column 19
+        let cmd_columns: Vec<usize> = item_lines
+            .iter()
+            .map(|l| {
+                let colon_pos = l.chars().take_while(|&c| c != ':').count();
+                // skip colon, then count padding spaces + the separator space
+                colon_pos
+                    + 1
+                    + l[l.find(':').unwrap() + 1..].chars().take_while(|&c| c == ' ').count()
+            })
+            .collect();
         assert!(
-            colon_columns.windows(2).all(|w| w[0] == w[1]),
-            "colon columns should be aligned: {colon_columns:?}"
+            cmd_columns.windows(2).all(|w| w[0] == w[1]),
+            "command columns should be aligned: {cmd_columns:?}"
         );
     }
 
     #[test]
-    fn interactive_left_padding_with_truncation_preserves_ellipsis() {
+    fn interactive_padding_with_truncation_preserves_ellipsis() {
         let items = make_items(&[
             ("app#build", "a really long command that exceeds the width limit"),
             ("lint", "short"),
@@ -645,11 +652,11 @@ mod tests {
             build_line.contains('\u{2026}'),
             "truncated line should contain ellipsis: {build_line:?}"
         );
-        // "lint" has 5 chars of left padding (9 - 4)
+        // "lint" (4) has padding of 5 after colon (9 - 4)
         let lint_line = output.lines().nth(3).unwrap();
         assert!(
-            lint_line.contains("     lint: short"),
-            "short label should have left padding: {lint_line:?}"
+            lint_line.contains("lint:      short"),
+            "short label should have padding after colon: {lint_line:?}"
         );
     }
 }
