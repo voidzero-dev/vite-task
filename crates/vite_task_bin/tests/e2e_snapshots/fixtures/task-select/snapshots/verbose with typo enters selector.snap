@@ -7,7 +7,7 @@ info:
 > vp run buid --verbose
 @ expect-milestone: task-select:buid:0
 Task "buid" not found.
-Select a task (↑/↓, Enter to run, Esc to clear): buid
+Select a task (↑/↓, Enter to run, Type to search): buid
 
   › build:   echo build app
     lib (packages/lib)

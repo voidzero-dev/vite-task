@@ -288,12 +288,12 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         if q.is_empty() {
             write!(
                 writer,
-                "Select a task (\u{2191}/\u{2193}, Enter to run, Esc to clear):{line_ending}",
+                "Select a task (\u{2191}/\u{2193}, Enter to run, Type to search):{line_ending}",
             )?;
         } else {
             write!(
                 writer,
-                "Select a task (\u{2191}/\u{2193}, Enter to run, Esc to clear): {q}{line_ending}",
+                "Select a task (\u{2191}/\u{2193}, Enter to run, Type to search): {q}{line_ending}",
             )?;
         }
         write!(writer, "{line_ending}")?;
@@ -740,7 +740,7 @@ mod tests {
         let spacer = lines.next().unwrap();
         let selected = lines.next().unwrap();
         let unselected = lines.next().unwrap();
-        assert_eq!(prompt, "Select a task (\u{2191}/\u{2193}, Enter to run, Esc to clear):");
+        assert_eq!(prompt, "Select a task (\u{2191}/\u{2193}, Enter to run, Type to search):");
         assert!(spacer.is_empty());
         assert_eq!(selected, "  \u{203a} build: echo build");
         assert_eq!(unselected, "    lint:  echo lint");
