@@ -2,22 +2,22 @@
   "tasks": {
     "auto-with-negative": {
       "command": "print-file src/main.ts dist/output.js",
-      "inputs": [{ "auto": true }, "!dist/**"],
+      "input": [{ "auto": true }, "!dist/**"],
       "cache": true
     },
     "dotdot-positive": {
       "command": "print-file ../shared/src/utils.ts",
-      "inputs": ["../shared/src/**"],
+      "input": ["../shared/src/**"],
       "cache": true
     },
     "dotdot-positive-negative": {
       "command": "print-file ../shared/src/utils.ts ../shared/dist/output.js",
-      "inputs": ["../shared/**", "!../shared/dist/**"],
+      "input": ["../shared/**", "!../shared/dist/**"],
       "cache": true
     },
     "dotdot-auto-negative": {
       "command": "print-file ../shared/src/utils.ts ../shared/dist/output.js",
-      "inputs": [{ "auto": true }, "!../shared/dist/**"],
+      "input": [{ "auto": true }, "!../shared/dist/**"],
       "cache": true
     }
   }

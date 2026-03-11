@@ -1,4 +1,4 @@
-# Common Wildcard Pattern for Task Envs
+# Common Wildcard Pattern for Task Env
 
 ## Executive Summary
 
@@ -13,7 +13,7 @@ Currently, vite-plus requires explicit listing of environment variables in task 
   "tasks": {
     "build": {
       "command": "vite build",
-      "envs": ["NODE_ENV", "NODE_OPTIONS", "VITE_API_URL", "VITE_APP_TITLE", "MY_APP_PORT"]
+      "env": ["NODE_ENV", "NODE_OPTIONS", "VITE_API_URL", "VITE_APP_TITLE", "MY_APP_PORT"]
     }
   }
 }
@@ -23,7 +23,7 @@ This approach becomes cumbersome when dealing with multiple environment variable
 
 ## Goals
 
-1. **Simplify Configuration**: Allow wildcard patterns in the `envs` array to match multiple environment variables
+1. **Simplify Configuration**: Allow wildcard patterns in the `env` array to match multiple environment variables
 2. **Maintain Cache Correctness**: Ensure wildcard-matched variables are properly included in cache fingerprints
 3. **Backward Compatibility**: Support both explicit variable names and wildcard patterns
 4. **Performance**: Minimal overhead when resolving environment variables
@@ -32,7 +32,7 @@ This approach becomes cumbersome when dealing with multiple environment variable
 ## Non-Goals
 
 1. Full regex support (only glob-style wildcards)
-2. Wildcard patterns in `pass_through_envs` (same as `envs`)
+2. Wildcard patterns in `passThroughEnvs` (same as `env`)
 3. Complex glob patterns like `{VITE,NODE}_*` (supported by wax crate)
 
 ## Proposed Solution
@@ -63,7 +63,7 @@ We don't support `!` for negated patterns. If match the negated pattern, will ig
 ```
 ┌─────────────────┐
 │  Task Config    │
-│   envs: [       │
+│   env: [       │
 │     "NODE_*",   │
 │     "VITE_*",   │
 │     "CI"        │
@@ -164,7 +164,7 @@ pub struct CommandFingerprint {
   "tasks": {
     "build": {
       "command": "vite build",
-      "envs": [
+      "env": [
         "NODE_ENV",
         "NODE_OPTIONS",
         "VITE_API_URL",
@@ -184,7 +184,7 @@ pub struct CommandFingerprint {
   "tasks": {
     "build": {
       "command": "vite build",
-      "envs": ["NODE_*", "VITE_*"]
+      "env": ["NODE_*", "VITE_*"]
     }
   }
 }

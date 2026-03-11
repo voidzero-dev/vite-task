@@ -81,7 +81,7 @@ pub struct SyntheticPlanRequest {
     /// Therefore, these envs are subject to env configurations in `UserTaskOptions`.
     ///
     /// - To set envs that are not subject to caching but still passed to the spawned child, use `task_options` to configure `pass_through_envs`.
-    /// - To set envs that should be fingerprinted, use `task_options` to configure `envs`.
+    /// - To set envs that should be fingerprinted, use `task_options` to configure `env`.
     /// - If neither is set, and caching is enabled, these envs will have not effect.
     pub envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
 }

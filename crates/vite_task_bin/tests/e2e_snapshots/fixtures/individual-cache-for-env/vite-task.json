@@ -3,7 +3,7 @@
   "tasks": {
     "hello": {
       "command": "print-env FOO",
-      "envs": ["FOO"],
+      "env": ["FOO"],
       "cache": true
     }
   }

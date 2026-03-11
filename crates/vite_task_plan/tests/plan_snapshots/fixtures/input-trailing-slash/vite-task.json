@@ -2,7 +2,7 @@
   "tasks": {
     "build": {
       "command": "echo build",
-      "inputs": ["src/", "!dist/"],
+      "input": ["src/", "!dist/"],
       "cache": true
     }
   }

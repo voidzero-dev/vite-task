@@ -61,10 +61,10 @@ steps = [
 ]
 
 [[e2e]]
-name = "inputs config changed"
+name = "input config changed"
 steps = [
   "vp run test # cache miss",
-  "json-edit vite-task.json \"_.tasks.test.inputs = ['test.txt']\" # change inputs config",
+  "json-edit vite-task.json \"_.tasks.test.input = ['test.txt']\" # change input config",
   "vp run test # cache miss: configuration changed",
 ]
 

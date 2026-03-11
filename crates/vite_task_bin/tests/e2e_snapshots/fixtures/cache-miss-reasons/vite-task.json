@@ -3,12 +3,12 @@
   "tasks": {
     "test": {
       "command": "print-file test.txt",
-      "envs": ["MY_ENV"],
+      "env": ["MY_ENV"],
       "cache": true
     },
     "glob-test": {
       "command": "print glob-test",
-      "inputs": ["*.txt"],
+      "input": ["*.txt"],
       "cache": true
     }
   }

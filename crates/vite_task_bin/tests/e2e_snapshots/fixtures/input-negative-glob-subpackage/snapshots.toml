@@ -3,7 +3,7 @@
 # instead of package-relative paths, so exclusions like !dist/**
 # failed for subpackages.
 
-# Auto + negative in subpackage: inputs: [{ "auto": true }, "!dist/**"]
+# Auto + negative in subpackage: input: [{ "auto": true }, "!dist/**"]
 # - dist/ should be excluded even though the package is a subpackage
 # - Modifying dist/output.js should be a cache hit
 [[e2e]]
@@ -28,7 +28,7 @@ steps = [
   "vp run sub-pkg#auto-with-negative",
 ]
 
-# .. prefix positive globs: inputs: ["../shared/src/**"]
+# .. prefix positive globs: input: ["../shared/src/**"]
 # - Should find files in sibling package via ..
 # - Cache miss when sibling file changes, hit when unrelated file changes
 [[e2e]]
@@ -47,11 +47,11 @@ steps = [
   "vp run sub-pkg#dotdot-positive",
   # Modify a file NOT matched by ../shared/src/**
   "replace-file-content packages/shared/dist/output.js initial modified",
-  # Cache hit: file not in inputs
+  # Cache hit: file not in input
   "vp run sub-pkg#dotdot-positive",
 ]
 
-# .. prefix positive + negative globs: inputs: ["../shared/**", "!../shared/dist/**"]
+# .. prefix positive + negative globs: input: ["../shared/**", "!../shared/dist/**"]
 # - Positive glob matches sibling package files via ..
 # - Negative glob excludes sibling dist/ via ..
 [[e2e]]
@@ -74,9 +74,9 @@ steps = [
   "vp run sub-pkg#dotdot-positive-negative",
 ]
 
-# .. prefix auto + negative: inputs: [{ "auto": true }, "!../shared/dist/**"]
+# .. prefix auto + negative: input: [{ "auto": true }, "!../shared/dist/**"]
 # - Auto-inferred files from sibling package are tracked
-# - Negative glob excludes sibling dist/ from inferred inputs
+# - Negative glob excludes sibling dist/ from inferred input
 [[e2e]]
 name = "dotdot auto negative - hit on excluded sibling inferred file"
 steps = [

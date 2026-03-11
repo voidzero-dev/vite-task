@@ -5,7 +5,7 @@ info:
   args:
     - run
     - env-test
-input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-envs
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-env
 ---
 [
   {

@@ -2,57 +2,57 @@
   "tasks": {
     "positive-globs-only": {
       "command": "print-file src/main.ts",
-      "inputs": ["src/**/*.ts"],
+      "input": ["src/**/*.ts"],
       "cache": true
     },
     "positive-globs-reads-unmatched": {
       "command": "print-file src/main.ts src/utils.ts",
-      "inputs": ["src/main.ts"],
+      "input": ["src/main.ts"],
       "cache": true
     },
     "positive-negative-globs": {
       "command": "print-file src/main.ts",
-      "inputs": ["src/**", "!src/**/*.test.ts"],
+      "input": ["src/**", "!src/**/*.test.ts"],
       "cache": true
     },
     "auto-only": {
       "command": "print-file src/main.ts",
-      "inputs": [{ "auto": true }],
+      "input": [{ "auto": true }],
       "cache": true
     },
     "auto-with-negative": {
       "command": "print-file src/main.ts dist/output.js",
-      "inputs": [{ "auto": true }, "!dist/**"],
+      "input": [{ "auto": true }, "!dist/**"],
       "cache": true
     },
     "positive-auto-negative": {
       "command": "print-file src/main.ts",
-      "inputs": ["package.json", { "auto": true }, "!src/**/*.test.ts"],
+      "input": ["package.json", { "auto": true }, "!src/**/*.test.ts"],
       "cache": true
     },
     "empty-inputs": {
       "command": "print-file src/main.ts",
-      "inputs": [],
+      "input": [],
       "cache": true
     },
     "check-fspy-env-with-auto": {
       "command": "print-env FSPY",
-      "inputs": [{ "auto": true }],
+      "input": [{ "auto": true }],
       "cache": true
     },
     "check-fspy-env-without-auto": {
       "command": "print-env FSPY",
-      "inputs": ["src/**/*.ts"],
+      "input": ["src/**/*.ts"],
       "cache": true
     },
     "folder-input": {
       "command": "print-file src/main.ts",
-      "inputs": ["src"],
+      "input": ["src"],
       "cache": true
     },
     "folder-slash-input": {
       "command": "print-file src/main.ts",
-      "inputs": ["src/"],
+      "input": ["src/"],
       "cache": true
     }
   }

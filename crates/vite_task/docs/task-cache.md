@@ -11,7 +11,7 @@ The task cache system enables:
 - **Content-based hashing**: Cache keys based on actual content, not timestamps
 - **Output replay**: Cached stdout/stderr are replayed exactly as originally produced
 - **Two-tier caching**: Cache entries shared across tasks, with task-run associations
-- **Configurable inputs**: Control which files are tracked for cache invalidation
+- **Configurable input**: Control which files are tracked for cache invalidation
 
 ### Shared caching
 
@@ -56,7 +56,7 @@ the task cache system is able to hit the same cache for the `test` task and for 
 │         ▼                                                                            │
 │  2. Cache Key Generation                                                             │
 │  ──────────────────────                                                              │
-│    • Spawn fingerprint (cwd, program, args, envs)                                    │
+│    • Spawn fingerprint (cwd, program, args, env)                                    │
 │    • Input configuration                                                             │
 │         │                                                                            │
 │         ▼                                                                            │
@@ -131,15 +131,15 @@ This ensures cache invalidation when:
 
 The `fingerprinted_envs` field is crucial for cache correctness:
 
-- Only includes envs explicitly declared in the task's `envs` array
+- Only includes env vars explicitly declared in the task's `env` array
 - Does NOT include pass-through envs (PATH, CI, etc.)
-- These envs become part of the cache key
+- These env vars become part of the cache key
 
 When a task runs:
 
-1. All envs (including pass-through) are available to the process
-2. Only declared envs affect the cache key
-3. If a declared env changes value, cache will miss
+1. All env vars (including pass-through) are available to the process
+2. Only declared env vars affect the cache key
+3. If a declared env var changes value, cache will miss
 4. If a pass-through env changes, cache will still hit
 
 The `pass_through_envs` field stores env names (not values) — if the set of pass-through env names changes, the cache invalidates, but value changes don't.
@@ -220,13 +220,13 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 
 ### 7. Inputs Configuration
 
-The `inputs` field in `vite-task.json` controls which files are tracked for cache fingerprinting:
+The `input` field in `vite-task.json` controls which files are tracked for cache fingerprinting:
 
 ```json
 {
   "tasks": {
     "build": {
-      "inputs": ["src/**", "!dist/**", { "auto": true }]
+      "input": ["src/**", "!dist/**", { "auto": true }]
     }
   }
 }
@@ -382,7 +382,7 @@ Cache entries are automatically invalidated when:
 4. **Pass-through config changes**: Pass-through environment names added/removed from configuration
 5. **Input files change**: Content hash differs (detected via xxHash3)
 6. **File structure changes**: Files added, removed, or type changed
-7. **Input config changes**: The `inputs` configuration itself changes
+7. **Input config changes**: The `input` configuration itself changes
 
 ## Configuration
 
@@ -535,13 +535,13 @@ Ensure commands produce identical outputs for identical inputs:
 }
 ```
 
-### 3. Use `inputs` for Precise Cache Control
+### 3. Use `input` for Precise Cache Control
 
 ```json
 {
   "tasks": {
     "build": {
-      "inputs": ["src/**", "tsconfig.json", "!src/**/*.test.ts"]
+      "input": ["src/**", "tsconfig.json", "!src/**/*.test.ts"]
     }
   }
 }

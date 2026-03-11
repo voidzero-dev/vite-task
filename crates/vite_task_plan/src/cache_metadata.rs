@@ -53,9 +53,9 @@ pub struct CacheMetadata {
 /// # Environment Variable Impact on Cache
 ///
 /// The `envs_without_pass_through` field is crucial for cache correctness:
-/// - Only includes envs explicitly declared in the task's `envs` array
+/// - Only includes env vars explicitly declared in the task's `env` array
 /// - Does NOT include pass-through envs (PATH, CI, etc.)
-/// - These envs become part of the cache key
+/// - These env vars become part of the cache key
 ///
 /// When a task runs:
 /// 1. All envs (including pass-through) are available to the process

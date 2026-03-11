@@ -119,7 +119,7 @@ impl Display for FingerprintMismatch {
                 write!(f, "Spawn fingerprint changed: old={old:?}, new={new:?}")
             }
             Self::InputConfig => {
-                write!(f, "inputs configuration changed")
+                write!(f, "input configuration changed")
             }
             Self::InputChanged { kind, path } => {
                 write!(f, "{}", display::format_input_change_str(*kind, path.as_str()))

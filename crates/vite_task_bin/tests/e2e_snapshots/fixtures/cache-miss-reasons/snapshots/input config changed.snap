@@ -5,8 +5,8 @@ expression: e2e_outputs
 > vp run test # cache miss
 $ print-file test.txt
 initial content
-> json-edit vite-task.json "_.tasks.test.inputs = ['test.txt']" # change inputs config
+> json-edit vite-task.json "_.tasks.test.input = ['test.txt']" # change input config
 
 > vp run test # cache miss: configuration changed
-$ print-file test.txt ✗ cache miss: inputs configuration changed, executing
+$ print-file test.txt ✗ cache miss: input configuration changed, executing
 initial content

@@ -72,7 +72,7 @@ impl ResolvedTaskOptions {
                 pass_through_envs.extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
 
                 let input_config = ResolvedInputConfig::from_user_config(
-                    enabled_cache_config.inputs.as_ref(),
+                    enabled_cache_config.input.as_ref(),
                     dir,
                     workspace_root,
                 )?;
@@ -80,7 +80,7 @@ impl ResolvedTaskOptions {
                 Some(CacheConfig {
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
-                            .envs
+                            .env
                             .map(|e| e.into_vec().into_iter().collect())
                             .unwrap_or_default(),
                         pass_through_envs,

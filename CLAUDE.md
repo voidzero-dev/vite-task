@@ -132,9 +132,9 @@ Tasks are defined in `vite-task.json`:
       "cwd": "relative/path",
       "dependsOn": ["build", "package#task"],
       "cache": true,
-      "envs": ["NODE_ENV"],
+      "env": ["NODE_ENV"],
       "passThroughEnvs": ["CI"],
-      "inputs": ["src/**", "!dist/**", { "auto": true }]
+      "input": ["src/**", "!dist/**", { "auto": true }]
     }
   }
 }
@@ -145,9 +145,9 @@ Tasks are defined in `vite-task.json`:
 - `cwd`: working directory relative to the package root
 - `dependsOn`: explicit task dependencies (`taskName` or `package#task`)
 - `cache` (task): enable/disable caching for this task (default: `true`)
-- `envs`: env var names to fingerprint and pass to the task
+- `env`: env var names to fingerprint and pass to the task
 - `passThroughEnvs`: env var names to pass without fingerprinting
-- `inputs`: files for cache fingerprinting (globs, `{ "auto": true }`, negation patterns)
+- `input`: files for cache fingerprinting (globs, `{ "auto": true }`, negation patterns)
 
 ## Task Dependencies
 

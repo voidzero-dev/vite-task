@@ -173,7 +173,7 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                         None => "configuration changed",
                     }
                 }
-                FingerprintMismatch::InputConfig => "inputs configuration changed",
+                FingerprintMismatch::InputConfig => "input configuration changed",
                 FingerprintMismatch::InputChanged { kind, path } => {
                     let desc = format_input_change_str(*kind, path.as_str());
                     return Some(vite_str::format!("✗ cache miss: {desc}, executing"));

@@ -439,7 +439,7 @@ impl TaskResult {
                         }
                     }
                     SavedCacheMissReason::ConfigChanged => {
-                        Str::from("→ Cache miss: inputs configuration changed")
+                        Str::from("→ Cache miss: input configuration changed")
                     }
                     SavedCacheMissReason::InputChanged { kind, path } => {
                         let desc = format_input_change_str(*kind, path.as_str());

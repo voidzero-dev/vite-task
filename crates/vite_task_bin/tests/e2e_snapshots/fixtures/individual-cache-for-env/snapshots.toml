@@ -1,7 +1,7 @@
 # Tests that different env values get separate cache entries
 
 [[e2e]]
-name = "individual cache for envs"
+name = "individual cache for env"
 steps = [
   "FOO=1 vp run hello # cache miss",
   "FOO=2 vp run hello # cache miss, different env",

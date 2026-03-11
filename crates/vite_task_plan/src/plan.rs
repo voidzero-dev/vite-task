@@ -420,7 +420,7 @@ fn resolve_synthetic_cache_config(
             Ok(match synthetic_cache_config {
                 UserCacheConfig::Disabled { .. } => Option::None,
                 UserCacheConfig::Enabled { enabled_cache_config, .. } => {
-                    if let Some(extra_envs) = enabled_cache_config.envs {
+                    if let Some(extra_envs) = enabled_cache_config.env {
                         parent_config.env_config.fingerprinted_envs.extend(extra_envs.into_vec());
                     }
                     if let Some(extra_pts) = enabled_cache_config.pass_through_envs {

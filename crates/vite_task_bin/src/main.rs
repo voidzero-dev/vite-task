@@ -33,9 +33,9 @@ async fn run() -> anyhow::Result<ExitStatus> {
                     args: [Str::from("FOO")].into(),
                     cache_config: UserCacheConfig::with_config({
                         EnabledCacheConfig {
-                            envs: Some(Box::from([Str::from("FOO")])),
+                            env: Some(Box::from([Str::from("FOO")])),
                             pass_through_envs: None,
-                            inputs: None,
+                            input: None,
                         }
                     }),
                     envs: Arc::clone(envs),
