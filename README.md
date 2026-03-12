@@ -10,6 +10,7 @@ Install [Vite+](https://viteplus.dev), then run tasks from your workspace. See t
 vp run build              # run a task in the current package
 vp run build -r           # run across all packages in dependency order
 vp run @my/app#build -t   # run in a package and its transitive dependencies
+vp run --cache build      # run with caching enabled
 ```
 
 ## License
