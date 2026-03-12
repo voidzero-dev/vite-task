@@ -4,3 +4,4 @@ expression: e2e_outputs
 ---
 [134]> vt run abort # SIGABRT -> exit code 134
 $ node -e "process.kill(process.pid, 6)"
+✗ exit code 134

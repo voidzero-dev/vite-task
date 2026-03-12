@@ -99,7 +99,7 @@ pub enum SpawnOutcome {
     /// Process exited with non-zero status.
     /// [`NonZeroI32`] enforces that exit code 0 is unrepresentable here.
     /// No `infra_error` field: cache operations are skipped on non-zero exit.
-    Failed { exit_code: NonZeroI32 },
+    Failed { exit_code: NonZeroI32, is_cancelled: bool },
 
     /// Could not start the process (e.g., command not found).
     SpawnError(SavedExecutionError),
@@ -146,6 +146,7 @@ struct SummaryStats {
     cache_misses: usize,
     cache_disabled: usize,
     failed: usize,
+    cancelled: usize,
     total_saved: Duration,
 }
 
@@ -157,6 +158,7 @@ impl SummaryStats {
             cache_misses: 0,
             cache_disabled: 0,
             failed: 0,
+            cancelled: 0,
             total_saved: Duration::ZERO,
         };
 
@@ -175,6 +177,7 @@ impl SummaryStats {
                         SpawnedCacheStatus::Disabled => stats.cache_disabled += 1,
                     }
                     match outcome {
+                        SpawnOutcome::Failed { is_cancelled: true, .. } => stats.cancelled += 1,
                         SpawnOutcome::Success { infra_error: Some(_) }
                         | SpawnOutcome::Failed { .. }
                         | SpawnOutcome::SpawnError(_) => stats.failed += 1,
@@ -213,7 +216,7 @@ impl SavedExecutionError {
     }
 
     /// Format the full error message for display.
-    fn display_message(&self) -> Str {
+    pub(super) fn display_message(&self) -> Str {
         match self {
             Self::Cache { kind, message } => {
                 let kind_str = match kind {
@@ -254,10 +257,12 @@ impl TaskResult {
     ///
     /// `cache_status`: the cache status determined at `start()` time.
     /// `exit_status`: the process exit status, or `None` for cache hit / in-process.
+    /// `is_cancelled`: whether the task was cancelled due to another task's failure.
     /// `saved_error`: an optional pre-converted execution error.
     pub fn from_execution(
         cache_status: &CacheStatus,
         exit_status: Option<std::process::ExitStatus>,
+        is_cancelled: bool,
         saved_error: Option<&SavedExecutionError>,
     ) -> Self {
         match cache_status {
@@ -267,13 +272,13 @@ impl TaskResult {
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
-                outcome: spawn_outcome_from_execution(exit_status, saved_error),
+                outcome: spawn_outcome_from_execution(exit_status, is_cancelled, saved_error),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::from_cache_miss(
                     cache_miss,
                 )),
-                outcome: spawn_outcome_from_execution(exit_status, saved_error),
+                outcome: spawn_outcome_from_execution(exit_status, is_cancelled, saved_error),
             },
         }
     }
@@ -282,6 +287,7 @@ impl TaskResult {
 /// Build a [`SpawnOutcome`] from process exit status and optional pre-converted error.
 fn spawn_outcome_from_execution(
     exit_status: Option<std::process::ExitStatus>,
+    is_cancelled: bool,
     saved_error: Option<&SavedExecutionError>,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
@@ -299,6 +305,7 @@ fn spawn_outcome_from_execution(
                 // implementation: always positive, non-zero for non-success status).
                 // NonZeroI32::new returns None only for 0, which cannot happen here.
                 exit_code: NonZeroI32::new(code).unwrap_or(NonZeroI32::MIN),
+                is_cancelled,
             }
         }
         // No exit status, no error — this is the cache hit / in-process path,
@@ -546,6 +553,16 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
     if !failed_str.is_empty() {
         let _ = write!(buf, " {failed_str}");
     }
+
+    let cancelled_str = if stats.cancelled > 0 {
+        let n = stats.cancelled;
+        Str::from(vite_str::format!("• {n} cancelled").style(Style::new().red()).to_string())
+    } else {
+        Str::default()
+    };
+    if !cancelled_str.is_empty() {
+        let _ = write!(buf, " {cancelled_str}");
+    }
     let _ = writeln!(buf);
 
     // Performance line
@@ -607,16 +624,27 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         // Exit icon
         if task.result.is_success() {
             let _ = write!(buf, " {}", "✓".style(Style::new().green().bold()));
-        } else if let TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code }, .. } =
-            &task.result
+        } else if let TaskResult::Spawned {
+            outcome: SpawnOutcome::Failed { exit_code, is_cancelled },
+            ..
+        } = &task.result
         {
-            let code = exit_code.get();
-            let _ = write!(
-                buf,
-                " {} {}",
-                "✗".style(Style::new().red().bold()),
-                vite_str::format!("(exit code: {code})").style(Style::new().red())
-            );
+            if *is_cancelled {
+                let _ = write!(
+                    buf,
+                    " {} {}",
+                    "✗".style(Style::new().red().bold()),
+                    "(cancelled)".style(Style::new().red())
+                );
+            } else {
+                let code = exit_code.get();
+                let _ = write!(
+                    buf,
+                    " {} {}",
+                    "✗".style(Style::new().red().bold()),
+                    vite_str::format!("(exit code: {code})").style(Style::new().red())
+                );
+            }
         }
         let _ = writeln!(buf);
 
@@ -725,6 +753,11 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
         if stats.failed > 0 {
             let n = stats.failed;
             let _ = write!(buf, ", {} failed", n.style(Style::new().red()));
+        }
+
+        if stats.cancelled > 0 {
+            let n = stats.cancelled;
+            let _ = write!(buf, ", {} cancelled", n.style(Style::new().red()));
         }
 
         let last_details_cmd = vite_str::format!("`{program_name} run --last-details`");

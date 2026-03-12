@@ -78,7 +78,11 @@ macro_rules! track_fn {
 )]
 #[allow(dead_code, reason = "used by track_fn! macro; not all test files use this macro")]
 pub async fn spawn_command(cmd: subprocess_test::Command) -> anyhow::Result<PathAccessIterable> {
-    let termination = fspy::Command::from(cmd).spawn().await?.wait_handle.await?;
+    let termination = fspy::Command::from(cmd)
+        .spawn(tokio_util::sync::CancellationToken::new())
+        .await?
+        .wait_handle
+        .await?;
     assert!(termination.status.success());
     Ok(termination.path_accesses)
 }

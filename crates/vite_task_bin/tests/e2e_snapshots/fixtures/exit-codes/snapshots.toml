@@ -7,7 +7,8 @@ steps = [
 ]
 
 [[e2e]]
-name = "multiple task failures returns exit code 1"
+name = "recursive failure fast-fails and returns task exit code"
+# --concurrency=1: deterministic execution order for snapshot stability
 steps = [
-  "vt run -r fail # multiple failures -> exit code 1",
+  "vt run -r fail --concurrency=1 # fast-fail: only first failure runs",
 ]

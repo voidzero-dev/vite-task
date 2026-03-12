@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vt run foo
+> vt run foo --concurrency=1
 $ check-tty ⊘ cache disabled
 stdin:tty
 stdout:tty
@@ -13,12 +13,12 @@ stdin:tty
 stdout:tty
 stderr:tty
 
-~/packages/other$ check-tty ⊘ cache disabled
+$ check-tty ⊘ cache disabled
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-$ check-tty ⊘ cache disabled
+~/packages/other$ check-tty ⊘ cache disabled
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty

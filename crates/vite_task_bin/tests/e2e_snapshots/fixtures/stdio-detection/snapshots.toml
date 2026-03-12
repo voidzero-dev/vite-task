@@ -37,21 +37,24 @@ steps = [
 [[e2e]]
 name = "multiple tasks, cache disabled"
 # Expect: stdio piped for labeled output (not-tty)
+# --concurrency=1: deterministic output ordering for snapshot stability
 steps = [
-  "vt run -r check-tty",
+  "vt run -r check-tty --concurrency=1",
 ]
 
 [[e2e]]
 name = "multiple tasks, cache miss"
 # Expect: stdio piped (not-tty)
+# --concurrency=1: deterministic output ordering for snapshot stability
 steps = [
-  "vt run -r check-tty-cached",
+  "vt run -r check-tty-cached --concurrency=1",
 ]
 
 [[e2e]]
 name = "multiple tasks, cache hit"
 # Expect: first run is a miss (not-tty), second run replays cached output
+# --concurrency=1: deterministic output ordering for snapshot stability
 steps = [
-  "vt run -r check-tty-cached",
-  "vt run -r check-tty-cached",
+  "vt run -r check-tty-cached --concurrency=1",
+  "vt run -r check-tty-cached --concurrency=1",
 ]

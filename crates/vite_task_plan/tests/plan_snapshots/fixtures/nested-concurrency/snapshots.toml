@@ -1,0 +1,16 @@
+# Tests concurrency inheritance in nested vp run commands
+
+# Nested vp run --concurrency=2 sets inner graph concurrency
+[[plan]]
+name = "nested --concurrency=2 sets inner graph concurrency"
+args = ["run", "outer-concurrency-2"]
+
+# Nested vp run without --concurrency inherits parent default (10)
+[[plan]]
+name = "nested run without --concurrency inherits parent"
+args = ["run", "outer-inherit"]
+
+# Outer --concurrency=4 propagates to nested run without flags
+[[plan]]
+name = "outer --concurrency=4 propagates to nested run without flags"
+args = ["run", "--concurrency=4", "outer-inherit"]

@@ -57,19 +57,19 @@ impl ExitStatus {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Stdio suggestion and configuration
+// Stdio mode and configuration
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// Suggestion from the reporter about what stdio mode to use for a spawned process.
+/// Stdio mode for a spawned process.
 ///
 /// The actual stdio mode is determined by [`execute_spawn`](super::execute::execute_spawn)
-/// based on this suggestion AND whether caching is enabled for the task:
+/// based on the reporter's suggestion AND whether caching is enabled for the task:
 /// - `Inherited` is only honoured when caching is disabled (`cache_metadata` is `None`).
 ///   With caching enabled, the execution engine overrides to `Piped` so that output can
 ///   be captured for the cache.
 /// - `Piped` is always respected as-is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StdioSuggestion {
+pub enum StdioMode {
     /// stdin is `/dev/null`, stdout and stderr are piped into the reporter's
     /// [`AsyncWrite`] streams.  Used when multiple tasks run concurrently and
     /// stdio should not be shared.
@@ -82,14 +82,14 @@ pub enum StdioSuggestion {
 
 /// Stdio configuration returned by [`LeafExecutionReporter::start`].
 ///
-/// Contains the reporter's suggestion for the stdio mode together with two
+/// Contains the reporter's suggested stdio mode together with two
 /// async writers that receive the child process's stdout and stderr when the
 /// execution engine decides to use piped mode.  The writers are always provided
 /// because the engine may override the suggestion (e.g. when caching forces
 /// piped mode even though the reporter suggested inherited).
 pub struct StdioConfig {
     /// The reporter's preferred stdio mode.
-    pub suggestion: StdioSuggestion,
+    pub stdio_mode: StdioMode,
     /// Async writer for the child process's stdout (used in piped mode and cache replay).
     pub stdout_writer: Box<dyn AsyncWrite + Unpin>,
     /// Async writer for the child process's stderr (used in piped mode and cache replay).
@@ -139,6 +139,27 @@ pub trait GraphExecutionReporter {
     async fn finish(self: Box<Self>) -> Result<(), ExitStatus>;
 }
 
+/// The outcome of a leaf execution, passed to [`LeafExecutionReporter::finish`].
+///
+/// Designed so that invalid states are unrepresentable:
+/// - `is_cancelled` is only possible when a process was actually spawned.
+/// - `exit_status` is always present when spawned, never present otherwise.
+pub enum LeafFinishStatus {
+    /// A process was spawned and exited (normally or killed via cancellation).
+    Spawned {
+        exit_status: StdExitStatus,
+        cache_update_status: CacheUpdateStatus,
+        is_cancelled: bool,
+        /// Post-execution infrastructure error (cache update or fingerprint failure).
+        /// Only possible after a successful spawn; does not affect the exit status.
+        infra_error: Option<ExecutionError>,
+    },
+    /// Completed without spawning a process (cache hit replay, in-process command).
+    Completed { cache_update_status: CacheUpdateStatus },
+    /// An error prevented normal completion (spawn failure, cache lookup failure, etc.)
+    Error { error: ExecutionError, cache_update_status: CacheUpdateStatus },
+}
+
 /// Reporter for a single leaf execution (one spawned process or in-process command).
 ///
 /// Lifecycle: `start()` → `finish()`.
@@ -151,30 +172,20 @@ pub trait LeafExecutionReporter {
     ///
     /// Called after the cache lookup completes, before any output is produced.
     /// Returns a [`StdioConfig`] containing:
-    /// - The reporter's stdio mode suggestion (inherited or piped).
+    /// - The reporter's stdio mode (inherited or piped).
     /// - Two [`AsyncWrite`] streams for receiving the child's stdout and stderr
     ///   (used when the execution engine decides on piped mode, or for cache replay).
     ///
-    /// The execution engine decides the actual stdio mode based on the suggestion
+    /// The execution engine decides the actual stdio mode based on the mode
     /// AND whether caching is enabled — inherited stdio is only used when the
-    /// suggestion is [`StdioSuggestion::Inherited`] AND the task has no cache
+    /// mode is [`StdioMode::Inherited`] AND the task has no cache
     /// metadata (caching disabled).
     async fn start(&mut self, cache_status: CacheStatus) -> StdioConfig;
 
     /// Finalize this leaf execution.
     ///
-    /// - `status`: The process exit status, or `None` for cache hits and in-process commands.
-    /// - `cache_update_status`: Whether the cache was updated after execution.
-    /// - `error`: If `Some`, an error occurred during this leaf's execution (cache lookup
-    ///   failure, spawn failure, fingerprint creation failure, cache update failure).
-    ///
     /// This method consumes the reporter — no further calls are possible after `finish()`.
-    async fn finish(
-        self: Box<Self>,
-        status: Option<StdExitStatus>,
-        cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    );
+    async fn finish(self: Box<Self>, status: LeafFinishStatus);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -262,6 +273,24 @@ fn format_error_message(message: &str) -> Str {
 /// Format the "cache hit, logs replayed" message for synthetic executions without display info.
 fn format_cache_hit_message() -> Str {
     vite_str::format!("{}\n", "✓ cache hit, logs replayed".style(Style::new().green().dimmed()))
+}
+
+/// Format an inline exit status line (e.g., `✗ exit code 1`).
+fn format_exit_status_line(code: i32) -> Str {
+    vite_str::format!(
+        "{} {}\n",
+        "✗".style(Style::new().red().bold()),
+        vite_str::format!("exit code {code}").style(Style::new().red())
+    )
+}
+
+/// Format a cancellation line (e.g., `✗ cancelled`).
+fn format_cancel_line() -> Str {
+    vite_str::format!(
+        "{} {}\n",
+        "✗".style(Style::new().red().bold()),
+        "cancelled".style(Style::new().red())
+    )
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

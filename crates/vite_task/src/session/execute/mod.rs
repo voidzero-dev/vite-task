@@ -2,14 +2,17 @@ pub mod fingerprint;
 pub mod glob_inputs;
 pub mod spawn;
 
-use std::{collections::BTreeMap, process::Stdio, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, process::Stdio, rc::Rc, sync::Arc};
 
-use futures_util::FutureExt;
+use futures_util::{FutureExt, StreamExt as _, stream::FuturesUnordered};
+use petgraph::Direction;
+use rustc_hash::FxHashMap;
 use tokio::io::AsyncWriteExt as _;
+use tokio_util::sync::CancellationToken;
 use vite_path::AbsolutePath;
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
-    SpawnExecution,
+    SpawnExecution, execution_graph::ExecutionNodeIndex,
 };
 
 use self::{
@@ -25,7 +28,7 @@ use super::{
     },
     reporter::{
         ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-        StdioSuggestion,
+        LeafFinishStatus, StdioMode,
     },
 };
 use crate::{Session, collections::HashMap};
@@ -46,90 +49,212 @@ pub enum SpawnOutcome {
     Failed,
 }
 
-/// Holds mutable references needed during graph execution.
+/// Holds shared references needed during graph execution.
 ///
-/// The `reporter` field is used to create leaf reporters for individual executions.
+/// The `reporter` field is wrapped in `Rc<RefCell<>>` to allow concurrent task
+/// futures to create leaf reporters from the shared graph reporter.
 /// Cache fields are passed through to [`execute_spawn`] for cache-aware execution.
 struct ExecutionContext<'a> {
     /// The graph-level reporter, used to create leaf reporters via `new_leaf_execution()`.
-    reporter: &'a mut dyn GraphExecutionReporter,
+    /// Wrapped in `Rc<RefCell<>>` so concurrent task futures can briefly borrow it
+    /// to create leaf reporters without holding the borrow across await points.
+    reporter: Rc<RefCell<&'a mut dyn GraphExecutionReporter>>,
     /// The execution cache for looking up and storing cached results.
     cache: &'a ExecutionCache,
     /// Base path for resolving relative paths in cache entries.
     /// Typically the workspace root.
     cache_base_path: &'a Arc<AbsolutePath>,
+    /// Shared cancellation token used for fail-fast across all nested graph executions.
+    /// When a task fails, this token is cancelled to signal all in-flight tasks to stop.
+    cancel_token: CancellationToken,
 }
 
 impl ExecutionContext<'_> {
-    /// Execute all tasks in an execution graph in dependency order.
+    /// Execute all tasks in an execution graph, respecting dependency order
+    /// and the graph's concurrency limit.
     ///
-    /// `ExecutionGraph` guarantees acyclicity at construction time.
-    /// We compute a topological order and iterate in reverse to get execution order
-    /// (dependencies before dependents).
+    /// **Single-node fast path:** When the graph has at most one node, tasks are
+    /// executed sequentially to preserve `StdioMode::Inherited` (allowing
+    /// direct terminal I/O for a single task).
     ///
-    /// `all_ancestors_single_node` tracks whether every graph in the ancestry chain
-    /// (from the root down to this level) contains exactly one node. The initial call
-    /// passes `graph.node_count() == 1`; recursive calls AND with the nested graph's
-    /// node count.
+    /// **Multi-node concurrent path:** Independent tasks (no dependency relationship)
+    /// run concurrently up to `graph.concurrency`. A task only starts after all its
+    /// dependencies have completed. On any failure, all in-flight tasks are cancelled
+    /// and no new tasks are started (fail-fast).
     ///
-    /// Leaf-level errors are reported through the reporter and do not abort the graph.
-    /// Cycle detection is handled at plan time, so this function cannot encounter cycles.
+    /// Returns `true` if all tasks succeeded, `false` if any task failed.
     #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_expanded_graph(
-        &mut self,
+        &self,
         graph: &ExecutionGraph,
         all_ancestors_single_node: bool,
-    ) {
-        // `compute_topological_order()` returns nodes in topological order: for every
-        // edge A→B, A appears before B. Since our edges mean "A depends on B",
-        // dependencies (B) appear after their dependents (A). We iterate in reverse
-        // to get execution order where dependencies run first.
+    ) -> bool {
+        // Single-node fast path: preserve Inherited stdio for the sole task.
+        if graph.graph.node_count() <= 1 {
+            if let Some(node_ix) = graph.graph.node_indices().next()
+                && !self.execute_node(graph, node_ix, all_ancestors_single_node).boxed_local().await
+            {
+                return false;
+            }
+            return true;
+        }
 
-        // Execute tasks in dependency-first order. Each task may have multiple items
-        // (from `&&`-split commands), which are executed sequentially.
-        let topo_order = graph.compute_topological_order();
-        for &node_ix in topo_order.iter().rev() {
-            let task_execution = &graph[node_ix];
+        // Multi-node concurrent execution.
+        self.execute_concurrent(graph).await
+    }
 
-            for item in &task_execution.items {
-                match &item.kind {
-                    ExecutionItemKind::Leaf(leaf_kind) => {
-                        self.execute_leaf(
-                            &item.execution_item_display,
-                            leaf_kind,
-                            all_ancestors_single_node,
-                        )
-                        .boxed_local()
-                        .await;
-                    }
-                    ExecutionItemKind::Expanded(nested_graph) => {
-                        self.execute_expanded_graph(
-                            nested_graph,
-                            all_ancestors_single_node && nested_graph.node_count() == 1,
-                        )
-                        .boxed_local()
-                        .await;
+    /// Concurrent scheduler: runs independent tasks in parallel up to the concurrency limit.
+    ///
+    /// Uses a ready-queue + `FuturesUnordered` approach:
+    /// 1. Compute initial dependency counts (outgoing neighbor count per node).
+    /// 2. Seed the ready queue with nodes that have zero dependencies.
+    /// 3. Launch ready tasks into `FuturesUnordered`, up to the concurrency limit.
+    /// 4. When a task completes, decrement dependency counts for its dependents
+    ///    (incoming neighbors) and enqueue newly-ready tasks.
+    /// 5. On failure: drop `FuturesUnordered` to cancel all in-flight tasks (fail-fast).
+    #[tracing::instrument(level = "debug", skip_all)]
+    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
+    async fn execute_concurrent(&self, graph: &ExecutionGraph) -> bool {
+        let concurrency = graph.concurrency;
+
+        // Compute dependency counts: for each node, count outgoing neighbors (dependencies).
+        let mut remaining_deps = FxHashMap::<ExecutionNodeIndex, usize>::with_capacity_and_hasher(
+            graph.graph.node_count(),
+            rustc_hash::FxBuildHasher,
+        );
+        let mut ready: Vec<ExecutionNodeIndex> = Vec::new();
+
+        for node_ix in graph.graph.node_indices() {
+            let dep_count = graph.graph.neighbors_directed(node_ix, Direction::Outgoing).count();
+            if dep_count == 0 {
+                ready.push(node_ix);
+            } else {
+                remaining_deps.insert(node_ix, dep_count);
+            }
+        }
+
+        let mut in_flight = FuturesUnordered::new();
+
+        loop {
+            // Fill up to concurrency limit from the ready queue.
+            while in_flight.len() < concurrency {
+                if let Some(node_ix) = ready.pop() {
+                    // Multi-node graph: all_ancestors_single_node is always false.
+                    in_flight.push(
+                        async move {
+                            let success = self.execute_node(graph, node_ix, false).await;
+                            (node_ix, success)
+                        }
+                        .boxed_local(),
+                    );
+                } else {
+                    break;
+                }
+            }
+
+            if in_flight.is_empty() {
+                break;
+            }
+
+            // Wait for any task to complete.
+            let Some((completed_ix, success)) = in_flight.next().await else {
+                break;
+            };
+
+            if !success {
+                // Fail-fast: cancel all in-flight tasks so they can kill their
+                // processes and call finish() with is_cancelled before returning.
+                self.cancel_token.cancel();
+                // Drain remaining futures — each will see cancellation, kill its
+                // process via start_kill(), and call finish(Cancelled).
+                in_flight.for_each(|_| async {}).await;
+                return false;
+            }
+
+            // Notify dependents: decrement their remaining dependency counts.
+            // Incoming neighbors of `completed_ix` are nodes that depend on it.
+            for dependent in graph.graph.neighbors_directed(completed_ix, Direction::Incoming) {
+                if let Some(count) = remaining_deps.get_mut(&dependent) {
+                    *count -= 1;
+                    if *count == 0 {
+                        remaining_deps.remove(&dependent);
+                        ready.push(dependent);
                     }
                 }
             }
         }
+
+        true
+    }
+
+    /// Execute all items within a single task node sequentially.
+    ///
+    /// A task's command may be split by `&&` into multiple items. Each item is
+    /// executed in order; if any item fails, the remaining items are skipped.
+    ///
+    /// Returns `true` if all items succeeded, `false` if any failed.
+    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
+    async fn execute_node(
+        &self,
+        graph: &ExecutionGraph,
+        node_ix: ExecutionNodeIndex,
+        all_ancestors_single_node: bool,
+    ) -> bool {
+        let task_execution = &graph.graph[node_ix];
+
+        for item in &task_execution.items {
+            // Don't start new items if cancellation has been requested.
+            if self.cancel_token.is_cancelled() {
+                return false;
+            }
+
+            let success = match &item.kind {
+                ExecutionItemKind::Leaf(leaf_kind) => {
+                    self.execute_leaf(
+                        &item.execution_item_display,
+                        leaf_kind,
+                        all_ancestors_single_node,
+                    )
+                    .boxed_local()
+                    .await
+                }
+                ExecutionItemKind::Expanded(nested_graph) => {
+                    self.execute_expanded_graph(
+                        nested_graph,
+                        all_ancestors_single_node && nested_graph.graph.node_count() == 1,
+                    )
+                    .boxed_local()
+                    .await
+                }
+            };
+            if !success {
+                return false;
+            }
+        }
+        true
     }
 
     /// Execute a single leaf item (in-process command or spawned process).
     ///
-    /// Creates a [`LeafExecutionReporter`] from the graph reporter and delegates
-    /// to the appropriate execution method.
+    /// Creates a [`LeafExecutionReporter`] from the graph reporter (briefly borrowing
+    /// the `RefCell`) and delegates to the appropriate execution method.
+    ///
+    /// Returns `true` on success, `false` on failure.
     #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_leaf(
-        &mut self,
+        &self,
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
-    ) {
-        let mut leaf_reporter =
-            self.reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node);
+    ) -> bool {
+        // Briefly borrow the reporter to create a leaf reporter, then drop the borrow.
+        let mut leaf_reporter = self.reporter.borrow_mut().new_leaf_execution(
+            display,
+            leaf_kind,
+            all_ancestors_single_node,
+        );
 
         match leaf_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
@@ -144,21 +269,32 @@ impl ExecutionContext<'_> {
                 let _ = stdio_config.stdout_writer.flush().await;
 
                 leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        None,
-                    )
+                    .finish(LeafFinishStatus::Completed {
+                        cache_update_status: CacheUpdateStatus::NotUpdated(
+                            CacheNotUpdatedReason::CacheDisabled,
+                        ),
+                    })
                     .await;
+                true
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
                 #[expect(
                     clippy::large_futures,
                     reason = "spawn execution with cache management creates large futures"
                 )]
-                let _ =
-                    execute_spawn(leaf_reporter, spawn_execution, self.cache, self.cache_base_path)
-                        .await;
+                match execute_spawn(
+                    leaf_reporter,
+                    spawn_execution,
+                    self.cache,
+                    self.cache_base_path,
+                    &self.cancel_token,
+                )
+                .await
+                {
+                    SpawnOutcome::CacheHit => true,
+                    SpawnOutcome::Spawned(status) => status.success(),
+                    SpawnOutcome::Failed => false,
+                }
             }
         }
     }
@@ -189,6 +325,7 @@ pub async fn execute_spawn(
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
     cache_base_path: &Arc<AbsolutePath>,
+    cancel_token: &CancellationToken,
 ) -> SpawnOutcome {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
@@ -207,11 +344,12 @@ pub async fn execute_spawn(
             Ok(inputs) => inputs,
             Err(err) => {
                 leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
-                    )
+                    .finish(LeafFinishStatus::Error {
+                        error: ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err },
+                        cache_update_status: CacheUpdateStatus::NotUpdated(
+                            CacheNotUpdatedReason::CacheDisabled,
+                        ),
+                    })
                     .await;
                 return SpawnOutcome::Failed;
             }
@@ -234,11 +372,12 @@ pub async fn execute_spawn(
                 // Cache lookup error — report through finish.
                 // Note: start() is NOT called because we don't have a valid cache status.
                 leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
-                    )
+                    .finish(LeafFinishStatus::Error {
+                        error: ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err },
+                        cache_update_status: CacheUpdateStatus::NotUpdated(
+                            CacheNotUpdatedReason::CacheDisabled,
+                        ),
+                    })
                     .await;
                 return SpawnOutcome::Failed;
             }
@@ -264,7 +403,9 @@ pub async fn execute_spawn(
             let _ = writer.flush().await;
         }
         leaf_reporter
-            .finish(None, CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit), None)
+            .finish(LeafFinishStatus::Completed {
+                cache_update_status: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
+            })
             .await;
         return SpawnOutcome::CacheHit;
     }
@@ -273,8 +414,7 @@ pub async fn execute_spawn(
     //    Inherited stdio is only used when the reporter suggests it AND caching is
     //    completely disabled (no cache_metadata). If caching is enabled but missed,
     //    we still need piped mode to capture output for the cache update.
-    let use_inherited =
-        stdio_config.suggestion == StdioSuggestion::Inherited && cache_metadata.is_none();
+    let use_inherited = stdio_config.stdio_mode == StdioMode::Inherited && cache_metadata.is_none();
 
     if use_inherited {
         // Inherited mode: all three stdio FDs (stdin, stdout, stderr) are inherited
@@ -283,24 +423,28 @@ pub async fn execute_spawn(
         // while the child also writes to the same FD.
         drop(stdio_config);
 
-        match spawn_inherited(&spawn_execution.spawn_command).await {
+        match spawn_inherited(&spawn_execution.spawn_command, cancel_token).await {
             Ok(result) => {
                 leaf_reporter
-                    .finish(
-                        Some(result.exit_status),
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        None,
-                    )
+                    .finish(LeafFinishStatus::Spawned {
+                        exit_status: result.exit_status,
+                        cache_update_status: CacheUpdateStatus::NotUpdated(
+                            CacheNotUpdatedReason::CacheDisabled,
+                        ),
+                        is_cancelled: cancel_token.is_cancelled(),
+                        infra_error: None,
+                    })
                     .await;
                 return SpawnOutcome::Spawned(result.exit_status);
             }
             Err(err) => {
                 leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::Spawn(err)),
-                    )
+                    .finish(LeafFinishStatus::Error {
+                        error: ExecutionError::Spawn(err),
+                        cache_update_status: CacheUpdateStatus::NotUpdated(
+                            CacheNotUpdatedReason::CacheDisabled,
+                        ),
+                    })
                     .await;
                 return SpawnOutcome::Failed;
             }
@@ -333,11 +477,12 @@ pub async fn execute_spawn(
                 Ok(negs) => negs,
                 Err(err) => {
                     leaf_reporter
-                        .finish(
-                            None,
-                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                            Some(ExecutionError::PostRunFingerprint(err)),
-                        )
+                        .finish(LeafFinishStatus::Error {
+                            error: ExecutionError::PostRunFingerprint(err),
+                            cache_update_status: CacheUpdateStatus::NotUpdated(
+                                CacheNotUpdatedReason::CacheDisabled,
+                            ),
+                        })
                         .await;
                     return SpawnOutcome::Failed;
                 }
@@ -358,17 +503,19 @@ pub async fn execute_spawn(
         std_outputs.as_mut(),
         path_accesses.as_mut(),
         &resolved_negatives,
+        cancel_token,
     )
     .await
     {
         Ok(result) => result,
         Err(err) => {
             leaf_reporter
-                .finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Spawn(err)),
-                )
+                .finish(LeafFinishStatus::Error {
+                    error: ExecutionError::Spawn(err),
+                    cache_update_status: CacheUpdateStatus::NotUpdated(
+                        CacheNotUpdatedReason::CacheDisabled,
+                    ),
+                })
                 .await;
             return SpawnOutcome::Failed;
         }
@@ -421,7 +568,14 @@ pub async fn execute_spawn(
     // 7. Finish the leaf execution with the result and optional cache error.
     //    Cache update/fingerprint failures are reported but do not affect the outcome —
     //    the process ran, so we return its actual exit status.
-    leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error).await;
+    leaf_reporter
+        .finish(LeafFinishStatus::Spawned {
+            exit_status: result.exit_status,
+            cache_update_status,
+            is_cancelled: cancel_token.is_cancelled(),
+            infra_error: cache_error,
+        })
+        .await;
 
     SpawnOutcome::Spawned(result.exit_status)
 }
@@ -436,7 +590,10 @@ pub async fn execute_spawn(
 /// The child process will see `is_terminal() == true` for stdout/stderr when the
 /// parent is running in a terminal. This is expected behavior.
 #[tracing::instrument(level = "debug", skip_all)]
-async fn spawn_inherited(spawn_command: &SpawnCommand) -> anyhow::Result<SpawnResult> {
+async fn spawn_inherited(
+    spawn_command: &SpawnCommand,
+    cancel_token: &CancellationToken,
+) -> anyhow::Result<SpawnResult> {
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
     cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
     cmd.envs(spawn_command.all_envs.iter());
@@ -478,7 +635,13 @@ async fn spawn_inherited(spawn_command: &SpawnCommand) -> anyhow::Result<SpawnRe
     }
 
     let mut child = tokio_cmd.spawn()?;
-    let exit_status = child.wait().await?;
+    let exit_status = tokio::select! {
+        status = child.wait() => status?,
+        () = cancel_token.cancelled() => {
+            let _ = child.start_kill();
+            child.wait().await?
+        }
+    };
 
     Ok(SpawnResult { exit_status, duration: start.elapsed() })
 }
@@ -513,16 +676,21 @@ impl Session<'_> {
 
         let mut reporter = builder.build();
 
-        let mut execution_context = ExecutionContext {
-            reporter: &mut *reporter,
+        let execution_context = ExecutionContext {
+            reporter: Rc::new(RefCell::new(&mut *reporter)),
             cache,
             cache_base_path: &self.workspace_path,
+            cancel_token: CancellationToken::new(),
         };
 
-        // Execute the graph. Leaf-level errors are reported through the reporter
-        // and do not abort the graph. Cycle detection is handled at plan time.
-        let all_single_node = execution_graph.node_count() == 1;
+        // Execute the graph. On failure, remaining tasks are cancelled (fail-fast).
+        // Cycle detection is handled at plan time.
+        let all_single_node = execution_graph.graph.node_count() == 1;
         execution_context.execute_expanded_graph(&execution_graph, all_single_node).await;
+
+        // Drop the execution context before finishing the reporter so the
+        // cancellation token is dropped before the reporter's finish().
+        drop(execution_context);
 
         // Leaf-level errors and non-zero exit statuses are tracked internally
         // by the reporter.

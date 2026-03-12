@@ -6,19 +6,27 @@
 //! Tracks statistics across multiple leaf executions, prints command lines with cache
 //! status indicators, and renders a summary with per-task details at the end.
 
-use std::{cell::RefCell, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell,
+    io,
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
-use tokio::io::{AsyncWrite, AsyncWriteExt as _};
+use tokio::io::AsyncWrite;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-    StdioConfig, StdioSuggestion, format_command_with_cache_status, format_error_message,
+    LeafFinishStatus, StdioConfig, StdioMode, format_cancel_line, format_command_with_cache_status,
+    format_error_message, format_exit_status_line,
 };
 use crate::session::{
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError},
+    event::{CacheStatus, exit_status_to_code},
     reporter::summary::{
         LastRunSummary, SavedExecutionError, SpawnOutcome, TaskResult, TaskSummary,
         format_compact_summary, format_full_summary,
@@ -28,13 +36,74 @@ use crate::session::{
 /// Callback type for persisting the summary (e.g., writing `last-summary.json`).
 type WriteSummaryFn = Box<dyn FnOnce(&LastRunSummary)>;
 
+/// An in-memory async writer that collects all writes into a shared buffer.
+///
+/// Used to buffer a task's output (header + stdout + stderr) during concurrent
+/// execution so it can be flushed atomically when the task finishes.
+struct BufferedAsyncWriter {
+    buffer: Rc<RefCell<Vec<u8>>>,
+}
+
+impl AsyncWrite for BufferedAsyncWriter {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        self.get_mut().buffer.borrow_mut().extend_from_slice(buf);
+        Poll::Ready(Ok(buf.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// Write data to the shared writer with exclusive ownership.
+///
+/// Takes the writer out of the `RefCell<Option<...>>` so that no other future can
+/// poll the same writer concurrently. This prevents corruption of the writer's
+/// internal state machine (e.g., `tokio::io::Blocking<Stdout>`) when multiple
+/// concurrent tasks in `FuturesUnordered` try to write through the same shared writer.
+///
+/// If the writer is already taken by another future, yields and retries.
+#[expect(clippy::future_not_send, reason = "used only in !Send reporter async contexts")]
+async fn write_and_flush_shared(
+    writer_cell: &RefCell<Option<Box<dyn AsyncWrite + Unpin>>>,
+    data: &[u8],
+) {
+    use tokio::io::AsyncWriteExt as _;
+
+    // Take exclusive ownership of the writer.
+    let mut writer = loop {
+        if let Some(w) = writer_cell.borrow_mut().take() {
+            break w;
+        }
+        // Another future has the writer — yield and retry.
+        tokio::task::yield_now().await;
+    };
+
+    if !data.is_empty() {
+        let _ = writer.write_all(data).await;
+    }
+    let _ = writer.flush().await;
+
+    // Return the writer.
+    *writer_cell.borrow_mut() = Some(writer);
+}
+
 /// Mutable state shared between [`LabeledGraphReporter`] and its [`LabeledLeafReporter`] instances
 /// via `Rc<RefCell<...>>`.
-///
-/// This is safe because execution is single-threaded and sequential — only one leaf
-/// reporter is active at a time.
 struct SharedReporterState {
     tasks: Vec<TaskSummary>,
+    /// Number of leaf reporters currently between `start()` and `finish()`.
+    /// Used to decide streaming vs buffering: the first task (idle → 0) streams
+    /// directly; subsequent concurrent tasks buffer their output.
+    active_count: usize,
 }
 
 /// Builder for the labeled graph reporter.
@@ -83,9 +152,12 @@ impl LabeledReporterBuilder {
 
 impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
     fn build(self: Box<Self>) -> Box<dyn GraphExecutionReporter> {
-        let writer = Rc::new(RefCell::new(self.writer));
+        let writer = Rc::new(RefCell::new(Some(self.writer)));
         Box::new(LabeledGraphReporter {
-            shared: Rc::new(RefCell::new(SharedReporterState { tasks: Vec::new() })),
+            shared: Rc::new(RefCell::new(SharedReporterState {
+                tasks: Vec::new(),
+                active_count: 0,
+            })),
             writer,
             workspace_path: self.workspace_path,
             show_details: self.show_details,
@@ -101,7 +173,7 @@ impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
 /// share mutable state with this reporter via `Rc<RefCell<SharedReporterState>>`.
 pub struct LabeledGraphReporter {
     shared: Rc<RefCell<SharedReporterState>>,
-    writer: Rc<RefCell<Box<dyn AsyncWrite + Unpin>>>,
+    writer: Rc<RefCell<Option<Box<dyn AsyncWrite + Unpin>>>>,
     workspace_path: Arc<AbsolutePath>,
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
@@ -109,11 +181,6 @@ pub struct LabeledGraphReporter {
 }
 
 #[async_trait::async_trait(?Send)]
-#[expect(
-    clippy::await_holding_refcell_ref,
-    reason = "writer RefCell borrow across await is safe: reporter is !Send, single-threaded, \
-              and finish() is called once after all leaf reporters are dropped"
-)]
 impl GraphExecutionReporter for LabeledGraphReporter {
     fn new_leaf_execution(
         &mut self,
@@ -122,9 +189,9 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         all_ancestors_single_node: bool,
     ) -> Box<dyn LeafExecutionReporter> {
         let display = display.clone();
-        let stdio_suggestion = match leaf_kind {
-            LeafExecutionKind::Spawn(_) if all_ancestors_single_node => StdioSuggestion::Inherited,
-            _ => StdioSuggestion::Piped,
+        let stdio_mode = match leaf_kind {
+            LeafExecutionKind::Spawn(_) if all_ancestors_single_node => StdioMode::Inherited,
+            _ => StdioMode::Piped,
         };
 
         Box::new(LabeledLeafReporter {
@@ -132,8 +199,9 @@ impl GraphExecutionReporter for LabeledGraphReporter {
             writer: Rc::clone(&self.writer),
             display,
             workspace_path: Arc::clone(&self.workspace_path),
-            stdio_suggestion,
+            stdio_mode,
             cache_status: None,
+            output_buffer: None,
         })
     }
 
@@ -150,7 +218,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         let failed_exit_codes: Vec<i32> = tasks
             .iter()
             .filter_map(|t| match &t.result {
-                TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code }, .. } => {
+                TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code, .. }, .. } => {
                     Some(exit_code.get())
                 }
                 _ => None,
@@ -194,13 +262,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         // Always flush the writer — even when the summary is empty, a preceding
         // spawned process may have written to the same fd via Stdio::inherit()
         // and the data must be flushed before the caller reads the output.
-        {
-            let mut writer = self.writer.borrow_mut();
-            if !summary_buf.is_empty() {
-                let _ = writer.write_all(&summary_buf).await;
-            }
-            let _ = writer.flush().await;
-        }
+        write_and_flush_shared(&self.writer, &summary_buf).await;
 
         result
     }
@@ -212,23 +274,22 @@ impl GraphExecutionReporter for LabeledGraphReporter {
 /// [`TaskSummary`] entries that are pushed to [`SharedReporterState`] on completion.
 struct LabeledLeafReporter {
     shared: Rc<RefCell<SharedReporterState>>,
-    writer: Rc<RefCell<Box<dyn AsyncWrite + Unpin>>>,
+    writer: Rc<RefCell<Option<Box<dyn AsyncWrite + Unpin>>>>,
     /// Display info for this execution, looked up from the graph via the path.
     display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
     /// Stdio suggestion precomputed from this leaf's graph path.
-    stdio_suggestion: StdioSuggestion,
+    stdio_mode: StdioMode,
     /// Cache status, set at `start()` time. `None` means `start()` was never called
     /// (e.g., cache lookup failure). Consumed in `finish()` to build [`TaskSummary`].
     cache_status: Option<CacheStatus>,
+    /// Output buffer for concurrent task execution.
+    /// `None` when streaming directly (first task while reporter is idle).
+    /// `Some(buffer)` when output needs buffering (other tasks running concurrently).
+    output_buffer: Option<Rc<RefCell<Vec<u8>>>>,
 }
 
 #[async_trait::async_trait(?Send)]
-#[expect(
-    clippy::await_holding_refcell_ref,
-    reason = "writer RefCell borrow across await is safe: reporter is !Send, single-threaded, \
-              and only one leaf is active at a time (no re-entrant access during write_all)"
-)]
 impl LeafExecutionReporter for LabeledLeafReporter {
     async fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
         // Format command line with cache status before storing it.
@@ -237,30 +298,63 @@ impl LeafExecutionReporter for LabeledLeafReporter {
 
         self.cache_status = Some(cache_status);
 
-        let mut writer = self.writer.borrow_mut();
-        let _ = writer.write_all(line.as_bytes()).await;
-        let _ = writer.flush().await;
+        // Decide streaming vs buffering based on whether other tasks are active.
+        let is_idle = {
+            let mut shared = self.shared.borrow_mut();
+            let idle = shared.active_count == 0;
+            shared.active_count += 1;
+            idle
+        };
 
-        StdioConfig {
-            suggestion: self.stdio_suggestion,
-            stdout_writer: Box::new(tokio::io::stdout()),
-            stderr_writer: Box::new(tokio::io::stderr()),
+        if is_idle {
+            // Stream directly — write header immediately, output goes to real stdout/stderr.
+            write_and_flush_shared(&self.writer, line.as_bytes()).await;
+
+            StdioConfig {
+                stdio_mode: self.stdio_mode,
+                stdout_writer: Box::new(tokio::io::stdout()),
+                stderr_writer: Box::new(tokio::io::stderr()),
+            }
+        } else {
+            // Buffer output — header + stdout + stderr collected for atomic flush in finish().
+            let buffer = Rc::new(RefCell::new(Vec::new()));
+            buffer.borrow_mut().extend_from_slice(line.as_bytes());
+            self.output_buffer = Some(Rc::clone(&buffer));
+
+            StdioConfig {
+                stdio_mode: self.stdio_mode,
+                stdout_writer: Box::new(BufferedAsyncWriter { buffer: Rc::clone(&buffer) }),
+                stderr_writer: Box::new(BufferedAsyncWriter { buffer }),
+            }
         }
     }
 
-    async fn finish(
-        self: Box<Self>,
-        status: Option<StdExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
-        // Convert error before consuming it (need the original for display formatting).
-        let saved_error = error.as_ref().map(SavedExecutionError::from_execution_error);
+    async fn finish(self: Box<Self>, status: LeafFinishStatus) {
+        // Extract error and exit status info from the finish status.
+        let (exit_status, error, is_cancelled) = match &status {
+            LeafFinishStatus::Spawned { exit_status, is_cancelled, infra_error, .. } => {
+                (Some(*exit_status), infra_error.as_ref(), *is_cancelled)
+            }
+            LeafFinishStatus::Completed { .. } => (None, None, false),
+            LeafFinishStatus::Error { error, .. } => (None, Some(error), false),
+        };
+
+        let cache_update_status = match &status {
+            LeafFinishStatus::Spawned { cache_update_status, .. }
+            | LeafFinishStatus::Completed { cache_update_status }
+            | LeafFinishStatus::Error { cache_update_status, .. } => cache_update_status,
+        };
+        let _ = cache_update_status; // used only for summary (via TaskResult)
+
+        // Convert error for summary persistence and format display string.
+        // Both are derived from the same borrowed error reference.
+        let saved_error = error.map(SavedExecutionError::from_execution_error);
         let error_display: Option<Str> =
-            error.map(|e| vite_str::format!("{:#}", anyhow::Error::from(e)));
+            saved_error.as_ref().map(SavedExecutionError::display_message);
 
         // Destructure self to avoid partial-move issues with Box<Self>.
-        let Self { shared, writer, display, workspace_path, cache_status, .. } = *self;
+        let Self { shared, writer, display, workspace_path, cache_status, output_buffer, .. } =
+            *self;
         let started = cache_status.is_some();
 
         // Build TaskSummary and push to shared state if start() was called.
@@ -276,30 +370,62 @@ impl LeafExecutionReporter for LabeledLeafReporter {
                 task_name: display.task_display.task_name.clone(),
                 command: display.command.clone(),
                 cwd: cwd_relative,
-                result: TaskResult::from_execution(&cache_status, status, saved_error.as_ref()),
+                result: TaskResult::from_execution(
+                    &cache_status,
+                    exit_status,
+                    is_cancelled,
+                    saved_error.as_ref(),
+                ),
             };
 
             shared.borrow_mut().tasks.push(task_summary);
         }
 
-        // Build all display output into a buffer, then write once asynchronously.
-        let mut buf = Vec::new();
+        // Determine if we should show inline status (only in multi-task execution).
+        let is_multi_task = {
+            let shared_ref = shared.borrow();
+            shared_ref.tasks.len() + shared_ref.active_count > 1
+        };
+
+        // Decrement active count if start() was called (active_count was incremented).
+        if started {
+            shared.borrow_mut().active_count -= 1;
+        }
+
+        // Build trailing output (inline status + error message + separator newline).
+        let mut trailing = Vec::new();
+
+        // Inline exit status or cancellation (only for multi-task execution).
+        if is_multi_task && is_cancelled {
+            trailing.extend_from_slice(format_cancel_line().as_bytes());
+        } else if is_multi_task
+            && let Some(exit_status) = exit_status
+            && !exit_status.success()
+        {
+            let code = exit_status_to_code(exit_status);
+            trailing.extend_from_slice(format_exit_status_line(code).as_bytes());
+        }
 
         if let Some(ref message) = error_display {
-            buf.extend_from_slice(format_error_message(message).as_bytes());
+            trailing.extend_from_slice(format_error_message(message).as_bytes());
         }
 
         // Add a trailing newline after each task's output for readability.
         // Skip if start() was never called (e.g. cache lookup failure) — there's
         // no task output to separate.
         if started {
-            buf.push(b'\n');
+            trailing.push(b'\n');
         }
 
-        if !buf.is_empty() {
-            let mut writer = writer.borrow_mut();
-            let _ = writer.write_all(&buf).await;
-            let _ = writer.flush().await;
+        if let Some(output_buffer) = output_buffer {
+            // Buffered mode: concatenate header + captured output + trailing into a single
+            // write for atomicity, then flush. Take the buffer in-place to avoid copying.
+            let mut data = std::mem::take(&mut *output_buffer.borrow_mut());
+            data.extend_from_slice(&trailing);
+            write_and_flush_shared(&writer, &data).await;
+        } else if !trailing.is_empty() {
+            // Streaming mode: only write trailing (header + output already written directly).
+            write_and_flush_shared(&writer, &trailing).await;
         }
     }
 }
@@ -312,7 +438,7 @@ mod tests {
     use crate::session::{
         event::CacheDisabledReason,
         reporter::{
-            LeafExecutionReporter, StdioSuggestion,
+            LeafExecutionReporter, StdioMode,
             test_fixtures::{in_process_task, spawn_task, test_path},
         },
     };
@@ -350,11 +476,11 @@ mod tests {
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
-    ) -> StdioSuggestion {
+    ) -> StdioMode {
         let mut leaf = build_labeled_leaf(display, leaf_kind, all_ancestors_single_node);
         let stdio_config =
             leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        stdio_config.suggestion
+        stdio_config.stdio_mode
     }
 
     #[tokio::test]
@@ -363,7 +489,7 @@ mod tests {
         let item = &task.items[0];
         assert_eq!(
             suggestion_for(&item.execution_item_display, leaf_kind(item), true).await,
-            StdioSuggestion::Inherited
+            StdioMode::Inherited
         );
     }
 
@@ -373,7 +499,7 @@ mod tests {
         let item = &task.items[0];
         assert_eq!(
             suggestion_for(&item.execution_item_display, leaf_kind(item), false).await,
-            StdioSuggestion::Piped
+            StdioMode::Piped
         );
     }
 
@@ -383,7 +509,7 @@ mod tests {
         let item = &task.items[0];
         assert_eq!(
             suggestion_for(&item.execution_item_display, leaf_kind(item), true).await,
-            StdioSuggestion::Piped
+            StdioMode::Piped
         );
     }
 
@@ -393,7 +519,7 @@ mod tests {
         let item = &task.items[0];
         assert_eq!(
             suggestion_for(&item.execution_item_display, leaf_kind(item), false).await,
-            StdioSuggestion::Piped
+            StdioMode::Piped
         );
     }
 }

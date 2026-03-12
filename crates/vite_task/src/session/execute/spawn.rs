@@ -11,6 +11,7 @@ use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 use wax::Program as _;
@@ -70,6 +71,10 @@ pub struct TrackedPathAccesses {
     clippy::too_many_lines,
     reason = "spawn logic is inherently sequential and splitting would reduce clarity"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "cancel_token is a temporary addition until ChildProcess API is implemented"
+)]
 pub async fn spawn_with_tracking(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
@@ -78,6 +83,7 @@ pub async fn spawn_with_tracking(
     std_outputs: Option<&mut Vec<StdOutput>>,
     path_accesses: Option<&mut TrackedPathAccesses>,
     resolved_negatives: &[wax::Glob<'static>],
+    cancel_token: &CancellationToken,
 ) -> anyhow::Result<SpawnResult> {
     /// The tracking state of the spawned process.
     /// Determined by whether `path_accesses` is `Some` (fspy enabled) or `None` (fspy disabled).
@@ -97,7 +103,7 @@ pub async fn spawn_with_tracking(
 
     let mut tracking_state = if path_accesses.is_some() {
         // path_accesses is Some, spawn with fspy tracking enabled
-        TrackingState::FspyEnabled(cmd.spawn().await?)
+        TrackingState::FspyEnabled(cmd.spawn(cancel_token.clone()).await?)
     } else {
         // path_accesses is None, spawn without fspy
         TrackingState::FspyDisabled(cmd.into_tokio_command().spawn()?)
@@ -122,6 +128,7 @@ pub async fn spawn_with_tracking(
     let start = Instant::now();
 
     // Read from both stdout and stderr concurrently using select!
+    // Also monitors the cancellation token to kill the child on fast-fail.
     loop {
         tokio::select! {
             result = child_stdout.read(&mut stdout_buf), if !stdout_done => {
@@ -165,6 +172,22 @@ pub async fn spawn_with_tracking(
                         }
                     }
                 }
+            }
+            () = cancel_token.cancelled(), if !stdout_done || !stderr_done => {
+                // Fast-fail: kill the child process so it exits quickly.
+                // The process pipes will close, ending the I/O loop naturally.
+                match &mut tracking_state {
+                    TrackingState::FspyEnabled(tracked_child) => {
+                        // fspy TrackedChild doesn't expose a kill method.
+                        // Drop stdin to signal the child; the wait_handle task
+                        // will see the process exit.
+                        drop(tracked_child.stdin.take());
+                    }
+                    TrackingState::FspyDisabled(tokio_child) => {
+                        let _ = tokio_child.start_kill();
+                    }
+                }
+                break;
             }
             else => break,
         }

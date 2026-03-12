@@ -27,6 +27,7 @@ steps = [
 name = "multiple tasks get null stdin"
 # Multiple spawn leaves → stdin is null regardless of cache setting
 # The piped "from-stdin" should NOT appear in any task's output
+# --concurrency=1: deterministic output ordering for snapshot stability
 steps = [
-  "echo from-stdin | vt run -r read-stdin",
+  "echo from-stdin | vt run -r read-stdin --concurrency=1",
 ]

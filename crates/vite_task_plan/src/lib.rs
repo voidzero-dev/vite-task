@@ -23,6 +23,9 @@ use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_graph::{TaskGraphLoadError, display::TaskDisplay};
 
+/// Default number of concurrent tasks when `--concurrency` is not specified.
+const DEFAULT_CONCURRENCY: usize = 10;
+
 /// A resolved spawn execution.
 ///
 /// Unlike tasks in `vite_task_graph`, this struct contains all information needed for execution,
@@ -206,6 +209,7 @@ pub async fn plan_query(
     );
 
     let QueryPlanRequest { query, plan_options } = query_plan_request;
+    let concurrency = plan_options.concurrency;
     let query = Arc::new(query);
     let context = PlanContext::new(
         workspace_path,
@@ -215,6 +219,7 @@ pub async fn plan_query(
         indexed_task_graph,
         resolved_global_cache,
         Arc::clone(&query),
+        concurrency.unwrap_or(DEFAULT_CONCURRENCY),
     );
     plan_query_request(query, plan_options, context).await
 }

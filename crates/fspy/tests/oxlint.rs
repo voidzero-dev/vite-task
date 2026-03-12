@@ -45,7 +45,7 @@ async fn track_oxlint(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<Pa
         .env("PATH", new_path)
         .current_dir(dir);
 
-    let child = command.spawn().await?;
+    let child = command.spawn(tokio_util::sync::CancellationToken::new()).await?;
     let termination = child.wait_handle.await?;
     // oxlint may return non-zero if it finds lint errors, that's OK
     Ok(termination.path_accesses)

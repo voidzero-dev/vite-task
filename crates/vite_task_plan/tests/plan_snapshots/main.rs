@@ -65,13 +65,16 @@ impl CompactPlan {
     fn from_execution_graph(graph: &ExecutionGraph, workspace_root: &AbsolutePath) -> Self {
         use petgraph::visit::EdgeRef as _;
         let mut map = BTreeMap::<Str, CompactNode>::new();
-        for node_idx in graph.node_indices() {
-            let node = &graph[node_idx];
+        for node_idx in graph.graph.node_indices() {
+            let node = &graph.graph[node_idx];
             let key = Self::task_key(&node.task_display, workspace_root);
 
             let neighbors: BTreeSet<Str> = graph
+                .graph
                 .edges(node_idx)
-                .map(|edge| Self::task_key(&graph[edge.target()].task_display, workspace_root))
+                .map(|edge| {
+                    Self::task_key(&graph.graph[edge.target()].task_display, workspace_root)
+                })
                 .collect();
 
             let expanded_items: Vec<Self> = node

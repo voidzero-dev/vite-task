@@ -1,0 +1,7 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+[7]> vt run -r fail --concurrency=1 # fast-fail: only first failure runs
+~/packages/pkg-b$ node -e "process.exit(7)"
+✗ exit code 7

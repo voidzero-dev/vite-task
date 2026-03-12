@@ -2,13 +2,13 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vt run -r foo-nested
-~/packages/other$ check-tty ⊘ cache disabled
+> vt run -r foo-nested --concurrency=1
+$ check-tty ⊘ cache disabled
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-$ check-tty ⊘ cache disabled
+~/packages/other$ check-tty ⊘ cache disabled
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty

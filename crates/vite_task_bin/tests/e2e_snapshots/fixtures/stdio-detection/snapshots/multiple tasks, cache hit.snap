@@ -2,26 +2,26 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vt run -r check-tty-cached
-~/packages/other$ check-tty
+> vt run -r check-tty-cached --concurrency=1
+$ check-tty
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-$ check-tty
+~/packages/other$ check-tty
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
 ---
 vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
-> vt run -r check-tty-cached
-~/packages/other$ check-tty ✓ cache hit, replaying
+> vt run -r check-tty-cached --concurrency=1
+$ check-tty ✓ cache hit, replaying
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-$ check-tty ✓ cache hit, replaying
+~/packages/other$ check-tty ✓ cache hit, replaying
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty

@@ -14,6 +14,7 @@ $ vt lint -D no-debugger
 
 Found 0 warnings and 1 error.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
+✗ exit code 1
 [1]> vt run lint -- -D no-debugger
 $ vt lint -D no-debugger
 
@@ -26,3 +27,4 @@ $ vt lint -D no-debugger
 
 Found 0 warnings and 1 error.
 Finished in <duration> on 1 file with 90 rules using <n> threads.
+✗ exit code 1

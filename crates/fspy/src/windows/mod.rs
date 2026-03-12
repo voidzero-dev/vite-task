@@ -73,7 +73,11 @@ impl SpyImpl {
     }
 
     #[expect(clippy::unused_async, reason = "async signature required by SpyImpl trait")]
-    pub(crate) async fn spawn(&self, mut command: Command) -> Result<TrackedChild, SpawnError> {
+    pub(crate) async fn spawn(
+        &self,
+        mut command: Command,
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> Result<TrackedChild, SpawnError> {
         let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
         command.env("FSPY", "1");
         let mut command = command.into_tokio_command();
@@ -142,7 +146,13 @@ impl SpyImpl {
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
             // because we need to stop the supervisor and lock the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
-                let status = child.wait().await?;
+                let status = tokio::select! {
+                    status = child.wait() => status?,
+                    () = cancel_token.cancelled() => {
+                        let _ = child.start_kill();
+                        child.wait().await?
+                    }
+                };
                 // Lock the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
                 let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;

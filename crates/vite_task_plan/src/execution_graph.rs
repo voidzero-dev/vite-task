@@ -155,8 +155,31 @@ impl<N, Ix: IndexType> Index<NodeIndex<Ix>> for AcyclicGraph<N, Ix> {
     }
 }
 
-/// The execution graph type alias, specialized for task execution.
-pub type ExecutionGraph = AcyclicGraph<TaskExecution, ExecutionIx>;
+/// The execution graph: a DAG of task executions with a resolved concurrency limit.
+///
+/// Concurrency is always a concrete `usize` — inheritance from parent `PlanContext`
+/// is resolved at plan time before storing here.
+#[derive(Debug, Serialize)]
+pub struct ExecutionGraph {
+    /// The underlying acyclic graph of task executions.
+    pub graph: AcyclicGraph<TaskExecution, ExecutionIx>,
+    /// Maximum number of tasks to run concurrently in this graph.
+    pub concurrency: usize,
+}
+
+impl ExecutionGraph {
+    /// Validate that `inner_graph` is acyclic and wrap it with the given concurrency.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CycleError`] if the graph contains a cycle.
+    pub fn try_from_graph(
+        inner_graph: InnerExecutionGraph,
+        concurrency: usize,
+    ) -> Result<Self, CycleError<ExecutionIx>> {
+        Ok(Self { graph: AcyclicGraph::try_from_graph(inner_graph)?, concurrency })
+    }
+}
 
 impl<N: vite_graph_ser::GetKey + Serialize, Ix: IndexType> Serialize for AcyclicGraph<N, Ix> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
