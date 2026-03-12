@@ -164,7 +164,11 @@ impl PackageGraphBuilder {
                             path2: dep_path2.clone(),
                         });
                     }
-                    self.graph.add_edge(*id, *dep_id, *dep_type);
+                    // Skip self-referential edges: a package listing itself as a dependency
+                    // (e.g. for testing purposes) must not create a cycle in the task graph.
+                    if *id != *dep_id {
+                        self.graph.add_edge(*id, *dep_id, *dep_type);
+                    }
                 }
                 // Silently skip if dependency not found - it might be an external package
             }
