@@ -118,6 +118,11 @@ pub enum TaskGraphLoadError {
 
     #[error("`cache` can only be set in the workspace root config, but found in {package_path}")]
     CacheInNonRootPackage { package_path: Arc<AbsolutePath> },
+
+    #[error(
+        "`enablePrePostScripts` can only be set in the workspace root config, but found in {package_path}"
+    )]
+    PrePostScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
 }
 
 /// Error when looking up a task by its specifier.
@@ -185,8 +190,14 @@ pub struct IndexedTaskGraph {
     /// task indices by task id for quick lookup
     pub(crate) node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex>,
 
+    /// Reverse map: task node index → task id (for hook lookup)
+    task_ids_by_node_index: FxHashMap<TaskNodeIndex, TaskId>,
+
     /// Global cache configuration resolved from the workspace root config.
     resolved_global_cache: ResolvedGlobalCacheConfig,
+
+    /// Whether pre/post script hooks are enabled (from `enablePrePostScripts` in workspace root config).
+    pre_post_scripts_enabled: bool,
 }
 
 pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
@@ -222,9 +233,12 @@ impl IndexedTaskGraph {
         // index tasks by ids
         let mut node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex> =
             FxHashMap::with_capacity_and_hasher(task_graph.node_count(), FxBuildHasher);
+        let mut task_ids_by_node_index: FxHashMap<TaskNodeIndex, TaskId> =
+            FxHashMap::with_capacity_and_hasher(task_graph.node_count(), FxBuildHasher);
 
         // First pass: load all configs, extract root cache config, validate
         let mut root_cache = None;
+        let mut root_pre_post_scripts_enabled = None;
         let mut package_configs: Vec<(PackageNodeIndex, Arc<AbsolutePath>, UserRunConfig)> =
             Vec::with_capacity(package_graph.node_count());
 
@@ -247,6 +261,16 @@ impl IndexedTaskGraph {
                     root_cache = Some(cache);
                 } else {
                     return Err(TaskGraphLoadError::CacheInNonRootPackage {
+                        package_path: package_dir.clone(),
+                    });
+                }
+            }
+
+            if let Some(val) = user_config.enable_pre_post_scripts {
+                if is_workspace_root {
+                    root_pre_post_scripts_enabled = Some(val);
+                } else {
+                    return Err(TaskGraphLoadError::PrePostScriptsInNonRootPackage {
                         package_path: package_dir.clone(),
                     });
                 }
@@ -312,6 +336,7 @@ impl IndexedTaskGraph {
 
                 let node_index = task_graph.add_node(task_node);
                 task_ids_with_dependency_specifiers.push((task_id.clone(), dependency_specifiers));
+                task_ids_by_node_index.insert(node_index, task_id.clone());
                 node_indices_by_task_id.insert(task_id, node_index);
             }
 
@@ -340,6 +365,7 @@ impl IndexedTaskGraph {
                     resolved_config,
                     source: TaskSource::PackageJsonScript,
                 });
+                task_ids_by_node_index.insert(node_index, task_id.clone());
                 node_indices_by_task_id.insert(task_id, node_index);
             }
         }
@@ -349,7 +375,9 @@ impl IndexedTaskGraph {
             task_graph,
             indexed_package_graph: IndexedPackageGraph::index(package_graph),
             node_indices_by_task_id,
+            task_ids_by_node_index,
             resolved_global_cache,
+            pre_post_scripts_enabled: root_pre_post_scripts_enabled.unwrap_or(true),
         };
 
         // Add explicit dependencies
@@ -458,5 +486,33 @@ impl IndexedTaskGraph {
     #[must_use]
     pub const fn global_cache_config(&self) -> &ResolvedGlobalCacheConfig {
         &self.resolved_global_cache
+    }
+
+    /// Whether pre/post script hooks are enabled workspace-wide.
+    #[must_use]
+    pub const fn pre_post_scripts_enabled(&self) -> bool {
+        self.pre_post_scripts_enabled
+    }
+
+    /// Returns the `TaskNodeIndex` of the pre/post hook for a `PackageJsonScript` task.
+    ///
+    /// Given a task named `X` and `prefix = "pre"`, looks up `preX` in the same package.
+    /// Given a task named `X` and `prefix = "post"`, looks up `postX` in the same package.
+    ///
+    /// Returns `None` if:
+    /// - The task is not a `PackageJsonScript`
+    /// - No `{prefix}{name}` script exists in the same package
+    /// - The hook is not itself a `PackageJsonScript`
+    #[must_use]
+    pub fn get_script_hook(&self, task_idx: TaskNodeIndex, prefix: &str) -> Option<TaskNodeIndex> {
+        let task_node = &self.task_graph[task_idx];
+        if task_node.source != TaskSource::PackageJsonScript {
+            return None;
+        }
+        let task_id = self.task_ids_by_node_index.get(&task_idx)?;
+        let hook_name = vite_str::format!("{prefix}{}", task_node.task_display.task_name);
+        let hook_id = TaskId { package_index: task_id.package_index, task_name: hook_name };
+        let &hook_idx = self.node_indices_by_task_id.get(&hook_id)?;
+        (self.task_graph[hook_idx].source == TaskSource::PackageJsonScript).then_some(hook_idx)
     }
 }

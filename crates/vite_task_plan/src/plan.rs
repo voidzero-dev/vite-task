@@ -100,6 +100,23 @@ async fn plan_task_as_execution_node(
 
     let mut items = Vec::<ExecutionItem>::new();
 
+    // Expand pre/post hooks (`preX`/`postX`) for package.json scripts.
+    // Resolve the flag once before any mutable borrow of `context` (duplicate() needs &mut).
+    let pre_post_scripts_enabled = context.indexed_task_graph().pre_post_scripts_enabled();
+    let pre_hook_idx = if pre_post_scripts_enabled {
+        context.indexed_task_graph().get_script_hook(task_node_index, "pre")
+    } else {
+        None
+    };
+    if let Some(pre_hook_idx) = pre_hook_idx {
+        let mut pre_context = context.duplicate();
+        // Extra args (e.g. `vt run test --coverage`) must not be forwarded to hooks.
+        pre_context.set_extra_args(Arc::new([]));
+        let pre_execution =
+            Box::pin(plan_task_as_execution_node(pre_hook_idx, pre_context)).await?;
+        items.extend(pre_execution.items);
+    }
+
     // Use task's resolved cwd for display (from task config's cwd option)
     let mut cwd = Arc::clone(&task_node.resolved_config.resolved_options.cwd);
 
@@ -355,6 +372,21 @@ async fn plan_task_as_execution_node(
             execution_item_display,
             kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
         });
+    }
+
+    // Expand post-hook (`postX`) for package.json scripts.
+    let post_hook_idx = if pre_post_scripts_enabled {
+        context.indexed_task_graph().get_script_hook(task_node_index, "post")
+    } else {
+        None
+    };
+    if let Some(post_hook_idx) = post_hook_idx {
+        let mut post_context = context.duplicate();
+        // Extra args must not be forwarded to hooks.
+        post_context.set_extra_args(Arc::new([]));
+        let post_execution =
+            Box::pin(plan_task_as_execution_node(post_hook_idx, post_context)).await?;
+        items.extend(post_execution.items);
     }
 
     Ok(TaskExecution { task_display: task_node.task_display.clone(), items })
