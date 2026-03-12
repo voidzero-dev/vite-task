@@ -95,6 +95,12 @@ pub enum TaskGraphLoadError {
         error: anyhow::Error,
     },
 
+    #[error(
+        "Task {task_display} conflicts with a package.json script of the same name. \
+         Remove the script from package.json or rename the task"
+    )]
+    ScriptConflict { task_display: TaskDisplay },
+
     #[error("Failed to resolve task config for task {task_display}")]
     ResolveConfigError {
         task_display: TaskDisplay,
@@ -264,9 +270,16 @@ impl IndexedTaskGraph {
                 .collect();
 
             for (task_name, task_user_config) in user_config.tasks.unwrap_or_default() {
-                // Remove any package.json script with the same name so it won't be
-                // duplicated as a standalone PackageJsonScript task below.
-                package_json_scripts.remove(task_name.as_str());
+                // Error if a package.json script with the same name exists
+                if package_json_scripts.remove(task_name.as_str()).is_some() {
+                    return Err(TaskGraphLoadError::ScriptConflict {
+                        task_display: TaskDisplay {
+                            package_name: package.package_json.name.clone(),
+                            task_name: task_name.clone(),
+                            package_path: Arc::clone(&package_dir),
+                        },
+                    });
+                }
 
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
