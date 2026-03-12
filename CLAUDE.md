@@ -1,10 +1,28 @@
-# CLAUDE.md
+# Vite Task
 
-## Project Overview
+A monorepo task runner (like Nx/Turbo) with intelligent caching and dependency resolution, distributed as the `vp run` command in [Vite+](https://github.com/voidzero-dev/vite-plus).
 
-A monorepo task runner (like nx/turbo) with intelligent caching and dependency resolution.
+## Repository Structure
 
-## Build Commands
+- `crates/vite_task` — Task execution engine with caching and session management
+- `crates/vite_task_bin` — Internal dev CLI binary (`vt`) and task synthesizer
+- `crates/vite_task_graph` — Task dependency graph construction and config loading
+- `crates/vite_task_plan` — Execution planning (resolves env vars, working dirs, commands)
+- `crates/vite_workspace` — Workspace detection and package dependency graph
+- `crates/fspy*` — File system access tracing (9 crates: supervisor, preload libs, platform backends)
+- `crates/pty_terminal*` — Cross-platform headless terminal emulator (3 crates)
+- `crates/vite_path` — Type-safe absolute/relative path system
+- `crates/vite_str` — Stack-allocated compact string type
+- `crates/vite_glob` — Glob pattern matching
+- `crates/vite_shell` — Shell command parsing
+- `crates/vite_select` — Interactive fuzzy selection UI
+- `crates/vite_tui` — Terminal UI components (WIP, unfinished)
+- `crates/vite_graph_ser` — Graph serialization utilities
+- `crates/subprocess_test` — Subprocess testing framework
+- `packages/tools` — Node.js test utilities (print, json-edit, check-tty, etc.)
+- `docs/` — Documentation (inputs configuration guide)
+
+## Development Commands
 
 ```bash
 just init          # Install build tools and dependencies
@@ -30,96 +48,37 @@ INSTA_UPDATE=always cargo test                          # Update snapshots
 
 Integration tests (e2e, plan, fspy) require `pnpm install` in `packages/tools` first. You don't need `pnpm install` in test fixture directories.
 
-Test fixtures and snapshots:
+### Test Fixtures
 
-- **Plan**: `crates/vite_task_plan/tests/plan_snapshots/fixtures/` - quicker, sufficient for testing behaviour before actual execution:
-  - task graph
-  - resolved configurations
-  - resolved program paths, cwd, and env vars
-- **E2E**: `crates/vite_task_bin/tests/e2e_snapshots/fixtures/` - needed for testing execution and beyond: caching, output styling
+- **Plan**: `crates/vite_task_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
+- **E2E**: `crates/vite_task_bin/tests/e2e_snapshots/fixtures/` — needed for testing execution, caching, output styling
 
 ### Cross-Platform Testing
 
-**CRITICAL**: This project must work on both Unix (macOS/Linux) and Windows. For any cross-platform features:
+**CRITICAL**: This project must work on both Unix (macOS/Linux) and Windows. Skipping tests on either platform is **UNACCEPTABLE**.
 
-1. **No Platform Skipping**: Skipping tests on either platform is **UNACCEPTABLE**
-   - Use `#[cfg(unix)]` and `#[cfg(windows)]` for platform-specific code within tests
-   - Both platforms must execute the test and verify the feature works correctly
-   - If a feature can't work on a platform, it shouldn't be added
+- Use `#[cfg(unix)]` and `#[cfg(windows)]` for platform-specific code within tests
+- Both platforms must execute the test and verify the feature works correctly
+- Use cross-platform libraries for common operations (e.g., `terminal_size` for terminal dimensions)
 
-2. **Windows Cross-Testing from macOS**:
-   `cargo xtest` cross-compiles the test binary and runs it on a real remote Windows environment (not emulation). The filesystem is bridged so the test can access local fixture files.
-   ```bash
-   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p <package> --test <test>
+## Architecture
 
-   # Examples:
-   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p pty_terminal --test terminal
-   cargo xtest --builder cargo-xwin --target aarch64-pc-windows-msvc -p pty_terminal --test terminal -- resize_terminal
-   ```
+### Task Execution Pipeline
 
-3. **Cross-Platform Test Design Patterns**:
-   - Use conditional compilation for platform-specific setup/assertions
-   - Use cross-platform libraries for common operations (e.g., `terminal_size` for terminal dimensions)
-   - Verify platform-specific behavior works as expected:
-     - **Unix**: SIGWINCH signals, ioctl, /dev/null, etc.
-     - **Windows**: ConPTY, GetConsoleScreenBufferInfo, NUL, etc.
-
-4. **Example**: The `pty_terminal::resize_terminal` test demonstrates proper cross-platform testing:
-   - Unix: Installs SIGWINCH handler to verify signal delivery
-   - Windows: Acknowledges synchronous ConPTY resize behavior
-   - Both: Query terminal size using cross-platform `terminal_size` crate
-   - Both: Verify resize actually works and returns correct dimensions
-
-## CLI Usage
-
-```bash
-# Run a task defined in vite-task.json
-vt run <task>                        # run task in current package
-vt run <package>#<task>              # run task in specific package
-vt run <task> -r                     # run task in all packages (recursive)
-vt run <task> -t                     # run task in current package + transitive deps
-vt run <task> -- --extra --args      # pass extra args to the task command
-vt run                               # interactive task selector (fuzzy search)
-
-# Built-in commands (run tools from node_modules/.bin)
-vt test [args...]                    # run vitest
-vt lint [args...]                    # run oxlint
-
-# Cache management
-vt cache clean                       # remove the cache database
-
-# Package selection flags
--r, --recursive                      # select all packages in the workspace
--t, --transitive                     # select current package + transitive deps
--w, --workspace-root                 # select the workspace root package
--F, --filter <pattern>               # pnpm-style filter (repeatable, see below)
-
-# Run flags
---ignore-depends-on                  # skip explicit dependsOn dependencies
--v, --verbose                        # show full detailed summary after execution
---cache                              # force caching on for all tasks and scripts
---no-cache                           # force caching off for all tasks and scripts
---last-details                       # show detailed summary of the last run
-
-# Filter patterns (pnpm-style)
--F <name>                            # select by package name
--F '@scope/*'                        # select by glob pattern
--F ./<dir>                           # select packages under a directory
--F '<pattern>...'                    # select package and its dependencies
--F '...<pattern>'                    # select package and its dependents
--F '!<pattern>'                      # exclude packages matching pattern
+```
+CLI (vite_task_bin) → Task Graph (vite_task_graph) → Plan (vite_task_plan) → Execution (vite_task)
+                          ↑                                                        ↓
+                    vite_workspace                                          fspy (file tracing)
 ```
 
-## Key Architecture
+### Task Dependencies
 
-- **vite_task** - Main task runner with caching and session management
-- **vite_task_bin** - CLI binary (`vt` command) and task synthesizer
-- **vite_task_graph** - Task dependency graph construction and config loading
-- **vite_task_plan** - Execution planning (resolves env vars, working dirs, commands)
-- **vite_workspace** - Workspace detection and package dependency graph
-- **fspy** - File system access tracking for precise cache invalidation
+1. **Explicit**: Defined via `dependsOn` in `vite-task.json` (skip with `--ignore-depends-on`)
+2. **Topological**: Based on package.json dependencies
+   - With `-r/--recursive`: runs task across all packages in dependency order
+   - With `-t/--transitive`: runs task in current package and its dependencies
 
-## Task Configuration
+### Task Configuration
 
 Tasks are defined in `vite-task.json`:
 
@@ -140,37 +99,11 @@ Tasks are defined in `vite-task.json`:
 }
 ```
 
-- `cache` (root): workspace-wide cache toggle. Default: `{ "scripts": false, "tasks": true }`
-- `command`: shell command to run (required)
-- `cwd`: working directory relative to the package root
-- `dependsOn`: explicit task dependencies (`taskName` or `package#task`)
-- `cache` (task): enable/disable caching for this task (default: `true`)
-- `env`: env var names to fingerprint and pass to the task
-- `untrackedEnv`: env var names to pass without fingerprinting
-- `input`: files for cache fingerprinting (globs, `{ "auto": true }`, negation patterns)
-
-## Task Dependencies
-
-1. **Explicit**: Defined via `dependsOn` in `vite-task.json` (skip with `--ignore-depends-on`)
-2. **Topological**: Based on package.json dependencies
-   - With `-r/--recursive`: runs task across all packages in dependency order
-   - With `-t/--transitive`: runs task in current package and its dependencies
-
-## Cross-Platform Linting
-
-After major changes (especially to `fspy*` or platform-specific crates), run cross-platform clippy before pushing:
-
-```bash
-just lint          # native (host platform)
-just lint-linux    # Linux via cargo-zigbuild
-just lint-windows  # Windows via cargo-xwin
-```
-
 ## Code Constraints
 
 ### Required Patterns
 
-These patterns are enforced by `.clippy.toml`:
+Enforced by `.clippy.toml`:
 
 | Instead of                          | Use                                      |
 | ----------------------------------- | ---------------------------------------- |
@@ -181,28 +114,23 @@ These patterns are enforced by `.clippy.toml`:
 | `std::env::current_dir`             | `vite_path::current_dir`                 |
 | `.to_lowercase()`/`.to_uppercase()` | `cow_utils` methods                      |
 
+### Path Type System
+
+- Use `AbsolutePath` for internal data flow; only convert to `RelativePath` when saving to cache
+- Use methods like `strip_prefix`/`join` from `vite_path` instead of converting to std paths
+- Only convert to std paths when interfacing with std library functions
+- Add necessary methods in `vite_path` instead of falling back to std path types
+
 ### Cross-Platform Requirements
 
-**All code must work on both Unix and Windows without platform skipping:**
+All code must work on both Unix and Windows without platform skipping:
 
 - Use `#[cfg(unix)]` / `#[cfg(windows)]` for platform-specific implementations
-- Always test on both platforms (use `cargo xtest` for Windows cross-compilation)
 - Platform differences should be handled gracefully, not skipped
-- Document platform-specific behavior in code comments
-
-## Path Type System
-
-- **Type Safety**: All paths use typed `vite_path` instead of `std::path`
-  - **Absolute Paths**: `vite_path::AbsolutePath` / `AbsolutePathBuf`
-  - **Relative Paths**: `vite_path::RelativePath` / `RelativePathBuf`
-
-- **Usage Guidelines**:
-  - Use `AbsolutePath` for internal data flow; only convert to `RelativePath` when saving to cache
-  - Use methods like `strip_prefix`/`join` from `vite_path` instead of converting to std paths
-  - Only convert to std paths when interfacing with std library functions
-  - Add necessary methods in `vite_path` instead of falling back to std path types
+- After major changes to `fspy*` or platform-specific crates, run `just lint-linux` and `just lint-windows`
 
 ## Quick Reference
 
 - **Task Format**: `package#task` (e.g., `app#build`, `@test/utils#lint`)
 - **Config File**: `vite-task.json` in each package
+- **Rust Edition**: 2024, MSRV 1.88.0
