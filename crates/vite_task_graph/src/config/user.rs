@@ -79,7 +79,7 @@ pub struct EnabledCacheConfig {
     pub env: Option<Box<[Str]>>,
 
     /// Environment variable names to be passed to the task without fingerprinting.
-    pub pass_through_envs: Option<Vec<Str>>,
+    pub untracked_env: Option<Vec<Str>>,
 
     /// Files to include in the cache fingerprint.
     ///
@@ -126,7 +126,7 @@ impl Default for UserTaskOptions {
                 cache: None,
                 enabled_cache_config: EnabledCacheConfig {
                     env: None,
-                    pass_through_envs: None,
+                    untracked_env: None,
                     input: None,
                 },
             },
@@ -411,7 +411,7 @@ mod tests {
         let user_config_json = json!({
             "cache": true,
             "env": ["NODE_ENV"],
-            "passThroughEnvs": ["FOO"],
+            "untrackedEnv": ["FOO"],
         });
         assert_eq!(
             serde_json::from_value::<UserCacheConfig>(user_config_json).unwrap(),
@@ -419,7 +419,7 @@ mod tests {
                 cache: Some(MustBe!(true)),
                 enabled_cache_config: EnabledCacheConfig {
                     env: Some(std::iter::once("NODE_ENV".into()).collect()),
-                    pass_through_envs: Some(std::iter::once("FOO".into()).collect()),
+                    untracked_env: Some(std::iter::once("FOO".into()).collect()),
                     input: None,
                 }
             },

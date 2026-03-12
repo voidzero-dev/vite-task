@@ -23,7 +23,7 @@ pub struct EnvFingerprints {
     /// Environment variable names that should be passed through without values being fingerprinted.
     ///
     /// Names are still included in the fingerprint so that changes to these names can invalidate the cache.
-    pub pass_through_env_config: Arc<[Str]>,
+    pub untracked_env_config: Arc<[Str]>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -42,17 +42,17 @@ impl EnvFingerprints {
     /// Resolves from all available envs and env config.
     ///
     /// Before the call, `all_envs` is expected to contain all available envs.
-    /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + `pass_through`).
+    /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + untracked).
     pub fn resolve(
         all_envs: &mut FxHashMap<Arc<OsStr>, Arc<OsStr>>,
         env_config: &EnvConfig,
     ) -> Result<Self, ResolveEnvError> {
-        // Collect all envs matching fingerpinted or pass-through envs in env_config
+        // Collect all envs matching fingerprinted or untracked envs in env_config
         *all_envs = {
             let mut new_all_envs = resolve_envs_with_patterns(
                 all_envs.iter(),
                 &env_config
-                    .pass_through_envs
+                    .untracked_env
                     .iter()
                     .map(std::convert::AsRef::as_ref)
                     .chain(env_config.fingerprinted_envs.iter().map(std::convert::AsRef::as_ref))
@@ -121,9 +121,9 @@ impl EnvFingerprints {
 
         Ok(Self {
             fingerprinted_envs,
-            // Save pass_through_envs names sorted for deterministic cache fingerprinting
-            pass_through_env_config: {
-                let mut sorted: Vec<Str> = env_config.pass_through_envs.iter().cloned().collect();
+            // Save untracked_env names sorted for deterministic cache fingerprinting
+            untracked_env_config: {
+                let mut sorted: Vec<Str> = env_config.untracked_env.iter().cloned().collect();
                 sorted.sort();
                 sorted.into()
             },
@@ -195,10 +195,10 @@ mod tests {
             .collect()
     }
 
-    fn create_env_config(fingerprinted: &[&str], pass_through: &[&str]) -> EnvConfig {
+    fn create_env_config(fingerprinted: &[&str], untracked: &[&str]) -> EnvConfig {
         EnvConfig {
             fingerprinted_envs: fingerprinted.iter().map(|s| Str::from(*s)).collect(),
-            pass_through_envs: pass_through.iter().map(|s| Str::from(*s)).collect(),
+            untracked_env: untracked.iter().map(|s| Str::from(*s)).collect(),
         }
     }
 
@@ -310,7 +310,7 @@ mod tests {
             "sha256:17f1ef795d5663faa129f6fe3e5335e67ac7a701d1a70533a5f4b1635413a1aa"
         );
 
-        // Verify pass-through envs are present in all_envs
+        // Verify untracked envs are present in all_envs
         assert!(all_envs1.contains_key(OsStr::new("VSCODE_VAR")));
         assert!(all_envs1.contains_key(OsStr::new("PATH")));
         assert!(all_envs1.contains_key(OsStr::new("HOME")));
@@ -397,7 +397,7 @@ mod tests {
         assert!(envs1.iter().any(|(k, _)| k.as_str() == "app1_name"));
         assert!(envs1.iter().any(|(k, _)| k.as_str() == "app2_name"));
 
-        // Verify pass-through envs are present
+        // Verify untracked envs are present
         assert!(all_envs1.contains_key(OsStr::new("VSCODE_VAR")));
         assert!(
             all_envs1.contains_key(OsStr::new("Path"))
@@ -433,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pass_through_envs_names_stored() {
+    fn test_untracked_env_names_stored() {
         let env_config = create_env_config(&["BUILD_MODE"], &["PATH", "HOME", "CI"]);
 
         let mut all_envs = create_test_envs(vec![
@@ -445,11 +445,11 @@ mod tests {
 
         let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
-        // Verify pass_through_envs names are stored
-        assert_eq!(result.pass_through_env_config.len(), 3);
-        assert!(result.pass_through_env_config.iter().any(|s| s.as_str() == "PATH"));
-        assert!(result.pass_through_env_config.iter().any(|s| s.as_str() == "HOME"));
-        assert!(result.pass_through_env_config.iter().any(|s| s.as_str() == "CI"));
+        // Verify untracked_env names are stored
+        assert_eq!(result.untracked_env_config.len(), 3);
+        assert!(result.untracked_env_config.iter().any(|s| s.as_str() == "PATH"));
+        assert!(result.untracked_env_config.iter().any(|s| s.as_str() == "HOME"));
+        assert!(result.untracked_env_config.iter().any(|s| s.as_str() == "CI"));
     }
 
     #[test]
@@ -466,7 +466,7 @@ mod tests {
 
         let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
-        // all_envs should only contain fingerprinted + pass_through envs (plus auto-added ones)
+        // all_envs should only contain fingerprinted + untracked envs (plus auto-added ones)
         assert!(all_envs.contains_key(OsStr::new("KEEP_THIS")));
         assert!(all_envs.contains_key(OsStr::new("PASS_THROUGH")));
         assert!(!all_envs.contains_key(OsStr::new("FILTER_OUT")));
@@ -528,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn test_playwright_env_passthrough() {
+    fn test_playwright_env_untracked() {
         // Verify PLAYWRIGHT_* pattern matches Playwright environment variables
         let env_config = create_env_config(&[], &["PLAYWRIGHT_*"]);
 

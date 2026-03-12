@@ -32,7 +32,7 @@ This approach becomes cumbersome when dealing with multiple environment variable
 ## Non-Goals
 
 1. Full regex support (only glob-style wildcards)
-2. Wildcard patterns in `passThroughEnvs` (same as `env`)
+2. Wildcard patterns in `untrackedEnv` (same as `env`)
 3. Complex glob patterns like `{VITE,NODE}_*` (supported by wax crate)
 
 ## Proposed Solution

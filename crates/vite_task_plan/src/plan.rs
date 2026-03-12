@@ -383,7 +383,7 @@ pub enum ParentCacheConfig {
 /// the parent task's cache config with the synthetic command's own additions.
 ///
 /// Synthetic tasks (e.g., `vp lint` → `oxlint`) may declare their own cache-related
-/// env requirements (e.g., `pass_through_envs` for env-test). When a parent task
+/// env requirements (e.g., `untracked_env` for env-test). When a parent task
 /// exists, its cache config takes precedence:
 /// - If the parent disables caching, the synthetic task is also uncached.
 /// - If the parent enables caching but the synthetic disables it, caching is disabled.
@@ -423,8 +423,8 @@ fn resolve_synthetic_cache_config(
                     if let Some(extra_envs) = enabled_cache_config.env {
                         parent_config.env_config.fingerprinted_envs.extend(extra_envs.into_vec());
                     }
-                    if let Some(extra_pts) = enabled_cache_config.pass_through_envs {
-                        parent_config.env_config.pass_through_envs.extend(extra_pts);
+                    if let Some(extra_pts) = enabled_cache_config.untracked_env {
+                        parent_config.env_config.untracked_env.extend(extra_pts);
                     }
                     Some(parent_config)
                 }

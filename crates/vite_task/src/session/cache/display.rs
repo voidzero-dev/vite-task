@@ -24,11 +24,11 @@ pub enum SpawnFingerprintChange {
     /// Environment variable value changed
     EnvValueChanged { key: Str, old_value: Str, new_value: Str },
 
-    // Pass-through env config changes
-    /// Pass-through env pattern added
-    PassThroughEnvAdded { name: Str },
-    /// Pass-through env pattern removed
-    PassThroughEnvRemoved { name: Str },
+    // Untracked env config changes
+    /// Untracked env pattern added
+    UntrackedEnvAdded { name: Str },
+    /// Untracked env pattern removed
+    UntrackedEnvRemoved { name: Str },
 
     // Command changes
     /// Program changed
@@ -55,11 +55,11 @@ pub fn format_spawn_change(change: &SpawnFingerprintChange) -> Str {
         SpawnFingerprintChange::EnvValueChanged { key, old_value, new_value } => {
             vite_str::format!("env {key} value changed from '{old_value}' to '{new_value}'")
         }
-        SpawnFingerprintChange::PassThroughEnvAdded { name } => {
-            vite_str::format!("pass-through env '{name}' added")
+        SpawnFingerprintChange::UntrackedEnvAdded { name } => {
+            vite_str::format!("untracked env '{name}' added")
         }
-        SpawnFingerprintChange::PassThroughEnvRemoved { name } => {
-            vite_str::format!("pass-through env '{name}' removed")
+        SpawnFingerprintChange::UntrackedEnvRemoved { name } => {
+            vite_str::format!("untracked env '{name}' removed")
         }
         SpawnFingerprintChange::ProgramChanged => Str::from("program changed"),
         SpawnFingerprintChange::ArgsChanged => Str::from("args changed"),
@@ -104,14 +104,14 @@ pub fn detect_spawn_fingerprint_changes(
         }
     }
 
-    // Check pass-through env config changes
-    let old_pass_through: FxHashSet<_> = old_env.pass_through_env_config.iter().collect();
-    let new_pass_through: FxHashSet<_> = new_env.pass_through_env_config.iter().collect();
-    for name in old_pass_through.difference(&new_pass_through) {
-        changes.push(SpawnFingerprintChange::PassThroughEnvRemoved { name: (*name).clone() });
+    // Check untracked env config changes
+    let old_untracked: FxHashSet<_> = old_env.untracked_env_config.iter().collect();
+    let new_untracked: FxHashSet<_> = new_env.untracked_env_config.iter().collect();
+    for name in old_untracked.difference(&new_untracked) {
+        changes.push(SpawnFingerprintChange::UntrackedEnvRemoved { name: (*name).clone() });
     }
-    for name in new_pass_through.difference(&old_pass_through) {
-        changes.push(SpawnFingerprintChange::PassThroughEnvAdded { name: (*name).clone() });
+    for name in new_untracked.difference(&old_untracked) {
+        changes.push(SpawnFingerprintChange::UntrackedEnvAdded { name: (*name).clone() });
     }
 
     // Check program changes
@@ -164,9 +164,9 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                             | SpawnFingerprintChange::EnvValueChanged { .. },
                         ) => "envs changed",
                         Some(
-                            SpawnFingerprintChange::PassThroughEnvAdded { .. }
-                            | SpawnFingerprintChange::PassThroughEnvRemoved { .. },
-                        ) => "pass-through env config changed",
+                            SpawnFingerprintChange::UntrackedEnvAdded { .. }
+                            | SpawnFingerprintChange::UntrackedEnvRemoved { .. },
+                        ) => "untracked env config changed",
                         Some(SpawnFingerprintChange::ProgramChanged) => "program changed",
                         Some(SpawnFingerprintChange::ArgsChanged) => "args changed",
                         Some(SpawnFingerprintChange::CwdChanged) => "working directory changed",

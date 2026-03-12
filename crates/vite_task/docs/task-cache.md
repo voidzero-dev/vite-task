@@ -105,7 +105,7 @@ pub struct SpawnFingerprint {
     pub cwd: RelativePathBuf,
     pub command_fingerprint: CommandFingerprint,
     pub fingerprinted_envs: BTreeMap<Str, Str>,
-    pub pass_through_envs: BTreeSet<Str>,
+    pub untracked_env: BTreeSet<Str>,
     pub fingerprint_ignores: Option<Vec<Str>>,
 }
 
@@ -124,7 +124,7 @@ This ensures cache invalidation when:
 
 - Working directory changes (package location changes)
 - Command or arguments change
-- Declared environment variables differ (pass-through envs don't affect cache)
+- Declared environment variables differ (untracked envs don't affect cache)
 - Program location changes (inside/outside workspace)
 
 ### 3. Environment Variable Impact on Cache
@@ -132,17 +132,17 @@ This ensures cache invalidation when:
 The `fingerprinted_envs` field is crucial for cache correctness:
 
 - Only includes env vars explicitly declared in the task's `env` array
-- Does NOT include pass-through envs (PATH, CI, etc.)
+- Does NOT include untracked envs (PATH, CI, etc.)
 - These env vars become part of the cache key
 
 When a task runs:
 
-1. All env vars (including pass-through) are available to the process
+1. All env vars (including untracked) are available to the process
 2. Only declared env vars affect the cache key
 3. If a declared env var changes value, cache will miss
-4. If a pass-through env changes, cache will still hit
+4. If an untracked env changes, cache will still hit
 
-The `pass_through_envs` field stores env names (not values) — if the set of pass-through env names changes, the cache invalidates, but value changes don't.
+The `untracked_env` field stores env names (not values) — if the set of untracked env names changes, the cache invalidates, but value changes don't.
 
 ### 4. Execution Cache Key
 

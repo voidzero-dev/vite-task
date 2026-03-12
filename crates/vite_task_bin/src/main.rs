@@ -34,7 +34,7 @@ async fn run() -> anyhow::Result<ExitStatus> {
                     cache_config: UserCacheConfig::with_config({
                         EnabledCacheConfig {
                             env: Some(Box::from([Str::from("FOO")])),
-                            pass_through_envs: None,
+                            untracked_env: None,
                             input: None,
                         }
                     }),

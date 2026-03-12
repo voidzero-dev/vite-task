@@ -22,20 +22,20 @@ steps = [
 ]
 
 [[e2e]]
-name = "pass-through env added"
+name = "untracked env added"
 steps = [
   "vp run test # cache miss",
-  "json-edit vite-task.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # add pass-through env",
-  "vp run test # cache miss: pass-through env added",
+  "json-edit vite-task.json \"_.tasks.test.untrackedEnv = ['MY_UNTRACKED']\" # add untracked env",
+  "vp run test # cache miss: untracked env added",
 ]
 
 [[e2e]]
-name = "pass-through env removed"
+name = "untracked env removed"
 steps = [
-  "json-edit vite-task.json \"_.tasks.test.passThroughEnvs = ['MY_PASSTHROUGH']\" # setup",
+  "json-edit vite-task.json \"_.tasks.test.untrackedEnv = ['MY_UNTRACKED']\" # setup",
   "vp run test # cache miss",
-  "json-edit vite-task.json \"delete _.tasks.test.passThroughEnvs\" # remove pass-through env",
-  "vp run test # cache miss: pass-through env removed",
+  "json-edit vite-task.json \"delete _.tasks.test.untrackedEnv\" # remove untracked env",
+  "vp run test # cache miss: untracked env removed",
 ]
 
 [[e2e]]

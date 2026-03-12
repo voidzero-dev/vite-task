@@ -8,9 +8,9 @@
       "command": "vp lint",
       "cache": true
     },
-    "lint-with-pass-through-envs": {
+    "lint-with-untracked-env": {
       "command": "vp lint",
-      "passThroughEnvs": ["CUSTOM_VAR"]
+      "untrackedEnv": ["CUSTOM_VAR"]
     },
     "build": {
       "command": "vp lint",

@@ -133,7 +133,7 @@ Tasks are defined in `vite-task.json`:
       "dependsOn": ["build", "package#task"],
       "cache": true,
       "env": ["NODE_ENV"],
-      "passThroughEnvs": ["CI"],
+      "untrackedEnv": ["CI"],
       "input": ["src/**", "!dist/**", { "auto": true }]
     }
   }
@@ -146,7 +146,7 @@ Tasks are defined in `vite-task.json`:
 - `dependsOn`: explicit task dependencies (`taskName` or `package#task`)
 - `cache` (task): enable/disable caching for this task (default: `true`)
 - `env`: env var names to fingerprint and pass to the task
-- `passThroughEnvs`: env var names to pass without fingerprinting
+- `untrackedEnv`: env var names to pass without fingerprinting
 - `input`: files for cache fingerprinting (globs, `{ "auto": true }`, negation patterns)
 
 ## Task Dependencies

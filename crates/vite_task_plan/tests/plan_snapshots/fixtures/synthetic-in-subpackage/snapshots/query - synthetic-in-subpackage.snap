@@ -70,8 +70,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-in-sub
                                 "args": [],
                                 "env_fingerprints": {
                                   "fingerprinted_envs": {},
-                                  "pass_through_env_config": [
-                                    "<default pass-through envs>"
+                                  "untracked_env_config": [
+                                    "<default untracked envs>"
                                   ]
                                 }
                               },

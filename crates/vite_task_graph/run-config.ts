@@ -26,7 +26,7 @@ export type Task = {
       /**
        * Environment variable names to be passed to the task without fingerprinting.
        */
-      passThroughEnvs?: Array<string>;
+      untrackedEnv?: Array<string>;
       /**
        * Files to include in the cache fingerprint.
        *

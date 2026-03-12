@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use cow_utils::CowUtils as _;
 use serde::Serialize;
-use vite_task_graph::config::DEFAULT_PASSTHROUGH_ENVS;
+use vite_task_graph::config::DEFAULT_UNTRACKED_ENV;
 
 fn visit_json(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json::Value)) {
     f(value);
@@ -162,21 +162,21 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
         let serde_json::Value::Array(array) = v else {
             return;
         };
-        let contains_all_default_pass_through_envs =
-            DEFAULT_PASSTHROUGH_ENVS.iter().all(|default_pass_through_envs| {
+        let contains_all_default_untracked_env =
+            DEFAULT_UNTRACKED_ENV.iter().all(|default_untracked_env| {
                 array.iter().any(|item| {
                     if let serde_json::Value::String(s) = item {
-                        s == *default_pass_through_envs
+                        s == *default_untracked_env
                     } else {
                         false
                     }
                 })
             });
-        // Remove default pass-through envs from snapshots to reduce noise
-        if contains_all_default_pass_through_envs {
+        // Remove default untracked envs from snapshots to reduce noise
+        if contains_all_default_untracked_env {
             array.retain(|item| {
                 if let serde_json::Value::String(s) = item {
-                    !DEFAULT_PASSTHROUGH_ENVS.contains(&s.as_str())
+                    !DEFAULT_UNTRACKED_ENV.contains(&s.as_str())
                 } else {
                     true
                 }
@@ -187,7 +187,7 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
                 let b_str = if let serde_json::Value::String(s) = b { s.as_str() } else { "" };
                 a_str.cmp(b_str)
             });
-            array.push(serde_json::Value::String("<default pass-through envs>".to_string()));
+            array.push(serde_json::Value::String("<default untracked envs>".to_string()));
         }
     });
 

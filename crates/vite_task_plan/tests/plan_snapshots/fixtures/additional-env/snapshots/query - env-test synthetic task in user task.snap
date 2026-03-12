@@ -47,9 +47,9 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-env
                     ],
                     "env_fingerprints": {
                       "fingerprinted_envs": {},
-                      "pass_through_env_config": [
+                      "untracked_env_config": [
                         "TEST_VAR",
-                        "<default pass-through envs>"
+                        "<default untracked envs>"
                       ]
                     }
                   },

@@ -11,8 +11,8 @@ name = "task with cache true enables synthetic cache"
 args = ["run", "lint-with-cache"]
 
 [[plan]]
-name = "task passThroughEnvs inherited by synthetic"
-args = ["run", "lint-with-pass-through-envs"]
+name = "task untrackedEnv inherited by synthetic"
+args = ["run", "lint-with-untracked-env"]
 
 [[plan]]
 name = "parent cache false does not affect expanded query tasks"

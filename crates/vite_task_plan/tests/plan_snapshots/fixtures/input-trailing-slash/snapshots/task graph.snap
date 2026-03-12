@@ -22,8 +22,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/input-trailing-s
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
+              "untracked_env": [
+                "<default untracked envs>"
               ]
             },
             "input_config": {

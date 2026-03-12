@@ -64,12 +64,9 @@ impl ResolvedTaskOptions {
         let cache_config = match user_options.cache_config {
             UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
             UserCacheConfig::Enabled { cache: _, enabled_cache_config } => {
-                let mut pass_through_envs: FxHashSet<Str> = enabled_cache_config
-                    .pass_through_envs
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect();
-                pass_through_envs.extend(DEFAULT_PASSTHROUGH_ENVS.iter().copied().map(Str::from));
+                let mut untracked_env: FxHashSet<Str> =
+                    enabled_cache_config.untracked_env.unwrap_or_default().into_iter().collect();
+                untracked_env.extend(DEFAULT_UNTRACKED_ENV.iter().copied().map(Str::from));
 
                 let input_config = ResolvedInputConfig::from_user_config(
                     enabled_cache_config.input.as_ref(),
@@ -83,7 +80,7 @@ impl ResolvedTaskOptions {
                             .env
                             .map(|e| e.into_vec().into_iter().collect())
                             .unwrap_or_default(),
-                        pass_through_envs,
+                        untracked_env,
                     },
                     input_config,
                 })
@@ -238,7 +235,7 @@ pub struct EnvConfig {
     /// environment variable names to be fingerprinted and passed to the task, with defaults populated
     pub fingerprinted_envs: FxHashSet<Str>,
     /// environment variable names to be passed to the task without fingerprinting, with defaults populated
-    pub pass_through_envs: FxHashSet<Str>,
+    pub untracked_env: FxHashSet<Str>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -305,7 +302,7 @@ impl ResolvedTaskConfig {
 // Referenced from Turborepo's implementation:
 // https://github.com/vercel/turborepo/blob/26d309f073ca3ac054109ba0c29c7e230e7caac3/crates/turborepo-lib/src/task_hash.rs#L439
 #[doc(hidden)] // exported for redacting snapshots in tests
-pub const DEFAULT_PASSTHROUGH_ENVS: &[&str] = &[
+pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     // System and shell
     "HOME",
     "USER",

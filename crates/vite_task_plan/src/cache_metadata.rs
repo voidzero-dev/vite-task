@@ -52,16 +52,16 @@ pub struct CacheMetadata {
 ///
 /// # Environment Variable Impact on Cache
 ///
-/// The `envs_without_pass_through` field is crucial for cache correctness:
+/// The `envs_without_untracked` field is crucial for cache correctness:
 /// - Only includes env vars explicitly declared in the task's `env` array
-/// - Does NOT include pass-through envs (PATH, CI, etc.)
+/// - Does NOT include untracked envs (PATH, CI, etc.)
 /// - These env vars become part of the cache key
 ///
 /// When a task runs:
-/// 1. All envs (including pass-through) are available to the process
+/// 1. All envs (including untracked) are available to the process
 /// 2. Only declared envs affect the cache key
 /// 3. If a declared env changes value, cache will miss
-/// 4. If a pass-through env changes, cache will still hit
+/// 4. If an untracked env changes, cache will still hit
 ///
 /// For built-in tasks (lint, build, etc):
 /// - The resolver provides envs which become part of the fingerprint

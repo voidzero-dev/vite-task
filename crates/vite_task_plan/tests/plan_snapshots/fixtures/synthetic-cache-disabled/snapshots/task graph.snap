@@ -22,8 +22,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
+              "untracked_env": [
+                "<default untracked envs>"
               ]
             },
             "input_config": {
@@ -56,8 +56,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
+              "untracked_env": [
+                "<default untracked envs>"
               ]
             },
             "input_config": {
@@ -112,8 +112,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
+              "untracked_env": [
+                "<default untracked envs>"
               ]
             },
             "input_config": {
@@ -131,12 +131,12 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
   {
     "key": [
       "<workspace>/",
-      "lint-with-pass-through-envs"
+      "lint-with-untracked-env"
     ],
     "node": {
       "task_display": {
         "package_name": "@test/synthetic-cache-disabled",
-        "task_name": "lint-with-pass-through-envs",
+        "task_name": "lint-with-untracked-env",
         "package_path": "<workspace>/"
       },
       "resolved_config": {
@@ -146,9 +146,9 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
-              "pass_through_envs": [
+              "untracked_env": [
                 "CUSTOM_VAR",
-                "<default pass-through envs>"
+                "<default untracked envs>"
               ]
             },
             "input_config": {
@@ -181,8 +181,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
-              "pass_through_envs": [
-                "<default pass-through envs>"
+              "untracked_env": [
+                "<default untracked envs>"
               ]
             },
             "input_config": {

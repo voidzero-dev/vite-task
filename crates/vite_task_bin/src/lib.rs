@@ -63,7 +63,7 @@ fn synthesize_node_modules_bin_task(
         args: args.into(),
         cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
             env: None,
-            pass_through_envs: None,
+            untracked_env: None,
             input: None,
         }),
         envs: Arc::clone(envs),
@@ -128,7 +128,7 @@ impl vite_task::CommandHandler for CommandHandler {
                     cache_config: UserCacheConfig::with_config({
                         EnabledCacheConfig {
                             env: None,
-                            pass_through_envs: Some(vec![name]),
+                            untracked_env: Some(vec![name]),
                             input: None,
                         }
                     }),

@@ -4,19 +4,19 @@ expression: "&plan_json"
 info:
   args:
     - run
-    - lint-with-pass-through-envs
+    - lint-with-untracked-env
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-disabled
 ---
 [
   {
     "key": [
       "<workspace>/",
-      "lint-with-pass-through-envs"
+      "lint-with-untracked-env"
     ],
     "node": {
       "task_display": {
         "package_name": "@test/synthetic-cache-disabled",
-        "task_name": "lint-with-pass-through-envs",
+        "task_name": "lint-with-untracked-env",
         "package_path": "<workspace>/"
       },
       "items": [
@@ -24,7 +24,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
           "execution_item_display": {
             "task_display": {
               "package_name": "@test/synthetic-cache-disabled",
-              "task_name": "lint-with-pass-through-envs",
+              "task_name": "lint-with-untracked-env",
               "package_path": "<workspace>/"
             },
             "command": "vp lint",
@@ -45,15 +45,15 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
                     "args": [],
                     "env_fingerprints": {
                       "fingerprinted_envs": {},
-                      "pass_through_env_config": [
+                      "untracked_env_config": [
                         "CUSTOM_VAR",
-                        "<default pass-through envs>"
+                        "<default untracked envs>"
                       ]
                     }
                   },
                   "execution_cache_key": {
                     "UserTask": {
-                      "task_name": "lint-with-pass-through-envs",
+                      "task_name": "lint-with-untracked-env",
                       "and_item_index": 0,
                       "extra_args": [],
                       "package_path": ""
