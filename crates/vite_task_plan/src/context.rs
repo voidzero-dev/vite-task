@@ -48,6 +48,12 @@ pub struct PlanContext<'a> {
     /// The query that caused the current expansion.
     /// Used by the skip rule to detect and skip duplicate nested expansions.
     parent_query: Arc<TaskQuery>,
+
+    /// Whether pre/post hook scripts should be expanded for the current task.
+    ///
+    /// Set to `false` when planning a hook script itself, so that hooks are
+    /// never expanded more than one level deep (matching npm behavior).
+    expand_hooks: bool,
 }
 
 impl<'a> PlanContext<'a> {
@@ -70,6 +76,7 @@ impl<'a> PlanContext<'a> {
             extra_args: Arc::default(),
             resolved_global_cache,
             parent_query,
+            expand_hooks: true,
         }
     }
 
@@ -150,6 +157,14 @@ impl<'a> PlanContext<'a> {
         self.task_call_stack.last().map(|(idx, _)| *idx)
     }
 
+    pub const fn expand_hooks(&self) -> bool {
+        self.expand_hooks
+    }
+
+    pub const fn set_expand_hooks(&mut self, expand_hooks: bool) {
+        self.expand_hooks = expand_hooks;
+    }
+
     pub fn duplicate(&mut self) -> PlanContext<'_> {
         PlanContext {
             workspace_path: self.workspace_path,
@@ -161,6 +176,7 @@ impl<'a> PlanContext<'a> {
             extra_args: Arc::clone(&self.extra_args),
             resolved_global_cache: self.resolved_global_cache,
             parent_query: Arc::clone(&self.parent_query),
+            expand_hooks: self.expand_hooks,
         }
     }
 }

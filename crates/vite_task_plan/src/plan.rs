@@ -101,8 +101,11 @@ async fn plan_task_as_execution_node(
     let mut items = Vec::<ExecutionItem>::new();
 
     // Expand pre/post hooks (`preX`/`postX`) for package.json scripts.
+    // Hooks are never expanded more than one level deep (matching npm behavior): when planning a
+    // hook script, `expand_hooks` is false so it won't look for its own pre/post hooks.
     // Resolve the flag once before any mutable borrow of `context` (duplicate() needs &mut).
-    let pre_post_scripts_enabled = context.indexed_task_graph().pre_post_scripts_enabled();
+    let pre_post_scripts_enabled =
+        context.expand_hooks() && context.indexed_task_graph().pre_post_scripts_enabled();
     let pre_hook_idx = if pre_post_scripts_enabled {
         context.indexed_task_graph().get_script_hook(task_node_index, "pre")
     } else {
@@ -112,6 +115,7 @@ async fn plan_task_as_execution_node(
         let mut pre_context = context.duplicate();
         // Extra args (e.g. `vt run test --coverage`) must not be forwarded to hooks.
         pre_context.set_extra_args(Arc::new([]));
+        pre_context.set_expand_hooks(false);
         let pre_execution =
             Box::pin(plan_task_as_execution_node(pre_hook_idx, pre_context)).await?;
         items.extend(pre_execution.items);
@@ -384,6 +388,7 @@ async fn plan_task_as_execution_node(
         let mut post_context = context.duplicate();
         // Extra args must not be forwarded to hooks.
         post_context.set_extra_args(Arc::new([]));
+        post_context.set_expand_hooks(false);
         let post_execution =
             Box::pin(plan_task_as_execution_node(post_hook_idx, post_context)).await?;
         items.extend(post_execution.items);

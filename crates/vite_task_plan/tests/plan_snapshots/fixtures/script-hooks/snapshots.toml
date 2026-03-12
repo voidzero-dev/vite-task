@@ -9,7 +9,7 @@ name = "build runs with pre hook only"
 args = ["run", "build"]
 
 [[plan]]
-name = "pretest directly has no hooks"
+name = "pretest directly expands prepretest but not when called as hook"
 args = ["run", "pretest"]
 
 [[plan]]
