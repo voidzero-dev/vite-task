@@ -50,7 +50,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cd-in-scripts
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "cd src && vp run build",
+        "command": "cd src && vt run build",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -84,7 +84,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cd-in-scripts
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "cd src && vp lint",
+        "command": "cd src && vt lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

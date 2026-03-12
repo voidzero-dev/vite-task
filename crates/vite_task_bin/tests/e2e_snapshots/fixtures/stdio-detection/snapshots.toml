@@ -14,22 +14,22 @@
 name = "single task, cache disabled"
 # Expect: all stdio inherited from terminal (tty)
 steps = [
-  "vp run check-tty",
+  "vt run check-tty",
 ]
 
 [[e2e]]
 name = "single task, cache miss"
 # Expect: stdio piped for cache capture (not-tty)
 steps = [
-  "vp run check-tty-cached",
+  "vt run check-tty-cached",
 ]
 
 [[e2e]]
 name = "single task, cache hit"
 # Expect: first run is a miss (not-tty), second run replays cached output
 steps = [
-  "vp run check-tty-cached",
-  "vp run check-tty-cached",
+  "vt run check-tty-cached",
+  "vt run check-tty-cached",
 ]
 
 # ─── Multiple tasks (-r) ────────────────────────────────────────
@@ -38,20 +38,20 @@ steps = [
 name = "multiple tasks, cache disabled"
 # Expect: stdio piped for labeled output (not-tty)
 steps = [
-  "vp run -r check-tty",
+  "vt run -r check-tty",
 ]
 
 [[e2e]]
 name = "multiple tasks, cache miss"
 # Expect: stdio piped (not-tty)
 steps = [
-  "vp run -r check-tty-cached",
+  "vt run -r check-tty-cached",
 ]
 
 [[e2e]]
 name = "multiple tasks, cache hit"
 # Expect: first run is a miss (not-tty), second run replays cached output
 steps = [
-  "vp run -r check-tty-cached",
-  "vp run -r check-tty-cached",
+  "vt run -r check-tty-cached",
+  "vt run -r check-tty-cached",
 ]

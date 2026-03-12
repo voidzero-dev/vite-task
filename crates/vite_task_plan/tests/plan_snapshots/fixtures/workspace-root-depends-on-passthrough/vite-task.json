@@ -2,7 +2,7 @@
   "cache": true,
   "tasks": {
     "build": {
-      "command": "vp run -r build",
+      "command": "vt run -r build",
       "dependsOn": ["lint"]
     }
   }

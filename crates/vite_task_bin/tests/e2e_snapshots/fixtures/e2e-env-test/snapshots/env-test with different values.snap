@@ -2,9 +2,9 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run env-test -- FOO bar # sets FOO=bar
-$ vp env-test FOO bar
+> vt run env-test -- FOO bar # sets FOO=bar
+$ vt env-test FOO bar
 bar
-> vp run env-test -- BAZ qux # sets BAZ=qux
-$ vp env-test BAZ qux
+> vt run env-test -- BAZ qux # sets BAZ=qux
+$ vt env-test BAZ qux
 qux

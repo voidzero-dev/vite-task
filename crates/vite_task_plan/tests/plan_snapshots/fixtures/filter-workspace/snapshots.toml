@@ -193,10 +193,10 @@ compact = true
 name = "exclude nonexistent package"
 args = ["run", "--filter", "!nonexistent", "build"]
 
-# script containing "vp run --filter .... build" — expanded in plan
+# script containing "vt run --filter .... build" — expanded in plan
 [[plan]]
 compact = true
-name = "nested vp run with filter in script"
+name = "nested vt run with filter in script"
 args = ["run", "--filter", "@test/app", "deploy"]
 
 # -w / --workspace-root: run task on workspace root package only

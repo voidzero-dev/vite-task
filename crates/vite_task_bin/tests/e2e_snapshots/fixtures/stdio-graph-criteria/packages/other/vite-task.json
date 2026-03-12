@@ -9,7 +9,7 @@
       "cache": false
     },
     "foo-nested": {
-      "command": "vp run bar",
+      "command": "vt run bar",
       "cache": false
     }
   }

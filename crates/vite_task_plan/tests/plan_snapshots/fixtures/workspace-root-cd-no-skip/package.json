@@ -2,6 +2,6 @@
   "name": "test-workspace",
   "private": true,
   "scripts": {
-    "deploy": "cd packages/a && vp run deploy"
+    "deploy": "cd packages/a && vt run deploy"
   }
 }

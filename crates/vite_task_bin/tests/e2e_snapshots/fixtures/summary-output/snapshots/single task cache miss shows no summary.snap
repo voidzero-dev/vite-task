@@ -4,6 +4,6 @@ expression: e2e_outputs
 info:
   cwd: packages/a
 ---
-> vp run build
+> vt run build
 ~/packages/a$ print built-a
 built-a

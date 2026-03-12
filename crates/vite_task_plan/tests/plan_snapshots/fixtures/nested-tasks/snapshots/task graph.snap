@@ -50,7 +50,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-tasks
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp run script1",
+        "command": "vt run script1",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

@@ -3,5 +3,5 @@
 [[e2e]]
 name = "cycle dependency error"
 steps = [
-  "vp run task-a # task-a -> task-b -> task-a cycle",
+  "vt run task-a # task-a -> task-b -> task-a cycle",
 ]

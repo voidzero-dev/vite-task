@@ -1,5 +1,5 @@
 {
   "scripts": {
-    "lint": "vp lint"
+    "lint": "vt lint"
   }
 }

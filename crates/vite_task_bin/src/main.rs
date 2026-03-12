@@ -6,7 +6,7 @@ use vite_task::{
     EnabledCacheConfig, ExitStatus, Session, UserCacheConfig, get_path_env,
     plan_request::SyntheticPlanRequest,
 };
-use vite_task_bin::{Args, OwnedSessionCallbacks, find_executable};
+use vite_task_bin::{Args, OwnedSessionConfig, find_executable};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
@@ -18,8 +18,8 @@ async fn main() -> anyhow::Result<ExitCode> {
 #[expect(clippy::future_not_send, reason = "Session contains !Send types; single-threaded runtime")]
 async fn run() -> anyhow::Result<ExitStatus> {
     let args = Args::parse();
-    let mut owned_callbacks = OwnedSessionCallbacks::default();
-    let session = Session::init(owned_callbacks.as_callbacks())?;
+    let mut owned_config = OwnedSessionConfig::default();
+    let session = Session::init(owned_config.as_config())?;
     match args {
         Args::Task(parsed) => session.main(parsed).await,
         args => {

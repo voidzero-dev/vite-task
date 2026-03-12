@@ -2,13 +2,13 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run list-tasks
+> vt run list-tasks
 @ expect-milestone: task-select::0
-$ vp run ⊘ cache disabled
+$ vt run ⊘ cache disabled
 Select a task (↑/↓, Enter to run, type to search):
 
   › hello        echo hello from root
-    list-tasks   vp run
+    list-tasks   vt run
     app (packages/app)
       build      echo build app
       lint       echo lint app
@@ -16,7 +16,7 @@ Select a task (↑/↓, Enter to run, type to search):
     lib (packages/lib)
       build      echo build lib
 @ write-key: enter
-$ vp run ⊘ cache disabled
+$ vt run ⊘ cache disabled
 Selected task: hello
 $ echo hello from root ⊘ cache disabled
 hello from root

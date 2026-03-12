@@ -2,6 +2,6 @@
   "name": "test-workspace",
   "private": true,
   "scripts": {
-    "build": "vp run -r build"
+    "build": "vt run -r build"
   }
 }

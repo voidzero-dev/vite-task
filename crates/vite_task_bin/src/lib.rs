@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
-    Command, EnabledCacheConfig, HandledCommand, ScriptCommand, SessionCallbacks, UserCacheConfig,
+    Command, EnabledCacheConfig, HandledCommand, ScriptCommand, SessionConfig, UserCacheConfig,
     get_path_env, plan_request::SyntheticPlanRequest,
 };
 
@@ -71,7 +71,7 @@ fn synthesize_node_modules_bin_task(
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "vp", version)]
+#[command(name = "vt", version)]
 pub enum Args {
     Lint {
         #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -96,10 +96,10 @@ impl vite_task::CommandHandler for CommandHandler {
         command: &mut ScriptCommand,
     ) -> anyhow::Result<HandledCommand> {
         match command.program.as_str() {
-            "vp" => {}
-            // `vpr <args>` is shorthand for `vp run <args>`
+            "vt" | "vp" => {}
+            // `vpr <args>` is shorthand for `vt run <args>`
             "vpr" => {
-                command.program = Str::from("vp");
+                command.program = Str::from("vt");
                 command.args =
                     iter::once(Str::from("run")).chain(command.args.iter().cloned()).collect();
             }
@@ -171,16 +171,17 @@ impl vite_task::loader::UserConfigLoader for JsonUserConfigLoader {
 }
 
 #[derive(Default)]
-pub struct OwnedSessionCallbacks {
+pub struct OwnedSessionConfig {
     command_handler: CommandHandler,
     user_config_loader: JsonUserConfigLoader,
 }
 
-impl OwnedSessionCallbacks {
-    pub fn as_callbacks(&mut self) -> SessionCallbacks<'_> {
-        SessionCallbacks {
+impl OwnedSessionConfig {
+    pub fn as_config(&mut self) -> SessionConfig<'_> {
+        SessionConfig {
             command_handler: &mut self.command_handler,
             user_config_loader: &mut self.user_config_loader,
+            program_name: Str::from("vt"),
         }
     }
 }

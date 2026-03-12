@@ -2,16 +2,16 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run sub-pkg#dotdot-positive-negative
+> vt run sub-pkg#dotdot-positive-negative
 ~/packages/sub-pkg$ print-file ../shared/src/utils.ts ../shared/dist/output.js
 export const shared = 'initial';
 // initial output
 > replace-file-content packages/shared/dist/output.js initial modified
 
-> vp run sub-pkg#dotdot-positive-negative
+> vt run sub-pkg#dotdot-positive-negative
 ~/packages/sub-pkg$ print-file ../shared/src/utils.ts ../shared/dist/output.js ✓ cache hit, replaying
 export const shared = 'initial';
 // initial output
 
 ---
-vp run: cache hit, <duration> saved.
+vt run: cache hit, <duration> saved.

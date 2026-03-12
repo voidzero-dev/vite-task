@@ -4,10 +4,10 @@ expression: e2e_outputs
 info:
   cwd: packages/a
 ---
-> vp run build # populate summary file
+> vt run build # populate summary file
 ~/packages/a$ print built-a
 built-a
-> vp run --last-details # display saved summary
+> vt run --last-details # display saved summary
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Vite+ Task Runner • Execution Summary

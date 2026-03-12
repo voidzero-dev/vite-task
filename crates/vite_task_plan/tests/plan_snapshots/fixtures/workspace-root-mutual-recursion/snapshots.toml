@@ -1,4 +1,4 @@
-# Tests mutual recursion detection: root#build → vp run -r test → root#test → vp run -r build → root#build
+# Tests mutual recursion detection: root#build → vt run -r test → root#test → vt run -r build → root#build
 # This is NOT self-recursion — it's caught by check_recursion as mutual recursion.
 
 [[plan]]

@@ -2,14 +2,14 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run sub-pkg#dotdot-positive
+> vt run sub-pkg#dotdot-positive
 ~/packages/sub-pkg$ print-file ../shared/src/utils.ts
 export const shared = 'initial';
 > replace-file-content packages/shared/dist/output.js initial modified
 
-> vp run sub-pkg#dotdot-positive
+> vt run sub-pkg#dotdot-positive
 ~/packages/sub-pkg$ print-file ../shared/src/utils.ts ✓ cache hit, replaying
 export const shared = 'initial';
 
 ---
-vp run: cache hit, <duration> saved.
+vt run: cache hit, <duration> saved.

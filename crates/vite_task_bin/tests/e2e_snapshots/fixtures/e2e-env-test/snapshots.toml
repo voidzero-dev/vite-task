@@ -3,12 +3,12 @@
 [[e2e]]
 name = "env-test prints value from additional_envs"
 steps = [
-  "vp run env-test -- SYNTHETIC_ENV_VAR test_value_from_synthesizer # prints env value",
+  "vt run env-test -- SYNTHETIC_ENV_VAR test_value_from_synthesizer # prints env value",
 ]
 
 [[e2e]]
 name = "env-test with different values"
 steps = [
-  "vp run env-test -- FOO bar # sets FOO=bar",
-  "vp run env-test -- BAZ qux # sets BAZ=qux",
+  "vt run env-test -- FOO bar # sets FOO=bar",
+  "vt run env-test -- BAZ qux # sets BAZ=qux",
 ]

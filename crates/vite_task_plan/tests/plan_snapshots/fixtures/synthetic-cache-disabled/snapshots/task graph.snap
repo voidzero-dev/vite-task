@@ -16,7 +16,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp lint",
+        "command": "vt lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -50,7 +50,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp lint",
+        "command": "vt lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -84,7 +84,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp lint",
+        "command": "vt lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": null
@@ -106,7 +106,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp lint",
+        "command": "vt lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -140,7 +140,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp lint",
+        "command": "vt lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -175,7 +175,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp run build",
+        "command": "vt run build",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -209,7 +209,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp run build",
+        "command": "vt run build",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": null

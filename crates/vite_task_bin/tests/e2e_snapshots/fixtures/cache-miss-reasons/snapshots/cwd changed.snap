@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run test # cache miss
+> vt run test # cache miss
 $ print-file test.txt
 initial content
 > mkdir -p subfolder
@@ -11,6 +11,6 @@ initial content
 
 > json-edit vite-task.json "_.tasks.test.cwd = 'subfolder'" # change cwd
 
-> vp run test # cache miss: cwd changed
+> vt run test # cache miss: cwd changed
 ~/subfolder$ print-file test.txt ✗ cache miss: working directory changed, executing
 initial content

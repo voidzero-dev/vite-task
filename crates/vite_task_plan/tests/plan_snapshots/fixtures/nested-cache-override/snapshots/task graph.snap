@@ -50,7 +50,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp run --cache inner",
+        "command": "vt run --cache inner",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -84,7 +84,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp run inner",
+        "command": "vt run inner",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -118,7 +118,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp run --no-cache inner",
+        "command": "vt run --no-cache inner",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

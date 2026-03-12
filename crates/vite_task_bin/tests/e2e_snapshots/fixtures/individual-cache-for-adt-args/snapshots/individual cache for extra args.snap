@@ -2,21 +2,21 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run say a # cache miss
+> vt run say a # cache miss
 $ print a
 a
-> vp run say b # cache miss, different args
+> vt run say b # cache miss, different args
 $ print b
 b
-> vp run say a # cache hit
+> vt run say a # cache hit
 $ print a ✓ cache hit, replaying
 a
 
 ---
-vp run: cache hit, <duration> saved.
-> vp run say b # cache hit
+vt run: cache hit, <duration> saved.
+> vt run say b # cache hit
 $ print b ✓ cache hit, replaying
 b
 
 ---
-vp run: cache hit, <duration> saved.
+vt run: cache hit, <duration> saved.

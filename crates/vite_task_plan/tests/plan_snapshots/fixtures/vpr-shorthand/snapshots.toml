@@ -1,4 +1,4 @@
 [[plan]]
-name = "vpr expands to vp run"
+name = "vpr expands to vt run"
 args = ["run", "all"]
 compact = true

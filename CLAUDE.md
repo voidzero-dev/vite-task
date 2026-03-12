@@ -74,19 +74,19 @@ Test fixtures and snapshots:
 
 ```bash
 # Run a task defined in vite-task.json
-vp run <task>                        # run task in current package
-vp run <package>#<task>              # run task in specific package
-vp run <task> -r                     # run task in all packages (recursive)
-vp run <task> -t                     # run task in current package + transitive deps
-vp run <task> -- --extra --args      # pass extra args to the task command
-vp run                               # interactive task selector (fuzzy search)
+vt run <task>                        # run task in current package
+vt run <package>#<task>              # run task in specific package
+vt run <task> -r                     # run task in all packages (recursive)
+vt run <task> -t                     # run task in current package + transitive deps
+vt run <task> -- --extra --args      # pass extra args to the task command
+vt run                               # interactive task selector (fuzzy search)
 
 # Built-in commands (run tools from node_modules/.bin)
-vp test [args...]                    # run vitest
-vp lint [args...]                    # run oxlint
+vt test [args...]                    # run vitest
+vt lint [args...]                    # run oxlint
 
 # Cache management
-vp cache clean                       # remove the cache database
+vt cache clean                       # remove the cache database
 
 # Package selection flags
 -r, --recursive                      # select all packages in the workspace
@@ -113,7 +113,7 @@ vp cache clean                       # remove the cache database
 ## Key Architecture
 
 - **vite_task** - Main task runner with caching and session management
-- **vite_task_bin** - CLI binary (`vp` command) and task synthesizer
+- **vite_task_bin** - CLI binary (`vt` command) and task synthesizer
 - **vite_task_graph** - Task dependency graph construction and config loading
 - **vite_task_plan** - Execution planning (resolves env vars, working dirs, commands)
 - **vite_workspace** - Workspace detection and package dependency graph

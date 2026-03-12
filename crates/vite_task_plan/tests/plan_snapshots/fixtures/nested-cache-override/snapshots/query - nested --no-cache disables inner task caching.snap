@@ -27,7 +27,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
               "task_name": "outer-no-cache",
               "package_path": "<workspace>/"
             },
-            "command": "vp run --no-cache inner",
+            "command": "vt run --no-cache inner",
             "and_item_index": null,
             "cwd": "<workspace>/"
           },

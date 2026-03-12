@@ -2,11 +2,11 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run test # cache miss
+> vt run test # cache miss
 $ print-file test.txt
 initial content
 > json-edit vite-task.json "_.tasks.test.input = ['test.txt']" # change input config
 
-> vp run test # cache miss: configuration changed
+> vt run test # cache miss: configuration changed
 $ print-file test.txt ✗ cache miss: input configuration changed, executing
 initial content

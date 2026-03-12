@@ -2,10 +2,10 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> echo from-stdin | vp run -r read-stdin
+> echo from-stdin | vt run -r read-stdin
 ~/packages/other$ read-stdin
 
 $ read-stdin ⊘ cache disabled
 
 ---
-vp run: 0/2 cache hit (0%). (Run `vp run --last-details` for full details)
+vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)

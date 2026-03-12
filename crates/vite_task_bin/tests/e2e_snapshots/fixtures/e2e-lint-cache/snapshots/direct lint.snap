@@ -2,14 +2,14 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run lint # cache miss
-$ vp lint
+> vt run lint # cache miss
+$ vt lint
 Found 0 warnings and 0 errors.
 Finished in <duration> on 0 files with 90 rules using <n> threads.
 > echo debugger > main.js # add lint error
 
-> vp run lint # cache miss, lint fails
-$ vp lint ✗ cache miss: 'main.js' added in workspace root, executing
+> vt run lint # cache miss, lint fails
+$ vt lint ✗ cache miss: 'main.js' added in workspace root, executing
 
   ! eslint(no-debugger): `debugger` statement is not allowed
    ,-[main.js:1:1]

@@ -2,17 +2,17 @@
 name = "list tasks from package dir"
 cwd = "packages/app"
 steps = [
-  "echo '' | vp run",
+  "echo '' | vt run",
 ]
 
 [[e2e]]
 name = "list tasks from workspace root"
 steps = [
-  "echo '' | vp run",
+  "echo '' | vt run",
 ]
 
 [[e2e]]
-name = "vp run in script"
+name = "vt run in script"
 steps = [
-  { command = "vp run list-tasks", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
+  { command = "vt run list-tasks", interactions = [{ "expect-milestone" = "task-select::0" }, { "write-key" = "enter" }] },
 ]

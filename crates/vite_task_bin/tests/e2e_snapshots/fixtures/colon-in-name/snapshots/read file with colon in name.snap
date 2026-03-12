@@ -2,10 +2,10 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run read_colon_in_name # cache miss
+> vt run read_colon_in_name # cache miss
 $ node read_node_fs.js
-> vp run read_colon_in_name # cache hit
+> vt run read_colon_in_name # cache hit
 $ node read_node_fs.js ✓ cache hit, replaying
 
 ---
-vp run: cache hit, <duration> saved.
+vt run: cache hit, <duration> saved.

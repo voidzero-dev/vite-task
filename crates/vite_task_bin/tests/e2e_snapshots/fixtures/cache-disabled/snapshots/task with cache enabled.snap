@@ -2,12 +2,12 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run cached-task # cache miss
+> vt run cached-task # cache miss
 $ print-file test.txt
 test content
-> vp run cached-task # cache hit
+> vt run cached-task # cache hit
 $ print-file test.txt ✓ cache hit, replaying
 test content
 
 ---
-vp run: cache hit, <duration> saved.
+vt run: cache hit, <duration> saved.

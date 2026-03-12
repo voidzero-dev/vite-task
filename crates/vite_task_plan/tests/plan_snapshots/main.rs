@@ -22,7 +22,7 @@ use vite_workspace::find_workspace_root;
 
 /// Local parser wrapper for `BuiltInCommand`
 #[derive(Parser)]
-#[command(name = "vp")]
+#[command(name = "vt")]
 enum Cli {
     #[clap(flatten)]
     Command(Command),
@@ -194,11 +194,11 @@ fn run_case_inner(
 
     runtime.block_on(async {
         let workspace_root_str = workspace_root.path.as_path().to_str().unwrap();
-        let mut owned_callbacks = vite_task_bin::OwnedSessionCallbacks::default();
+        let mut owned_config = vite_task_bin::OwnedSessionConfig::default();
         let mut session = Session::init_with(
             plan_envs,
             Arc::clone(&workspace_root.path),
-            owned_callbacks.as_callbacks(),
+            owned_config.as_config(),
         )
         .unwrap();
 
@@ -239,7 +239,7 @@ fn run_case_inner(
             let _guard = case_settings.bind_to_scope();
 
             let cli = match Cli::try_parse_from(
-                std::iter::once("vp") // dummy program name
+                std::iter::once("vt") // dummy program name
                     .chain(plan.args.iter().map(vite_str::Str::as_str)),
             ) {
                 Ok(ok) => ok,

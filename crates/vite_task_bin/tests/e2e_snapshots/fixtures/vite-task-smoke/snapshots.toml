@@ -3,7 +3,7 @@
 [[e2e]]
 name = "cache hit after file modification"
 steps = [
-  "vp run test-task # cache miss",
+  "vt run test-task # cache miss",
   "replace-file-content main.js foo bar # modify input file",
-  "vp run test-task # cache miss, main.js changed",
+  "vt run test-task # cache miss, main.js changed",
 ]

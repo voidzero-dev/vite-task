@@ -1,6 +1,6 @@
-# Tests nested vp run resolution
+# Tests nested vt run resolution
 
 [[plan]]
-name = "nested vp run"
+name = "nested vt run"
 args = ["run", "script2"]
 compact = true

@@ -4,12 +4,12 @@ expression: e2e_outputs
 info:
   cwd: packages/a
 ---
-> vp run build # first run, cache miss
+> vt run build # first run, cache miss
 ~/packages/a$ print built-a
 built-a
-> vp run build # second run, cache hit → compact summary
+> vt run build # second run, cache hit → compact summary
 ~/packages/a$ print built-a ✓ cache hit, replaying
 built-a
 
 ---
-vp run: cache hit, <duration> saved.
+vt run: cache hit, <duration> saved.

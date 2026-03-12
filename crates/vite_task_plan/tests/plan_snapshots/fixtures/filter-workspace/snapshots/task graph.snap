@@ -118,7 +118,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/filter-workspace
         "package_path": "<workspace>/packages/app"
       },
       "resolved_config": {
-        "command": "vp run --filter .... build",
+        "command": "vt run --filter .... build",
         "resolved_options": {
           "cwd": "<workspace>/packages/app",
           "cache_config": {

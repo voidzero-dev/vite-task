@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "vp"
+name = "vt"
 path = "src/main.rs"
 
 [dependencies]

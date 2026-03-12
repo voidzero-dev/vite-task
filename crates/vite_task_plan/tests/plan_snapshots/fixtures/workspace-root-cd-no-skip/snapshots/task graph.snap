@@ -16,7 +16,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-c
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "cd packages/a && vp run deploy",
+        "command": "cd packages/a && vt run deploy",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

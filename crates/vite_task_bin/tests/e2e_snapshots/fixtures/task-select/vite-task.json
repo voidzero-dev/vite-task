@@ -19,7 +19,7 @@
       "command": "echo hello from root"
     },
     "run-typo-task": {
-      "command": "vp run nonexistent-xyz"
+      "command": "vt run nonexistent-xyz"
     },
     "validate": {
       "command": "echo validate root"

@@ -10,11 +10,11 @@
       "cache": false
     },
     "foo": {
-      "command": "check-tty && vp run bar && vp run -r check-tty",
+      "command": "check-tty && vt run bar && vt run -r check-tty",
       "cache": false
     },
     "foo-nested": {
-      "command": "vp run bar",
+      "command": "vt run bar",
       "cache": false
     }
   }

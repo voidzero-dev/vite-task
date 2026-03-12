@@ -4,7 +4,7 @@ expression: e2e_outputs
 info:
   cwd: packages/lib
 ---
-> vp run
+> vt run
 @ expect-milestone: task-select::0
 Select a task (↑/↓, Enter to run, type to search):
 

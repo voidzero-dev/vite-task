@@ -59,6 +59,7 @@ pub struct LabeledReporterBuilder {
     /// Callback to persist the summary (e.g., write `last-summary.json`).
     /// `None` when persistence is not needed (e.g., nested script execution, tests).
     write_summary: Option<WriteSummaryFn>,
+    program_name: Str,
 }
 
 impl LabeledReporterBuilder {
@@ -68,13 +69,15 @@ impl LabeledReporterBuilder {
     /// - `writer`: Async writer for reporter display output.
     /// - `show_details`: Whether to render the full detailed summary.
     /// - `write_summary`: Callback to persist the summary, or `None` to skip.
+    /// - `program_name`: The CLI binary name (e.g. `"vt"`) used in summary output.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn AsyncWrite + Unpin>,
         show_details: bool,
         write_summary: Option<WriteSummaryFn>,
+        program_name: Str,
     ) -> Self {
-        Self { workspace_path, writer, show_details, write_summary }
+        Self { workspace_path, writer, show_details, write_summary, program_name }
     }
 }
 
@@ -87,6 +90,7 @@ impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
             workspace_path: self.workspace_path,
             show_details: self.show_details,
             write_summary: self.write_summary,
+            program_name: self.program_name,
         })
     }
 }
@@ -101,6 +105,7 @@ pub struct LabeledGraphReporter {
     workspace_path: Arc<AbsolutePath>,
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
+    program_name: Str,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -177,7 +182,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         let summary_buf = if self.show_details {
             format_full_summary(&summary)
         } else {
-            format_compact_summary(&summary)
+            format_compact_summary(&summary, &self.program_name)
         };
 
         // Persist summary via callback (best-effort, callback handles errors).
@@ -331,6 +336,7 @@ mod tests {
             Box::new(tokio::io::sink()),
             false,
             None,
+            Str::from("vt"),
         ));
         let mut reporter = builder.build();
         reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node)

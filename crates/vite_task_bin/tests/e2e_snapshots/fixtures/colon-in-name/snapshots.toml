@@ -3,6 +3,6 @@
 [[e2e]]
 name = "read file with colon in name"
 steps = [
-  "vp run read_colon_in_name # cache miss",
-  "vp run read_colon_in_name # cache hit",
+  "vt run read_colon_in_name # cache miss",
+  "vt run read_colon_in_name # cache hit",
 ]

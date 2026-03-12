@@ -1,23 +1,23 @@
 {
   "tasks": {
     "lint-no-cache": {
-      "command": "vp lint",
+      "command": "vt lint",
       "cache": false
     },
     "lint-with-cache": {
-      "command": "vp lint",
+      "command": "vt lint",
       "cache": true
     },
     "lint-with-untracked-env": {
-      "command": "vp lint",
+      "command": "vt lint",
       "untrackedEnv": ["CUSTOM_VAR"]
     },
     "build": {
-      "command": "vp lint",
+      "command": "vt lint",
       "cache": true
     },
     "run-build-no-cache": {
-      "command": "vp run build",
+      "command": "vt run build",
       "cache": false
     }
   }

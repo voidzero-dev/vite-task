@@ -4,5 +4,5 @@ expression: e2e_outputs
 info:
   cwd: packages/app
 ---
-[1]> vp run -t buid
+[1]> vt run -t buid
 Error: Task "buid" not found

@@ -79,9 +79,10 @@ impl TaskGraphLoader for LazyTaskGraph<'_> {
     }
 }
 
-pub struct SessionCallbacks<'a> {
+pub struct SessionConfig<'a> {
     pub command_handler: &'a mut (dyn CommandHandler + 'a),
     pub user_config_loader: &'a mut (dyn UserConfigLoader + 'a),
+    pub program_name: Str,
 }
 
 /// The result of a [`CommandHandler::handle_command`] call.
@@ -162,8 +163,10 @@ pub struct Session<'a> {
 
     plan_request_parser: PlanRequestParser<'a>,
 
+    program_name: Str,
+
     /// Cache is lazily initialized to avoid `SQLite` race conditions when multiple
-    /// processes (e.g., parallel `vp lib` commands) start simultaneously.
+    /// processes (e.g., parallel `vt lib` commands) start simultaneously.
     cache: OnceCell<ExecutionCache>,
     cache_path: AbsolutePathBuf,
 }
@@ -185,11 +188,11 @@ impl<'a> Session<'a> {
     /// Returns an error if the current directory cannot be determined or
     /// if workspace initialization fails.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn init(callbacks: SessionCallbacks<'a>) -> anyhow::Result<Self> {
+    pub fn init(config: SessionConfig<'a>) -> anyhow::Result<Self> {
         let envs = std::env::vars_os()
             .map(|(k, v)| (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str())))
             .collect();
-        Self::init_with(envs, vite_path::current_dir()?.into(), callbacks)
+        Self::init_with(envs, vite_path::current_dir()?.into(), config)
     }
 
     /// Ensures the task graph is loaded, loading it if necessary.
@@ -221,7 +224,7 @@ impl<'a> Session<'a> {
     pub fn init_with(
         mut envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
         cwd: Arc<AbsolutePath>,
-        callbacks: SessionCallbacks<'a>,
+        config: SessionConfig<'a>,
     ) -> anyhow::Result<Self> {
         let (workspace_root, _) = find_workspace_root(&cwd)?;
         let cache_path = get_cache_path_of_workspace(&workspace_root.path);
@@ -235,11 +238,12 @@ impl<'a> Session<'a> {
             workspace_path: Arc::clone(&workspace_root.path),
             lazy_task_graph: LazyTaskGraph::Uninitialized {
                 workspace_root,
-                config_loader: callbacks.user_config_loader,
+                config_loader: config.user_config_loader,
             },
             envs: Arc::new(envs),
             cwd,
-            plan_request_parser: PlanRequestParser { command_handler: callbacks.command_handler },
+            plan_request_parser: PlanRequestParser { command_handler: config.command_handler },
+            program_name: config.program_name,
             cache: OnceCell::new(),
             cache_path,
         })
@@ -317,6 +321,7 @@ impl<'a> Session<'a> {
                     Box::new(tokio::io::stdout()),
                     run_command.flags.verbose,
                     Some(self.make_summary_writer()),
+                    self.program_name.clone(),
                 );
                 self.execute_graph(graph, Box::new(builder)).await.map_err(SessionError::EarlyExit)
             }
@@ -688,7 +693,7 @@ impl<'a> Session<'a> {
             Err(error) => {
                 return Err(vite_task_plan::Error::ParsePlanRequest {
                     error: error.into(),
-                    program: Str::from("vp"),
+                    program: self.program_name.clone(),
                     args: Arc::default(),
                     cwd: Arc::clone(&cwd),
                 });

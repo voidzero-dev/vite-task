@@ -1,5 +1,5 @@
-# Tests that `cd` before `vp run` prevents the skip rule from firing.
-# Root deploy = `cd packages/a && vp run deploy`.
+# Tests that `cd` before `vt run` prevents the skip rule from firing.
+# Root deploy = `cd packages/a && vt run deploy`.
 #
 # The skip rule compares TaskQuery, which includes ContainingPackage(cwd).
 # After `cd packages/a`, the cwd changes, so the nested query resolves to

@@ -23,7 +23,7 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(20);
 /// Screen size for the PTY terminal. Large enough to avoid line wrapping.
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
 
-const COMPILE_TIME_VP_PATH: &str = env!("CARGO_BIN_EXE_vp");
+const COMPILE_TIME_VT_PATH: &str = env!("CARGO_BIN_EXE_vt");
 const COMPILE_TIME_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Get the shell executable for running e2e test steps.
@@ -58,10 +58,10 @@ fn get_shell_exe() -> std::path::PathBuf {
 
 #[expect(
     clippy::disallowed_types,
-    reason = "PathBuf required for compile-time/runtime vp path remapping"
+    reason = "PathBuf required for compile-time/runtime vt path remapping"
 )]
-fn resolve_runtime_vp_path() -> AbsolutePathBuf {
-    let compile_time_vp = std::path::PathBuf::from(COMPILE_TIME_VP_PATH);
+fn resolve_runtime_vt_path() -> AbsolutePathBuf {
+    let compile_time_vt = std::path::PathBuf::from(COMPILE_TIME_VT_PATH);
     let compile_time_manifest = std::path::PathBuf::from(COMPILE_TIME_MANIFEST_DIR);
     let runtime_manifest =
         std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
@@ -69,23 +69,23 @@ fn resolve_runtime_vp_path() -> AbsolutePathBuf {
     let compile_time_repo_root = compile_time_manifest.parent().unwrap().parent().unwrap();
     let runtime_repo_root = runtime_manifest.parent().unwrap().parent().unwrap();
 
-    let relative_vp = diff_paths(&compile_time_vp, compile_time_repo_root).unwrap_or_else(|| {
+    let relative_vt = diff_paths(&compile_time_vt, compile_time_repo_root).unwrap_or_else(|| {
         panic!(
-            "Failed to diff vp path. vp={} repo_root={}",
-            compile_time_vp.display(),
+            "Failed to diff vt path. vt={} repo_root={}",
+            compile_time_vt.display(),
             compile_time_repo_root.display(),
         )
     });
-    let runtime_vp = runtime_repo_root.join(&relative_vp);
+    let runtime_vt = runtime_repo_root.join(&relative_vt);
 
     assert!(
-        runtime_vp.exists(),
-        "Remapped vp path does not exist: {} (relative: {})",
-        runtime_vp.display(),
-        relative_vp.display(),
+        runtime_vt.exists(),
+        "Remapped vt path does not exist: {} (relative: {})",
+        runtime_vt.display(),
+        relative_vt.display(),
     );
 
-    AbsolutePathBuf::new(runtime_vp).unwrap()
+    AbsolutePathBuf::new(runtime_vt).unwrap()
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -279,11 +279,11 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
     // Prepare PATH for e2e tests
     let e2e_env_path = join_paths(
         [
-            // Include vp binary path to PATH so that e2e tests can run "vp ..." commands.
+            // Include vt binary path to PATH so that e2e tests can run "vt ..." commands.
             {
-                let vp_path = resolve_runtime_vp_path();
-                let vp_dir = vp_path.parent().unwrap();
-                vp_dir.as_path().as_os_str().into()
+                let vt_path = resolve_runtime_vt_path();
+                let vt_dir = vt_path.parent().unwrap();
+                vt_dir.as_path().as_os_str().into()
             },
             // Include packages/tools to PATH so that e2e tests can run utilities such as replace-file-content.
             test_bin_path,

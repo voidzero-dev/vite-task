@@ -7,31 +7,31 @@
 name = "positive globs only - cache hit on second run"
 steps = [
   # First run - cache miss
-  "vp run positive-globs-only",
+  "vt run positive-globs-only",
   # Second run - cache hit
-  "vp run positive-globs-only",
+  "vt run positive-globs-only",
 ]
 
 [[e2e]]
 name = "positive globs only - miss on matched file change"
 steps = [
   # Initial run
-  "vp run positive-globs-only",
+  "vt run positive-globs-only",
   # Modify a file that matches the glob
   "replace-file-content src/main.ts initial modified",
   # Cache miss: matched file changed
-  "vp run positive-globs-only",
+  "vt run positive-globs-only",
 ]
 
 [[e2e]]
 name = "positive globs only - hit on unmatched file change"
 steps = [
   # Initial run
-  "vp run positive-globs-only",
+  "vt run positive-globs-only",
   # Modify a file that does NOT match the glob (test/ is outside src/)
   "replace-file-content test/main.test.ts outside modified",
   # Cache hit: file not in input
-  "vp run positive-globs-only",
+  "vt run positive-globs-only",
 ]
 
 # 1b. Positive globs reads unmatched file: input: ["src/main.ts"], command reads src/utils.ts too
@@ -41,11 +41,11 @@ steps = [
 name = "positive globs - hit on read but unmatched file"
 steps = [
   # Initial run - reads both src/main.ts and src/utils.ts
-  "vp run positive-globs-reads-unmatched",
+  "vt run positive-globs-reads-unmatched",
   # Modify utils.ts - read by command but NOT in glob
   "replace-file-content src/utils.ts initial modified",
   # Cache hit: file was read but not matched by glob, inference is off
-  "vp run positive-globs-reads-unmatched",
+  "vt run positive-globs-reads-unmatched",
 ]
 
 # 2. Positive + negative globs: input: ["src/**", "!src/**/*.test.ts"]
@@ -55,22 +55,22 @@ steps = [
 name = "positive negative globs - miss on non-excluded file"
 steps = [
   # Initial run
-  "vp run positive-negative-globs",
+  "vt run positive-negative-globs",
   # Modify a file that matches positive but NOT negative
   "replace-file-content src/main.ts initial modified",
   # Cache miss: file changed
-  "vp run positive-negative-globs",
+  "vt run positive-negative-globs",
 ]
 
 [[e2e]]
 name = "positive negative globs - hit on excluded file"
 steps = [
   # Initial run
-  "vp run positive-negative-globs",
+  "vt run positive-negative-globs",
   # Modify a file that matches the negative glob (excluded)
   "replace-file-content src/main.test.ts main modified",
   # Cache hit: file excluded by negative glob
-  "vp run positive-negative-globs",
+  "vt run positive-negative-globs",
 ]
 
 # 3. Auto only: input: [{ "auto": true }]
@@ -80,22 +80,22 @@ steps = [
 name = "auto only - miss on inferred file change"
 steps = [
   # Initial run - reads src/main.ts
-  "vp run auto-only",
+  "vt run auto-only",
   # Modify the file that was read
   "replace-file-content src/main.ts initial modified",
   # Cache miss: inferred input changed
-  "vp run auto-only",
+  "vt run auto-only",
 ]
 
 [[e2e]]
 name = "auto only - hit on non-inferred file change"
 steps = [
   # Initial run - reads src/main.ts (NOT utils.ts)
-  "vp run auto-only",
+  "vt run auto-only",
   # Modify a file that was NOT read by the command
   "replace-file-content src/utils.ts initial modified",
   # Cache hit: file not in inferred input
-  "vp run auto-only",
+  "vt run auto-only",
 ]
 
 # 4. Auto + negative: input: [{ "auto": true }, "!dist/**"]
@@ -105,22 +105,22 @@ steps = [
 name = "auto with negative - hit on excluded inferred file"
 steps = [
   # Initial run - reads both src/main.ts and dist/output.js
-  "vp run auto-with-negative",
+  "vt run auto-with-negative",
   # Modify file in excluded directory (dist/)
   "replace-file-content dist/output.js initial modified",
   # Cache hit: dist/ is excluded by negative glob
-  "vp run auto-with-negative",
+  "vt run auto-with-negative",
 ]
 
 [[e2e]]
 name = "auto with negative - miss on non-excluded inferred file"
 steps = [
   # Initial run
-  "vp run auto-with-negative",
+  "vt run auto-with-negative",
   # Modify file NOT in excluded directory
   "replace-file-content src/main.ts initial modified",
   # Cache miss: inferred input changed
-  "vp run auto-with-negative",
+  "vt run auto-with-negative",
 ]
 
 # 5. Positive + auto + negative: input: ["package.json", { "auto": true }, "!src/**/*.test.ts"]
@@ -130,33 +130,33 @@ steps = [
 name = "positive auto negative - miss on explicit glob file"
 steps = [
   # Initial run
-  "vp run positive-auto-negative",
+  "vt run positive-auto-negative",
   # Modify explicit input file
   "replace-file-content package.json inputs-cache-test modified-pkg",
   # Cache miss: explicit input changed
-  "vp run positive-auto-negative",
+  "vt run positive-auto-negative",
 ]
 
 [[e2e]]
 name = "positive auto negative - miss on inferred file"
 steps = [
   # Initial run
-  "vp run positive-auto-negative",
+  "vt run positive-auto-negative",
   # Modify inferred input file (read by command)
   "replace-file-content src/main.ts initial modified",
   # Cache miss: inferred input changed
-  "vp run positive-auto-negative",
+  "vt run positive-auto-negative",
 ]
 
 [[e2e]]
 name = "positive auto negative - hit on excluded file"
 steps = [
   # Initial run
-  "vp run positive-auto-negative",
+  "vt run positive-auto-negative",
   # Modify file excluded by negative glob
   "replace-file-content src/main.test.ts main modified",
   # Cache hit: file excluded by negative glob
-  "vp run positive-auto-negative",
+  "vt run positive-auto-negative",
 ]
 
 # 6. Empty input: input: []
@@ -166,22 +166,22 @@ steps = [
 name = "empty input - hit despite file changes"
 steps = [
   # Initial run
-  "vp run empty-inputs",
+  "vt run empty-inputs",
   # Modify any file - should NOT affect cache
   "replace-file-content src/main.ts initial modified",
   # Cache hit: no input configured
-  "vp run empty-inputs",
+  "vt run empty-inputs",
 ]
 
 [[e2e]]
 name = "empty input - miss on command change"
 steps = [
   # Initial run
-  "vp run empty-inputs",
+  "vt run empty-inputs",
   # Change the command
   "json-edit vite-task.json \"_.tasks['empty-inputs'].command = 'print-file src/utils.ts'\"",
   # Cache miss: command changed
-  "vp run empty-inputs",
+  "vt run empty-inputs",
 ]
 
 # 7. FSPY environment variable
@@ -191,14 +191,14 @@ steps = [
 name = "fspy env - set when auto inference enabled"
 steps = [
   # Run task with auto inference - should see FSPY=1
-  "vp run check-fspy-env-with-auto",
+  "vt run check-fspy-env-with-auto",
 ]
 
 [[e2e]]
 name = "fspy env - not set when auto inference disabled"
 steps = [
   # Run task without auto inference - should see (undefined)
-  "vp run check-fspy-env-without-auto",
+  "vt run check-fspy-env-without-auto",
 ]
 
 # 8. Trailing slash input: input: ["src/"]
@@ -208,28 +208,28 @@ steps = [
 [[e2e]]
 name = "folder slash input - miss on direct and nested file changes"
 steps = [
-  "vp run folder-slash-input",
+  "vt run folder-slash-input",
   # Modify a direct file in src/
   "replace-file-content src/main.ts initial modified",
   # Cache miss: direct file changed
-  "vp run folder-slash-input",
+  "vt run folder-slash-input",
   # Reset and run again to re-establish cache
   "replace-file-content src/main.ts modified initial",
-  "vp run folder-slash-input",
+  "vt run folder-slash-input",
   # Modify a nested file in src/sub/
   "replace-file-content src/sub/nested.ts initial modified",
   # Cache miss: nested file changed
-  "vp run folder-slash-input",
+  "vt run folder-slash-input",
 ]
 
 [[e2e]]
 name = "folder slash input - hit on file outside directory"
 steps = [
-  "vp run folder-slash-input",
+  "vt run folder-slash-input",
   # Modify a file outside src/
   "replace-file-content test/main.test.ts outside modified",
   # Cache hit: file not under src/
-  "vp run folder-slash-input",
+  "vt run folder-slash-input",
 ]
 
 # 9. Folder path as input: input: ["src"]
@@ -238,13 +238,13 @@ steps = [
 [[e2e]]
 name = "folder input - hit despite file changes and folder deletion"
 steps = [
-  "vp run folder-input",
+  "vt run folder-input",
   # Modify a file inside the folder
   "replace-file-content src/main.ts initial modified",
   # Cache hit: "src" matches the directory itself, not files inside it
-  "vp run folder-input",
+  "vt run folder-input",
   # Delete the entire folder
   "rm -rf src",
   # Cache hit: folder removal doesn't affect fingerprint
-  "vp run folder-input",
+  "vt run folder-input",
 ]

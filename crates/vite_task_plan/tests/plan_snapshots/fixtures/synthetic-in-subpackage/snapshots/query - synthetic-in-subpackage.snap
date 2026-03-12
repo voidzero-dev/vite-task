@@ -27,7 +27,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-in-sub
               "task_name": "lint",
               "package_path": "<workspace>/"
             },
-            "command": "vp run a#lint",
+            "command": "vt run a#lint",
             "and_item_index": null,
             "cwd": "<workspace>/"
           },
@@ -52,7 +52,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-in-sub
                           "task_name": "lint",
                           "package_path": "<workspace>/packages/a"
                         },
-                        "command": "vp lint",
+                        "command": "vt lint",
                         "and_item_index": null,
                         "cwd": "<workspace>/packages/a"
                       },

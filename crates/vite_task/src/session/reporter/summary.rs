@@ -666,7 +666,7 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
 /// - Single task + cache hit → thin line + "vp run: cache hit, {duration} saved."
 /// - Multi-task → thin line + "vp run: {hits}/{total} cache hit ({rate}%), {duration} saved."
 ///   with optional failure count and `--verbose` hint.
-pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
+pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> Vec<u8> {
     let stats = SummaryStats::compute(&summary.tasks);
 
     let is_single_task = summary.tasks.len() == 1;
@@ -681,13 +681,14 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
     // Thin line separator
     let _ = writeln!(buf, "{}", "---".style(Style::new().bright_black()));
 
+    let run_label = vite_str::format!("{program_name} run:");
     if is_single_task {
         // Single task cache hit
         let formatted_total_saved = format_summary_duration(stats.total_saved);
         let _ = writeln!(
             buf,
             "{} cache hit, {} saved.",
-            "vp run:".style(Style::new().blue().bold()),
+            run_label.as_str().style(Style::new().blue().bold()),
             formatted_total_saved.style(Style::new().green().bold()),
         );
     } else {
@@ -709,7 +710,7 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
         let _ = write!(
             buf,
             "{} {hits}/{total} cache hit ({rate}%)",
-            "vp run:".style(Style::new().blue().bold()),
+            run_label.as_str().style(Style::new().blue().bold()),
         );
 
         if stats.total_saved > Duration::ZERO {
@@ -726,8 +727,9 @@ pub fn format_compact_summary(summary: &LastRunSummary) -> Vec<u8> {
             let _ = write!(buf, ", {} failed", n.style(Style::new().red()));
         }
 
+        let last_details_cmd = vite_str::format!("`{program_name} run --last-details`");
         let _ = write!(buf, ". {}", "(Run ".style(Style::new().bright_black()));
-        let _ = write!(buf, "{}", "`vp run --last-details`".style(COMMAND_STYLE));
+        let _ = write!(buf, "{}", last_details_cmd.as_str().style(COMMAND_STYLE));
         let _ = write!(buf, "{}", " for full details)".style(Style::new().bright_black()));
         let _ = writeln!(buf);
     }

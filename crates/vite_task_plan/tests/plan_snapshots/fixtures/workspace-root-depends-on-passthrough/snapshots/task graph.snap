@@ -16,7 +16,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-d
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vp run -r build",
+        "command": "vt run -r build",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

@@ -2,11 +2,11 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run empty-inputs
+> vt run empty-inputs
 $ print-file src/main.ts
 export const main = 'initial';
 > json-edit vite-task.json "_.tasks['empty-inputs'].command = 'print-file src/utils.ts'"
 
-> vp run empty-inputs
+> vt run empty-inputs
 $ print-file src/utils.ts ✗ cache miss: args changed, executing
 export const utils = 'initial';

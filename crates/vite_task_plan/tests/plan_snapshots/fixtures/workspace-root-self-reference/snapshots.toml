@@ -1,11 +1,11 @@
 # Tests workspace root self-reference handling (skip rule and prune rule).
-# Root build = `vp run -r build`.
+# Root build = `vt run -r build`.
 #
 # The skip rule compares TaskQuery (package_query + task_name + include_explicit_deps).
 # Extra args are in PlanOptions, not TaskQuery, so they don't affect skip/prune.
 
-# Skip rule: the nested `vp run -r build` produces the same query as the
-# top-level `vp run -r build`, so the expansion is skipped. Root#build
+# Skip rule: the nested `vt run -r build` produces the same query as the
+# top-level `vt run -r build`, so the expansion is skipped. Root#build
 # becomes a passthrough (no items). Siblings a and b run normally.
 [[plan]]
 name = "recursive build skips self"
@@ -19,8 +19,8 @@ name = "recursive build with extra arg skips self"
 args = ["run", "-r", "build", "extra_arg"]
 compact = true
 
-# Prune rule: top-level query is `vp run build` (ContainingPackage), but root's
-# script produces `vp run -r build` (All). The queries differ, so the skip rule
+# Prune rule: top-level query is `vt run build` (ContainingPackage), but root's
+# script produces `vt run -r build` (All). The queries differ, so the skip rule
 # does not fire. The nested All query finds root + a + b; the prune rule removes
 # root (the expanding task) from the result, leaving a and b.
 [[plan]]

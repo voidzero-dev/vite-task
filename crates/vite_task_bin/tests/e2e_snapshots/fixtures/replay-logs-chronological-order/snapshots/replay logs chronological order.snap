@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vp run build # cache miss
+> vt run build # cache miss
 $ node build.js
 [build.js] --------------------------------
 [build.js] start
@@ -97,7 +97,7 @@ $ node build.js
 [echo.js] 30303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030
 [echo.js] --------------------------------
 [build.js] main process end
-> vp run build # cache hit
+> vt run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------
 [build.js] start
@@ -194,8 +194,8 @@ $ node build.js ✓ cache hit, replaying
 [build.js] main process end
 
 ---
-vp run: cache hit, <duration> saved.
-> vp run build # cache hit
+vt run: cache hit, <duration> saved.
+> vt run build # cache hit
 $ node build.js ✓ cache hit, replaying
 [build.js] --------------------------------
 [build.js] start
@@ -292,4 +292,4 @@ $ node build.js ✓ cache hit, replaying
 [build.js] main process end
 
 ---
-vp run: cache hit, <duration> saved.
+vt run: cache hit, <duration> saved.

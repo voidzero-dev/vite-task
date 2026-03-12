@@ -4,7 +4,7 @@
       "command": "echo hello from root"
     },
     "list-tasks": {
-      "command": "vp run"
+      "command": "vt run"
     }
   }
 }

@@ -2,14 +2,14 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> echo '' | vp run
+> echo '' | vt run
   check: echo check root
   clean: echo clean root
   deploy: echo deploy root
   docs: echo docs root
   format: echo format root
   hello: echo hello from root
-  run-typo-task: vp run nonexistent-xyz
+  run-typo-task: vt run nonexistent-xyz
   validate: echo validate root
   app#build: echo build app
   app#lint: echo lint app

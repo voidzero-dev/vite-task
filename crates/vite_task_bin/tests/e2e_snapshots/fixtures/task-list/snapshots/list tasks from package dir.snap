@@ -4,10 +4,10 @@ expression: e2e_outputs
 info:
   cwd: packages/app
 ---
-> echo '' | vp run
+> echo '' | vt run
   build: echo build app
   lint: echo lint app
   test: echo test app
   lib#build: echo build lib
   task-list-test#hello: echo hello from root
-  task-list-test#list-tasks: vp run
+  task-list-test#list-tasks: vt run

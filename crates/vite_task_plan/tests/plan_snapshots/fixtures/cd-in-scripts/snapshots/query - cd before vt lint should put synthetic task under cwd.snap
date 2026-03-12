@@ -27,7 +27,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cd-in-scripts
               "task_name": "cd-lint",
               "package_path": "<workspace>/"
             },
-            "command": "vp lint",
+            "command": "vt lint",
             "and_item_index": 1,
             "cwd": "<workspace>/src"
           },

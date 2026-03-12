@@ -4,7 +4,7 @@ expression: e2e_outputs
 info:
   cwd: packages/lib
 ---
-> vp run
+> vt run
 @ expect-milestone: task-select::0
 Select a task (↑/↓, Enter to run, type to search):
 
@@ -35,7 +35,7 @@ Select a task (↑/↓, Enter to run, type to search): t
       docs          echo docs root
       format        echo format root
       hello         echo hello from root
-      run-typo-task vp run nonexistent-xyz
+      run-typo-task vt run nonexistent-xyz
       validate      echo validate root
   (…2 more)
 @ write-key: enter

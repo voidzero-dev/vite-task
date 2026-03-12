@@ -4,7 +4,7 @@ expression: e2e_outputs
 info:
   cwd: packages/app
 ---
-> vp run -t build # core -> lib -> app
+> vt run -t build # core -> lib -> app
 ~/packages/core$ echo 'Building core' ⊘ cache disabled
 Building core
 
@@ -15,4 +15,4 @@ Building lib
 Building app
 
 ---
-vp run: 0/3 cache hit (0%). (Run `vp run --last-details` for full details)
+vt run: 0/3 cache hit (0%). (Run `vt run --last-details` for full details)
