@@ -72,15 +72,18 @@ impl ExecutionContext<'_> {
     /// passes `graph.node_count() == 1`; recursive calls AND with the nested graph's
     /// node count.
     ///
-    /// Leaf-level errors are reported through the reporter and do not abort the graph.
-    /// Cycle detection is handled at plan time, so this function cannot encounter cycles.
+    /// Fast-fail: if any task fails (non-zero exit or infrastructure error), remaining
+    /// tasks and `&&`-chained items are skipped. Leaf-level errors are reported through
+    /// the reporter. Cycle detection is handled at plan time.
+    ///
+    /// Returns `true` if all tasks succeeded, `false` if any task failed.
     #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_expanded_graph(
         &mut self,
         graph: &ExecutionGraph,
         all_ancestors_single_node: bool,
-    ) {
+    ) -> bool {
         // `compute_topological_order()` returns nodes in topological order: for every
         // edge A→B, A appears before B. Since our edges mean "A depends on B",
         // dependencies (B) appear after their dependents (A). We iterate in reverse
@@ -88,12 +91,13 @@ impl ExecutionContext<'_> {
 
         // Execute tasks in dependency-first order. Each task may have multiple items
         // (from `&&`-split commands), which are executed sequentially.
+        // If any task fails, subsequent tasks and items are skipped (fast-fail).
         let topo_order = graph.compute_topological_order();
         for &node_ix in topo_order.iter().rev() {
             let task_execution = &graph[node_ix];
 
             for item in &task_execution.items {
-                match &item.kind {
+                let failed = match &item.kind {
                     ExecutionItemKind::Leaf(leaf_kind) => {
                         self.execute_leaf(
                             &item.execution_item_display,
@@ -101,25 +105,32 @@ impl ExecutionContext<'_> {
                             all_ancestors_single_node,
                         )
                         .boxed_local()
-                        .await;
+                        .await
                     }
                     ExecutionItemKind::Expanded(nested_graph) => {
-                        self.execute_expanded_graph(
-                            nested_graph,
-                            all_ancestors_single_node && nested_graph.node_count() == 1,
-                        )
-                        .boxed_local()
-                        .await;
+                        !self
+                            .execute_expanded_graph(
+                                nested_graph,
+                                all_ancestors_single_node && nested_graph.node_count() == 1,
+                            )
+                            .boxed_local()
+                            .await
                     }
+                };
+                if failed {
+                    return false;
                 }
             }
         }
+        true
     }
 
     /// Execute a single leaf item (in-process command or spawned process).
     ///
     /// Creates a [`LeafExecutionReporter`] from the graph reporter and delegates
     /// to the appropriate execution method.
+    ///
+    /// Returns `true` if the execution failed (non-zero exit or infrastructure error).
     #[tracing::instrument(level = "debug", skip_all)]
     #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_leaf(
@@ -127,7 +138,7 @@ impl ExecutionContext<'_> {
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
-    ) {
+    ) -> bool {
         let mut leaf_reporter =
             self.reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node);
 
@@ -150,15 +161,21 @@ impl ExecutionContext<'_> {
                         None,
                     )
                     .await;
+                false
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
                 #[expect(
                     clippy::large_futures,
                     reason = "spawn execution with cache management creates large futures"
                 )]
-                let _ =
+                let outcome =
                     execute_spawn(leaf_reporter, spawn_execution, self.cache, self.cache_base_path)
                         .await;
+                match outcome {
+                    SpawnOutcome::CacheHit => false,
+                    SpawnOutcome::Spawned(status) => !status.success(),
+                    SpawnOutcome::Failed => true,
+                }
             }
         }
     }
@@ -519,8 +536,8 @@ impl Session<'_> {
             cache_base_path: &self.workspace_path,
         };
 
-        // Execute the graph. Leaf-level errors are reported through the reporter
-        // and do not abort the graph. Cycle detection is handled at plan time.
+        // Execute the graph with fast-fail: if any task fails, remaining tasks
+        // are skipped. Leaf-level errors are reported through the reporter.
         let all_single_node = execution_graph.node_count() == 1;
         execution_context.execute_expanded_graph(&execution_graph, all_single_node).await;
 

@@ -1,6 +1,10 @@
 {
   "name": "pkg-b",
+  "dependencies": {
+    "pkg-a": "workspace:*"
+  },
   "scripts": {
-    "fail": "node -e \"process.exit(7)\""
+    "fail": "node -e \"process.exit(7)\"",
+    "check": "echo 'pkg-b check passed'"
   }
 }

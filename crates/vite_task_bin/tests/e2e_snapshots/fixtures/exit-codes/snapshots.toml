@@ -7,7 +7,20 @@ steps = [
 ]
 
 [[e2e]]
-name = "multiple task failures returns exit code 1"
+name = "task failure fast-fails remaining tasks"
 steps = [
-  "vt run -r fail # multiple failures -> exit code 1",
+  "vt run -r fail # pkg-a fails, pkg-b is skipped",
+]
+
+[[e2e]]
+name = "dependency failure fast-fails dependents"
+cwd = "packages/pkg-b"
+steps = [
+  "vt run -t check # pkg-a fails, pkg-b is skipped",
+]
+
+[[e2e]]
+name = "chained command with && stops at first failure"
+steps = [
+  "vt run pkg-a#chained # first fails with exit code 3, second should not run",
 ]
