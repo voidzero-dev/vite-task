@@ -29,7 +29,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                 "task_name": "outer-inherit",
                 "package_path": "<workspace>/"
               },
-              "command": "vp run inner",
+              "command": "vt run inner",
               "and_item_index": null,
               "cwd": "<workspace>/"
             },
@@ -75,8 +75,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                                     ],
                                     "env_fingerprints": {
                                       "fingerprinted_envs": {},
-                                      "pass_through_env_config": [
-                                        "<default pass-through envs>"
+                                      "untracked_env_config": [
+                                        "<default untracked envs>"
                                       ]
                                     }
                                   },

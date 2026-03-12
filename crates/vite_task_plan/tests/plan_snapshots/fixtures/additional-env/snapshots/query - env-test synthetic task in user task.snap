@@ -5,7 +5,7 @@ info:
   args:
     - run
     - env-test
-input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-envs
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-env
 ---
 {
   "graph": [
@@ -28,7 +28,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-envs
                 "task_name": "env-test",
                 "package_path": "<workspace>/"
               },
-              "command": "vp env-test TEST_VAR hello_world",
+              "command": "vt env-test TEST_VAR hello_world",
               "and_item_index": null,
               "cwd": "<workspace>/"
             },
@@ -48,9 +48,9 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-envs
                       ],
                       "env_fingerprints": {
                         "fingerprinted_envs": {},
-                        "pass_through_env_config": [
+                        "untracked_env_config": [
                           "TEST_VAR",
-                          "<default pass-through envs>"
+                          "<default untracked envs>"
                         ]
                       }
                     },

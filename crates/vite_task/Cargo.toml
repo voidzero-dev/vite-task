@@ -31,6 +31,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "io-std", "io-util", "macros", "sync"] }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
 vite_path = { workspace = true }

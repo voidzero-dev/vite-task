@@ -28,7 +28,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-cache-
                 "task_name": "lint",
                 "package_path": "<workspace>/"
               },
-              "command": "vp lint",
+              "command": "vt lint",
               "and_item_index": null,
               "cwd": "<workspace>/"
             },

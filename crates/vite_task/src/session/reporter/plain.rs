@@ -6,10 +6,10 @@
 use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 
 use super::{
-    LeafExecutionReporter, StdioConfig, StdioSuggestion, format_cache_hit_message,
+    LeafExecutionReporter, LeafFinishStatus, StdioConfig, StdioMode, format_cache_hit_message,
     format_error_message,
 };
-use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
+use crate::session::event::CacheStatus;
 
 /// A self-contained [`LeafExecutionReporter`] for single-leaf executions
 /// (e.g., `execute_synthetic`).
@@ -62,27 +62,22 @@ impl LeafExecutionReporter for PlainReporter {
         // to suppress replayed output.
         if self.silent_if_cache_hit && self.is_cache_hit {
             StdioConfig {
-                suggestion: StdioSuggestion::Inherited,
+                stdio_mode: StdioMode::Inherited,
                 stdout_writer: Box::new(tokio::io::sink()),
                 stderr_writer: Box::new(tokio::io::sink()),
             }
         } else {
             StdioConfig {
-                suggestion: StdioSuggestion::Inherited,
+                stdio_mode: StdioMode::Inherited,
                 stdout_writer: Box::new(tokio::io::stdout()),
                 stderr_writer: Box::new(tokio::io::stderr()),
             }
         }
     }
 
-    async fn finish(
-        mut self: Box<Self>,
-        _status: Option<std::process::ExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
+    async fn finish(mut self: Box<Self>, status: LeafFinishStatus) {
         // Handle errors — format the full error chain and print inline.
-        if let Some(error) = error {
+        if let LeafFinishStatus::Error { error, .. } = status {
             let message = vite_str::format!("{:#}", anyhow::Error::from(error));
             let line = format_error_message(&message);
             let _ = self.writer.write_all(line.as_bytes()).await;
@@ -109,7 +104,7 @@ mod tests {
         let mut reporter = PlainReporter::new(false, Box::new(tokio::io::sink()));
         let stdio_config =
             reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
+        assert_eq!(stdio_config.stdio_mode, StdioMode::Inherited);
     }
 
     #[tokio::test]
@@ -117,6 +112,6 @@ mod tests {
         let mut reporter = PlainReporter::new(true, Box::new(tokio::io::sink()));
         let stdio_config =
             reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
+        assert_eq!(stdio_config.stdio_mode, StdioMode::Inherited);
     }
 }

@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     io,
     pin::Pin,
-    process::ExitStatus as StdExitStatus,
     rc::Rc,
     sync::Arc,
     task::{Context, Poll},
@@ -23,10 +22,11 @@ use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-    StdioConfig, StdioSuggestion, format_command_with_cache_status, format_error_message,
+    LeafFinishStatus, StdioConfig, StdioMode, format_cancel_line, format_command_with_cache_status,
+    format_error_message, format_exit_status_line,
 };
 use crate::session::{
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError},
+    event::{CacheStatus, exit_status_to_code},
     reporter::summary::{
         LastRunSummary, SavedExecutionError, SpawnOutcome, TaskResult, TaskSummary,
         format_compact_summary, format_full_summary,
@@ -189,9 +189,9 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         all_ancestors_single_node: bool,
     ) -> Box<dyn LeafExecutionReporter> {
         let display = display.clone();
-        let stdio_suggestion = match leaf_kind {
-            LeafExecutionKind::Spawn(_) if all_ancestors_single_node => StdioSuggestion::Inherited,
-            _ => StdioSuggestion::Piped,
+        let stdio_mode = match leaf_kind {
+            LeafExecutionKind::Spawn(_) if all_ancestors_single_node => StdioMode::Inherited,
+            _ => StdioMode::Piped,
         };
 
         Box::new(LabeledLeafReporter {
@@ -199,7 +199,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
             writer: Rc::clone(&self.writer),
             display,
             workspace_path: Arc::clone(&self.workspace_path),
-            stdio_suggestion,
+            stdio_mode,
             cache_status: None,
             output_buffer: None,
         })
@@ -218,7 +218,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         let failed_exit_codes: Vec<i32> = tasks
             .iter()
             .filter_map(|t| match &t.result {
-                TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code }, .. } => {
+                TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code, .. }, .. } => {
                     Some(exit_code.get())
                 }
                 _ => None,
@@ -279,7 +279,7 @@ struct LabeledLeafReporter {
     display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
     /// Stdio suggestion precomputed from this leaf's graph path.
-    stdio_suggestion: StdioSuggestion,
+    stdio_mode: StdioMode,
     /// Cache status, set at `start()` time. `None` means `start()` was never called
     /// (e.g., cache lookup failure). Consumed in `finish()` to build [`TaskSummary`].
     cache_status: Option<CacheStatus>,
@@ -311,7 +311,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
             write_and_flush_shared(&self.writer, line.as_bytes()).await;
 
             StdioConfig {
-                suggestion: self.stdio_suggestion,
+                stdio_mode: self.stdio_mode,
                 stdout_writer: Box::new(tokio::io::stdout()),
                 stderr_writer: Box::new(tokio::io::stderr()),
             }
@@ -322,23 +322,35 @@ impl LeafExecutionReporter for LabeledLeafReporter {
             self.output_buffer = Some(Rc::clone(&buffer));
 
             StdioConfig {
-                suggestion: self.stdio_suggestion,
+                stdio_mode: self.stdio_mode,
                 stdout_writer: Box::new(BufferedAsyncWriter { buffer: Rc::clone(&buffer) }),
                 stderr_writer: Box::new(BufferedAsyncWriter { buffer }),
             }
         }
     }
 
-    async fn finish(
-        self: Box<Self>,
-        status: Option<StdExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
-        // Convert error before consuming it (need the original for display formatting).
-        let saved_error = error.as_ref().map(SavedExecutionError::from_execution_error);
+    async fn finish(self: Box<Self>, status: LeafFinishStatus) {
+        // Extract error and exit status info from the finish status.
+        let (exit_status, error, is_cancelled) = match &status {
+            LeafFinishStatus::Spawned { exit_status, is_cancelled, infra_error, .. } => {
+                (Some(*exit_status), infra_error.as_ref(), *is_cancelled)
+            }
+            LeafFinishStatus::Completed { .. } => (None, None, false),
+            LeafFinishStatus::Error { error, .. } => (None, Some(error), false),
+        };
+
+        let cache_update_status = match &status {
+            LeafFinishStatus::Spawned { cache_update_status, .. }
+            | LeafFinishStatus::Completed { cache_update_status }
+            | LeafFinishStatus::Error { cache_update_status, .. } => cache_update_status,
+        };
+        let _ = cache_update_status; // used only for summary (via TaskResult)
+
+        // Convert error for summary persistence and format display string.
+        // Both are derived from the same borrowed error reference.
+        let saved_error = error.map(SavedExecutionError::from_execution_error);
         let error_display: Option<Str> =
-            error.map(|e| vite_str::format!("{:#}", anyhow::Error::from(e)));
+            saved_error.as_ref().map(SavedExecutionError::display_message);
 
         // Destructure self to avoid partial-move issues with Box<Self>.
         let Self { shared, writer, display, workspace_path, cache_status, output_buffer, .. } =
@@ -358,19 +370,41 @@ impl LeafExecutionReporter for LabeledLeafReporter {
                 task_name: display.task_display.task_name.clone(),
                 command: display.command.clone(),
                 cwd: cwd_relative,
-                result: TaskResult::from_execution(&cache_status, status, saved_error.as_ref()),
+                result: TaskResult::from_execution(
+                    &cache_status,
+                    exit_status,
+                    is_cancelled,
+                    saved_error.as_ref(),
+                ),
             };
 
             shared.borrow_mut().tasks.push(task_summary);
         }
+
+        // Determine if we should show inline status (only in multi-task execution).
+        let is_multi_task = {
+            let shared_ref = shared.borrow();
+            shared_ref.tasks.len() + shared_ref.active_count > 1
+        };
 
         // Decrement active count if start() was called (active_count was incremented).
         if started {
             shared.borrow_mut().active_count -= 1;
         }
 
-        // Build trailing output (error message + separator newline).
+        // Build trailing output (inline status + error message + separator newline).
         let mut trailing = Vec::new();
+
+        // Inline exit status or cancellation (only for multi-task execution).
+        if is_multi_task && is_cancelled {
+            trailing.extend_from_slice(format_cancel_line().as_bytes());
+        } else if is_multi_task
+            && let Some(exit_status) = exit_status
+            && !exit_status.success()
+        {
+            let code = exit_status_to_code(exit_status);
+            trailing.extend_from_slice(format_exit_status_line(code).as_bytes());
+        }
 
         if let Some(ref message) = error_display {
             trailing.extend_from_slice(format_error_message(message).as_bytes());
@@ -404,7 +438,7 @@ mod tests {
     use crate::session::{
         event::CacheDisabledReason,
         reporter::{
-            LeafExecutionReporter, StdioSuggestion,
+            LeafExecutionReporter, StdioMode,
             test_fixtures::{in_process_task, spawn_task, test_path},
         },
     };
@@ -442,11 +476,11 @@ mod tests {
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
-    ) -> StdioSuggestion {
+    ) -> StdioMode {
         let mut leaf = build_labeled_leaf(display, leaf_kind, all_ancestors_single_node);
         let stdio_config =
             leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
-        stdio_config.suggestion
+        stdio_config.stdio_mode
     }
 
     #[tokio::test]
@@ -455,7 +489,7 @@ mod tests {
         let item = &task.items[0];
         assert_eq!(
             suggestion_for(&item.execution_item_display, leaf_kind(item), true).await,
-            StdioSuggestion::Inherited
+            StdioMode::Inherited
         );
     }
 
@@ -465,7 +499,7 @@ mod tests {
         let item = &task.items[0];
         assert_eq!(
             suggestion_for(&item.execution_item_display, leaf_kind(item), false).await,
-            StdioSuggestion::Piped
+            StdioMode::Piped
         );
     }
 
@@ -475,7 +509,7 @@ mod tests {
         let item = &task.items[0];
         assert_eq!(
             suggestion_for(&item.execution_item_display, leaf_kind(item), true).await,
-            StdioSuggestion::Piped
+            StdioMode::Piped
         );
     }
 
@@ -485,7 +519,7 @@ mod tests {
         let item = &task.items[0];
         assert_eq!(
             suggestion_for(&item.execution_item_display, leaf_kind(item), false).await,
-            StdioSuggestion::Piped
+            StdioMode::Piped
         );
     }
 }

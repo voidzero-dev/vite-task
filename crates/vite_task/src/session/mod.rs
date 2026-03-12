@@ -493,6 +493,7 @@ impl<'a> Session<'a> {
             plan_options: PlanOptions {
                 extra_args: run_command.additional_args.clone().into(),
                 cache_override: run_command.flags.cache_override(),
+                concurrency: run_command.flags.concurrency.map(|c| c.0),
             },
         })
     }
@@ -624,12 +625,15 @@ impl<'a> Session<'a> {
         let plain_reporter =
             reporter::PlainReporter::new(silent_if_cache_hit, Box::new(tokio::io::stdout()));
 
-        // Execute the spawn directly using the free function, bypassing the graph pipeline
+        // Execute the spawn directly using the free function, bypassing the graph pipeline.
+        // Synthetic executions are standalone — no concurrent graph, no cancellation.
+        let cancel_token = tokio_util::sync::CancellationToken::new();
         let outcome = execute::execute_spawn(
             Box::new(plain_reporter),
             &spawn_execution,
             cache,
             &self.workspace_path,
+            &cancel_token,
         )
         .await;
         match outcome {

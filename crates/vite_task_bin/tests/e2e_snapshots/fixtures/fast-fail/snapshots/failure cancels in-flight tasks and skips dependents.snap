@@ -4,3 +4,10 @@ expression: e2e_outputs
 ---
 [1]> vp run -r build # pkg-b fails, pkg-c cancelled, pkg-a skipped
 ~/packages/pkg-b$ node -e "process.exit(1)" ⊘ cache disabled
+✗ exit code 1
+
+~/packages/pkg-c$ node -e "setTimeout(() => {}, 999999)" ⊘ cache disabled
+✗ cancelled
+
+---
+[vp run] 0/2 cache hit (0%), 1 failed, 1 cancelled. (Run `vp run --last-details` for full details)

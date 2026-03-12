@@ -28,7 +28,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cd-in-scripts
                 "task_name": "cd-build",
                 "package_path": "<workspace>/"
               },
-              "command": "vp run build",
+              "command": "vt run build",
               "and_item_index": 1,
               "cwd": "<workspace>/src"
             },
@@ -74,8 +74,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cd-in-scripts
                                     ],
                                     "env_fingerprints": {
                                       "fingerprinted_envs": {},
-                                      "pass_through_env_config": [
-                                        "<default pass-through envs>"
+                                      "untracked_env_config": [
+                                        "<default untracked envs>"
                                       ]
                                     }
                                   },
