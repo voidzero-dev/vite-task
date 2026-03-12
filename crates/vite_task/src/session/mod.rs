@@ -217,10 +217,6 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if workspace root cannot be found or PATH env cannot be prepended.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "cwd is an Arc that gets cloned internally, pass by value is intentional"
-    )]
     pub fn init_with(
         mut envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
         cwd: Arc<AbsolutePath>,
