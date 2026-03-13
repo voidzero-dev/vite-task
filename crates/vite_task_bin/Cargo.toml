@@ -43,3 +43,7 @@ workspace = true
 [[test]]
 name = "e2e_snapshots"
 harness = false
+
+[lib]
+test = false
+doctest = false

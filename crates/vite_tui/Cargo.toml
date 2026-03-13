@@ -12,6 +12,7 @@ workspace = true
 
 [lib]
 doctest = false
+test = false
 
 [dependencies]
 color-eyre = { workspace = true }

@@ -22,3 +22,6 @@ portable-pty = ["dep:portable-pty"]
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false

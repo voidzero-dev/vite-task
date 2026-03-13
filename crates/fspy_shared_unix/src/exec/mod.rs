@@ -1,4 +1,3 @@
-mod fs;
 mod shebang;
 mod which;
 

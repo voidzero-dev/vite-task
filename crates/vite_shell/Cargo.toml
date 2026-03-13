@@ -17,3 +17,6 @@ vite_str = { workspace = true }
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false

@@ -25,3 +25,6 @@ workspace = true
 
 [dev-dependencies]
 assert2 = { workspace = true }
+
+[lib]
+doctest = false

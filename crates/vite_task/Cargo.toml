@@ -45,3 +45,6 @@ tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
+
+[lib]
+doctest = false

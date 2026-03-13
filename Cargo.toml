@@ -158,9 +158,6 @@ ignored = [
   # These are artifact dependencies. They are not directly `use`d in Rust code.
   "fspy_preload_unix",
   "fspy_preload_windows",
-  "fspy_test_bin",
-  # used in a macro in crates/subprocess_test/src/lib.rs
-  "ctor",
 ]
 
 [profile.dev]

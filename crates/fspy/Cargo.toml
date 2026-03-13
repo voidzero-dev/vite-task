@@ -64,3 +64,9 @@ xxhash-rust = { workspace = true, features = ["xxh3"] }
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false
+
+[package.metadata.cargo-shear]
+ignored = ["ctor", "fspy_test_bin"]

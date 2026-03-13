@@ -29,3 +29,6 @@ subprocess_test = { workspace = true }
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false

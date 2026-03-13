@@ -47,3 +47,6 @@ vite_workspace = { workspace = true }
 [[test]]
 name = "plan_snapshots"
 harness = false
+
+[lib]
+doctest = false
