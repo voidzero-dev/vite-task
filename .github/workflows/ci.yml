@@ -8,8 +8,6 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize]
-    paths-ignore:
-      - '**/*.md'
   push:
     branches:
       - main
