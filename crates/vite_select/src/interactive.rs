@@ -434,7 +434,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
 
     // Empty state
     if !has_items {
-        write!(writer, "  No matching tasks.{line_ending}")?;
+        write!(writer, "  No matching tasks. Press Escape to clear search.{line_ending}")?;
         lines += 1;
     }
 

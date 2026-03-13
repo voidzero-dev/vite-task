@@ -25,7 +25,7 @@ Select a task (↑/↓, Enter to run, type to search):
 @ expect-milestone: task-select:zzzzz:0
 Select a task (↑/↓, Enter to run, type to search): zzzzz
 
-  No matching tasks.
+  No matching tasks. Press Escape to clear search.
 @ write-key: enter
 @ write-key: escape
 @ expect-milestone: task-select::0
