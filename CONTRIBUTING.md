@@ -14,7 +14,7 @@
 just init
 ```
 
-This installs all required Rust tools (`cargo-insta`, `typos-cli`, `cargo-shear`, `dprint`, `taplo-cli`) and bootstraps the Node.js tooling.
+This installs all required Rust tools (`cargo-insta`, `typos-cli`, `cargo-shear`, `taplo-cli`) and bootstraps the Node.js tooling.
 
 ## Development Workflow
 
@@ -29,7 +29,7 @@ Officially, Vite Task is distributed as part of Vite+ and invoked via `vp run`. 
 
 ```bash
 just ready    # Full quality check: typos, fmt, check, test, lint, doc
-just fmt      # Format code (cargo fmt + cargo shear + dprint)
+just fmt      # Format code (cargo fmt + cargo shear + oxfmt)
 just check    # Check compilation with all features
 just test     # Run all tests
 just lint     # Clippy linting

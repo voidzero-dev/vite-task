@@ -8,12 +8,8 @@
 
 [[e2e]]
 name = "single-node chains inherit even with multi-node sibling graph"
-steps = [
-  "vt run foo",
-]
+steps = ["vt run foo"]
 
 [[e2e]]
 name = "multi-node ancestor forces piped for nested single-node graph"
-steps = [
-  "vt run -r foo-nested",
-]
+steps = ["vt run -r foo-nested"]

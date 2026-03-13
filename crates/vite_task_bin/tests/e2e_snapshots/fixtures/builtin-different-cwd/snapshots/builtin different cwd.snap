@@ -20,7 +20,7 @@ $ vt lint
   help: Delete this file or add some code to it.
 
 Found 2 warnings and 0 errors.
-Finished in <duration> on 2 files with 90 rules using <n> threads.
+Finished in <duration> on 2 files with 93 rules using <n> threads.
 > cd folder2 && vt run lint # cache miss in folder2
 $ vt lint ✓ cache hit, replaying
 
@@ -39,7 +39,7 @@ $ vt lint ✓ cache hit, replaying
   help: Delete this file or add some code to it.
 
 Found 2 warnings and 0 errors.
-Finished in <duration> on 2 files with 90 rules using <n> threads.
+Finished in <duration> on 2 files with 93 rules using <n> threads.
 
 ---
 vt run: cache hit, <duration> saved.
@@ -56,7 +56,7 @@ $ vt lint ✗ cache miss: 'folder2/a.js' modified, executing
   help: Delete this file or add some code to it.
 
 Found 1 warning and 0 errors.
-Finished in <duration> on 2 files with 90 rules using <n> threads.
+Finished in <duration> on 2 files with 93 rules using <n> threads.
 > cd folder2 && vt run lint # cache miss
 $ vt lint ✓ cache hit, replaying
 
@@ -68,7 +68,7 @@ $ vt lint ✓ cache hit, replaying
   help: Delete this file or add some code to it.
 
 Found 1 warning and 0 errors.
-Finished in <duration> on 2 files with 90 rules using <n> threads.
+Finished in <duration> on 2 files with 93 rules using <n> threads.
 
 ---
 vt run: cache hit, <duration> saved.

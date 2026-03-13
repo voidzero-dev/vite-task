@@ -1,8 +1,6 @@
 [[e2e]]
 name = "exec not triggered from script"
-steps = [
-  "FOO=bar vt run lint-task # no print-env FOO output",
-]
+steps = ["FOO=bar vt run lint-task # no print-env FOO output"]
 
 [[e2e]]
 name = "exec caching"

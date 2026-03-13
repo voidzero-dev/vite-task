@@ -129,10 +129,11 @@ jobs:
         with:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: fmt
-          tools: dprint,cargo-shear
+          tools: cargo-shear
           components: clippy rust-docs rustfmt
 
-      - run: dprint check
+      - uses: oxc-project/setup-node@fdbf0dfd334c4e6d56ceeb77d91c76339c2a0885 # v1.0.4
+      - run: pnpm oxfmt --check
       - run: cargo shear
       - run: cargo fmt --check
       - run: RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --document-private-items
@@ -140,8 +141,6 @@ jobs:
       - uses: crate-ci/typos@85f62a8a84f939ae994ab3763f01a0296d61a7ee # v1.36.2
         with:
           files: .
-
-      - uses: oxc-project/setup-node@fdbf0dfd334c4e6d56ceeb77d91c76339c2a0885 # v1.0.4
 
       - name: Deduplicate dependencies
         run: pnpm dedupe --check

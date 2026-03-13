@@ -5,12 +5,9 @@ packages:
 catalog:
   '@types/node': 25.0.3
   husky: ^9.1.7
-  lint-staged: ^16.2.6
-  oxlint: ^1.34.0
-  oxlint-tsgolint: ^0.10.0
+  lint-staged: ^16.3.3
+  oxfmt: 0.40.0
+  oxlint: ^1.55.0
+  oxlint-tsgolint: ^0.16.0
 
 catalogMode: prefer
-
-minimumReleaseAge: 1440
-
-minimumReleaseAgeExclude: null

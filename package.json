@@ -1,11 +1,7 @@
 {
   "name": "vite-task-monorepo",
-  "license": "MIT",
   "private": true,
-  "packageManager": "pnpm@10.17.1",
-  "engines": {
-    "node": "^20.19.0 || >=22.12.0"
-  },
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "prepare": "husky"
@@ -14,18 +10,17 @@
     "@types/node": "catalog:",
     "husky": "catalog:",
     "lint-staged": "catalog:",
+    "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:"
   },
   "lint-staged": {
-    "*.@(js|ts|tsx|yml|yaml|md|json|html|toml)": [
-      "dprint fmt --staged"
-    ],
-    "*.@(js|ts|tsx)": [
-      "oxlint -- --fix"
-    ],
-    "*.rs": [
-      "cargo fmt --"
-    ]
-  }
+    "*": "oxfmt --no-error-on-unmatched-pattern",
+    "*.@(js|ts|tsx)": "oxlint -- --fix",
+    "*.rs": "cargo fmt --"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "packageManager": "pnpm@10.17.1"
 }

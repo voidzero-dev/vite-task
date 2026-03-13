@@ -116,7 +116,7 @@ impl TaskEnvs {
     /// Create a secure fingerprint for environment variables
     pub fn create_fingerprint(&self) -> HashMap<Str, Str> {
         let mut fingerprint = HashMap::new();
-        
+
         for (name, value) in &self.envs_without_pass_through {
             let fingerprint_value = if is_sensitive_env_name(name) {
                 // Hash sensitive values - never store them in plaintext
@@ -128,10 +128,10 @@ impl TaskEnvs {
                 // Or stored as-is if needed for debugging
                 value.clone()
             };
-            
+
             fingerprint.insert(name.clone(), fingerprint_value);
         }
-        
+
         fingerprint
     }
 }
@@ -164,14 +164,7 @@ pub struct CommandFingerprint {
   "tasks": {
     "build": {
       "command": "vite build",
-      "env": [
-        "NODE_ENV",
-        "NODE_OPTIONS",
-        "VITE_API_URL",
-        "VITE_APP_TITLE",
-        "VITE_PUBLIC_PATH",
-        "VITE_BASE_URL"
-      ]
+      "env": ["NODE_ENV", "NODE_OPTIONS", "VITE_API_URL", "VITE_APP_TITLE", "VITE_PUBLIC_PATH", "VITE_BASE_URL"]
     }
   }
 }
@@ -251,7 +244,7 @@ fn is_sensitive_env_name(name: &str) -> bool {
         "REDIS_URL",
         "*_CERT*",
     ];
-    
+
     // Exact matches for known sensitive names
     const SENSITIVE_EXACT: &[&str] = &[
         "PASSWORD",
@@ -260,17 +253,17 @@ fn is_sensitive_env_name(name: &str) -> bool {
         "PRIVATE_KEY",
         "PUBLIC_KEY",
     ];
-    
+
     if SENSITIVE_EXACT.contains(&name) {
         return true;
     }
-    
+
     for pattern in SENSITIVE_PATTERNS {
         if Glob::new(pattern).is_match(name) {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -288,6 +281,7 @@ fn display_env_value(name: &str, value: &str) -> String {
 **Principles for Secure Cache Storage:**
 
 1. **Never Store Sensitive Values in Cache**:
+
    ```rust
    // BAD - Never do this
    cache_entry.envs = task.envs_without_pass_through.clone();

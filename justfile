@@ -9,7 +9,7 @@ _default:
 alias r := ready
 
 init:
-  cargo binstall watchexec-cli cargo-insta typos-cli cargo-shear dprint taplo-cli -y
+  cargo binstall watchexec-cli cargo-insta typos-cli cargo-shear taplo-cli -y
   pnpm run bootstrap-cli
 
 ready:
@@ -27,7 +27,7 @@ watch *args='':
 fmt:
   cargo shear --fix
   cargo fmt --all
-  dprint fmt
+  pnpm oxfmt
 
 check:
   cargo check --workspace --all-features --all-targets --locked

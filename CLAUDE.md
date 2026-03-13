@@ -27,7 +27,7 @@ A monorepo task runner (like Nx/Turbo) with intelligent caching and dependency r
 ```bash
 just init          # Install build tools and dependencies
 just ready         # Full quality check (fmt, check, test, lint, doc)
-just fmt           # Format code (cargo fmt, cargo shear, dprint)
+just fmt           # Format code (cargo fmt, cargo shear, oxfmt)
 just check         # Check compilation with all features
 just test          # Run all tests
 just lint          # Clippy linting

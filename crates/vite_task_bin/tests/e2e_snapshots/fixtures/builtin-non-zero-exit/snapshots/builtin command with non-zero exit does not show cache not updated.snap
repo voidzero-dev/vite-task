@@ -13,7 +13,7 @@ $ vt lint -D no-debugger
   help: Remove the debugger statement
 
 Found 0 warnings and 1 error.
-Finished in <duration> on 1 file with 90 rules using <n> threads.
+Finished in <duration> on 1 file with 93 rules using <n> threads.
 [1]> vt run lint -- -D no-debugger
 $ vt lint -D no-debugger
 
@@ -25,4 +25,4 @@ $ vt lint -D no-debugger
   help: Remove the debugger statement
 
 Found 0 warnings and 1 error.
-Finished in <duration> on 1 file with 90 rules using <n> threads.
+Finished in <duration> on 1 file with 93 rules using <n> threads.

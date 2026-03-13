@@ -9,17 +9,11 @@ steps = [
 
 [[e2e]]
 name = "env added"
-steps = [
-  "vt run test # cache miss",
-  "cross-env MY_ENV=1 vt run test # cache miss: env added",
-]
+steps = ["vt run test # cache miss", "cross-env MY_ENV=1 vt run test # cache miss: env added"]
 
 [[e2e]]
 name = "env removed"
-steps = [
-  "cross-env MY_ENV=1 vt run test # cache miss",
-  "vt run test # cache miss: env removed",
-]
+steps = ["cross-env MY_ENV=1 vt run test # cache miss", "vt run test # cache miss: env removed"]
 
 [[e2e]]
 name = "untracked env added"

@@ -1,16 +1,16 @@
 {
   "name": "vite-task-tools",
-  "type": "module",
   "private": true,
   "bin": {
-    "print": "./src/print.ts",
-    "print-file": "./src/print-file.ts",
-    "print-env": "./src/print-env.js",
-    "json-edit": "./src/json-edit.ts",
     "check-tty": "./src/check-tty.js",
+    "json-edit": "./src/json-edit.ts",
+    "print": "./src/print.ts",
+    "print-env": "./src/print-env.js",
+    "print-file": "./src/print-file.ts",
     "read-stdin": "./src/read-stdin.js",
     "replace-file-content": "./src/replace-file-content.ts"
   },
+  "type": "module",
   "dependencies": {
     "cross-env": "^10.1.0",
     "oxfmt": "0.26.0",

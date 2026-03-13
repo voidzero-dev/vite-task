@@ -22,8 +22,8 @@ For tasks defined as below:
 {
   "scripts": {
     "build": "echo $foo",
-    "test": "echo $foo && echo $bar"
-  }
+    "test": "echo $foo && echo $bar",
+  },
 }
 ```
 

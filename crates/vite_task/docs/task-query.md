@@ -21,9 +21,9 @@ The task graph contains a node for every task in every package, and edges only f
   "tasks": {
     "build": {
       "command": "vite build",
-      "dependsOn": ["@shared/lib#build"] // ← this becomes an edge
-    }
-  }
+      "dependsOn": ["@shared/lib#build"], // ← this becomes an edge
+    },
+  },
 }
 ```
 
@@ -178,9 +178,9 @@ After mapping the package subgraph to tasks, we follow explicit `dependsOn` edge
 {
   "tasks": {
     "build": {
-      "dependsOn": ["codegen#generate"]
-    }
-  }
+      "dependsOn": ["codegen#generate"],
+    },
+  },
 }
 ```
 
@@ -198,9 +198,9 @@ A task script can contain `vp run` calls:
 {
   "tasks": {
     "ci": {
-      "command": "vp run -r build && vp run -r test"
-    }
-  }
+      "command": "vp run -r build && vp run -r test",
+    },
+  },
 }
 ```
 

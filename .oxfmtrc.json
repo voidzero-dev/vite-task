@@ -1,0 +1,5 @@
+{
+  "printWidth": 120,
+  "singleQuote": true,
+  "ignorePatterns": ["crates/fspy_detours_sys/detours", "crates/vite_task_graph/run-config.ts"]
+}

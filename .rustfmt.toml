@@ -18,6 +18,4 @@ group_imports = "StdExternalCrate"
 imports_granularity = "Crate"
 
 # Skip generated files
-ignore = [
-  "crates/fspy_detours_sys/src/generated_bindings.rs",
-]
+ignore = ["crates/fspy_detours_sys/src/generated_bindings.rs"]
