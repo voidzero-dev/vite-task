@@ -93,8 +93,14 @@ jobs:
 
       # For x86_64-apple-darwin on arm64 runner, install x64 node so fspy preload dylib
       # (compiled for x86_64) can be injected into node processes running under Rosetta.
-      - uses: oxc-project/setup-node@fdbf0dfd334c4e6d56ceeb77d91c76339c2a0885 # v1.0.4
+      # oxc-project/setup-node doesn't support the architecture input, so use
+      # pnpm/action-setup + actions/setup-node directly.
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
         with:
+          node-version-file: .node-version
           architecture: x64
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}
 
