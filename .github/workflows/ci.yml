@@ -53,7 +53,7 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-26-intel
+          - os: macos-latest
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
@@ -91,7 +91,15 @@ jobs:
         continue-on-error: true
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # For x86_64-apple-darwin on arm64 runner, install x64 node so fspy preload dylib
+      # (compiled for x86_64) can be injected into node processes running under Rosetta.
       - uses: oxc-project/setup-node@fdbf0dfd334c4e6d56ceeb77d91c76339c2a0885 # v1.0.4
+        with:
+          architecture: x64
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+
+      - uses: oxc-project/setup-node@fdbf0dfd334c4e6d56ceeb77d91c76339c2a0885 # v1.0.4
+        if: ${{ matrix.target != 'x86_64-apple-darwin' }}
 
       # `pnpm install` prepares test bins used in snapshot tests
       # Must run after setup-node so correct native binaries are installed
