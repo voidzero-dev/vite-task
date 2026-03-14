@@ -38,7 +38,7 @@ fn get_interp(executable: &[u8]) -> nix::Result<Option<&BStr>> {
         return Err(nix::Error::ENOEXEC);
     };
 
-    let interp = CStr::from_bytes_until_nul(interp).map(CStr::to_bytes).unwrap_or(interp);
+    let interp = CStr::from_bytes_until_nul(interp).map_or(interp, CStr::to_bytes);
     Ok(Some(BStr::new(interp)))
 }
 
