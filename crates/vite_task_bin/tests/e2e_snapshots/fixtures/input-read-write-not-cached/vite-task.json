@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "rw-task": {
+      "command": "replace-file-content src/data.txt original modified",
+      "input": [{ "auto": true }],
+      "cache": true
+    }
+  }
+}

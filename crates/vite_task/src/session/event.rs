@@ -57,6 +57,9 @@ pub enum CacheNotUpdatedReason {
     CacheDisabled,
     /// Execution exited with non-zero status
     NonZeroExitStatus,
+    /// Task modified files it read during execution (read-write overlap detected by fspy).
+    /// Caching such tasks is unsound because the prerun input hashes become stale.
+    InputModified,
 }
 
 #[derive(Debug)]

@@ -55,19 +55,24 @@ impl PostRunFingerprint {
     /// Creates a new fingerprint from path accesses after task execution.
     ///
     /// Negative glob filtering is done upstream in `spawn_with_tracking`.
-    /// Paths may contain `..` components from fspy, so this method cleans them
-    /// before fingerprinting.
+    /// Paths already present in `globbed_inputs` are skipped — they are
+    /// already tracked by the prerun glob fingerprint, and the read-write
+    /// overlap check in `execute_spawn` guarantees the task did not modify
+    /// them, so the prerun hash is still correct.
     ///
     /// # Arguments
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
     /// * `base_dir` - Workspace root for resolving relative paths
+    /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
+        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
     ) -> anyhow::Result<Self> {
         let inferred_inputs = inferred_path_reads
             .par_iter()
+            .filter(|(path, _)| !globbed_inputs.contains_key(*path))
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
                 let fingerprint = fingerprint_path(&full_path, *path_read)?;

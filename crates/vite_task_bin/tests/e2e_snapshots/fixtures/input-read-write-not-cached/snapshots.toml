@@ -1,0 +1,12 @@
+# Test that tasks modifying their own inputs (read-write overlap) are not cached.
+# replace-file-content reads then writes the same file — fspy detects both.
+# Without this behavior, the second run would be a cache hit.
+
+[[e2e]]
+name = "read-write task is not cached"
+steps = [
+  # First run - executes, but cache NOT stored (read-write overlap detected)
+  "vt run rw-task",
+  # Second run - still miss (no cache was stored on first run)
+  "vt run rw-task",
+]

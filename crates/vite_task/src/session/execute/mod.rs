@@ -397,34 +397,50 @@ pub async fn execute_spawn(
         cache_metadata_and_inputs
     {
         if result.exit_status.success() {
-            // path_reads is empty when inference is disabled (path_accesses is None)
-            let empty_path_reads = HashMap::default();
-            let path_reads = path_accesses.as_ref().map_or(&empty_path_reads, |pa| &pa.path_reads);
+            // Check for read-write overlap: if the task wrote to any file it also
+            // read, the inputs were modified during execution — don't cache.
+            // Note: this only checks fspy-inferred reads, not globbed_inputs keys.
+            // A task that writes to a glob-matched file without reading it causes
+            // perpetual cache misses (glob detects the hash change) but not a
+            // correctness bug, so we don't handle that case here.
+            if path_accesses
+                .as_ref()
+                .is_some_and(|pa| pa.path_reads.keys().any(|p| pa.path_writes.contains(p)))
+            {
+                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified), None)
+            } else {
+                // path_reads is empty when inference is disabled (path_accesses is None)
+                let empty_path_reads = HashMap::default();
+                let path_reads =
+                    path_accesses.as_ref().map_or(&empty_path_reads, |pa| &pa.path_reads);
 
-            // Execution succeeded — attempt to create fingerprint and update cache
-            match PostRunFingerprint::create(path_reads, cache_base_path) {
-                Ok(post_run_fingerprint) => {
-                    let new_cache_value = CacheEntryValue {
-                        post_run_fingerprint,
-                        std_outputs: std_outputs.unwrap_or_default().into(),
-                        duration: result.duration,
-                        globbed_inputs,
-                    };
-                    match cache.update(cache_metadata, new_cache_value).await {
-                        Ok(()) => (CacheUpdateStatus::Updated, None),
-                        Err(err) => (
-                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                            Some(ExecutionError::Cache {
-                                kind: CacheErrorKind::Update,
-                                source: err,
-                            }),
-                        ),
+                // Execution succeeded — attempt to create fingerprint and update cache.
+                // Paths already in globbed_inputs are skipped: Rule 1 (above) guarantees
+                // no input modification, so the prerun hash is the correct post-exec hash.
+                match PostRunFingerprint::create(path_reads, cache_base_path, &globbed_inputs) {
+                    Ok(post_run_fingerprint) => {
+                        let new_cache_value = CacheEntryValue {
+                            post_run_fingerprint,
+                            std_outputs: std_outputs.unwrap_or_default().into(),
+                            duration: result.duration,
+                            globbed_inputs,
+                        };
+                        match cache.update(cache_metadata, new_cache_value).await {
+                            Ok(()) => (CacheUpdateStatus::Updated, None),
+                            Err(err) => (
+                                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                                Some(ExecutionError::Cache {
+                                    kind: CacheErrorKind::Update,
+                                    source: err,
+                                }),
+                            ),
+                        }
                     }
+                    Err(err) => (
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                        Some(ExecutionError::PostRunFingerprint(err)),
+                    ),
                 }
-                Err(err) => (
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::PostRunFingerprint(err)),
-                ),
             }
         } else {
             // Execution failed with non-zero exit status — don't update cache
