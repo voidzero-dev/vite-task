@@ -8,7 +8,8 @@
     "print-env": "./src/print-env.js",
     "print-file": "./src/print-file.ts",
     "read-stdin": "./src/read-stdin.js",
-    "replace-file-content": "./src/replace-file-content.ts"
+    "replace-file-content": "./src/replace-file-content.ts",
+    "touch-file": "./src/touch-file.ts"
   },
   "type": "module",
   "dependencies": {

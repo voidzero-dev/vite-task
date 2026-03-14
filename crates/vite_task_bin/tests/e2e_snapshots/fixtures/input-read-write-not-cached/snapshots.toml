@@ -17,3 +17,9 @@ steps = ["vt run -r task", "vt run -r task"]
 name = "verbose read-write task shows path in full summary"
 cwd = "packages/rw-pkg"
 steps = ["vt run -v task"]
+
+# Single O_RDWR open (touch-file) is also detected as read-write overlap
+[[e2e]]
+name = "single O_RDWR open is not cached"
+cwd = "packages/touch-pkg"
+steps = ["vt run task", "vt run task"]

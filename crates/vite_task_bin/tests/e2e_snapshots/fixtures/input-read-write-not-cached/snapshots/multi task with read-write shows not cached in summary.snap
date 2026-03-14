@@ -6,15 +6,19 @@ expression: e2e_outputs
 ~/packages/normal-pkg$ print hello
 hello
 
+~/packages/touch-pkg$ touch-file src/data.txt
+
 ~/packages/rw-pkg$ replace-file-content src/data.txt original modified
 
 ---
-vt run: 0/2 cache hit (0%). @test/rw-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)
+vt run: 0/3 cache hit (0%). @test/touch-pkg#task (and 1 more) not cached because they modified their inputs. (Run `vt run --last-details` for full details)
 > vt run -r task
 ~/packages/normal-pkg$ print hello ✓ cache hit, replaying
 hello
 
+~/packages/touch-pkg$ touch-file src/data.txt
+
 ~/packages/rw-pkg$ replace-file-content src/data.txt original modified
 
 ---
-vt run: 1/2 cache hit (50%), <duration> saved. @test/rw-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)
+vt run: 1/3 cache hit (33%), <duration> saved. @test/touch-pkg#task (and 1 more) not cached because they modified their inputs. (Run `vt run --last-details` for full details)
