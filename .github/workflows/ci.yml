@@ -56,7 +56,7 @@ jobs:
           cache-key: clippy
           components: clippy
 
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   test:
     needs: detect-changes
