@@ -62,10 +62,8 @@ impl Component for TasksList {
         match action {
             Action::Up => self.up(),
             Action::Down => self.down(),
-            Action::SelectTask(index) => {
-                if index < self.tasks.len() {
-                    self.select(index);
-                }
+            Action::SelectTask(index) if index < self.tasks.len() => {
+                self.select(index);
             }
             _ => {}
         }

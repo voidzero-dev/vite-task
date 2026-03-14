@@ -27,7 +27,7 @@ pub struct PackageJson {
 
 impl std::fmt::Debug for PackageJson {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if std::env::var("VITE_DEBUG_VERBOSE").map(|v| v != "0" && v != "false").unwrap_or(false) {
+        if std::env::var("VITE_DEBUG_VERBOSE").is_ok_and(|v| v != "0" && v != "false") {
             write!(
                 f,
                 "PackageJson {{ name: {:?}, scripts: {:?}, dependencies: {:?}, dev_dependencies: {:?}, peer_dependencies: {:?} }}",
