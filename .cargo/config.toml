@@ -1,5 +1,5 @@
 [build]
-rustflags = ["--cfg", "tokio_unstable"] # also update .github/workflows/ci.yml
+rustflags = ["--cfg", "tokio_unstable", "-D", "warnings"]
 
 [unstable]
 bindeps = true
