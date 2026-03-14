@@ -39,6 +39,25 @@ jobs:
             code:
               - '!**/*.md'
 
+  clippy:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code-changed == 'true'
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - uses: oxc-project/setup-rust@d286d43bc1f606abbd98096666ff8be68c8d5f57 # v1.0.0
+        with:
+          save-cache: ${{ github.ref_name == 'main' }}
+          cache-key: clippy
+          components: clippy
+
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
   test:
     needs: detect-changes
     if: needs.detect-changes.outputs.code-changed == 'true'
@@ -75,7 +94,6 @@ jobs:
         with:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: test
-          components: clippy
 
       - run: rustup target add ${{ matrix.target }}
 
@@ -84,15 +102,6 @@ jobs:
 
       - run: pip install cargo-zigbuild
         if: ${{ matrix.os == 'ubuntu-latest' }}
-
-      - run: cargo check --locked --all-targets --all-features --target ${{ matrix.target }}
-        env:
-          RUSTFLAGS: '-D warnings --cfg tokio_unstable' # also update .cargo/config.toml
-
-      - name: Clippy
-        id: clippy
-        continue-on-error: true
-        run: cargo clippy --all-targets --all-features -- -D warnings
 
       # For x86_64-apple-darwin on arm64 runner, install x64 node so fspy preload dylib
       # (compiled for x86_64) can be injected into node processes running under Rosetta.
@@ -119,10 +128,6 @@ jobs:
 
       - run: cargo-zigbuild test --target x86_64-unknown-linux-gnu.2.17
         if: ${{ matrix.os == 'ubuntu-latest' }}
-
-      - name: Check clippy result
-        if: ${{ steps.clippy.outcome == 'failure' }}
-        run: exit 1
 
   fmt:
     name: Format and Check Deps
@@ -157,6 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - clippy
       - test
       - fmt
     steps:
