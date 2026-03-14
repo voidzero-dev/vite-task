@@ -1,6 +1,6 @@
-use bincode::{Decode, Encode};
+use wincode::{SchemaRead, SchemaWrite};
 
-#[derive(Debug, Encode, Decode, Clone, Copy)]
+#[derive(Debug, SchemaWrite, SchemaRead, Clone, Copy)]
 pub struct CodableSockFilter {
     code: u16,
     jt: u8,
@@ -24,5 +24,5 @@ impl From<CodableSockFilter> for libc::sock_filter {
     }
 }
 
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(SchemaWrite, SchemaRead, Debug, Clone)]
 pub struct Filter(pub(crate) Vec<CodableSockFilter>);

@@ -7,7 +7,7 @@ use std::{
 };
 
 use allocator_api2::alloc::Allocator;
-use bincode::{BorrowDecode, Encode, de::BorrowDecoder, error::DecodeError};
+use std::mem::MaybeUninit;
 use bytemuck::TransparentWrapper;
 
 use super::native_str::NativeStr;
@@ -18,7 +18,7 @@ use super::native_str::NativeStr;
 /// whose raw data is not meaningful for direct consumption. The only way
 /// to use the path is through [`strip_path_prefix`](NativePath::strip_path_prefix),
 /// which normalizes platform differences and extracts a workspace-relative path.
-#[derive(TransparentWrapper, Encode, PartialEq, Eq)]
+#[derive(TransparentWrapper, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct NativePath {
     inner: NativeStr,
@@ -87,12 +87,32 @@ impl Debug for NativePath {
     }
 }
 
-impl<'a, C> BorrowDecode<'a, C> for &'a NativePath {
-    fn borrow_decode<D: BorrowDecoder<'a, Context = C>>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
-        let inner: &'a NativeStr = BorrowDecode::borrow_decode(decoder)?;
-        Ok(NativePath::wrap_ref(inner))
+// SAFETY: NativePath is repr(transparent) over NativeStr, so it serializes identically.
+unsafe impl<C: wincode::config::Config> wincode::SchemaWrite<C> for NativePath {
+    type Src = NativePath;
+
+    fn size_of(src: &NativePath) -> wincode::WriteResult<usize> {
+        <NativeStr as wincode::SchemaWrite<C>>::size_of(&src.inner)
+    }
+
+    fn write(writer: impl wincode::io::Writer, src: &NativePath) -> wincode::WriteResult<()> {
+        <NativeStr as wincode::SchemaWrite<C>>::write(writer, &src.inner)
+    }
+}
+
+// SAFETY: We borrow a &NativeStr from the reader and wrap it as &NativePath.
+// dst is always initialized on success.
+unsafe impl<'de, C: wincode::config::Config> wincode::SchemaRead<'de, C> for &'de NativePath {
+    type Dst = &'de NativePath;
+
+    fn read(
+        reader: impl wincode::io::Reader<'de>,
+        dst: &mut MaybeUninit<&'de NativePath>,
+    ) -> wincode::ReadResult<()> {
+        let inner: &'de NativeStr =
+            <&'de NativeStr as wincode::SchemaRead<'de, C>>::get(reader)?;
+        dst.write(NativePath::wrap_ref(inner));
+        Ok(())
     }
 }
 

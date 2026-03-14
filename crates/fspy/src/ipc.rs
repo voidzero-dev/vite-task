@@ -5,9 +5,8 @@
 
 use std::io;
 
-use bincode::borrow_decode_from_slice;
 use fspy_shared::ipc::{
-    BINCODE_CONFIG, PathAccess,
+    PathAccess,
     channel::{Receiver, ReceiverLockGuard},
 };
 use tokio::task::spawn_blocking;
@@ -38,9 +37,7 @@ impl OwnedReceiverLockGuard {
 
     pub fn iter_path_accesses(&self) -> impl Iterator<Item = PathAccess<'_>> {
         self.borrow_lock_guard().iter_frames().map(|frame| {
-            let (path_access, decoded_size) =
-                borrow_decode_from_slice::<PathAccess<'_>, _>(frame, BINCODE_CONFIG).unwrap();
-            assert_eq!(decoded_size, frame.len());
+            let path_access: PathAccess<'_> = wincode::deserialize(frame).unwrap();
             path_access
         })
     }

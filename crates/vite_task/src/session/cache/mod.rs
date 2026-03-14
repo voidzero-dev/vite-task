@@ -4,7 +4,7 @@ pub mod display;
 
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
 
-use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
+use wincode::{SchemaRead, SchemaWrite};
 // Re-export display functions for convenience
 pub use display::format_cache_status_inline;
 pub use display::{
@@ -32,7 +32,7 @@ use super::execute::{fingerprint::PostRunFingerprint, spawn::StdOutput};
 /// overwrite the existing entry (e.g., input file hashes — there's no
 /// reason to keep the old hash around, and storing them in the value
 /// lets us report exactly *which file* changed).
-#[derive(Debug, Encode, Decode, Serialize, PartialEq, Eq, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize, PartialEq, Eq, Clone)]
 pub struct CacheEntryKey {
     /// The spawn fingerprint (command, args, cwd, envs)
     pub spawn_fingerprint: SpawnFingerprint,
@@ -54,7 +54,7 @@ impl CacheEntryKey {
 ///
 /// Contains the post-run fingerprint (from fspy), captured outputs,
 /// execution duration, and explicit input file hashes.
-#[derive(Debug, Encode, Decode, Serialize)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize)]
 pub struct CacheEntryValue {
     pub post_run_fingerprint: PostRunFingerprint,
     pub std_outputs: Arc<[StdOutput]>,
@@ -71,7 +71,6 @@ pub struct ExecutionCache {
     conn: Mutex<Connection>,
 }
 
-const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
 #[derive(Debug, Serialize, Deserialize)]
 #[expect(
@@ -331,12 +330,16 @@ impl ExecutionCache {
         clippy::significant_drop_tightening,
         reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
     )]
-    async fn get_key_by_value<K: Encode, V: Decode<()>>(
+    async fn get_key_by_value<K, V>(
         &self,
         table: &str,
         key: &K,
-    ) -> anyhow::Result<Option<V>> {
-        let key_blob = encode_to_vec(key, BINCODE_CONFIG)?;
+    ) -> anyhow::Result<Option<V>>
+    where
+        K: wincode::SchemaWrite<wincode::config::DefaultConfig, Src = K> + ?Sized,
+        V: for<'de> wincode::SchemaRead<'de, wincode::config::DefaultConfig, Dst = V>,
+    {
+        let key_blob = wincode::serialize(key)?;
         let value_blob = {
             let conn = self.conn.lock().await;
             #[expect(
@@ -352,7 +355,7 @@ impl ExecutionCache {
         let Some(value_blob) = value_blob else {
             return Ok(None);
         };
-        let (value, _) = decode_from_slice::<V, _>(&value_blob, BINCODE_CONFIG)?;
+        let value: V = wincode::deserialize(&value_blob)?;
         Ok(Some(value))
     }
 
@@ -378,14 +381,18 @@ impl ExecutionCache {
         clippy::significant_drop_tightening,
         reason = "lock guard must be held while executing the prepared statement"
     )]
-    async fn upsert<K: Encode, V: Encode>(
+    async fn upsert<K, V>(
         &self,
         table: &str,
         key: &K,
         value: &V,
-    ) -> anyhow::Result<()> {
-        let key_blob = encode_to_vec(key, BINCODE_CONFIG)?;
-        let value_blob = encode_to_vec(value, BINCODE_CONFIG)?;
+    ) -> anyhow::Result<()>
+    where
+        K: wincode::SchemaWrite<wincode::config::DefaultConfig, Src = K> + ?Sized,
+        V: wincode::SchemaWrite<wincode::config::DefaultConfig, Src = V> + ?Sized,
+    {
+        let key_blob = wincode::serialize(key)?;
+        let value_blob = wincode::serialize(value)?;
         let conn = self.conn.lock().await;
         #[expect(clippy::disallowed_macros, reason = "SQL query string for rusqlite requires String")]
         let mut update_stmt = conn.prepare_cached(&format!(
@@ -415,11 +422,15 @@ impl ExecutionCache {
         clippy::significant_drop_tightening,
         reason = "lock guard must be held while iterating over query rows"
     )]
-    async fn list_table<K: Decode<()> + Serialize, V: Decode<()> + Serialize>(
+    async fn list_table<K, V>(
         &self,
         table: &str,
         out: &mut impl Write,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<()>
+    where
+        K: for<'de> wincode::SchemaRead<'de, wincode::config::DefaultConfig, Dst = K> + Serialize,
+        V: for<'de> wincode::SchemaRead<'de, wincode::config::DefaultConfig, Dst = V> + Serialize,
+    {
         let conn = self.conn.lock().await;
         #[expect(
             clippy::disallowed_macros,
@@ -430,8 +441,8 @@ impl ExecutionCache {
         while let Some(row) = rows.next()? {
             let key_blob: Vec<u8> = row.get(0)?;
             let value_blob: Vec<u8> = row.get(1)?;
-            let (key, _) = decode_from_slice::<K, _>(&key_blob, BINCODE_CONFIG)?;
-            let (value, _) = decode_from_slice::<V, _>(&value_blob, BINCODE_CONFIG)?;
+            let key: K = wincode::deserialize(&key_blob)?;
+            let value: V = wincode::deserialize(&value_blob)?;
             writeln!(
                 out,
                 "{} => {}",

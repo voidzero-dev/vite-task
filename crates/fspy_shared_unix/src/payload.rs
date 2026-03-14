@@ -1,11 +1,11 @@
 use std::os::unix::ffi::OsStringExt;
 
 use base64::{Engine as _, prelude::BASE64_STANDARD_NO_PAD};
-use bincode::{Decode, Encode, config::standard};
+use wincode::{SchemaRead, SchemaWrite};
 use bstr::BString;
 use fspy_shared::ipc::{NativeStr, channel::ChannelConf};
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, SchemaWrite, SchemaRead)]
 pub struct Payload {
     pub ipc_channel_conf: ChannelConf,
 
@@ -20,7 +20,7 @@ pub struct Payload {
 }
 
 #[cfg(target_os = "macos")]
-#[derive(Debug, Encode, Decode, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Clone)]
 pub struct Artifacts {
     pub bash_path: Box<NativeStr>,
     pub coreutils_path: Box<NativeStr>,
@@ -37,11 +37,11 @@ pub struct EncodedPayload {
 ///
 /// # Panics
 ///
-/// Panics if bincode serialization fails, which should never happen for valid `Payload` structs.
+/// Panics if serialization fails, which should never happen for valid `Payload` structs.
 #[must_use]
 pub fn encode_payload(payload: Payload) -> EncodedPayload {
-    let bincode_bytes = bincode::encode_to_vec(&payload, standard()).unwrap();
-    let encoded_string = BASE64_STANDARD_NO_PAD.encode(&bincode_bytes);
+    let bytes = wincode::serialize(&payload).unwrap();
+    let encoded_string = BASE64_STANDARD_NO_PAD.encode(&bytes);
     EncodedPayload { payload, encoded_string: encoded_string.into() }
 }
 
@@ -52,7 +52,7 @@ pub fn encode_payload(payload: Payload) -> EncodedPayload {
 /// Returns an error if:
 /// - The environment variable is not found
 /// - The base64 decoding fails
-/// - The bincode deserialization fails
+/// - The wincode deserialization fails
 pub fn decode_payload_from_env() -> anyhow::Result<EncodedPayload> {
     let Some(encoded_string) = std::env::var_os(PAYLOAD_ENV_NAME) else {
         anyhow::bail!("Environment variable '{PAYLOAD_ENV_NAME}' not found");
@@ -61,8 +61,7 @@ pub fn decode_payload_from_env() -> anyhow::Result<EncodedPayload> {
 }
 
 fn decode_payload(encoded_string: BString) -> anyhow::Result<EncodedPayload> {
-    let bincode_bytes = BASE64_STANDARD_NO_PAD.decode(&encoded_string)?;
-    let (payload, n) = bincode::decode_from_slice::<Payload, _>(&bincode_bytes, standard())?;
-    assert_eq!(bincode_bytes.len(), n);
+    let bytes = BASE64_STANDARD_NO_PAD.decode(&encoded_string)?;
+    let payload: Payload = wincode::deserialize(&bytes)?;
     Ok(EncodedPayload { payload, encoded_string })
 }

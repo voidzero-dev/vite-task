@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use bincode::{Decode, Encode};
+use wincode::{SchemaRead, SchemaWrite};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use vite_path::{AbsolutePath, RelativePathBuf};
@@ -22,7 +22,7 @@ use crate::{collections::HashMap, session::cache::InputChangeKind};
 
 /// Post-run fingerprint capturing file state after execution.
 /// Used to validate whether cached outputs are still valid.
-#[derive(Encode, Decode, Debug, Serialize)]
+#[derive(SchemaWrite, SchemaRead, Debug, Serialize)]
 pub struct PostRunFingerprint {
     /// Paths inferred from fspy during execution with their content fingerprints.
     /// Only populated when `input_config.includes_auto` is true.
@@ -30,7 +30,7 @@ pub struct PostRunFingerprint {
 }
 
 /// Fingerprint for a single path (file or directory)
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub enum PathFingerprint {
     /// Path was not found when fingerprinting
     NotFound,
@@ -44,7 +44,7 @@ pub enum PathFingerprint {
 }
 
 /// Kind of directory entry
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub enum DirEntryKind {
     File,
     Dir,

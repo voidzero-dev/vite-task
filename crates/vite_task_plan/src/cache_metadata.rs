@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bincode::{Decode, Encode};
+use wincode::{SchemaRead, SchemaWrite};
 use serde::{Deserialize, Serialize};
 use vite_path::RelativePathBuf;
 use vite_str::{self, Str};
@@ -9,7 +9,7 @@ use vite_task_graph::config::ResolvedInputConfig;
 use crate::envs::EnvFingerprints;
 
 /// Key to identify an execution across sessions.
-#[derive(Debug, Encode, Decode, Serialize)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize)]
 pub enum ExecutionCacheKey {
     /// This execution is from a script of a user-defined task.
     UserTask {
@@ -67,7 +67,7 @@ pub struct CacheMetadata {
 /// - The resolver provides envs which become part of the fingerprint
 /// - If resolver provides different envs between runs, cache breaks
 /// - Each built-in task type must have unique task name to avoid cache collision
-#[derive(Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(SchemaWrite, SchemaRead, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct SpawnFingerprint {
     pub(crate) cwd: RelativePathBuf,
     pub(crate) program_fingerprint: ProgramFingerprint,
@@ -102,7 +102,7 @@ impl SpawnFingerprint {
 }
 
 /// The program fingerprint used in `SpawnFingerprint`
-#[derive(Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(SchemaWrite, SchemaRead, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub(crate) enum ProgramFingerprint {
     /// If the program is outside the workspace, fingerprint by its name only (like `node`, `npm`, etc)
     OutsideWorkspace { program_name: Str },

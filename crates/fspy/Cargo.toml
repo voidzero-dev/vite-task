@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
-bincode = { workspace = true }
+wincode = { workspace = true }
 bstr = { workspace = true, default-features = false }
 bumpalo = { workspace = true }
 const_format = { workspace = true, features = ["fmt"] }

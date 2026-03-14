@@ -5,17 +5,10 @@ use std::{
     fmt::{Debug, Display},
     ops::Deref,
     path::Path,
-    str::from_utf8,
     sync::Arc,
 };
 
-use bincode::{
-    Decode, Encode,
-    de::{Decoder, read::Reader},
-    enc::Encoder,
-    error::{DecodeError, EncodeError},
-    impl_borrow_decode,
-};
+use std::mem::MaybeUninit;
 use compact_str::CompactString;
 #[doc(hidden)] // for `format` macro only
 pub use compact_str::format_compact;
@@ -116,34 +109,34 @@ impl Debug for Str {
     }
 }
 
-impl Encode for Str {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        self.0.encode(encoder)
+// SAFETY: Str serializes identically to str (length-prefixed UTF-8 bytes).
+// The wire format matches `str`: a varint length followed by the raw UTF-8 bytes.
+unsafe impl<C: wincode::config::Config> wincode::SchemaWrite<C> for Str {
+    type Src = Str;
+
+    fn size_of(src: &Str) -> wincode::WriteResult<usize> {
+        <str as wincode::SchemaWrite<C>>::size_of(src.as_str())
+    }
+
+    fn write(writer: impl wincode::io::Writer, src: &Str) -> wincode::WriteResult<()> {
+        <str as wincode::SchemaWrite<C>>::write(writer, src.as_str())
     }
 }
 
-// https://github.com/bincode-org/bincode/blob/48ac8d4e8057387696a7ed3af2dda198ead23246/src/de/mod.rs#L331
-fn decode_slice_len<D: Decoder>(decoder: &mut D) -> Result<usize, DecodeError> {
-    let v = u64::decode(decoder)?;
-    v.try_into().map_err(|_| DecodeError::OutsideUsizeRange(v))
-}
-impl<Context> Decode<Context> for Str {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let len = decode_slice_len(decoder)?;
-        decoder.claim_container_read::<u8>(len)?;
+// SAFETY: Str deserializes identically to String (length-prefixed UTF-8 bytes),
+// then wraps into CompactString. We always initialize `dst` on success.
+unsafe impl<'de, C: wincode::config::Config> wincode::SchemaRead<'de, C> for Str {
+    type Dst = Str;
 
-        let mut compact_str = CompactString::with_capacity(len);
-        // SAFETY: we write exactly `len` bytes into the spare capacity, validate UTF-8, then set length
-        unsafe {
-            let buf = &mut compact_str.as_mut_bytes()[..len];
-            decoder.reader().read(buf)?;
-            from_utf8(buf).map_err(|utf8_error| DecodeError::Utf8 { inner: utf8_error })?;
-            compact_str.set_len(len);
-        }
-        Ok(Self(compact_str))
+    fn read(
+        reader: impl wincode::io::Reader<'de>,
+        dst: &mut MaybeUninit<Str>,
+    ) -> wincode::ReadResult<()> {
+        let s = <String as wincode::SchemaRead<'de, C>>::get(reader)?;
+        dst.write(Str::from(CompactString::from(s)));
+        Ok(())
     }
 }
-impl_borrow_decode!(Str);
 
 impl From<&str> for Str {
     fn from(value: &str) -> Self {
@@ -217,17 +210,14 @@ mod ts_impl {
 
 #[cfg(test)]
 mod tests {
-    use bincode::{config::standard, decode_from_slice, encode_to_vec};
-
     use super::*;
 
     #[test]
     fn test_str_encode_decode() {
-        let config = standard();
         let original = Str::from("Hello, World!");
-        let encoded = encode_to_vec(&original, config).unwrap();
+        let encoded = wincode::serialize(&original).unwrap();
 
-        let decoded: Str = decode_from_slice(&encoded, config).unwrap().0;
+        let decoded: Str = wincode::deserialize(&encoded).unwrap();
         assert_eq!(original, decoded);
     }
 }

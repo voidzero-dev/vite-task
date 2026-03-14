@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, ffi::OsStr, sync::Arc};
 
-use bincode::{Decode, Encode};
+#[expect(clippy::disallowed_macros, reason = "SHA256 hash strings are too long for Str")]
+use std::format;
+
+use wincode::{SchemaRead, SchemaWrite};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -13,12 +16,13 @@ use vite_task_graph::config::EnvConfig;
 ///
 /// Contents of this struct are only for fingerprinting and cache key computation (some of envs may be hashed for security).
 /// The actual environment variables to be passed to the execution are in `LeafExecutionItem.all_envs`.
-#[derive(Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct EnvFingerprints {
     /// Environment variables that should be fingerprinted for this execution.
     ///
     /// Use `BTreeMap` to ensure stable order.
-    pub fingerprinted_envs: BTreeMap<Str, Arc<str>>,
+    #[expect(clippy::disallowed_types, reason = "wincode doesn't support Arc<str>; Str is the appropriate replacement")]
+    pub fingerprinted_envs: BTreeMap<Str, String>,
 
     /// Environment variable names that should be passed through without values being fingerprinted.
     ///
@@ -84,7 +88,7 @@ impl EnvFingerprints {
         };
 
         // Resolve fingerprinted envs
-        let mut fingerprinted_envs = BTreeMap::<Str, Arc<str>>::new();
+        let mut fingerprinted_envs = BTreeMap::<Str, String>::new();
         if !env_config.fingerprinted_envs.is_empty() {
             let fingerprinted_env_patterns = GlobPatternSet::new(
                 env_config.fingerprinted_envs.iter().filter(|s| !s.starts_with('!')),
@@ -104,14 +108,10 @@ impl EnvFingerprints {
                     });
                 };
                 // Hash sensitive env values
-                let value: Arc<str> = if sensitive_patterns.is_match(name) {
+                let value: String = if sensitive_patterns.is_match(name) {
                     let mut hasher = Sha256::new();
                     hasher.update(value.as_bytes());
-                    #[expect(
-                        clippy::disallowed_macros,
-                        reason = "result is converted to Arc<str>, not Str"
-                    )]
-                    format!("sha256:{:x}", hasher.finalize()).into()
+                    format!("sha256:{:x}", hasher.finalize())
                 } else {
                     value.into()
                 };
@@ -306,7 +306,7 @@ mod tests {
         // APP1_PASSWORD should be hashed
         let password = result1.fingerprinted_envs.get("APP1_PASSWORD").unwrap();
         assert_eq!(
-            password.as_ref(),
+            password.as_str(),
             "sha256:17f1ef795d5663faa129f6fe3e5335e67ac7a701d1a70533a5f4b1635413a1aa"
         );
 
@@ -342,15 +342,15 @@ mod tests {
         );
 
         assert_eq!(
-            fingerprinted_envs.get("TEST_VAR").map(std::convert::AsRef::as_ref),
+            fingerprinted_envs.get("TEST_VAR").map(String::as_str),
             Some("uppercase")
         );
         assert_eq!(
-            fingerprinted_envs.get("test_var").map(std::convert::AsRef::as_ref),
+            fingerprinted_envs.get("test_var").map(String::as_str),
             Some("lowercase")
         );
         assert_eq!(
-            fingerprinted_envs.get("Test_Var").map(std::convert::AsRef::as_ref),
+            fingerprinted_envs.get("Test_Var").map(String::as_str),
             Some("mixed")
         );
     }
@@ -524,7 +524,7 @@ mod tests {
         assert!(result.fingerprinted_envs.get("DB_PASSWORD").unwrap().starts_with("sha256:"));
 
         // Non-sensitive env should NOT be hashed
-        assert_eq!(result.fingerprinted_envs.get("NORMAL_VAR").unwrap().as_ref(), "normal_value");
+        assert_eq!(result.fingerprinted_envs.get("NORMAL_VAR").unwrap().as_str(), "normal_value");
     }
 
     #[test]

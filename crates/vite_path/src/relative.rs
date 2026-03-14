@@ -10,7 +10,7 @@ use std::{
     path::{Component, Path},
 };
 
-use bincode::{Decode, Encode, de::Decoder, error::DecodeError};
+use std::mem::MaybeUninit;
 use diff::Diff;
 use ref_cast::{RefCastCustom, ref_cast_custom};
 use serde::{Deserialize, Serialize};
@@ -101,11 +101,11 @@ impl RelativePath {
 
 /// A owned relative path buf with the same guarantees as `RelativePath`
 #[derive(
-    Debug, Encode, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, Default,
+    Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, Default,
 )]
 #[expect(
     clippy::unsafe_derive_deserialize,
-    reason = "unsafe in Decode impl validates portability invariants"
+    reason = "unsafe in SchemaRead impl validates portability invariants"
 )]
 pub struct RelativePathBuf(Str);
 
@@ -216,21 +216,37 @@ impl RelativePathBuf {
     }
 }
 
-impl<Context> Decode<Context> for RelativePathBuf {
-    fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let path_str = Str::decode(decoder)?;
-        Self::new(path_str.as_str()).map_err(|err| {
-            #[expect(
-                clippy::disallowed_macros,
-                reason = "bincode::error::DecodeError requires std format!"
-            )]
-            let msg = format!("{err}: {path_str}");
-            DecodeError::OtherString(msg)
-        })
+// SAFETY: RelativePathBuf serializes identically to Str (its inner type).
+// We delegate write to Str's SchemaWrite implementation.
+unsafe impl<C: wincode::config::Config> wincode::SchemaWrite<C> for RelativePathBuf {
+    type Src = RelativePathBuf;
+
+    fn size_of(src: &RelativePathBuf) -> wincode::WriteResult<usize> {
+        <Str as wincode::SchemaWrite<C>>::size_of(&src.0)
+    }
+
+    fn write(writer: impl wincode::io::Writer, src: &RelativePathBuf) -> wincode::WriteResult<()> {
+        <Str as wincode::SchemaWrite<C>>::write(writer, &src.0)
     }
 }
 
-bincode::impl_borrow_decode!(RelativePathBuf);
+// SAFETY: We always initialize `dst` on success. Reads a Str then validates
+// portability invariants before constructing RelativePathBuf.
+unsafe impl<'de, C: wincode::config::Config> wincode::SchemaRead<'de, C> for RelativePathBuf {
+    type Dst = RelativePathBuf;
+
+    fn read(
+        reader: impl wincode::io::Reader<'de>,
+        dst: &mut MaybeUninit<RelativePathBuf>,
+    ) -> wincode::ReadResult<()> {
+        let path_str = <Str as wincode::SchemaRead<'de, C>>::get(reader)?;
+        let result = Self::new(path_str.as_str()).map_err(|_| {
+            wincode::ReadError::Custom("invalid RelativePathBuf: non-portable path")
+        })?;
+        dst.write(result);
+        Ok(())
+    }
+}
 
 impl TryFrom<&Path> for RelativePathBuf {
     type Error = FromPathError;
@@ -452,10 +468,8 @@ mod tests {
     #[test]
     fn encode_decode() {
         let rel_path = RelativePathBuf::new("foo/bar").unwrap();
-        let config = bincode::config::standard();
-        let encoded = bincode::encode_to_vec(&rel_path, config).unwrap();
-        let (decoded, _) =
-            bincode::decode_from_slice::<RelativePathBuf, _>(&encoded, config).unwrap();
+        let encoded = wincode::serialize(&rel_path).unwrap();
+        let decoded: RelativePathBuf = wincode::deserialize(&encoded).unwrap();
         assert_eq!(rel_path, decoded);
     }
 }

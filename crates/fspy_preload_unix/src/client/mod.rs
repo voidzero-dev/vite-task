@@ -2,13 +2,12 @@ pub mod convert;
 pub mod raw_exec;
 
 use std::{
-    ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _, path::Path,
+    ffi::OsStr, fmt::Debug, os::unix::ffi::OsStrExt as _, path::Path,
     sync::OnceLock,
 };
 
-use bincode::{enc::write::SizeWriter, encode_into_slice, encode_into_writer};
 use convert::{ToAbsolutePath, ToAccessMode};
-use fspy_shared::ipc::{BINCODE_CONFIG, PathAccess, channel::Sender};
+use fspy_shared::ipc::{PathAccess, channel::Sender};
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::EncodedPayload,
@@ -72,17 +71,9 @@ impl Client {
             return Ok(());
         }
         let path_access = PathAccess { mode, path: path.into() };
-        let mut size_writer = SizeWriter::default();
-        encode_into_writer(path_access, &mut size_writer, BINCODE_CONFIG)?;
-
-        let frame_size = NonZeroUsize::new(size_writer.bytes_written)
-            .expect("fspy: encoded PathAccess should never be empty");
-
-        let mut frame = ipc_sender
-            .claim_frame(frame_size)
-            .expect("fspy: failed to claim frame in shared memory");
-        let written_size = encode_into_slice(path_access, &mut frame, BINCODE_CONFIG)?;
-        assert_eq!(written_size, size_writer.bytes_written);
+        ipc_sender
+            .write_encoded(&path_access)
+            .expect("fspy: failed to write path access to shared memory");
 
         Ok(())
     }

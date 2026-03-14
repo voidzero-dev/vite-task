@@ -8,9 +8,6 @@ use std::{
     sync::atomic::{AtomicI32, AtomicUsize, Ordering, fence},
 };
 
-use bincode::{
-    Encode, config::Config, enc::write::SizeWriter, encode_into_slice, encode_into_writer,
-};
 use bytemuck::must_cast;
 use shared_memory::Shmem;
 
@@ -109,7 +106,7 @@ impl Drop for FrameMut<'_> {
 #[derive(thiserror::Error, Debug)]
 pub enum WriteEncodedError {
     #[error("Failed to encode value into shared memory")]
-    EncodeError(#[from] bincode::error::EncodeError),
+    EncodeError(#[from] wincode::WriteError),
     #[error("Tried to write a frame of zero size into shared memory")]
     ZeroSizedFrame,
     #[error("Not enough space in shared memory to write the encoded frame")]
@@ -226,23 +223,31 @@ impl<M: AsRawSlice> ShmWriter<M> {
     }
 
     /// Append an encoded value into the shared memory.
-    pub fn write_encoded<T: Encode, C: Config>(
+    pub fn write_encoded<T>(
         &self,
         value: &T,
-        config: C,
-    ) -> Result<(), WriteEncodedError> {
-        let mut size_writer = SizeWriter::default();
-        encode_into_writer(value, &mut size_writer, config)?;
+    ) -> Result<(), WriteEncodedError>
+    where
+        T: wincode::SchemaWrite<wincode::config::DefaultConfig, Src = T> + ?Sized,
+    {
+        let serialized_size = wincode::serialized_size(value)? as usize;
 
-        let Some(frame_size) = NonZeroUsize::new(size_writer.bytes_written) else {
+        let Some(frame_size) = NonZeroUsize::new(serialized_size) else {
             return Err(WriteEncodedError::ZeroSizedFrame);
         };
         let Some(mut frame) = self.claim_frame(frame_size) else {
             return Err(WriteEncodedError::InsufficientSpace);
         };
 
-        let written_size = encode_into_slice(value, &mut frame, config)?;
-        assert_eq!(written_size, size_writer.bytes_written);
+        // SAFETY: frame is a valid mutable slice of frame_size bytes from claim_frame.
+        // We cast to MaybeUninit<u8> slice to satisfy Cursor's Writer impl.
+        let uninit_frame: &mut [std::mem::MaybeUninit<u8>] = unsafe {
+            std::slice::from_raw_parts_mut(
+                frame.as_mut_ptr().cast::<std::mem::MaybeUninit<u8>>(),
+                frame.len(),
+            )
+        };
+        wincode::serialize_into(wincode::io::Cursor::new(uninit_frame), value)?;
 
         Ok(())
     }

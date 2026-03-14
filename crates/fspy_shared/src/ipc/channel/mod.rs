@@ -2,9 +2,9 @@
 
 mod shm_io;
 
-use std::{env::temp_dir, fs::File, io, ops::Deref, path::PathBuf, sync::Arc};
+use std::{env::temp_dir, fs::File, io, ops::Deref, path::PathBuf};
 
-use bincode::{Decode, Encode};
+use wincode::{SchemaRead, SchemaWrite};
 use shared_memory::{Shmem, ShmemConf};
 pub use shm_io::FrameMut;
 use shm_io::{ShmReader, ShmWriter};
@@ -14,10 +14,11 @@ use uuid::Uuid;
 use super::NativeStr;
 
 /// Serializable configuration to create channel senders.
-#[derive(Encode, Decode, Clone, Debug)]
+#[derive(SchemaWrite, SchemaRead, Clone, Debug)]
 pub struct ChannelConf {
     lock_file_path: Box<NativeStr>,
-    shm_id: Arc<str>,
+    #[expect(clippy::disallowed_types, reason = "wincode doesn't support Arc<str>; this is an internal IPC field")]
+    shm_id: String,
     shm_size: usize,
 }
 

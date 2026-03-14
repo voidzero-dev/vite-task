@@ -82,14 +82,14 @@ pub fn detect_spawn_fingerprint_changes(
             if old_value != new_value {
                 changes.push(SpawnFingerprintChange::EnvValueChanged {
                     key: key.clone(),
-                    old_value: Str::from(old_value.as_ref()),
-                    new_value: Str::from(new_value.as_ref()),
+                    old_value: Str::from(old_value.as_str()),
+                    new_value: Str::from(new_value.as_str()),
                 });
             }
         } else {
             changes.push(SpawnFingerprintChange::EnvRemoved {
                 key: key.clone(),
-                value: Str::from(old_value.as_ref()),
+                value: Str::from(old_value.as_str()),
             });
         }
     }
@@ -99,7 +99,7 @@ pub fn detect_spawn_fingerprint_changes(
         if !old_env.fingerprinted_envs.contains_key(key) {
             changes.push(SpawnFingerprintChange::EnvAdded {
                 key: key.clone(),
-                value: Str::from(new_value.as_ref()),
+                value: Str::from(new_value.as_str()),
             });
         }
     }

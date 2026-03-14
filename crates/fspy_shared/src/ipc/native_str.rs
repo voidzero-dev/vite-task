@@ -9,22 +9,17 @@ use std::os::windows::ffi::OsStringExt as _;
 use std::{borrow::Cow, ffi::OsStr, fmt::Debug};
 
 use allocator_api2::alloc::Allocator;
-use bincode::{
-    BorrowDecode, Decode, Encode,
-    de::{BorrowDecoder, Decoder},
-    error::DecodeError,
-    impl_borrow_decode,
-};
+use std::mem::MaybeUninit;
 #[cfg(windows)]
 use bytemuck::must_cast_slice;
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc};
 
 /// Similar to `OsStr`, but
-/// - Can be infallibly and losslessly encoded/decoded using bincode.
+/// - Can be infallibly and losslessly encoded/decoded using wincode.
 ///   (`Encode`/`Decoded` implementations for `OsStr` requires it to be valid UTF-8. This does not.)
 /// - Can be constructed from wide characters on Windows with zero copy.
 /// - Supports zero-copy `BorrowDecode`.
-#[derive(TransparentWrapper, Encode, PartialEq, Eq)]
+#[derive(TransparentWrapper, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct NativeStr {
     // On unix, this is the raw bytes of the OsStr.
@@ -81,12 +76,31 @@ impl Debug for NativeStr {
     }
 }
 
-impl<'a, C> BorrowDecode<'a, C> for &'a NativeStr {
-    fn borrow_decode<D: BorrowDecoder<'a, Context = C>>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
-        let data: &'a [u8] = BorrowDecode::borrow_decode(decoder)?;
-        Ok(NativeStr::wrap_ref(data))
+// SAFETY: NativeStr is repr(transparent) over [u8], so it serializes identically to [u8].
+unsafe impl<C: wincode::config::Config> wincode::SchemaWrite<C> for NativeStr {
+    type Src = NativeStr;
+
+    fn size_of(src: &NativeStr) -> wincode::WriteResult<usize> {
+        <[u8] as wincode::SchemaWrite<C>>::size_of(&src.data)
+    }
+
+    fn write(writer: impl wincode::io::Writer, src: &NativeStr) -> wincode::WriteResult<()> {
+        <[u8] as wincode::SchemaWrite<C>>::write(writer, &src.data)
+    }
+}
+
+// SAFETY: We borrow a &[u8] from the reader and wrap it as &NativeStr.
+// dst is always initialized on success.
+unsafe impl<'de, C: wincode::config::Config> wincode::SchemaRead<'de, C> for &'de NativeStr {
+    type Dst = &'de NativeStr;
+
+    fn read(
+        reader: impl wincode::io::Reader<'de>,
+        dst: &mut MaybeUninit<&'de NativeStr>,
+    ) -> wincode::ReadResult<()> {
+        let data: &'de [u8] = <&'de [u8] as wincode::SchemaRead<'de, C>>::get(reader)?;
+        dst.write(NativeStr::wrap_ref(data));
+        Ok(())
     }
 }
 
@@ -97,13 +111,33 @@ impl<'a, S: AsRef<OsStr> + ?Sized> From<&'a S> for &'a NativeStr {
     }
 }
 
-impl<C> Decode<C> for Box<NativeStr> {
-    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let data: Box<[u8]> = Decode::decode(decoder)?;
-        Ok(NativeStr::wrap_box(data))
+// SAFETY: Box<NativeStr> serializes identically to NativeStr (which wraps [u8]).
+unsafe impl<C: wincode::config::Config> wincode::SchemaWrite<C> for Box<NativeStr> {
+    type Src = Box<NativeStr>;
+
+    fn size_of(src: &Box<NativeStr>) -> wincode::WriteResult<usize> {
+        <NativeStr as wincode::SchemaWrite<C>>::size_of(src)
+    }
+
+    fn write(writer: impl wincode::io::Writer, src: &Box<NativeStr>) -> wincode::WriteResult<()> {
+        <NativeStr as wincode::SchemaWrite<C>>::write(writer, src)
     }
 }
-impl_borrow_decode!(Box<NativeStr>);
+
+// SAFETY: We read a Box<[u8]> and wrap it as Box<NativeStr>.
+// dst is always initialized on success.
+unsafe impl<'de, C: wincode::config::Config> wincode::SchemaRead<'de, C> for Box<NativeStr> {
+    type Dst = Box<NativeStr>;
+
+    fn read(
+        reader: impl wincode::io::Reader<'de>,
+        dst: &mut MaybeUninit<Box<NativeStr>>,
+    ) -> wincode::ReadResult<()> {
+        let data: Box<[u8]> = <Box<[u8]> as wincode::SchemaRead<'de, C>>::get(reader)?;
+        dst.write(NativeStr::wrap_box(data));
+        Ok(())
+    }
+}
 
 impl Clone for Box<NativeStr> {
     fn clone(&self) -> Self {
@@ -148,25 +182,12 @@ mod tests {
     fn test_from_wide() {
         use std::os::windows::ffi::OsStrExt;
 
-        use bincode::{borrow_decode_from_slice, config, encode_to_vec};
-
         let wide_str: &[u16] = &[528, 491];
         let native_str = NativeStr::from_wide(wide_str);
 
-        let mut encoded = encode_to_vec(native_str, config::standard()).unwrap();
+        let encoded = wincode::serialize(native_str).unwrap();
 
-        let (decoded, _) =
-            borrow_decode_from_slice::<'_, &NativeStr, _>(&encoded, config::standard()).unwrap();
-        let decoded_wide = decoded.to_os_string().encode_wide().collect::<Vec<u16>>();
-        assert_eq!(decoded_wide, wide_str);
-
-        let encoded_len = encoded.len();
-        encoded.push(0);
-        encoded.copy_within(..encoded_len, 1);
-
-        let (decoded, _) =
-            borrow_decode_from_slice::<'_, &NativeStr, _>(&encoded[1..], config::standard())
-                .unwrap();
+        let decoded: &NativeStr = wincode::deserialize(&encoded).unwrap();
         let decoded_wide = decoded.to_os_string().encode_wide().collect::<Vec<u16>>();
         assert_eq!(decoded_wide, wide_str);
     }

@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bincode::{Decode, Encode};
+use wincode::{SchemaRead, SchemaWrite};
 use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
@@ -24,14 +24,14 @@ pub struct PathRead {
 }
 
 /// Output kind for stdout/stderr
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Encode, Decode, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, SchemaWrite, SchemaRead, Serialize)]
 pub enum OutputKind {
     StdOut,
     StdErr,
 }
 
 /// Output chunk with stream kind
-#[derive(Debug, Encode, Decode, Serialize, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize, Clone)]
 pub struct StdOutput {
     pub kind: OutputKind,
     pub content: Vec<u8>,

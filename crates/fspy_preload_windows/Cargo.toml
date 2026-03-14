@@ -7,7 +7,7 @@ edition.workspace = true
 crate-type = ["cdylib"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
-bincode = { workspace = true }
+wincode = { workspace = true }
 constcat = { workspace = true }
 fspy_detours_sys = { workspace = true }
 fspy_shared = { workspace = true }
