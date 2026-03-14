@@ -64,7 +64,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-scripts-ta
                     "includes_auto": true,
                     "positive_globs": [],
                     "negative_globs": []
-                  }
+                  },
+                  "output_globs": []
                 },
                 "spawn_command": {
                   "program_path": "<tools>/node_modules/.bin/print-file",

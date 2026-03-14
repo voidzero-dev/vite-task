@@ -65,6 +65,7 @@ fn synthesize_node_modules_bin_task(
             env: None,
             untracked_env: None,
             input: None,
+            output: None,
         }),
         envs: Arc::clone(envs),
     })
@@ -130,6 +131,7 @@ impl vite_task::CommandHandler for CommandHandler {
                             env: None,
                             untracked_env: Some(vec![name]),
                             input: None,
+                            output: None,
                         }
                     }),
                     envs: Arc::new(envs),

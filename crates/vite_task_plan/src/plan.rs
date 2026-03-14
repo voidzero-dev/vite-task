@@ -593,6 +593,7 @@ fn plan_spawn_execution(
                 spawn_fingerprint,
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
+                output_globs: cache_config.output_globs.clone(),
             });
         }
     }

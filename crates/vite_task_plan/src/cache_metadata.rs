@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -46,6 +46,11 @@ pub struct CacheMetadata {
     /// Resolved input configuration for cache fingerprinting.
     /// Used at execution time to determine what files to track.
     pub input_config: ResolvedInputConfig,
+
+    /// Workspace-root-relative output glob patterns.
+    /// Files matching these globs are saved to cache after execution
+    /// and restored on cache hit.
+    pub output_globs: BTreeSet<Str>,
 }
 
 /// Fingerprint for spawn execution that affects caching.

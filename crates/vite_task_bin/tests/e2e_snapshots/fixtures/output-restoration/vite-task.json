@@ -1,0 +1,10 @@
+{
+  "tasks": {
+    "build": {
+      "command": "node -e \"const fs=require('fs'); fs.mkdirSync('dist',{recursive:true}); const input=fs.readFileSync('src/input.txt','utf8'); fs.writeFileSync('dist/output.txt',input.toUpperCase()); console.log('built: '+input.trim())\"",
+      "input": ["src/**"],
+      "output": ["dist/**"],
+      "cache": true
+    }
+  }
+}

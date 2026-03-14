@@ -15,6 +15,7 @@ use rusqlite::{Connection, OptionalExtension as _, config::DbConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_str::Str;
 use vite_task_graph::config::ResolvedInputConfig;
 use vite_task_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
 
@@ -64,11 +65,17 @@ pub struct CacheEntryValue {
     /// Path is relative to workspace root, value is `xxHash3_64` of file content.
     /// Stored in the value (not the key) so changes can be detected and reported.
     pub globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    /// Filename of the output archive in the cache outputs directory.
+    /// Empty string when no output globs are configured.
+    /// The actual tar file is stored on the filesystem, not in `SQLite`.
+    pub output_archive_name: Str,
 }
 
 #[derive(Debug)]
 pub struct ExecutionCache {
     conn: Mutex<Connection>,
+    /// Path to the `outputs/` subdirectory where output archive files are stored.
+    outputs_dir: Arc<AbsolutePath>,
 }
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
@@ -168,27 +175,33 @@ impl ExecutionCache {
                         "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    conn.execute("PRAGMA user_version = 10", ())?;
+                    conn.execute("PRAGMA user_version = 11", ())?;
                 }
-                1..=9 => {
+                1..=10 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                10 => break, // current version
-                11.. => {
+                11 => break, // current version
+                12.. => {
                     return Err(anyhow::anyhow!("Unrecognized database version: {user_version}"));
                 }
             }
         }
+        let outputs_dir = path.join("outputs");
+        std::fs::create_dir_all(&outputs_dir)?;
+
         // Lock is released when lock_file is dropped
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self { conn: Mutex::new(conn), outputs_dir: Arc::from(outputs_dir) })
     }
 
     #[tracing::instrument]
     pub async fn save(self) -> anyhow::Result<()> {
-        // do some cleanup in the future
+        // Checkpoint WAL to consolidate into a single cache.db file.
+        // This makes the cache portable for CI upload/download (no -wal/-shm files needed).
+        let conn = self.conn.into_inner();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
 
@@ -440,6 +453,11 @@ impl ExecutionCache {
             )?;
         }
         Ok(())
+    }
+
+    /// Get the outputs directory path.
+    pub const fn outputs_dir(&self) -> &Arc<AbsolutePath> {
+        &self.outputs_dir
     }
 
     pub async fn list(&self, mut out: impl Write) -> anyhow::Result<()> {

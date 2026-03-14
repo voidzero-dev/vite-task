@@ -47,6 +47,16 @@ export type Task = {
             auto: boolean;
           }
       >;
+      /**
+       * Files produced by the task that should be cached and restored on cache hit.
+       *
+       * - Omitted or `[]`: no output files are cached (only stdout/stderr are replayed)
+       * - Glob patterns (e.g. `"dist/**"`) select output files to cache
+       *
+       * Patterns are relative to the package directory.
+       * When a cache hit occurs, these files are restored before replaying stdout/stderr.
+       */
+      output?: Array<string>;
     }
   | {
       /**

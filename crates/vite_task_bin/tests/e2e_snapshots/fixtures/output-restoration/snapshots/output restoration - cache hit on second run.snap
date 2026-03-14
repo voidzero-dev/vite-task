@@ -1,0 +1,13 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vt run build
+$ node -e "const fs=require('fs'); fs.mkdirSync('dist',{recursive:true}); const input=fs.readFileSync('src/input.txt','utf8'); fs.writeFileSync('dist/output.txt',input.toUpperCase()); console.log('built: '+input.trim())"
+built: hello world
+> vt run build
+$ node -e "const fs=require('fs'); fs.mkdirSync('dist',{recursive:true}); const input=fs.readFileSync('src/input.txt','utf8'); fs.writeFileSync('dist/output.txt',input.toUpperCase()); console.log('built: '+input.trim())" ✓ cache hit, replaying
+built: hello world
+
+---
+vt run: cache hit, <duration> saved.

@@ -74,6 +74,18 @@ impl ResolvedTaskOptions {
                     workspace_root,
                 )?;
 
+                let mut output_globs = BTreeSet::new();
+                if let Some(output_patterns) = enabled_cache_config.output {
+                    for pattern in &output_patterns {
+                        let resolved = resolve_glob_to_workspace_relative(
+                            pattern.as_str(),
+                            dir,
+                            workspace_root,
+                        )?;
+                        output_globs.insert(resolved);
+                    }
+                }
+
                 Some(CacheConfig {
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
@@ -83,6 +95,7 @@ impl ResolvedTaskOptions {
                         untracked_env,
                     },
                     input_config,
+                    output_globs,
                 })
             }
         };
@@ -94,6 +107,10 @@ impl ResolvedTaskOptions {
 pub struct CacheConfig {
     pub env_config: EnvConfig,
     pub input_config: ResolvedInputConfig,
+    /// Workspace-root-relative output glob patterns.
+    /// Files matching these globs are saved to cache after execution
+    /// and restored on cache hit.
+    pub output_globs: BTreeSet<Str>,
 }
 
 /// Resolved input configuration for cache fingerprinting.

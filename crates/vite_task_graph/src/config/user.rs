@@ -93,6 +93,16 @@ pub struct EnabledCacheConfig {
     #[serde(default)]
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
     pub input: Option<UserInputsConfig>,
+
+    /// Files produced by the task that should be cached and restored on cache hit.
+    ///
+    /// - Omitted or `[]`: no output files are cached (only stdout/stderr are replayed)
+    /// - Glob patterns (e.g. `"dist/**"`) select output files to cache
+    ///
+    /// Patterns are relative to the package directory.
+    /// When a cache hit occurs, these files are restored before replaying stdout/stderr.
+    #[serde(default)]
+    pub output: Option<Vec<Str>>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -128,6 +138,7 @@ impl Default for UserTaskOptions {
                     env: None,
                     untracked_env: None,
                     input: None,
+                    output: None,
                 },
             },
         }
@@ -431,6 +442,7 @@ mod tests {
                     env: Some(std::iter::once("NODE_ENV".into()).collect()),
                     untracked_env: Some(std::iter::once("FOO".into()).collect()),
                     input: None,
+                    output: None,
                 }
             },
         );

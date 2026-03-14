@@ -30,7 +30,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/package-self-dep
               "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
-            }
+            },
+            "output_globs": []
           }
         }
       },

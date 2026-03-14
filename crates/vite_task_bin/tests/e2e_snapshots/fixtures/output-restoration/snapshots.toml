@@ -1,0 +1,25 @@
+# Test output restoration: files in `output` globs are cached and restored on cache hit
+
+[[e2e]]
+name = "output restoration - cache hit restores files"
+steps = [
+  # First run: cache miss, produces dist/output.txt
+  "vt run build",
+  # Delete output to simulate CI fresh checkout
+  "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+  # Verify output was deleted
+  "node -e \"console.log('exists:',require('fs').existsSync('dist/output.txt'))\"",
+  # Second run: cache hit, should restore dist/output.txt
+  "vt run build",
+  # Verify output was restored with correct content
+  "node -e \"console.log(require('fs').readFileSync('dist/output.txt','utf8').trim())\"",
+]
+
+[[e2e]]
+name = "output restoration - cache hit on second run"
+steps = [
+  # First run - cache miss
+  "vt run build",
+  # Second run - cache hit (output still exists, should be fine)
+  "vt run build",
+]

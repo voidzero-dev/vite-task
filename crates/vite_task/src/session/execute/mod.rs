@@ -1,5 +1,6 @@
 pub mod fingerprint;
 pub mod glob_inputs;
+pub mod output_archive;
 pub mod spawn;
 
 use std::{collections::BTreeMap, process::Stdio, sync::Arc};
@@ -7,6 +8,7 @@ use std::{collections::BTreeMap, process::Stdio, sync::Arc};
 use futures_util::FutureExt;
 use tokio::io::AsyncWriteExt as _;
 use vite_path::AbsolutePath;
+use vite_str::Str;
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
     SpawnExecution,
@@ -269,9 +271,47 @@ pub async fn execute_spawn(
     //    Returns StdioConfig with the reporter's suggestion and async writers.
     let mut stdio_config = leaf_reporter.start(cache_status).await;
 
-    // 3. If cache hit, replay outputs via the StdioConfig writers and finish early.
-    //    No need to actually execute the command — just replay what was cached.
+    // 3. If cache hit, restore output files and replay stdout/stderr via the StdioConfig writers.
+    //    No need to actually execute the command — just restore what was cached.
     if let Some(cached) = cached_value {
+        // Restore output files before replaying stdout/stderr
+        if let Some(cache_metadata) = cache_metadata
+            && !cache_metadata.output_globs.is_empty()
+            && !cached.output_archive_name.is_empty()
+        {
+            let archive_path = cache.outputs_dir().join(cached.output_archive_name.as_str());
+            let archive_data = match std::fs::read(archive_path.as_path()) {
+                Ok(data) => data,
+                Err(err) => {
+                    leaf_reporter
+                        .finish(
+                            None,
+                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
+                            Some(ExecutionError::Cache {
+                                kind: CacheErrorKind::Lookup,
+                                source: err.into(),
+                            }),
+                        )
+                        .await;
+                    return SpawnOutcome::Failed;
+                }
+            };
+            if let Err(err) = output_archive::restore_outputs(
+                cache_base_path,
+                &cache_metadata.output_globs,
+                &archive_data,
+            ) {
+                leaf_reporter
+                    .finish(
+                        None,
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
+                        Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
+                    )
+                    .await;
+                return SpawnOutcome::Failed;
+            }
+        }
+
         for output in cached.std_outputs.iter() {
             let writer: &mut (dyn tokio::io::AsyncWrite + Unpin) = match output.kind {
                 spawn::OutputKind::StdOut => &mut stdio_config.stdout_writer,
@@ -404,11 +444,38 @@ pub async fn execute_spawn(
             // Execution succeeded — attempt to create fingerprint and update cache
             match PostRunFingerprint::create(path_reads, cache_base_path) {
                 Ok(post_run_fingerprint) => {
+                    let output_archive_name = if cache_metadata.output_globs.is_empty() {
+                        Str::default()
+                    } else {
+                        match output_archive::collect_and_store_outputs(
+                            cache_base_path,
+                            &cache_metadata.output_globs,
+                            cache.outputs_dir(),
+                        ) {
+                            Ok(name) => name,
+                            Err(err) => {
+                                leaf_reporter
+                                    .finish(
+                                        Some(result.exit_status),
+                                        CacheUpdateStatus::NotUpdated(
+                                            CacheNotUpdatedReason::CacheDisabled,
+                                        ),
+                                        Some(ExecutionError::Cache {
+                                            kind: CacheErrorKind::Update,
+                                            source: err,
+                                        }),
+                                    )
+                                    .await;
+                                return SpawnOutcome::Spawned(result.exit_status);
+                            }
+                        }
+                    };
                     let new_cache_value = CacheEntryValue {
                         post_run_fingerprint,
                         std_outputs: std_outputs.unwrap_or_default().into(),
                         duration: result.duration,
                         globbed_inputs,
+                        output_archive_name,
                     };
                     match cache.update(cache_metadata, new_cache_value).await {
                         Ok(()) => (CacheUpdateStatus::Updated, None),

@@ -36,6 +36,7 @@ async fn run() -> anyhow::Result<ExitStatus> {
                             env: Some(Box::from([Str::from("FOO")])),
                             untracked_env: None,
                             input: None,
+                            output: None,
                         }
                     }),
                     envs: Arc::clone(envs),

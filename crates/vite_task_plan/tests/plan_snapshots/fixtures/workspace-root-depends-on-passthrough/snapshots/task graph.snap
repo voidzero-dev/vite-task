@@ -30,7 +30,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-d
               "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
-            }
+            },
+            "output_globs": []
           }
         }
       },
@@ -69,7 +70,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-d
               "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
-            }
+            },
+            "output_globs": []
           }
         }
       },
@@ -103,7 +105,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-d
               "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
-            }
+            },
+            "output_globs": []
           }
         }
       },
@@ -137,7 +140,8 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/workspace-root-d
               "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
-            }
+            },
+            "output_globs": []
           }
         }
       },
