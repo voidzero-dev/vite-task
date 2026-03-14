@@ -1,8 +1,0 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
-> vt run rw-task
-$ replace-file-content src/data.txt original modified
-> vt run rw-task
-$ replace-file-content src/data.txt original modified

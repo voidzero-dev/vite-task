@@ -1,0 +1,20 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vt run -r task
+~/packages/normal-pkg$ print hello
+hello
+
+~/packages/rw-pkg$ replace-file-content src/data.txt original modified
+
+---
+vt run: 0/2 cache hit (0%). @test/rw-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)
+> vt run -r task
+~/packages/normal-pkg$ print hello ✓ cache hit, replaying
+hello
+
+~/packages/rw-pkg$ replace-file-content src/data.txt original modified
+
+---
+vt run: 1/2 cache hit (50%), <duration> saved. @test/rw-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)

@@ -403,11 +403,16 @@ pub async fn execute_spawn(
             // A task that writes to a glob-matched file without reading it causes
             // perpetual cache misses (glob detects the hash change) but not a
             // correctness bug, so we don't handle that case here.
-            if path_accesses
+            if let Some(path) = path_accesses
                 .as_ref()
-                .is_some_and(|pa| pa.path_reads.keys().any(|p| pa.path_writes.contains(p)))
+                .and_then(|pa| pa.path_reads.keys().find(|p| pa.path_writes.contains(*p)))
             {
-                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified), None)
+                (
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
+                        path: path.clone(),
+                    }),
+                    None,
+                )
             } else {
                 // path_reads is empty when inference is disabled (path_accesses is None)
                 let empty_path_reads = HashMap::default();

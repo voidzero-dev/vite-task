@@ -1,5 +1,7 @@
 use std::{process::ExitStatus, time::Duration};
 
+use vite_path::RelativePathBuf;
+
 use super::cache::CacheMiss;
 
 /// The cache operation that failed.
@@ -59,7 +61,10 @@ pub enum CacheNotUpdatedReason {
     NonZeroExitStatus,
     /// Task modified files it read during execution (read-write overlap detected by fspy).
     /// Caching such tasks is unsound because the prerun input hashes become stale.
-    InputModified,
+    InputModified {
+        /// First path that was both read and written during execution.
+        path: RelativePathBuf,
+    },
 }
 
 #[derive(Debug)]
@@ -69,13 +74,7 @@ pub enum CacheUpdateStatus {
     /// Cache was not updated (with reason).
     /// The reason is part of the `LeafExecutionReporter` trait contract — reporters
     /// can use it for detailed logging, even if current implementations don't.
-    NotUpdated(
-        #[expect(
-            dead_code,
-            reason = "part of LeafExecutionReporter trait contract; reporters may use for detailed logging"
-        )]
-        CacheNotUpdatedReason,
-    ),
+    NotUpdated(CacheNotUpdatedReason),
 }
 
 #[derive(Debug)]

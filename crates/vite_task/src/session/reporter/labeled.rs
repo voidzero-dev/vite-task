@@ -251,7 +251,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
     async fn finish(
         self: Box<Self>,
         status: Option<StdExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
+        cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
     ) {
         // Convert error before consuming it (need the original for display formatting).
@@ -276,7 +276,12 @@ impl LeafExecutionReporter for LabeledLeafReporter {
                 task_name: display.task_display.task_name.clone(),
                 command: display.command.clone(),
                 cwd: cwd_relative,
-                result: TaskResult::from_execution(&cache_status, status, saved_error.as_ref()),
+                result: TaskResult::from_execution(
+                    &cache_status,
+                    status,
+                    saved_error.as_ref(),
+                    &cache_update_status,
+                ),
             };
 
             shared.borrow_mut().tasks.push(task_summary);

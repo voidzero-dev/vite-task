@@ -20,7 +20,10 @@ use crate::session::{
         CacheMiss, FingerprintMismatch, InputChangeKind, SpawnFingerprintChange,
         detect_spawn_fingerprint_changes, format_input_change_str, format_spawn_change,
     },
-    event::{CacheDisabledReason, CacheErrorKind, CacheStatus, ExecutionError},
+    event::{
+        CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
+        ExecutionError,
+    },
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -94,7 +97,12 @@ pub enum SpawnOutcome {
     /// Process exited successfully (exit code 0).
     /// May have a post-execution infrastructure error (cache update or fingerprint failed).
     /// These only run after exit 0, so this field only exists on the success path.
-    Success { infra_error: Option<SavedExecutionError> },
+    Success {
+        infra_error: Option<SavedExecutionError>,
+        /// First path that was both read and written, causing cache to be skipped.
+        /// Only set when fspy detected a read-write overlap.
+        input_modified_path: Option<Str>,
+    },
 
     /// Process exited with non-zero status.
     /// [`NonZeroI32`] enforces that exit code 0 is unrepresentable here.
@@ -147,6 +155,8 @@ struct SummaryStats {
     cache_disabled: usize,
     failed: usize,
     total_saved: Duration,
+    /// Display names of tasks that were not cached due to read-write overlap.
+    input_modified_task_names: Vec<Str>,
 }
 
 impl SummaryStats {
@@ -158,6 +168,7 @@ impl SummaryStats {
             cache_disabled: 0,
             failed: 0,
             total_saved: Duration::ZERO,
+            input_modified_task_names: Vec::new(),
         };
 
         for task in tasks {
@@ -175,10 +186,13 @@ impl SummaryStats {
                         SpawnedCacheStatus::Disabled => stats.cache_disabled += 1,
                     }
                     match outcome {
-                        SpawnOutcome::Success { infra_error: Some(_) }
+                        SpawnOutcome::Success { infra_error: Some(_), .. }
                         | SpawnOutcome::Failed { .. }
                         | SpawnOutcome::SpawnError(_) => stats.failed += 1,
-                        SpawnOutcome::Success { infra_error: None } => {}
+                        SpawnOutcome::Success { input_modified_path: Some(_), .. } => {
+                            stats.input_modified_task_names.push(task.format_task_display());
+                        }
+                        SpawnOutcome::Success { .. } => {}
                     }
                 }
             }
@@ -255,11 +269,20 @@ impl TaskResult {
     /// `cache_status`: the cache status determined at `start()` time.
     /// `exit_status`: the process exit status, or `None` for cache hit / in-process.
     /// `saved_error`: an optional pre-converted execution error.
+    /// `cache_update_status`: the post-execution cache update result.
     pub fn from_execution(
         cache_status: &CacheStatus,
         exit_status: Option<std::process::ExitStatus>,
         saved_error: Option<&SavedExecutionError>,
+        cache_update_status: &CacheUpdateStatus,
     ) -> Self {
+        let input_modified_path = match cache_update_status {
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified { path }) => {
+                Some(Str::from(path.as_str()))
+            }
+            _ => None,
+        };
+
         match cache_status {
             CacheStatus::Hit { replayed_duration } => {
                 Self::CacheHit { saved_duration_ms: duration_to_ms(*replayed_duration) }
@@ -267,13 +290,21 @@ impl TaskResult {
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
-                outcome: spawn_outcome_from_execution(exit_status, saved_error),
+                outcome: spawn_outcome_from_execution(
+                    exit_status,
+                    saved_error,
+                    input_modified_path,
+                ),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::from_cache_miss(
                     cache_miss,
                 )),
-                outcome: spawn_outcome_from_execution(exit_status, saved_error),
+                outcome: spawn_outcome_from_execution(
+                    exit_status,
+                    saved_error,
+                    input_modified_path,
+                ),
             },
         }
     }
@@ -283,13 +314,14 @@ impl TaskResult {
 fn spawn_outcome_from_execution(
     exit_status: Option<std::process::ExitStatus>,
     saved_error: Option<&SavedExecutionError>,
+    input_modified_path: Option<Str>,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
         (None, Some(err)) => SpawnOutcome::SpawnError(err.clone()),
         // Process exited successfully, possible infra error
         (Some(status), _) if status.success() => {
-            SpawnOutcome::Success { infra_error: saved_error.cloned() }
+            SpawnOutcome::Success { infra_error: saved_error.cloned(), input_modified_path }
         }
         // Process exited with non-zero code
         (Some(status), _) => {
@@ -304,7 +336,7 @@ fn spawn_outcome_from_execution(
         // No exit status, no error — this is the cache hit / in-process path,
         // handled by TaskResult::CacheHit / InProcess before reaching here.
         // If we somehow get here, treat as success.
-        (None, None) => SpawnOutcome::Success { infra_error: None },
+        (None, None) => SpawnOutcome::Success { infra_error: None, input_modified_path: None },
     }
 }
 
@@ -415,6 +447,15 @@ impl TaskResult {
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
     fn format_cache_detail(&self) -> Str {
+        // Check for input modification first — it overrides the cache miss reason
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { input_modified_path: Some(path), .. },
+            ..
+        } = self
+        {
+            return vite_str::format!("→ Not cached: read and wrote '{path}'");
+        }
+
         match self {
             Self::CacheHit { saved_duration_ms } => {
                 let d = Duration::from_millis(*saved_duration_ms);
@@ -467,7 +508,7 @@ impl TaskResult {
         match self {
             Self::CacheHit { .. } | Self::InProcess => None,
             Self::Spawned { outcome, .. } => match outcome {
-                SpawnOutcome::Success { infra_error } => infra_error.as_ref(),
+                SpawnOutcome::Success { infra_error, .. } => infra_error.as_ref(),
                 SpawnOutcome::Failed { .. } => None,
                 SpawnOutcome::SpawnError(err) => Some(err),
             },
@@ -671,8 +712,8 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
 
     let is_single_task = summary.tasks.len() == 1;
 
-    // Single task + not cache hit → no summary
-    if is_single_task && stats.cache_hits == 0 {
+    // Single task + not cache hit + no input modification → no summary
+    if is_single_task && stats.cache_hits == 0 && stats.input_modified_task_names.is_empty() {
         return Vec::new();
     }
 
@@ -682,16 +723,18 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
     let _ = writeln!(buf, "{}", "---".style(Style::new().bright_black()));
 
     let run_label = vite_str::format!("{program_name} run:");
-    if is_single_task {
-        // Single task cache hit
+    let mut show_last_details_hint = true;
+    if is_single_task && stats.cache_hits > 0 {
+        // Single task cache hit — no need for --last-details hint
         let formatted_total_saved = format_summary_duration(stats.total_saved);
-        let _ = writeln!(
+        let _ = write!(
             buf,
             "{} cache hit, {} saved.",
             run_label.as_str().style(Style::new().blue().bold()),
             formatted_total_saved.style(Style::new().green().bold()),
         );
-    } else {
+        show_last_details_hint = false;
+    } else if !is_single_task {
         // Multi-task
         let total = stats.total;
         let hits = stats.cache_hits;
@@ -727,12 +770,42 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
             let _ = write!(buf, ", {} failed", n.style(Style::new().red()));
         }
 
-        let last_details_cmd = vite_str::format!("`{program_name} run --last-details`");
-        let _ = write!(buf, ". {}", "(Run ".style(Style::new().bright_black()));
-        let _ = write!(buf, "{}", last_details_cmd.as_str().style(COMMAND_STYLE));
-        let _ = write!(buf, "{}", " for full details)".style(Style::new().bright_black()));
-        let _ = writeln!(buf);
+        let _ = write!(buf, ".");
+    } else {
+        // Single task, no cache hit — only shown when input_modified is non-empty
+        let _ = write!(buf, "{}", run_label.as_str().style(Style::new().blue().bold()));
     }
 
+    // Inline input-modified notice before the --last-details hint
+    if !stats.input_modified_task_names.is_empty() {
+        format_input_modified_notice(&mut buf, &stats.input_modified_task_names);
+    }
+
+    if show_last_details_hint {
+        let last_details_cmd = vite_str::format!("`{program_name} run --last-details`");
+        let _ = write!(buf, " {}", "(Run ".style(Style::new().bright_black()));
+        let _ = write!(buf, "{}", last_details_cmd.as_str().style(COMMAND_STYLE));
+        let _ = write!(buf, "{}", " for full details)".style(Style::new().bright_black()));
+    }
+    let _ = writeln!(buf);
+
     buf
+}
+
+/// Write the "not cached because it modified its input" notice inline.
+fn format_input_modified_notice(buf: &mut Vec<u8>, task_names: &[Str]) {
+    let _ = write!(buf, " ");
+
+    let first = &task_names[0];
+    let _ = write!(buf, "{}", first.as_str().style(Style::new().bold()));
+    let remaining = task_names.len() - 1;
+    if remaining > 0 {
+        let _ = write!(buf, " (and {remaining} more)");
+    }
+
+    if task_names.len() == 1 {
+        let _ = write!(buf, " not cached because it modified its input.");
+    } else {
+        let _ = write!(buf, " not cached because they modified their inputs.");
+    }
 }
