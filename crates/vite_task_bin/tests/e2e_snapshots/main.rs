@@ -19,11 +19,8 @@ use vite_workspace::find_workspace_root;
 
 /// Timeout for each step in e2e tests.
 /// Windows CI needs a longer timeout due to Git Bash startup overhead and slower I/O.
-const STEP_TIMEOUT: Duration = if cfg!(windows) {
-    Duration::from_secs(60)
-} else {
-    Duration::from_secs(20)
-};
+const STEP_TIMEOUT: Duration =
+    if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(20) };
 
 /// Screen size for the PTY terminal. Large enough to avoid line wrapping.
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
