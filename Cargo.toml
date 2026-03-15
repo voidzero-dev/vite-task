@@ -47,7 +47,7 @@ bindgen = "0.72.1"
 bitflags = "2.10.0"
 # The newest released version (0.3.0) of brush-parser has a bug that reports incorrect locations for some ast nodes.
 # The latest commit has fixed it. TODO: switch back to released version when a new version is published.
-brush-parser = { git = "https://github.com/reubeno/brush", rev = "dcb760933b10ee0433d7b740a5709b06f5c67c6b" }
+brush-parser = { git = "https://github.com/reubeno/brush", rev = "4dbd00362db42fb36bf438d5b118f935e31217a1" }
 bstr = { version = "1.12.0", default-features = false, features = ["alloc", "std"] }
 bumpalo = { version = "3.17.0", features = ["allocator-api2"] }
 bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
