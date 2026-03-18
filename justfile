@@ -10,7 +10,6 @@ alias r := ready
 
 init:
   cargo binstall watchexec-cli cargo-insta typos-cli cargo-shear@1.11.1 taplo-cli -y
-  pnpm run bootstrap-cli
 
 ready:
   git diff --exit-code --quiet
