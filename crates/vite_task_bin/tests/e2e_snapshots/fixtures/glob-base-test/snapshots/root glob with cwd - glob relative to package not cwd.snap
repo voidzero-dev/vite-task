@@ -8,5 +8,5 @@ export const root = 'initial';
 > replace-file-content src/root.ts initial modified
 
 > vt run root-glob-with-cwd
-~/src$ print-file root.ts 〇 cache miss: 'src/root.ts' modified, executing
+~/src$ print-file root.ts ○ cache miss: 'src/root.ts' modified, executing
 export const root = 'modified';

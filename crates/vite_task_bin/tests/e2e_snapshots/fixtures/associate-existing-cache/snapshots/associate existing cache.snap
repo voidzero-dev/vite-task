@@ -14,5 +14,5 @@ vt run: cache hit, <duration> saved.
 > json-edit package.json '_.scripts.script2 = "print world"' # change script2
 
 > vt run script2 # cache miss
-$ print world 〇 cache miss: args changed, executing
+$ print world ○ cache miss: args changed, executing
 world

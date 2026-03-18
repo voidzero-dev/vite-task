@@ -8,5 +8,5 @@ initial content
 > json-edit vite-task.json "_.tasks.test.input = ['test.txt']" # change input config
 
 > vt run test # cache miss: configuration changed
-$ print-file test.txt 〇 cache miss: input configuration changed, executing
+$ print-file test.txt ○ cache miss: input configuration changed, executing
 initial content
