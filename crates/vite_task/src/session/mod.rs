@@ -302,7 +302,7 @@ impl<'a> Session<'a> {
 
                 let builder = LabeledReporterBuilder::new(
                     self.workspace_path(),
-                    Box::new(tokio::io::stdout()),
+                    Box::new(std::io::stdout()),
                     run_command.flags.verbose,
                     Some(self.make_summary_writer()),
                     self.program_name.clone(),
@@ -602,7 +602,7 @@ impl<'a> Session<'a> {
 
         // Create a plain (standalone) reporter — no graph awareness, no summary
         let plain_reporter =
-            reporter::PlainReporter::new(silent_if_cache_hit, Box::new(tokio::io::stdout()));
+            reporter::PlainReporter::new(silent_if_cache_hit, Box::new(std::io::stdout()));
 
         // Execute the spawn directly using the free function, bypassing the graph pipeline
         let outcome = execute::execute_spawn(

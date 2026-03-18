@@ -2,6 +2,7 @@
 
 use std::{
     collections::hash_map::Entry,
+    io::Write,
     process::{ExitStatus, Stdio},
     time::{Duration, Instant},
 };
@@ -10,7 +11,7 @@ use bincode::{Decode, Encode};
 use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
-use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use tokio::io::AsyncReadExt as _;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 use wax::Program as _;
@@ -72,8 +73,8 @@ pub struct TrackedPathAccesses {
 pub async fn spawn_with_tracking(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
-    stdout_writer: &mut (dyn AsyncWrite + Unpin),
-    stderr_writer: &mut (dyn AsyncWrite + Unpin),
+    stdout_writer: &mut dyn Write,
+    stderr_writer: &mut dyn Write,
     std_outputs: Option<&mut Vec<StdOutput>>,
     path_accesses: Option<&mut TrackedPathAccesses>,
     resolved_negatives: &[wax::Glob<'static>],
@@ -128,9 +129,9 @@ pub async fn spawn_with_tracking(
                     0 => stdout_done = true,
                     n => {
                         let content = stdout_buf[..n].to_vec();
-                        // Write to the async writer immediately
-                        stdout_writer.write_all(&content).await?;
-                        stdout_writer.flush().await?;
+                        // Write to the sync writer immediately
+                        stdout_writer.write_all(&content)?;
+                        stdout_writer.flush()?;
                         // Store outputs for caching
                         if let Some(outputs) = &mut outputs {
                             if let Some(last) = outputs.last_mut()
@@ -149,9 +150,9 @@ pub async fn spawn_with_tracking(
                     0 => stderr_done = true,
                     n => {
                         let content = stderr_buf[..n].to_vec();
-                        // Write to the async writer immediately
-                        stderr_writer.write_all(&content).await?;
-                        stderr_writer.flush().await?;
+                        // Write to the sync writer immediately
+                        stderr_writer.write_all(&content)?;
+                        stderr_writer.flush()?;
                         // Store outputs for caching
                         if let Some(outputs) = &mut outputs {
                             if let Some(last) = outputs.last_mut()

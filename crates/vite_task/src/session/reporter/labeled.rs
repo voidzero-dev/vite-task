@@ -6,9 +6,8 @@
 //! Tracks statistics across multiple leaf executions, prints command lines with cache
 //! status indicators, and renders a summary with per-task details at the end.
 
-use std::{cell::RefCell, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
+use std::{cell::RefCell, io::Write, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
 
-use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
@@ -53,7 +52,7 @@ struct SharedReporterState {
 /// - Shows full Statistics, Performance, and Task Details sections
 pub struct LabeledReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
-    writer: Box<dyn AsyncWrite + Unpin>,
+    writer: Box<dyn Write>,
     /// Whether to render the full detailed summary (`--verbose` flag).
     show_details: bool,
     /// Callback to persist the summary (e.g., write `last-summary.json`).
@@ -66,13 +65,13 @@ impl LabeledReporterBuilder {
     /// Create a new labeled reporter builder.
     ///
     /// - `workspace_path`: The workspace root, used to compute relative cwds in display.
-    /// - `writer`: Async writer for reporter display output.
+    /// - `writer`: Writer for reporter display output.
     /// - `show_details`: Whether to render the full detailed summary.
     /// - `write_summary`: Callback to persist the summary, or `None` to skip.
     /// - `program_name`: The CLI binary name (e.g. `"vt"`) used in summary output.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
-        writer: Box<dyn AsyncWrite + Unpin>,
+        writer: Box<dyn Write>,
         show_details: bool,
         write_summary: Option<WriteSummaryFn>,
         program_name: Str,
@@ -101,19 +100,13 @@ impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
 /// share mutable state with this reporter via `Rc<RefCell<SharedReporterState>>`.
 pub struct LabeledGraphReporter {
     shared: Rc<RefCell<SharedReporterState>>,
-    writer: Rc<RefCell<Box<dyn AsyncWrite + Unpin>>>,
+    writer: Rc<RefCell<Box<dyn Write>>>,
     workspace_path: Arc<AbsolutePath>,
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
 }
 
-#[async_trait::async_trait(?Send)]
-#[expect(
-    clippy::await_holding_refcell_ref,
-    reason = "writer RefCell borrow across await is safe: reporter is !Send, single-threaded, \
-              and finish() is called once after all leaf reporters are dropped"
-)]
 impl GraphExecutionReporter for LabeledGraphReporter {
     fn new_leaf_execution(
         &mut self,
@@ -137,7 +130,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
         })
     }
 
-    async fn finish(self: Box<Self>) -> Result<(), ExitStatus> {
+    fn finish(self: Box<Self>) -> Result<(), ExitStatus> {
         // Take tasks from shared state — all leaf reporters have been dropped by now.
         let tasks = {
             let mut shared = self.shared.borrow_mut();
@@ -190,16 +183,16 @@ impl GraphExecutionReporter for LabeledGraphReporter {
             write_summary(&summary);
         }
 
-        // Write the summary buffer asynchronously.
+        // Write the summary buffer.
         // Always flush the writer — even when the summary is empty, a preceding
         // spawned process may have written to the same fd via Stdio::inherit()
         // and the data must be flushed before the caller reads the output.
         {
             let mut writer = self.writer.borrow_mut();
             if !summary_buf.is_empty() {
-                let _ = writer.write_all(&summary_buf).await;
+                let _ = writer.write_all(&summary_buf);
             }
-            let _ = writer.flush().await;
+            let _ = writer.flush();
         }
 
         result
@@ -208,11 +201,11 @@ impl GraphExecutionReporter for LabeledGraphReporter {
 
 /// Leaf-level reporter created by [`LabeledGraphReporter::new_leaf_execution`].
 ///
-/// Writes display output in real-time to the shared async writer and builds
+/// Writes display output in real-time to the shared writer and builds
 /// [`TaskSummary`] entries that are pushed to [`SharedReporterState`] on completion.
 struct LabeledLeafReporter {
     shared: Rc<RefCell<SharedReporterState>>,
-    writer: Rc<RefCell<Box<dyn AsyncWrite + Unpin>>>,
+    writer: Rc<RefCell<Box<dyn Write>>>,
     /// Display info for this execution, looked up from the graph via the path.
     display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
@@ -223,14 +216,8 @@ struct LabeledLeafReporter {
     cache_status: Option<CacheStatus>,
 }
 
-#[async_trait::async_trait(?Send)]
-#[expect(
-    clippy::await_holding_refcell_ref,
-    reason = "writer RefCell borrow across await is safe: reporter is !Send, single-threaded, \
-              and only one leaf is active at a time (no re-entrant access during write_all)"
-)]
 impl LeafExecutionReporter for LabeledLeafReporter {
-    async fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
+    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
         // Format command line with cache status before storing it.
         let line =
             format_command_with_cache_status(&self.display, &self.workspace_path, &cache_status);
@@ -238,17 +225,17 @@ impl LeafExecutionReporter for LabeledLeafReporter {
         self.cache_status = Some(cache_status);
 
         let mut writer = self.writer.borrow_mut();
-        let _ = writer.write_all(line.as_bytes()).await;
-        let _ = writer.flush().await;
+        let _ = writer.write_all(line.as_bytes());
+        let _ = writer.flush();
 
         StdioConfig {
             suggestion: self.stdio_suggestion,
-            stdout_writer: Box::new(tokio::io::stdout()),
-            stderr_writer: Box::new(tokio::io::stderr()),
+            stdout_writer: Box::new(std::io::stdout()),
+            stderr_writer: Box::new(std::io::stderr()),
         }
     }
 
-    async fn finish(
+    fn finish(
         self: Box<Self>,
         status: Option<StdExitStatus>,
         cache_update_status: CacheUpdateStatus,
@@ -287,7 +274,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
             shared.borrow_mut().tasks.push(task_summary);
         }
 
-        // Build all display output into a buffer, then write once asynchronously.
+        // Build all display output into a buffer, then write once.
         let mut buf = Vec::new();
 
         if let Some(ref message) = error_display {
@@ -303,8 +290,8 @@ impl LeafExecutionReporter for LabeledLeafReporter {
 
         if !buf.is_empty() {
             let mut writer = writer.borrow_mut();
-            let _ = writer.write_all(&buf).await;
-            let _ = writer.flush().await;
+            let _ = writer.write_all(&buf);
+            let _ = writer.flush();
         }
     }
 }
@@ -338,7 +325,7 @@ mod tests {
     ) -> Box<dyn LeafExecutionReporter> {
         let builder = Box::new(LabeledReporterBuilder::new(
             test_path(),
-            Box::new(tokio::io::sink()),
+            Box::new(std::io::sink()),
             false,
             None,
             Str::from("vt"),
@@ -347,53 +334,52 @@ mod tests {
         reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node)
     }
 
-    async fn suggestion_for(
+    fn suggestion_for(
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
         all_ancestors_single_node: bool,
     ) -> StdioSuggestion {
         let mut leaf = build_labeled_leaf(display, leaf_kind, all_ancestors_single_node);
-        let stdio_config =
-            leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).await;
+        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
         stdio_config.suggestion
     }
 
-    #[tokio::test]
-    async fn spawn_with_all_single_node_ancestors_suggests_inherited() {
+    #[test]
+    fn spawn_with_all_single_node_ancestors_suggests_inherited() {
         let task = spawn_task("build");
         let item = &task.items[0];
         assert_eq!(
-            suggestion_for(&item.execution_item_display, leaf_kind(item), true).await,
+            suggestion_for(&item.execution_item_display, leaf_kind(item), true),
             StdioSuggestion::Inherited
         );
     }
 
-    #[tokio::test]
-    async fn spawn_without_all_single_node_ancestors_suggests_piped() {
+    #[test]
+    fn spawn_without_all_single_node_ancestors_suggests_piped() {
         let task = spawn_task("build");
         let item = &task.items[0];
         assert_eq!(
-            suggestion_for(&item.execution_item_display, leaf_kind(item), false).await,
+            suggestion_for(&item.execution_item_display, leaf_kind(item), false),
             StdioSuggestion::Piped
         );
     }
 
-    #[tokio::test]
-    async fn in_process_leaf_suggests_piped_even_with_single_node_ancestors() {
+    #[test]
+    fn in_process_leaf_suggests_piped_even_with_single_node_ancestors() {
         let task = in_process_task("echo");
         let item = &task.items[0];
         assert_eq!(
-            suggestion_for(&item.execution_item_display, leaf_kind(item), true).await,
+            suggestion_for(&item.execution_item_display, leaf_kind(item), true),
             StdioSuggestion::Piped
         );
     }
 
-    #[tokio::test]
-    async fn in_process_leaf_suggests_piped_without_single_node_ancestors() {
+    #[test]
+    fn in_process_leaf_suggests_piped_without_single_node_ancestors() {
         let task = in_process_task("echo");
         let item = &task.items[0];
         assert_eq!(
-            suggestion_for(&item.execution_item_display, leaf_kind(item), false).await,
+            suggestion_for(&item.execution_item_display, leaf_kind(item), false),
             StdioSuggestion::Piped
         );
     }
