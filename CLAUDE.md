@@ -36,6 +36,8 @@ just lint-windows  # Cross-clippy for Windows (requires cargo-xwin)
 just doc           # Documentation generation
 ```
 
+If `gt` (Graphite CLI) is available in PATH, use it instead of `gh` to create pull requests.
+
 ## Tests
 
 ```bash
@@ -47,6 +49,10 @@ INSTA_UPDATE=always cargo test                          # Update snapshots
 ```
 
 Integration tests (e2e, plan, fspy) require `pnpm install` in `packages/tools` first. You don't need `pnpm install` in test fixture directories.
+
+### Test Reliability
+
+The test suite has no known pre-existing failures or flaky tests. If a test fails during your changes, treat it as a real regression caused by your work. Fix the root cause properly — do not skip, ignore, or work around failing tests.
 
 ### Test Fixtures
 
