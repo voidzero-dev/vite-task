@@ -1,6 +1,6 @@
 # Task Standard I/O
 
-How stdin, stdout, and stderr are connected to task processes, controlled by the `--log` flag.
+How stdin, stdout, and stderr are connected to task processes, controlled by the `--log` flag. Largely inspired by [npm-run-all2](https://github.com/bcomnes/npm-run-all2)'s stdio handling, with differences explained in the [appendix](#appendix-npm-run-all2-behavior).
 
 ## The `--log` Flag
 
@@ -15,6 +15,8 @@ vp run build --log=<mode>
 | `grouped`                   | Output is buffered per task and printed as a block after each task completes. |
 
 ### Examples
+
+In `interleaved` mode, task names are omitted from the command line to keep output clean. In `labeled` and `grouped` modes, the `[pkg#task]` prefix is necessary to identify which task produced each line.
 
 #### `interleaved`
 
