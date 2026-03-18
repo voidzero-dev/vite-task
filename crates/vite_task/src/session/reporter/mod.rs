@@ -70,7 +70,7 @@ impl ExitStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StdioSuggestion {
     /// stdin is `/dev/null`, stdout and stderr are piped into the reporter's
-    /// [`Write`](std::io::Write) streams.  Used when multiple tasks run concurrently and
+    /// [`Write`] streams.  Used when multiple tasks run concurrently and
     /// stdio should not be shared.
     Piped,
     /// All three file descriptors (stdin, stdout, stderr) are inherited from the
