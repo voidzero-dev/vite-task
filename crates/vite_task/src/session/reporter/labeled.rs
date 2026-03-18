@@ -261,7 +261,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
             let task_summary = TaskSummary {
                 package_name: display.task_display.package_name.clone(),
                 task_name: display.task_display.task_name.clone(),
-                command: display.command.clone(),
+                command: display.command,
                 cwd: cwd_relative,
                 result: TaskResult::from_execution(
                     &cache_status,
