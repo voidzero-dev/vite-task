@@ -207,7 +207,12 @@ struct SnapshotsFile {
 }
 
 #[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
-fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, filter: Option<&str>) {
+fn run_case(
+    tmpdir: &AbsolutePath,
+    fixture_path: &std::path::Path,
+    filter: Option<&str>,
+    test_bin_path: &Arc<OsStr>,
+) {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
     if fixture_name.starts_with('.') {
         return; // skip hidden files like .DS_Store
@@ -229,7 +234,7 @@ fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, filter: Optio
     settings.set_prepend_module_to_snapshot(false);
     settings.remove_snapshot_suffix();
 
-    settings.bind(|| run_case_inner(tmpdir, fixture_path, fixture_name));
+    settings.bind(|| run_case_inner(tmpdir, fixture_path, fixture_name, test_bin_path));
 }
 
 enum TerminationState {
@@ -245,7 +250,12 @@ enum TerminationState {
     clippy::disallowed_types,
     reason = "Path required by insta::glob! callback; String required by from_utf8_lossy and string accumulation"
 )]
-fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture_name: &str) {
+fn run_case_inner(
+    tmpdir: &AbsolutePath,
+    fixture_path: &std::path::Path,
+    fixture_name: &str,
+    test_bin_path: &Arc<OsStr>,
+) {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
     CopyOptions::new().copy_tree(fixture_path, stage_path.as_path()).unwrap();
@@ -264,17 +274,6 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
-    // Navigate from runtime CARGO_MANIFEST_DIR to packages/tools at the repo root.
-    #[expect(
-        clippy::disallowed_types,
-        reason = "Path required for CARGO_MANIFEST_DIR path traversal"
-    )]
-    let repo_root = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let repo_root = repo_root.parent().unwrap().parent().unwrap();
-    let test_bin_path = Arc::<OsStr>::from(
-        repo_root.join("packages").join("tools").join("node_modules").join(".bin").into_os_string(),
-    );
-
     // Get shell executable for running steps
     let shell_exe = get_shell_exe();
 
@@ -287,8 +286,8 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 let vt_dir = vt_path.parent().unwrap();
                 vt_dir.as_path().as_os_str().into()
             },
-            // Include packages/tools to PATH so that e2e tests can run utilities such as replace-file-content.
-            test_bin_path,
+            // Include tool binaries (print, json-edit, etc.) from repo root node_modules.
+            Arc::clone(test_bin_path),
         ]
         .into_iter()
         .chain(
@@ -477,10 +476,22 @@ fn main() {
         clippy::disallowed_types,
         reason = "Path required for CARGO_MANIFEST_DIR path traversal"
     )]
-    let fixtures_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("tests")
-        .join("e2e_snapshots")
-        .join("fixtures");
+    let (repo_root, fixtures_dir) = {
+        let manifest_dir =
+            std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+        let repo_root = manifest_dir.join("../..").canonicalize().unwrap();
+        let fixtures_dir = manifest_dir.join("tests/e2e_snapshots/fixtures");
+        (repo_root, fixtures_dir)
+    };
+
+    // Copy .node-version to the tmp dir so version manager shims can resolve the correct Node.js
+    // binary when running task commands.
+    std::fs::copy(repo_root.join(".node-version"), tmp_dir.path().join(".node-version")).unwrap();
+
+    // Include packages/tools to PATH so that e2e tests can run utilities such as print, json-edit, etc.
+    let test_bin_path: Arc<OsStr> =
+        Arc::from(repo_root.join("packages/tools/node_modules/.bin").into_os_string());
+
     let mut fixture_paths = std::fs::read_dir(fixtures_dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -488,7 +499,7 @@ fn main() {
     fixture_paths.sort();
 
     for case_path in &fixture_paths {
-        run_case(&tmp_dir_path, case_path, filter.as_deref());
+        run_case(&tmp_dir_path, case_path, filter.as_deref(), &test_bin_path);
     }
     #[expect(clippy::print_stdout, reason = "test summary")]
     {
