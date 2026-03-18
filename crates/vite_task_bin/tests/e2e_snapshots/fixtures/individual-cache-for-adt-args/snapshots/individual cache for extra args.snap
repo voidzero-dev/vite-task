@@ -9,13 +9,13 @@ a
 $ print b
 b
 > vt run say a # cache hit
-$ print a ✓ cache hit, replaying
+$ print a ◉ cache hit, replaying
 a
 
 ---
 vt run: cache hit, <duration> saved.
 > vt run say b # cache hit
-$ print b ✓ cache hit, replaying
+$ print b ◉ cache hit, replaying
 b
 
 ---

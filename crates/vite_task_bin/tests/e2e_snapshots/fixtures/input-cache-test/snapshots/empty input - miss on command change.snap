@@ -8,5 +8,5 @@ export const main = 'initial';
 > json-edit vite-task.json "_.tasks['empty-inputs'].command = 'print-file src/utils.ts'"
 
 > vt run empty-inputs
-$ print-file src/utils.ts ✗ cache miss: args changed, executing
+$ print-file src/utils.ts 〇 cache miss: args changed, executing
 export const utils = 'initial';

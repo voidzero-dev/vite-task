@@ -8,7 +8,7 @@ export const sub = 'initial';
 > replace-file-content packages/sub-pkg/other/other.ts initial modified
 
 > vt run sub-pkg#sub-glob-test
-~/packages/sub-pkg$ print-file src/sub.ts ✓ cache hit, replaying
+~/packages/sub-pkg$ print-file src/sub.ts ◉ cache hit, replaying
 export const sub = 'initial';
 
 ---

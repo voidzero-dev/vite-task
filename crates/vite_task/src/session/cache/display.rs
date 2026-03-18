@@ -145,7 +145,7 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
     match cache_status {
         CacheStatus::Hit { .. } => {
             // Show "cache hit" indicator when replaying from cache
-            Some(Str::from("✓ cache hit, replaying"))
+            Some(Str::from("◉ cache hit, replaying"))
         }
         CacheStatus::Miss(CacheMiss::NotFound) => {
             // No inline message for "not found" case - just show command
@@ -176,10 +176,10 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                 FingerprintMismatch::InputConfig => "input configuration changed",
                 FingerprintMismatch::InputChanged { kind, path } => {
                     let desc = format_input_change_str(*kind, path.as_str());
-                    return Some(vite_str::format!("✗ cache miss: {desc}, executing"));
+                    return Some(vite_str::format!("〇 cache miss: {desc}, executing"));
                 }
             };
-            Some(vite_str::format!("✗ cache miss: {reason}, executing"))
+            Some(vite_str::format!("〇 cache miss: {reason}, executing"))
         }
         CacheStatus::Disabled(_) => Some(Str::from("⊘ cache disabled")),
     }
