@@ -300,7 +300,7 @@ impl ResolvedTaskConfig {
 
 // Exact matches for common environment variables
 // Referenced from Turborepo's implementation:
-// https://github.com/vercel/turborepo/blob/26d309f073ca3ac054109ba0c29c7e230e7caac3/crates/turborepo-lib/src/task_hash.rs#L439
+// https://github.com/vercel/turborepo/blob/06ba8e2f7b8d7c7ff99edff7114e2584713e18c4/crates/turborepo-env/src/lib.rs#L20
 #[doc(hidden)] // exported for redacting snapshots in tests
 pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     // System and shell
@@ -311,16 +311,22 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "SHELL",
     "PWD",
     "PATH",
+    // Linux/X11 session
+    "XDG_RUNTIME_DIR",
+    "XAUTHORITY",
+    "DBUS_SESSION_BUS_ADDRESS",
     // CI/CD environments
     "CI",
     // Node.js specific
     "NODE_OPTIONS",
-    "COREPACK_HOME",
+    "COREPACK_*",
     "NPM_CONFIG_STORE_DIR",
     "PNPM_HOME",
     // Library paths
     "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
     "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
     "LIBPATH",
     // Terminal/display
     "COLORTERM",
@@ -338,6 +344,10 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "NEXT_*",
     "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
     "NOW_BUILDER",
+    "VC_MICROFRONTENDS_CONFIG_FILE_NAME",
+    // GitHub Actions
+    "GITHUB_*",
+    "RUNNER_*",
     // Windows specific
     "APPDATA",
     "PROGRAMDATA",
@@ -346,6 +356,9 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "USERPROFILE",
     "HOMEDRIVE",
     "HOMEPATH",
+    "WINDIR",
+    "ProgramFiles",
+    "ProgramFiles[(]x86[)]", // Parens escaped for glob syntax (Turborepo uses literal `ProgramFiles(x86)`)
     // IDE specific (exact matches)
     "ELECTRON_RUN_AS_NODE",
     "JB_INTERPRETER",
