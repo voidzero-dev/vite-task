@@ -201,10 +201,6 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the task graph cannot be loaded from the workspace configuration.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
     pub async fn ensure_task_graph_loaded(
         &mut self,
     ) -> Result<&IndexedTaskGraph, TaskGraphLoadError> {
@@ -251,10 +247,6 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if planning or execution fails.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
     pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
         match self.main_inner(command).await {
             Ok(()) => Ok(ExitStatus::SUCCESS),
@@ -266,10 +258,6 @@ impl<'a> Session<'a> {
     /// # Panics
     ///
     /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
-    #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
     async fn main_inner(&mut self, command: Command) -> Result<(), SessionError> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
@@ -343,10 +331,6 @@ impl<'a> Session<'a> {
     ///
     /// In non-interactive mode, prints the task list (or "did you mean" suggestions)
     /// and returns `Err(SessionError::EarlyExit(_))` — no further execution needed.
-    #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
     #[expect(
         clippy::too_many_lines,
         reason = "builds interactive/non-interactive select items and handles selection"
@@ -595,10 +579,6 @@ impl<'a> Session<'a> {
     /// Returns an error if planning or execution of the synthetic command fails.
     #[tracing::instrument(level = "debug", skip_all)]
     #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
-    #[expect(
         clippy::large_futures,
         reason = "execution plan future is large but only awaited once"
     )]
@@ -657,10 +637,6 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the plan request cannot be parsed or if planning fails.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
     pub async fn plan_from_cli_run(
         &mut self,
         cwd: Arc<AbsolutePath>,
@@ -672,10 +648,6 @@ impl<'a> Session<'a> {
 
     /// Internal: plans execution from a resolved run command.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
     async fn plan_from_cli_run_resolved(
         &mut self,
         cwd: Arc<AbsolutePath>,
@@ -711,10 +683,6 @@ impl<'a> Session<'a> {
     ///
     /// Used by the interactive task selector, which constructs the request
     /// directly (bypassing CLI specifier parsing).
-    #[expect(
-        clippy::future_not_send,
-        reason = "session is single-threaded, futures do not need to be Send"
-    )]
     async fn plan_from_query(
         &mut self,
         request: QueryPlanRequest,

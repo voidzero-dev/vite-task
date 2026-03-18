@@ -188,7 +188,6 @@ pub trait TaskGraphLoader {
 /// # Errors
 /// Returns an error if task graph loading, query, or execution planning fails.
 #[tracing::instrument(level = "debug", skip_all)]
-#[expect(clippy::future_not_send, reason = "PlanRequestParser and TaskGraphLoader are !Send")]
 #[expect(clippy::implicit_hasher, reason = "FxHashMap is the only hasher used in this codebase")]
 pub async fn plan_query(
     query_plan_request: QueryPlanRequest,

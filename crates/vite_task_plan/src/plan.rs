@@ -83,7 +83,6 @@ fn effective_cache_config(
 ///   `false` when the task itself is being executed as a hook, so that hooks are
 ///   never expanded more than one level deep (matching npm behavior).
 #[expect(clippy::too_many_lines, reason = "sequential planning steps are clearer in one function")]
-#[expect(clippy::future_not_send, reason = "PlanContext contains !Send dyn PlanRequestParser")]
 async fn plan_task_as_execution_node(
     task_node_index: TaskNodeIndex,
     mut context: PlanContext<'_>,
@@ -626,7 +625,6 @@ fn plan_spawn_execution(
 /// `vp run build` produces a different query than the script's `vp run -r build`,
 /// so the skip rule doesn't fire, but the prune rule catches root in the result).
 /// Like the skip rule, extra args don't affect this — only the `TaskQuery` matters.
-#[expect(clippy::future_not_send, reason = "PlanContext contains !Send dyn PlanRequestParser")]
 pub async fn plan_query_request(
     query: Arc<TaskQuery>,
     plan_options: PlanOptions,

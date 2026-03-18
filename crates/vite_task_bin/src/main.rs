@@ -15,7 +15,6 @@ async fn main() -> anyhow::Result<ExitCode> {
     Ok(exit_status.0.into())
 }
 
-#[expect(clippy::future_not_send, reason = "Session contains !Send types; single-threaded runtime")]
 async fn run() -> anyhow::Result<ExitStatus> {
     let args = Args::parse();
     let mut owned_config = OwnedSessionConfig::default();

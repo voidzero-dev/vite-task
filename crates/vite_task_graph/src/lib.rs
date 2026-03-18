@@ -215,10 +215,6 @@ impl IndexedTaskGraph {
         clippy::too_many_lines,
         reason = "graph loading is inherently sequential and multi-step"
     )]
-    #[expect(
-        clippy::future_not_send,
-        reason = "UserConfigLoader uses async_trait(?Send) so the future is intentionally not Send"
-    )]
     pub async fn load(
         workspace_root: &WorkspaceRoot,
         config_loader: &dyn loader::UserConfigLoader,

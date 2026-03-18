@@ -78,7 +78,6 @@ impl ExecutionContext<'_> {
     ///
     /// Returns `true` if all tasks succeeded, `false` if any task failed.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_expanded_graph(
         &mut self,
         graph: &ExecutionGraph,
@@ -132,7 +131,6 @@ impl ExecutionContext<'_> {
     ///
     /// Returns `true` if the execution failed (non-zero exit or infrastructure error).
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_leaf(
         &mut self,
         display: &ExecutionItemDisplay,
@@ -196,7 +194,6 @@ impl ExecutionContext<'_> {
 /// Errors (cache lookup failure, spawn failure, cache update failure) are reported
 /// through `leaf_reporter.finish()` and do not abort the caller.
 #[tracing::instrument(level = "debug", skip_all)]
-#[expect(clippy::future_not_send, reason = "uses !Send types internally")]
 #[expect(
     clippy::too_many_lines,
     reason = "sequential cache check, execute, and update steps are clearer in one function"
@@ -531,7 +528,6 @@ impl Session<'_> {
     /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
     /// Returns `Ok(())` when all tasks succeeded.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     pub(crate) async fn execute_graph(
         &self,
         execution_graph: ExecutionGraph,

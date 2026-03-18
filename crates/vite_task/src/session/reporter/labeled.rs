@@ -347,10 +347,6 @@ mod tests {
         reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node)
     }
 
-    #[expect(
-        clippy::future_not_send,
-        reason = "LeafExecutionReporter futures are !Send in single-threaded reporter tests"
-    )]
     async fn suggestion_for(
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,

@@ -1,8 +1,3 @@
-#![expect(
-    clippy::future_not_send,
-    reason = "ouroboros generates async builder methods that cannot satisfy Send bounds"
-)]
-
 use std::io;
 
 use bincode::borrow_decode_from_slice;

@@ -65,7 +65,6 @@ pub struct TrackedPathAccesses {
 /// - `path_accesses` if provided, fspy will be used to track file accesses. If `None`, fspy is disabled.
 /// - `resolved_negatives` - resolved negative glob patterns for filtering fspy-tracked paths.
 #[tracing::instrument(level = "debug", skip_all)]
-#[expect(clippy::future_not_send, reason = "uses !Send dyn AsyncWrite writers internally")]
 #[expect(
     clippy::too_many_lines,
     reason = "spawn logic is inherently sequential and splitting would reduce clarity"

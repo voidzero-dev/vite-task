@@ -324,10 +324,6 @@ fn detect_globbed_input_change(
 // Basic database operations
 impl ExecutionCache {
     #[expect(
-        clippy::future_not_send,
-        reason = "tokio MutexGuard is !Send but this future only runs on a single-threaded runtime"
-    )]
-    #[expect(
         clippy::significant_drop_tightening,
         reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
     )]
@@ -370,10 +366,6 @@ impl ExecutionCache {
         self.get_key_by_value("task_fingerprints", execution_cache_key).await
     }
 
-    #[expect(
-        clippy::future_not_send,
-        reason = "tokio MutexGuard is !Send but this future only runs on a single-threaded runtime"
-    )]
     #[expect(
         clippy::significant_drop_tightening,
         reason = "lock guard must be held while executing the prepared statement"
