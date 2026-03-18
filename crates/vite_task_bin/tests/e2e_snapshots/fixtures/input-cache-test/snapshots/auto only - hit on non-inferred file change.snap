@@ -8,7 +8,7 @@ export const main = 'initial';
 > replace-file-content src/utils.ts initial modified
 
 > vt run auto-only
-$ print-file src/main.ts ✓ cache hit, replaying
+$ print-file src/main.ts ◉ cache hit, replaying
 export const main = 'initial';
 
 ---

@@ -6,7 +6,7 @@ expression: e2e_outputs
 $ print-file foo.txt
 initial content
 > vt run script2 # cache hit, same command as script1
-$ print-file foo.txt ✓ cache hit, replaying
+$ print-file foo.txt ◉ cache hit, replaying
 initial content
 
 ---
@@ -14,10 +14,10 @@ vt run: cache hit, <duration> saved.
 > replace-file-content foo.txt initial modified # modify shared input
 
 > vt run script2 # cache miss, input changed
-$ print-file foo.txt ✗ cache miss: 'foo.txt' modified, executing
+$ print-file foo.txt ○ cache miss: 'foo.txt' modified, executing
 modified content
 > vt run script1 # cache hit, script2 already warmed cache
-$ print-file foo.txt ✓ cache hit, replaying
+$ print-file foo.txt ◉ cache hit, replaying
 modified content
 
 ---

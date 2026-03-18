@@ -195,7 +195,7 @@ impl<T: owo_colors::OwoColorize> ColorizeExt for T {
 }
 
 const COMMAND_STYLE: Style = Style::new().blue();
-const CACHE_MISS_STYLE: Style = Style::new().purple();
+const CACHE_MISS_STYLE: Style = Style::new().bright_black();
 
 /// Format the display's cwd as a string relative to the workspace root.
 /// Returns an empty string if the cwd equals the workspace root.
@@ -261,7 +261,7 @@ fn format_error_message(message: &str) -> Str {
 
 /// Format the "cache hit, logs replayed" message for synthetic executions without display info.
 fn format_cache_hit_message() -> Str {
-    vite_str::format!("{}\n", "✓ cache hit, logs replayed".style(Style::new().green().dimmed()))
+    vite_str::format!("{}\n", "◉ cache hit, logs replayed".style(Style::new().green().dimmed()))
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

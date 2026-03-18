@@ -8,7 +8,7 @@ export const shared = 'initial';
 > replace-file-content packages/shared/dist/output.js initial modified
 
 > vt run sub-pkg#dotdot-positive
-~/packages/sub-pkg$ print-file ../shared/src/utils.ts ✓ cache hit, replaying
+~/packages/sub-pkg$ print-file ../shared/src/utils.ts ◉ cache hit, replaying
 export const shared = 'initial';
 
 ---

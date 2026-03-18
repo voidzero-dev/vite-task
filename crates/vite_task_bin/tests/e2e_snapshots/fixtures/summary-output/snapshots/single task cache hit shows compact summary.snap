@@ -8,7 +8,7 @@ info:
 ~/packages/a$ print built-a
 built-a
 > vt run build # second run, cache hit → compact summary
-~/packages/a$ print built-a ✓ cache hit, replaying
+~/packages/a$ print built-a ◉ cache hit, replaying
 built-a
 
 ---
