@@ -6,9 +6,9 @@ use fspy_seccomp_unotify::{payload::SeccompPayload, target::install_target};
 use memmap2::Mmap;
 
 #[cfg(not(target_env = "musl"))]
-use crate::{elf, open_exec::open_executable};
+use crate::{elf, exec::ensure_env, open_exec::open_executable};
 use crate::{
-    exec::{Exec, ensure_env},
+    exec::Exec,
     payload::{EncodedPayload, PAYLOAD_ENV_NAME},
 };
 
