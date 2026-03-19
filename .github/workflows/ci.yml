@@ -163,10 +163,12 @@ jobs:
           npm install -g pnpm
           pnpm install
 
-      # Remove the zig linker wrapper from .cargo/config.toml — in Alpine, the
-      # system cc is already musl-based, so no cross-compilation linker is needed.
+      # Remove the zig cross-compilation config from .cargo/config.toml — in Alpine,
+      # the system cc is already musl-based, so no cross-compilation linker or CC is needed.
       - name: Remove zig linker config for native musl
-        run: sed -i '/\[target.*musl\]/,/^$/d' .cargo/config.toml
+        run: |
+          sed -i '/\[target.*musl\]/,/^$/d' .cargo/config.toml
+          sed -i '/\[env\]/,/^$/d' .cargo/config.toml
 
       - run: cargo test --no-fail-fast
 
