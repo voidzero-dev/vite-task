@@ -168,7 +168,7 @@ jobs:
       - name: Remove zig linker config for native musl
         run: sed -i '/\[target.*musl\]/,/^$/d' .cargo/config.toml
 
-      - run: cargo test
+      - run: cargo test --no-fail-fast
 
   fmt:
     name: Format and Check Deps
