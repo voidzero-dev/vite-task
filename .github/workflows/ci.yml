@@ -161,9 +161,10 @@ jobs:
 
       # Override the musl linker from .cargo/config.toml — in Alpine, the system
       # cc is already musl-based, so no zig wrapper is needed.
+      # Also include the build-level rustflags that get replaced by the override.
       - run: cargo test
         env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: cc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: --cfg tokio_unstable -D warnings
 
   fmt:
     name: Format and Check Deps
