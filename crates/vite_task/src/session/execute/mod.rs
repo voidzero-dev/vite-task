@@ -66,22 +66,13 @@ impl ExecutionContext<'_> {
     /// We compute a topological order and iterate in reverse to get execution order
     /// (dependencies before dependents).
     ///
-    /// `all_ancestors_single_node` tracks whether every graph in the ancestry chain
-    /// (from the root down to this level) contains exactly one node. The initial call
-    /// passes `graph.node_count() == 1`; recursive calls AND with the nested graph's
-    /// node count.
-    ///
     /// Fast-fail: if any task fails (non-zero exit or infrastructure error), remaining
     /// tasks and `&&`-chained items are skipped. Leaf-level errors are reported through
     /// the reporter. Cycle detection is handled at plan time.
     ///
     /// Returns `true` if all tasks succeeded, `false` if any task failed.
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_expanded_graph(
-        &mut self,
-        graph: &ExecutionGraph,
-        all_ancestors_single_node: bool,
-    ) -> bool {
+    async fn execute_expanded_graph(&mut self, graph: &ExecutionGraph) -> bool {
         // `compute_topological_order()` returns nodes in topological order: for every
         // edge A→B, A appears before B. Since our edges mean "A depends on B",
         // dependencies (B) appear after their dependents (A). We iterate in reverse
@@ -97,22 +88,12 @@ impl ExecutionContext<'_> {
             for item in &task_execution.items {
                 let failed = match &item.kind {
                     ExecutionItemKind::Leaf(leaf_kind) => {
-                        self.execute_leaf(
-                            &item.execution_item_display,
-                            leaf_kind,
-                            all_ancestors_single_node,
-                        )
-                        .boxed_local()
-                        .await
-                    }
-                    ExecutionItemKind::Expanded(nested_graph) => {
-                        !self
-                            .execute_expanded_graph(
-                                nested_graph,
-                                all_ancestors_single_node && nested_graph.node_count() == 1,
-                            )
+                        self.execute_leaf(&item.execution_item_display, leaf_kind)
                             .boxed_local()
                             .await
+                    }
+                    ExecutionItemKind::Expanded(nested_graph) => {
+                        !self.execute_expanded_graph(nested_graph).boxed_local().await
                     }
                 };
                 if failed {
@@ -134,10 +115,8 @@ impl ExecutionContext<'_> {
         &mut self,
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
-        all_ancestors_single_node: bool,
     ) -> bool {
-        let mut leaf_reporter =
-            self.reporter.new_leaf_execution(display, leaf_kind, all_ancestors_single_node);
+        let mut leaf_reporter = self.reporter.new_leaf_execution(display, leaf_kind);
 
         match leaf_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
@@ -543,8 +522,7 @@ impl Session<'_> {
 
         // Execute the graph with fast-fail: if any task fails, remaining tasks
         // are skipped. Leaf-level errors are reported through the reporter.
-        let all_single_node = execution_graph.node_count() == 1;
-        execution_context.execute_expanded_graph(&execution_graph, all_single_node).await;
+        execution_context.execute_expanded_graph(&execution_graph).await;
 
         // Leaf-level errors and non-zero exit statuses are tracked internally
         // by the reporter.

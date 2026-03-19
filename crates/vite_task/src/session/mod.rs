@@ -12,7 +12,8 @@ use clap::Parser as _;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
 use reporter::{
-    LabeledReporterBuilder,
+    GroupedReporterBuilder, InterleavedReporterBuilder, LabeledReporterBuilder,
+    SummaryReporterBuilder,
     summary::{LastRunSummary, ReadSummaryError, format_full_summary},
 };
 use rustc_hash::FxHashMap;
@@ -300,14 +301,33 @@ impl<'a> Session<'a> {
                     self.plan_from_query(qpr).await?
                 };
 
-                let builder = LabeledReporterBuilder::new(
-                    self.workspace_path(),
+                let workspace_path = self.workspace_path();
+                let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
+
+                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> =
+                    match run_command.flags.log {
+                        crate::cli::LogMode::Interleaved => Box::new(
+                            InterleavedReporterBuilder::new(Arc::clone(&workspace_path), writer),
+                        ),
+                        crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
+                            Arc::clone(&workspace_path),
+                            writer,
+                        )),
+                        crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
+                            Arc::clone(&workspace_path),
+                            writer,
+                        )),
+                    };
+
+                let builder = Box::new(SummaryReporterBuilder::new(
+                    inner,
+                    workspace_path,
                     Box::new(std::io::stdout()),
                     run_command.flags.verbose,
                     Some(self.make_summary_writer()),
                     self.program_name.clone(),
-                );
-                self.execute_graph(graph, Box::new(builder)).await.map_err(SessionError::EarlyExit)
+                ));
+                self.execute_graph(graph, builder).await.map_err(SessionError::EarlyExit)
             }
         }
     }
