@@ -141,6 +141,7 @@ jobs:
     container: alpine:3.21
     steps:
       - name: Install Alpine dependencies
+        shell: sh {0}
         run: apk add --no-cache bash curl git musl-dev gcc g++ nodejs npm python3
 
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
