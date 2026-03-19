@@ -159,12 +159,12 @@ jobs:
           npm install -g pnpm
           pnpm install
 
-      # Override the musl linker from .cargo/config.toml — in Alpine, the system
-      # cc is already musl-based, so no zig wrapper is needed.
-      # Also include the build-level rustflags that get replaced by the override.
+      # Remove the zig linker wrapper from .cargo/config.toml — in Alpine, the
+      # system cc is already musl-based, so no cross-compilation linker is needed.
+      - name: Remove zig linker config for native musl
+        run: sed -i '/\[target.*musl\]/,/^$/d' .cargo/config.toml
+
       - run: cargo test
-        env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: --cfg tokio_unstable -D warnings
 
   fmt:
     name: Format and Check Deps
