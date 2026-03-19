@@ -170,7 +170,11 @@ jobs:
           sed -i '/\[target.*musl\]/,/^$/d' .cargo/config.toml
           sed -i '/\[env\]/,/^$/d' .cargo/config.toml
 
+      # Alpine's Node.js package doesn't enable TypeScript type stripping by default.
+      # The test tool scripts (packages/tools/src/*.ts) need it.
       - run: cargo test --no-fail-fast
+        env:
+          NODE_OPTIONS: '--experimental-strip-types'
 
   fmt:
     name: Format and Check Deps
