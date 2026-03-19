@@ -61,9 +61,12 @@ pub static SUBPROCESS_HANDLERS: [SubprocessHandler];
 
 /// Checks if the process was spawned as a subprocess and dispatches to the
 /// matching handler. Called from the crate-level init function.
+///
+/// Uses [`get_args`] to read arguments, which works even during `.init_array`
+/// on musl targets where `std::env::args()` is not yet initialized.
 #[doc(hidden)]
 pub fn subprocess_dispatch() {
-    let args: Vec<String> = std::env::args().collect();
+    let args = get_args();
     // <test_binary> <expected_id> <arg_base64>
     if args.len() < 3 {
         return;
@@ -75,6 +78,73 @@ pub fn subprocess_dispatch() {
             // handler calls std::process::exit(0) — unreachable
         }
     }
+}
+
+/// Read command-line arguments in a way that works during `.init_array`.
+///
+/// On Linux, `std::env::args()` may return empty during `.init_array`
+/// constructors (observed on musl targets) because the Rust runtime hasn't
+/// initialized its argument storage yet. We fall back to reading
+/// `/proc/self/cmdline` directly using raw syscalls that don't depend on
+/// the Rust runtime being initialized.
+fn get_args() -> Vec<String> {
+    let args: Vec<String> = std::env::args().collect();
+    if !args.is_empty() {
+        return args;
+    }
+
+    // Fallback: read /proc/self/cmdline using raw libc calls.
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(args) = read_proc_cmdline() {
+            return args;
+        }
+    }
+
+    args
+}
+
+/// Read `/proc/self/cmdline` using raw libc calls that work before Rust
+/// runtime initialization (during `.init_array` constructors).
+#[cfg(target_os = "linux")]
+fn read_proc_cmdline() -> Option<Vec<String>> {
+    // SAFETY: opening a read-only procfs file with a static path
+    let fd =
+        unsafe { libc::open(c"/proc/self/cmdline".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return None;
+    }
+
+    let mut buf = [0u8; 4096];
+    let mut total = 0usize;
+    loop {
+        // SAFETY: reading into a valid stack buffer from an open fd
+        let n = unsafe { libc::read(fd, buf[total..].as_mut_ptr().cast(), buf.len() - total) };
+        let Ok(n) = usize::try_from(n) else {
+            break;
+        };
+        if n == 0 {
+            break;
+        }
+        total += n;
+        if total >= buf.len() {
+            break;
+        }
+    }
+    // SAFETY: closing an fd we opened
+    unsafe { libc::close(fd) };
+
+    if total == 0 {
+        return None;
+    }
+
+    Some(
+        buf[..total]
+            .split(|&b| b == 0)
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| std::str::from_utf8(s).ok().map(String::from))
+            .collect(),
+    )
 }
 
 /// Creates a `subprocess_test::Command` that only executes the provided function.
@@ -143,11 +213,9 @@ macro_rules! subprocess_test_main {
 
 #[doc(hidden)]
 pub fn init_impl<A: Decode<()>>(expected_id: &str, f: impl FnOnce(A)) {
-    let mut args = ::std::env::args();
+    let args = get_args();
     // <test_binary> <expected_id> <arg_base64>
-    let (Some(_program), Some(current_id), Some(arg_base64)) =
-        (args.next(), args.next(), args.next())
-    else {
+    let (Some(current_id), Some(arg_base64)) = (args.get(1), args.get(2)) else {
         return;
     };
     if current_id != expected_id {

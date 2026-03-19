@@ -12,6 +12,7 @@ base64 = { workspace = true }
 bincode = { workspace = true }
 ctor = { workspace = true }
 fspy = { workspace = true, optional = true }
+libc = { workspace = true }
 linkme = { workspace = true }
 portable-pty = { workspace = true, optional = true }
 rustc-hash = { workspace = true }
