@@ -353,6 +353,11 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 cmd.env("PATHEXT", pathext);
             }
 
+            // Inherit NODE_OPTIONS for TypeScript strip-types support on Alpine musl
+            if let Ok(node_options) = std::env::var("NODE_OPTIONS") {
+                cmd.env("NODE_OPTIONS", node_options);
+            }
+
             let terminal = TestTerminal::spawn(SCREEN_SIZE, cmd).unwrap();
             let mut killer = terminal.child_handle.clone();
             let interactions = step.interactions().to_vec();
