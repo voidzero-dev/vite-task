@@ -316,11 +316,9 @@ pub async fn execute_spawn(
     //    - path_accesses: only tracked when includes_auto is true (fspy inference)
     let (mut std_outputs, mut path_accesses, cache_metadata_and_inputs) =
         cache_metadata.map_or((None, None, None), |cache_metadata| {
-            // On musl targets, fspy's LD_PRELOAD-based file tracking is not available
-            // because musl binaries are statically linked. Disable inference at execution
-            // time so that plan-level config (includes_auto) stays consistent across targets.
-            let fspy_available = !cfg!(target_env = "musl");
-            let path_accesses = if cache_metadata.input_config.includes_auto && fspy_available {
+            // On musl targets, LD_PRELOAD-based tracking is unavailable but seccomp
+            // unotify provides equivalent file access tracing.
+            let path_accesses = if cache_metadata.input_config.includes_auto {
                 Some(TrackedPathAccesses::default())
             } else {
                 None // Skip fspy when inference is disabled or unavailable

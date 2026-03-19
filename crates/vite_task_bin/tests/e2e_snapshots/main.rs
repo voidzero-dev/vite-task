@@ -198,7 +198,8 @@ struct E2e {
     /// Optional platform filter: "unix" or "windows". If set, test only runs on that platform.
     #[serde(default)]
     pub platform: Option<Str>,
-    /// If true, the test requires fspy-based input inference and will be skipped on musl targets.
+    /// Deprecated: fspy now works on musl via seccomp unotify.
+    /// Kept for backwards compatibility with existing snapshots.toml files.
     #[serde(default)]
     pub requires_fspy: bool,
 }
@@ -316,11 +317,8 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
             }
         }
 
-        // Skip fspy-dependent tests on musl targets where LD_PRELOAD-based tracking
-        // is not available.
-        if e2e.requires_fspy && cfg!(target_env = "musl") {
-            continue;
-        }
+        // fspy works on musl via seccomp unotify — no tests need to be skipped.
+        let _ = e2e.requires_fspy;
 
         let _info_guard = if e2e.cwd.as_str().is_empty() {
             None

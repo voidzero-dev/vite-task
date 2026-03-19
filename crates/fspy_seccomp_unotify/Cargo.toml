@@ -33,3 +33,7 @@ workspace = true
 [lib]
 test = false
 doctest = false
+
+[[test]]
+name = "arg_types"
+required-features = ["supervisor", "target"]

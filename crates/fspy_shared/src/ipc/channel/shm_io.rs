@@ -323,7 +323,6 @@ impl<M: AsRef<[u8]>> ShmReader<M> {
 #[cfg(test)]
 mod tests {
     use std::{
-        env::current_exe,
         process::{Child, Command},
         sync::Arc,
         thread,
@@ -669,43 +668,31 @@ mod tests {
     #[cfg(not(miri))]
     fn real_shm_across_processes() {
         use shared_memory::ShmemConf;
+        use subprocess_test::command_for_fn;
 
-        const CHILD_PROCESS_ENV: &str = "FSPY_SHM_IO_TEST_CHILD_PROCESS";
         const CHILD_COUNT: usize = 12;
         const FRAME_COUNT_EACH_CHILD: usize = 100;
 
-        #[ctor::ctor]
-        fn child_process() {
-            if std::env::var_os(CHILD_PROCESS_ENV).is_none() {
-                return;
-            }
-            let mut args = std::env::args_os();
-            args.next().unwrap(); // exe path
-            let shm_name = args.next().expect("shm name arg").into_string().unwrap();
-            let child_index = args.next().expect("child name").into_string().unwrap();
-
-            let shm = ShmemConf::new().os_id(shm_name).open().unwrap();
-            // SAFETY: `shm` is a freshly opened shared memory region with a valid pointer and size.
-            // Concurrent write access is safe because `ShmWriter` uses atomic operations.
-            let writer = unsafe { ShmWriter::new(shm) };
-            for i in 0..FRAME_COUNT_EACH_CHILD {
-                let frame_data = format!("{child_index} {i}");
-                assert!(writer.try_write_frame(frame_data.as_bytes()));
-            }
-            std::process::exit(0);
-        }
-
         let shm = ShmemConf::new().size(1024 * 1024).create().unwrap();
-        let shm_name = shm.get_os_id();
+        let shm_name = shm.get_os_id().to_owned();
 
         let children: Vec<Child> = (0..CHILD_COUNT)
             .map(|child_index| {
-                Command::new(current_exe().unwrap())
-                    .env(CHILD_PROCESS_ENV, "1")
-                    .arg(shm_name)
-                    .arg(child_index.to_string())
-                    .spawn()
-                    .unwrap()
+                let cmd = command_for_fn!(
+                    (shm_name.clone(), child_index),
+                    |(shm_name, child_index): (String, usize)| {
+                        let shm = ShmemConf::new().os_id(shm_name).open().unwrap();
+                        // SAFETY: `shm` is a freshly opened shared memory region with a valid
+                        // pointer and size. Concurrent write access is safe because `ShmWriter`
+                        // uses atomic operations.
+                        let writer = unsafe { ShmWriter::new(shm) };
+                        for i in 0..FRAME_COUNT_EACH_CHILD {
+                            let frame_data = std::format!("{child_index} {i}");
+                            assert!(writer.try_write_frame(frame_data.as_bytes()));
+                        }
+                    }
+                );
+                Command::from(cmd).spawn().unwrap()
             })
             .collect();
 
