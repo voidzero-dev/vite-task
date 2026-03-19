@@ -113,15 +113,30 @@ macro_rules! command_for_fn {
 /// Register the subprocess dispatcher as a `#[ctor]` in the calling crate.
 ///
 /// Must be invoked once at crate scope in every crate that uses
-/// [`command_for_fn!`]. This ensures the dispatcher's `.init_array` entry
-/// is linked into the final binary, which is required for musl targets
-/// where `#[ctor]` inside macro expansions may be dropped.
+/// [`command_for_fn!`]. On musl targets, `#[ctor]` may not work reliably
+/// in test binaries — use [`subprocess_dispatch()`] at the start of a
+/// custom test main instead.
 #[macro_export]
 macro_rules! subprocess_dispatch_ctor {
     () => {
         #[::ctor::ctor]
         fn __subprocess_dispatch() {
             $crate::subprocess_dispatch();
+        }
+    };
+}
+
+/// Wrap the standard test runner with subprocess dispatch.
+///
+/// Use this at the top of custom test mains (`harness = false`) or
+/// invoke via the `subprocess_test_main!` macro for test crates that
+/// need subprocess support on musl.
+#[macro_export]
+macro_rules! subprocess_test_main {
+    ($body:expr) => {
+        fn main() {
+            $crate::subprocess_dispatch();
+            $body
         }
     };
 }
