@@ -8,7 +8,9 @@ use std::{io, path::Path};
 
 #[cfg(target_os = "linux")]
 use fspy_seccomp_unotify::supervisor::supervise;
-use fspy_shared::ipc::{NativeStr, PathAccess, channel::channel};
+#[cfg(not(target_env = "musl"))]
+use fspy_shared::ipc::NativeStr;
+use fspy_shared::ipc::{PathAccess, channel::channel};
 #[cfg(target_os = "macos")]
 use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
@@ -45,7 +47,7 @@ impl SpyImpl {
     ///
     /// On musl targets, the preload library is not available (musl does not support cdylib),
     /// so only seccomp-based tracking is used.
-    pub fn init_in(dir: &Path) -> io::Result<Self> {
+    pub fn init_in(#[cfg_attr(target_env = "musl", allow(unused))] dir: &Path) -> io::Result<Self> {
         #[cfg(not(target_env = "musl"))]
         let preload_path = {
             use const_format::formatcp;
