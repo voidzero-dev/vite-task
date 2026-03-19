@@ -138,13 +138,18 @@ fn read_proc_cmdline() -> Option<Vec<String>> {
         return None;
     }
 
-    Some(
-        buf[..total]
-            .split(|&b| b == 0)
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| std::str::from_utf8(s).ok().map(String::from))
-            .collect(),
-    )
+    // /proc/self/cmdline has null-separated args with a trailing null.
+    // We must preserve empty args (e.g., empty base64 for `()` arg) but
+    // remove the trailing empty entry from the final null terminator.
+    let mut args: Vec<String> = buf[..total]
+        .split(|&b| b == 0)
+        .filter_map(|s| std::str::from_utf8(s).ok().map(String::from))
+        .collect();
+    // Remove trailing empty string from the final null byte
+    if args.last().is_some_and(String::is_empty) {
+        args.pop();
+    }
+    Some(args)
 }
 
 /// Creates a `subprocess_test::Command` that only executes the provided function.
