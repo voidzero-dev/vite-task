@@ -33,3 +33,6 @@ workspace = true
 
 [lib]
 doctest = false
+
+[package.metadata.cargo-shear]
+ignored = ["linkme"]

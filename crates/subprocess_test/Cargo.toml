@@ -28,4 +28,4 @@ workspace = true
 doctest = false
 
 [package.metadata.cargo-shear]
-ignored = ["ctor", "linkme"]
+ignored = []
