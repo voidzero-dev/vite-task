@@ -159,7 +159,11 @@ jobs:
           npm install -g pnpm
           pnpm install
 
+      # Override the musl linker from .cargo/config.toml — in Alpine, the system
+      # cc is already musl-based, so no zig wrapper is needed.
       - run: cargo test
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: cc
 
   fmt:
     name: Format and Check Deps
