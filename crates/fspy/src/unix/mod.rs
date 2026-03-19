@@ -33,6 +33,7 @@ pub struct SpyImpl {
     #[cfg(target_os = "macos")]
     artifacts: Artifacts,
 
+    #[cfg(not(target_env = "musl"))]
     preload_path: Box<NativeStr>,
 }
 
@@ -62,12 +63,8 @@ impl SpyImpl {
             preload_cdylib_path.as_path().into()
         };
 
-        // On musl, the preload cdylib is not compiled. Set an empty preload_path;
-        // fspy_shared_unix will detect musl and skip LD_PRELOAD injection.
-        #[cfg(target_env = "musl")]
-        let preload_path = Box::<NativeStr>::from("");
-
         Ok(Self {
+            #[cfg(not(target_env = "musl"))]
             preload_path,
             #[cfg(target_os = "macos")]
             artifacts: {
@@ -94,6 +91,7 @@ impl SpyImpl {
             #[cfg(target_os = "macos")]
             artifacts: self.artifacts.clone(),
 
+            #[cfg(not(target_env = "musl"))]
             preload_path: self.preload_path.clone(),
 
             #[cfg(target_os = "linux")]

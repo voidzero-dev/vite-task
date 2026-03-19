@@ -9,6 +9,7 @@ use fspy_shared::ipc::{NativeStr, channel::ChannelConf};
 pub struct Payload {
     pub ipc_channel_conf: ChannelConf,
 
+    #[cfg(not(target_env = "musl"))]
     pub preload_path: Box<NativeStr>,
 
     #[cfg(target_os = "macos")]

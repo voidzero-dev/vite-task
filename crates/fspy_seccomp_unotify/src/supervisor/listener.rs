@@ -30,7 +30,7 @@ impl AsFd for NotifyListener {
     }
 }
 
-const SECCOMP_IOCTL_NOTIF_SEND: libc::c_ulong = 3_222_806_785;
+const SECCOMP_IOCTL_NOTIF_SEND: libc::Ioctl = 3_222_806_785u64 as libc::Ioctl;
 
 impl NotifyListener {
     /// Sends a `SECCOMP_USER_NOTIF_FLAG_CONTINUE` response for the given request ID.
