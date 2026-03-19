@@ -52,7 +52,8 @@ async fn readdir() -> anyhow::Result<()> {
 
     let accesses = track_fn!(tmpdir_path.to_str().unwrap().to_owned(), |tmpdir_path: String| {
         std::env::set_current_dir(tmpdir_path).unwrap();
-        let _ = std::fs::read_dir("hello_dir");
+        // Consume at least one entry so that getdents64 fires on seccomp targets.
+        let _ = std::fs::read_dir("hello_dir").unwrap().next();
     })
     .await?;
     assert_contains(&accesses, tmpdir_path.join("hello_dir").as_path(), AccessMode::READ_DIR);

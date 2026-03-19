@@ -1,5 +1,3 @@
-subprocess_test::subprocess_dispatch_ctor!();
-
 use std::{
     io::{BufRead, BufReader, IsTerminal, Read, Write, stderr, stdin, stdout},
     time::{Duration, Instant},

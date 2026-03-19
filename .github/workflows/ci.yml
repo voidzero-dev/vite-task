@@ -140,25 +140,23 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: alpine:3.21
-      # fspy uses seccomp user notifications which require unconfined seccomp
-      # fspy uses seccomp user notifications and shared memory IPC
       options: --security-opt seccomp=unconfined --shm-size=256m
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}
         run: apk add --no-cache bash curl git musl-dev gcc g++ python3
 
-      # Alpine's Node.js package is compiled without TypeScript type-stripping.
-      # Install the official Node.js musl binary which includes full TypeScript support.
-      - name: Install Node.js from official distribution
-        run: |
-          NODE_VERSION=$(curl -fsSL https://unofficial-builds.nodejs.org/download/release/index.json | python3 -c "import sys,json; print(next(d['version'] for d in json.load(sys.stdin) if d['version'].startswith('v22.')))")
-          curl -fsSL "https://unofficial-builds.nodejs.org/download/release/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64-musl.tar.gz" | tar -xz -C /usr/local --strip-components=1
-
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
           submodules: true
+
+      # Alpine's Node.js package is compiled without TypeScript type-stripping.
+      # Install the official Node.js musl binary which includes full TypeScript support.
+      - name: Install Node.js from official distribution
+        run: |
+          NODE_VERSION=v$(cat .node-version)
+          curl -fsSL "https://unofficial-builds.nodejs.org/download/release/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64-musl.tar.gz" | tar -xz -C /usr/local --strip-components=1
 
       - name: Install Rust
         run: |
@@ -171,11 +169,9 @@ jobs:
           pnpm install
 
       # Remove the zig cross-compilation config from .cargo/config.toml — in Alpine,
-      # the system cc is already musl-based, so no cross-compilation linker or CC is needed.
+      # the system cc is already musl-based, so no cross-compilation linker is needed.
       - name: Remove zig linker config for native musl
-        run: |
-          sed -i '/\[target.*musl\]/,/^$/d' .cargo/config.toml
-          sed -i '/\[env\]/,/^$/d' .cargo/config.toml
+        run: sed -i '/\[target.*musl\]/,/^$/d' .cargo/config.toml
 
       - run: cargo test --no-fail-fast
 

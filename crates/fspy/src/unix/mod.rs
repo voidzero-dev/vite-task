@@ -45,8 +45,8 @@ const PRELOAD_CDYLIB_BINARY: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_FSPY
 impl SpyImpl {
     /// Initialize the fs access spy by writing the preload library on disk.
     ///
-    /// On musl targets, the preload library is not available (musl does not support cdylib),
-    /// so only seccomp-based tracking is used.
+    /// On musl targets, we don't build a preload library —
+    /// only seccomp-based tracking is used.
     pub fn init_in(#[cfg_attr(target_env = "musl", allow(unused))] dir: &Path) -> io::Result<Self> {
         #[cfg(not(target_env = "musl"))]
         let preload_path = {

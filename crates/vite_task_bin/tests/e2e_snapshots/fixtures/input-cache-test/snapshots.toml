@@ -78,7 +78,6 @@ steps = [
 # - Files NOT read by the command do NOT trigger invalidation
 [[e2e]]
 name = "auto only - miss on inferred file change"
-requires_fspy = true
 steps = [
   # Initial run - reads src/main.ts
   "vt run auto-only",
@@ -90,7 +89,6 @@ steps = [
 
 [[e2e]]
 name = "auto only - hit on non-inferred file change"
-requires_fspy = true
 steps = [
   # Initial run - reads src/main.ts (NOT utils.ts)
   "vt run auto-only",
@@ -105,7 +103,6 @@ steps = [
 # - Files in excluded directories don't trigger invalidation even if read
 [[e2e]]
 name = "auto with negative - hit on excluded inferred file"
-requires_fspy = true
 steps = [
   # Initial run - reads both src/main.ts and dist/output.js
   "vt run auto-with-negative",
@@ -117,7 +114,6 @@ steps = [
 
 [[e2e]]
 name = "auto with negative - miss on non-excluded inferred file"
-requires_fspy = true
 steps = [
   # Initial run
   "vt run auto-with-negative",
@@ -143,7 +139,6 @@ steps = [
 
 [[e2e]]
 name = "positive auto negative - miss on inferred file"
-requires_fspy = true
 steps = [
   # Initial run
   "vt run positive-auto-negative",
@@ -194,7 +189,6 @@ steps = [
 # - FSPY is NOT set when fspy is disabled (explicit globs only)
 [[e2e]]
 name = "fspy env - set when auto inference enabled"
-requires_fspy = true
 steps = [
   # Run task with auto inference - should see FSPY=1
   "vt run check-fspy-env-with-auto",

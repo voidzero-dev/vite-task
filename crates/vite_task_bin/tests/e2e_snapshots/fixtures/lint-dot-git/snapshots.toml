@@ -2,7 +2,6 @@
 
 [[e2e]]
 name = "lint dot git"
-requires_fspy = true
 steps = [
   "mkdir .git",
   "vt run lint # cache miss",

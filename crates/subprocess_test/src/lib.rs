@@ -48,36 +48,28 @@ impl From<Command> for portable_pty::CommandBuilder {
     }
 }
 
-/// Type for subprocess handler entries in the distributed slice.
-#[doc(hidden)]
-pub struct SubprocessHandler {
-    pub id: &'static str,
-    pub handler: fn(),
-}
-
-#[doc(hidden)]
-#[linkme::distributed_slice]
-pub static SUBPROCESS_HANDLERS: [SubprocessHandler];
-
-/// Checks if the process was spawned as a subprocess and dispatches to the
-/// matching handler. Called from the crate-level init function.
+/// Creates a `subprocess_test::Command` that only executes the provided function.
 ///
-/// Uses [`get_args`] to read arguments, which works even during `.init_array`
-/// on musl targets where `std::env::args()` is not yet initialized.
-#[doc(hidden)]
-pub fn subprocess_dispatch() {
-    let args = get_args();
-    // <test_binary> <expected_id> <arg_base64>
-    if args.len() < 3 {
-        return;
-    }
-    let current_id = &args[1];
-    for handler in SUBPROCESS_HANDLERS {
-        if handler.id == current_id {
-            (handler.handler)();
-            // handler calls std::process::exit(0) — unreachable
+/// - $arg: The argument to pass to the function, must implement `Encode` and `Decode`.
+/// - $f: The function to run in the separate process, takes one argument of the type of $arg.
+#[macro_export]
+macro_rules! command_for_fn {
+    ($arg: expr, $f: expr) => {{
+        // Generate a unique ID for every invocation of this macro.
+        const ID: &str =
+            ::core::concat!(::core::file!(), ":", ::core::line!(), ":", ::core::column!());
+
+        fn assert_arg_type<A>(_arg: &A, _f: impl FnOnce(A)) {}
+        assert_arg_type(&$arg, $f);
+
+        // Register an initializer that runs the provided function when the process is started
+        #[::ctor::ctor]
+        unsafe fn init() {
+            $crate::init_impl(ID, $f);
         }
-    }
+        // Create the command
+        $crate::create_command(ID, $arg)
+    }};
 }
 
 /// Read command-line arguments in a way that works during `.init_array`.
@@ -152,70 +144,6 @@ fn read_proc_cmdline() -> Option<Vec<String>> {
     Some(args)
 }
 
-/// Creates a `subprocess_test::Command` that only executes the provided function.
-///
-/// - $arg: The argument to pass to the function, must implement `Encode` and `Decode`.
-/// - $f: The function to run in the separate process, takes one argument of the type of $arg.
-///
-/// **Important:** Every crate that uses this macro must also invoke
-/// [`subprocess_dispatch_ctor!()`] once at crate scope (outside any function)
-/// to register the subprocess dispatcher.
-#[macro_export]
-macro_rules! command_for_fn {
-    ($arg: expr, $f: expr) => {{
-        // Generate a unique ID for every invocation of this macro.
-        const ID: &str =
-            ::core::concat!(::core::file!(), ":", ::core::line!(), ":", ::core::column!());
-
-        fn assert_arg_type<A>(_arg: &A, _f: impl FnOnce(A)) {}
-        assert_arg_type(&$arg, $f);
-
-        // Register a handler in the distributed slice.
-        #[::linkme::distributed_slice($crate::SUBPROCESS_HANDLERS)]
-        #[linkme(crate = ::linkme)]
-        static HANDLER: $crate::SubprocessHandler = $crate::SubprocessHandler {
-            id: ID,
-            handler: || {
-                $crate::init_impl(ID, $f);
-            },
-        };
-
-        // Create the command
-        $crate::create_command(ID, $arg)
-    }};
-}
-
-/// Register the subprocess dispatcher as a `#[ctor]` in the calling crate.
-///
-/// Must be invoked once at crate scope in every crate that uses
-/// [`command_for_fn!`]. On musl targets, `#[ctor]` may not work reliably
-/// in test binaries — use [`subprocess_dispatch()`] at the start of a
-/// custom test main instead.
-#[macro_export]
-macro_rules! subprocess_dispatch_ctor {
-    () => {
-        #[::ctor::ctor]
-        fn __subprocess_dispatch() {
-            $crate::subprocess_dispatch();
-        }
-    };
-}
-
-/// Wrap the standard test runner with subprocess dispatch.
-///
-/// Use this at the top of custom test mains (`harness = false`) or
-/// invoke via the `subprocess_test_main!` macro for test crates that
-/// need subprocess support on musl.
-#[macro_export]
-macro_rules! subprocess_test_main {
-    ($body:expr) => {
-        fn main() {
-            $crate::subprocess_dispatch();
-            $body
-        }
-    };
-}
-
 #[doc(hidden)]
 pub fn init_impl<A: Decode<()>>(expected_id: &str, f: impl FnOnce(A)) {
     let args = get_args();
@@ -246,9 +174,6 @@ pub fn create_command(id: &str, arg: impl Encode) -> Command {
 
     Command { program, args, envs, cwd }
 }
-
-#[cfg(test)]
-subprocess_dispatch_ctor!();
 
 #[cfg(test)]
 mod tests {

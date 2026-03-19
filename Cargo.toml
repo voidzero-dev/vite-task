@@ -71,7 +71,6 @@ diff-struct = "0.5.3"
 directories = "6.0.0"
 elf = { version = "0.8.0", default-features = false }
 flate2 = "1.0.35"
-linkme = "0.3"
 fspy = { path = "crates/fspy" }
 fspy_detours_sys = { path = "crates/fspy_detours_sys" }
 fspy_preload_unix = { path = "crates/fspy_preload_unix", artifact = "cdylib" }
