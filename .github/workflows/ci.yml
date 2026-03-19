@@ -141,7 +141,8 @@ jobs:
     container:
       image: alpine:3.21
       # fspy uses seccomp user notifications which require unconfined seccomp
-      options: --security-opt seccomp=unconfined
+      # fspy uses seccomp user notifications and shared memory IPC
+      options: --security-opt seccomp=unconfined --shm-size=256m
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}
