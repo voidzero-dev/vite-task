@@ -123,8 +123,8 @@ mod tests {
 
     #[test]
     fn split_across_chunks() {
-        let result = labeled_output("[p] ", &[b"hel", b"lo\n"]);
-        assert_eq!(result, b"[p] hello\n");
+        let result = labeled_output("[p] ", &[b"split ", b"line\n"]);
+        assert_eq!(result, b"[p] split line\n");
     }
 
     #[test]
