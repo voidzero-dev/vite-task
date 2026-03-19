@@ -15,6 +15,7 @@ vt100 = { workspace = true }
 [dev-dependencies]
 ctor = { workspace = true }
 ctrlc = { workspace = true }
+linkme = { workspace = true }
 ntest = "0.9.5"
 subprocess_test = { workspace = true, features = ["portable-pty"] }
 terminal_size = "0.4"
@@ -30,4 +31,4 @@ test = false
 doctest = false
 
 [package.metadata.cargo-shear]
-ignored = ["ctor"]
+ignored = ["ctor", "linkme"]

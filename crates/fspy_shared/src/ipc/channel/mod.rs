@@ -184,6 +184,9 @@ impl<'a> Deref for ReceiverLockGuard<'a> {
 }
 
 #[cfg(test)]
+subprocess_test::subprocess_dispatch_ctor!();
+
+#[cfg(test)]
 mod tests {
     use std::{num::NonZeroUsize, str::from_utf8};
 

@@ -1,3 +1,5 @@
+subprocess_test::subprocess_dispatch_ctor!();
+
 use std::io::Write;
 
 use ntest::timeout;

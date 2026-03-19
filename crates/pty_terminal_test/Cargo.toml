@@ -16,6 +16,7 @@ pty_terminal_test_client = { workspace = true }
 [dev-dependencies]
 crossterm = { workspace = true }
 ctor = { workspace = true }
+linkme = { workspace = true }
 ntest = "0.9.5"
 pty_terminal_test_client = { workspace = true, features = ["testing"] }
 subprocess_test = { workspace = true, features = ["portable-pty"] }
@@ -28,4 +29,4 @@ test = false
 doctest = false
 
 [package.metadata.cargo-shear]
-ignored = ["ctor"]
+ignored = ["ctor", "linkme"]

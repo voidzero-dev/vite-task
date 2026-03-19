@@ -48,10 +48,43 @@ impl From<Command> for portable_pty::CommandBuilder {
     }
 }
 
+/// Type for subprocess handler entries in the distributed slice.
+#[doc(hidden)]
+pub struct SubprocessHandler {
+    pub id: &'static str,
+    pub handler: fn(),
+}
+
+#[doc(hidden)]
+#[linkme::distributed_slice]
+pub static SUBPROCESS_HANDLERS: [SubprocessHandler];
+
+/// Checks if the process was spawned as a subprocess and dispatches to the
+/// matching handler. Called from the crate-level init function.
+#[doc(hidden)]
+pub fn subprocess_dispatch() {
+    let args: Vec<String> = std::env::args().collect();
+    // <test_binary> <expected_id> <arg_base64>
+    if args.len() < 3 {
+        return;
+    }
+    let current_id = &args[1];
+    for handler in SUBPROCESS_HANDLERS {
+        if handler.id == current_id {
+            (handler.handler)();
+            // handler calls std::process::exit(0) — unreachable
+        }
+    }
+}
+
 /// Creates a `subprocess_test::Command` that only executes the provided function.
 ///
 /// - $arg: The argument to pass to the function, must implement `Encode` and `Decode`.
 /// - $f: The function to run in the separate process, takes one argument of the type of $arg.
+///
+/// **Important:** Every crate that uses this macro must also invoke
+/// [`subprocess_dispatch_ctor!()`] once at crate scope (outside any function)
+/// to register the subprocess dispatcher.
 #[macro_export]
 macro_rules! command_for_fn {
     ($arg: expr, $f: expr) => {{
@@ -62,14 +95,35 @@ macro_rules! command_for_fn {
         fn assert_arg_type<A>(_arg: &A, _f: impl FnOnce(A)) {}
         assert_arg_type(&$arg, $f);
 
-        // Register an initializer that runs the provided function when the process is started
-        #[::ctor::ctor]
-        unsafe fn init() {
-            $crate::init_impl(ID, $f);
-        }
+        // Register a handler in the distributed slice.
+        #[::linkme::distributed_slice($crate::SUBPROCESS_HANDLERS)]
+        #[linkme(crate = ::linkme)]
+        static HANDLER: $crate::SubprocessHandler = $crate::SubprocessHandler {
+            id: ID,
+            handler: || {
+                $crate::init_impl(ID, $f);
+            },
+        };
+
         // Create the command
         $crate::create_command(ID, $arg)
     }};
+}
+
+/// Register the subprocess dispatcher as a `#[ctor]` in the calling crate.
+///
+/// Must be invoked once at crate scope in every crate that uses
+/// [`command_for_fn!`]. This ensures the dispatcher's `.init_array` entry
+/// is linked into the final binary, which is required for musl targets
+/// where `#[ctor]` inside macro expansions may be dropped.
+#[macro_export]
+macro_rules! subprocess_dispatch_ctor {
+    () => {
+        #[::ctor::ctor]
+        fn __subprocess_dispatch() {
+            $crate::subprocess_dispatch();
+        }
+    };
 }
 
 #[doc(hidden)]
@@ -104,6 +158,9 @@ pub fn create_command(id: &str, arg: impl Encode) -> Command {
 
     Command { program, args, envs, cwd }
 }
+
+#[cfg(test)]
+subprocess_dispatch_ctor!();
 
 #[cfg(test)]
 mod tests {

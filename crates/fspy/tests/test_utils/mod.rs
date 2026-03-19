@@ -1,3 +1,5 @@
+subprocess_test::subprocess_dispatch_ctor!();
+
 use std::path::{Path, PathBuf, StripPrefixError};
 
 use fspy::{AccessMode, PathAccessIterable};

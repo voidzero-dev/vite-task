@@ -48,6 +48,7 @@ tempfile = { workspace = true }
 anyhow = { workspace = true }
 csv-async = { workspace = true }
 ctor = { workspace = true }
+linkme = { workspace = true }
 subprocess_test = { workspace = true, features = ["fspy"] }
 test-log = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "io-std"] }
@@ -71,4 +72,4 @@ workspace = true
 doctest = false
 
 [package.metadata.cargo-shear]
-ignored = ["ctor", "fspy_test_bin"]
+ignored = ["ctor", "linkme", "fspy_test_bin"]
