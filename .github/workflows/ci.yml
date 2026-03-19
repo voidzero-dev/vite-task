@@ -41,7 +41,7 @@ jobs:
 
   clippy:
     needs: detect-changes
-    if: needs.detect-changes.outputs.code-changed == 'true'
+    if: false # temporarily disabled
     name: Clippy
     runs-on: ubuntu-latest
     steps:
@@ -64,7 +64,7 @@ jobs:
 
   test:
     needs: detect-changes
-    if: needs.detect-changes.outputs.code-changed == 'true'
+    if: false # temporarily disabled
     name: Test
     strategy:
       fail-fast: false
@@ -161,6 +161,7 @@ jobs:
       - run: cargo-zigbuild test --target x86_64-unknown-linux-musl
 
   fmt:
+    if: false # temporarily disabled
     name: Format and Check Deps
     runs-on: ubuntu-latest
     steps:

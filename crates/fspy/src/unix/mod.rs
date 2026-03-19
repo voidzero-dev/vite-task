@@ -36,25 +36,39 @@ pub struct SpyImpl {
     preload_path: Box<NativeStr>,
 }
 
+#[cfg(not(target_env = "musl"))]
 const PRELOAD_CDYLIB_BINARY: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX"));
 
 impl SpyImpl {
-    /// Initialize the fs access spy by writing the preload library on disk
+    /// Initialize the fs access spy by writing the preload library on disk.
+    ///
+    /// On musl targets, the preload library is not available (musl does not support cdylib),
+    /// so only seccomp-based tracking is used.
     pub fn init_in(dir: &Path) -> io::Result<Self> {
-        use const_format::formatcp;
-        use xxhash_rust::const_xxh3::xxh3_128;
+        #[cfg(not(target_env = "musl"))]
+        let preload_path = {
+            use const_format::formatcp;
+            use xxhash_rust::const_xxh3::xxh3_128;
 
-        use crate::artifact::Artifact;
+            use crate::artifact::Artifact;
 
-        const PRELOAD_CDYLIB: Artifact = Artifact {
-            name: "fspy_preload",
-            content: PRELOAD_CDYLIB_BINARY,
-            hash: formatcp!("{:x}", xxh3_128(PRELOAD_CDYLIB_BINARY)),
+            const PRELOAD_CDYLIB: Artifact = Artifact {
+                name: "fspy_preload",
+                content: PRELOAD_CDYLIB_BINARY,
+                hash: formatcp!("{:x}", xxh3_128(PRELOAD_CDYLIB_BINARY)),
+            };
+
+            let preload_cdylib_path = PRELOAD_CDYLIB.write_to(dir, ".dylib")?;
+            preload_cdylib_path.as_path().into()
         };
 
-        let preload_cdylib_path = PRELOAD_CDYLIB.write_to(dir, ".dylib")?;
+        // On musl, the preload cdylib is not compiled. Set an empty preload_path;
+        // fspy_shared_unix will detect musl and skip LD_PRELOAD injection.
+        #[cfg(target_env = "musl")]
+        let preload_path = Box::<NativeStr>::from("");
+
         Ok(Self {
-            preload_path: preload_cdylib_path.as_path().into(),
+            preload_path,
             #[cfg(target_os = "macos")]
             artifacts: {
                 let coreutils_path = macos_artifacts::COREUTILS_BINARY.write_to(dir, "")?;
