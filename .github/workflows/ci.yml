@@ -138,7 +138,10 @@ jobs:
     if: needs.detect-changes.outputs.code-changed == 'true'
     name: Test (musl)
     runs-on: ubuntu-latest
-    container: alpine:3.21
+    container:
+      image: alpine:3.21
+      # fspy uses seccomp user notifications which require unconfined seccomp
+      options: --security-opt seccomp=unconfined
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}
