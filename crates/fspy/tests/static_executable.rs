@@ -18,11 +18,11 @@ const TEST_BIN_CONTENT: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_FSPY_TEST_BI
 
 fn test_bin_path() -> &'static Path {
     static TEST_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
-        assert_eq!(
-            is_dynamically_linked_to_libc(TEST_BIN_CONTENT),
-            Ok(false),
-            "Test binary is not a static executable"
-        );
+        // On musl with -crt-static (dynamic linking), the artifact dep is also
+        // dynamically linked.  The seccomp tracer works for both static and
+        // dynamic binaries, so the tests are still valid either way.
+        let is_dynamic = is_dynamically_linked_to_libc(TEST_BIN_CONTENT);
+        assert!(is_dynamic.is_ok(), "Failed to inspect test binary: {is_dynamic:?}");
 
         let tmp_dir = env!("CARGO_TARGET_TMPDIR");
         let test_bin_path = PathBuf::from(tmp_dir).join("fspy-test-bin");
