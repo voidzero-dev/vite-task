@@ -95,23 +95,37 @@ fn run_milestone_does_not_pollute_screen() {
 }
 
 #[test]
-#[timeout(60_000)]
+#[timeout(120_000)]
 fn milestone_stress_sequential() {
-    for _ in 0..20 {
+    for _ in 0..100 {
         run_milestone_raw_mode_keystrokes();
         run_milestone_does_not_pollute_screen();
     }
 }
 
 #[test]
-#[timeout(60_000)]
+#[timeout(120_000)]
 fn milestone_stress_concurrent() {
     // Run multiple iterations where both milestone tests execute concurrently
     // via threads, mimicking the parallel test execution in `cargo test`.
-    for _ in 0..20 {
+    for _ in 0..100 {
         std::thread::scope(|s| {
             s.spawn(run_milestone_raw_mode_keystrokes);
             s.spawn(run_milestone_does_not_pollute_screen);
+        });
+    }
+}
+
+#[test]
+#[timeout(120_000)]
+fn milestone_stress_high_concurrency() {
+    // Run many PTY sessions in parallel to stress thread/PTY resource handling.
+    for _ in 0..20 {
+        std::thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(run_milestone_raw_mode_keystrokes);
+                s.spawn(run_milestone_does_not_pollute_screen);
+            }
         });
     }
 }
