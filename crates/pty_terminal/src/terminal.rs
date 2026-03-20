@@ -256,6 +256,15 @@ impl Terminal {
     ///
     /// Panics if the writer lock is poisoned when the background thread closes it.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
+        // On musl libc (Alpine Linux), concurrent openpty + fork/exec operations
+        // trigger SIGSEGV/SIGBUS in musl internals (observed in sysconf, fcntl).
+        // Serialize PTY creation and child spawning to avoid the race.
+        // See: https://github.com/voidzero-dev/vite-task/pull/278
+        #[cfg(target_env = "musl")]
+        static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        #[cfg(target_env = "musl")]
+        let _spawn_guard = SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let pty_pair = portable_pty::native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
