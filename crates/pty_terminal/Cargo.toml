@@ -12,9 +12,6 @@ anyhow = { workspace = true }
 portable-pty = { workspace = true }
 vt100 = { workspace = true }
 
-[target.'cfg(target_env = "musl")'.dependencies]
-libc = { workspace = true }
-
 [dev-dependencies]
 ctor = { workspace = true }
 ctrlc = { workspace = true }
