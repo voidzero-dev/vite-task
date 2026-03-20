@@ -90,9 +90,6 @@ async fn run_in_pre_exec(
 async fn fd_and_path() -> Result<(), Box<dyn Error>> {
     let syscalls = run_in_pre_exec(|| {
         set_current_dir("/")?;
-        // Use openat(AT_FDCWD, ...) instead of open() because musl's open()
-        // uses the native `open` syscall on x86_64, which isn't intercepted by
-        // the test's openat-only seccomp handler.
         let home_fd = openat(AT_FDCWD, c"/home", OFlag::O_PATH, Mode::empty())?;
         let _ = openat(home_fd, c"open_at_home", OFlag::O_RDONLY, Mode::empty());
         let _ = openat(AT_FDCWD, c"openat_cwd", OFlag::O_RDONLY, Mode::empty());

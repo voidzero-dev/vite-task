@@ -164,7 +164,7 @@ jobs:
           corepack enable
           pnpm install
 
-      - run: cargo test --no-fail-fast
+      - run: cargo test
 
   fmt:
     name: Format and Check Deps
