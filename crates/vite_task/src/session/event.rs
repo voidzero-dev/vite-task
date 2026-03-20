@@ -45,7 +45,7 @@ pub enum ExecutionError {
     PostRunFingerprint(#[source] anyhow::Error),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CacheDisabledReason {
     InProcessExecution,
     NoCacheMetadata,
@@ -77,7 +77,7 @@ pub enum CacheUpdateStatus {
     NotUpdated(CacheNotUpdatedReason),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[expect(
     clippy::large_enum_variant,
     reason = "CacheMiss variant is intentionally large and infrequently cloned"

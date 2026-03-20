@@ -1,4 +1,8 @@
-#![cfg(target_os = "linux")]
+//! Tests for fspy tracing of statically-linked executables (seccomp path).
+//! Skipped on musl: the test binary is an artifact dep targeting musl, and when
+//! the CI builds with `-crt-static` the binary becomes dynamically linked,
+//! defeating the purpose of these tests.
+#![cfg(all(target_os = "linux", not(target_env = "musl")))]
 use std::{
     fs::{self, Permissions},
     os::unix::fs::PermissionsExt as _,

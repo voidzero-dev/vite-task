@@ -92,6 +92,11 @@ impl_handler!(
     #[cfg(target_arch = "x86_64")] lstat,
     #[cfg(target_arch = "x86_64")] newfstatat,
     #[cfg(target_arch = "aarch64")] fstatat,
+    statx,
+
+    #[cfg(target_arch = "x86_64")] access,
+    faccessat,
+    faccessat2,
 
     execve,
     execveat,

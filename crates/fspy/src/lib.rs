@@ -2,6 +2,8 @@
 #![feature(once_cell_try)]
 
 // Persist the injected DLL/shared library somewhere in the filesystem.
+// Not needed on musl (seccomp-only tracking).
+#[cfg(not(target_env = "musl"))]
 mod artifact;
 
 pub mod error;

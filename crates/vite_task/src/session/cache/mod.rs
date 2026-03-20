@@ -73,7 +73,7 @@ pub struct ExecutionCache {
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[expect(
     clippy::large_enum_variant,
     reason = "FingerprintMismatch contains SpawnFingerprint which is intentionally large; boxing would add unnecessary indirection for a short-lived enum"
@@ -93,7 +93,7 @@ pub enum InputChangeKind {
     Removed,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FingerprintMismatch {
     /// Found a previous cache entry key for the same task, but the spawn fingerprint differs.
     /// This happens when the command itself or an env changes.

@@ -45,7 +45,7 @@ pub fn notif_recv(
     notif_buf: &mut Alloced<libc::seccomp_notif>,
 ) -> nix::Result<()> {
     use std::os::fd::AsRawFd;
-    const SECCOMP_IOCTL_NOTIF_RECV: libc::c_ulong = 3_226_476_800;
+    const SECCOMP_IOCTL_NOTIF_RECV: libc::Ioctl = 3_226_476_800u64 as libc::Ioctl;
     // SAFETY: `notif_buf.zeroed()` returns a valid mutable pointer to a zeroed
     // `seccomp_notif` buffer with sufficient size for the kernel's notification struct
     let ret = unsafe {

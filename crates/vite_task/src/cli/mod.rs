@@ -7,6 +7,18 @@ use vite_task_graph::{TaskSpecifier, query::TaskQuery};
 use vite_task_plan::plan_request::{CacheOverride, PlanOptions, QueryPlanRequest};
 use vite_workspace::package_filter::{PackageQueryArgs, PackageQueryError};
 
+/// Controls how task output is displayed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum LogMode {
+    /// Output streams directly to the terminal as tasks produce it.
+    #[default]
+    Interleaved,
+    /// Each line is prefixed with `[packageName#taskName]`.
+    Labeled,
+    /// Output is buffered per task and printed as a block after each task completes.
+    Grouped,
+}
+
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum CacheSubcommand {
     /// Clean up all the cache
@@ -35,6 +47,10 @@ pub struct RunFlags {
     /// Force caching off for all tasks and scripts.
     #[clap(long, conflicts_with = "cache")]
     pub no_cache: bool,
+
+    /// How task output is displayed.
+    #[clap(long, default_value = "interleaved")]
+    pub log: LogMode,
 }
 
 impl RunFlags {

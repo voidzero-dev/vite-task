@@ -11,26 +11,33 @@
 //! 3. [`LeafExecutionReporter`] — handles events for a single leaf execution (output streaming,
 //!    cache status, errors). Finalized with `finish()`.
 //!
-//! Two concrete implementations are provided in child modules:
+//! Three output mode reporters are provided:
 //!
-//! - [`plain::PlainReporter`] — a standalone [`LeafExecutionReporter`] for single-leaf execution
-//!   (e.g., `execute_synthetic`). Self-contained, no shared state, no summary.
+//! - [`interleaved::InterleavedReporterBuilder`] — streams output directly as tasks produce it.
+//! - [`labeled::LabeledReporterBuilder`] — prefixes each output line with `[pkg#task]`.
+//! - [`grouped::GroupedReporterBuilder`] — buffers output per task and prints as a block.
 //!
-//! - [`labeled::LabeledReporterBuilder`] / [`labeled::LabeledGraphReporter`] /
-//!   `LabeledLeafReporter` — a full graph-aware reporter family. Tracks stats across multiple
-//!   leaf executions, prints command lines with cache status, and renders a summary at the end.
+//! [`summary_reporter::SummaryReporterBuilder`] wraps any mode reporter to add summary
+//! tracking (task results, exit codes, cache stats) and renders the summary at the end.
+//!
+//! Additionally, [`plain::PlainReporter`] is a standalone [`LeafExecutionReporter`] for
+//! single-leaf synthetic executions (e.g., `execute_synthetic`).
 
+mod grouped;
+mod interleaved;
 mod labeled;
 mod plain;
 pub mod summary;
+mod summary_reporter;
 
-// Re-export the concrete implementations so callers can use `reporter::PlainReporter`
-// and `reporter::LabeledReporterBuilder` without navigating into child modules.
 use std::{io::Write, process::ExitStatus as StdExitStatus, sync::LazyLock};
 
+pub use grouped::GroupedReporterBuilder;
+pub use interleaved::InterleavedReporterBuilder;
 pub use labeled::LabeledReporterBuilder;
 use owo_colors::{Style, Styled};
 pub use plain::PlainReporter;
+pub use summary_reporter::SummaryReporterBuilder;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
@@ -114,16 +121,10 @@ pub trait GraphExecutionReporterBuilder {
 /// and finalizes the session with `finish()`.
 pub trait GraphExecutionReporter {
     /// Create a new leaf execution reporter for the given leaf.
-    ///
-    /// `all_ancestors_single_node` is `true` when every execution graph in
-    /// the ancestry chain (root + all nested `Expanded` parents) contains
-    /// exactly one node. The reporter may use this to decide stdio mode
-    /// (e.g. suggesting inherited stdio for a single spawned process).
     fn new_leaf_execution(
         &mut self,
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
-        all_ancestors_single_node: bool,
     ) -> Box<dyn LeafExecutionReporter>;
 
     /// Finalize the graph execution session.
@@ -205,6 +206,14 @@ fn format_cwd_relative(display: &ExecutionItemDisplay, workspace_path: &Absolute
     if cwd_relative.is_empty() { Str::default() } else { vite_str::format!("~/{cwd_relative}") }
 }
 
+/// Format the task label for labeled/grouped modes (e.g., `[pkg#task]`).
+fn format_task_label(display: &ExecutionItemDisplay) -> Str {
+    vite_str::format!(
+        "{}",
+        vite_str::format!("[{}]", display.task_display).style(Style::new().bright_black())
+    )
+}
+
 /// Format the command string with cwd prefix for display (e.g., `~/packages/lib$ vitest run`).
 fn format_command_display(display: &ExecutionItemDisplay, workspace_path: &AbsolutePath) -> Str {
     let cwd_str = format_cwd_relative(display, workspace_path);
@@ -254,6 +263,34 @@ fn format_error_message(message: &str) -> Str {
         "✗".style(Style::new().red().bold()),
         message.style(Style::new().red())
     )
+}
+
+/// Write the trailing output for a leaf execution: optional extra content (e.g., grouped
+/// output block), error message, and a separating newline.
+fn write_leaf_trailing_output(
+    writer: &std::cell::RefCell<Box<dyn Write>>,
+    error: Option<ExecutionError>,
+    started: bool,
+    extra: &[u8],
+) {
+    let mut buf = Vec::new();
+
+    buf.extend_from_slice(extra);
+
+    if let Some(error) = error {
+        let message = vite_str::format!("{:#}", anyhow::Error::from(error));
+        buf.extend_from_slice(format_error_message(&message).as_bytes());
+    }
+
+    if started {
+        buf.push(b'\n');
+    }
+
+    if !buf.is_empty() {
+        let mut writer = writer.borrow_mut();
+        let _ = writer.write_all(&buf);
+        let _ = writer.flush();
+    }
 }
 
 /// Format the "cache hit, logs replayed" message for synthetic executions without display info.

@@ -1,2 +1,7 @@
 #!/bin/sh
+# Linker wrapper for aarch64-unknown-linux-musl targets.
+# On Linux, use the system cc directly. On other hosts, cross-compile via cargo-zigbuild.
+if [ "$(uname -s)" = "Linux" ]; then
+  exec cc "$@"
+fi
 exec cargo-zigbuild zig cc -- -fno-sanitize=all -target aarch64-linux-musl "$@"

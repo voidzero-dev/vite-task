@@ -72,13 +72,57 @@ macro_rules! command_for_fn {
     }};
 }
 
+/// Read command-line arguments in a way that works during `.init_array`.
+///
+/// On Linux, `std::env::args()` may return empty during `.init_array`
+/// constructors (observed on musl targets) because the Rust runtime hasn't
+/// initialized its argument storage yet. We fall back to reading
+/// `/proc/self/cmdline` directly.
+fn get_args() -> Vec<String> {
+    let args: Vec<String> = std::env::args().collect();
+    if !args.is_empty() {
+        return args;
+    }
+
+    // Fallback: read /proc/self/cmdline directly.
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(args) = read_proc_cmdline() {
+            return args;
+        }
+    }
+
+    args
+}
+
+/// Read `/proc/self/cmdline` as a fallback that works before Rust runtime
+/// initialization (during `.init_array` constructors).
+#[cfg(target_os = "linux")]
+fn read_proc_cmdline() -> Option<Vec<String>> {
+    let buf = std::fs::read("/proc/self/cmdline").ok()?;
+    if buf.is_empty() {
+        return None;
+    }
+
+    // /proc/self/cmdline has null-separated args with a trailing null.
+    // We must preserve empty args (e.g., empty base64 for `()` arg) but
+    // remove the trailing empty entry from the final null terminator.
+    let mut args: Vec<String> = buf
+        .split(|&b| b == 0)
+        .filter_map(|s| std::str::from_utf8(s).ok().map(String::from))
+        .collect();
+    // Remove trailing empty string from the final null byte
+    if args.last().is_some_and(String::is_empty) {
+        args.pop();
+    }
+    Some(args)
+}
+
 #[doc(hidden)]
 pub fn init_impl<A: Decode<()>>(expected_id: &str, f: impl FnOnce(A)) {
-    let mut args = ::std::env::args();
+    let args = get_args();
     // <test_binary> <expected_id> <arg_base64>
-    let (Some(_program), Some(current_id), Some(arg_base64)) =
-        (args.next(), args.next(), args.next())
-    else {
+    let (Some(current_id), Some(arg_base64)) = (args.get(1), args.get(2)) else {
         return;
     };
     if current_id != expected_id {

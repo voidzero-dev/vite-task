@@ -8,7 +8,9 @@ use std::{io, path::Path};
 
 #[cfg(target_os = "linux")]
 use fspy_seccomp_unotify::supervisor::supervise;
-use fspy_shared::ipc::{NativeStr, PathAccess, channel::channel};
+#[cfg(not(target_env = "musl"))]
+use fspy_shared::ipc::NativeStr;
+use fspy_shared::ipc::{PathAccess, channel::channel};
 #[cfg(target_os = "macos")]
 use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
@@ -33,28 +35,39 @@ pub struct SpyImpl {
     #[cfg(target_os = "macos")]
     artifacts: Artifacts,
 
+    #[cfg(not(target_env = "musl"))]
     preload_path: Box<NativeStr>,
 }
 
+#[cfg(not(target_env = "musl"))]
 const PRELOAD_CDYLIB_BINARY: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX"));
 
 impl SpyImpl {
-    /// Initialize the fs access spy by writing the preload library on disk
-    pub fn init_in(dir: &Path) -> io::Result<Self> {
-        use const_format::formatcp;
-        use xxhash_rust::const_xxh3::xxh3_128;
+    /// Initialize the fs access spy by writing the preload library on disk.
+    ///
+    /// On musl targets, we don't build a preload library —
+    /// only seccomp-based tracking is used.
+    pub fn init_in(#[cfg_attr(target_env = "musl", allow(unused))] dir: &Path) -> io::Result<Self> {
+        #[cfg(not(target_env = "musl"))]
+        let preload_path = {
+            use const_format::formatcp;
+            use xxhash_rust::const_xxh3::xxh3_128;
 
-        use crate::artifact::Artifact;
+            use crate::artifact::Artifact;
 
-        const PRELOAD_CDYLIB: Artifact = Artifact {
-            name: "fspy_preload",
-            content: PRELOAD_CDYLIB_BINARY,
-            hash: formatcp!("{:x}", xxh3_128(PRELOAD_CDYLIB_BINARY)),
+            const PRELOAD_CDYLIB: Artifact = Artifact {
+                name: "fspy_preload",
+                content: PRELOAD_CDYLIB_BINARY,
+                hash: formatcp!("{:x}", xxh3_128(PRELOAD_CDYLIB_BINARY)),
+            };
+
+            let preload_cdylib_path = PRELOAD_CDYLIB.write_to(dir, ".dylib")?;
+            preload_cdylib_path.as_path().into()
         };
 
-        let preload_cdylib_path = PRELOAD_CDYLIB.write_to(dir, ".dylib")?;
         Ok(Self {
-            preload_path: preload_cdylib_path.as_path().into(),
+            #[cfg(not(target_env = "musl"))]
+            preload_path,
             #[cfg(target_os = "macos")]
             artifacts: {
                 let coreutils_path = macos_artifacts::COREUTILS_BINARY.write_to(dir, "")?;
@@ -80,6 +93,7 @@ impl SpyImpl {
             #[cfg(target_os = "macos")]
             artifacts: self.artifacts.clone(),
 
+            #[cfg(not(target_env = "musl"))]
             preload_path: self.preload_path.clone(),
 
             #[cfg(target_os = "linux")]

@@ -4,8 +4,8 @@ rustflags = ["--cfg", "tokio_unstable", "-D", "warnings"]
 [unstable]
 bindeps = true
 
-# Linker wrappers for cross-compiling bindep targets (fspy_test_bin) via cargo-zigbuild.
-# On native Linux the system linker can handle musl targets; these are needed on non-Linux hosts.
+# Linker wrappers for musl targets. On Linux hosts these use the system cc directly;
+# on non-Linux hosts (macOS, Windows) they cross-compile via cargo-zigbuild.
 [target.x86_64-unknown-linux-musl]
 rustflags = ["-C", "linker=.cargo/zigcc-x86_64-unknown-linux-musl"]
 

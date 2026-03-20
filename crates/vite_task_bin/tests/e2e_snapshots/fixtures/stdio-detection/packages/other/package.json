@@ -1,7 +1,0 @@
-{
-  "name": "other",
-  "scripts": {
-    "check-tty": "check-tty",
-    "check-tty-cached": "check-tty"
-  }
-}

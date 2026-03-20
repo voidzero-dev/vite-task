@@ -1,6 +1,0 @@
-{
-  "name": "other",
-  "scripts": {
-    "read-stdin": "read-stdin"
-  }
-}
