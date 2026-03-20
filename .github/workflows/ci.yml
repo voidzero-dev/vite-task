@@ -68,19 +68,24 @@ jobs:
             output=$("$milestone" --quiet 2>&1) || {
               echo "CRASHED (parallel) on iteration $i"
               echo "$output"
-              # Extract addresses and resolve with addr2line
-              # Find binary base address (first r--p mapping with offset 0)
+              # Extract crashing RIP and resolve with addr2line
               base=$(echo "$output" | grep "$(basename "$milestone")" | grep 'r--p 00000000' | head -1 | awk '{print $1}' | cut -d- -f1)
               echo "Binary base: 0x$base"
-              # Resolve all backtrace addresses
-              echo "=== addr2line resolution ==="
-              echo "$output" | grep -oP '0x[0-9a-f]+' | while read addr; do
+              # Extract the RIP from "Crashing RIP: 0x..."
+              rip=$(echo "$output" | sed -n 's/.*Crashing RIP: \(0x[0-9a-f]*\).*/\1/p')
+              echo "=== addr2line for crashing RIP $rip ==="
+              if [ -n "$rip" ] && [ -n "$base" ]; then
+                offset=$(printf "0x%x" $(($rip - 0x$base)))
+                echo "Offset: $offset"
+                addr2line -e "$milestone" -f -C "$offset" 2>&1 || true
+              fi
+              # Also resolve all backtrace frames
+              echo "=== addr2line for backtrace ==="
+              echo "$output" | sed -n 's/.*#[0-9A-Z]* \(0x[0-9a-f]*\)/\1/p' | while read addr; do
                 if [ -n "$base" ]; then
-                  offset=$(printf "0x%x" $(($addr - 0x$base)))
+                  offset=$(printf "0x%x" $(($addr - 0x$base)) 2>/dev/null) || continue
                   result=$(addr2line -e "$milestone" -f -C "$offset" 2>/dev/null)
-                  if echo "$result" | grep -qv '??'; then
-                    echo "$addr (offset $offset): $result"
-                  fi
+                  echo "  $addr -> $offset: $result"
                 fi
               done
               exit 1
