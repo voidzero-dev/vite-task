@@ -256,15 +256,6 @@ impl Terminal {
     ///
     /// Panics if the writer lock is poisoned when the background thread closes it.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
-        // On musl libc (Alpine Linux), concurrent PTY operations trigger
-        // SIGSEGV/SIGBUS in musl internals (sysconf, fcntl). This affects
-        // both openpty+fork and FD cleanup (close) from background threads.
-        // Serialize all PTY lifecycle operations that touch musl internals.
-        #[cfg(target_env = "musl")]
-        static PTY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        #[cfg(target_env = "musl")]
-        let _spawn_guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let pty_pair = portable_pty::native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
@@ -275,35 +266,79 @@ impl Terminal {
         let reader = pty_pair.master.try_clone_reader()?;
         let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
-        let mut child = pty_pair.slave.spawn_command(cmd)?;
-        let child_killer = child.clone_killer();
-        let master = pty_pair.master;
-        let exit_status: Arc<OnceLock<ChildWaitResult>> = Arc::new(OnceLock::new());
 
-        // Background thread: wait for child to exit, then clean up.
-        //
-        // The slave is kept alive until after `child.wait()` returns rather than
-        // being dropped immediately after spawn. On macOS, if the parent's slave
-        // fd is closed early (before spawn) and the child exits quickly, ALL
-        // slave references close before the reader issues its first `read()`.
-        // macOS then returns EIO on the master without draining the output buffer,
-        // causing data loss. Holding the slave until the background thread takes
-        // over guarantees the PTY stays connected while the child runs.
-        thread::spawn({
-            let writer = Arc::clone(&writer);
-            let exit_status = Arc::clone(&exit_status);
-            let slave = pty_pair.slave;
-            move || {
-                let _ = exit_status.set(child.wait().map_err(Arc::new));
-                // On musl, serialize FD cleanup (close) with PTY spawn to
-                // prevent racing on musl-internal state.
-                #[cfg(target_env = "musl")]
-                let _cleanup_guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-                // Close writer first, then drop slave to trigger EOF on the reader.
-                *writer.lock().unwrap() = None;
-                drop(slave);
-            }
-        });
+        #[cfg(target_env = "musl")]
+        let (child_killer, exit_status, master) = {
+            // On musl libc (Alpine Linux), fork() in a multi-threaded process is
+            // unsafe: musl internal state (locks, allocator metadata) inherited by
+            // the child can be inconsistent, causing SIGSEGV/SIGBUS.
+            //
+            // portable_pty's spawn_command() uses pre_exec() for PTY setup, which
+            // forces Rust's Command to use fork()+exec() instead of posix_spawn().
+            //
+            // We bypass portable_pty's spawn and use posix_spawn() directly, which
+            // musl implements via clone(CLONE_VM|CLONE_VFORK) — avoiding fork()
+            // entirely. PTY setup is handled via spawn attributes and file actions:
+            // - POSIX_SPAWN_SETSID for session leadership
+            // - addopen() on the slave TTY path sets the controlling terminal
+            // - SETSIGDEF/SETSIGMASK for signal cleanup
+            let slave_tty_path = pty_pair
+                .master
+                .tty_name()
+                .ok_or_else(|| anyhow::anyhow!("failed to get slave TTY name"))?;
+            let mut child = crate::musl_spawn::spawn_child_posix(&slave_tty_path, &cmd)?;
+            let child_killer = child.clone_killer();
+            let master = pty_pair.master;
+            let exit_status: Arc<OnceLock<ChildWaitResult>> = Arc::new(OnceLock::new());
+
+            // Drop the parent's reference to the slave. The child opened its own
+            // reference via posix_spawn file actions, and we only need the master.
+            // (The macOS slave-lifetime issue doesn't apply to Linux/musl.)
+            drop(pty_pair.slave);
+
+            // Background thread: wait for child to exit, then clean up.
+            thread::spawn({
+                let writer = Arc::clone(&writer);
+                let exit_status = Arc::clone(&exit_status);
+                move || {
+                    let _ = exit_status.set(child.wait().map_err(Arc::new));
+                    *writer.lock().unwrap() = None;
+                }
+            });
+
+            (child_killer, exit_status, master)
+        };
+
+        #[cfg(not(target_env = "musl"))]
+        let (child_killer, exit_status, master) = {
+            let mut child = pty_pair.slave.spawn_command(cmd)?;
+            let child_killer = child.clone_killer();
+            let master = pty_pair.master;
+            let exit_status: Arc<OnceLock<ChildWaitResult>> = Arc::new(OnceLock::new());
+
+            // Background thread: wait for child to exit, then clean up.
+            //
+            // The slave is kept alive until after `child.wait()` returns rather than
+            // being dropped immediately after spawn. On macOS, if the parent's slave
+            // fd is closed early (before spawn) and the child exits quickly, ALL
+            // slave references close before the reader issues its first `read()`.
+            // macOS then returns EIO on the master without draining the output buffer,
+            // causing data loss. Holding the slave until the background thread takes
+            // over guarantees the PTY stays connected while the child runs.
+            thread::spawn({
+                let writer = Arc::clone(&writer);
+                let exit_status = Arc::clone(&exit_status);
+                let slave = pty_pair.slave;
+                move || {
+                    let _ = exit_status.set(child.wait().map_err(Arc::new));
+                    // Close writer first, then drop slave to trigger EOF on the reader.
+                    *writer.lock().unwrap() = None;
+                    drop(slave);
+                }
+            });
+
+            (child_killer, exit_status, master)
+        };
 
         let parser = Arc::new(Mutex::new(vt100::Parser::new_with_callbacks(
             size.rows,
