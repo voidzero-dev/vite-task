@@ -2542,6 +2542,7 @@ dependencies = [
  "anyhow",
  "crossterm",
  "ctor",
+ "libc",
  "ntest",
  "portable-pty",
  "pty_terminal",

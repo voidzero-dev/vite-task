@@ -10,40 +10,64 @@ use subprocess_test::command_for_fn;
 #[cfg(unix)]
 #[ctor::ctor]
 unsafe fn install_sigsegv_handler() {
-    unsafe extern "C" fn handler(sig: libc::c_int) {
-        unsafe {
-            let msg = b"\nSIGSEGV caught in milestone test! Signal: ";
-            libc::write(2, msg.as_ptr().cast(), msg.len());
-            let digit = b'0' + (sig as u8);
-            libc::write(2, (&digit) as *const u8 as _, 1);
+    fn write_hex(fd: libc::c_int, val: usize) {
+        let mut hex_buf = [0u8; 18];
+        hex_buf[0] = b'0';
+        hex_buf[1] = b'x';
+        let mut v = val;
+        for i in (2..18).rev() {
+            let nibble = (v & 0xf) as u8;
+            hex_buf[i] = if nibble < 10 { b'0' + nibble } else { b'a' + nibble - 10 };
+            v >>= 4;
+        }
+        unsafe { libc::write(fd, hex_buf.as_ptr().cast(), 18) };
+    }
+    fn write_str(fd: libc::c_int, s: &[u8]) {
+        unsafe { libc::write(fd, s.as_ptr().cast(), s.len()) };
+    }
 
-            // Print thread stack info
-            let stack_msg = b"\nStack pointer approx: ";
-            libc::write(2, stack_msg.as_ptr().cast(), stack_msg.len());
-            let sp: usize;
+    unsafe extern "C" fn handler(
+        _sig: libc::c_int,
+        info: *mut libc::siginfo_t,
+        context: *mut libc::c_void,
+    ) {
+        unsafe {
+            write_str(2, b"\n=== SIGSEGV DEBUG INFO ===\n");
+
+            // Fault address from siginfo
+            write_str(2, b"Fault address (si_addr): ");
+            if !info.is_null() {
+                write_hex(2, (*info).si_addr() as usize);
+            } else {
+                write_str(2, b"(null siginfo)");
+            }
+
+            // Crashing thread's RSP from ucontext
+            write_str(2, b"\nCrashing RSP: ");
+            #[cfg(target_arch = "x86_64")]
+            if !context.is_null() {
+                let uc = context as *const libc::ucontext_t;
+                let rsp = (*uc).uc_mcontext.gregs[libc::REG_RSP as usize] as usize;
+                write_hex(2, rsp);
+                write_str(2, b"\nCrashing RIP: ");
+                let rip = (*uc).uc_mcontext.gregs[libc::REG_RIP as usize] as usize;
+                write_hex(2, rip);
+            }
+
+            // Handler's own RSP (on sigaltstack if configured)
+            write_str(2, b"\nHandler RSP:  ");
+            let handler_sp: usize;
             #[cfg(target_arch = "x86_64")]
             {
-                core::arch::asm!("mov {}, rsp", out(reg) sp);
+                core::arch::asm!("mov {}, rsp", out(reg) handler_sp);
             }
             #[cfg(not(target_arch = "x86_64"))]
             {
-                sp = 0;
+                handler_sp = 0;
             }
-            // Write sp as hex
-            let mut hex_buf = [0u8; 18];
-            hex_buf[0] = b'0';
-            hex_buf[1] = b'x';
-            let mut val = sp;
-            for i in (2..18).rev() {
-                let nibble = (val & 0xf) as u8;
-                hex_buf[i] = if nibble < 10 { b'0' + nibble } else { b'a' + nibble - 10 };
-                val >>= 4;
-            }
-            libc::write(2, hex_buf.as_ptr().cast(), 18);
+            write_hex(2, handler_sp);
 
-            let nl = b"\n/proc/self/maps:\n";
-            libc::write(2, nl.as_ptr().cast(), nl.len());
-
+            write_str(2, b"\n/proc/self/maps:\n");
             let fd = libc::open(b"/proc/self/maps\0".as_ptr().cast(), libc::O_RDONLY);
             if fd >= 0 {
                 let mut buf = [0u8; 4096];
@@ -56,6 +80,7 @@ unsafe fn install_sigsegv_handler() {
                 }
                 libc::close(fd);
             }
+            write_str(2, b"=== END SIGSEGV DEBUG INFO ===\n");
 
             libc::signal(libc::SIGSEGV, libc::SIG_DFL);
             libc::raise(libc::SIGSEGV);

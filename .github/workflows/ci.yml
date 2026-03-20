@@ -63,8 +63,18 @@ jobs:
       - name: Repeat milestone binary to reproduce flaky SIGSEGV
         run: |
           milestone=$(find target/debug/deps -name 'milestone-*' -executable -type f)
-          echo "Running $milestone in a loop..."
+          echo "=== Test A: parallel (default) ==="
           for i in $(seq 1 500); do
-            "$milestone" --quiet 2>&1 || { echo "CRASHED on iteration $i"; exit 1; }
+            "$milestone" --quiet 2>&1 || { echo "CRASHED (parallel) on iteration $i"; exit 1; }
           done
-          echo "All 500 iterations passed"
+          echo "All 500 parallel iterations passed"
+
+      - name: Repeat milestone binary single-threaded
+        if: always()
+        run: |
+          milestone=$(find target/debug/deps -name 'milestone-*' -executable -type f)
+          echo "=== Test B: single-threaded ==="
+          for i in $(seq 1 500); do
+            "$milestone" --quiet --test-threads=1 2>&1 || { echo "CRASHED (single-threaded) on iteration $i"; exit 1; }
+          done
+          echo "All 500 single-threaded iterations passed"
