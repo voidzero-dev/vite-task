@@ -139,7 +139,7 @@ jobs:
     name: Test (musl)
     runs-on: ubuntu-latest
     container:
-      image: alpine:3.21
+      image: node:22-alpine3.21
       options: --shm-size=256m # shm_io tests need bigger shared memory
     steps:
       - name: Install Alpine dependencies
@@ -151,27 +151,18 @@ jobs:
           persist-credentials: false
           submodules: true
 
-      # Alpine's Node.js package is compiled without TypeScript type-stripping.
-      # Install the official Node.js musl binary which includes full TypeScript support.
-      - name: Install Node.js from official distribution
+      - name: Install rustup
         run: |
-          NODE_VERSION=v$(cat .node-version)
-          curl -fsSL "https://unofficial-builds.nodejs.org/download/release/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64-musl.tar.gz" | tar -xz -C /usr/local --strip-components=1
-
-      - name: Install Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly-2026-03-05
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rust toolchain
+        run: rustup show
 
       - name: Install pnpm and Node tools
         run: |
-          npm install -g pnpm
+          corepack enable
           pnpm install
-
-      # Remove the zig cross-compilation config from .cargo/config.toml — in Alpine,
-      # the system cc is already musl-based, so no cross-compilation linker is needed.
-      - name: Remove zig linker config for native musl
-        run: sed -i '/\[target.*musl\]/,/^$/d' .cargo/config.toml
 
       - run: cargo test --no-fail-fast
 
