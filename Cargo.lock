@@ -3206,7 +3206,6 @@ dependencies = [
  "bincode",
  "ctor",
  "fspy",
- "libc",
  "portable-pty",
  "rustc-hash",
 ]

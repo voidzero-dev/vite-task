@@ -141,6 +141,11 @@ jobs:
     container:
       image: node:22-alpine3.21
       options: --shm-size=256m # shm_io tests need bigger shared memory
+    env:
+      # Override all rustflags to skip the zig cross-linker from .cargo/config.toml.
+      # Alpine's cc is already musl-native, so no custom linker is needed.
+      # Must mirror [build].rustflags from .cargo/config.toml.
+      RUSTFLAGS: --cfg tokio_unstable -D warnings
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}

@@ -77,15 +77,14 @@ macro_rules! command_for_fn {
 /// On Linux, `std::env::args()` may return empty during `.init_array`
 /// constructors (observed on musl targets) because the Rust runtime hasn't
 /// initialized its argument storage yet. We fall back to reading
-/// `/proc/self/cmdline` directly using raw syscalls that don't depend on
-/// the Rust runtime being initialized.
+/// `/proc/self/cmdline` directly.
 fn get_args() -> Vec<String> {
     let args: Vec<String> = std::env::args().collect();
     if !args.is_empty() {
         return args;
     }
 
-    // Fallback: read /proc/self/cmdline using raw libc calls.
+    // Fallback: read /proc/self/cmdline directly.
     #[cfg(target_os = "linux")]
     {
         if let Some(args) = read_proc_cmdline() {
@@ -96,44 +95,19 @@ fn get_args() -> Vec<String> {
     args
 }
 
-/// Read `/proc/self/cmdline` using raw libc calls that work before Rust
-/// runtime initialization (during `.init_array` constructors).
+/// Read `/proc/self/cmdline` as a fallback that works before Rust runtime
+/// initialization (during `.init_array` constructors).
 #[cfg(target_os = "linux")]
 fn read_proc_cmdline() -> Option<Vec<String>> {
-    // SAFETY: opening a read-only procfs file with a static path
-    let fd =
-        unsafe { libc::open(c"/proc/self/cmdline".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return None;
-    }
-
-    let mut buf = [0u8; 4096];
-    let mut total = 0usize;
-    loop {
-        // SAFETY: reading into a valid stack buffer from an open fd
-        let n = unsafe { libc::read(fd, buf[total..].as_mut_ptr().cast(), buf.len() - total) };
-        let Ok(n) = usize::try_from(n) else {
-            break;
-        };
-        if n == 0 {
-            break;
-        }
-        total += n;
-        if total >= buf.len() {
-            break;
-        }
-    }
-    // SAFETY: closing an fd we opened
-    unsafe { libc::close(fd) };
-
-    if total == 0 {
+    let buf = std::fs::read("/proc/self/cmdline").ok()?;
+    if buf.is_empty() {
         return None;
     }
 
     // /proc/self/cmdline has null-separated args with a trailing null.
     // We must preserve empty args (e.g., empty base64 for `()` arg) but
     // remove the trailing empty entry from the final null terminator.
-    let mut args: Vec<String> = buf[..total]
+    let mut args: Vec<String> = buf
         .split(|&b| b == 0)
         .filter_map(|s| std::str::from_utf8(s).ok().map(String::from))
         .collect();
