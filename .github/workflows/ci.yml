@@ -144,9 +144,8 @@ jobs:
     env:
       # Override all rustflags to skip the zig cross-linker from .cargo/config.toml.
       # Alpine's cc is already musl-native, so no custom linker is needed.
-      # Must mirror [build].rustflags from .cargo/config.toml.
-      # -crt-static: link musl dynamically so fspy preload .so can be injected into
-      # host processes that are themselves dynamically linked (e.g. node on Alpine).
+      # Must mirror [build].rustflags and target rustflags from .cargo/config.toml
+      # (RUSTFLAGS env var overrides both levels).
       RUSTFLAGS: --cfg tokio_unstable -D warnings -C target-feature=-crt-static
     steps:
       - name: Install Alpine dependencies
