@@ -62,9 +62,9 @@ jobs:
 
       - name: Repeat milestone binary to reproduce flaky SIGSEGV
         run: |
-          binary=$(find target/debug/deps -name 'milestone-*' -executable -type f)
-          echo "Running $binary in a loop..."
-          for i in $(seq 1 200); do
-            "$binary" --quiet 2>&1 || { echo "CRASHED on iteration $i"; exit 1; }
+          milestone=$(find target/debug/deps -name 'milestone-*' -executable -type f)
+          echo "Running $milestone in a loop..."
+          for i in $(seq 1 500); do
+            "$milestone" --quiet 2>&1 || { echo "CRASHED on iteration $i"; exit 1; }
           done
-          echo "All 200 iterations passed"
+          echo "All 500 iterations passed"
