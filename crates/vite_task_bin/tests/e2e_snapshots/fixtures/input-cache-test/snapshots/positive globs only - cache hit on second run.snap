@@ -6,7 +6,7 @@ expression: e2e_outputs
 $ print-file src/main.ts
 export const main = 'initial';
 > vt run positive-globs-only
-$ print-file src/main.ts ✓ cache hit, replaying
+$ print-file src/main.ts ◉ cache hit, replaying
 export const main = 'initial';
 
 ---

@@ -13,7 +13,7 @@ hello
 ---
 vt run: 0/3 cache hit (0%). @test/touch-pkg#task (and 1 more) not cached because they modified their inputs. (Run `vt run --last-details` for full details)
 > vt run -r task
-~/packages/normal-pkg$ print hello ✓ cache hit, replaying
+~/packages/normal-pkg$ print hello ◉ cache hit, replaying
 hello
 
 ~/packages/touch-pkg$ touch-file src/data.txt

@@ -2,10 +2,9 @@ pub mod fingerprint;
 pub mod glob_inputs;
 pub mod spawn;
 
-use std::{collections::BTreeMap, process::Stdio, sync::Arc};
+use std::{collections::BTreeMap, io::Write as _, process::Stdio, sync::Arc};
 
 use futures_util::FutureExt;
-use tokio::io::AsyncWriteExt as _;
 use vite_path::AbsolutePath;
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
@@ -78,7 +77,6 @@ impl ExecutionContext<'_> {
     ///
     /// Returns `true` if all tasks succeeded, `false` if any task failed.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_expanded_graph(
         &mut self,
         graph: &ExecutionGraph,
@@ -132,7 +130,6 @@ impl ExecutionContext<'_> {
     ///
     /// Returns `true` if the execution failed (non-zero exit or infrastructure error).
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     async fn execute_leaf(
         &mut self,
         display: &ExecutionItemDisplay,
@@ -146,21 +143,18 @@ impl ExecutionContext<'_> {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 // In-process (built-in) commands: caching is disabled, execute synchronously
                 let mut stdio_config = leaf_reporter
-                    .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution))
-                    .await;
+                    .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
 
                 let execution_output = in_process_execution.execute();
                 // Write output to the stdout writer from StdioConfig
-                let _ = stdio_config.stdout_writer.write_all(&execution_output.stdout).await;
-                let _ = stdio_config.stdout_writer.flush().await;
+                let _ = stdio_config.stdout_writer.write_all(&execution_output.stdout);
+                let _ = stdio_config.stdout_writer.flush();
 
-                leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        None,
-                    )
-                    .await;
+                leaf_reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    None,
+                );
                 false
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
@@ -196,7 +190,6 @@ impl ExecutionContext<'_> {
 /// Errors (cache lookup failure, spawn failure, cache update failure) are reported
 /// through `leaf_reporter.finish()` and do not abort the caller.
 #[tracing::instrument(level = "debug", skip_all)]
-#[expect(clippy::future_not_send, reason = "uses !Send types internally")]
 #[expect(
     clippy::too_many_lines,
     reason = "sequential cache check, execute, and update steps are clearer in one function"
@@ -223,13 +216,11 @@ pub async fn execute_spawn(
         ) {
             Ok(inputs) => inputs,
             Err(err) => {
-                leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
-                    )
-                    .await;
+                leaf_reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
+                );
                 return SpawnOutcome::Failed;
             }
         };
@@ -250,13 +241,11 @@ pub async fn execute_spawn(
             Err(err) => {
                 // Cache lookup error — report through finish.
                 // Note: start() is NOT called because we don't have a valid cache status.
-                leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
-                    )
-                    .await;
+                leaf_reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
+                );
                 return SpawnOutcome::Failed;
             }
         }
@@ -266,23 +255,25 @@ pub async fn execute_spawn(
     };
 
     // 2. Report execution start with the determined cache status.
-    //    Returns StdioConfig with the reporter's suggestion and async writers.
-    let mut stdio_config = leaf_reporter.start(cache_status).await;
+    //    Returns StdioConfig with the reporter's suggestion and writers.
+    let mut stdio_config = leaf_reporter.start(cache_status);
 
     // 3. If cache hit, replay outputs via the StdioConfig writers and finish early.
     //    No need to actually execute the command — just replay what was cached.
     if let Some(cached) = cached_value {
         for output in cached.std_outputs.iter() {
-            let writer: &mut (dyn tokio::io::AsyncWrite + Unpin) = match output.kind {
+            let writer: &mut dyn std::io::Write = match output.kind {
                 spawn::OutputKind::StdOut => &mut stdio_config.stdout_writer,
                 spawn::OutputKind::StdErr => &mut stdio_config.stderr_writer,
             };
-            let _ = writer.write_all(&output.content).await;
-            let _ = writer.flush().await;
+            let _ = writer.write_all(&output.content);
+            let _ = writer.flush();
         }
-        leaf_reporter
-            .finish(None, CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit), None)
-            .await;
+        leaf_reporter.finish(
+            None,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
+            None,
+        );
         return SpawnOutcome::CacheHit;
     }
 
@@ -296,29 +287,25 @@ pub async fn execute_spawn(
     if use_inherited {
         // Inherited mode: all three stdio FDs (stdin, stdout, stderr) are inherited
         // from the parent process. No fspy tracking, no output capture.
-        // Drop the StdioConfig writers before spawning to avoid holding tokio::io::Stdout
+        // Drop the StdioConfig writers before spawning to avoid holding std::io::Stdout
         // while the child also writes to the same FD.
         drop(stdio_config);
 
         match spawn_inherited(&spawn_execution.spawn_command).await {
             Ok(result) => {
-                leaf_reporter
-                    .finish(
-                        Some(result.exit_status),
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        None,
-                    )
-                    .await;
+                leaf_reporter.finish(
+                    Some(result.exit_status),
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    None,
+                );
                 return SpawnOutcome::Spawned(result.exit_status);
             }
             Err(err) => {
-                leaf_reporter
-                    .finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::Spawn(err)),
-                    )
-                    .await;
+                leaf_reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    Some(ExecutionError::Spawn(err)),
+                );
                 return SpawnOutcome::Failed;
             }
         }
@@ -349,13 +336,11 @@ pub async fn execute_spawn(
             {
                 Ok(negs) => negs,
                 Err(err) => {
-                    leaf_reporter
-                        .finish(
-                            None,
-                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                            Some(ExecutionError::PostRunFingerprint(err)),
-                        )
-                        .await;
+                    leaf_reporter.finish(
+                        None,
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                        Some(ExecutionError::PostRunFingerprint(err)),
+                    );
                     return SpawnOutcome::Failed;
                 }
             }
@@ -370,8 +355,8 @@ pub async fn execute_spawn(
     let result = match spawn_with_tracking(
         &spawn_execution.spawn_command,
         cache_base_path,
-        &mut stdio_config.stdout_writer,
-        &mut stdio_config.stderr_writer,
+        &mut *stdio_config.stdout_writer,
+        &mut *stdio_config.stderr_writer,
         std_outputs.as_mut(),
         path_accesses.as_mut(),
         &resolved_negatives,
@@ -380,13 +365,11 @@ pub async fn execute_spawn(
     {
         Ok(result) => result,
         Err(err) => {
-            leaf_reporter
-                .finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Spawn(err)),
-                )
-                .await;
+            leaf_reporter.finish(
+                None,
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                Some(ExecutionError::Spawn(err)),
+            );
             return SpawnOutcome::Failed;
         }
     };
@@ -459,7 +442,7 @@ pub async fn execute_spawn(
     // 7. Finish the leaf execution with the result and optional cache error.
     //    Cache update/fingerprint failures are reported but do not affect the outcome —
     //    the process ran, so we return its actual exit status.
-    leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error).await;
+    leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error);
 
     SpawnOutcome::Spawned(result.exit_status)
 }
@@ -531,7 +514,6 @@ impl Session<'_> {
     /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
     /// Returns `Ok(())` when all tasks succeeded.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(clippy::future_not_send, reason = "uses !Send types internally")]
     pub(crate) async fn execute_graph(
         &self,
         execution_graph: ExecutionGraph,
@@ -564,6 +546,6 @@ impl Session<'_> {
 
         // Leaf-level errors and non-zero exit statuses are tracked internally
         // by the reporter.
-        reporter.finish().await
+        reporter.finish()
     }
 }

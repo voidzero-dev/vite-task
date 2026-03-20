@@ -26,12 +26,11 @@ pub mod summary;
 
 // Re-export the concrete implementations so callers can use `reporter::PlainReporter`
 // and `reporter::LabeledReporterBuilder` without navigating into child modules.
-use std::{process::ExitStatus as StdExitStatus, sync::LazyLock};
+use std::{io::Write, process::ExitStatus as StdExitStatus, sync::LazyLock};
 
 pub use labeled::LabeledReporterBuilder;
 use owo_colors::{Style, Styled};
 pub use plain::PlainReporter;
-use tokio::io::AsyncWrite;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
@@ -71,7 +70,7 @@ impl ExitStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StdioSuggestion {
     /// stdin is `/dev/null`, stdout and stderr are piped into the reporter's
-    /// [`AsyncWrite`] streams.  Used when multiple tasks run concurrently and
+    /// [`Write`] streams.  Used when multiple tasks run concurrently and
     /// stdio should not be shared.
     Piped,
     /// All three file descriptors (stdin, stdout, stderr) are inherited from the
@@ -83,17 +82,17 @@ pub enum StdioSuggestion {
 /// Stdio configuration returned by [`LeafExecutionReporter::start`].
 ///
 /// Contains the reporter's suggestion for the stdio mode together with two
-/// async writers that receive the child process's stdout and stderr when the
+/// writers that receive the child process's stdout and stderr when the
 /// execution engine decides to use piped mode.  The writers are always provided
 /// because the engine may override the suggestion (e.g. when caching forces
 /// piped mode even though the reporter suggested inherited).
 pub struct StdioConfig {
     /// The reporter's preferred stdio mode.
     pub suggestion: StdioSuggestion,
-    /// Async writer for the child process's stdout (used in piped mode and cache replay).
-    pub stdout_writer: Box<dyn AsyncWrite + Unpin>,
-    /// Async writer for the child process's stderr (used in piped mode and cache replay).
-    pub stderr_writer: Box<dyn AsyncWrite + Unpin>,
+    /// Writer for the child process's stdout (used in piped mode and cache replay).
+    pub stdout_writer: Box<dyn Write>,
+    /// Writer for the child process's stderr (used in piped mode and cache replay).
+    pub stderr_writer: Box<dyn Write>,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -113,7 +112,6 @@ pub trait GraphExecutionReporterBuilder {
 ///
 /// Creates [`LeafExecutionReporter`] instances for individual leaf executions
 /// and finalizes the session with `finish()`.
-#[async_trait::async_trait(?Send)]
 pub trait GraphExecutionReporter {
     /// Create a new leaf execution reporter for the given leaf.
     ///
@@ -136,7 +134,7 @@ pub trait GraphExecutionReporter {
     ///
     /// Returns `Ok(())` if all tasks succeeded, or `Err(ExitStatus)` to indicate the
     /// process should exit with the given status code.
-    async fn finish(self: Box<Self>) -> Result<(), ExitStatus>;
+    fn finish(self: Box<Self>) -> Result<(), ExitStatus>;
 }
 
 /// Reporter for a single leaf execution (one spawned process or in-process command).
@@ -145,21 +143,20 @@ pub trait GraphExecutionReporter {
 ///
 /// `start()` may not be called before `finish()` if an error occurs before the cache
 /// status is determined (e.g., cache lookup failure).
-#[async_trait::async_trait(?Send)]
 pub trait LeafExecutionReporter {
     /// Report that execution is starting with the given cache status.
     ///
     /// Called after the cache lookup completes, before any output is produced.
     /// Returns a [`StdioConfig`] containing:
     /// - The reporter's stdio mode suggestion (inherited or piped).
-    /// - Two [`AsyncWrite`] streams for receiving the child's stdout and stderr
+    /// - Two [`Write`] streams for receiving the child's stdout and stderr
     ///   (used when the execution engine decides on piped mode, or for cache replay).
     ///
     /// The execution engine decides the actual stdio mode based on the suggestion
     /// AND whether caching is enabled — inherited stdio is only used when the
     /// suggestion is [`StdioSuggestion::Inherited`] AND the task has no cache
     /// metadata (caching disabled).
-    async fn start(&mut self, cache_status: CacheStatus) -> StdioConfig;
+    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig;
 
     /// Finalize this leaf execution.
     ///
@@ -169,7 +166,7 @@ pub trait LeafExecutionReporter {
     ///   failure, spawn failure, fingerprint creation failure, cache update failure).
     ///
     /// This method consumes the reporter — no further calls are possible after `finish()`.
-    async fn finish(
+    fn finish(
         self: Box<Self>,
         status: Option<StdExitStatus>,
         cache_update_status: CacheUpdateStatus,
@@ -195,7 +192,7 @@ impl<T: owo_colors::OwoColorize> ColorizeExt for T {
 }
 
 const COMMAND_STYLE: Style = Style::new().blue();
-const CACHE_MISS_STYLE: Style = Style::new().purple();
+const CACHE_MISS_STYLE: Style = Style::new().bright_black();
 
 /// Format the display's cwd as a string relative to the workspace root.
 /// Returns an empty string if the cwd equals the workspace root.
@@ -261,7 +258,7 @@ fn format_error_message(message: &str) -> Str {
 
 /// Format the "cache hit, logs replayed" message for synthetic executions without display info.
 fn format_cache_hit_message() -> Str {
-    vite_str::format!("{}\n", "✓ cache hit, logs replayed".style(Style::new().green().dimmed()))
+    vite_str::format!("{}\n", "◉ cache hit, logs replayed".style(Style::new().green().dimmed()))
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

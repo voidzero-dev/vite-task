@@ -6,7 +6,7 @@ expression: e2e_outputs
 $ print-file test.txt
 test content
 > vt run cached-task # cache hit
-$ print-file test.txt ✓ cache hit, replaying
+$ print-file test.txt ◉ cache hit, replaying
 test content
 
 ---

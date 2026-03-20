@@ -1,3 +1,7 @@
 {
-  "cache": true
+  "tasks": {
+    "task": {
+      "command": "print foo && print bar"
+    }
+  }
 }

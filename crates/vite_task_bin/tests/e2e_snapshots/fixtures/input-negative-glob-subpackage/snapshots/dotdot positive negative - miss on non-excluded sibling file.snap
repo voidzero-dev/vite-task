@@ -9,6 +9,6 @@ export const shared = 'initial';
 > replace-file-content packages/shared/src/utils.ts initial modified
 
 > vt run sub-pkg#dotdot-positive-negative
-~/packages/sub-pkg$ print-file ../shared/src/utils.ts ../shared/dist/output.js ✗ cache miss: 'packages/shared/src/utils.ts' modified, executing
+~/packages/sub-pkg$ print-file ../shared/src/utils.ts ../shared/dist/output.js ○ cache miss: 'packages/shared/src/utils.ts' modified, executing
 export const shared = 'modified';
 // initial output
