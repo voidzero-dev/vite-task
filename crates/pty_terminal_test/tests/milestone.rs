@@ -1,6 +1,4 @@
 use std::io::Write;
-#[cfg(target_env = "musl")]
-use std::sync::Mutex;
 
 use ntest::timeout;
 use portable_pty::CommandBuilder;
@@ -8,19 +6,9 @@ use pty_terminal::geo::ScreenSize;
 use pty_terminal_test::TestTerminal;
 use subprocess_test::command_for_fn;
 
-// On musl, concurrent PTY spawns + FD operations in the same process cause
-// SIGSEGV in musl internals. The crate-level PTY_LOCK serializes spawn and
-// drop, but interleaved reads/writes between two live Terminals can still
-// trigger the race. Serialize entire test bodies as a workaround.
-#[cfg(target_env = "musl")]
-static TEST_MUTEX: Mutex<()> = Mutex::new(());
-
 #[test]
 #[timeout(5000)]
 fn milestone_raw_mode_keystrokes() {
-    #[cfg(target_env = "musl")]
-    let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Read, Write, stdout};
 
@@ -89,9 +77,6 @@ fn milestone_raw_mode_keystrokes() {
 #[test]
 #[timeout(5000)]
 fn milestone_does_not_pollute_screen() {
-    #[cfg(target_env = "musl")]
-    let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Read, Write, stdout};
 
