@@ -6,10 +6,8 @@ bindeps = true
 
 # Linker wrappers for musl targets. On Linux hosts these use the system cc directly;
 # on non-Linux hosts (macOS, Windows) they cross-compile via cargo-zigbuild.
-# -crt-static: link musl dynamically so fspy preload .so can be injected into
-# host processes that are themselves dynamically linked (e.g. node on Alpine).
 [target.x86_64-unknown-linux-musl]
-rustflags = ["-C", "target-feature=-crt-static", "-C", "linker=.cargo/zigcc-x86_64-unknown-linux-musl"]
+rustflags = ["-C", "linker=.cargo/zigcc-x86_64-unknown-linux-musl"]
 
 [target.aarch64-unknown-linux-musl]
-rustflags = ["-C", "target-feature=-crt-static", "-C", "linker=.cargo/zigcc-aarch64-unknown-linux-musl"]
+rustflags = ["-C", "linker=.cargo/zigcc-aarch64-unknown-linux-musl"]
