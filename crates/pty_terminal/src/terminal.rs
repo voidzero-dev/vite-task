@@ -256,13 +256,14 @@ impl Terminal {
     ///
     /// Panics if the writer lock is poisoned when the background thread closes it.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
-        // On musl libc (Alpine Linux), concurrent openpty + fork/exec
-        // operations trigger SIGSEGV/SIGBUS in musl internals (observed
-        // in sysconf, fcntl). Serialize PTY creation and child spawning.
+        // On musl libc (Alpine Linux), concurrent PTY operations trigger
+        // SIGSEGV/SIGBUS in musl internals (sysconf, fcntl). This affects
+        // both openpty+fork and FD cleanup (close) from background threads.
+        // Serialize all PTY lifecycle operations that touch musl internals.
         #[cfg(target_env = "musl")]
-        static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        static PTY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         #[cfg(target_env = "musl")]
-        let _spawn_guard = SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _spawn_guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let pty_pair = portable_pty::native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
@@ -294,6 +295,10 @@ impl Terminal {
             let slave = pty_pair.slave;
             move || {
                 let _ = exit_status.set(child.wait().map_err(Arc::new));
+                // On musl, serialize FD cleanup (close) with PTY spawn to
+                // prevent racing on musl-internal state.
+                #[cfg(target_env = "musl")]
+                let _cleanup_guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
                 // Close writer first, then drop slave to trigger EOF on the reader.
                 *writer.lock().unwrap() = None;
                 drop(slave);
