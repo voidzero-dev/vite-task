@@ -20,6 +20,7 @@ subprocess_test = { workspace = true, features = ["portable-pty"] }
 terminal_size = "0.4"
 
 [target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true }
 signal-hook = "0.3"
 
 [lints]

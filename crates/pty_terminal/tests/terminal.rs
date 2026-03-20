@@ -275,60 +275,52 @@ fn send_ctrl_c_interrupts_process() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdout};
 
-        // On Unix, use signal_hook directly instead of ctrlc.
-        // ctrlc spawns a background thread to monitor signals, but the subprocess
-        // closure runs during .init_array (via ctor). On musl, newly-created threads
-        // cannot execute during init (musl holds a lock), so ctrlc's thread never
-        // runs and SIGINT is silently swallowed.
-        // signal_hook::low_level::register installs a raw signal handler with no
-        // background thread, avoiding the issue entirely.
-        #[cfg(unix)]
+        // On Linux, use signalfd to wait for SIGINT without signal handlers or
+        // background threads. This avoids musl issues where threads spawned during
+        // .init_array (via ctor) are blocked by musl's internal lock.
+        #[cfg(target_os = "linux")]
         {
-            use std::sync::{
-                Arc,
-                atomic::{AtomicBool, Ordering},
+            use nix::sys::{
+                signal::{SigSet, Signal},
+                signalfd::SignalFd,
             };
 
-            let interrupted = Arc::new(AtomicBool::new(false));
-            let flag = Arc::clone(&interrupted);
+            // Block SIGINT so it goes to signalfd instead of the default handler.
+            let mut mask = SigSet::empty();
+            mask.add(Signal::SIGINT);
+            mask.thread_block().unwrap();
 
-            // SAFETY: The closure only performs an atomic store, which is signal-safe.
-            unsafe {
-                signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
-                    flag.store(true, Ordering::SeqCst);
-                })
-                .unwrap();
-            }
+            let sfd = SignalFd::new(&mask).unwrap();
 
             println!("ready");
             stdout().flush().unwrap();
 
-            loop {
-                if interrupted.load(Ordering::SeqCst) {
-                    print!("INTERRUPTED");
-                    stdout().flush().unwrap();
-                    std::process::exit(0);
-                }
-                std::thread::yield_now();
-            }
+            // Block until SIGINT arrives via signalfd.
+            sfd.read_signal().unwrap().unwrap();
+            print!("INTERRUPTED");
+            stdout().flush().unwrap();
+            std::process::exit(0);
         }
 
-        // On Windows, ctrlc works fine (no .init_array/musl issue).
-        #[cfg(windows)]
+        // On macOS/Windows, use ctrlc which works fine (no .init_array/musl issue).
+        #[cfg(not(target_os = "linux"))]
         {
-            // Clear the "ignore CTRL_C" flag set by Rust runtime
+            // On Windows, clear the "ignore CTRL_C" flag set by Rust runtime
             // so that CTRL_C_EVENT reaches the ctrlc handler.
-            // SAFETY: Declaring correct signature for SetConsoleCtrlHandler from kernel32.
-            unsafe extern "system" {
-                fn SetConsoleCtrlHandler(
-                    handler: Option<unsafe extern "system" fn(u32) -> i32>,
-                    add: i32,
-                ) -> i32;
-            }
+            #[cfg(windows)]
+            {
+                // SAFETY: Declaring correct signature for SetConsoleCtrlHandler from kernel32.
+                unsafe extern "system" {
+                    fn SetConsoleCtrlHandler(
+                        handler: Option<unsafe extern "system" fn(u32) -> i32>,
+                        add: i32,
+                    ) -> i32;
+                }
 
-            // SAFETY: Clearing the "ignore CTRL_C" flag so handlers are invoked.
-            unsafe {
-                SetConsoleCtrlHandler(None, 0); // FALSE = remove ignore
+                // SAFETY: Clearing the "ignore CTRL_C" flag so handlers are invoked.
+                unsafe {
+                    SetConsoleCtrlHandler(None, 0); // FALSE = remove ignore
+                }
             }
 
             ctrlc::set_handler(move || {
