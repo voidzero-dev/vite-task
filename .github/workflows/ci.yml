@@ -144,8 +144,14 @@ jobs:
     env:
       # Override all rustflags to skip the zig cross-linker from .cargo/config.toml.
       # Alpine's cc is already musl-native, so no custom linker is needed.
-      # Must mirror [build].rustflags from .cargo/config.toml.
-      RUSTFLAGS: --cfg tokio_unstable -D warnings
+      # Must mirror [build].rustflags and target rustflags from .cargo/config.toml
+      # (RUSTFLAGS env var overrides both levels).
+      # -crt-static: vite-task is shipped as a NAPI module in vite+, and musl Node
+      # with native modules links to musl libc dynamically, so we must do the same.
+      RUSTFLAGS: --cfg tokio_unstable -D warnings -C target-feature=-crt-static
+      # On musl, concurrent PTY operations can trigger SIGSEGV in musl internals.
+      # Run test threads sequentially to avoid the race.
+      RUST_TEST_THREADS: 1
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}

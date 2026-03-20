@@ -16,7 +16,7 @@ fn is_terminal() {
         println!("{} {} {}", stdin().is_terminal(), stdout().is_terminal(), stderr().is_terminal());
     }));
 
-    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle } =
+    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
@@ -40,7 +40,7 @@ fn write_basic_echo() {
         }
     }));
 
-    let Terminal { mut pty_reader, mut pty_writer, child_handle } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     pty_writer.write_line(b"hello world").unwrap();
@@ -71,7 +71,7 @@ fn write_multiple_lines() {
         }
     }));
 
-    let Terminal { mut pty_reader, mut pty_writer, child_handle } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     pty_writer.write_line(b"first").unwrap();
@@ -113,7 +113,7 @@ fn write_after_exit() {
         print!("exiting");
     }));
 
-    let Terminal { mut pty_reader, mut pty_writer, child_handle } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Read all output - this blocks until child exits and EOF is reached
@@ -149,7 +149,7 @@ fn write_interactive_prompt() {
         stdout.flush().unwrap();
     }));
 
-    let Terminal { mut pty_reader, mut pty_writer, child_handle } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for prompt "Name: " (read until the space after colon)
@@ -240,7 +240,7 @@ fn resize_terminal() {
         stdout().flush().unwrap();
     }));
 
-    let Terminal { mut pty_reader, mut pty_writer, child_handle: _ } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle: _, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for initial size line (synchronize before resizing)
@@ -275,43 +275,74 @@ fn send_ctrl_c_interrupts_process() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdout};
 
-        // On Windows, clear the "ignore CTRL_C" flag set by Rust runtime
-        // so that CTRL_C_EVENT reaches the ctrlc handler.
-        #[cfg(windows)]
+        // On Linux, use signalfd to wait for SIGINT without signal handlers or
+        // background threads. This avoids musl issues where threads spawned during
+        // .init_array (via ctor) are blocked by musl's internal lock.
+        #[cfg(target_os = "linux")]
         {
-            // SAFETY: Declaring correct signature for SetConsoleCtrlHandler from kernel32.
-            unsafe extern "system" {
-                fn SetConsoleCtrlHandler(
-                    handler: Option<unsafe extern "system" fn(u32) -> i32>,
-                    add: i32,
-                ) -> i32;
-            }
+            use nix::sys::{
+                signal::{SigSet, Signal},
+                signalfd::SignalFd,
+            };
 
-            // SAFETY: Clearing the "ignore CTRL_C" flag so handlers are invoked.
-            unsafe {
-                SetConsoleCtrlHandler(None, 0); // FALSE = remove ignore
-            }
+            // Block SIGINT so it goes to signalfd instead of the default handler.
+            let mut mask = SigSet::empty();
+            mask.add(Signal::SIGINT);
+            mask.thread_block().unwrap();
+
+            let sfd = SignalFd::new(&mask).unwrap();
+
+            println!("ready");
+            stdout().flush().unwrap();
+
+            // Block until SIGINT arrives via signalfd.
+            sfd.read_signal().unwrap().unwrap();
+            print!("INTERRUPTED");
+            stdout().flush().unwrap();
+            std::process::exit(0);
         }
 
-        ctrlc::set_handler(move || {
-            // Write directly and exit from the handler to avoid races.
-            use std::io::Write;
-            let _ = write!(std::io::stdout(), "INTERRUPTED");
-            let _ = std::io::stdout().flush();
-            std::process::exit(0);
-        })
-        .unwrap();
+        // On macOS/Windows, use ctrlc which works fine (no .init_array/musl issue).
+        #[cfg(not(target_os = "linux"))]
+        {
+            // On Windows, clear the "ignore CTRL_C" flag set by Rust runtime
+            // so that CTRL_C_EVENT reaches the ctrlc handler.
+            #[cfg(windows)]
+            {
+                // SAFETY: Declaring correct signature for SetConsoleCtrlHandler from kernel32.
+                unsafe extern "system" {
+                    fn SetConsoleCtrlHandler(
+                        handler: Option<unsafe extern "system" fn(u32) -> i32>,
+                        add: i32,
+                    ) -> i32;
+                }
 
-        println!("ready");
-        stdout().flush().unwrap();
+                // SAFETY: Clearing the "ignore CTRL_C" flag so handlers are invoked.
+                unsafe {
+                    SetConsoleCtrlHandler(None, 0); // FALSE = remove ignore
+                }
+            }
 
-        // Block until Ctrl+C handler exits the process.
-        loop {
-            std::thread::park();
+            ctrlc::set_handler(move || {
+                // Write directly and exit from the handler to avoid races.
+                use std::io::Write;
+                let _ = write!(std::io::stdout(), "INTERRUPTED");
+                let _ = std::io::stdout().flush();
+                std::process::exit(0);
+            })
+            .unwrap();
+
+            println!("ready");
+            stdout().flush().unwrap();
+
+            // Block until Ctrl+C handler exits the process.
+            loop {
+                std::thread::park();
+            }
         }
     }));
 
-    let Terminal { mut pty_reader, mut pty_writer, child_handle: _ } =
+    let Terminal { mut pty_reader, mut pty_writer, child_handle: _, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for process to be ready
@@ -342,7 +373,7 @@ fn read_to_end_returns_exit_status_success() {
         println!("success");
     }));
 
-    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle } =
+    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
@@ -358,7 +389,7 @@ fn read_to_end_returns_exit_status_nonzero() {
         std::process::exit(42);
     }));
 
-    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle } =
+    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
