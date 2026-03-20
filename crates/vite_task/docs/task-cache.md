@@ -103,20 +103,19 @@ The spawn fingerprint captures the complete execution context:
 ```rust
 pub struct SpawnFingerprint {
     pub cwd: RelativePathBuf,
-    pub command_fingerprint: CommandFingerprint,
-    pub fingerprinted_envs: BTreeMap<Str, Str>,
-    pub untracked_env: BTreeSet<Str>,
-    pub fingerprint_ignores: Option<Vec<Str>>,
+    pub program_fingerprint: ProgramFingerprint,
+    pub args: Arc<[Str]>,
+    pub env_fingerprints: EnvFingerprints,
 }
 
-enum CommandFingerprint {
-    Program { program_fingerprint: ProgramFingerprint, args: Vec<Str> },
-    ShellScript { script: Str, extra_args: Vec<Str> },
+pub struct EnvFingerprints {
+    pub fingerprinted_envs: BTreeMap<Str, Arc<str>>,
+    pub untracked_env_config: Arc<[Str]>,
 }
 
 enum ProgramFingerprint {
     OutsideWorkspace { program_name: Str },
-    InsideWorkspace { relative_path: RelativePathBuf },
+    InsideWorkspace { relative_program_path: RelativePathBuf },
 }
 ```
 
@@ -129,7 +128,7 @@ This ensures cache invalidation when:
 
 ### 3. Environment Variable Impact on Cache
 
-The `fingerprinted_envs` field is crucial for cache correctness:
+The `fingerprinted_envs` field in `EnvFingerprints` is crucial for cache correctness:
 
 - Only includes env vars explicitly declared in the task's `env` array
 - Does NOT include untracked envs (PATH, CI, etc.)
@@ -142,7 +141,7 @@ When a task runs:
 3. If a declared env var changes value, cache will miss
 4. If an untracked env changes, cache will still hit
 
-The `untracked_env` field stores env names (not values) — if the set of untracked env names changes, the cache invalidates, but value changes don't.
+The `untracked_env_config` field stores env names (not values) — if the set of untracked env names changes, the cache invalidates, but value changes don't.
 
 ### 4. Execution Cache Key
 
@@ -152,11 +151,11 @@ The execution cache key associates a task identity with its cache entry:
 pub enum ExecutionCacheKey {
     UserTask {
         task_name: Str,
-        and_item_index: Option<usize>,
+        and_item_index: usize,
         extra_args: Arc<[Str]>,
         package_path: RelativePathBuf,
     },
-    ExecAPI(Str),
+    ExecAPI(Arc<[Str]>),
 }
 ```
 
@@ -169,7 +168,7 @@ pub struct CacheEntryValue {
     pub post_run_fingerprint: PostRunFingerprint,
     pub std_outputs: Arc<[StdOutput]>,
     pub duration: Duration,
-    pub globbed_inputs: Option<GlobbedInputs>,
+    pub globbed_inputs: BTreeMap<RelativePathBuf, u64>,
 }
 ```
 
@@ -204,7 +203,7 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 │    enum PathFingerprint {                                    │
 │        NotFound,                   // File doesn't exist     │
 │        FileContentHash(u64),       // xxHash3 of content     │
-│        Folder(Option<HashMap>),    // Directory listing      │
+│        Folder(Option<BTreeMap<Str, DirEntryKind>>),          │
 │    }             ▲                                           │
 │                  │                                           │
 │  This value is `None` when fspy reports that the task is     │
@@ -213,7 +212,7 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 │  `openat(2)`. In such case, the folder's entries don't need  │
 │  to be fingerprinted.                                        │
 │  Folders with empty entries fingerprinted are represented as │
-│  `Folder(Some(empty hashmap))`.                              │
+│  `Folder(Some(empty BTreeMap))`.                             │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -378,8 +377,8 @@ Cache entries are automatically invalidated when:
 
 1. **Command changes**: Different command, arguments, or working directory
 2. **Package location changes**: Working directory (`cwd`) in spawn fingerprint changes
-3. **Environment changes**: Modified declared environment variables (pass-through values don't affect cache)
-4. **Pass-through config changes**: Pass-through environment names added/removed from configuration
+3. **Environment changes**: Modified declared environment variables (untracked env values don't affect cache)
+4. **Untracked env config changes**: Untracked environment names added/removed from configuration
 5. **Input files change**: Content hash differs (detected via xxHash3)
 6. **File structure changes**: Files added, removed, or type changed
 7. **Input config changes**: The `input` configuration itself changes
@@ -567,14 +566,16 @@ Each `&&` separated command is cached independently. If only terser config chang
 crates/vite_task/src/session/
 ├── cache/
 │   ├── mod.rs            # ExecutionCache, CacheEntryKey/Value, FingerprintMismatch
-│   └── fingerprint.rs    # SpawnFingerprint, CommandFingerprint, ProgramFingerprint
+│   └── display.rs        # Cache status display formatting
 ├── execute/
 │   ├── mod.rs            # execute_spawn, SpawnOutcome
+│   ├── fingerprint.rs    # PostRunFingerprint, PathFingerprint, DirEntryKind
 │   └── spawn.rs          # spawn_with_tracking, fspy integration
 └── reporter/
     └── mod.rs            # Reporter traits for cache hit/miss display
 
 crates/vite_task_plan/src/
-├── cache_metadata.rs     # ExecutionCacheKey, CacheMetadata
+├── cache_metadata.rs     # ExecutionCacheKey, SpawnFingerprint, ProgramFingerprint, CacheMetadata
+├── envs.rs               # EnvFingerprints
 └── plan.rs               # Planning logic
 ```
