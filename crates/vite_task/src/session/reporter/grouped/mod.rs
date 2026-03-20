@@ -2,13 +2,14 @@
 
 use std::{cell::RefCell, io::Write, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
 
+use owo_colors::Style;
 use vite_path::AbsolutePath;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
-    ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-    StdioConfig, StdioSuggestion, format_command_with_cache_status, format_task_label,
-    write_leaf_trailing_output,
+    ColorizeExt, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
+    LeafExecutionReporter, StdioConfig, StdioSuggestion, format_command_with_cache_status,
+    format_task_label, write_leaf_trailing_output,
 };
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
 
@@ -109,7 +110,12 @@ impl LeafExecutionReporter for GroupedLeafReporter {
         if let Some(ref grouped_buffer) = self.grouped_buffer {
             let content = grouped_buffer.borrow();
             if !content.is_empty() {
-                let header = vite_str::format!("── {} ──\n", self.label);
+                let header = vite_str::format!(
+                    "{} {} {}\n",
+                    "──".style(Style::new().bright_black()),
+                    self.label,
+                    "──".style(Style::new().bright_black())
+                );
                 extra.extend_from_slice(header.as_bytes());
                 extra.extend_from_slice(&content);
             }

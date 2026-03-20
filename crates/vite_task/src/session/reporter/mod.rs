@@ -208,7 +208,10 @@ fn format_cwd_relative(display: &ExecutionItemDisplay, workspace_path: &Absolute
 
 /// Format the task label for labeled/grouped modes (e.g., `[pkg#task]`).
 fn format_task_label(display: &ExecutionItemDisplay) -> Str {
-    vite_str::format!("[{}]", display.task_display)
+    vite_str::format!(
+        "{}",
+        vite_str::format!("[{}]", display.task_display).style(Style::new().bright_black())
+    )
 }
 
 /// Format the command string with cwd prefix for display (e.g., `~/packages/lib$ vitest run`).
