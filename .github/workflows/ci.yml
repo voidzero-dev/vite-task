@@ -57,6 +57,12 @@ jobs:
           corepack enable
           pnpm install
 
+      - name: Show environment info
+        run: |
+          rustc --version
+          ldd --version 2>&1 || true
+          cat /etc/os-release | head -5
+
       - name: Run pty_terminal_test
         run: cargo test -p pty_terminal_test
 
@@ -64,24 +70,28 @@ jobs:
         run: |
           milestone=$(find target/debug/deps -name 'milestone-*' -executable -type f)
           echo "=== Test A: parallel (default) ==="
-          for i in $(seq 1 500); do
+          for i in $(seq 1 2000); do
             output=$("$milestone" --quiet 2>&1) || {
               echo "CRASHED (parallel) on iteration $i"
               echo "$output"
               # Extract crashing RIP and resolve with addr2line
               base=$(echo "$output" | grep "$(basename "$milestone")" | grep 'r--p 00000000' | head -1 | awk '{print $1}' | cut -d- -f1)
               echo "Binary base: 0x$base"
-              # Extract the RIP from "Crashing RIP: 0x..."
               rip=$(echo "$output" | sed -n 's/.*Crashing RIP: \(0x[0-9a-f]*\).*/\1/p')
               echo "=== addr2line for crashing RIP $rip ==="
               if [ -n "$rip" ] && [ -n "$base" ]; then
                 offset=$(printf "0x%x" $(($rip - 0x$base)))
                 echo "Offset: $offset"
                 addr2line -e "$milestone" -f -C "$offset" 2>&1 || true
+                # Also dump nearby assembly
+                echo "=== objdump around crash ==="
+                start=$(printf "0x%x" $(($rip - 0x$base - 32)))
+                stop=$(printf "0x%x" $(($rip - 0x$base + 32)))
+                objdump -d -C --start-address="$start" --stop-address="$stop" "$milestone" 2>&1 | tail -30 || true
               fi
-              # Also resolve all backtrace frames
+              # Resolve backtrace frames
               echo "=== addr2line for backtrace ==="
-              echo "$output" | sed -n 's/.*#[0-9A-Z]* \(0x[0-9a-f]*\)/\1/p' | while read addr; do
+              echo "$output" | sed -n 's/.*#[0-9A-Za-z]* \(0x[0-9a-f]*\)/\1/p' | while read addr; do
                 if [ -n "$base" ]; then
                   offset=$(printf "0x%x" $(($addr - 0x$base)) 2>/dev/null) || continue
                   result=$(addr2line -e "$milestone" -f -C "$offset" 2>/dev/null)
@@ -98,7 +108,7 @@ jobs:
         run: |
           milestone=$(find target/debug/deps -name 'milestone-*' -executable -type f)
           echo "=== Test B: single-threaded ==="
-          for i in $(seq 1 500); do
+          for i in $(seq 1 2000); do
             "$milestone" --quiet --test-threads=1 2>&1 || { echo "CRASHED (single-threaded) on iteration $i"; exit 1; }
           done
           echo "All 500 single-threaded iterations passed"
