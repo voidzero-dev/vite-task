@@ -140,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: alpine:3.21
-      options: --security-opt seccomp=unconfined --shm-size=256m
+      options: --shm-size=256m # shm_io tests need bigger shared memory
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}
