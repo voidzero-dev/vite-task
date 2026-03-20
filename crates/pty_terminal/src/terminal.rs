@@ -51,12 +51,6 @@ pub struct Terminal {
     pub pty_reader: PtyReader,
     pub pty_writer: PtyWriter,
     pub child_handle: ChildHandle,
-
-    /// On musl libc, concurrent PTY operations (openpty, fork/exec, FD I/O)
-    /// trigger SIGSEGV/SIGBUS in musl internals. This guard serializes the
-    /// entire PTY lifecycle so only one Terminal is active at a time.
-    #[cfg(target_env = "musl")]
-    _pty_guard: std::sync::MutexGuard<'static, ()>,
 }
 
 struct Vt100Callbacks {
@@ -262,15 +256,13 @@ impl Terminal {
     ///
     /// Panics if the writer lock is poisoned when the background thread closes it.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
-        // On musl libc (Alpine Linux), concurrent PTY operations (openpty,
-        // fork/exec, FD I/O) trigger SIGSEGV/SIGBUS in musl internals.
-        // Hold the lock for the Terminal's entire lifetime so only one PTY
-        // is active at a time.
-        // See: https://github.com/voidzero-dev/vite-task/pull/278
+        // On musl libc (Alpine Linux), concurrent openpty + fork/exec
+        // operations trigger SIGSEGV/SIGBUS in musl internals (observed
+        // in sysconf, fcntl). Serialize PTY creation and child spawning.
         #[cfg(target_env = "musl")]
-        static PTY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         #[cfg(target_env = "musl")]
-        let pty_guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _spawn_guard = SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let pty_pair = portable_pty::native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
@@ -322,8 +314,6 @@ impl Terminal {
             pty_reader: PtyReader { reader, parser: Arc::clone(&parser) },
             pty_writer: PtyWriter { writer, parser, master },
             child_handle: ChildHandle { child_killer, exit_status },
-            #[cfg(target_env = "musl")]
-            _pty_guard: pty_guard,
         })
     }
 }
