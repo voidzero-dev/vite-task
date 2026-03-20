@@ -14,7 +14,7 @@
   "type": "module",
   "dependencies": {
     "cross-env": "^10.1.0",
-    "oxfmt": "0.40.0",
+    "oxfmt": "0.41.0",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "vite-task-tools": "link:"
