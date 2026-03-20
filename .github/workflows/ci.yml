@@ -37,7 +37,7 @@ jobs:
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}
-        run: apk add --no-cache bash curl git musl-dev gcc g++ python3
+        run: apk add --no-cache bash curl git musl-dev gcc g++ python3 binutils
 
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -65,7 +65,26 @@ jobs:
           milestone=$(find target/debug/deps -name 'milestone-*' -executable -type f)
           echo "=== Test A: parallel (default) ==="
           for i in $(seq 1 500); do
-            "$milestone" --quiet 2>&1 || { echo "CRASHED (parallel) on iteration $i"; exit 1; }
+            output=$("$milestone" --quiet 2>&1) || {
+              echo "CRASHED (parallel) on iteration $i"
+              echo "$output"
+              # Extract addresses and resolve with addr2line
+              # Find binary base address (first r--p mapping with offset 0)
+              base=$(echo "$output" | grep "$(basename "$milestone")" | grep 'r--p 00000000' | head -1 | awk '{print $1}' | cut -d- -f1)
+              echo "Binary base: 0x$base"
+              # Resolve all backtrace addresses
+              echo "=== addr2line resolution ==="
+              echo "$output" | grep -oP '0x[0-9a-f]+' | while read addr; do
+                if [ -n "$base" ]; then
+                  offset=$(printf "0x%x" $(($addr - 0x$base)))
+                  result=$(addr2line -e "$milestone" -f -C "$offset" 2>/dev/null)
+                  if echo "$result" | grep -qv '??'; then
+                    echo "$addr (offset $offset): $result"
+                  fi
+                fi
+              done
+              exit 1
+            }
           done
           echo "All 500 parallel iterations passed"
 

@@ -54,20 +54,45 @@ unsafe fn install_sigsegv_handler() {
                 write_hex(2, rip);
             }
 
-            // Handler's own RSP (on sigaltstack if configured)
-            write_str(2, b"\nHandler RSP:  ");
-            let handler_sp: usize;
-            #[cfg(target_arch = "x86_64")]
-            {
-                core::arch::asm!("mov {}, rsp", out(reg) handler_sp);
-            }
-            #[cfg(not(target_arch = "x86_64"))]
-            {
-                handler_sp = 0;
-            }
-            write_hex(2, handler_sp);
+            // Print handler address for base-address calculation
+            write_str(2, b"\nHandler fn addr: ");
+            write_hex(2, handler as usize);
 
-            write_str(2, b"\n/proc/self/maps:\n");
+            // Walk frame pointers to get a backtrace
+            write_str(2, b"\nBacktrace (frame-pointer walk):\n");
+            #[cfg(target_arch = "x86_64")]
+            if !context.is_null() {
+                let uc = context as *const libc::ucontext_t;
+                // Start from the crashing frame
+                let mut rip = (*uc).uc_mcontext.gregs[libc::REG_RIP as usize] as usize;
+                let mut rbp = (*uc).uc_mcontext.gregs[libc::REG_RBP as usize] as usize;
+                for i in 0..20u8 {
+                    write_str(2, b"  #");
+                    let digit = b'0' + i;
+                    libc::write(2, (&digit) as *const u8 as _, 1);
+                    if i >= 10 {
+                        // two digits
+                    }
+                    write_str(2, b" ");
+                    write_hex(2, rip);
+                    write_str(2, b"\n");
+                    if rbp == 0 || rbp % 8 != 0 {
+                        break;
+                    }
+                    // Next frame: return address is at rbp+8, next rbp is at rbp
+                    let next_rip_ptr = (rbp + 8) as *const usize;
+                    let next_rbp_ptr = rbp as *const usize;
+                    // Safety: validate pointer is readable by checking maps would be too expensive;
+                    // just try to read and let the handler crash if bad (re-raises SIGSEGV)
+                    rip = *next_rip_ptr;
+                    rbp = *next_rbp_ptr;
+                    if rip == 0 {
+                        break;
+                    }
+                }
+            }
+
+            write_str(2, b"/proc/self/maps:\n");
             let fd = libc::open(b"/proc/self/maps\0".as_ptr().cast(), libc::O_RDONLY);
             if fd >= 0 {
                 let mut buf = [0u8; 4096];
