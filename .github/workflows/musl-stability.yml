@@ -24,6 +24,7 @@ jobs:
       options: --shm-size=256m
     env:
       RUSTFLAGS: --cfg tokio_unstable -D warnings -C target-feature=-crt-static
+      RUST_TEST_THREADS: 1
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}

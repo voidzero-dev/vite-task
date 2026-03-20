@@ -149,6 +149,9 @@ jobs:
       # -crt-static: vite-task is shipped as a NAPI module in vite+, and musl Node
       # with native modules links to musl libc dynamically, so we must do the same.
       RUSTFLAGS: --cfg tokio_unstable -D warnings -C target-feature=-crt-static
+      # On musl, concurrent PTY operations can trigger SIGSEGV in musl internals.
+      # Run test threads sequentially to avoid the race.
+      RUST_TEST_THREADS: 1
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}
