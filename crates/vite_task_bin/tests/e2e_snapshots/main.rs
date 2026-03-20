@@ -477,10 +477,19 @@ fn main() {
         clippy::disallowed_types,
         reason = "Path required for CARGO_MANIFEST_DIR path traversal"
     )]
-    let fixtures_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("tests")
-        .join("e2e_snapshots")
-        .join("fixtures");
+    let fixtures_dir = {
+        let manifest_dir =
+            std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+
+        // Copy .node-version to the tmp dir so version manager shims can resolve the correct
+        // Node.js binary when running task commands.
+        let repo_root = manifest_dir.join("../..").canonicalize().unwrap();
+        std::fs::copy(repo_root.join(".node-version"), tmp_dir.path().join(".node-version"))
+            .unwrap();
+
+        manifest_dir.join("tests/e2e_snapshots/fixtures")
+    };
+
     let mut fixture_paths = std::fs::read_dir(fixtures_dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())

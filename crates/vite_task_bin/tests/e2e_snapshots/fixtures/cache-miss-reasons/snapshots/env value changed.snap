@@ -6,5 +6,5 @@ expression: e2e_outputs
 $ print-file test.txt
 initial content
 > cross-env MY_ENV=2 vt run test # cache miss: env value changed
-$ print-file test.txt ✗ cache miss: envs changed, executing
+$ print-file test.txt ○ cache miss: envs changed, executing
 initial content

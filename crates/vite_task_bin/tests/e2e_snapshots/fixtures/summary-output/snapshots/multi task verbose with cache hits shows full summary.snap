@@ -12,10 +12,10 @@ built-b
 ---
 vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
 > vt run -r -v build # second run, verbose with cache hits
-~/packages/a$ print built-a ✓ cache hit, replaying
+~/packages/a$ print built-a ◉ cache hit, replaying
 built-a
 
-~/packages/b$ print built-b ✓ cache hit, replaying
+~/packages/b$ print built-b ◉ cache hit, replaying
 built-b
 
 

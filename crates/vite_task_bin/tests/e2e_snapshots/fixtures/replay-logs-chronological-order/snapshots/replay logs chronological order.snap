@@ -98,7 +98,7 @@ $ node build.js
 [echo.js] --------------------------------
 [build.js] main process end
 > vt run build # cache hit
-$ node build.js ✓ cache hit, replaying
+$ node build.js ◉ cache hit, replaying
 [build.js] --------------------------------
 [build.js] start
 [echo.js] --------------------------------
@@ -196,7 +196,7 @@ $ node build.js ✓ cache hit, replaying
 ---
 vt run: cache hit, <duration> saved.
 > vt run build # cache hit
-$ node build.js ✓ cache hit, replaying
+$ node build.js ◉ cache hit, replaying
 [build.js] --------------------------------
 [build.js] start
 [echo.js] --------------------------------

@@ -19,7 +19,7 @@ Finished in <duration> on 1 file with 93 rules using <n> threads.
 > echo hello > .git/foo.txt # add file inside .git
 
 > vt run lint # cache hit, .git is ignored
-$ vt lint ✓ cache hit, replaying
+$ vt lint ◉ cache hit, replaying
 
   ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
    ,-[a.js:1:1]

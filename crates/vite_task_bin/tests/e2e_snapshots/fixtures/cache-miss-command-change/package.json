@@ -1,5 +1,1 @@
-{
-  "scripts": {
-    "task": "print foo && print bar"
-  }
-}
+{}

@@ -8,7 +8,7 @@ export const root = 'initial';
 > replace-file-content packages/sub-pkg/src/sub.ts initial modified
 
 > vt run root-glob-test
-$ print-file src/root.ts ✓ cache hit, replaying
+$ print-file src/root.ts ◉ cache hit, replaying
 export const root = 'initial';
 
 ---
