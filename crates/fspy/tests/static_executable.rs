@@ -1,4 +1,8 @@
-#![cfg(target_os = "linux")]
+//! Tests for fspy tracing of statically-linked executables (seccomp path).
+//! Skipped on musl: the test binary is an artifact dep targeting musl, and when
+//! the CI builds with `-crt-static` the binary becomes dynamically linked,
+//! defeating the purpose of these tests.
+#![cfg(all(target_os = "linux", not(target_env = "musl")))]
 use std::{
     fs::{self, Permissions},
     os::unix::fs::PermissionsExt as _,
@@ -18,11 +22,11 @@ const TEST_BIN_CONTENT: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_FSPY_TEST_BI
 
 fn test_bin_path() -> &'static Path {
     static TEST_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
-        // On musl with -crt-static (dynamic linking), the artifact dep is also
-        // dynamically linked.  The seccomp tracer works for both static and
-        // dynamic binaries, so the tests are still valid either way.
-        let is_dynamic = is_dynamically_linked_to_libc(TEST_BIN_CONTENT);
-        assert!(is_dynamic.is_ok(), "Failed to inspect test binary: {is_dynamic:?}");
+        assert_eq!(
+            is_dynamically_linked_to_libc(TEST_BIN_CONTENT),
+            Ok(false),
+            "Test binary is not a static executable"
+        );
 
         let tmp_dir = env!("CARGO_TARGET_TMPDIR");
         let test_bin_path = PathBuf::from(tmp_dir).join("fspy-test-bin");
