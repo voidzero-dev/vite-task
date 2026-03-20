@@ -275,10 +275,49 @@ fn send_ctrl_c_interrupts_process() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdout};
 
-        // On Windows, clear the "ignore CTRL_C" flag set by Rust runtime
-        // so that CTRL_C_EVENT reaches the ctrlc handler.
+        // On Unix, use signal_hook directly instead of ctrlc.
+        // ctrlc spawns a background thread to monitor signals, but the subprocess
+        // closure runs during .init_array (via ctor). On musl, newly-created threads
+        // cannot execute during init (musl holds a lock), so ctrlc's thread never
+        // runs and SIGINT is silently swallowed.
+        // signal_hook::low_level::register installs a raw signal handler with no
+        // background thread, avoiding the issue entirely.
+        #[cfg(unix)]
+        {
+            use std::sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering},
+            };
+
+            let interrupted = Arc::new(AtomicBool::new(false));
+            let flag = Arc::clone(&interrupted);
+
+            // SAFETY: The closure only performs an atomic store, which is signal-safe.
+            unsafe {
+                signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+                    flag.store(true, Ordering::SeqCst);
+                })
+                .unwrap();
+            }
+
+            println!("ready");
+            stdout().flush().unwrap();
+
+            loop {
+                if interrupted.load(Ordering::SeqCst) {
+                    print!("INTERRUPTED");
+                    stdout().flush().unwrap();
+                    std::process::exit(0);
+                }
+                std::thread::yield_now();
+            }
+        }
+
+        // On Windows, ctrlc works fine (no .init_array/musl issue).
         #[cfg(windows)]
         {
+            // Clear the "ignore CTRL_C" flag set by Rust runtime
+            // so that CTRL_C_EVENT reaches the ctrlc handler.
             // SAFETY: Declaring correct signature for SetConsoleCtrlHandler from kernel32.
             unsafe extern "system" {
                 fn SetConsoleCtrlHandler(
@@ -291,23 +330,23 @@ fn send_ctrl_c_interrupts_process() {
             unsafe {
                 SetConsoleCtrlHandler(None, 0); // FALSE = remove ignore
             }
-        }
 
-        ctrlc::set_handler(move || {
-            // Write directly and exit from the handler to avoid races.
-            use std::io::Write;
-            let _ = write!(std::io::stdout(), "INTERRUPTED");
-            let _ = std::io::stdout().flush();
-            std::process::exit(0);
-        })
-        .unwrap();
+            ctrlc::set_handler(move || {
+                // Write directly and exit from the handler to avoid races.
+                use std::io::Write;
+                let _ = write!(std::io::stdout(), "INTERRUPTED");
+                let _ = std::io::stdout().flush();
+                std::process::exit(0);
+            })
+            .unwrap();
 
-        println!("ready");
-        stdout().flush().unwrap();
+            println!("ready");
+            stdout().flush().unwrap();
 
-        // Block until Ctrl+C handler exits the process.
-        loop {
-            std::thread::park();
+            // Block until Ctrl+C handler exits the process.
+            loop {
+                std::thread::park();
+            }
         }
     }));
 
