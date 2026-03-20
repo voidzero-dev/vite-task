@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{Read, Write},
+    mem::ManuallyDrop,
     sync::{Arc, Mutex, OnceLock},
     thread,
 };
@@ -12,12 +13,19 @@ use crate::geo::ScreenSize;
 
 type ChildWaitResult = Result<ExitStatus, Arc<std::io::Error>>;
 
+// On musl libc (Alpine Linux), concurrent PTY operations trigger
+// SIGSEGV/SIGBUS in musl internals (sysconf, fcntl). This affects
+// openpty+fork, FD cleanup (close), and FD drops from any thread.
+// Serialize all PTY lifecycle operations that touch musl internals.
+#[cfg(target_env = "musl")]
+static PTY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The read half of a PTY connection. Implements [`Read`].
 ///
 /// Reading feeds data through an internal vt100 parser (shared with [`PtyWriter`]),
 /// keeping `screen_contents()` up-to-date with parsed terminal output.
 pub struct PtyReader {
-    reader: Box<dyn Read + Send>,
+    reader: ManuallyDrop<Box<dyn Read + Send>>,
     parser: Arc<Mutex<vt100::Parser<Vt100Callbacks>>>,
 }
 
@@ -28,7 +36,25 @@ pub struct PtyReader {
 pub struct PtyWriter {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     parser: Arc<Mutex<vt100::Parser<Vt100Callbacks>>>,
-    master: Box<dyn MasterPty + Send>,
+    master: ManuallyDrop<Box<dyn MasterPty + Send>>,
+}
+
+impl Drop for PtyReader {
+    fn drop(&mut self) {
+        #[cfg(target_env = "musl")]
+        let _guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: called exactly once, from drop.
+        unsafe { ManuallyDrop::drop(&mut self.reader) };
+    }
+}
+
+impl Drop for PtyWriter {
+    fn drop(&mut self) {
+        #[cfg(target_env = "musl")]
+        let _guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: called exactly once, from drop.
+        unsafe { ManuallyDrop::drop(&mut self.master) };
+    }
 }
 
 /// A cloneable handle to a child process spawned in a PTY.
@@ -256,12 +282,6 @@ impl Terminal {
     ///
     /// Panics if the writer lock is poisoned when the background thread closes it.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
-        // On musl libc (Alpine Linux), concurrent PTY operations trigger
-        // SIGSEGV/SIGBUS in musl internals (sysconf, fcntl). This affects
-        // both openpty+fork and FD cleanup (close) from background threads.
-        // Serialize all PTY lifecycle operations that touch musl internals.
-        #[cfg(target_env = "musl")]
-        static PTY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         #[cfg(target_env = "musl")]
         let _spawn_guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -316,8 +336,11 @@ impl Terminal {
         )));
 
         Ok(Self {
-            pty_reader: PtyReader { reader, parser: Arc::clone(&parser) },
-            pty_writer: PtyWriter { writer, parser, master },
+            pty_reader: PtyReader {
+                reader: ManuallyDrop::new(reader),
+                parser: Arc::clone(&parser),
+            },
+            pty_writer: PtyWriter { writer, parser, master: ManuallyDrop::new(master) },
             child_handle: ChildHandle { child_killer, exit_status },
         })
     }
