@@ -56,7 +56,7 @@ unsafe fn install_sigsegv_handler() {
 
             // Print handler address for base-address calculation
             write_str(2, b"\nHandler fn addr: ");
-            write_hex(2, handler as usize);
+            write_hex(2, handler as *const () as usize);
 
             // Walk frame pointers to get a backtrace
             write_str(2, b"\nBacktrace (frame-pointer walk):\n");
@@ -128,7 +128,12 @@ unsafe fn install_sigsegv_handler() {
         }
 
         let mut sa: libc::sigaction = std::mem::zeroed();
-        sa.sa_sigaction = handler as *const () as usize;
+        let handler_ptr: unsafe extern "C" fn(
+            libc::c_int,
+            *mut libc::siginfo_t,
+            *mut libc::c_void,
+        ) = handler;
+        sa.sa_sigaction = handler_ptr as usize;
         sa.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
         libc::sigaction(libc::SIGSEGV, &sa, std::ptr::null_mut());
     }
