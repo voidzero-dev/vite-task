@@ -17,7 +17,7 @@ pub enum CdCommandError {
     NoHomeDirectory,
 
     #[error("Too many args for 'cd' command")]
-    ToManyArgs,
+    TooManyArgs,
 }
 
 #[derive(Debug, thiserror::Error)]
