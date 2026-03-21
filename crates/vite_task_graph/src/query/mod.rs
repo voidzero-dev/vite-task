@@ -22,7 +22,7 @@ use vite_str::Str;
 use vite_workspace::PackageNodeIndex;
 pub use vite_workspace::package_graph::{PackageQuery, PackageQueryResolveError};
 
-use crate::{IndexedTaskGraph, TaskDependencyType, TaskId, TaskNodeIndex};
+use crate::{IndexedTaskGraph, TaskId, TaskNodeIndex};
 
 /// A task execution graph queried from a `TaskQuery`.
 ///
@@ -109,7 +109,7 @@ impl IndexedTaskGraph {
 
         // Expand explicit dependsOn edges (may add new task nodes from outside the subgraph).
         if query.include_explicit_deps {
-            self.add_dependencies(&mut execution_graph, |_| TaskDependencyType::is_explicit());
+            self.add_dependencies(&mut execution_graph);
         }
 
         Ok(TaskQueryResult { execution_graph, unmatched_selectors: resolution.unmatched_selectors })
@@ -177,16 +177,11 @@ impl IndexedTaskGraph {
         }
     }
 
-    /// Recursively add dependencies to the execution graph based on filtered edges.
+    /// Recursively add explicit `dependsOn` dependencies to the execution graph.
     ///
-    /// Starts from the current nodes in `execution_graph` and follows outgoing edges
-    /// that match `filter_edge`, adding new nodes to the frontier until no new nodes
-    /// are discovered.
-    fn add_dependencies(
-        &self,
-        execution_graph: &mut TaskExecutionGraph,
-        mut filter_edge: impl FnMut(TaskDependencyType) -> bool,
-    ) {
+    /// Starts from the current nodes in `execution_graph` and follows outgoing edges,
+    /// adding new nodes to the frontier until no new nodes are discovered.
+    fn add_dependencies(&self, execution_graph: &mut TaskExecutionGraph) {
         let mut frontier: FxHashSet<TaskNodeIndex> = execution_graph.nodes().collect();
 
         // Continue until no new nodes are added to the frontier.
@@ -196,13 +191,10 @@ impl IndexedTaskGraph {
             for from_node in frontier {
                 for edge_ref in self.task_graph.edges(from_node) {
                     let to_node = edge_ref.target();
-                    let dep_type = *edge_ref.weight();
-                    if filter_edge(dep_type) {
-                        let is_new = !execution_graph.contains_node(to_node);
-                        execution_graph.add_edge(from_node, to_node, ());
-                        if is_new {
-                            next_frontier.insert(to_node);
-                        }
+                    let is_new = !execution_graph.contains_node(to_node);
+                    execution_graph.add_edge(from_node, to_node, ());
+                    if is_new {
+                        next_frontier.insert(to_node);
                     }
                 }
             }

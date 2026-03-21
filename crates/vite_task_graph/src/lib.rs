@@ -17,25 +17,8 @@ use vite_workspace::{PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPack
 
 use crate::display::TaskDisplay;
 
-/// The type of a task dependency edge in the task graph.
-///
-/// Currently only `Explicit` is produced (from `dependsOn` in `vite-task.json`).
-/// Topological ordering is handled at query time via the package subgraph rather
-/// than by pre-computing edges in the task graph.
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct TaskDependencyType;
-
-impl TaskDependencyType {
-    /// Returns `true` — all task graph edges are explicit `dependsOn` dependencies.
-    ///
-    /// Kept as an associated function for use as a filter predicate in
-    /// `add_dependencies`. Always returns `true` since `TaskDependencyType`
-    /// only represents explicit edges now.
-    #[must_use]
-    pub const fn is_explicit() -> bool {
-        true
-    }
-}
+// Task dependency edges are all explicit `dependsOn` dependencies.
+// Topological ordering is handled at query time via the package subgraph.
 
 /// Uniquely identifies a task, by its name and the package where it's defined.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
@@ -180,7 +163,7 @@ pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 /// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
 #[derive(Debug)]
 pub struct IndexedTaskGraph {
-    task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
+    task_graph: DiGraph<TaskNode, (), TaskIx>,
 
     /// Preserve the package graph for two purposes:
     /// - `self.task_graph` refers packages via `PackageNodeIndex`. To display package names and paths, we need to lookup them in `package_graph`.
@@ -200,7 +183,7 @@ pub struct IndexedTaskGraph {
     pre_post_scripts_enabled: bool,
 }
 
-pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
+pub type TaskGraph = DiGraph<TaskNode, (), TaskIx>;
 
 impl IndexedTaskGraph {
     /// Load the task graph from a discovered workspace using the provided config loader.
@@ -219,7 +202,7 @@ impl IndexedTaskGraph {
         workspace_root: &WorkspaceRoot,
         config_loader: &dyn loader::UserConfigLoader,
     ) -> Result<Self, TaskGraphLoadError> {
-        let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
+        let mut task_graph = DiGraph::<TaskNode, (), TaskIx>::default();
 
         let package_graph = vite_workspace::load_package_graph(workspace_root)?;
 
@@ -227,10 +210,11 @@ impl IndexedTaskGraph {
         let mut task_ids_with_dependency_specifiers: Vec<(TaskId, Option<Arc<[Str]>>)> = Vec::new();
 
         // index tasks by ids
+        let estimated_task_count = package_graph.node_count() * 2;
         let mut node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex> =
-            FxHashMap::with_capacity_and_hasher(task_graph.node_count(), FxBuildHasher);
+            FxHashMap::with_capacity_and_hasher(estimated_task_count, FxBuildHasher);
         let mut task_ids_by_node_index: FxHashMap<TaskNodeIndex, TaskId> =
-            FxHashMap::with_capacity_and_hasher(task_graph.node_count(), FxBuildHasher);
+            FxHashMap::with_capacity_and_hasher(estimated_task_count, FxBuildHasher);
 
         // First pass: load all configs, extract root cache config, validate
         let mut root_cache = None;
@@ -305,6 +289,12 @@ impl IndexedTaskGraph {
 
                 let dependency_specifiers = task_user_config.options.depends_on.clone();
 
+                let task_display = TaskDisplay {
+                    package_name: package.package_json.name.clone(),
+                    task_name: task_name.clone(),
+                    package_path: Arc::clone(&package_dir),
+                };
+
                 // Resolve the task configuration from the user config
                 let resolved_config = ResolvedTaskConfig::resolve(
                     task_user_config,
@@ -313,22 +303,11 @@ impl IndexedTaskGraph {
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
-                    task_display: TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: task_name.clone(),
-                        package_path: Arc::clone(&package_dir),
-                    },
+                    task_display: task_display.clone(),
                 })?;
 
-                let task_node = TaskNode {
-                    task_display: TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: task_name.clone(),
-                        package_path: Arc::clone(&package_dir),
-                    },
-                    resolved_config,
-                    source: TaskSource::TaskConfig,
-                };
+                let task_node =
+                    TaskNode { task_display, resolved_config, source: TaskSource::TaskConfig };
 
                 let node_index = task_graph.add_node(task_node);
                 task_ids_with_dependency_specifiers.push((task_id.clone(), dependency_specifiers));
@@ -339,6 +318,11 @@ impl IndexedTaskGraph {
             // For remaining package.json scripts not in the tasks map, create tasks with default config
             for (script_name, package_json_script) in package_json_scripts {
                 let task_id = TaskId { task_name: Str::from(script_name), package_index };
+                let task_display = TaskDisplay {
+                    package_name: package.package_json.name.clone(),
+                    task_name: script_name.into(),
+                    package_path: Arc::clone(&package_dir),
+                };
                 let resolved_config = ResolvedTaskConfig::resolve_package_json_script(
                     &package_dir,
                     package_json_script,
@@ -346,18 +330,10 @@ impl IndexedTaskGraph {
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
-                    task_display: TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: script_name.into(),
-                        package_path: Arc::clone(&package_dir),
-                    },
+                    task_display: task_display.clone(),
                 })?;
                 let node_index = task_graph.add_node(TaskNode {
-                    task_display: TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: script_name.into(),
-                        package_path: Arc::clone(&package_dir),
-                    },
+                    task_display,
                     resolved_config,
                     source: TaskSource::PackageJsonScript,
                 });
@@ -390,7 +366,7 @@ impl IndexedTaskGraph {
                         specifier,
                         task_display: me.display_task(from_node_index),
                     })?;
-                me.task_graph.update_edge(from_node_index, to_node_index, TaskDependencyType);
+                me.task_graph.update_edge(from_node_index, to_node_index, ());
             }
         }
 
