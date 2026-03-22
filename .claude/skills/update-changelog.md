@@ -24,6 +24,7 @@ Add a new entry to `CHANGELOG.md` for the change being made in the current branc
 ## What NOT to include
 
 Do not add entries for:
+
 - Internal refactors with no user-facing effect
 - CI/CD changes
 - Dependency bumps
