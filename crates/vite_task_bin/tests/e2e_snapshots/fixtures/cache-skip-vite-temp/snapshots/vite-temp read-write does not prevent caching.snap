@@ -4,10 +4,10 @@ expression: e2e_outputs
 ---
 > vt run build # first run: cache miss
 $ node build.mjs
-built: export const hello = "world";
+built: export const hello = 'world';
 > vt run build # second run: should hit cache despite .vite-temp write
 $ node build.mjs ◉ cache hit, replaying
-built: export const hello = "world";
+built: export const hello = 'world';
 
 ---
 vt run: cache hit, <duration> saved.
