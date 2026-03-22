@@ -14,19 +14,5 @@ Select a task (↑/↓, Enter to run, type to search): buid
       build echo build lib
 @ write-key: enter
 Selected task: build
-~/packages/app$ echo build app ⊘ cache disabled
-build app
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Vite+ Task Runner • Execution Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Statistics:   1 tasks • 0 cache hits • 0 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
-
-Task Details:
-────────────────────────────────────────────────
-  [1] app#build: ~/packages/app$ echo build app ✓
-      → Cache disabled for built-in command
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+~/packages/app$ echo build app --verbose ⊘ cache disabled
+build app --verbose
