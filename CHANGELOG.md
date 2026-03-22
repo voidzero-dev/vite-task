@@ -1,7 +1,5 @@
 # Changelog
 
-## Unreleased
-
 - **Added** `--log=interleaved|labeled|grouped` flag to control task output display: `interleaved` (default) streams directly, `labeled` prefixes lines with `[pkg#task]`, `grouped` buffers output per task ([#266](https://github.com/voidzero-dev/vite-task/pull/266))
 - **Added** musl target support (`x86_64-unknown-linux-musl`) ([#273](https://github.com/voidzero-dev/vite-task/pull/273))
 - **Added** automatic skip of caching for tasks that modify their own inputs ([#248](https://github.com/voidzero-dev/vite-task/pull/248))
