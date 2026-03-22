@@ -1,0 +1,16 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vt run echo --help
+$ echo --help ⊘ cache disabled
+--help
+> vt run echo --version
+$ echo --version ⊘ cache disabled
+--version
+> vt run echo -v
+$ echo -v ⊘ cache disabled
+-v
+> vt run echo -a
+$ echo -a ⊘ cache disabled
+-a
