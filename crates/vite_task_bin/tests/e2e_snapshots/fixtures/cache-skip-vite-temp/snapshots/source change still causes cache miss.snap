@@ -1,0 +1,12 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vt run build # first run: cache miss
+$ node build.mjs
+built: export const hello = "world";
+> replace-file-content src/index.ts world universe # modify real source
+
+> vt run build # cache miss: source changed
+$ node build.mjs ○ cache miss: 'src/index.ts' modified, executing
+built: export const hello = "universe";

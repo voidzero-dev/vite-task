@@ -1,0 +1,18 @@
+# Tests that node_modules/.vite-temp/ is excluded from fspy tracking,
+# so tasks writing to .vite-temp (like Vite config compilation) are still cached.
+# See: https://github.com/voidzero-dev/vite-plus/issues/1095
+
+[[e2e]]
+name = "vite-temp read-write does not prevent caching"
+steps = [
+  "vt run build # first run: cache miss",
+  "vt run build # second run: should hit cache despite .vite-temp write",
+]
+
+[[e2e]]
+name = "source change still causes cache miss"
+steps = [
+  "vt run build # first run: cache miss",
+  "replace-file-content src/index.ts world universe # modify real source",
+  "vt run build # cache miss: source changed",
+]

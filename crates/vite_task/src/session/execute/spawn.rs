@@ -211,6 +211,11 @@ pub async fn spawn_with_tracking(
                 return None;
             }
 
+            // Skip Vite temp config files (transient build artifacts)
+            if relative.as_str().contains("node_modules/.vite-temp/") {
+                return None;
+            }
+
             if !resolved_negatives.is_empty()
                 && resolved_negatives.iter().any(|neg| neg.is_match(relative.as_str()))
             {
