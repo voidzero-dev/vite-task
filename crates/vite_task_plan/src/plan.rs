@@ -157,7 +157,7 @@ async fn plan_task_as_execution_node(
                     }
                     [dir] => Path::new(dir.as_str()).into(),
                     _ => {
-                        return Err(Error::CdCommand(CdCommandError::ToManyArgs));
+                        return Err(Error::CdCommand(CdCommandError::TooManyArgs));
                     }
                 };
                 cwd = cwd.join(cd_target.as_ref()).into();
