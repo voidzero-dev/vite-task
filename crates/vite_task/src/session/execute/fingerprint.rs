@@ -6,8 +6,7 @@
 use std::{
     collections::BTreeMap,
     fs::File,
-    hash::Hasher as _,
-    io::{self, BufRead, Read},
+    io::{self, BufRead},
     sync::Arc,
 };
 
@@ -182,20 +181,6 @@ fn determine_folder_change_kind<'a>(
     }
 }
 
-/// Hash file content using `xxHash3_64`
-fn hash_content(mut stream: impl Read) -> io::Result<u64> {
-    let mut hasher = twox_hash::XxHash3_64::default();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = stream.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.write(&buf[..n]);
-    }
-    Ok(hasher.finish())
-}
-
 /// Check if a directory entry should be ignored in fingerprinting
 fn should_ignore_entry(name: &[u8]) -> bool {
     matches!(name, b"." | b".." | b".DS_Store") || name.eq_ignore_ascii_case(b"dist")
@@ -251,7 +236,7 @@ pub fn fingerprint_path(
             return process_directory(std_path, path_read);
         }
     }
-    Ok(PathFingerprint::FileContentHash(hash_content(reader)?))
+    Ok(PathFingerprint::FileContentHash(super::hash::hash_content(reader)?))
 }
 
 /// Process a directory on Windows using `std::fs::read_dir`

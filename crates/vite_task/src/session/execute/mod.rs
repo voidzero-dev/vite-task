@@ -1,5 +1,6 @@
 pub mod fingerprint;
 pub mod glob_inputs;
+mod hash;
 pub mod spawn;
 
 use std::{collections::BTreeMap, io::Write as _, process::Stdio, sync::Arc};
