@@ -5,12 +5,7 @@
 //!
 //! All glob patterns are workspace-root-relative (resolved at task graph stage).
 
-use std::{
-    collections::BTreeMap,
-    fs::File,
-    hash::Hasher as _,
-    io::{self, Read},
-};
+use std::{collections::BTreeMap, fs::File, io};
 
 #[cfg(test)]
 use vite_path::AbsolutePathBuf;
@@ -114,21 +109,9 @@ pub fn compute_globbed_inputs(
     Ok(result)
 }
 
-/// Hash file content using `xxHash3_64`.
 #[expect(clippy::disallowed_types, reason = "receives std::path::Path from wax glob walker")]
 fn hash_file_content(path: &std::path::Path) -> io::Result<u64> {
-    let file = File::open(path)?;
-    let mut reader = io::BufReader::new(file);
-    let mut hasher = twox_hash::XxHash3_64::default();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.write(&buf[..n]);
-    }
-    Ok(hasher.finish())
+    super::hash::hash_content(io::BufReader::new(File::open(path)?))
 }
 
 #[cfg(test)]
