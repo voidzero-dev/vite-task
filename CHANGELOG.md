@@ -7,5 +7,3 @@
 - **Added** automatic skip of caching for tasks that modify their own inputs ([#248](https://github.com/voidzero-dev/vite-task/pull/248))
 - **Changed** cache hit/miss indicators to use neutral symbols (◉/〇) instead of ✓/✗ to avoid confusion with success/error ([#268](https://github.com/voidzero-dev/vite-task/pull/268))
 - **Changed** default untracked env patterns to align with Turborepo, covering more CI and platform-specific variables ([#262](https://github.com/voidzero-dev/vite-task/pull/262))
-- **Removed** `bootstrap-cli` command from the init task ([#261](https://github.com/voidzero-dev/vite-task/pull/261))
-- **Fixed** flaky SIGSEGV on musl targets ([#278](https://github.com/voidzero-dev/vite-task/pull/278))
