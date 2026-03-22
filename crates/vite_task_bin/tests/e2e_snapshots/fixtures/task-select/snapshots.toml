@@ -214,7 +214,7 @@ steps = ["vt run --verbose"]
 name = "verbose with typo enters selector"
 cwd = "packages/app"
 steps = [
-  { command = "vt run buid --verbose", interactions = [
+  { command = "vt run --verbose buid", interactions = [
     { "expect-milestone" = "task-select:buid:0" },
     { "write-key" = "enter" },
   ] },
