@@ -18,7 +18,7 @@ Add a new entry to `CHANGELOG.md` for the change being made in the current branc
    - **Perf** — performance improvement noticeable to users
 3. Write a concise, user-facing description. Focus on what changed from the user's perspective, not implementation details.
 4. Include a PR link in the format `([#NNN](https://github.com/voidzero-dev/vite-task/pull/NNN))`. If the PR number is not yet known, leave a `([#???](https://github.com/voidzero-dev/vite-task/pull/???))` placeholder.
-5. Append the new entry at the end of the existing list in `CHANGELOG.md`.
+5. Insert the new entry at the **top** of the existing list in `CHANGELOG.md` (newest first).
 6. If the current change is closely related to an existing entry (e.g., multiple PRs contributing to the same feature or fix), group them into a single item with multiple PR links rather than adding a separate entry.
 
 ## What NOT to include
