@@ -1,0 +1,11 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+[1]> vt run -r --cache daemon
+~/packages/a$ barrier ../../.barrier daemon-sync 2 --exit=1
+~/packages/b$ barrier ../../.barrier daemon-sync 2 --daemonize
+
+
+---
+vt run: 0/2 cache hit (0%), 2 failed. (Run `vt run --last-details` for full details)

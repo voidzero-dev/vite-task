@@ -208,8 +208,12 @@ pub async fn spawn_with_tracking(
     }
 
     // Wait for process termination and collect results.
+    // The child may have closed its pipes without exiting (e.g., daemonized),
+    // so we still need a cancellation arm here.
     match child_wait {
         ChildWait::Fspy(tracked_child) => {
+            // fspy's wait_handle already monitors the cancellation token internally,
+            // so no additional select! is needed here.
             let termination = tracked_child.wait_handle.await?;
             let duration = start.elapsed();
 
@@ -285,7 +289,13 @@ pub async fn spawn_with_tracking(
             Ok(SpawnResult { exit_status: termination.status, duration })
         }
         ChildWait::Tokio(mut child) => {
-            let exit_status = child.wait().await?;
+            let exit_status = tokio::select! {
+                status = child.wait() => status?,
+                () = cancellation_token.cancelled() => {
+                    child.start_kill()?;
+                    child.wait().await?
+                }
+            };
             Ok(SpawnResult { exit_status, duration: start.elapsed() })
         }
     }

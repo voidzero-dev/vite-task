@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// barrier <dir> <prefix> <count> [--exit=<code>] [--hang]
+// barrier <dir> <prefix> <count> [--exit=<code>] [--hang] [--daemonize]
 //
 // Cross-platform concurrency barrier for testing.
 // Creates <dir>/<prefix>_<pid>, then waits (via fs.watch) for <count> files
@@ -8,7 +8,8 @@
 //
 // Options:
 //   --exit=<code>  Exit with the given code after the barrier is met.
-//   --hang         Block on stdin after the barrier is met (for kill tests).
+//   --hang         Keep process alive after the barrier (for kill tests).
+//   --daemonize    Close stdout/stderr but keep process alive (for daemon kill tests).
 //
 // If tasks run concurrently, all participants arrive and the barrier resolves.
 // If tasks run sequentially, the first participant waits forever (test timeout).
@@ -19,12 +20,15 @@ import path from 'node:path';
 const positional = [];
 let exitCode = 0;
 let hang = false;
+let daemonize = false;
 
 for (const arg of process.argv.slice(2)) {
   if (arg.startsWith('--exit=')) {
     exitCode = parseInt(arg.slice(7), 10);
   } else if (arg === '--hang') {
     hang = true;
+  } else if (arg === '--daemonize') {
+    daemonize = true;
   } else {
     positional.push(arg);
   }
@@ -44,6 +48,14 @@ function countMatches() {
 }
 
 function onBarrierMet() {
+  if (daemonize) {
+    // Close stdout/stderr but keep the process alive. Simulates a daemon that
+    // detaches from stdio — tests that the runner can still kill such processes.
+    process.stdout.end();
+    process.stderr.end();
+    setInterval(() => {}, 1 << 30);
+    return;
+  }
   if (hang) {
     // Keep the process alive indefinitely — killed via signal when the runner cancels.
     // Use setInterval rather than stdin.resume() for cross-platform reliability.
