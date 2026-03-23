@@ -108,7 +108,12 @@ pub async fn spawn_with_tracking(
     // kills all descendant processes (e.g., node.exe spawned by a .cmd shim).
     // Declared before the branch so it outlives both the fspy and non-fspy paths.
     #[cfg(windows)]
-    let _job;
+    let job;
+
+    // Clone the token before it's moved into the spawn branches. The clone is used
+    // in the pipe read loop on Windows to terminate the job (killing grandchild
+    // processes that hold pipes open).
+    let cancellation_for_pipes = cancellation_token.clone();
 
     let (mut child_stdout, mut child_stderr, wait_state) = if path_accesses.is_some() {
         // fspy tracking enabled — fspy's background task handles cancellation
@@ -118,7 +123,7 @@ pub async fn spawn_with_tracking(
         #[cfg(windows)]
         {
             use std::os::windows::io::AsRawHandle;
-            _job = super::win_job::assign_to_kill_on_close_job(
+            job = super::win_job::assign_to_kill_on_close_job(
                 tracked_child.process_handle.as_raw_handle(),
             )?;
         }
@@ -134,7 +139,7 @@ pub async fn spawn_with_tracking(
             // SAFETY: The child was just spawned, so its raw handle is valid.
             let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
             let owned = borrowed.try_clone_to_owned()?;
-            _job = super::win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?;
+            job = super::win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?;
         }
         let wait_handle = tokio::spawn(async move {
             tokio::select! {
@@ -158,9 +163,9 @@ pub async fn spawn_with_tracking(
     let start = Instant::now();
 
     // Read from both stdout and stderr concurrently using select!
-    // No cancellation branch needed — both WaitState variants run a background task
-    // that kills the child on cancellation, which closes the pipes and makes reads
-    // return EOF naturally.
+    // On cancellation, the background task kills the direct child, but on Windows
+    // grandchild processes may keep pipes open. The cancellation branch terminates
+    // the entire job to close all pipe writers.
     loop {
         tokio::select! {
             result = child_stdout.read(&mut stdout_buf), if !stdout_done => {
@@ -204,6 +209,13 @@ pub async fn spawn_with_tracking(
                         }
                     }
                 }
+            }
+            // On Windows, kill the entire process tree so that grandchild processes
+            // release their pipe handles, allowing the reads above to reach EOF.
+            () = cancellation_for_pipes.cancelled(), if cfg!(windows) => {
+                #[cfg(windows)]
+                job.terminate();
+                break;
             }
             else => break,
         }

@@ -604,7 +604,10 @@ mod win_job {
         shared::minwindef::FALSE,
         um::{
             handleapi::CloseHandle,
-            jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject},
+            jobapi2::{
+                AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
+                TerminateJobObject,
+            },
             winnt::{
                 HANDLE, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             },
@@ -613,6 +616,17 @@ mod win_job {
 
     /// RAII wrapper around a Win32 Job Object `HANDLE` that closes it on drop.
     pub(super) struct OwnedJobHandle(HANDLE);
+
+    impl OwnedJobHandle {
+        /// Immediately terminate all processes in the job.
+        ///
+        /// This is needed when pipes to a grandchild process must be closed before
+        /// the job handle is dropped (e.g., to unblock pipe reads in `spawn_with_tracking`).
+        pub(super) fn terminate(&self) {
+            // SAFETY: self.0 is a valid job handle from CreateJobObjectW.
+            unsafe { TerminateJobObject(self.0, 1) };
+        }
+    }
 
     impl Drop for OwnedJobHandle {
         fn drop(&mut self) {
