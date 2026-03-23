@@ -591,27 +591,25 @@ async fn spawn_inherited(
 /// which automatically terminates all processes in the job when the handle is dropped.
 #[cfg(windows)]
 mod win_job {
-    use std::io;
+    use std::{io, os::windows::io::AsRawHandle};
 
     use winapi::{
         shared::minwindef::FALSE,
         um::{
             handleapi::CloseHandle,
             jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject},
-            processthreadsapi::OpenProcess,
             winnt::{
                 HANDLE, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-                PROCESS_SET_QUOTA, PROCESS_TERMINATE,
             },
         },
     };
 
-    /// RAII wrapper around a Win32 `HANDLE` that closes it on drop.
-    pub(super) struct OwnedHandle(HANDLE);
+    /// RAII wrapper around a Win32 Job Object `HANDLE` that closes it on drop.
+    pub(super) struct OwnedJobHandle(HANDLE);
 
-    impl Drop for OwnedHandle {
+    impl Drop for OwnedJobHandle {
         fn drop(&mut self) {
-            // SAFETY: self.0 is a valid handle obtained from CreateJobObjectW or OpenProcess.
+            // SAFETY: self.0 is a valid handle obtained from CreateJobObjectW.
             unsafe { CloseHandle(self.0) };
         }
     }
@@ -622,17 +620,13 @@ mod win_job {
     /// in the job (the child and its descendants) are terminated.
     pub(super) fn assign_child_to_kill_on_close_job(
         child: &tokio::process::Child,
-    ) -> io::Result<OwnedHandle> {
-        let pid = child.id().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "child process has no PID (already exited?)")
-        })?;
-
+    ) -> io::Result<OwnedJobHandle> {
         // SAFETY: Creating an anonymous job object with no security attributes.
         let job = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
         if job.is_null() {
             return Err(io::Error::last_os_error());
         }
-        let job = OwnedHandle(job);
+        let job = OwnedJobHandle(job);
 
         // Configure the job to kill all processes when the handle is closed.
         let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
@@ -657,23 +651,19 @@ mod win_job {
             return Err(io::Error::last_os_error());
         }
 
-        // Open a handle to the child process with permissions needed for job assignment.
-        // SAFETY: pid is the process ID of the just-spawned child.
-        let process_handle =
-            unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, pid) };
-        if process_handle.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        let process_handle = OwnedHandle(process_handle);
+        // Use the child's raw process handle directly — no need to OpenProcess via PID.
+        let process_handle = child.raw_handle().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "child process has no handle (already exited?)")
+        })?;
 
-        // SAFETY: Both handles are valid — job from CreateJobObjectW, process from OpenProcess.
-        let ok = unsafe { AssignProcessToJobObject(job.0, process_handle.0) };
+        // SAFETY: Both handles are valid — job from CreateJobObjectW, process from the
+        // just-spawned child. The child's handle is borrowed (not consumed), so tokio
+        // retains ownership for wait/kill.
+        let ok = unsafe { AssignProcessToJobObject(job.0, process_handle as HANDLE) };
         if ok == FALSE {
             return Err(io::Error::last_os_error());
         }
 
-        // process_handle is dropped here (we only needed it for assignment).
-        // job handle is returned — when it drops, all processes in the job are killed.
         Ok(job)
     }
 }
