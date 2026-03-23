@@ -92,9 +92,11 @@ pub struct RunCommand {
     #[clap(long, exclusive = true)]
     pub(crate) last_details: bool,
 
-    /// `packageName#taskName` or `taskName`, followed by any additional
-    /// arguments to pass to the task.
-    #[clap(allow_hyphen_values = true, value_names = ["TASK_SPECIFIER", "ADDITIONAL_ARGS"])]
+    #[clap(
+        allow_hyphen_values = true,
+        value_names = ["TASK_SPECIFIER", "ADDITIONAL_ARGS"],
+        long_help = "Task to run, as `packageName#taskName` or just `taskName`.\nAny arguments after the task name are forwarded to the task process.\nRunning `vp run` without a task name shows an interactive task selector."
+    )]
     pub(crate) task_and_args: Vec<Str>,
 }
 
