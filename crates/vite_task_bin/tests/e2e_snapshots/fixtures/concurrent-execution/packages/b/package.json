@@ -1,0 +1,7 @@
+{
+  "name": "@concurrent/b",
+  "scripts": {
+    "build": "barrier ../../.barrier sync 2",
+    "test": "barrier ../../.barrier test-sync 2 --hang"
+  }
+}

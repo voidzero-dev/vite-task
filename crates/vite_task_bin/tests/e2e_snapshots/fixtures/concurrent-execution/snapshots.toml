@@ -1,0 +1,16 @@
+# Tests that independent tasks execute concurrently.
+# Packages a and b have no dependency relationship.
+# Both use a barrier that requires 2 participants — if run sequentially,
+# the first would wait forever and the test would timeout.
+
+[[e2e]]
+name = "independent tasks run concurrently"
+steps = ["vt run -r build"]
+
+# Both tasks use a single-command barrier (no && splitting). Task a exits with
+# code 1 after the barrier, task b hangs on stdin after the barrier. Since both
+# participate in the same barrier, b is guaranteed to be running when a fails.
+# The test completing without timeout proves cancellation kills b.
+[[e2e]]
+name = "failure kills concurrent tasks"
+steps = ["vt run -r test"]

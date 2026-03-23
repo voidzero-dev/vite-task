@@ -2,5 +2,8 @@
   "name": "@test/touch-pkg",
   "scripts": {
     "task": "touch-file src/data.txt"
+  },
+  "dependencies": {
+    "@test/normal-pkg": "workspace:*"
   }
 }

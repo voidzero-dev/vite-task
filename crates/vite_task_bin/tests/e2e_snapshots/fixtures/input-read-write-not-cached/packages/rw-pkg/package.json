@@ -4,6 +4,6 @@
     "task": "replace-file-content src/data.txt original modified"
   },
   "dependencies": {
-    "@test/normal-pkg": "workspace:*"
+    "@test/touch-pkg": "workspace:*"
   }
 }

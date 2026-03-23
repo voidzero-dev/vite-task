@@ -1,4 +1,7 @@
 {
   "name": "interleaved-stdio-test",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "other": "workspace:*"
+  }
 }

@@ -3,14 +3,17 @@ pub mod glob_inputs;
 mod hash;
 pub mod spawn;
 
-use std::{collections::BTreeMap, io::Write as _, process::Stdio, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, io::Write as _, process::Stdio, sync::Arc};
 
-use futures_util::FutureExt;
+use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
+use petgraph::Direction;
+use rustc_hash::FxHashMap;
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use vite_path::AbsolutePath;
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
-    SpawnExecution,
+    SpawnExecution, execution_graph::ExecutionNodeIndex,
 };
 
 use self::{
@@ -47,13 +50,22 @@ pub enum SpawnOutcome {
     Failed,
 }
 
-/// Holds mutable references needed during graph execution.
+/// Maximum number of tasks that can execute concurrently within a single
+/// execution graph level.
+const CONCURRENCY_LIMIT: usize = 10;
+
+/// Holds shared references needed during graph execution.
 ///
-/// The `reporter` field is used to create leaf reporters for individual executions.
+/// The `reporter` field is wrapped in `RefCell` because concurrent futures
+/// (via `FuturesUnordered`) need shared access to create leaf reporters.
+/// Since all futures run on a single thread (no `tokio::spawn`), `RefCell`
+/// is sufficient for interior mutability.
+///
 /// Cache fields are passed through to [`execute_spawn`] for cache-aware execution.
 struct ExecutionContext<'a> {
     /// The graph-level reporter, used to create leaf reporters via `new_leaf_execution()`.
-    reporter: &'a mut dyn GraphExecutionReporter,
+    /// Wrapped in `RefCell` for shared access from concurrent task futures.
+    reporter: &'a RefCell<Box<dyn GraphExecutionReporter>>,
     /// The execution cache for looking up and storing cached results.
     cache: &'a ExecutionCache,
     /// Base path for resolving relative paths in cache entries.
@@ -64,65 +76,121 @@ struct ExecutionContext<'a> {
 }
 
 impl ExecutionContext<'_> {
-    /// Execute all tasks in an execution graph in dependency order.
+    /// Execute all tasks in an execution graph concurrently, respecting dependencies.
     ///
-    /// `ExecutionGraph` guarantees acyclicity at construction time.
-    /// We compute a topological order and iterate in reverse to get execution order
-    /// (dependencies before dependents).
+    /// Uses a DAG scheduler: tasks whose dependencies have all completed are scheduled
+    /// onto a `FuturesUnordered`, bounded by a per-graph `Semaphore` with
+    /// [`CONCURRENCY_LIMIT`] permits. Each recursive `Expanded` graph creates its own
+    /// semaphore, so nested graphs have independent concurrency limits.
     ///
-    /// Fast-fail: if any task fails (non-zero exit or infrastructure error), remaining
-    /// tasks and `&&`-chained items are skipped. Leaf-level errors are reported through
-    /// the reporter. Cycle detection is handled at plan time.
-    ///
-    /// Returns `true` if all tasks succeeded, `false` if any task failed.
+    /// Fast-fail: if any task fails, `execute_leaf` cancels the `CancellationToken`
+    /// (killing in-flight child processes). This method detects the cancellation,
+    /// closes the semaphore, drains remaining futures, and returns.
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_expanded_graph(&mut self, graph: &ExecutionGraph) -> bool {
-        // `compute_topological_order()` returns nodes in topological order: for every
-        // edge A→B, A appears before B. Since our edges mean "A depends on B",
-        // dependencies (B) appear after their dependents (A). We iterate in reverse
-        // to get execution order where dependencies run first.
+    async fn execute_expanded_graph(&self, graph: &ExecutionGraph) {
+        if graph.node_count() == 0 {
+            return;
+        }
 
-        // Execute tasks in dependency-first order. Each task may have multiple items
-        // (from `&&`-split commands), which are executed sequentially.
-        // If any task fails, subsequent tasks and items are skipped (fast-fail).
-        let topo_order = graph.compute_topological_order();
-        for &node_ix in topo_order.iter().rev() {
-            let task_execution = &graph[node_ix];
+        let semaphore = Arc::new(Semaphore::new(CONCURRENCY_LIMIT));
 
-            for item in &task_execution.items {
-                let failed = match &item.kind {
-                    ExecutionItemKind::Leaf(leaf_kind) => {
-                        self.execute_leaf(&item.execution_item_display, leaf_kind)
-                            .boxed_local()
-                            .await
-                    }
-                    ExecutionItemKind::Expanded(nested_graph) => {
-                        !self.execute_expanded_graph(nested_graph).boxed_local().await
-                    }
-                };
-                if failed {
-                    return false;
+        // Compute dependency count for each node.
+        // Edge A→B means "A depends on B", so A's dependency count = outgoing edge count.
+        let mut dep_count: FxHashMap<ExecutionNodeIndex, usize> = FxHashMap::default();
+        for node_ix in graph.node_indices() {
+            dep_count.insert(node_ix, graph.neighbors(node_ix).count());
+        }
+
+        let mut futures = FuturesUnordered::new();
+
+        // Schedule initially ready nodes (no dependencies).
+        for (&node_ix, &count) in &dep_count {
+            if count == 0 {
+                futures.push(self.spawn_node(graph, node_ix, &semaphore));
+            }
+        }
+
+        // Process completions and schedule newly ready dependents.
+        // On failure, `execute_leaf` cancels the token — we detect it here, close
+        // the semaphore (so pending acquires fail immediately), and drain.
+        while let Some(completed_ix) = futures.next().await {
+            if self.cancellation_token.is_cancelled() {
+                semaphore.close();
+                while futures.next().await.is_some() {}
+                return;
+            }
+
+            // Find dependents of the completed node (nodes that depend on it).
+            // Edge X→completed means "X depends on completed", so X is a predecessor
+            // in graph direction = neighbor in Incoming direction.
+            for dependent in graph.neighbors_directed(completed_ix, Direction::Incoming) {
+                let count = dep_count.get_mut(&dependent).expect("all nodes are in dep_count");
+                *count -= 1;
+                if *count == 0 {
+                    futures.push(self.spawn_node(graph, dependent, &semaphore));
                 }
             }
         }
-        true
+    }
+
+    /// Create a future that acquires a semaphore permit, then executes a graph node.
+    ///
+    /// On failure, `execute_node` cancels the `CancellationToken` — the caller
+    /// detects this after the future completes. On semaphore closure or prior
+    /// cancellation, the node is skipped.
+    fn spawn_node<'a>(
+        &'a self,
+        graph: &'a ExecutionGraph,
+        node_ix: ExecutionNodeIndex,
+        semaphore: &Arc<Semaphore>,
+    ) -> LocalBoxFuture<'a, ExecutionNodeIndex> {
+        let sem = semaphore.clone();
+        async move {
+            if let Ok(_permit) = sem.acquire_owned().await {
+                if !self.cancellation_token.is_cancelled() {
+                    self.execute_node(graph, node_ix).await;
+                }
+            }
+            node_ix
+        }
+        .boxed_local()
+    }
+
+    /// Execute a single node's items sequentially.
+    ///
+    /// A node may have multiple items (from `&&`-split commands). Items are executed
+    /// in order; if any item fails, `execute_leaf` cancels the `CancellationToken`
+    /// and remaining items are skipped (preserving `&&` semantics).
+    async fn execute_node(&self, graph: &ExecutionGraph, node_ix: ExecutionNodeIndex) {
+        let task_execution = &graph[node_ix];
+
+        for item in &task_execution.items {
+            if self.cancellation_token.is_cancelled() {
+                return;
+            }
+            match &item.kind {
+                ExecutionItemKind::Leaf(leaf_kind) => {
+                    self.execute_leaf(&item.execution_item_display, leaf_kind).boxed_local().await;
+                }
+                ExecutionItemKind::Expanded(nested_graph) => {
+                    self.execute_expanded_graph(nested_graph).boxed_local().await;
+                }
+            }
+        }
     }
 
     /// Execute a single leaf item (in-process command or spawned process).
     ///
     /// Creates a [`LeafExecutionReporter`] from the graph reporter and delegates
-    /// to the appropriate execution method.
-    ///
-    /// Returns `true` if the execution failed (non-zero exit or infrastructure error).
+    /// to the appropriate execution method. On failure (non-zero exit or
+    /// infrastructure error), cancels the `CancellationToken`.
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_leaf(
-        &mut self,
-        display: &ExecutionItemDisplay,
-        leaf_kind: &LeafExecutionKind,
-    ) -> bool {
-        let mut leaf_reporter = self.reporter.new_leaf_execution(display, leaf_kind);
+    async fn execute_leaf(&self, display: &ExecutionItemDisplay, leaf_kind: &LeafExecutionKind) {
+        // Borrow the reporter briefly to create the leaf reporter, then drop
+        // the RefCell guard before any `.await` point.
+        let mut leaf_reporter = self.reporter.borrow_mut().new_leaf_execution(display, leaf_kind);
 
-        match leaf_kind {
+        let failed = match leaf_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 // In-process (built-in) commands: caching is disabled, execute synchronously
                 let mut stdio_config = leaf_reporter
@@ -159,6 +227,9 @@ impl ExecutionContext<'_> {
                     SpawnOutcome::Failed => true,
                 }
             }
+        };
+        if failed {
+            self.cancellation_token.cancel();
         }
     }
 }
@@ -532,10 +603,10 @@ impl Session<'_> {
             }
         };
 
-        let mut reporter = builder.build();
+        let reporter = RefCell::new(builder.build());
 
-        let mut execution_context = ExecutionContext {
-            reporter: &mut *reporter,
+        let execution_context = ExecutionContext {
+            reporter: &reporter,
             cache,
             cache_base_path: &self.workspace_path,
             cancellation_token: CancellationToken::new(),
@@ -547,6 +618,6 @@ impl Session<'_> {
 
         // Leaf-level errors and non-zero exit statuses are tracked internally
         // by the reporter.
-        reporter.finish()
+        reporter.into_inner().finish()
     }
 }

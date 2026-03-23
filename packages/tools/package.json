@@ -2,6 +2,7 @@
   "name": "vite-task-tools",
   "private": true,
   "bin": {
+    "barrier": "./src/barrier.js",
     "check-tty": "./src/check-tty.js",
     "json-edit": "./src/json-edit.ts",
     "print": "./src/print.ts",
