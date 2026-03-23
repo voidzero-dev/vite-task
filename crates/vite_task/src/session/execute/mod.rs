@@ -571,7 +571,14 @@ async fn spawn_inherited(
     // when the job handle is dropped. Without this, TerminateProcess only kills the
     // direct child, leaving grandchildren alive.
     #[cfg(windows)]
-    let _job = win_job::assign_child_to_kill_on_close_job(&child)?;
+    let _job = {
+        use std::os::windows::io::{AsRawHandle, BorrowedHandle};
+        // Duplicate the process handle so the job outlives tokio's handle.
+        // SAFETY: The child was just spawned, so its raw handle is valid.
+        let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
+        let owned = borrowed.try_clone_to_owned()?;
+        win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?
+    };
 
     let exit_status = tokio::select! {
         status = child.wait() => status?,
@@ -591,7 +598,7 @@ async fn spawn_inherited(
 /// which automatically terminates all processes in the job when the handle is dropped.
 #[cfg(windows)]
 mod win_job {
-    use std::{io, os::windows::io::AsRawHandle};
+    use std::{io, os::windows::io::RawHandle};
 
     use winapi::{
         shared::minwindef::FALSE,
@@ -614,12 +621,12 @@ mod win_job {
         }
     }
 
-    /// Create a Job Object with `KILL_ON_JOB_CLOSE` and assign the child process to it.
+    /// Create a Job Object with `KILL_ON_JOB_CLOSE` and assign a process to it.
     ///
     /// Returns the job handle wrapped in an RAII guard. When dropped, all processes
     /// in the job (the child and its descendants) are terminated.
-    pub(super) fn assign_child_to_kill_on_close_job(
-        child: &tokio::process::Child,
+    pub(super) fn assign_to_kill_on_close_job(
+        process_handle: RawHandle,
     ) -> io::Result<OwnedJobHandle> {
         // SAFETY: Creating an anonymous job object with no security attributes.
         let job = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
@@ -629,12 +636,12 @@ mod win_job {
         let job = OwnedJobHandle(job);
 
         // Configure the job to kill all processes when the handle is closed.
-        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
-            BasicLimitInformation: winapi::um::winnt::JOBOBJECT_BASIC_LIMIT_INFORMATION {
-                LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-                ..unsafe { std::mem::zeroed() }
-            },
-            ..unsafe { std::mem::zeroed() }
+        // SAFETY: JOBOBJECT_EXTENDED_LIMIT_INFORMATION is a plain C struct (no pointers
+        // in the zeroed fields). Zeroing then setting LimitFlags is the standard pattern.
+        let mut info = unsafe {
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            info
         };
 
         // SAFETY: info is a valid JOBOBJECT_EXTENDED_LIMIT_INFORMATION, job.0 is a valid handle.
@@ -651,14 +658,8 @@ mod win_job {
             return Err(io::Error::last_os_error());
         }
 
-        // Use the child's raw process handle directly — no need to OpenProcess via PID.
-        let process_handle = child.raw_handle().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "child process has no handle (already exited?)")
-        })?;
-
-        // SAFETY: Both handles are valid — job from CreateJobObjectW, process from the
-        // just-spawned child. The child's handle is borrowed (not consumed), so tokio
-        // retains ownership for wait/kill.
+        // SAFETY: Both handles are valid — job from CreateJobObjectW, process handle
+        // from the caller.
         let ok = unsafe { AssignProcessToJobObject(job.0, process_handle as HANDLE) };
         if ok == FALSE {
             return Err(io::Error::last_os_error());

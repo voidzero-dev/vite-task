@@ -104,17 +104,38 @@ pub async fn spawn_with_tracking(
     cmd.current_dir(&*spawn_command.cwd);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
+    // On Windows, assign the child to a Job Object so that killing the child also
+    // kills all descendant processes (e.g., node.exe spawned by a .cmd shim).
+    // Declared before the branch so it outlives both the fspy and non-fspy paths.
+    #[cfg(windows)]
+    let _job;
+
     let (mut child_stdout, mut child_stderr, wait_state) = if path_accesses.is_some() {
         // fspy tracking enabled — fspy's background task handles cancellation
         let mut tracked_child = cmd.spawn(cancellation_token).await?;
         let stdout = tracked_child.stdout.take().unwrap();
         let stderr = tracked_child.stderr.take().unwrap();
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            _job = super::win_job::assign_to_kill_on_close_job(
+                tracked_child.process_handle.as_raw_handle(),
+            )?;
+        }
         (stdout, stderr, WaitState::FspyEnabled(tracked_child))
     } else {
         // No fspy — spawn a background task that waits for exit or cancellation
         let mut child = cmd.into_tokio_command().spawn()?;
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::{AsRawHandle, BorrowedHandle};
+            // SAFETY: The child was just spawned, so its raw handle is valid.
+            let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
+            let owned = borrowed.try_clone_to_owned()?;
+            _job = super::win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?;
+        }
         let wait_handle = tokio::spawn(async move {
             tokio::select! {
                 status = child.wait() => status,

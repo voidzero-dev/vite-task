@@ -140,10 +140,22 @@ impl SpyImpl {
                 if *spawn_success { SpawnError::OsSpawn(err) } else { SpawnError::Injection(err) }
             })?;
 
+        // Duplicate the process handle before the child is moved into the background
+        // task. The duplicate is independently owned (its own ref count), so it stays
+        // valid even after tokio closes its copy when the process exits.
+        let process_handle = {
+            use std::os::windows::io::BorrowedHandle;
+            // SAFETY: The child was just spawned and hasn't been moved yet, so its
+            // raw handle is valid. `borrow_raw` creates a temporary borrow.
+            let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
+            borrowed.try_clone_to_owned().map_err(SpawnError::OsSpawn)?
+        };
+
         Ok(TrackedChild {
             stdin: child.stdin.take(),
             stdout: child.stdout.take(),
             stderr: child.stderr.take(),
+            process_handle,
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
             // because we need to stop the supervisor and lock the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {

@@ -14,3 +14,9 @@ steps = ["vt run -r build"]
 [[e2e]]
 name = "failure kills concurrent tasks"
 steps = ["vt run -r test"]
+
+# Same as above but with --cache to exercise the piped stdio / fspy path
+# (spawn_with_tracking) instead of the inherited stdio path (spawn_inherited).
+[[e2e]]
+name = "failure kills concurrent cached tasks"
+steps = ["vt run -r --cache test"]
