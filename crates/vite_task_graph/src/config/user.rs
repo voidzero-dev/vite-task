@@ -273,22 +273,12 @@ impl UserRunConfig {
     pub const TS_TYPE: &str = include_str!("../../run-config.ts");
 
     /// Generates TypeScript type definitions for user task configuration.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `oxfmt` is not found in `packages/tools`, if the formatter process
-    /// fails to spawn or write, or if the output is not valid UTF-8.
     #[cfg(all(test, not(clippy)))]
     #[must_use]
     // test code: uses std types for convenience
     #[expect(clippy::disallowed_types, reason = "test code uses std types for convenience")]
     pub fn generate_ts_definition() -> String {
-        use std::{
-            any::TypeId,
-            collections::HashSet,
-            io::Write,
-            process::{Command, Stdio},
-        };
+        use std::{any::TypeId, collections::HashSet};
 
         use ts_rs::TypeVisitor;
 
@@ -335,32 +325,7 @@ impl UserRunConfig {
         types.push_str("\n\nexport ");
         types.push_str(&Self::decl());
 
-        // Format using oxfmt from packages/tools
-        let workspace_root =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-        let tools_path = workspace_root.join("packages/tools/node_modules/.bin");
-
-        let oxfmt_path = which::which_in("oxfmt", Some(&tools_path), &tools_path)
-            .expect("oxfmt not found in packages/tools");
-
-        let mut child = Command::new(oxfmt_path)
-            .arg("--stdin-filepath=run-config.ts")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("failed to spawn oxfmt");
-
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(types.as_bytes())
-            .expect("failed to write to oxfmt stdin");
-
-        let output = child.wait_with_output().expect("failed to read oxfmt output");
-        assert!(output.status.success(), "oxfmt failed");
-
-        String::from_utf8(output.stdout).expect("oxfmt output is not valid UTF-8")
+        types
     }
 }
 
