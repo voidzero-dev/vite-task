@@ -4,7 +4,7 @@ expression: e2e_outputs
 info:
   cwd: packages/app
 ---
-> vt run buid --verbose
+> vt run --verbose buid
 @ expect-milestone: task-select:buid:0
 Task "buid" not found.
 Select a task (↑/↓, Enter to run, type to search): buid

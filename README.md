@@ -8,8 +8,8 @@ Install [Vite+](https://viteplus.dev), then run tasks from your workspace. See t
 
 ```bash
 vp run build              # run a task in the current package
-vp run build -r           # run across all packages in dependency order
-vp run @my/app#build -t   # run in a package and its transitive dependencies
+vp run -r build           # run across all packages in dependency order
+vp run -t @my/app#build   # run in a package and its transitive dependencies
 vp run --cache build      # run with caching enabled
 ```
 

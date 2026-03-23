@@ -149,6 +149,9 @@ jobs:
       # -crt-static: vite-task is shipped as a NAPI module in vite+, and musl Node
       # with native modules links to musl libc dynamically, so we must do the same.
       RUSTFLAGS: --cfg tokio_unstable -D warnings -C target-feature=-crt-static
+      # On musl, concurrent PTY operations can trigger SIGSEGV in musl internals.
+      # Run test threads sequentially to avoid the race.
+      RUST_TEST_THREADS: 1
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}
@@ -172,14 +175,7 @@ jobs:
           corepack enable
           pnpm install
 
-      # Use cargo-nextest: it runs each test in its own process, avoiding
-      # musl's fork()-in-multithreaded-process SIGSEGV while keeping parallel
-      # execution (across processes instead of threads within one process).
-      # Exclude packages with custom test harnesses (harness = false) since
-      # nextest can't discover their tests; run those with cargo test instead.
-      - run: cargo install cargo-nextest --locked
-      - run: cargo nextest run --workspace --exclude vite_task_bin --exclude vite_task_plan
-      - run: cargo test -p vite_task_bin -p vite_task_plan
+      - run: cargo test
 
   fmt:
     name: Format and Check Deps

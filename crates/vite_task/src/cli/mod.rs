@@ -76,19 +76,19 @@ impl RunFlags {
 /// `ResolvedCommand::RunLastDetails` variant internally.
 #[derive(Debug, clap::Parser)]
 pub struct RunCommand {
-    /// `packageName#taskName` or `taskName`. If omitted, lists all available tasks.
-    pub(crate) task_specifier: Option<Str>,
-
     #[clap(flatten)]
     pub(crate) flags: RunFlags,
-
-    /// Additional arguments to pass to the tasks
-    #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
-    pub(crate) additional_args: Vec<Str>,
 
     /// Display the detailed summary of the last run.
     #[clap(long, exclusive = true)]
     pub(crate) last_details: bool,
+
+    /// The task name and all arguments to pass to the task process
+    /// Prevent flags after the task name to be consumed by Vite Task with `trailing_var_arg`
+    ///
+    /// <https://github.com/voidzero-dev/vite-task/issues/285>
+    #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub(crate) task_and_args: Vec<Str>,
 }
 
 /// vite task CLI subcommands as parsed by clap.
@@ -162,10 +162,11 @@ impl RunCommand {
     /// Convert to the resolved run command, stripping the `last_details` flag.
     #[must_use]
     pub(crate) fn into_resolved(self) -> ResolvedRunCommand {
+        let mut iter = self.task_and_args.into_iter();
         ResolvedRunCommand {
-            task_specifier: self.task_specifier,
+            task_specifier: iter.next(),
             flags: self.flags,
-            additional_args: self.additional_args,
+            additional_args: iter.collect(),
         }
     }
 }
