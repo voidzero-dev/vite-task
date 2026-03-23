@@ -594,7 +594,7 @@ mod win_job {
     use std::io;
 
     use winapi::{
-        shared::minwindef::{DWORD, FALSE},
+        shared::minwindef::FALSE,
         um::{
             handleapi::CloseHandle,
             jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject},
@@ -607,7 +607,7 @@ mod win_job {
     };
 
     /// RAII wrapper around a Win32 `HANDLE` that closes it on drop.
-    struct OwnedHandle(HANDLE);
+    pub(super) struct OwnedHandle(HANDLE);
 
     impl Drop for OwnedHandle {
         fn drop(&mut self) {
@@ -620,7 +620,7 @@ mod win_job {
     ///
     /// Returns the job handle wrapped in an RAII guard. When dropped, all processes
     /// in the job (the child and its descendants) are terminated.
-    pub fn assign_child_to_kill_on_close_job(
+    pub(super) fn assign_child_to_kill_on_close_job(
         child: &tokio::process::Child,
     ) -> io::Result<OwnedHandle> {
         let pid = child.id().ok_or_else(|| {
