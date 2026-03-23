@@ -28,14 +28,25 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     // child processes report paths without the prefix. Try both variants.
     let workspace_root_stripped = workspace_root.strip_prefix(r"\\?\").unwrap_or(workspace_root);
 
-    redact_string(
-        &mut output,
-        &[
-            (workspace_root, "<workspace>"),
-            (workspace_root_stripped, "<workspace>"),
-            (manifest_dir.as_str(), "<manifest_dir>"),
-        ],
-    );
+    // On Windows, paths displayed via Debug format ({:?}) have backslashes escaped
+    // to double-backslashes. Try matching both the raw and escaped variants.
+    let workspace_root_escaped = {
+        use cow_utils::CowUtils as _;
+        workspace_root_stripped.cow_replace('\\', r"\\").into_owned()
+    };
+
+    let mut redactions: Vec<(&str, &str)> = vec![
+        (workspace_root, "<workspace>"),
+        (workspace_root_stripped, "<workspace>"),
+        (manifest_dir.as_str(), "<manifest_dir>"),
+    ];
+
+    // Add the escaped variant if it differs from the raw one
+    if workspace_root_escaped != workspace_root_stripped {
+        redactions.insert(0, (&workspace_root_escaped, "<workspace>"));
+    }
+
+    redact_string(&mut output, &redactions);
 
     // Redact durations like "0ns", "123ms" or "1.23s" to "<duration>"
     let duration_regex = regex::Regex::new(r"\d+(\.\d+)?(ns|ms|s)").unwrap();
