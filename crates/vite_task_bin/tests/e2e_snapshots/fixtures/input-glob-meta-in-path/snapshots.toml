@@ -7,6 +7,6 @@ name = "cache hit then miss on file change"
 steps = [
   "vt run [lib]#build",
   "vt run [lib]#build",
-  "replace-file-content packages/[lib]/src/main.ts initial modified",
+  "vtt replace-file-content packages/[lib]/src/main.ts initial modified",
   "vt run [lib]#build",
 ]

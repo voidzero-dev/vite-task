@@ -18,7 +18,7 @@ steps = [
   # Initial run
   "vt run positive-globs-only",
   # Modify a file that matches the glob
-  "replace-file-content src/main.ts initial modified",
+  "vtt replace-file-content src/main.ts initial modified",
   # Cache miss: matched file changed
   "vt run positive-globs-only",
 ]
@@ -29,7 +29,7 @@ steps = [
   # Initial run
   "vt run positive-globs-only",
   # Modify a file that does NOT match the glob (test/ is outside src/)
-  "replace-file-content test/main.test.ts outside modified",
+  "vtt replace-file-content test/main.test.ts outside modified",
   # Cache hit: file not in input
   "vt run positive-globs-only",
 ]
@@ -43,7 +43,7 @@ steps = [
   # Initial run - reads both src/main.ts and src/utils.ts
   "vt run positive-globs-reads-unmatched",
   # Modify utils.ts - read by command but NOT in glob
-  "replace-file-content src/utils.ts initial modified",
+  "vtt replace-file-content src/utils.ts initial modified",
   # Cache hit: file was read but not matched by glob, inference is off
   "vt run positive-globs-reads-unmatched",
 ]
@@ -57,7 +57,7 @@ steps = [
   # Initial run
   "vt run positive-negative-globs",
   # Modify a file that matches positive but NOT negative
-  "replace-file-content src/main.ts initial modified",
+  "vtt replace-file-content src/main.ts initial modified",
   # Cache miss: file changed
   "vt run positive-negative-globs",
 ]
@@ -68,7 +68,7 @@ steps = [
   # Initial run
   "vt run positive-negative-globs",
   # Modify a file that matches the negative glob (excluded)
-  "replace-file-content src/main.test.ts main modified",
+  "vtt replace-file-content src/main.test.ts main modified",
   # Cache hit: file excluded by negative glob
   "vt run positive-negative-globs",
 ]
@@ -82,7 +82,7 @@ steps = [
   # Initial run - reads src/main.ts
   "vt run auto-only",
   # Modify the file that was read
-  "replace-file-content src/main.ts initial modified",
+  "vtt replace-file-content src/main.ts initial modified",
   # Cache miss: inferred input changed
   "vt run auto-only",
 ]
@@ -93,7 +93,7 @@ steps = [
   # Initial run - reads src/main.ts (NOT utils.ts)
   "vt run auto-only",
   # Modify a file that was NOT read by the command
-  "replace-file-content src/utils.ts initial modified",
+  "vtt replace-file-content src/utils.ts initial modified",
   # Cache hit: file not in inferred input
   "vt run auto-only",
 ]
@@ -107,7 +107,7 @@ steps = [
   # Initial run - reads both src/main.ts and dist/output.js
   "vt run auto-with-negative",
   # Modify file in excluded directory (dist/)
-  "replace-file-content dist/output.js initial modified",
+  "vtt replace-file-content dist/output.js initial modified",
   # Cache hit: dist/ is excluded by negative glob
   "vt run auto-with-negative",
 ]
@@ -118,7 +118,7 @@ steps = [
   # Initial run
   "vt run auto-with-negative",
   # Modify file NOT in excluded directory
-  "replace-file-content src/main.ts initial modified",
+  "vtt replace-file-content src/main.ts initial modified",
   # Cache miss: inferred input changed
   "vt run auto-with-negative",
 ]
@@ -132,7 +132,7 @@ steps = [
   # Initial run
   "vt run positive-auto-negative",
   # Modify explicit input file
-  "replace-file-content package.json inputs-cache-test modified-pkg",
+  "vtt replace-file-content package.json inputs-cache-test modified-pkg",
   # Cache miss: explicit input changed
   "vt run positive-auto-negative",
 ]
@@ -143,7 +143,7 @@ steps = [
   # Initial run
   "vt run positive-auto-negative",
   # Modify inferred input file (read by command)
-  "replace-file-content src/main.ts initial modified",
+  "vtt replace-file-content src/main.ts initial modified",
   # Cache miss: inferred input changed
   "vt run positive-auto-negative",
 ]
@@ -154,7 +154,7 @@ steps = [
   # Initial run
   "vt run positive-auto-negative",
   # Modify file excluded by negative glob
-  "replace-file-content src/main.test.ts main modified",
+  "vtt replace-file-content src/main.test.ts main modified",
   # Cache hit: file excluded by negative glob
   "vt run positive-auto-negative",
 ]
@@ -168,7 +168,7 @@ steps = [
   # Initial run
   "vt run empty-inputs",
   # Modify any file - should NOT affect cache
-  "replace-file-content src/main.ts initial modified",
+  "vtt replace-file-content src/main.ts initial modified",
   # Cache hit: no input configured
   "vt run empty-inputs",
 ]
@@ -179,7 +179,7 @@ steps = [
   # Initial run
   "vt run empty-inputs",
   # Change the command
-  "json-edit vite-task.json \"_.tasks['empty-inputs'].command = 'print-file src/utils.ts'\"",
+  "vtt json-edit vite-task.json \"_.tasks['empty-inputs'].command = 'vtt print-file src/utils.ts'\"",
   # Cache miss: command changed
   "vt run empty-inputs",
 ]
@@ -210,14 +210,14 @@ name = "folder slash input - miss on direct and nested file changes"
 steps = [
   "vt run folder-slash-input",
   # Modify a direct file in src/
-  "replace-file-content src/main.ts initial modified",
+  "vtt replace-file-content src/main.ts initial modified",
   # Cache miss: direct file changed
   "vt run folder-slash-input",
   # Reset and run again to re-establish cache
-  "replace-file-content src/main.ts modified initial",
+  "vtt replace-file-content src/main.ts modified initial",
   "vt run folder-slash-input",
   # Modify a nested file in src/sub/
-  "replace-file-content src/sub/nested.ts initial modified",
+  "vtt replace-file-content src/sub/nested.ts initial modified",
   # Cache miss: nested file changed
   "vt run folder-slash-input",
 ]
@@ -227,7 +227,7 @@ name = "folder slash input - hit on file outside directory"
 steps = [
   "vt run folder-slash-input",
   # Modify a file outside src/
-  "replace-file-content test/main.test.ts outside modified",
+  "vtt replace-file-content test/main.test.ts outside modified",
   # Cache hit: file not under src/
   "vt run folder-slash-input",
 ]
@@ -240,7 +240,7 @@ name = "folder input - hit despite file changes and folder deletion"
 steps = [
   "vt run folder-input",
   # Modify a file inside the folder
-  "replace-file-content src/main.ts initial modified",
+  "vtt replace-file-content src/main.ts initial modified",
   # Cache hit: "src" matches the directory itself, not files inside it
   "vt run folder-input",
   # Delete the entire folder

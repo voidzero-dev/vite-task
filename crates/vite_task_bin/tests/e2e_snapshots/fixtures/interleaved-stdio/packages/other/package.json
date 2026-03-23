@@ -1,8 +1,8 @@
 {
   "name": "other",
   "scripts": {
-    "check-tty": "check-tty",
-    "check-tty-cached": "check-tty",
-    "read-stdin": "read-stdin"
+    "check-tty": "vtt check-tty",
+    "check-tty-cached": "vtt check-tty",
+    "read-stdin": "vtt read-stdin"
   }
 }

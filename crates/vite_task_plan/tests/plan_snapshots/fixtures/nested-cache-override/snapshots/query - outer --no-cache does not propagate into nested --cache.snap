@@ -53,7 +53,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                           "task_name": "inner",
                           "package_path": "<workspace>/"
                         },
-                        "command": "print-file package.json",
+                        "command": "vtt print-file package.json",
                         "and_item_index": null,
                         "cwd": "<workspace>/"
                       },
@@ -65,10 +65,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                                 "cwd": "",
                                 "program_fingerprint": {
                                   "OutsideWorkspace": {
-                                    "program_name": "print-file"
+                                    "program_name": "vtt"
                                   }
                                 },
                                 "args": [
+                                  "print-file",
                                   "package.json"
                                 ],
                                 "env_fingerprints": {
@@ -93,13 +94,14 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
                               }
                             },
                             "spawn_command": {
-                              "program_path": "<tools>/node_modules/.bin/print-file",
+                              "program_path": "<tools>/vtt",
                               "args": [
+                                "print-file",
                                 "package.json"
                               ],
                               "all_envs": {
                                 "NO_COLOR": "1",
-                                "PATH": "<workspace>/node_modules/.bin:<tools>/node_modules/.bin"
+                                "PATH": "<workspace>/node_modules/.bin:<tools>"
                               },
                               "cwd": "<workspace>/"
                             }

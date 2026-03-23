@@ -3,19 +3,19 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run -r build # first run, populate cache
-~/packages/a$ print built-a
+~/packages/a$ vtt print built-a
 built-a
 
-~/packages/b$ print built-b
+~/packages/b$ vtt print built-b
 built-b
 
 ---
 vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
 > vt run -r -v build # second run, verbose with cache hits
-~/packages/a$ print built-a ◉ cache hit, replaying
+~/packages/a$ vtt print built-a ◉ cache hit, replaying
 built-a
 
-~/packages/b$ print built-b ◉ cache hit, replaying
+~/packages/b$ vtt print built-b ◉ cache hit, replaying
 built-b
 
 
@@ -28,9 +28,9 @@ Performance:  100% cache hit rate, <duration> saved in total
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] @summary/a#build: ~/packages/a$ print built-a ✓
+  [1] @summary/a#build: ~/packages/a$ vtt print built-a ✓
       → Cache hit - output replayed - <duration> saved
   ·······················································
-  [2] @summary/b#build: ~/packages/b$ print built-b ✓
+  [2] @summary/b#build: ~/packages/b$ vtt print built-b ✓
       → Cache hit - output replayed - <duration> saved
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

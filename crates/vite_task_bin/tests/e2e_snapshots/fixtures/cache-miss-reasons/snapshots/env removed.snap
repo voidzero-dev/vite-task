@@ -2,9 +2,9 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> cross-env MY_ENV=1 vt run test # cache miss
-$ print-file test.txt
+> MY_ENV=1 vt run test # cache miss
+$ vtt print-file test.txt
 initial content
 > vt run test # cache miss: env removed
-$ print-file test.txt ○ cache miss: envs changed, executing
+$ vtt print-file test.txt ○ cache miss: envs changed, executing
 initial content

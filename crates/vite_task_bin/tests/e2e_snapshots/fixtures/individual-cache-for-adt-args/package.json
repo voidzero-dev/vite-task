@@ -1,5 +1,5 @@
 {
   "scripts": {
-    "say": "print"
+    "say": "vtt print"
   }
 }

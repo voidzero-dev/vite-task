@@ -6,7 +6,7 @@ use vite_task::{
     EnabledCacheConfig, ExitStatus, Session, UserCacheConfig, get_path_env,
     plan_request::SyntheticPlanRequest,
 };
-use vite_task_bin::{Args, OwnedSessionConfig, find_executable};
+use vite_task_bin::{Args, OwnedSessionConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
@@ -22,14 +22,18 @@ async fn run() -> anyhow::Result<ExitStatus> {
     match args {
         Args::Task(parsed) => session.main(parsed).await,
         args => {
-            // If env FOO is set, run `print-env FOO` via Session::exec before proceeding.
+            // If env FOO is set, run `vtt print-env FOO` via Session::exec before proceeding.
             // In vite-plus, Session::exec is used for auto-install.
             let envs = session.envs();
             if envs.contains_key(std::ffi::OsStr::new("FOO")) {
-                let program = find_executable(get_path_env(envs), session.cwd(), "print-env")?;
+                let program = vite_task_bin::find_executable(
+                    get_path_env(envs),
+                    session.cwd(),
+                    "vtt",
+                )?;
                 let request = SyntheticPlanRequest {
                     program,
-                    args: [Str::from("FOO")].into(),
+                    args: [Str::from("print-env"), Str::from("FOO")].into(),
                     cache_config: UserCacheConfig::with_config({
                         EnabledCacheConfig {
                             env: Some(Box::from([Str::from("FOO")])),

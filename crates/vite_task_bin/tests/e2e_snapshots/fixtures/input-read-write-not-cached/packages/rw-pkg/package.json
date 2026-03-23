@@ -1,7 +1,7 @@
 {
   "name": "@test/rw-pkg",
   "scripts": {
-    "task": "replace-file-content src/data.txt original modified"
+    "task": "vtt replace-file-content src/data.txt original modified"
   },
   "dependencies": {
     "@test/touch-pkg": "workspace:*"

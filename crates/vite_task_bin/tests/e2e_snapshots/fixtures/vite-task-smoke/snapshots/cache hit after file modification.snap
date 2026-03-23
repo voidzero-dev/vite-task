@@ -6,18 +6,18 @@ expression: e2e_outputs
 $ echo hello ⊘ cache disabled
 hello
 
-$ print-file main.js
+$ vtt print-file main.js
 console.log('foo');
 
 ---
 vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
-> replace-file-content main.js foo bar # modify input file
+> vtt replace-file-content main.js foo bar # modify input file
 
 > vt run test-task # cache miss, main.js changed
 $ echo hello ⊘ cache disabled
 hello
 
-$ print-file main.js ○ cache miss: 'main.js' modified, executing
+$ vtt print-file main.js ○ cache miss: 'main.js' modified, executing
 console.log('bar');
 
 ---

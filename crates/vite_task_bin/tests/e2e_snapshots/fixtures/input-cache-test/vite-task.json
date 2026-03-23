@@ -1,58 +1,90 @@
 {
   "tasks": {
     "positive-globs-only": {
-      "command": "print-file src/main.ts",
-      "input": ["src/**/*.ts"],
+      "command": "vtt print-file src/main.ts",
+      "input": [
+        "src/**/*.ts"
+      ],
       "cache": true
     },
     "positive-globs-reads-unmatched": {
-      "command": "print-file src/main.ts src/utils.ts",
-      "input": ["src/main.ts"],
+      "command": "vtt print-file src/main.ts src/utils.ts",
+      "input": [
+        "src/main.ts"
+      ],
       "cache": true
     },
     "positive-negative-globs": {
-      "command": "print-file src/main.ts",
-      "input": ["src/**", "!src/**/*.test.ts"],
+      "command": "vtt print-file src/main.ts",
+      "input": [
+        "src/**",
+        "!src/**/*.test.ts"
+      ],
       "cache": true
     },
     "auto-only": {
-      "command": "print-file src/main.ts",
-      "input": [{ "auto": true }],
+      "command": "vtt print-file src/main.ts",
+      "input": [
+        {
+          "auto": true
+        }
+      ],
       "cache": true
     },
     "auto-with-negative": {
-      "command": "print-file src/main.ts dist/output.js",
-      "input": [{ "auto": true }, "!dist/**"],
+      "command": "vtt print-file src/main.ts dist/output.js",
+      "input": [
+        {
+          "auto": true
+        },
+        "!dist/**"
+      ],
       "cache": true
     },
     "positive-auto-negative": {
-      "command": "print-file src/main.ts",
-      "input": ["package.json", { "auto": true }, "!src/**/*.test.ts"],
+      "command": "vtt print-file src/main.ts",
+      "input": [
+        "package.json",
+        {
+          "auto": true
+        },
+        "!src/**/*.test.ts"
+      ],
       "cache": true
     },
     "empty-inputs": {
-      "command": "print-file src/main.ts",
+      "command": "vtt print-file src/main.ts",
       "input": [],
       "cache": true
     },
     "check-fspy-env-with-auto": {
-      "command": "print-env FSPY",
-      "input": [{ "auto": true }],
+      "command": "vtt print-env FSPY",
+      "input": [
+        {
+          "auto": true
+        }
+      ],
       "cache": true
     },
     "check-fspy-env-without-auto": {
-      "command": "print-env FSPY",
-      "input": ["src/**/*.ts"],
+      "command": "vtt print-env FSPY",
+      "input": [
+        "src/**/*.ts"
+      ],
       "cache": true
     },
     "folder-input": {
-      "command": "print-file src/main.ts",
-      "input": ["src"],
+      "command": "vtt print-file src/main.ts",
+      "input": [
+        "src"
+      ],
       "cache": true
     },
     "folder-slash-input": {
-      "command": "print-file src/main.ts",
-      "input": ["src/"],
+      "command": "vtt print-file src/main.ts",
+      "input": [
+        "src/"
+      ],
       "cache": true
     }
   }

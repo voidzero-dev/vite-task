@@ -3,10 +3,10 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run root-glob-test
-$ print-file src/root.ts
+$ vtt print-file src/root.ts
 export const root = 'initial';
-> replace-file-content src/root.ts initial modified
+> vtt replace-file-content src/root.ts initial modified
 
 > vt run root-glob-test
-$ print-file src/root.ts ○ cache miss: 'src/root.ts' modified, executing
+$ vtt print-file src/root.ts ○ cache miss: 'src/root.ts' modified, executing
 export const root = 'modified';

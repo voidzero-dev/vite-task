@@ -70,6 +70,28 @@ fn synthesize_node_modules_bin_task(
     })
 }
 
+/// Create a synthetic plan request for running a `vtt` subcommand.
+///
+/// # Errors
+///
+/// Returns an error if the `vtt` executable cannot be found.
+fn synthesize_vtt_task(
+    subcommand: &str,
+    args: &[Str],
+    cache_config: UserCacheConfig,
+    envs: &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    cwd: &Arc<AbsolutePath>,
+) -> anyhow::Result<SyntheticPlanRequest> {
+    let mut full_args = vec![Str::from(subcommand)];
+    full_args.extend_from_slice(args);
+    Ok(SyntheticPlanRequest {
+        program: find_executable(get_path_env(envs), cwd, "vtt")?,
+        args: full_args.into(),
+        cache_config,
+        envs: Arc::clone(envs),
+    })
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "vt", version)]
 pub enum Args {
@@ -121,19 +143,20 @@ impl vite_task::CommandHandler for CommandHandler {
                     Arc::from(OsStr::new(name.as_str())),
                     Arc::from(OsStr::new(value.as_str())),
                 );
+                let envs = Arc::new(envs);
 
-                Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
-                    program: find_executable(get_path_env(&envs), &command.cwd, "print-env")?,
-                    args: [name.clone()].into(),
-                    cache_config: UserCacheConfig::with_config({
-                        EnabledCacheConfig {
-                            env: None,
-                            untracked_env: Some(vec![name]),
-                            input: None,
-                        }
+                let untracked = vec![name.clone()];
+                Ok(HandledCommand::Synthesized(synthesize_vtt_task(
+                    "print-env",
+                    std::slice::from_ref(&name),
+                    UserCacheConfig::with_config(EnabledCacheConfig {
+                        env: None,
+                        untracked_env: Some(untracked),
+                        input: None,
                     }),
-                    envs: Arc::new(envs),
-                }))
+                    &envs,
+                    &command.cwd,
+                )?))
             }
             Args::Task(parsed) => Ok(HandledCommand::ViteTaskCommand(parsed)),
         }

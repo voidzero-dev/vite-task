@@ -3,10 +3,10 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run -r build
-~/packages/a$ print built-a
+~/packages/a$ vtt print built-a
 built-a
 
-~/packages/b$ print built-b
+~/packages/b$ vtt print built-b
 built-b
 
 ---

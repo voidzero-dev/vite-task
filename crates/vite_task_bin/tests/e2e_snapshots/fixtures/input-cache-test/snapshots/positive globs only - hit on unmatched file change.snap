@@ -3,12 +3,12 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run positive-globs-only
-$ print-file src/main.ts
+$ vtt print-file src/main.ts
 export const main = 'initial';
-> replace-file-content test/main.test.ts outside modified
+> vtt replace-file-content test/main.test.ts outside modified
 
 > vt run positive-globs-only
-$ print-file src/main.ts ◉ cache hit, replaying
+$ vtt print-file src/main.ts ◉ cache hit, replaying
 export const main = 'initial';
 
 ---

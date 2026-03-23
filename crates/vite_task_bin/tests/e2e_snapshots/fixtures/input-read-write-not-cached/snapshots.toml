@@ -1,5 +1,5 @@
 # Tests that tasks modifying their own inputs (read-write overlap) are not cached.
-# replace-file-content reads then writes the same file — fspy detects both.
+# vtt replace-file-content reads then writes the same file — fspy detects both.
 
 # Single rw-task: compact summary shows "not cached because it modified its input"
 [[e2e]]

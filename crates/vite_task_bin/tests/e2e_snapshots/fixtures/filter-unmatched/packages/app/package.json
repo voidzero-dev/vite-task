@@ -1,7 +1,7 @@
 {
   "name": "@test/app",
   "scripts": {
-    "build": "print built-app"
+    "build": "vtt print built-app"
   },
   "dependencies": {
     "@test/lib": "workspace:*"

@@ -1,6 +1,6 @@
 {
   "name": "@test/lib",
   "scripts": {
-    "build": "print built-lib"
+    "build": "vtt print built-lib"
   }
 }

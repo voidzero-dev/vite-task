@@ -26,6 +26,8 @@ const STEP_TIMEOUT: Duration =
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
 
 const COMPILE_TIME_VT_PATH: &str = env!("CARGO_BIN_EXE_vt");
+/// Ensures the `vtt` binary is built before running e2e tests (vtt is in the same directory as vt).
+const _: &str = env!("CARGO_BIN_EXE_vtt");
 const COMPILE_TIME_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Get the shell executable for running e2e test steps.
@@ -60,10 +62,10 @@ fn get_shell_exe() -> std::path::PathBuf {
 
 #[expect(
     clippy::disallowed_types,
-    reason = "PathBuf required for compile-time/runtime vt path remapping"
+    reason = "PathBuf required for compile-time/runtime binary path remapping"
 )]
-fn resolve_runtime_vt_path() -> AbsolutePathBuf {
-    let compile_time_vt = std::path::PathBuf::from(COMPILE_TIME_VT_PATH);
+fn resolve_runtime_bin_path(compile_time_bin_path: &str) -> AbsolutePathBuf {
+    let compile_time_bin = std::path::PathBuf::from(compile_time_bin_path);
     let compile_time_manifest = std::path::PathBuf::from(COMPILE_TIME_MANIFEST_DIR);
     let runtime_manifest =
         std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
@@ -71,23 +73,23 @@ fn resolve_runtime_vt_path() -> AbsolutePathBuf {
     let compile_time_repo_root = compile_time_manifest.parent().unwrap().parent().unwrap();
     let runtime_repo_root = runtime_manifest.parent().unwrap().parent().unwrap();
 
-    let relative_vt = diff_paths(&compile_time_vt, compile_time_repo_root).unwrap_or_else(|| {
+    let relative_bin = diff_paths(&compile_time_bin, compile_time_repo_root).unwrap_or_else(|| {
         panic!(
-            "Failed to diff vt path. vt={} repo_root={}",
-            compile_time_vt.display(),
+            "Failed to diff binary path. bin={} repo_root={}",
+            compile_time_bin.display(),
             compile_time_repo_root.display(),
         )
     });
-    let runtime_vt = runtime_repo_root.join(&relative_vt);
+    let runtime_bin = runtime_repo_root.join(&relative_bin);
 
     assert!(
-        runtime_vt.exists(),
-        "Remapped vt path does not exist: {} (relative: {})",
-        runtime_vt.display(),
-        relative_vt.display(),
+        runtime_bin.exists(),
+        "Remapped binary path does not exist: {} (relative: {})",
+        runtime_bin.display(),
+        relative_bin.display(),
     );
 
-    AbsolutePathBuf::new(runtime_vt).unwrap()
+    AbsolutePathBuf::new(runtime_bin).unwrap()
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -264,33 +266,17 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
-    // Navigate from runtime CARGO_MANIFEST_DIR to packages/tools at the repo root.
-    #[expect(
-        clippy::disallowed_types,
-        reason = "Path required for CARGO_MANIFEST_DIR path traversal"
-    )]
-    let repo_root = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let repo_root = repo_root.parent().unwrap().parent().unwrap();
-    let test_bin_path = Arc::<OsStr>::from(
-        repo_root.join("packages").join("tools").join("node_modules").join(".bin").into_os_string(),
-    );
-
     // Get shell executable for running steps
     let shell_exe = get_shell_exe();
 
-    // Prepare PATH for e2e tests
+    // Prepare PATH for e2e tests: include vt and vtt binary directories.
+    // Both vt and vtt are in the same target directory.
     let e2e_env_path = join_paths(
-        [
-            // Include vt binary path to PATH so that e2e tests can run "vt ..." commands.
-            {
-                let vt_path = resolve_runtime_vt_path();
-                let vt_dir = vt_path.parent().unwrap();
-                vt_dir.as_path().as_os_str().into()
-            },
-            // Include packages/tools to PATH so that e2e tests can run utilities such as replace-file-content.
-            test_bin_path,
-        ]
-        .into_iter()
+        std::iter::once({
+            let vt_path = resolve_runtime_bin_path(COMPILE_TIME_VT_PATH);
+            let vt_dir = vt_path.parent().unwrap();
+            vt_dir.as_path().as_os_str().into()
+        })
         .chain(
             // the existing PATH
             split_paths(&env::var_os("PATH").unwrap())

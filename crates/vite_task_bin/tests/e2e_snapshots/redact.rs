@@ -23,22 +23,12 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
 )]
 pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    // Get the packages/tools directory path
-    let tools_dir = std::path::Path::new(&manifest_dir)
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("packages")
-        .join("tools");
-    let tools_dir_str = tools_dir.to_str().unwrap();
 
     redact_string(
         &mut output,
         &[
             (workspace_root, "<workspace>"),
             (manifest_dir.as_str(), "<manifest_dir>"),
-            (tools_dir_str, "<tools>"),
         ],
     );
 

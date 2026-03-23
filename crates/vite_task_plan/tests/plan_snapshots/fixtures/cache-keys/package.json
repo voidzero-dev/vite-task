@@ -1,7 +1,7 @@
 {
   "scripts": {
     "lint": "vt lint",
-    "hello": "print-file",
+    "hello": "vtt print-file",
     "lint-and-echo": "vt lint && echo",
     "echo-and-lint": "echo Linting && vt lint"
   }

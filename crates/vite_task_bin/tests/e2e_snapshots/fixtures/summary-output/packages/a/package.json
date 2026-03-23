@@ -1,6 +1,6 @@
 {
   "name": "@summary/a",
   "scripts": {
-    "build": "print built-a"
+    "build": "vtt print built-a"
   }
 }

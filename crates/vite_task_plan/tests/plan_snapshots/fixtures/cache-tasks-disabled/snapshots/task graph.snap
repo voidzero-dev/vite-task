@@ -16,7 +16,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-tasks-disa
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "print-file package.json",
+        "command": "vtt print-file package.json",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -50,7 +50,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-tasks-disa
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "print-file package.json",
+        "command": "vtt print-file package.json",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -84,7 +84,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-tasks-disa
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "print-file package.json",
+        "command": "vtt print-file package.json",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

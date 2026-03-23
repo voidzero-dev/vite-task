@@ -3,10 +3,10 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run -r -v build
-~/packages/a$ print built-a
+~/packages/a$ vtt print built-a
 built-a
 
-~/packages/b$ print built-b
+~/packages/b$ vtt print built-b
 built-b
 
 
@@ -19,9 +19,9 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] @summary/a#build: ~/packages/a$ print built-a ✓
+  [1] @summary/a#build: ~/packages/a$ vtt print built-a ✓
       → Cache miss: no previous cache entry found
   ·······················································
-  [2] @summary/b#build: ~/packages/b$ print built-b ✓
+  [2] @summary/b#build: ~/packages/b$ vtt print built-b ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

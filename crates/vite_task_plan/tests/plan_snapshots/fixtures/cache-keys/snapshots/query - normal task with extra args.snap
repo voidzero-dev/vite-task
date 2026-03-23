@@ -28,7 +28,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
               "task_name": "hello",
               "package_path": "<workspace>/"
             },
-            "command": "print-file a.txt",
+            "command": "vtt print-file a.txt",
             "and_item_index": null,
             "cwd": "<workspace>/"
           },
@@ -40,10 +40,11 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
                     "cwd": "",
                     "program_fingerprint": {
                       "OutsideWorkspace": {
-                        "program_name": "print-file"
+                        "program_name": "vtt"
                       }
                     },
                     "args": [
+                      "print-file",
                       "a.txt"
                     ],
                     "env_fingerprints": {
@@ -70,13 +71,14 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
                   }
                 },
                 "spawn_command": {
-                  "program_path": "<tools>/node_modules/.bin/print-file",
+                  "program_path": "<tools>/vtt",
                   "args": [
+                    "print-file",
                     "a.txt"
                   ],
                   "all_envs": {
                     "NO_COLOR": "1",
-                    "PATH": "<workspace>/node_modules/.bin:<tools>/node_modules/.bin"
+                    "PATH": "<workspace>/node_modules/.bin:<tools>"
                   },
                   "cwd": "<workspace>/"
                 }

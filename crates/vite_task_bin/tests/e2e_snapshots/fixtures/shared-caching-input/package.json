@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "script1": "print-file foo.txt",
-    "script2": "print-file foo.txt"
+    "script1": "vtt print-file foo.txt",
+    "script2": "vtt print-file foo.txt"
   }
 }

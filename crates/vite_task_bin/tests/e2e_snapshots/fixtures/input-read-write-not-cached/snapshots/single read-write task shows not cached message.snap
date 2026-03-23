@@ -5,12 +5,12 @@ info:
   cwd: packages/rw-pkg
 ---
 > vt run task
-~/packages/rw-pkg$ replace-file-content src/data.txt original modified
+~/packages/rw-pkg$ vtt replace-file-content src/data.txt original modified
 
 ---
 vt run: @test/rw-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)
 > vt run task
-~/packages/rw-pkg$ replace-file-content src/data.txt original modified
+~/packages/rw-pkg$ vtt replace-file-content src/data.txt original modified
 
 ---
 vt run: @test/rw-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)

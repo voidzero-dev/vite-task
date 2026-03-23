@@ -3,19 +3,19 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run say a # cache miss
-$ print a
+$ vtt print a
 a
 > vt run say b # cache miss, different args
-$ print b
+$ vtt print b
 b
 > vt run say a # cache hit
-$ print a ◉ cache hit, replaying
+$ vtt print a ◉ cache hit, replaying
 a
 
 ---
 vt run: cache hit, <duration> saved.
 > vt run say b # cache hit
-$ print b ◉ cache hit, replaying
+$ vtt print b ◉ cache hit, replaying
 b
 
 ---

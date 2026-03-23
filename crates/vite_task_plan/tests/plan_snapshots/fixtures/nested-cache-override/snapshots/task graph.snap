@@ -16,7 +16,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/nested-cache-ove
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "print-file package.json",
+        "command": "vtt print-file package.json",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

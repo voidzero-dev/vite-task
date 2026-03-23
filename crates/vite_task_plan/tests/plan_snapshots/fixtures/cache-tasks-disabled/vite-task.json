@@ -1,11 +1,13 @@
 {
-  "cache": { "tasks": false },
+  "cache": {
+    "tasks": false
+  },
   "tasks": {
     "build": {
-      "command": "print-file package.json"
+      "command": "vtt print-file package.json"
     },
     "deploy": {
-      "command": "print-file package.json",
+      "command": "vtt print-file package.json",
       "cache": true
     }
   }

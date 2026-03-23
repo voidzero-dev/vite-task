@@ -5,7 +5,7 @@ info:
   cwd: packages/a
 ---
 > vt run build # populate summary file
-~/packages/a$ print built-a
+~/packages/a$ vtt print built-a
 built-a
 > vt run --last-details # display saved summary
 
@@ -18,6 +18,6 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] @summary/a#build: ~/packages/a$ print built-a ✓
+  [1] @summary/a#build: ~/packages/a$ vtt print built-a ✓
       → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

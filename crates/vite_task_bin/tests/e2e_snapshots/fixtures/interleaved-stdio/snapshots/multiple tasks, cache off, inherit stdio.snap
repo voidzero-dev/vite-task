@@ -3,12 +3,12 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run -r check-tty
-~/packages/other$ check-tty
+~/packages/other$ vtt check-tty
 stdin:not-tty
 stdout:not-tty
 stderr:not-tty
 
-$ check-tty ⊘ cache disabled
+$ vtt check-tty ⊘ cache disabled
 stdin:tty
 stdout:tty
 stderr:tty

@@ -5,5 +5,5 @@ info:
   cwd: packages/a
 ---
 > vt run build
-~/packages/a$ print built-a
+~/packages/a$ vtt print built-a
 built-a

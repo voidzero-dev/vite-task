@@ -60,24 +60,16 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     }
 }
 
-#[expect(
-    clippy::disallowed_types,
-    reason = "String required by std::env::var return type and serde_json Value manipulation; Path required for CARGO_MANIFEST_DIR path manipulation"
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "redaction logic is sequential and reads better in one function"
-)]
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    // Get the packages/tools directory path
-    let tools_dir = std::path::Path::new(&manifest_dir)
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("packages")
-        .join("tools");
+    // Get the vtt binary directory path — vtt is in target/<profile>/,
+    // while the test binary is in target/<profile>/deps/.
+    let tools_dir = {
+        let current_exe = std::env::current_exe().unwrap();
+        // Test binaries are in target/<profile>/deps/, but workspace binaries (vtt)
+        // are in target/<profile>/. Go up from deps/ to find the tools directory.
+        current_exe.parent().unwrap().parent().unwrap().to_owned()
+    };
     let tools_dir_str = tools_dir.to_str().unwrap().to_owned();
     let mut json_value = serde_json::to_value(value).unwrap();
 

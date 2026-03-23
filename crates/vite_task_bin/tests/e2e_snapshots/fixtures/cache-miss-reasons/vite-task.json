@@ -2,13 +2,17 @@
   "cache": true,
   "tasks": {
     "test": {
-      "command": "print-file test.txt",
-      "env": ["MY_ENV"],
+      "command": "vtt print-file test.txt",
+      "env": [
+        "MY_ENV"
+      ],
       "cache": true
     },
     "glob-test": {
-      "command": "print glob-test",
-      "input": ["*.txt"],
+      "command": "vtt print glob-test",
+      "input": [
+        "*.txt"
+      ],
       "cache": true
     }
   }

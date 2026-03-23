@@ -166,25 +166,24 @@ fn run_case_inner(
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
-    // Navigate from CARGO_MANIFEST_DIR to packages/tools at the repo root
-    #[expect(
-        clippy::disallowed_types,
-        reason = "Path required for CARGO_MANIFEST_DIR path manipulation to locate packages/tools"
-    )]
+    // Locate the vtt binary directory. Since both plan_snapshots test and vtt are built
+    // into the same Cargo target directory, we can find vtt next to the current test executable.
     let test_bin_path = {
-        let repo_root =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-        Arc::<OsStr>::from(
-            repo_root
-                .join("packages")
-                .join("tools")
-                .join("node_modules")
-                .join(".bin")
-                .into_os_string(),
-        )
+        let current_exe = std::env::current_exe().unwrap();
+        // Test binaries are in target/<profile>/deps/, but workspace binaries (vtt)
+        // are in target/<profile>/. Go up from deps/ to find vtt.
+        let deps_dir = current_exe.parent().unwrap();
+        let bin_dir = deps_dir.parent().unwrap();
+        let vtt_name = if cfg!(windows) { "vtt.exe" } else { "vtt" };
+        assert!(
+            bin_dir.join(vtt_name).exists(),
+            "vtt binary not found at {}. Build it first with: cargo build --bin vtt",
+            bin_dir.join(vtt_name).display(),
+        );
+        Arc::<OsStr>::from(bin_dir.as_os_str())
     };
 
-    // Add packages/tools to PATH so test programs (such as print-file) in fixtures can be found.
+    // Add vtt binary directory to PATH so test programs (such as vtt print-file) in fixtures can be found.
     let plan_envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> = [
         (Arc::<OsStr>::from(OsStr::new("PATH")), Arc::clone(&test_bin_path)),
         (Arc::<OsStr>::from(OsStr::new("NO_COLOR")), Arc::<OsStr>::from(OsStr::new("1"))),
