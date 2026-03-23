@@ -166,7 +166,14 @@ pub async fn spawn_with_tracking(
     // On cancellation, the background task kills the direct child, but on Windows
     // grandchild processes may keep pipes open. The cancellation branch terminates
     // the entire job to close all pipe writers.
+    //
+    // The exit condition is checked at the top of the loop (not via `else =>`),
+    // because the `cancelled()` arm stays pending even when pipes are done,
+    // which would prevent `else` from ever firing.
     loop {
+        if stdout_done && stderr_done {
+            break;
+        }
         tokio::select! {
             result = child_stdout.read(&mut stdout_buf), if !stdout_done => {
                 match result? {
@@ -217,7 +224,6 @@ pub async fn spawn_with_tracking(
                 job.terminate();
                 break;
             }
-            else => break,
         }
     }
 
