@@ -14,4 +14,4 @@ export const main = 'initial';
 export const utils = 'initial';
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.

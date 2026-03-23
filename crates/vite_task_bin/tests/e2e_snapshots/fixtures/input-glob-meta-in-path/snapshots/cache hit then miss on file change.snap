@@ -10,7 +10,7 @@ export const lib = 'initial';
 export const lib = 'initial';
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.
 > vtt replace-file-content packages/[lib]/src/main.ts initial modified
 
 > vt run [lib]#build

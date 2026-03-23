@@ -31,4 +31,4 @@ stdout:not-tty
 stderr:not-tty
 
 ---
-vt run: 2/2 cache hit (100%), <duration> saved. (Run `vt run --last-details` for full details)
+vt run: 2/2 cache hit (100%). (Run `vt run --last-details` for full details)

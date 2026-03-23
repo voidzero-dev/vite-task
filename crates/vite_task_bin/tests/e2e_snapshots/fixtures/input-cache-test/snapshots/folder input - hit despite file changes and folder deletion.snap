@@ -12,7 +12,7 @@ $ vtt print-file src/main.ts ◉ cache hit, replaying
 export const main = 'initial';
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.
 > rm -rf src
 
 > vt run folder-input
@@ -20,4 +20,4 @@ $ vtt print-file src/main.ts ◉ cache hit, replaying
 export const main = 'initial';
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.

@@ -10,4 +10,4 @@ $ vtt print-file test.txt ◉ cache hit, replaying
 test content
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.

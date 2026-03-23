@@ -13,10 +13,10 @@ $ vtt print a ◉ cache hit, replaying
 a
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.
 > vt run say b # cache hit
 $ vtt print b ◉ cache hit, replaying
 b
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.

@@ -10,7 +10,7 @@ $ vtt print-file foo.txt ◉ cache hit, replaying
 initial content
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.
 > vtt replace-file-content foo.txt initial modified # modify shared input
 
 > vt run script2 # cache miss, input changed
@@ -21,4 +21,4 @@ $ vtt print-file foo.txt ◉ cache hit, replaying
 modified content
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.

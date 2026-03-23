@@ -8,4 +8,4 @@ $ node read_node_fs.js
 $ node read_node_fs.js ◉ cache hit, replaying
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.

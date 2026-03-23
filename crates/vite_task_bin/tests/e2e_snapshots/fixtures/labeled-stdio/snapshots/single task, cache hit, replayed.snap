@@ -14,4 +14,4 @@ expression: e2e_outputs
 [labeled-stdio-test#check-tty-cached] stderr:not-tty
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.

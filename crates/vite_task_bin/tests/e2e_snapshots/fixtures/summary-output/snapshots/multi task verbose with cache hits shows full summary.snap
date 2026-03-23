@@ -24,13 +24,13 @@ built-b
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Statistics:   2 tasks • 2 cache hits • 0 cache misses
-Performance:  100% cache hit rate, <duration> saved in total
+Performance:  100% cache hit rate in total
 
 Task Details:
 ────────────────────────────────────────────────
   [1] @summary/a#build: ~/packages/a$ vtt print built-a ✓
-      → Cache hit - output replayed - <duration> saved
+      → Cache hit - output replayed -
   ·······················································
   [2] @summary/b#build: ~/packages/b$ vtt print built-b ✓
-      → Cache hit - output replayed - <duration> saved
+      → Cache hit - output replayed -
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

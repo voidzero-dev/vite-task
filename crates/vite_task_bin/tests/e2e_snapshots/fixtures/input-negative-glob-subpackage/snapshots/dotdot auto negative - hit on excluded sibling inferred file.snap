@@ -14,4 +14,4 @@ export const shared = 'initial';
 // initial output
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.

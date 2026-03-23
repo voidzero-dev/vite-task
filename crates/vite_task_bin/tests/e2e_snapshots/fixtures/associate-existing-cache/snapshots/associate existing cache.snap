@@ -10,7 +10,7 @@ $ vtt print hello ◉ cache hit, replaying
 hello
 
 ---
-vt run: cache hit, <duration> saved.
+vt run: cache hit.
 > vtt json-edit package.json '_.scripts.script2 = "vtt print world"' # change script2
 
 > vt run script2 # cache miss
