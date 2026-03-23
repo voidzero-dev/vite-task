@@ -630,6 +630,7 @@ impl<'a> Session<'a> {
             &spawn_execution,
             cache,
             &self.workspace_path,
+            tokio_util::sync::CancellationToken::new(),
         )
         .await;
         match outcome {

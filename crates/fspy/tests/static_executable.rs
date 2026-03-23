@@ -45,7 +45,7 @@ async fn track_test_bin(args: &[&str], cwd: Option<&str>) -> PathAccessIterable 
         cmd.current_dir(cwd);
     }
     cmd.args(args);
-    let tracked_child = cmd.spawn().await.unwrap();
+    let tracked_child = cmd.spawn(tokio_util::sync::CancellationToken::new()).await.unwrap();
 
     let termination = tracked_child.wait_handle.await.unwrap();
     assert!(termination.status.success());

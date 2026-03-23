@@ -6,6 +6,7 @@ pub mod spawn;
 use std::{collections::BTreeMap, io::Write as _, process::Stdio, sync::Arc};
 
 use futures_util::FutureExt;
+use tokio_util::sync::CancellationToken;
 use vite_path::AbsolutePath;
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
@@ -58,6 +59,8 @@ struct ExecutionContext<'a> {
     /// Base path for resolving relative paths in cache entries.
     /// Typically the workspace root.
     cache_base_path: &'a Arc<AbsolutePath>,
+    /// Token for cancelling in-flight child processes.
+    cancellation_token: CancellationToken,
 }
 
 impl ExecutionContext<'_> {
@@ -142,9 +145,14 @@ impl ExecutionContext<'_> {
                     clippy::large_futures,
                     reason = "spawn execution with cache management creates large futures"
                 )]
-                let outcome =
-                    execute_spawn(leaf_reporter, spawn_execution, self.cache, self.cache_base_path)
-                        .await;
+                let outcome = execute_spawn(
+                    leaf_reporter,
+                    spawn_execution,
+                    self.cache,
+                    self.cache_base_path,
+                    self.cancellation_token.clone(),
+                )
+                .await;
                 match outcome {
                     SpawnOutcome::CacheHit => false,
                     SpawnOutcome::Spawned(status) => !status.success(),
@@ -179,6 +187,7 @@ pub async fn execute_spawn(
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
     cache_base_path: &Arc<AbsolutePath>,
+    cancellation_token: CancellationToken,
 ) -> SpawnOutcome {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
@@ -271,7 +280,7 @@ pub async fn execute_spawn(
         // while the child also writes to the same FD.
         drop(stdio_config);
 
-        match spawn_inherited(&spawn_execution.spawn_command).await {
+        match spawn_inherited(&spawn_execution.spawn_command, cancellation_token).await {
             Ok(result) => {
                 leaf_reporter.finish(
                     Some(result.exit_status),
@@ -342,6 +351,7 @@ pub async fn execute_spawn(
         std_outputs.as_mut(),
         path_accesses.as_mut(),
         &resolved_negatives,
+        cancellation_token,
     )
     .await
     {
@@ -439,7 +449,10 @@ pub async fn execute_spawn(
 /// The child process will see `is_terminal() == true` for stdout/stderr when the
 /// parent is running in a terminal. This is expected behavior.
 #[tracing::instrument(level = "debug", skip_all)]
-async fn spawn_inherited(spawn_command: &SpawnCommand) -> anyhow::Result<SpawnResult> {
+async fn spawn_inherited(
+    spawn_command: &SpawnCommand,
+    cancellation_token: CancellationToken,
+) -> anyhow::Result<SpawnResult> {
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
     cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
     cmd.envs(spawn_command.all_envs.iter());
@@ -481,7 +494,13 @@ async fn spawn_inherited(spawn_command: &SpawnCommand) -> anyhow::Result<SpawnRe
     }
 
     let mut child = tokio_cmd.spawn()?;
-    let exit_status = child.wait().await?;
+    let exit_status = tokio::select! {
+        status = child.wait() => status?,
+        () = cancellation_token.cancelled() => {
+            child.start_kill()?;
+            child.wait().await?
+        }
+    };
 
     Ok(SpawnResult { exit_status, duration: start.elapsed() })
 }
@@ -519,6 +538,7 @@ impl Session<'_> {
             reporter: &mut *reporter,
             cache,
             cache_base_path: &self.workspace_path,
+            cancellation_token: CancellationToken::new(),
         };
 
         // Execute the graph with fast-fail: if any task fails, remaining tasks

@@ -8,6 +8,7 @@ use std::{
 use fspy_shared_unix::exec::Exec;
 use rustc_hash::FxHashMap;
 use tokio::process::Command as TokioCommand;
+use tokio_util::sync::CancellationToken;
 
 use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 
@@ -167,9 +168,12 @@ impl Command {
     /// # Errors
     ///
     /// Returns [`SpawnError`] if program resolution fails or the process cannot be spawned.
-    pub async fn spawn(mut self) -> Result<TrackedChild, SpawnError> {
+    pub async fn spawn(
+        mut self,
+        cancellation_token: CancellationToken,
+    ) -> Result<TrackedChild, SpawnError> {
         self.resolve_program()?;
-        SPY_IMPL.spawn(self).await
+        SPY_IMPL.spawn(self, cancellation_token).await
     }
 
     /// Resolve program name to full path using `PATH` and cwd.

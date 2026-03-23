@@ -84,7 +84,8 @@ async fn main() {
             .stderr(Stdio::piped())
             .current_dir(&dir);
 
-        let mut tracked_child = cmd.spawn().await.unwrap();
+        let mut tracked_child =
+            cmd.spawn(tokio_util::sync::CancellationToken::new()).await.unwrap();
 
         let mut stdout_bytes = Vec::<u8>::new();
         tracked_child.stdout.take().unwrap().read_to_end(&mut stdout_bytes).await.unwrap();

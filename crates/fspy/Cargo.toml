@@ -20,6 +20,7 @@ rustc-hash = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "process", "io-util", "sync", "rt"] }
+tokio-util = { workspace = true }
 which = { workspace = true, features = ["tracing"] }
 xxhash-rust = { workspace = true }
 

@@ -22,6 +22,7 @@ use futures_util::FutureExt;
 #[cfg(target_os = "linux")]
 use syscall_handler::SyscallHandler;
 use tokio::task::spawn_blocking;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     ChildTermination, Command, TrackedChild,
@@ -80,7 +81,11 @@ impl SpyImpl {
         })
     }
 
-    pub(crate) async fn spawn(&self, mut command: Command) -> Result<TrackedChild, SpawnError> {
+    pub(crate) async fn spawn(
+        &self,
+        mut command: Command,
+        cancellation_token: CancellationToken,
+    ) -> Result<TrackedChild, SpawnError> {
         #[cfg(target_os = "linux")]
         let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
 
@@ -143,7 +148,13 @@ impl SpyImpl {
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
             // because we need to stop the supervisor and lock the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
-                let status = child.wait().await?;
+                let status = tokio::select! {
+                    status = child.wait() => status?,
+                    () = cancellation_token.cancelled() => {
+                        child.start_kill()?;
+                        child.wait().await?
+                    }
+                };
 
                 let arenas = std::iter::once(exec_resolve_accesses);
                 // Stop the supervisor and collect path accesses from it.

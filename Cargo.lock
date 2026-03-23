@@ -1176,6 +1176,7 @@ dependencies = [
  "test-log",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "which",
  "winapi",
  "winsafe 0.0.24",
@@ -1200,6 +1201,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "tokio",
+ "tokio-util",
  "toml",
 ]
 
@@ -3884,6 +3886,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "twox-hash",
  "vite_path",

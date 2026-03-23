@@ -12,6 +12,7 @@ use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use tokio::io::AsyncReadExt as _;
+use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 use wax::Program as _;
@@ -70,6 +71,10 @@ pub struct TrackedPathAccesses {
     clippy::too_many_lines,
     reason = "spawn logic is inherently sequential and splitting would reduce clarity"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "spawn parameters are all distinct concerns that don't form a natural group"
+)]
 pub async fn spawn_with_tracking(
     spawn_command: &SpawnCommand,
     workspace_root: &AbsolutePath,
@@ -78,15 +83,19 @@ pub async fn spawn_with_tracking(
     std_outputs: Option<&mut Vec<StdOutput>>,
     path_accesses: Option<&mut TrackedPathAccesses>,
     resolved_negatives: &[wax::Glob<'static>],
+    cancellation_token: CancellationToken,
 ) -> anyhow::Result<SpawnResult> {
-    /// The tracking state of the spawned process.
-    /// Determined by whether `path_accesses` is `Some` (fspy enabled) or `None` (fspy disabled).
-    enum TrackingState {
-        /// fspy tracking is enabled
+    /// How the child process is awaited after stdout/stderr are drained.
+    ///
+    /// Both variants run a background task that monitors the cancellation token
+    /// and kills the child when cancelled. The read loop needs no cancellation
+    /// branch — killing the child closes its pipes, which makes reads return EOF.
+    enum WaitState {
+        /// fspy tracking enabled — background task managed by fspy.
         FspyEnabled(fspy::TrackedChild),
 
-        /// fspy tracking is disabled, using plain tokio process
-        FspyDisabled(tokio::process::Child),
+        /// Plain tokio process — we spawn our own cancellation-aware background task.
+        TokioChild(tokio::task::JoinHandle<std::io::Result<ExitStatus>>),
     }
 
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
@@ -95,21 +104,27 @@ pub async fn spawn_with_tracking(
     cmd.current_dir(&*spawn_command.cwd);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let mut tracking_state = if path_accesses.is_some() {
-        // path_accesses is Some, spawn with fspy tracking enabled
-        TrackingState::FspyEnabled(cmd.spawn().await?)
+    let (mut child_stdout, mut child_stderr, wait_state) = if path_accesses.is_some() {
+        // fspy tracking enabled — fspy's background task handles cancellation
+        let mut tracked_child = cmd.spawn(cancellation_token).await?;
+        let stdout = tracked_child.stdout.take().unwrap();
+        let stderr = tracked_child.stderr.take().unwrap();
+        (stdout, stderr, WaitState::FspyEnabled(tracked_child))
     } else {
-        // path_accesses is None, spawn without fspy
-        TrackingState::FspyDisabled(cmd.into_tokio_command().spawn()?)
-    };
-
-    let mut child_stdout = match &mut tracking_state {
-        TrackingState::FspyEnabled(tracked_child) => tracked_child.stdout.take().unwrap(),
-        TrackingState::FspyDisabled(tokio_child) => tokio_child.stdout.take().unwrap(),
-    };
-    let mut child_stderr = match &mut tracking_state {
-        TrackingState::FspyEnabled(tracked_child) => tracked_child.stderr.take().unwrap(),
-        TrackingState::FspyDisabled(tokio_child) => tokio_child.stderr.take().unwrap(),
+        // No fspy — spawn a background task that waits for exit or cancellation
+        let mut child = cmd.into_tokio_command().spawn()?;
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let wait_handle = tokio::spawn(async move {
+            tokio::select! {
+                status = child.wait() => status,
+                () = cancellation_token.cancelled() => {
+                    child.start_kill()?;
+                    child.wait().await
+                }
+            }
+        });
+        (stdout, stderr, WaitState::TokioChild(wait_handle))
     };
 
     // Output capturing is independent of fspy tracking
@@ -122,6 +137,9 @@ pub async fn spawn_with_tracking(
     let start = Instant::now();
 
     // Read from both stdout and stderr concurrently using select!
+    // No cancellation branch needed — both WaitState variants run a background task
+    // that kills the child on cancellation, which closes the pipes and makes reads
+    // return EOF naturally.
     loop {
         tokio::select! {
             result = child_stdout.read(&mut stdout_buf), if !stdout_done => {
@@ -170,9 +188,10 @@ pub async fn spawn_with_tracking(
         }
     }
 
-    // Wait for process termination and process path accesses if fspy was enabled
-    let (termination, path_accesses) = match tracking_state {
-        TrackingState::FspyEnabled(tracked_child) => {
+    // Wait for process termination. Both variants' background tasks handle
+    // cancellation internally, so these awaits need no additional select.
+    let (termination, path_accesses) = match wait_state {
+        WaitState::FspyEnabled(tracked_child) => {
             let termination = tracked_child.wait_handle.await?;
             // path_accesses must be Some when fspy is enabled (they're set together)
             let path_accesses = path_accesses.ok_or_else(|| {
@@ -180,8 +199,8 @@ pub async fn spawn_with_tracking(
             })?;
             (termination, path_accesses)
         }
-        TrackingState::FspyDisabled(mut tokio_child) => {
-            let exit_status = tokio_child.wait().await?;
+        WaitState::TokioChild(wait_handle) => {
+            let exit_status = wait_handle.await.map_err(|err| anyhow::anyhow!(err))??;
             return Ok(SpawnResult { exit_status, duration: start.elapsed() });
         }
     };
