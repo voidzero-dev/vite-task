@@ -26,14 +26,11 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
 
     redact_string(
         &mut output,
-        &[
-            (workspace_root, "<workspace>"),
-            (manifest_dir.as_str(), "<manifest_dir>"),
-        ],
+        &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
     );
 
-    // Redact durations like "123ms" or "1.23s" to "<duration>ms" or "<duration>s"
-    let duration_regex = regex::Regex::new(r"\d+(\.\d+)?(ms|s)").unwrap();
+    // Redact durations like "0ns", "123ms" or "1.23s" to "<duration>"
+    let duration_regex = regex::Regex::new(r"\d+(\.\d+)?(ns|ms|s)").unwrap();
     output = duration_regex.replace_all(&output, "<duration>").into_owned();
 
     // Redact thread counts like "using 10 threads" to "using <n> threads"

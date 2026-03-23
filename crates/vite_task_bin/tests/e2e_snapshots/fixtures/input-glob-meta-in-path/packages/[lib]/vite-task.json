@@ -2,9 +2,7 @@
   "tasks": {
     "build": {
       "command": "vtt print-file src/main.ts",
-      "input": [
-        "src/**/*.ts"
-      ],
+      "input": ["src/**/*.ts"],
       "cache": true
     }
   }

@@ -3,9 +3,7 @@
   "tasks": {
     "hello": {
       "command": "vtt print-env FOO",
-      "env": [
-        "FOO"
-      ],
+      "env": ["FOO"],
       "cache": true
     }
   }

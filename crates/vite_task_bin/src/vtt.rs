@@ -15,7 +15,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
-        eprintln!("Subcommands: check-tty, json-edit, print, print-env, print-file, read-stdin, replace-file-content, touch-file");
+        eprintln!(
+            "Subcommands: check-tty, json-edit, print, print-env, print-file, read-stdin, replace-file-content, touch-file"
+        );
         std::process::exit(1);
     }
 
@@ -251,13 +253,9 @@ fn set_path(
     let (last, parents) = path.split_last().ok_or("Empty path")?;
     let mut current = root;
     for key in parents {
-        current = current
-            .get_mut(key.as_str())
-            .ok_or_else(|| format!("Key not found: {key}"))?;
+        current = current.get_mut(key.as_str()).ok_or_else(|| format!("Key not found: {key}"))?;
     }
-    let obj = current
-        .as_object_mut()
-        .ok_or("Parent is not an object")?;
+    let obj = current.as_object_mut().ok_or("Parent is not an object")?;
     obj.insert(last.clone(), value);
     Ok(())
 }
@@ -269,13 +267,9 @@ fn delete_path(
     let (last, parents) = path.split_last().ok_or("Empty path")?;
     let mut current = root;
     for key in parents {
-        current = current
-            .get_mut(key.as_str())
-            .ok_or_else(|| format!("Key not found: {key}"))?;
+        current = current.get_mut(key.as_str()).ok_or_else(|| format!("Key not found: {key}"))?;
     }
-    let obj = current
-        .as_object_mut()
-        .ok_or("Parent is not an object")?;
+    let obj = current.as_object_mut().ok_or("Parent is not an object")?;
     obj.remove(last.as_str());
     Ok(())
 }

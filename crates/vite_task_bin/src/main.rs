@@ -26,11 +26,8 @@ async fn run() -> anyhow::Result<ExitStatus> {
             // In vite-plus, Session::exec is used for auto-install.
             let envs = session.envs();
             if envs.contains_key(std::ffi::OsStr::new("FOO")) {
-                let program = vite_task_bin::find_executable(
-                    get_path_env(envs),
-                    session.cwd(),
-                    "vtt",
-                )?;
+                let program =
+                    vite_task_bin::find_executable(get_path_env(envs), session.cwd(), "vtt")?;
                 let request = SyntheticPlanRequest {
                     program,
                     args: [Str::from("print-env"), Str::from("FOO")].into(),

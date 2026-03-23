@@ -3,16 +3,12 @@
   "tasks": {
     "test": {
       "command": "vtt print-file test.txt",
-      "env": [
-        "MY_ENV"
-      ],
+      "env": ["MY_ENV"],
       "cache": true
     },
     "glob-test": {
       "command": "vtt print glob-test",
-      "input": [
-        "*.txt"
-      ],
+      "input": ["*.txt"],
       "cache": true
     }
   }
