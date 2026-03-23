@@ -57,6 +57,15 @@ pub struct TrackedPathAccesses {
     pub path_writes: FxHashSet<RelativePathBuf>,
 }
 
+/// How the child process is awaited after stdout/stderr are drained.
+enum ChildWait {
+    /// fspy tracking enabled — fspy manages cancellation internally.
+    Fspy(fspy::TrackedChild),
+
+    /// Plain tokio process — cancellation is handled in the pipe read loop.
+    Tokio(tokio::process::Child),
+}
+
 /// Spawn a command with optional file system tracking via fspy, using piped stdio.
 ///
 /// Returns the execution result including exit status and duration.
@@ -85,19 +94,6 @@ pub async fn spawn_with_tracking(
     resolved_negatives: &[wax::Glob<'static>],
     cancellation_token: CancellationToken,
 ) -> anyhow::Result<SpawnResult> {
-    /// How the child process is awaited after stdout/stderr are drained.
-    ///
-    /// Both variants run a background task that monitors the cancellation token
-    /// and kills the child when cancelled. The read loop needs no cancellation
-    /// branch — killing the child closes its pipes, which makes reads return EOF.
-    enum WaitState {
-        /// fspy tracking enabled — background task managed by fspy.
-        FspyEnabled(fspy::TrackedChild),
-
-        /// Plain tokio process — we spawn our own cancellation-aware background task.
-        TokioChild(tokio::task::JoinHandle<std::io::Result<ExitStatus>>),
-    }
-
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
     cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
     cmd.envs(spawn_command.all_envs.iter());
@@ -106,18 +102,13 @@ pub async fn spawn_with_tracking(
 
     // On Windows, assign the child to a Job Object so that killing the child also
     // kills all descendant processes (e.g., node.exe spawned by a .cmd shim).
-    // Declared before the branch so it outlives both the fspy and non-fspy paths.
     #[cfg(windows)]
     let job;
 
-    // Clone the token before it's moved into the spawn branches. The clone is used
-    // in the pipe read loop on Windows to terminate the job (killing grandchild
-    // processes that hold pipes open).
-    let cancellation_for_pipes = cancellation_token.clone();
-
-    let (mut child_stdout, mut child_stderr, wait_state) = if path_accesses.is_some() {
-        // fspy tracking enabled — fspy's background task handles cancellation
-        let mut tracked_child = cmd.spawn(cancellation_token).await?;
+    let (mut child_stdout, mut child_stderr, mut child_wait) = if path_accesses.is_some() {
+        // fspy tracking enabled — fspy manages cancellation internally via a clone
+        // of the token. We keep the original for the pipe read loop.
+        let mut tracked_child = cmd.spawn(cancellation_token.clone()).await?;
         let stdout = tracked_child.stdout.take().unwrap();
         let stderr = tracked_child.stderr.take().unwrap();
         #[cfg(windows)]
@@ -127,9 +118,8 @@ pub async fn spawn_with_tracking(
                 tracked_child.process_handle.as_raw_handle(),
             )?;
         }
-        (stdout, stderr, WaitState::FspyEnabled(tracked_child))
+        (stdout, stderr, ChildWait::Fspy(tracked_child))
     } else {
-        // No fspy — spawn a background task that waits for exit or cancellation
         let mut child = cmd.into_tokio_command().spawn()?;
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
@@ -141,16 +131,7 @@ pub async fn spawn_with_tracking(
             let owned = borrowed.try_clone_to_owned()?;
             job = super::win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?;
         }
-        let wait_handle = tokio::spawn(async move {
-            tokio::select! {
-                status = child.wait() => status,
-                () = cancellation_token.cancelled() => {
-                    child.start_kill()?;
-                    child.wait().await
-                }
-            }
-        });
-        (stdout, stderr, WaitState::TokioChild(wait_handle))
+        (stdout, stderr, ChildWait::Tokio(child))
     };
 
     // Output capturing is independent of fspy tracking
@@ -163,13 +144,8 @@ pub async fn spawn_with_tracking(
     let start = Instant::now();
 
     // Read from both stdout and stderr concurrently using select!
-    // On cancellation, the background task kills the direct child, but on Windows
-    // grandchild processes may keep pipes open. The cancellation branch terminates
-    // the entire job to close all pipe writers.
-    //
-    // The exit condition is checked at the top of the loop (not via `else =>`),
-    // because the `cancelled()` arm stays pending even when pipes are done,
-    // which would prevent `else` from ever firing.
+    // Cancellation is handled directly in the loop: kill the child process (and
+    // on Windows, terminate the Job Object to kill grandchildren holding pipes).
     loop {
         if stdout_done && stderr_done {
             break;
@@ -217,9 +193,13 @@ pub async fn spawn_with_tracking(
                     }
                 }
             }
-            // On Windows, kill the entire process tree so that grandchild processes
-            // release their pipe handles, allowing the reads above to reach EOF.
-            () = cancellation_for_pipes.cancelled(), if cfg!(windows) => {
+            () = cancellation_token.cancelled() => {
+                // Kill the direct child (no-op for fspy which handles it internally).
+                if let ChildWait::Tokio(ref mut child) = child_wait {
+                    let _ = child.start_kill();
+                }
+                // On Windows, terminate the entire process tree so grandchild
+                // processes release their pipe handles.
                 #[cfg(windows)]
                 job.terminate();
                 break;
@@ -227,83 +207,86 @@ pub async fn spawn_with_tracking(
         }
     }
 
-    // Wait for process termination. Both variants' background tasks handle
-    // cancellation internally, so these awaits need no additional select.
-    let (termination, path_accesses) = match wait_state {
-        WaitState::FspyEnabled(tracked_child) => {
+    // Wait for process termination and collect results.
+    match child_wait {
+        ChildWait::Fspy(tracked_child) => {
             let termination = tracked_child.wait_handle.await?;
+            let duration = start.elapsed();
+
             // path_accesses must be Some when fspy is enabled (they're set together)
             let path_accesses = path_accesses.ok_or_else(|| {
                 anyhow::anyhow!("internal error: fspy enabled but path_accesses is None")
             })?;
-            (termination, path_accesses)
-        }
-        WaitState::TokioChild(wait_handle) => {
-            let exit_status = wait_handle.await.map_err(|err| anyhow::anyhow!(err))??;
-            return Ok(SpawnResult { exit_status, duration: start.elapsed() });
-        }
-    };
-    let duration = start.elapsed();
-    let path_reads = &mut path_accesses.path_reads;
-    let path_writes = &mut path_accesses.path_writes;
+            let path_reads = &mut path_accesses.path_reads;
+            let path_writes = &mut path_accesses.path_writes;
 
-    for access in termination.path_accesses.iter() {
-        // Strip workspace root, clean `..` components, and filter in one pass.
-        // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
-        let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {
-            let Ok(stripped_path) = strip_result else {
-                return None;
-            };
-            // On Windows, paths are possible to be still absolute after stripping the workspace root.
-            // For example: c:\workspace\subdir\c:\workspace\subdir
-            // Just ignore those accesses.
-            let relative = RelativePathBuf::new(stripped_path).ok()?;
+            for access in termination.path_accesses.iter() {
+                // Strip workspace root, clean `..` components, and filter in one pass.
+                // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
+                let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {
+                    let Ok(stripped_path) = strip_result else {
+                        return None;
+                    };
+                    // On Windows, paths are possible to be still absolute after stripping the workspace root.
+                    // For example: c:\workspace\subdir\c:\workspace\subdir
+                    // Just ignore those accesses.
+                    let relative = RelativePathBuf::new(stripped_path).ok()?;
 
-            // Clean `..` components — fspy may report paths like
-            // `packages/sub-pkg/../shared/dist/output.js`. Normalize them for
-            // consistent behavior across platforms and clean user-facing messages.
-            let relative = relative.clean();
+                    // Clean `..` components — fspy may report paths like
+                    // `packages/sub-pkg/../shared/dist/output.js`. Normalize them for
+                    // consistent behavior across platforms and clean user-facing messages.
+                    let relative = relative.clean();
 
-            // Skip .git directory accesses (workaround for tools like oxlint)
-            if relative.as_path().strip_prefix(".git").is_ok() {
-                return None;
-            }
+                    // Skip .git directory accesses (workaround for tools like oxlint)
+                    if relative.as_path().strip_prefix(".git").is_ok() {
+                        return None;
+                    }
 
-            if !resolved_negatives.is_empty()
-                && resolved_negatives.iter().any(|neg| neg.is_match(relative.as_str()))
-            {
-                return None;
-            }
+                    if !resolved_negatives.is_empty()
+                        && resolved_negatives.iter().any(|neg| neg.is_match(relative.as_str()))
+                    {
+                        return None;
+                    }
 
-            Some(relative)
-        });
+                    Some(relative)
+                });
 
-        let Some(relative_path) = relative_path else {
-            continue;
-        };
+                let Some(relative_path) = relative_path else {
+                    continue;
+                };
 
-        if access.mode.contains(AccessMode::READ) {
-            path_reads.entry(relative_path.clone()).or_insert(PathRead { read_dir_entries: false });
-        }
-        if access.mode.contains(AccessMode::WRITE) {
-            path_writes.insert(relative_path.clone());
-        }
-        if access.mode.contains(AccessMode::READ_DIR) {
-            match path_reads.entry(relative_path) {
-                Entry::Occupied(mut occupied) => occupied.get_mut().read_dir_entries = true,
-                Entry::Vacant(vacant) => {
-                    vacant.insert(PathRead { read_dir_entries: true });
+                if access.mode.contains(AccessMode::READ) {
+                    path_reads
+                        .entry(relative_path.clone())
+                        .or_insert(PathRead { read_dir_entries: false });
+                }
+                if access.mode.contains(AccessMode::WRITE) {
+                    path_writes.insert(relative_path.clone());
+                }
+                if access.mode.contains(AccessMode::READ_DIR) {
+                    match path_reads.entry(relative_path) {
+                        Entry::Occupied(mut occupied) => {
+                            occupied.get_mut().read_dir_entries = true;
+                        }
+                        Entry::Vacant(vacant) => {
+                            vacant.insert(PathRead { read_dir_entries: true });
+                        }
+                    }
                 }
             }
+
+            tracing::debug!(
+                "spawn finished, path_reads: {}, path_writes: {}, exit_status: {}",
+                path_reads.len(),
+                path_writes.len(),
+                termination.status,
+            );
+
+            Ok(SpawnResult { exit_status: termination.status, duration })
+        }
+        ChildWait::Tokio(mut child) => {
+            let exit_status = child.wait().await?;
+            Ok(SpawnResult { exit_status, duration: start.elapsed() })
         }
     }
-
-    tracing::debug!(
-        "spawn finished, path_reads: {}, path_writes: {}, exit_status: {}",
-        path_reads.len(),
-        path_writes.len(),
-        termination.status,
-    );
-
-    Ok(SpawnResult { exit_status: termination.status, duration })
 }
