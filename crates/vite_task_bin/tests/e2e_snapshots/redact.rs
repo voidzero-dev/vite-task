@@ -24,9 +24,17 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
 pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
+    // On Windows, canonicalize() may produce verbatim paths (\\?\C:\...) while
+    // child processes report paths without the prefix. Try both variants.
+    let workspace_root_stripped = workspace_root.strip_prefix(r"\\?\").unwrap_or(workspace_root);
+
     redact_string(
         &mut output,
-        &[(workspace_root, "<workspace>"), (manifest_dir.as_str(), "<manifest_dir>")],
+        &[
+            (workspace_root, "<workspace>"),
+            (workspace_root_stripped, "<workspace>"),
+            (manifest_dir.as_str(), "<manifest_dir>"),
+        ],
     );
 
     // Redact durations like "0ns", "123ms" or "1.23s" to "<duration>"
