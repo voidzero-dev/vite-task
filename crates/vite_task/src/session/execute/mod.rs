@@ -146,10 +146,10 @@ impl ExecutionContext<'_> {
     ) -> LocalBoxFuture<'a, ExecutionNodeIndex> {
         let sem = semaphore.clone();
         async move {
-            if let Ok(_permit) = sem.acquire_owned().await {
-                if !self.cancellation_token.is_cancelled() {
-                    self.execute_node(graph, node_ix).await;
-                }
+            if let Ok(_permit) = sem.acquire_owned().await
+                && !self.cancellation_token.is_cancelled()
+            {
+                self.execute_node(graph, node_ix).await;
             }
             node_ix
         }

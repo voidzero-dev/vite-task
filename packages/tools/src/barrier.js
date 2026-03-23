@@ -45,8 +45,9 @@ function countMatches() {
 
 function onBarrierMet() {
   if (hang) {
-    // Keep the process alive — killed via signal when the runner cancels.
-    process.stdin.resume();
+    // Keep the process alive indefinitely — killed via signal when the runner cancels.
+    // Use setInterval rather than stdin.resume() for cross-platform reliability.
+    setInterval(() => {}, 1 << 30);
     return;
   }
   process.exit(exitCode);
