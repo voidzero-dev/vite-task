@@ -9,8 +9,13 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     for (from, to) in redactions {
         if let Cow::Owned(mut replaced) = s.as_str().cow_replace(from, to) {
             if cfg!(windows) {
-                // Also replace with backslashes on Windows
+                // Normalize backslashes to forward slashes on Windows
                 replaced = replaced.cow_replace("\\", "/").into_owned();
+                // Collapse double slashes that arise when an escaped path separator (\\)
+                // is only partially replaced (e.g., Debug-format paths end with \\")
+                while replaced.contains("//") {
+                    replaced = replaced.cow_replace("//", "/").into_owned();
+                }
             }
             *s = replaced;
         }
