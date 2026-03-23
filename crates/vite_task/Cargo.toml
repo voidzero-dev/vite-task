@@ -48,5 +48,8 @@ tempfile = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+winapi = { workspace = true, features = ["handleapi", "jobapi2", "processthreadsapi", "winnt"] }
+
 [lib]
 doctest = false

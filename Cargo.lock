@@ -3897,6 +3897,7 @@ dependencies = [
  "vite_task_plan",
  "vite_workspace",
  "wax",
+ "winapi",
 ]
 
 [[package]]

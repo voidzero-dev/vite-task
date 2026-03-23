@@ -565,6 +565,14 @@ async fn spawn_inherited(
     }
 
     let mut child = tokio_cmd.spawn()?;
+
+    // On Windows, assign the child to a Job Object with KILL_ON_JOB_CLOSE so that
+    // all descendant processes (e.g., node.exe spawned by a .cmd shim) are killed
+    // when the job handle is dropped. Without this, TerminateProcess only kills the
+    // direct child, leaving grandchildren alive.
+    #[cfg(windows)]
+    let _job = win_job::assign_child_to_kill_on_close_job(&child)?;
+
     let exit_status = tokio::select! {
         status = child.wait() => status?,
         () = cancellation_token.cancelled() => {
@@ -574,6 +582,100 @@ async fn spawn_inherited(
     };
 
     Ok(SpawnResult { exit_status, duration: start.elapsed() })
+}
+
+/// Win32 Job Object utilities for process tree management.
+///
+/// On Windows, `TerminateProcess` only kills the direct child process, not its
+/// descendants. This module creates a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`,
+/// which automatically terminates all processes in the job when the handle is dropped.
+#[cfg(windows)]
+mod win_job {
+    use std::io;
+
+    use winapi::{
+        shared::minwindef::{DWORD, FALSE},
+        um::{
+            handleapi::CloseHandle,
+            jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject},
+            processthreadsapi::OpenProcess,
+            winnt::{
+                HANDLE, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+            },
+        },
+    };
+
+    /// RAII wrapper around a Win32 `HANDLE` that closes it on drop.
+    struct OwnedHandle(HANDLE);
+
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            // SAFETY: self.0 is a valid handle obtained from CreateJobObjectW or OpenProcess.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    /// Create a Job Object with `KILL_ON_JOB_CLOSE` and assign the child process to it.
+    ///
+    /// Returns the job handle wrapped in an RAII guard. When dropped, all processes
+    /// in the job (the child and its descendants) are terminated.
+    pub fn assign_child_to_kill_on_close_job(
+        child: &tokio::process::Child,
+    ) -> io::Result<OwnedHandle> {
+        let pid = child.id().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "child process has no PID (already exited?)")
+        })?;
+
+        // SAFETY: Creating an anonymous job object with no security attributes.
+        let job = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
+        if job.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let job = OwnedHandle(job);
+
+        // Configure the job to kill all processes when the handle is closed.
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+            BasicLimitInformation: winapi::um::winnt::JOBOBJECT_BASIC_LIMIT_INFORMATION {
+                LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                ..unsafe { std::mem::zeroed() }
+            },
+            ..unsafe { std::mem::zeroed() }
+        };
+
+        // SAFETY: info is a valid JOBOBJECT_EXTENDED_LIMIT_INFORMATION, job.0 is a valid handle.
+        let ok = unsafe {
+            SetInformationJobObject(
+                job.0,
+                // JobObjectExtendedLimitInformation = 9
+                9,
+                std::ptr::from_mut(&mut info).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>().try_into().unwrap(),
+            )
+        };
+        if ok == FALSE {
+            return Err(io::Error::last_os_error());
+        }
+
+        // Open a handle to the child process with permissions needed for job assignment.
+        // SAFETY: pid is the process ID of the just-spawned child.
+        let process_handle =
+            unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, pid) };
+        if process_handle.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let process_handle = OwnedHandle(process_handle);
+
+        // SAFETY: Both handles are valid — job from CreateJobObjectW, process from OpenProcess.
+        let ok = unsafe { AssignProcessToJobObject(job.0, process_handle.0) };
+        if ok == FALSE {
+            return Err(io::Error::last_os_error());
+        }
+
+        // process_handle is dropped here (we only needed it for assignment).
+        // job handle is returned — when it drops, all processes in the job are killed.
+        Ok(job)
+    }
 }
 
 impl Session<'_> {
