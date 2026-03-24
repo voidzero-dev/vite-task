@@ -127,10 +127,20 @@ jobs:
       # Must run after setup-node so correct native binaries are installed
       - run: pnpm install
 
-      - run: cargo test --target ${{ matrix.target }}
+      - name: Build tests
+        run: cargo test --no-run --target ${{ matrix.target }}
         if: ${{ matrix.os != 'ubuntu-latest' }}
 
-      - run: cargo-zigbuild test --target x86_64-unknown-linux-gnu.2.17
+      - name: Build tests
+        run: cargo-zigbuild test --no-run --target x86_64-unknown-linux-gnu.2.17
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+
+      - name: Run tests
+        run: cargo test --target ${{ matrix.target }}
+        if: ${{ matrix.os != 'ubuntu-latest' }}
+
+      - name: Run tests
+        run: cargo-zigbuild test --target x86_64-unknown-linux-gnu.2.17
         if: ${{ matrix.os == 'ubuntu-latest' }}
 
   test-musl:
@@ -175,7 +185,11 @@ jobs:
           corepack enable
           pnpm install
 
-      - run: cargo test
+      - name: Build tests
+        run: cargo test --no-run
+
+      - name: Run tests
+        run: cargo test
 
   fmt:
     name: Format and Check Deps
