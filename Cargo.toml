@@ -167,6 +167,9 @@ ignored = [
 # and we don't rely on it for debugging that much.
 debug = false
 
+[profile.test]
+debug = false
+
 [profile.release]
 # Configurations explicitly listed here for clarity.
 # Using the best options for performance.
