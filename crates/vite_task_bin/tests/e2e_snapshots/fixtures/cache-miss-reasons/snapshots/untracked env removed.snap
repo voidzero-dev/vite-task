@@ -2,12 +2,12 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vtt json-patch vite-task.json '[{"op":"add","path":"/tasks/test/untrackedEnv","value":["MY_UNTRACKED"]}]' # setup
+> vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "untrackedEnv": ["MY_UNTRACKED"]' # setup
 
 > vt run test # cache miss
 $ vtt print-file test.txt
 initial content
-> vtt json-patch vite-task.json '[{"op":"remove","path":"/tasks/test/untrackedEnv"}]' # remove untracked env
+> vtt replace-file-content vite-task.json '"cache": true, "untrackedEnv": ["MY_UNTRACKED"]' '"cache": true' # remove untracked env
 
 > vt run test # cache miss: untracked env removed
 $ vtt print-file test.txt ○ cache miss: untracked env config changed, executing

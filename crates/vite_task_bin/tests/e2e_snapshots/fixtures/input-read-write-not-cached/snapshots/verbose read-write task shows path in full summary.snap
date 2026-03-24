@@ -5,7 +5,7 @@ info:
   cwd: packages/rw-pkg
 ---
 > vt run -v task
-~/packages/rw-pkg$ vtt replace-file-content src/data.txt original modified
+~/packages/rw-pkg$ vtt replace-file-content src/data.txt i !
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -17,6 +17,6 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] @test/rw-pkg#task: ~/packages/rw-pkg$ vtt replace-file-content src/data.txt original modified ✓
+  [1] @test/rw-pkg#task: ~/packages/rw-pkg$ vtt replace-file-content src/data.txt i ! ✓
       → Not cached: read and wrote 'packages/rw-pkg/src/data.txt'
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

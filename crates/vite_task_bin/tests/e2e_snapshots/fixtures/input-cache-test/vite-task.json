@@ -46,7 +46,7 @@
       "cache": true
     },
     "empty-inputs": {
-      "command": "vtt print-file src/main.ts",
+      "command": "vtt print-file ./src/main.ts",
       "input": [],
       "cache": true
     },

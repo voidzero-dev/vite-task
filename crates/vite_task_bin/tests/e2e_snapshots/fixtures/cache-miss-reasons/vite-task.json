@@ -1,5 +1,4 @@
 {
-  "cache": true,
   "tasks": {
     "test": {
       "command": "vtt print-file test.txt",

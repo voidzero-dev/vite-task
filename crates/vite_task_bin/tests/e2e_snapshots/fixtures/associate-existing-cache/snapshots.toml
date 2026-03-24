@@ -5,6 +5,6 @@ name = "associate existing cache"
 steps = [
   "vt run script1 # cache miss",
   "vt run script2 # cache hit, same command as script1",
-  "vtt json-patch package.json '[{\"op\":\"add\",\"path\":\"/scripts/script2\",\"value\":\"vtt print world\"}]' # change script2",
+  "vtt replace-file-content package.json '\"script2\": \"vtt print hello\"' '\"script2\": \"vtt print world\"' # change script2",
   "vt run script2 # cache miss",
 ]

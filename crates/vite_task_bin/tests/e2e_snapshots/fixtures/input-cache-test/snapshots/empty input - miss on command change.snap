@@ -3,9 +3,9 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run empty-inputs
-$ vtt print-file src/main.ts
+$ vtt print-file ./src/main.ts
 export const main = 'initial';
-> vtt json-patch vite-task.json '[{"op":"replace","path":"/tasks/empty-inputs/command","value":"vtt print-file src/utils.ts"}]'
+> vtt replace-file-content vite-task.json 'vtt print-file ./src/main.ts' 'vtt print-file src/utils.ts'
 
 > vt run empty-inputs
 $ vtt print-file src/utils.ts ○ cache miss: args changed, executing
