@@ -21,6 +21,22 @@ use vite_task_graph::display::TaskDisplay;
 use vite_task_plan::{ExecutionGraph, ExecutionItemKind};
 use vite_workspace::find_workspace_root;
 
+/// Resolve the directory containing workspace binaries (vt, vtt) at runtime.
+/// Test binaries are in `target/<profile>/deps/`, while workspace binaries
+/// are in `target/<profile>/`. Go up from `deps/` to find them.
+fn resolve_runtime_bin_dir() -> AbsolutePathBuf {
+    let current_exe = std::env::current_exe().unwrap();
+    let deps_dir = current_exe.parent().unwrap();
+    let bin_dir = deps_dir.parent().unwrap();
+    let vtt_name = if cfg!(windows) { "vtt.exe" } else { "vtt" };
+    assert!(
+        bin_dir.join(vtt_name).exists(),
+        "vtt binary not found at {}. Build it first with: cargo build --bin vtt",
+        bin_dir.join(vtt_name).display(),
+    );
+    AbsolutePathBuf::new(bin_dir.to_path_buf()).unwrap()
+}
+
 /// Local parser wrapper for `BuiltInCommand`
 #[derive(Parser)]
 #[command(name = "vt")]
@@ -216,21 +232,10 @@ fn run_case_inner(
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
-    // Locate the vtt binary directory. Since both plan_snapshots test and vtt are built
-    // into the same Cargo target directory, we can find vtt next to the current test executable.
+    // Locate the directory containing vt and vtt binaries.
     let test_bin_path = {
-        let current_exe = std::env::current_exe().unwrap();
-        // Test binaries are in target/<profile>/deps/, but workspace binaries (vtt)
-        // are in target/<profile>/. Go up from deps/ to find vtt.
-        let deps_dir = current_exe.parent().unwrap();
-        let bin_dir = deps_dir.parent().unwrap();
-        let vtt_name = if cfg!(windows) { "vtt.exe" } else { "vtt" };
-        assert!(
-            bin_dir.join(vtt_name).exists(),
-            "vtt binary not found at {}. Build it first with: cargo build --bin vtt",
-            bin_dir.join(vtt_name).display(),
-        );
-        Arc::<OsStr>::from(bin_dir.as_os_str())
+        let bin_dir = resolve_runtime_bin_dir();
+        Arc::<OsStr>::from(bin_dir.as_path().as_os_str())
     };
 
     // Add vtt binary directory to PATH so test programs (such as vtt print-file) in fixtures can be found.

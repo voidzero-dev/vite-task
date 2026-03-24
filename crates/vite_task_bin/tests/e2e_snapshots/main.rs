@@ -26,8 +26,6 @@ const STEP_TIMEOUT: Duration =
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
 
 const COMPILE_TIME_VT_PATH: &str = env!("CARGO_BIN_EXE_vt");
-/// Ensures the `vtt` binary is built before running e2e tests (vtt is in the same directory as vt).
-const _: &str = env!("CARGO_BIN_EXE_vtt");
 const COMPILE_TIME_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Get the shell executable for running e2e test steps.
@@ -269,8 +267,8 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
     // Get shell executable for running steps
     let shell_exe = get_shell_exe();
 
-    // Prepare PATH for e2e tests: include vt and vtt binary directories.
-    // Both vt and vtt are in the same target directory.
+    // Prepare PATH for e2e tests: include vt binary directory (vtt is in the same directory
+    // since all workspace binaries are built into the same target/<profile>/ directory).
     let e2e_env_path = join_paths(
         std::iter::once({
             let vt_path = resolve_runtime_bin_path(COMPILE_TIME_VT_PATH);

@@ -1,8 +1,3 @@
-//! `vtt` — Vite Task Tools
-//!
-//! A lightweight test utility binary with subcommands used by e2e and plan snapshot tests.
-//! Replaces the Node.js tools previously in `packages/tools`.
-
 // This is a standalone test utility binary that deliberately uses std types
 // rather than the project's custom types (vite_str, vite_path, etc.).
 #![expect(clippy::disallowed_types, reason = "standalone test utility uses std types")]

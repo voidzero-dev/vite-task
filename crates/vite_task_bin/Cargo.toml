@@ -10,10 +10,6 @@ rust-version.workspace = true
 name = "vt"
 path = "src/main.rs"
 
-[[bin]]
-name = "vtt"
-path = "src/vtt.rs"
-
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
