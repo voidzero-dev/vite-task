@@ -58,6 +58,10 @@ fn get_shell_exe() -> std::path::PathBuf {
     }
 }
 
+/// Resolve a binary's runtime path from its compile-time path.
+///
+/// Computes `join(runtime_manifest, diff(compile_time_bin, compile_time_manifest))`.
+/// This handles cases where compile-time and runtime paths differ (e.g. CI caches).
 #[expect(
     clippy::disallowed_types,
     reason = "PathBuf required for compile-time/runtime binary path remapping"
@@ -68,26 +72,36 @@ fn resolve_runtime_bin_path(compile_time_bin_path: &str) -> AbsolutePathBuf {
     let runtime_manifest =
         std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
 
-    let compile_time_repo_root = compile_time_manifest.parent().unwrap().parent().unwrap();
-    let runtime_repo_root = runtime_manifest.parent().unwrap().parent().unwrap();
-
-    let relative_bin = diff_paths(&compile_time_bin, compile_time_repo_root).unwrap_or_else(|| {
+    let relative_bin = diff_paths(&compile_time_bin, &compile_time_manifest).unwrap_or_else(|| {
         panic!(
-            "Failed to diff binary path. bin={} repo_root={}",
+            "Failed to diff binary path. bin={} manifest={}",
             compile_time_bin.display(),
-            compile_time_repo_root.display(),
+            compile_time_manifest.display(),
         )
     });
-    let runtime_bin = runtime_repo_root.join(&relative_bin);
+    let runtime_bin = runtime_manifest.join(&relative_bin);
 
-    assert!(
-        runtime_bin.exists(),
-        "Remapped binary path does not exist: {} (relative: {})",
-        runtime_bin.display(),
-        relative_bin.display(),
-    );
+    let runtime_bin = runtime_bin.canonicalize().unwrap_or_else(|_| {
+        panic!(
+            "Remapped binary path does not exist: {} (relative: {})",
+            runtime_bin.display(),
+            relative_bin.display(),
+        )
+    });
 
     AbsolutePathBuf::new(runtime_bin).unwrap()
+}
+
+/// Derive the compile-time path of `vtt` from the compile-time path of `vt`.
+/// Both binaries are workspace binaries built into the same target directory.
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path/String required for compile-time binary path derivation"
+)]
+fn compile_time_vtt_path() -> std::string::String {
+    let vt = std::path::Path::new(COMPILE_TIME_VT_PATH);
+    let vtt_name = if cfg!(windows) { "vtt.exe" } else { "vtt" };
+    vt.with_file_name(vtt_name).to_str().unwrap().to_owned()
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -267,15 +281,13 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
     // Get shell executable for running steps
     let shell_exe = get_shell_exe();
 
-    // Prepare PATH for e2e tests: include vt binary directory (vtt is in the same directory
-    // since all workspace binaries are built into the same target/<profile>/ directory).
+    // Prepare PATH for e2e tests: include vt and vtt binary directories.
+    let bin_dirs: [Arc<OsStr>; 2] = [COMPILE_TIME_VT_PATH, &compile_time_vtt_path()].map(|p| {
+        let bin = resolve_runtime_bin_path(p);
+        Arc::<OsStr>::from(bin.parent().unwrap().as_path().as_os_str())
+    });
     let e2e_env_path = join_paths(
-        std::iter::once({
-            let vt_path = resolve_runtime_bin_path(COMPILE_TIME_VT_PATH);
-            let vt_dir = vt_path.parent().unwrap();
-            vt_dir.as_path().as_os_str().into()
-        })
-        .chain(
+        bin_dirs.into_iter().chain(
             // the existing PATH
             split_paths(&env::var_os("PATH").unwrap())
                 .map(|path| Arc::<OsStr>::from(path.into_os_string())),

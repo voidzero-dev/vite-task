@@ -3986,6 +3986,7 @@ dependencies = [
  "cow-utils",
  "futures-util",
  "insta",
+ "pathdiff",
  "petgraph",
  "rustc-hash",
  "serde",

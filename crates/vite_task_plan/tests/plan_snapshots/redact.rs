@@ -62,9 +62,9 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
 
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    // Get the vtt binary directory path at runtime.
-    let tools_dir = super::resolve_runtime_bin_dir();
-    let tools_dir_str = tools_dir.as_path().to_str().unwrap().to_owned();
+    // Get the vtt binary directory path via compile-time/runtime path remapping.
+    let tools_dir = super::resolve_runtime_bin_path(super::COMPILE_TIME_VTT_PATH);
+    let tools_dir_str = tools_dir.parent().unwrap().as_path().to_str().unwrap().to_owned();
     let mut json_value = serde_json::to_value(value).unwrap();
 
     // On Windows, paths might use either backslashes or forward slashes
