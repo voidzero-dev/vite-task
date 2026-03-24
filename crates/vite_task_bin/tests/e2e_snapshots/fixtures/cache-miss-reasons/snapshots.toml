@@ -19,16 +19,16 @@ steps = ["MY_ENV=1 vt run test # cache miss", "vt run test # cache miss: env rem
 name = "untracked env added"
 steps = [
   "vt run test # cache miss",
-  "vtt json-edit vite-task.json \"_.tasks.test.untrackedEnv = ['MY_UNTRACKED']\" # add untracked env",
+  "vtt json-patch vite-task.json '[{\"op\":\"add\",\"path\":\"/tasks/test/untrackedEnv\",\"value\":[\"MY_UNTRACKED\"]}]' # add untracked env",
   "vt run test # cache miss: untracked env added",
 ]
 
 [[e2e]]
 name = "untracked env removed"
 steps = [
-  "vtt json-edit vite-task.json \"_.tasks.test.untrackedEnv = ['MY_UNTRACKED']\" # setup",
+  "vtt json-patch vite-task.json '[{\"op\":\"add\",\"path\":\"/tasks/test/untrackedEnv\",\"value\":[\"MY_UNTRACKED\"]}]' # setup",
   "vt run test # cache miss",
-  "vtt json-edit vite-task.json \"delete _.tasks.test.untrackedEnv\" # remove untracked env",
+  "vtt json-patch vite-task.json '[{\"op\":\"remove\",\"path\":\"/tasks/test/untrackedEnv\"}]' # remove untracked env",
   "vt run test # cache miss: untracked env removed",
 ]
 
@@ -38,7 +38,7 @@ steps = [
   "vt run test # cache miss",
   "mkdir -p subfolder",
   "cp test.txt subfolder/test.txt",
-  "vtt json-edit vite-task.json \"_.tasks.test.cwd = 'subfolder'\" # change cwd",
+  "vtt json-patch vite-task.json '[{\"op\":\"add\",\"path\":\"/tasks/test/cwd\",\"value\":\"subfolder\"}]' # change cwd",
   "vt run test # cache miss: cwd changed",
 ]
 
@@ -58,7 +58,7 @@ steps = [
 name = "input config changed"
 steps = [
   "vt run test # cache miss",
-  "vtt json-edit vite-task.json \"_.tasks.test.input = ['test.txt']\" # change input config",
+  "vtt json-patch vite-task.json '[{\"op\":\"add\",\"path\":\"/tasks/test/input\",\"value\":[\"test.txt\"]}]' # change input config",
   "vt run test # cache miss: configuration changed",
 ]
 

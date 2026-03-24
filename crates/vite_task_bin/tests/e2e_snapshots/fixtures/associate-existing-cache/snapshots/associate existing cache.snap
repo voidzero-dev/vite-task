@@ -11,7 +11,7 @@ hello
 
 ---
 vt run: cache hit.
-> vtt json-edit package.json '_.scripts.script2 = "vtt print world"' # change script2
+> vtt json-patch package.json '[{"op":"add","path":"/scripts/script2","value":"vtt print world"}]' # change script2
 
 > vt run script2 # cache miss
 $ vtt print world ○ cache miss: args changed, executing

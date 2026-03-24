@@ -5,7 +5,7 @@ expression: e2e_outputs
 > vt run empty-inputs
 $ vtt print-file src/main.ts
 export const main = 'initial';
-> vtt json-edit vite-task.json "_.tasks['empty-inputs'].command = 'vtt print-file src/utils.ts'"
+> vtt json-patch vite-task.json '[{"op":"replace","path":"/tasks/empty-inputs/command","value":"vtt print-file src/utils.ts"}]'
 
 > vt run empty-inputs
 $ vtt print-file src/utils.ts ○ cache miss: args changed, executing

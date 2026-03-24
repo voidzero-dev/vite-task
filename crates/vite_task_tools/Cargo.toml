@@ -12,6 +12,7 @@ name = "vtt"
 path = "src/main.rs"
 
 [dependencies]
+json-patch = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

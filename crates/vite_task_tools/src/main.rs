@@ -1,7 +1,6 @@
 // This is a standalone test utility binary that deliberately uses std types
 // rather than the project's custom types (vite_str, vite_path, etc.).
 #![expect(clippy::disallowed_types, reason = "standalone test utility uses std types")]
-#![expect(clippy::disallowed_macros, reason = "standalone test utility uses std macros")]
 #![expect(clippy::disallowed_methods, reason = "standalone test utility uses std methods")]
 #![expect(clippy::print_stderr, reason = "CLI tool error output")]
 #![expect(clippy::print_stdout, reason = "CLI tool output")]
@@ -11,7 +10,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: check-tty, json-edit, print, print-env, print-file, read-stdin, replace-file-content, touch-file"
+            "Subcommands: check-tty, json-patch, print, print-env, print-file, read-stdin, replace-file-content, touch-file"
         );
         std::process::exit(1);
     }
@@ -21,7 +20,7 @@ fn main() {
             cmd_check_tty();
             Ok(())
         }
-        "json-edit" => cmd_json_edit(&args[2..]),
+        "json-patch" => cmd_json_patch(&args[2..]),
         "print" => {
             cmd_print(&args[2..]);
             Ok(())
@@ -116,155 +115,19 @@ fn cmd_touch_file(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// ── json-edit implementation ──
-
-fn cmd_json_edit(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_json_patch(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() < 2 {
-        return Err("Usage: vtt json-edit <filename> <expression>".into());
+        return Err("Usage: vtt json-patch <json_file_path> <json_patch>".into());
     }
     let filename = &args[0];
-    let expr = &args[1];
+    let patch_str = &args[1];
 
     let content = std::fs::read_to_string(filename)?;
     let mut json: serde_json::Value = serde_json::from_str(&content)?;
-
-    let expr = expr.trim();
-    if let Some(path_str) = expr.strip_prefix("delete ") {
-        let path = parse_path(path_str.trim())?;
-        delete_path(&mut json, &path)?;
-    } else if let Some((path_str, value_str)) = expr.split_once('=') {
-        let path = parse_path(path_str.trim())?;
-        let value = parse_value(value_str.trim())?;
-        set_path(&mut json, &path, value)?;
-    } else {
-        return Err(format!("Unsupported expression: {expr}").into());
-    }
+    let patch: json_patch::Patch = serde_json::from_str(patch_str)?;
+    json_patch::patch(&mut json, &patch)?;
 
     let output = serde_json::to_string_pretty(&json)? + "\n";
     std::fs::write(filename, output)?;
-    Ok(())
-}
-
-fn parse_path(s: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    // Parse paths like: _.tasks.test.untrackedEnv or _.tasks['empty-inputs'].command
-    let s = s.strip_prefix("_.").ok_or("Path must start with '_.' ")?;
-    let mut keys = Vec::new();
-    let mut chars = s.chars().peekable();
-    let mut current = String::new();
-
-    while let Some(&ch) = chars.peek() {
-        match ch {
-            '.' => {
-                if !current.is_empty() {
-                    keys.push(std::mem::take(&mut current));
-                }
-                chars.next();
-            }
-            '[' => {
-                if !current.is_empty() {
-                    keys.push(std::mem::take(&mut current));
-                }
-                chars.next(); // consume '['
-                // expect quote
-                let quote = chars.next().ok_or("Expected quote after [")?;
-                if quote != '\'' && quote != '"' {
-                    return Err("Expected quote after [".into());
-                }
-                let mut key = String::new();
-                for ch in chars.by_ref() {
-                    if ch == quote {
-                        break;
-                    }
-                    key.push(ch);
-                }
-                // expect ']'
-                let close = chars.next().ok_or("Expected ]")?;
-                if close != ']' {
-                    return Err("Expected ]".into());
-                }
-                keys.push(key);
-            }
-            _ => {
-                current.push(ch);
-                chars.next();
-            }
-        }
-    }
-    if !current.is_empty() {
-        keys.push(current);
-    }
-    Ok(keys)
-}
-
-fn parse_value(s: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    // Handle quoted strings
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        let inner = &s[1..s.len() - 1];
-        return Ok(serde_json::Value::String(inner.to_string()));
-    }
-    // Handle arrays like ['foo', 'bar'] or ["foo"]
-    if s.starts_with('[') && s.ends_with(']') {
-        let inner = s[1..s.len() - 1].trim();
-        if inner.is_empty() {
-            return Ok(serde_json::Value::Array(vec![]));
-        }
-        let mut items = Vec::new();
-        let mut chars = inner.chars().peekable();
-        while chars.peek().is_some() {
-            // skip whitespace
-            while chars.peek().is_some_and(|c| c.is_whitespace()) {
-                chars.next();
-            }
-            if chars.peek().is_none() {
-                break;
-            }
-            let quote = chars.next().ok_or("Expected quote")?;
-            if quote != '\'' && quote != '"' {
-                return Err(format!("Expected quote in array, got '{quote}'").into());
-            }
-            let mut val = String::new();
-            for ch in chars.by_ref() {
-                if ch == quote {
-                    break;
-                }
-                val.push(ch);
-            }
-            items.push(serde_json::Value::String(val));
-            // skip whitespace and comma
-            while chars.peek().is_some_and(|c| c.is_whitespace() || *c == ',') {
-                chars.next();
-            }
-        }
-        return Ok(serde_json::Value::Array(items));
-    }
-    Err(format!("Cannot parse value: {s}").into())
-}
-
-fn set_path(
-    root: &mut serde_json::Value,
-    path: &[String],
-    value: serde_json::Value,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (last, parents) = path.split_last().ok_or("Empty path")?;
-    let mut current = root;
-    for key in parents {
-        current = current.get_mut(key.as_str()).ok_or_else(|| format!("Key not found: {key}"))?;
-    }
-    let obj = current.as_object_mut().ok_or("Parent is not an object")?;
-    obj.insert(last.clone(), value);
-    Ok(())
-}
-
-fn delete_path(
-    root: &mut serde_json::Value,
-    path: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (last, parents) = path.split_last().ok_or("Empty path")?;
-    let mut current = root;
-    for key in parents {
-        current = current.get_mut(key.as_str()).ok_or_else(|| format!("Key not found: {key}"))?;
-    }
-    let obj = current.as_object_mut().ok_or("Parent is not an object")?;
-    obj.remove(last.as_str());
     Ok(())
 }

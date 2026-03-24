@@ -9,7 +9,7 @@ initial content
 
 > cp test.txt subfolder/test.txt
 
-> vtt json-edit vite-task.json "_.tasks.test.cwd = 'subfolder'" # change cwd
+> vtt json-patch vite-task.json '[{"op":"add","path":"/tasks/test/cwd","value":"subfolder"}]' # change cwd
 
 > vt run test # cache miss: cwd changed
 ~/subfolder$ vtt print-file test.txt ○ cache miss: working directory changed, executing

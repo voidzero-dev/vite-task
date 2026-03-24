@@ -179,7 +179,7 @@ steps = [
   # Initial run
   "vt run empty-inputs",
   # Change the command
-  "vtt json-edit vite-task.json \"_.tasks['empty-inputs'].command = 'vtt print-file src/utils.ts'\"",
+  "vtt json-patch vite-task.json '[{\"op\":\"replace\",\"path\":\"/tasks/empty-inputs/command\",\"value\":\"vtt print-file src/utils.ts\"}]'",
   # Cache miss: command changed
   "vt run empty-inputs",
 ]

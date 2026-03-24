@@ -4,8 +4,8 @@
 name = "cache miss command change"
 steps = [
   "vt run task # cache miss",
-  "vtt json-edit vite-task.json '_.tasks.task.command = \"vtt print baz && vtt print bar\"' # change first subtask",
+  "vtt json-patch vite-task.json '[{\"op\":\"replace\",\"path\":\"/tasks/task/command\",\"value\":\"vtt print baz && vtt print bar\"}]' # change first subtask",
   "vt run task # first: cache miss, second: cache hit",
-  "vtt json-edit vite-task.json '_.tasks.task.command = \"vtt print bar\"' # remove first subtask",
+  "vtt json-patch vite-task.json '[{\"op\":\"replace\",\"path\":\"/tasks/task/command\",\"value\":\"vtt print bar\"}]' # remove first subtask",
   "vt run task # cache hit",
 ]

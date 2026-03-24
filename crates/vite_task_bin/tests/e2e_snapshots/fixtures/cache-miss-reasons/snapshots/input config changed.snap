@@ -5,7 +5,7 @@ expression: e2e_outputs
 > vt run test # cache miss
 $ vtt print-file test.txt
 initial content
-> vtt json-edit vite-task.json "_.tasks.test.input = ['test.txt']" # change input config
+> vtt json-patch vite-task.json '[{"op":"add","path":"/tasks/test/input","value":["test.txt"]}]' # change input config
 
 > vt run test # cache miss: configuration changed
 $ vtt print-file test.txt ○ cache miss: input configuration changed, executing

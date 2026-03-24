@@ -81,6 +81,7 @@ fspy_shared_unix = { path = "crates/fspy_shared_unix" }
 futures = "0.3.31"
 futures-util = "0.3.31"
 insta = "1.44.3"
+json-patch = "4.1.0"
 jsonc-parser = { version = "0.29.0", features = ["serde"] }
 libc = "0.2.172"
 memmap2 = "0.9.7"
