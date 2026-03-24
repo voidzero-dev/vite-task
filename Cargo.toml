@@ -167,6 +167,13 @@ ignored = [
 # and we don't rely on it for debugging that much.
 debug = false
 
+# Optimize snapshot testing dependencies in dev/test builds.
+# Snapshot diffing (insta + similar) is CPU-intensive; optimizing them
+# speeds up test runs without the compile-time cost of a full release build.
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3
+
 [profile.release]
 # Configurations explicitly listed here for clarity.
 # Using the best options for performance.
