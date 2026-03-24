@@ -5,7 +5,7 @@
 #![expect(clippy::print_stderr, reason = "CLI tool error output")]
 #![expect(clippy::print_stdout, reason = "CLI tool output")]
 
-fn main() {
+pub fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");

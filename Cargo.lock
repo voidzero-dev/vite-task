@@ -3946,6 +3946,7 @@ dependencies = [
  "vite_path",
  "vite_str",
  "vite_task",
+ "vite_task_tools",
  "vite_workspace",
  "which",
 ]

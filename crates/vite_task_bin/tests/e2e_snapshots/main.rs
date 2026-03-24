@@ -26,6 +26,7 @@ const STEP_TIMEOUT: Duration =
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
 
 const COMPILE_TIME_VT_PATH: &str = env!("CARGO_BIN_EXE_vt");
+const COMPILE_TIME_VTT_PATH: &str = env!("CARGO_BIN_EXE_vtt");
 const COMPILE_TIME_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Get the shell executable for running e2e test steps.
@@ -90,18 +91,6 @@ fn resolve_runtime_bin_path(compile_time_bin_path: &str) -> AbsolutePathBuf {
     });
 
     AbsolutePathBuf::new(runtime_bin).unwrap()
-}
-
-/// Derive the compile-time path of `vtt` from the compile-time path of `vt`.
-/// Both binaries are workspace binaries built into the same target directory.
-#[expect(
-    clippy::disallowed_types,
-    reason = "Path/String required for compile-time binary path derivation"
-)]
-fn compile_time_vtt_path() -> std::string::String {
-    let vt = std::path::Path::new(COMPILE_TIME_VT_PATH);
-    let vtt_name = if cfg!(windows) { "vtt.exe" } else { "vtt" };
-    vt.with_file_name(vtt_name).to_str().unwrap().to_owned()
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -282,7 +271,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
     let shell_exe = get_shell_exe();
 
     // Prepare PATH for e2e tests: include vt and vtt binary directories.
-    let bin_dirs: [Arc<OsStr>; 2] = [COMPILE_TIME_VT_PATH, &compile_time_vtt_path()].map(|p| {
+    let bin_dirs: [Arc<OsStr>; 2] = [COMPILE_TIME_VT_PATH, COMPILE_TIME_VTT_PATH].map(|p| {
         let bin = resolve_runtime_bin_path(p);
         Arc::<OsStr>::from(bin.parent().unwrap().as_path().as_os_str())
     });
