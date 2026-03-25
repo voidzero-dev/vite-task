@@ -6,19 +6,19 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/input-workspace-
 [
   {
     "key": [
-      "<workspace>/",
+      "<workspace>/packages/app",
       "build"
     ],
     "node": {
       "task_display": {
-        "package_name": "test",
+        "package_name": "app",
         "task_name": "build",
-        "package_path": "<workspace>/"
+        "package_path": "<workspace>/packages/app"
       },
       "resolved_config": {
         "command": "echo build",
         "resolved_options": {
-          "cwd": "<workspace>/",
+          "cwd": "<workspace>/packages/app",
           "cache_config": {
             "env_config": {
               "fingerprinted_envs": [],
@@ -30,7 +30,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/input-workspace-
               "includes_auto": false,
               "positive_globs": [
                 "configs/tsconfig.json",
-                "src/**"
+                "packages/app/src/**"
               ],
               "negative_globs": [
                 "dist/**"
