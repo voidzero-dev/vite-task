@@ -52,7 +52,7 @@ pub struct TaskQuery {
     /// The task name to run within each selected package.
     pub task_name: Str,
 
-    /// Whether to include explicit `dependsOn` dependencies from `vite-task.json`.
+    /// Whether to include explicit `dependsOn` dependencies from the task config.
     pub include_explicit_deps: bool,
 }
 

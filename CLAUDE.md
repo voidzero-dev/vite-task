@@ -105,6 +105,17 @@ Tasks are defined in `vite-task.json`:
 }
 ```
 
+## Internal vs Public Naming
+
+This repo uses internal names that differ from the public-facing product. In code comments, docs, and user-facing strings, use the public names:
+
+| Internal (this repo) | Public (Vite+)  |
+| -------------------- | --------------- |
+| `vt`                 | `vp`            |
+| `vite-task.json`     | `vite.config.*` |
+
+`vite-task.json` and `vt` are fine in implementation code, test fixtures, and CLAUDE.md itself — just not in doc comments or user-facing messages.
+
 ## Code Constraints
 
 ### Required Patterns

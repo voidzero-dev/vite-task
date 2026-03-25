@@ -19,7 +19,7 @@ use crate::display::TaskDisplay;
 
 /// The type of a task dependency edge in the task graph.
 ///
-/// Currently only `Explicit` is produced (from `dependsOn` in `vite-task.json`).
+/// Currently only `Explicit` is produced (from `dependsOn` in the task config).
 /// Topological ordering is handled at query time via the package subgraph rather
 /// than by pre-computing edges in the task graph.
 #[derive(Debug, Clone, Copy, Serialize)]

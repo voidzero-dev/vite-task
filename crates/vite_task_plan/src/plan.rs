@@ -20,7 +20,8 @@ use vite_str::Str;
 use vite_task_graph::{
     TaskNodeIndex, TaskSource,
     config::{
-        CacheConfig, ResolvedGlobalCacheConfig, ResolvedTaskOptions,
+        CacheConfig, EnabledCacheConfig, ResolvedGlobalCacheConfig, ResolvedInputConfig,
+        ResolvedTaskOptions,
         user::{UserCacheConfig, UserTaskOptions},
     },
     query::TaskQuery,
@@ -281,6 +282,7 @@ async fn plan_task_as_execution_node(
                         synthetic_plan_request,
                         Some(task_execution_cache_key),
                         &cwd,
+                        package_path,
                         parent_cache_config,
                     )?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
@@ -433,7 +435,7 @@ pub enum ParentCacheConfig {
 fn resolve_synthetic_cache_config(
     parent: ParentCacheConfig,
     synthetic_cache_config: UserCacheConfig,
-    cwd: &Arc<AbsolutePath>,
+    package_dir: &AbsolutePath,
     workspace_path: &AbsolutePath,
 ) -> Result<Option<CacheConfig>, Error> {
     match parent {
@@ -445,7 +447,7 @@ fn resolve_synthetic_cache_config(
                     cwd_relative_to_package: None,
                     depends_on: None,
                 },
-                cwd,
+                &package_dir.into(),
                 workspace_path,
             )
             .map_err(Error::ResolveTaskConfig)?
@@ -458,12 +460,33 @@ fn resolve_synthetic_cache_config(
             Ok(match synthetic_cache_config {
                 UserCacheConfig::Disabled { .. } => Option::None,
                 UserCacheConfig::Enabled { enabled_cache_config, .. } => {
-                    if let Some(extra_envs) = enabled_cache_config.env {
-                        parent_config.env_config.fingerprinted_envs.extend(extra_envs.into_vec());
+                    let EnabledCacheConfig { env, untracked_env, input } = enabled_cache_config;
+                    parent_config.env_config.fingerprinted_envs.extend(env.unwrap_or_default());
+                    parent_config
+                        .env_config
+                        .untracked_env
+                        .extend(untracked_env.unwrap_or_default());
+
+                    if let Some(input) = input {
+                        let synthetic_input = ResolvedInputConfig::from_user_config(
+                            Some(&input),
+                            package_dir,
+                            workspace_path,
+                        )
+                        .map_err(Error::ResolveTaskConfig)?;
+                        // Merge globs but preserve the parent's includes_auto —
+                        // the user's explicit choice takes precedence
+                        // over the synthetic handler's preference.
+                        parent_config
+                            .input_config
+                            .positive_globs
+                            .extend(synthetic_input.positive_globs);
+                        parent_config
+                            .input_config
+                            .negative_globs
+                            .extend(synthetic_input.negative_globs);
                     }
-                    if let Some(extra_pts) = enabled_cache_config.untracked_env {
-                        parent_config.env_config.untracked_env.extend(extra_pts);
-                    }
+
                     Some(parent_config)
                 }
             })
@@ -478,13 +501,18 @@ pub fn plan_synthetic_request(
     synthetic_plan_request: SyntheticPlanRequest,
     execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
+    package_dir: &AbsolutePath,
     parent_cache_config: ParentCacheConfig,
 ) -> Result<SpawnExecution, Error> {
     let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
     let program_path = which(&program, &envs, cwd)?;
-    let resolved_cache_config =
-        resolve_synthetic_cache_config(parent_cache_config, cache_config, cwd, workspace_path)?;
+    let resolved_cache_config = resolve_synthetic_cache_config(
+        parent_cache_config,
+        cache_config,
+        package_dir,
+        workspace_path,
+    )?;
     let resolved_options =
         ResolvedTaskOptions { cwd: Arc::clone(cwd), cache_config: resolved_cache_config };
 
@@ -748,4 +776,220 @@ pub async fn plan_query_request(
             .collect();
         Error::CycleDependencyDetected(displays)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use rustc_hash::FxHashSet;
+    use vite_path::AbsolutePathBuf;
+    use vite_str::Str;
+    use vite_task_graph::config::{
+        CacheConfig, EnabledCacheConfig, EnvConfig, ResolvedInputConfig,
+        user::{UserCacheConfig, UserInputEntry},
+    };
+
+    use super::{ParentCacheConfig, resolve_synthetic_cache_config};
+
+    fn test_paths() -> (AbsolutePathBuf, AbsolutePathBuf) {
+        if cfg!(windows) {
+            (
+                AbsolutePathBuf::new("C:\\workspace\\packages\\my-pkg".into()).unwrap(),
+                AbsolutePathBuf::new("C:\\workspace".into()).unwrap(),
+            )
+        } else {
+            (
+                AbsolutePathBuf::new("/workspace/packages/my-pkg".into()).unwrap(),
+                AbsolutePathBuf::new("/workspace".into()).unwrap(),
+            )
+        }
+    }
+
+    fn parent_config(includes_auto: bool, positive_globs: &[&str]) -> CacheConfig {
+        CacheConfig {
+            env_config: EnvConfig {
+                fingerprinted_envs: FxHashSet::default(),
+                untracked_env: FxHashSet::default(),
+            },
+            input_config: ResolvedInputConfig {
+                includes_auto,
+                positive_globs: positive_globs.iter().map(|s| Str::from(*s)).collect(),
+                negative_globs: BTreeSet::new(),
+            },
+        }
+    }
+
+    fn globs(items: &[&str]) -> BTreeSet<Str> {
+        items.iter().map(|s| Str::from(*s)).collect()
+    }
+
+    #[test]
+    fn synthetic_input_none_preserves_parent() {
+        let (pkg, ws) = test_paths();
+        let parent = parent_config(true, &["src/**"]);
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: None,
+            }),
+            &pkg,
+            &ws,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(result.input_config.includes_auto);
+        assert_eq!(result.input_config.positive_globs, globs(&["src/**"]));
+        assert_eq!(result.input_config.negative_globs, globs(&[]));
+    }
+
+    #[test]
+    fn synthetic_globs_merged_into_parent_default_auto() {
+        let (pkg, ws) = test_paths();
+        let parent = parent_config(true, &[]);
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: Some(vec![UserInputEntry::Glob("config/**".into())]),
+            }),
+            &pkg,
+            &ws,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(result.input_config.includes_auto);
+        assert_eq!(result.input_config.positive_globs, globs(&["packages/my-pkg/config/**"]));
+        assert_eq!(result.input_config.negative_globs, globs(&[]));
+    }
+
+    #[test]
+    fn synthetic_globs_merged_into_parent_explicit_input() {
+        let (pkg, ws) = test_paths();
+        let parent = parent_config(false, &["src/**"]);
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: Some(vec![UserInputEntry::Glob("config/**".into())]),
+            }),
+            &pkg,
+            &ws,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!result.input_config.includes_auto);
+        assert_eq!(
+            result.input_config.positive_globs,
+            globs(&["packages/my-pkg/config/**", "src/**"])
+        );
+        assert_eq!(result.input_config.negative_globs, globs(&[]));
+    }
+
+    #[test]
+    fn synthetic_auto_ignored_when_parent_has_explicit_input() {
+        let (pkg, ws) = test_paths();
+        let parent = parent_config(false, &["src/**"]);
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: Some(vec![
+                    UserInputEntry::Glob("config/**".into()),
+                    UserInputEntry::Auto(vite_task_graph::config::user::AutoInput { auto: true }),
+                ]),
+            }),
+            &pkg,
+            &ws,
+        )
+        .unwrap()
+        .unwrap();
+        // User's explicit choice (no auto) takes precedence
+        assert!(!result.input_config.includes_auto);
+        assert_eq!(
+            result.input_config.positive_globs,
+            globs(&["packages/my-pkg/config/**", "src/**"])
+        );
+        assert_eq!(result.input_config.negative_globs, globs(&[]));
+    }
+
+    #[test]
+    fn parent_auto_preserved_with_synthetic_globs() {
+        let (pkg, ws) = test_paths();
+        let parent = parent_config(true, &["tests/**"]);
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: Some(vec![UserInputEntry::Glob("config/**".into())]),
+            }),
+            &pkg,
+            &ws,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(result.input_config.includes_auto);
+        assert_eq!(
+            result.input_config.positive_globs,
+            globs(&["packages/my-pkg/config/**", "tests/**"])
+        );
+        assert_eq!(result.input_config.negative_globs, globs(&[]));
+    }
+
+    #[test]
+    fn parent_cache_disabled_ignores_synthetic_input() {
+        let (pkg, ws) = test_paths();
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Disabled,
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: Some(vec![UserInputEntry::Glob("config/**".into())]),
+            }),
+            &pkg,
+            &ws,
+        )
+        .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn synthetic_disables_cache_despite_parent() {
+        let (pkg, ws) = test_paths();
+        let parent = parent_config(true, &["src/**"]);
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::disabled(),
+            &pkg,
+            &ws,
+        )
+        .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn synthetic_negative_globs_merged() {
+        let (pkg, ws) = test_paths();
+        let parent = parent_config(true, &["src/**"]);
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: Some(vec![UserInputEntry::Glob("!dist/**".into())]),
+            }),
+            &pkg,
+            &ws,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.input_config.positive_globs, globs(&["src/**"]));
+        assert_eq!(result.input_config.negative_globs, globs(&["packages/my-pkg/dist/**"]));
+    }
 }

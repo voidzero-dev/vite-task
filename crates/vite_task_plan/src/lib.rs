@@ -256,6 +256,7 @@ pub fn plan_synthetic(
         synthetic_plan_request,
         Some(execution_cache_key),
         cwd,
+        cwd,
         ParentCacheConfig::None,
     )
 }
