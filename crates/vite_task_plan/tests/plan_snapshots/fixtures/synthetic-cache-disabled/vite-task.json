@@ -1,19 +1,19 @@
 {
   "tasks": {
     "lint-no-cache": {
-      "command": "vt lint",
+      "command": "vt tool print lint",
       "cache": false
     },
     "lint-with-cache": {
-      "command": "vt lint",
+      "command": "vt tool print lint",
       "cache": true
     },
     "lint-with-untracked-env": {
-      "command": "vt lint",
+      "command": "vt tool print lint",
       "untrackedEnv": ["CUSTOM_VAR"]
     },
     "build": {
-      "command": "vt lint",
+      "command": "vt tool print lint",
       "cache": true
     },
     "run-build-no-cache": {

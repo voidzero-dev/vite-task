@@ -1,6 +1,6 @@
 {
   "name": "a",
   "scripts": {
-    "lint": "vt lint"
+    "lint": "vt tool print lint"
   }
 }

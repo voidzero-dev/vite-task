@@ -16,7 +16,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-env
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt env-test TEST_VAR hello_world",
+        "command": "TEST_VAR=hello_world vt tool print-env TEST_VAR",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

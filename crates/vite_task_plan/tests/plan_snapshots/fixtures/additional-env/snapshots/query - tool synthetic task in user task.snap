@@ -27,7 +27,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-env
               "task_name": "env-test",
               "package_path": "<workspace>/"
             },
-            "command": "vt env-test TEST_VAR hello_world",
+            "command": "TEST_VAR=hello_world vt tool print-env TEST_VAR",
             "and_item_index": null,
             "cwd": "<workspace>/"
           },
@@ -47,9 +47,10 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-env
                       "TEST_VAR"
                     ],
                     "env_fingerprints": {
-                      "fingerprinted_envs": {},
+                      "fingerprinted_envs": {
+                        "TEST_VAR": "hello_world"
+                      },
                       "untracked_env_config": [
-                        "TEST_VAR",
                         "<default untracked envs>"
                       ]
                     }

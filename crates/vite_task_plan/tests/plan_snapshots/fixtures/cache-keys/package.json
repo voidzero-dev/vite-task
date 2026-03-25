@@ -1,8 +1,8 @@
 {
   "scripts": {
-    "lint": "vt lint",
+    "lint": "vt tool print lint",
     "hello": "vtt print-file",
-    "lint-and-echo": "vt lint && echo",
-    "echo-and-lint": "echo Linting && vt lint"
+    "lint-and-echo": "vt tool print lint && echo",
+    "echo-and-lint": "echo Linting && vt tool print lint"
   }
 }

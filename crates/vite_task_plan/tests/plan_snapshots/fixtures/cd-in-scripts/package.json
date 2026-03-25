@@ -2,6 +2,6 @@
   "scripts": {
     "build": "vtt print-file package.json",
     "cd-build": "cd src && vt run build",
-    "cd-lint": "cd src && vt lint"
+    "cd-lint": "cd src && vt tool print lint"
   }
 }

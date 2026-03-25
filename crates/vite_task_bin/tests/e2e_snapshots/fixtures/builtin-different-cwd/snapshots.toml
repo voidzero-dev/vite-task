@@ -1,11 +1,10 @@
-# Tests that tasks have separate cache per cwd
+# Tests that synthetic tasks have separate cache per cwd
 
 [[e2e]]
 name = "builtin different cwd"
 steps = [
-  "cd folder1 && vt run lint # cache miss in folder1",
-  "cd folder2 && vt run lint # cache miss in folder2",
-  "echo 'console.log(1);' > folder2/a.js # modify folder2",
-  "cd folder1 && vt run lint # cache hit",
-  "cd folder2 && vt run lint # cache miss",
+  "vt run cwd1 # cache miss in folder1",
+  "vt run cwd2 # cache miss in folder2 (different cwd)",
+  "vt run cwd1 # cache hit in folder1",
+  "vt run cwd2 # cache hit in folder2",
 ]

@@ -1,7 +1,0 @@
-{
-  "name": "e2e-env-test",
-  "private": true,
-  "scripts": {
-    "env-test": "vt env-test"
-  }
-}

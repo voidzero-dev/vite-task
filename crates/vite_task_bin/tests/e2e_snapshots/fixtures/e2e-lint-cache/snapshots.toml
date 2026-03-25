@@ -1,9 +1,9 @@
-# Tests lint caching with file changes
+# Tests synthetic task caching with file changes
 
 [[e2e]]
 name = "direct lint"
 steps = [
   "vt run lint # cache miss",
-  "echo debugger > main.js # add lint error",
-  "vt run lint # cache miss, lint fails",
+  "echo modified > main.js # modify tracked file",
+  "vt run lint # cache miss, file changed",
 ]

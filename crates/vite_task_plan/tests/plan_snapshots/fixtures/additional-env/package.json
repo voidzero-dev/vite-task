@@ -3,6 +3,6 @@
   "private": true,
   "scripts": {
     "hello": "echo hello",
-    "env-test": "vt env-test TEST_VAR hello_world"
+    "env-test": "TEST_VAR=hello_world vt tool print-env TEST_VAR"
   }
 }

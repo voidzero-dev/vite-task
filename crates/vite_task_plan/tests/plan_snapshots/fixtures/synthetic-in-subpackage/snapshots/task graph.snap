@@ -50,7 +50,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/synthetic-in-sub
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "vt lint",
+        "command": "vt tool print lint",
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {

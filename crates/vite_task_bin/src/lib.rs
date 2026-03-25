@@ -6,7 +6,6 @@ use std::{
 };
 
 use clap::Parser;
-use rustc_hash::FxHashMap;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_task::{
@@ -47,65 +46,13 @@ pub fn find_executable(
     Ok(executable_path.into_os_string().into())
 }
 
-/// Create a synthetic plan request for running a tool from `node_modules/.bin`.
-///
-/// # Errors
-///
-/// Returns an error if the executable cannot be found.
-fn synthesize_node_modules_bin_task(
-    executable_name: &str,
-    args: &[Str],
-    envs: &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
-    cwd: &Arc<AbsolutePath>,
-) -> anyhow::Result<SyntheticPlanRequest> {
-    Ok(SyntheticPlanRequest {
-        program: find_executable(get_path_env(envs), cwd, executable_name)?,
-        args: args.into(),
-        cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
-            env: None,
-            untracked_env: None,
-            input: None,
-        }),
-        envs: Arc::clone(envs),
-    })
-}
-
-/// Create a synthetic plan request for running a `vtt` subcommand.
-///
-/// # Errors
-///
-/// Returns an error if the `vtt` executable cannot be found.
-fn synthesize_vtt_task(
-    subcommand: &str,
-    args: &[Str],
-    cache_config: UserCacheConfig,
-    envs: &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
-    cwd: &Arc<AbsolutePath>,
-) -> anyhow::Result<SyntheticPlanRequest> {
-    let mut full_args = vec![Str::from(subcommand)];
-    full_args.extend_from_slice(args);
-    Ok(SyntheticPlanRequest {
-        program: find_executable(get_path_env(envs), cwd, "vtt")?,
-        args: full_args.into(),
-        cache_config,
-        envs: Arc::clone(envs),
-    })
-}
-
 #[derive(Debug, Parser)]
 #[command(name = "vt", version)]
 pub enum Args {
-    Lint {
+    /// Run a tool via vtt.
+    Tool {
         #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<Str>,
-    },
-    Test {
-        #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<Str>,
-    },
-    EnvTest {
-        name: Str,
-        value: Str,
     },
     #[command(flatten)]
     Task(Command),
@@ -131,32 +78,18 @@ impl vite_task::CommandHandler for CommandHandler {
             std::iter::once(command.program.as_str()).chain(command.args.iter().map(Str::as_str)),
         )?;
         match args {
-            Args::Lint { args } => Ok(HandledCommand::Synthesized(
-                synthesize_node_modules_bin_task("oxlint", &args, &command.envs, &command.cwd)?,
-            )),
-            Args::Test { args } => Ok(HandledCommand::Synthesized(
-                synthesize_node_modules_bin_task("vitest", &args, &command.envs, &command.cwd)?,
-            )),
-            Args::EnvTest { name, value } => {
-                let mut envs = FxHashMap::clone(&command.envs);
-                envs.insert(
-                    Arc::from(OsStr::new(name.as_str())),
-                    Arc::from(OsStr::new(value.as_str())),
-                );
-                let envs = Arc::new(envs);
-
-                let untracked = vec![name.clone()];
-                Ok(HandledCommand::Synthesized(synthesize_vtt_task(
-                    "print-env",
-                    std::slice::from_ref(&name),
-                    UserCacheConfig::with_config(EnabledCacheConfig {
+            Args::Tool { args } => {
+                let program = find_executable(get_path_env(&command.envs), &command.cwd, "vtt")?;
+                Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
+                    program,
+                    args: args.into_iter().filter(|a| a.as_str() != "--").collect(),
+                    cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
                         env: None,
-                        untracked_env: Some(untracked),
+                        untracked_env: None,
                         input: None,
                     }),
-                    &envs,
-                    &command.cwd,
-                )?))
+                    envs: Arc::clone(&command.envs),
+                }))
             }
             Args::Task(parsed) => Ok(HandledCommand::ViteTaskCommand(parsed)),
         }

@@ -2,13 +2,9 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-[1]> vt run lint -- -D no-debugger
-Error: Invalid vite task command: vt with args ["lint", "--", "-D", "no-debugger"] under cwd "<workspace>/"
-
-Caused by:
-    cannot find binary path
-[1]> vt run lint -- -D no-debugger
-Error: Invalid vite task command: vt with args ["lint", "--", "-D", "no-debugger"] under cwd "<workspace>/"
-
-Caused by:
-    cannot find binary path
+[1]> vt run lint
+$ vt tool replace-file-content bad.js NOTFOUND replacement
+searchValue not found in bad.js: "NOTFOUND"
+[1]> vt run lint
+$ vt tool replace-file-content bad.js NOTFOUND replacement
+searchValue not found in bad.js: "NOTFOUND"

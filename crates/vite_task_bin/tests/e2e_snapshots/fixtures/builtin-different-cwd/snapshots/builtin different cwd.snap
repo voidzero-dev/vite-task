@@ -2,25 +2,21 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-[1]> cd folder1 && vt run lint # cache miss in folder1
-Error: Invalid vite task command: vt with args ["lint"] under cwd "<workspace>/"
+> vt run cwd1 # cache miss in folder1
+~/folder1$ vt tool print-cwd
+<workspace>/folder1
+> vt run cwd2 # cache miss in folder2 (different cwd)
+~/folder2$ vt tool print-cwd
+<workspace>/folder2
+> vt run cwd1 # cache hit in folder1
+~/folder1$ vt tool print-cwd ◉ cache hit, replaying
+<workspace>/folder1
 
-Caused by:
-    cannot find binary path
-[1]> cd folder2 && vt run lint # cache miss in folder2
-Error: Invalid vite task command: vt with args ["lint"] under cwd "<workspace>/"
+---
+vt run: cache hit.
+> vt run cwd2 # cache hit in folder2
+~/folder2$ vt tool print-cwd ◉ cache hit, replaying
+<workspace>/folder2
 
-Caused by:
-    cannot find binary path
-> echo 'console.log(1);' > folder2/a.js # modify folder2
-
-[1]> cd folder1 && vt run lint # cache hit
-Error: Invalid vite task command: vt with args ["lint"] under cwd "<workspace>/"
-
-Caused by:
-    cannot find binary path
-[1]> cd folder2 && vt run lint # cache miss
-Error: Invalid vite task command: vt with args ["lint"] under cwd "<workspace>/"
-
-Caused by:
-    cannot find binary path
+---
+vt run: cache hit.

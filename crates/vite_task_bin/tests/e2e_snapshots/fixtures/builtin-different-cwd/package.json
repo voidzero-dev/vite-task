@@ -1,5 +1,6 @@
 {
   "scripts": {
-    "lint": "vt lint"
+    "cwd1": "cd folder1 && vt tool print-cwd",
+    "cwd2": "cd folder2 && vt tool print-cwd"
   }
 }

@@ -84,7 +84,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cd-in-scripts
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "cd src && vt lint",
+        "command": "cd src && vt tool print lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

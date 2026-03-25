@@ -1,6 +1,6 @@
 {
   "name": "builtin-non-zero-exit-test",
   "scripts": {
-    "lint": "vt lint"
+    "lint": "vt tool replace-file-content bad.js NOTFOUND replacement"
   }
 }

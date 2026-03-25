@@ -11,7 +11,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: check-tty, print, print-env, print-file, read-stdin, replace-file-content, touch-file"
+            "Subcommands: check-tty, print, print-cwd, print-env, print-file, read-stdin, replace-file-content, touch-file"
         );
         std::process::exit(1);
     }
@@ -25,6 +25,7 @@ fn main() {
             cmd_print(&args[2..]);
             Ok(())
         }
+        "print-cwd" => cmd_print_cwd(),
         "print-env" => cmd_print_env(&args[2..]),
         "print-file" => cmd_print_file(&args[2..]),
         "read-stdin" => cmd_read_stdin(),
@@ -54,6 +55,12 @@ fn cmd_check_tty() {
 
 fn cmd_print(args: &[String]) {
     println!("{}", args.join(" "));
+}
+
+fn cmd_print_cwd() -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    println!("{}", cwd.display());
+    Ok(())
 }
 
 fn cmd_print_env(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {

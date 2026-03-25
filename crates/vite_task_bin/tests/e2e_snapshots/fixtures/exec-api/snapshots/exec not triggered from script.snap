@@ -1,9 +1,0 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
-[1]> FOO=bar vt run lint-task # no print-env FOO output
-Error: Invalid vite task command: vt with args ["lint"] under cwd "<workspace>/"
-
-Caused by:
-    cannot find binary path

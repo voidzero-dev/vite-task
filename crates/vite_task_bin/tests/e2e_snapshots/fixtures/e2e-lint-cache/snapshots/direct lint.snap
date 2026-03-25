@@ -2,15 +2,11 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-[1]> vt run lint # cache miss
-Error: Invalid vite task command: vt with args ["lint"] under cwd "<workspace>/"
+> vt run lint # cache miss
+$ vt tool print-file main.js
+console.log("hello");
+> echo modified > main.js # modify tracked file
 
-Caused by:
-    cannot find binary path
-> echo debugger > main.js # add lint error
-
-[1]> vt run lint # cache miss, lint fails
-Error: Invalid vite task command: vt with args ["lint"] under cwd "<workspace>/"
-
-Caused by:
-    cannot find binary path
+> vt run lint # cache miss, file changed
+$ vt tool print-file main.js ○ cache miss: 'main.js' modified, executing
+modified

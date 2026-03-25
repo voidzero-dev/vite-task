@@ -16,7 +16,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo Linting && vt lint",
+        "command": "echo Linting && vt tool print lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -84,7 +84,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt lint",
+        "command": "vt tool print lint",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -118,7 +118,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/cache-keys
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt lint && echo",
+        "command": "vt tool print lint && echo",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
