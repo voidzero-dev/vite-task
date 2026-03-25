@@ -21,6 +21,26 @@ pub enum InputBase {
     Workspace,
 }
 
+/// Glob pattern with explicit base directory for resolution.
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(deny_unknown_fields)]
+pub struct GlobWithBase {
+    /// The glob pattern (positive or negative starting with `!`)
+    pub pattern: Str,
+    /// The base directory for resolving the pattern
+    pub base: InputBase,
+}
+
+/// Auto-inference directive for input tracking.
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(deny_unknown_fields)]
+pub struct AutoInput {
+    /// Automatically track which files the task reads
+    pub auto: bool,
+}
+
 /// A single input entry in the `input` array.
 ///
 /// Inputs can be:
@@ -35,17 +55,9 @@ pub enum UserInputEntry {
     /// Glob pattern (positive or negative starting with `!`), resolved relative to package dir
     Glob(Str),
     /// Glob pattern with explicit base directory
-    GlobWithBase {
-        /// The glob pattern (positive or negative starting with `!`)
-        pattern: Str,
-        /// The base directory for resolving the pattern
-        base: InputBase,
-    },
+    GlobWithBase(GlobWithBase),
     /// Auto-inference directive
-    Auto {
-        /// Automatically track which files the task reads
-        auto: bool,
-    },
+    Auto(AutoInput),
 }
 
 /// The inputs configuration for cache fingerprinting.
@@ -471,7 +483,7 @@ mod tests {
             "input": [{ "auto": true }]
         });
         let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(config.input, Some(vec![UserInputEntry::Auto { auto: true }]));
+        assert_eq!(config.input, Some(vec![UserInputEntry::Auto(AutoInput { auto: true })]));
     }
 
     #[test]
@@ -480,7 +492,7 @@ mod tests {
             "input": [{ "auto": false }]
         });
         let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(config.input, Some(vec![UserInputEntry::Auto { auto: false }]));
+        assert_eq!(config.input, Some(vec![UserInputEntry::Auto(AutoInput { auto: false })]));
     }
 
     #[test]
@@ -523,7 +535,7 @@ mod tests {
             config.input,
             Some(vec![
                 UserInputEntry::Glob("package.json".into()),
-                UserInputEntry::Auto { auto: true },
+                UserInputEntry::Auto(AutoInput { auto: true }),
                 UserInputEntry::Glob("!node_modules/**".into()),
             ])
         );
@@ -537,10 +549,10 @@ mod tests {
         let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
         assert_eq!(
             config.input,
-            Some(vec![UserInputEntry::GlobWithBase {
+            Some(vec![UserInputEntry::GlobWithBase(GlobWithBase {
                 pattern: "configs/tsconfig.json".into(),
                 base: InputBase::Workspace,
-            }])
+            })])
         );
     }
 
@@ -552,10 +564,10 @@ mod tests {
         let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
         assert_eq!(
             config.input,
-            Some(vec![UserInputEntry::GlobWithBase {
+            Some(vec![UserInputEntry::GlobWithBase(GlobWithBase {
                 pattern: "src/**".into(),
                 base: InputBase::Package,
-            }])
+            })])
         );
     }
 
@@ -567,10 +579,10 @@ mod tests {
         let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
         assert_eq!(
             config.input,
-            Some(vec![UserInputEntry::GlobWithBase {
+            Some(vec![UserInputEntry::GlobWithBase(GlobWithBase {
                 pattern: "!dist/**".into(),
                 base: InputBase::Workspace,
-            }])
+            })])
         );
     }
 
@@ -594,6 +606,16 @@ mod tests {
     }
 
     #[test]
+    fn test_input_mixed_auto_and_glob_with_base_error() {
+        // An object with both "auto" and "pattern"/"base" should fail due to deny_unknown_fields
+        let user_config_json = json!({
+            "input": [{ "auto": true, "pattern": "src/**", "base": "workspace" }]
+        });
+        let result = serde_json::from_value::<EnabledCacheConfig>(user_config_json);
+        assert!(result.is_err(), "mixing auto and pattern/base fields should produce an error");
+    }
+
+    #[test]
     fn test_input_mixed_with_glob_base() {
         let user_config_json = json!({
             "input": [
@@ -608,11 +630,11 @@ mod tests {
             config.input,
             Some(vec![
                 UserInputEntry::Glob("package.json".into()),
-                UserInputEntry::GlobWithBase {
+                UserInputEntry::GlobWithBase(GlobWithBase {
                     pattern: "configs/**".into(),
                     base: InputBase::Workspace,
-                },
-                UserInputEntry::Auto { auto: true },
+                }),
+                UserInputEntry::Auto(AutoInput { auto: true }),
                 UserInputEntry::Glob("!node_modules/**".into()),
             ])
         );

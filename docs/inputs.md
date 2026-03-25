@@ -68,7 +68,7 @@ By default, glob patterns are resolved relative to the package directory. Use th
 
 ```json
 {
-  "inputs": [
+  "input": [
     "src/**",
     { "pattern": "configs/tsconfig.json", "base": "workspace" },
     { "pattern": "!dist/**", "base": "workspace" }
@@ -159,15 +159,15 @@ The cache will only invalidate when the command itself or environment variables 
 
 ## Behavior Summary
 
-| Configuration                                                   | Auto-Inference | File Tracking                      |
-| --------------------------------------------------------------- | -------------- | ---------------------------------- |
-| `inputs` omitted                                                | Enabled        | Inferred files                     |
-| `inputs: [{ "auto": true }]`                                    | Enabled        | Inferred files                     |
-| `inputs: ["src/**"]`                                            | Disabled       | Matched files only                 |
-| `inputs: [{ "auto": true }, "!dist/**"]`                        | Enabled        | Inferred files except `dist/`      |
-| `inputs: ["pkg.json", { "auto": true }]`                        | Enabled        | `pkg.json` + inferred files        |
-| `inputs: [{ "pattern": "tsconfig.json", "base": "workspace" }]` | Disabled       | Matched files (workspace-relative) |
-| `inputs: []`                                                    | Disabled       | No files tracked                   |
+| Configuration                                                  | Auto-Inference | File Tracking                      |
+| -------------------------------------------------------------- | -------------- | ---------------------------------- |
+| `inputs` omitted                                               | Enabled        | Inferred files                     |
+| `inputs: [{ "auto": true }]`                                   | Enabled        | Inferred files                     |
+| `inputs: ["src/**"]`                                           | Disabled       | Matched files only                 |
+| `inputs: [{ "auto": true }, "!dist/**"]`                       | Enabled        | Inferred files except `dist/`      |
+| `inputs: ["pkg.json", { "auto": true }]`                       | Enabled        | `pkg.json` + inferred files        |
+| `input: [{ "pattern": "tsconfig.json", "base": "workspace" }]` | Disabled       | Matched files (workspace-relative) |
+| `inputs: []`                                                   | Disabled       | No files tracked                   |
 
 ## Important Notes
 

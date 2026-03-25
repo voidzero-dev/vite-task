@@ -7,8 +7,9 @@ use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
-    EnabledCacheConfig, InputBase, ResolvedGlobalCacheConfig, UserCacheConfig,
-    UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserRunConfig, UserTaskConfig,
+    AutoInput, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
+    UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserRunConfig,
+    UserTaskConfig,
 };
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -153,8 +154,8 @@ impl ResolvedInputConfig {
 
         for entry in entries {
             match entry {
-                UserInputEntry::Auto { auto: true } => includes_auto = true,
-                UserInputEntry::Auto { auto: false } => {} // Ignore {auto: false}
+                UserInputEntry::Auto(AutoInput { auto: true }) => includes_auto = true,
+                UserInputEntry::Auto(AutoInput { auto: false }) => {} // Ignore {auto: false}
                 UserInputEntry::Glob(pattern) => {
                     Self::insert_glob(
                         pattern.as_str(),
@@ -164,7 +165,7 @@ impl ResolvedInputConfig {
                         &mut negative_globs,
                     )?;
                 }
-                UserInputEntry::GlobWithBase { pattern, base } => {
+                UserInputEntry::GlobWithBase(GlobWithBase { pattern, base }) => {
                     let base_dir = match base {
                         InputBase::Package => package_dir,
                         InputBase::Workspace => workspace_root,
@@ -452,7 +453,7 @@ mod tests {
     #[test]
     fn test_resolved_input_config_auto_only() {
         let (pkg, ws) = test_paths();
-        let user_inputs = vec![UserInputEntry::Auto { auto: true }];
+        let user_inputs = vec![UserInputEntry::Auto(AutoInput { auto: true })];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert!(config.positive_globs.is_empty());
@@ -462,7 +463,7 @@ mod tests {
     #[test]
     fn test_resolved_input_config_auto_false_ignored() {
         let (pkg, ws) = test_paths();
-        let user_inputs = vec![UserInputEntry::Auto { auto: false }];
+        let user_inputs = vec![UserInputEntry::Auto(AutoInput { auto: false })];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert!(config.positive_globs.is_empty());
@@ -506,7 +507,7 @@ mod tests {
         let (pkg, ws) = test_paths();
         let user_inputs = vec![
             UserInputEntry::Glob("package.json".into()),
-            UserInputEntry::Auto { auto: true },
+            UserInputEntry::Auto(AutoInput { auto: true }),
             UserInputEntry::Glob("!node_modules/**".into()),
         ];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
@@ -521,8 +522,10 @@ mod tests {
     fn test_resolved_input_config_globs_with_auto() {
         let (pkg, ws) = test_paths();
         // Globs with auto keeps inference enabled
-        let user_inputs =
-            vec![UserInputEntry::Glob("src/**/*.ts".into()), UserInputEntry::Auto { auto: true }];
+        let user_inputs = vec![
+            UserInputEntry::Glob("src/**/*.ts".into()),
+            UserInputEntry::Auto(AutoInput { auto: true }),
+        ];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
     }
@@ -552,10 +555,10 @@ mod tests {
     #[test]
     fn test_resolved_input_config_glob_with_workspace_base() {
         let (pkg, ws) = test_paths();
-        let user_inputs = vec![UserInputEntry::GlobWithBase {
+        let user_inputs = vec![UserInputEntry::GlobWithBase(GlobWithBase {
             pattern: "configs/tsconfig.json".into(),
             base: InputBase::Workspace,
-        }];
+        })];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert_eq!(config.positive_globs.len(), 1);
@@ -570,10 +573,10 @@ mod tests {
     #[test]
     fn test_resolved_input_config_negative_glob_with_workspace_base() {
         let (pkg, ws) = test_paths();
-        let user_inputs = vec![UserInputEntry::GlobWithBase {
+        let user_inputs = vec![UserInputEntry::GlobWithBase(GlobWithBase {
             pattern: "!dist/**".into(),
             base: InputBase::Workspace,
-        }];
+        })];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert_eq!(config.negative_globs.len(), 1);
         assert!(
@@ -587,10 +590,10 @@ mod tests {
     fn test_resolved_input_config_glob_with_package_base_explicit() {
         let (pkg, ws) = test_paths();
         // Explicit "package" base should behave same as bare string
-        let user_inputs = vec![UserInputEntry::GlobWithBase {
+        let user_inputs = vec![UserInputEntry::GlobWithBase(GlobWithBase {
             pattern: "src/**/*.ts".into(),
             base: InputBase::Package,
-        }];
+        })];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert_eq!(config.positive_globs.len(), 1);
         assert!(
@@ -605,12 +608,15 @@ mod tests {
         let (pkg, ws) = test_paths();
         let user_inputs = vec![
             UserInputEntry::Glob("src/**".into()),
-            UserInputEntry::GlobWithBase {
+            UserInputEntry::GlobWithBase(GlobWithBase {
                 pattern: "configs/**".into(),
                 base: InputBase::Workspace,
-            },
-            UserInputEntry::Auto { auto: true },
-            UserInputEntry::GlobWithBase { pattern: "!dist/**".into(), base: InputBase::Workspace },
+            }),
+            UserInputEntry::Auto(AutoInput { auto: true }),
+            UserInputEntry::GlobWithBase(GlobWithBase {
+                pattern: "!dist/**".into(),
+                base: InputBase::Workspace,
+            }),
         ];
         let config = ResolvedInputConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
