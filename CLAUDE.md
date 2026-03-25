@@ -99,7 +99,7 @@ Tasks are defined in `vite-task.json`:
       "cache": true,
       "env": ["NODE_ENV"],
       "untrackedEnv": ["CI"],
-      "input": ["src/**", "!dist/**", { "auto": true }]
+      "input": ["src/**", "!dist/**", { "auto": true }, { "pattern": "tsconfig.json", "base": "workspace" }]
     }
   }
 }

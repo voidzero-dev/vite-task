@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "build": {
+      "command": "echo build",
+      "input": [
+        "src/**",
+        { "pattern": "configs/tsconfig.json", "base": "workspace" },
+        { "pattern": "!dist/**", "base": "workspace" }
+      ],
+      "cache": true
+    }
+  }
+}

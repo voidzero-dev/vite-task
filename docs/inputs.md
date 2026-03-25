@@ -62,6 +62,29 @@ Exclude files from tracking using `!` prefix:
 
 Negative patterns filter out files that would otherwise be matched by positive patterns or auto-inference.
 
+### Glob with Base Directory
+
+By default, glob patterns are resolved relative to the package directory. Use the object form to resolve patterns relative to a different base:
+
+```json
+{
+  "inputs": [
+    "src/**",
+    { "pattern": "configs/tsconfig.json", "base": "workspace" },
+    { "pattern": "!dist/**", "base": "workspace" }
+  ]
+}
+```
+
+The `base` field is required and accepts:
+
+- `"package"` — resolve relative to the package directory (same as bare string globs)
+- `"workspace"` — resolve relative to the workspace root
+
+This is useful for tracking shared configuration files at the workspace root, or excluding workspace-level directories from cache fingerprinting.
+
+Negation (`!` prefix) works in both bare strings and the object form.
+
 ## Configuration Examples
 
 ### Explicit Globs Only
@@ -136,20 +159,21 @@ The cache will only invalidate when the command itself or environment variables 
 
 ## Behavior Summary
 
-| Configuration                            | Auto-Inference | File Tracking                 |
-| ---------------------------------------- | -------------- | ----------------------------- |
-| `inputs` omitted                         | Enabled        | Inferred files                |
-| `inputs: [{ "auto": true }]`             | Enabled        | Inferred files                |
-| `inputs: ["src/**"]`                     | Disabled       | Matched files only            |
-| `inputs: [{ "auto": true }, "!dist/**"]` | Enabled        | Inferred files except `dist/` |
-| `inputs: ["pkg.json", { "auto": true }]` | Enabled        | `pkg.json` + inferred files   |
-| `inputs: []`                             | Disabled       | No files tracked              |
+| Configuration                                                   | Auto-Inference | File Tracking                      |
+| --------------------------------------------------------------- | -------------- | ---------------------------------- |
+| `inputs` omitted                                                | Enabled        | Inferred files                     |
+| `inputs: [{ "auto": true }]`                                    | Enabled        | Inferred files                     |
+| `inputs: ["src/**"]`                                            | Disabled       | Matched files only                 |
+| `inputs: [{ "auto": true }, "!dist/**"]`                        | Enabled        | Inferred files except `dist/`      |
+| `inputs: ["pkg.json", { "auto": true }]`                        | Enabled        | `pkg.json` + inferred files        |
+| `inputs: [{ "pattern": "tsconfig.json", "base": "workspace" }]` | Disabled       | Matched files (workspace-relative) |
+| `inputs: []`                                                    | Disabled       | No files tracked                   |
 
 ## Important Notes
 
 ### Glob Base Directory
 
-Glob patterns are resolved relative to the **package directory** (where `package.json` is located), not the task's working directory (`cwd`).
+By default, glob patterns (bare strings) are resolved relative to the **package directory** (where `package.json` is located), not the task's working directory (`cwd`). To resolve relative to the workspace root instead, use the object form with `"base": "workspace"` (see [Glob with Base Directory](#glob-with-base-directory)).
 
 ```json
 {

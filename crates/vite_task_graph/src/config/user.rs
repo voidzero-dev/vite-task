@@ -10,16 +10,37 @@ use ts_rs::TS;
 use vite_path::RelativePathBuf;
 use vite_str::Str;
 
+/// The base directory for resolving a glob pattern.
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(rename_all = "lowercase")]
+pub enum InputBase {
+    /// Resolve relative to the package directory (where `package.json` is located)
+    Package,
+    /// Resolve relative to the workspace root
+    Workspace,
+}
+
 /// A single input entry in the `input` array.
 ///
-/// Inputs can be either glob patterns (strings) or auto-inference directives (`{auto: true}`).
+/// Inputs can be:
+/// - Glob patterns as strings (resolved relative to the package directory)
+/// - Object form with explicit base: `{ "pattern": "...", "base": "workspace" | "package" }`
+/// - Auto-inference directives: `{ "auto": true }`
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS))]
 #[serde(untagged)]
 pub enum UserInputEntry {
-    /// Glob pattern (positive or negative starting with `!`)
+    /// Glob pattern (positive or negative starting with `!`), resolved relative to package dir
     Glob(Str),
+    /// Glob pattern with explicit base directory
+    GlobWithBase {
+        /// The glob pattern (positive or negative starting with `!`)
+        pattern: Str,
+        /// The base directory for resolving the pattern
+        base: InputBase,
+    },
     /// Auto-inference directive
     Auto {
         /// Automatically track which files the task reads
@@ -85,11 +106,10 @@ pub struct EnabledCacheConfig {
     ///
     /// - Omitted: automatically tracks which files the task reads
     /// - `[]` (empty): disables file tracking entirely
-    /// - Glob patterns (e.g. `"src/**"`) select specific files
+    /// - Glob patterns (e.g. `"src/**"`) select specific files, relative to the package directory
+    /// - `{pattern: "...", base: "workspace" | "package"}` specifies a glob with an explicit base directory
     /// - `{auto: true}` enables automatic file tracking
     /// - Negative patterns (e.g. `"!dist/**"`) exclude matched files
-    ///
-    /// Patterns are relative to the package directory.
     #[serde(default)]
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
     pub input: Option<UserInputsConfig>,
@@ -503,6 +523,95 @@ mod tests {
             config.input,
             Some(vec![
                 UserInputEntry::Glob("package.json".into()),
+                UserInputEntry::Auto { auto: true },
+                UserInputEntry::Glob("!node_modules/**".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_input_glob_with_base_workspace() {
+        let user_config_json = json!({
+            "input": [{ "pattern": "configs/tsconfig.json", "base": "workspace" }]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            config.input,
+            Some(vec![UserInputEntry::GlobWithBase {
+                pattern: "configs/tsconfig.json".into(),
+                base: InputBase::Workspace,
+            }])
+        );
+    }
+
+    #[test]
+    fn test_input_glob_with_base_package() {
+        let user_config_json = json!({
+            "input": [{ "pattern": "src/**", "base": "package" }]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            config.input,
+            Some(vec![UserInputEntry::GlobWithBase {
+                pattern: "src/**".into(),
+                base: InputBase::Package,
+            }])
+        );
+    }
+
+    #[test]
+    fn test_input_negative_glob_with_base() {
+        let user_config_json = json!({
+            "input": [{ "pattern": "!dist/**", "base": "workspace" }]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            config.input,
+            Some(vec![UserInputEntry::GlobWithBase {
+                pattern: "!dist/**".into(),
+                base: InputBase::Workspace,
+            }])
+        );
+    }
+
+    #[test]
+    fn test_input_glob_with_base_missing_base_error() {
+        // { "pattern": "src/**" } without "base" should fail (base is required)
+        let user_config_json = json!({
+            "input": [{ "pattern": "src/**" }]
+        });
+        let result = serde_json::from_value::<EnabledCacheConfig>(user_config_json);
+        assert!(result.is_err(), "missing 'base' field should produce an error");
+    }
+
+    #[test]
+    fn test_input_glob_with_base_invalid_base_error() {
+        let user_config_json = json!({
+            "input": [{ "pattern": "src/**", "base": "invalid" }]
+        });
+        let result = serde_json::from_value::<EnabledCacheConfig>(user_config_json);
+        assert!(result.is_err(), "invalid 'base' value should produce an error");
+    }
+
+    #[test]
+    fn test_input_mixed_with_glob_base() {
+        let user_config_json = json!({
+            "input": [
+                "package.json",
+                { "pattern": "configs/**", "base": "workspace" },
+                { "auto": true },
+                "!node_modules/**"
+            ]
+        });
+        let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            config.input,
+            Some(vec![
+                UserInputEntry::Glob("package.json".into()),
+                UserInputEntry::GlobWithBase {
+                    pattern: "configs/**".into(),
+                    base: InputBase::Workspace,
+                },
                 UserInputEntry::Auto { auto: true },
                 UserInputEntry::Glob("!node_modules/**".into()),
             ])
