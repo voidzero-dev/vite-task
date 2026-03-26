@@ -3911,6 +3911,7 @@ dependencies = [
  "cp_r",
  "insta",
  "jsonc-parser",
+ "libc",
  "pathdiff",
  "pty_terminal",
  "pty_terminal_test",

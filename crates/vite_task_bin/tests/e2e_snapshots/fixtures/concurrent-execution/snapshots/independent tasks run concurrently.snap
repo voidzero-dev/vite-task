@@ -3,8 +3,8 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run -r build
-~/packages/a$ barrier ../../.barrier sync 2 ⊘ cache disabled
-~/packages/b$ barrier ../../.barrier sync 2 ⊘ cache disabled
+~/packages/a$ vtt barrier ../../.barrier sync 2 ⊘ cache disabled
+~/packages/b$ vtt barrier ../../.barrier sync 2 ⊘ cache disabled
 
 
 ---

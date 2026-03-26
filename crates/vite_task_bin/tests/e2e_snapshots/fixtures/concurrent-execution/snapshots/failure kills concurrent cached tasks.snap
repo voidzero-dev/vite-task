@@ -3,8 +3,8 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 [1]> vt run -r --cache test
-~/packages/a$ barrier ../../.barrier test-sync 2 --exit=1
-~/packages/b$ barrier ../../.barrier test-sync 2 --hang
+~/packages/a$ vtt barrier ../../.barrier test-sync 2 --exit=1
+~/packages/b$ vtt barrier ../../.barrier test-sync 2 --hang
 
 
 ---

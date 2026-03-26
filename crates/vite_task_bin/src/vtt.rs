@@ -11,12 +11,13 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: check-tty, print, print-cwd, print-env, print-file, read-stdin, replace-file-content, touch-file"
+            "Subcommands: barrier, check-tty, print, print-cwd, print-env, print-file, read-stdin, replace-file-content, touch-file"
         );
         std::process::exit(1);
     }
 
     let result: Result<(), Box<dyn std::error::Error>> = match args[1].as_str() {
+        "barrier" => cmd_barrier(&args[2..]),
         "check-tty" => {
             cmd_check_tty();
             Ok(())
@@ -41,6 +42,92 @@ fn main() {
         eprintln!("{err}");
         std::process::exit(1);
     }
+}
+
+/// barrier <dir> <prefix> <count> [--exit=<code>] [--hang] [--daemonize]
+///
+/// Cross-platform concurrency barrier for testing.
+/// Creates <dir>/<prefix>_<pid>, then polls until <count> files matching
+/// <prefix>_* exist in <dir>.
+///
+/// Options:
+///   --exit=<code>  Exit with the given code after the barrier is met.
+///   --hang         Keep process alive after the barrier (for kill tests).
+///   --daemonize    Close stdout/stderr but keep process alive (for daemon kill tests).
+fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut positional: Vec<&str> = Vec::new();
+    let mut exit_code: i32 = 0;
+    let mut hang = false;
+    let mut daemonize = false;
+
+    for arg in args {
+        if let Some(code) = arg.strip_prefix("--exit=") {
+            exit_code = code.parse()?;
+        } else if arg == "--hang" {
+            hang = true;
+        } else if arg == "--daemonize" {
+            daemonize = true;
+        } else {
+            positional.push(arg.as_str());
+        }
+    }
+
+    if positional.len() < 3 {
+        return Err(
+            "Usage: vtt barrier <dir> <prefix> <count> [--exit=<code>] [--hang] [--daemonize]"
+                .into(),
+        );
+    }
+
+    let dir = std::path::Path::new(positional[0]);
+    let prefix = positional[1];
+    let count: usize = positional[2].parse()?;
+
+    std::fs::create_dir_all(dir)?;
+
+    // Create this participant's marker file.
+    let pid = std::process::id();
+    let marker = dir.join(std::format!("{prefix}_{pid}"));
+    std::fs::write(&marker, "")?;
+
+    // Poll until <count> matching files exist.
+    loop {
+        let matches = std::fs::read_dir(dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&std::format!("{prefix}_")))
+            .count();
+        if matches >= count {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    if daemonize {
+        // Close stdout/stderr but keep the process alive. Simulates a daemon that
+        // detaches from stdio — tests that the runner can still kill such processes.
+        // Replace stdout/stderr fds with /dev/null so the pipe the parent holds gets EOF.
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::IntoRawFd;
+            let null1 = std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap();
+            let null2 = std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap();
+            unsafe {
+                libc::dup2(null1.into_raw_fd(), 1);
+                libc::dup2(null2.into_raw_fd(), 2);
+            }
+        }
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
+
+    if hang {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
+
+    std::process::exit(exit_code);
 }
 
 fn cmd_check_tty() {
