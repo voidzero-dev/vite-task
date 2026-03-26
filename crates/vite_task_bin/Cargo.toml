@@ -17,6 +17,7 @@ path = "src/vtt.rs"
 [dependencies]
 anyhow = { workspace = true }
 libc = { workspace = true }
+notify = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 jsonc-parser = { workspace = true }

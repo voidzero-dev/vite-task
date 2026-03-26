@@ -90,16 +90,29 @@ fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let marker = dir.join(std::format!("{prefix}_{pid}"));
     std::fs::write(&marker, "")?;
 
-    // Poll until <count> matching files exist.
-    loop {
-        let matches = std::fs::read_dir(dir)?
+    // Wait until <count> matching files exist using filesystem notifications.
+    let prefix_match = std::format!("{prefix}_");
+    let count_matches = |d: &std::path::Path| -> Result<bool, Box<dyn std::error::Error>> {
+        Ok(std::fs::read_dir(d)?
             .filter_map(Result::ok)
-            .filter(|e| e.file_name().to_string_lossy().starts_with(&std::format!("{prefix}_")))
-            .count();
-        if matches >= count {
-            break;
+            .filter(|e| e.file_name().to_string_lossy().starts_with(prefix_match.as_str()))
+            .count()
+            >= count)
+    };
+    if !count_matches(dir)? {
+        use notify::Watcher as _;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = notify::recommended_watcher(tx)?;
+        watcher.watch(dir, notify::RecursiveMode::NonRecursive)?;
+        // Re-check after setting up the watcher to avoid missing events created
+        // between our marker write and the watcher registration.
+        if !count_matches(dir)? {
+            for _ in rx {
+                if count_matches(dir)? {
+                    break;
+                }
+            }
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
     if daemonize {
