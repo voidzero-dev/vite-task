@@ -44,16 +44,16 @@ fn main() {
     }
 }
 
-/// barrier <dir> <prefix> <count> [--exit=<code>] [--hang] [--daemonize]
+/// barrier `<dir>` `<prefix>` `<count>` \[--exit=`<code>`\] \[--hang\] \[--daemonize\]
 ///
 /// Cross-platform concurrency barrier for testing.
-/// Creates <dir>/<prefix>_<pid>, then polls until <count> files matching
-/// <prefix>_* exist in <dir>.
+/// Creates `<dir>/<prefix>_<pid>`, then polls until `<count>` files matching
+/// `<prefix>_*` exist in `<dir>`.
 ///
 /// Options:
-///   --exit=<code>  Exit with the given code after the barrier is met.
-///   --hang         Keep process alive after the barrier (for kill tests).
-///   --daemonize    Close stdout/stderr but keep process alive (for daemon kill tests).
+/// - `--exit=<code>`: Exit with the given code after the barrier is met.
+/// - `--hang`: Keep process alive after the barrier (for kill tests).
+/// - `--daemonize`: Close stdout/stderr but keep process alive (for daemon kill tests).
 fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut positional: Vec<&str> = Vec::new();
     let mut exit_code: i32 = 0;
