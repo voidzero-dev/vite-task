@@ -93,7 +93,7 @@ fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Poll until <count> matching files exist.
     loop {
         let matches = std::fs::read_dir(dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .filter(|e| e.file_name().to_string_lossy().starts_with(&std::format!("{prefix}_")))
             .count();
         if matches >= count {
@@ -111,6 +111,8 @@ fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             use std::os::unix::io::IntoRawFd;
             let null1 = std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap();
             let null2 = std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap();
+            // SAFETY: fds 1 and 2 are always valid (stdout/stderr), and null1/null2 are
+            // valid open file descriptors. dup2 is safe to call with valid fd arguments.
             unsafe {
                 libc::dup2(null1.into_raw_fd(), 1);
                 libc::dup2(null2.into_raw_fd(), 2);

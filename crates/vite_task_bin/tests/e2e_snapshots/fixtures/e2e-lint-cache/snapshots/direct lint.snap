@@ -4,7 +4,7 @@ expression: e2e_outputs
 ---
 > vt run lint # cache miss
 $ vt tool print-file main.js
-console.log("hello");
+console.log('hello');
 > echo modified > main.js # modify tracked file
 
 > vt run lint # cache miss, file changed

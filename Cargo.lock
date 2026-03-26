@@ -3916,7 +3916,6 @@ dependencies = [
  "pty_terminal",
  "pty_terminal_test",
  "regex",
- "rustc-hash",
  "serde",
  "serde_json",
  "tempfile",
@@ -3950,7 +3949,6 @@ dependencies = [
  "vite_str",
  "vite_workspace",
  "wax",
- "which",
 ]
 
 [[package]]
