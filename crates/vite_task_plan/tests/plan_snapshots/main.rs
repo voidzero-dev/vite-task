@@ -10,7 +10,6 @@ use std::{
 use clap::Parser;
 use copy_dir::copy_dir;
 use cow_utils::CowUtils as _;
-use pathdiff::diff_paths;
 use redact::redact_snapshot;
 use rustc_hash::FxHashMap;
 use serde::Serialize;
@@ -21,43 +20,6 @@ use vite_task::{Command, Session};
 use vite_task_graph::display::TaskDisplay;
 use vite_task_plan::{ExecutionGraph, ExecutionItemKind};
 use vite_workspace::find_workspace_root;
-
-const COMPILE_TIME_VT_PATH: &str = env!("COMPILE_TIME_VT_PATH");
-const COMPILE_TIME_VTT_PATH: &str = env!("COMPILE_TIME_VTT_PATH");
-const COMPILE_TIME_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
-
-/// Resolve a binary's runtime path from its compile-time path.
-///
-/// Computes `join(runtime_manifest, diff(compile_time_bin, compile_time_manifest))`.
-#[expect(
-    clippy::disallowed_types,
-    reason = "PathBuf required for compile-time/runtime binary path remapping"
-)]
-fn resolve_runtime_bin_path(compile_time_bin_path: &str) -> AbsolutePathBuf {
-    let compile_time_bin = std::path::PathBuf::from(compile_time_bin_path);
-    let compile_time_manifest = std::path::PathBuf::from(COMPILE_TIME_MANIFEST_DIR);
-    let runtime_manifest =
-        std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-
-    let relative_bin = diff_paths(&compile_time_bin, &compile_time_manifest).unwrap_or_else(|| {
-        panic!(
-            "Failed to diff binary path. bin={} manifest={}",
-            compile_time_bin.display(),
-            compile_time_manifest.display(),
-        )
-    });
-    let runtime_bin = runtime_manifest.join(&relative_bin);
-
-    let runtime_bin = runtime_bin.canonicalize().unwrap_or_else(|_| {
-        panic!(
-            "Remapped binary path does not exist: {} (relative: {})",
-            runtime_bin.display(),
-            relative_bin.display(),
-        )
-    });
-
-    AbsolutePathBuf::new(runtime_bin).unwrap()
-}
 
 /// Local parser wrapper for `BuiltInCommand`
 #[derive(Parser)]
@@ -254,15 +216,10 @@ fn run_case_inner(
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
-    // Resolve vt and vtt binary directories for PATH.
-    let bin_dirs: [Arc<OsStr>; 2] = [COMPILE_TIME_VT_PATH, COMPILE_TIME_VTT_PATH].map(|p| {
-        let bin = resolve_runtime_bin_path(p);
-        Arc::<OsStr>::from(bin.parent().unwrap().as_path().as_os_str())
-    });
-    let path_sep = if cfg!(windows) { ";" } else { ":" };
-    let combined_path = Arc::<OsStr>::from(std::ffi::OsString::from(
-        [bin_dirs[0].to_str().unwrap(), bin_dirs[1].to_str().unwrap()].join(path_sep),
-    ));
+    let fake_bin_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("tests/plan_snapshots/fake-bin");
+    let combined_path =
+        Arc::<OsStr>::from(std::ffi::OsString::from(fake_bin_dir.to_str().unwrap()));
 
     let plan_envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> = [
         (Arc::<OsStr>::from(OsStr::new("PATH")), combined_path),

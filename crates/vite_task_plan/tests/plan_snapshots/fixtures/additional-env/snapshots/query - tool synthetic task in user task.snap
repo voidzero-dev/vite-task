@@ -77,7 +77,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/additional-env
                   ],
                   "all_envs": {
                     "NO_COLOR": "1",
-                    "PATH": "<workspace>/node_modules/.bin:<tools>:<tools>",
+                    "PATH": "<workspace>/node_modules/.bin:<tools>",
                     "TEST_VAR": "hello_world"
                   },
                   "cwd": "<workspace>/"
