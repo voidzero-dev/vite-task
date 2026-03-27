@@ -119,13 +119,10 @@ fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         // Close stdout/stderr but keep the process alive. Simulates a daemon that
         // detaches from stdio — tests that the runner can still kill such processes.
         // Closing the fds gives the parent's pipe an EOF.
-        #[cfg(unix)]
-        {
-            // SAFETY: fds 1 and 2 are always valid (stdout/stderr).
-            unsafe {
-                libc::close(1);
-                libc::close(2);
-            }
+        // SAFETY: fds 1 and 2 are always valid (stdout/stderr).
+        unsafe {
+            libc::close(1);
+            libc::close(2);
         }
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3600));
