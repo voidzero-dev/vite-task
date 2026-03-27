@@ -118,17 +118,13 @@ fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if daemonize {
         // Close stdout/stderr but keep the process alive. Simulates a daemon that
         // detaches from stdio — tests that the runner can still kill such processes.
-        // Replace stdout/stderr fds with /dev/null so the pipe the parent holds gets EOF.
+        // Closing the fds gives the parent's pipe an EOF.
         #[cfg(unix)]
         {
-            use std::os::unix::io::IntoRawFd;
-            let null1 = std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap();
-            let null2 = std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap();
-            // SAFETY: fds 1 and 2 are always valid (stdout/stderr), and null1/null2 are
-            // valid open file descriptors. dup2 is safe to call with valid fd arguments.
+            // SAFETY: fds 1 and 2 are always valid (stdout/stderr).
             unsafe {
-                libc::dup2(null1.into_raw_fd(), 1);
-                libc::dup2(null2.into_raw_fd(), 2);
+                libc::close(1);
+                libc::close(2);
             }
         }
         loop {
