@@ -1,7 +1,6 @@
 mod redact;
 
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
     sync::Arc,
@@ -112,49 +111,6 @@ impl CompactPlan {
 /// On Windows, error messages may contain Debug-format paths with escaped
 /// backslashes (`\\`). This function tries both raw and escaped variants
 /// of the workspace root, then normalizes backslashes to forward slashes.
-#[expect(
-    clippy::disallowed_types,
-    reason = "String required for cow_replace and into_owned operations"
-)]
-fn redact_error_string(err_str: &str, workspace_root: &str) -> String {
-    let workspace_root_stripped = workspace_root.strip_prefix(r"\\?\").unwrap_or(workspace_root);
-    // Try matching the escaped variant first (Debug-format paths have \\ for each \)
-    let workspace_root_escaped = workspace_root.cow_replace('\\', r"\\");
-    let workspace_root_stripped_escaped = workspace_root_stripped.cow_replace('\\', r"\\");
-
-    let mut result = err_str.to_owned();
-    // Try escaped variants first (longest match)
-    if let Cow::Owned(replaced) =
-        result.as_str().cow_replace(workspace_root_escaped.as_ref(), "<workspace>")
-    {
-        result = replaced;
-    }
-    if let Cow::Owned(replaced) =
-        result.as_str().cow_replace(workspace_root_stripped_escaped.as_ref(), "<workspace>")
-    {
-        result = replaced;
-    }
-    // Try raw variants
-    if let Cow::Owned(replaced) = result.as_str().cow_replace(workspace_root, "<workspace>") {
-        result = replaced;
-    }
-    if let Cow::Owned(replaced) =
-        result.as_str().cow_replace(workspace_root_stripped, "<workspace>")
-    {
-        result = replaced;
-    }
-    // Normalize backslashes to forward slashes on Windows
-    if cfg!(windows) {
-        if let Cow::Owned(replaced) = result.as_str().cow_replace('\\', "/") {
-            result = replaced;
-        }
-        // Collapse double forward slashes
-        while result.contains("//") {
-            result = result.cow_replace("//", "/").into_owned();
-        }
-    }
-    result
-}
 
 #[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
 fn run_case(
@@ -243,13 +199,15 @@ fn run_case_inner(
             Ok(task_graph) => task_graph,
             Err(err) => {
                 let err_formatted = vite_str::format!("{err:#}");
-                let err_str = redact_error_string(&err_formatted, workspace_root_str);
+                let err_str = err_formatted.as_str().cow_replace(workspace_root_str, "<workspace>");
+                let err_str =
+                    if cfg!(windows) { err_str.as_ref().cow_replace('\\', "/") } else { err_str };
                 #[expect(
                     clippy::disallowed_macros,
                     reason = "insta::assert_snapshot! internally uses std::format!"
                 )]
                 {
-                    insta::assert_snapshot!("task graph load error", &err_str);
+                    insta::assert_snapshot!("task graph load error", err_str.as_ref());
                 }
                 return;
             }
@@ -304,13 +262,19 @@ fn run_case_inner(
                     // and redact workspace paths for snapshot stability.
                     let anyhow_err: anyhow::Error = err.into();
                     let err_formatted = vite_str::format!("{anyhow_err:#}");
-                    let err_str = redact_error_string(&err_formatted, workspace_root_str);
+                    let err_str =
+                        err_formatted.as_str().cow_replace(workspace_root_str, "<workspace>");
+                    let err_str = if cfg!(windows) {
+                        err_str.as_ref().cow_replace('\\', "/")
+                    } else {
+                        err_str
+                    };
                     #[expect(
                         clippy::disallowed_macros,
                         reason = "insta::assert_snapshot! internally uses std::format!"
                     )]
                     {
-                        insta::assert_snapshot!(snapshot_name.as_str(), &err_str);
+                        insta::assert_snapshot!(snapshot_name.as_str(), err_str.as_ref());
                     }
                     continue;
                 }
