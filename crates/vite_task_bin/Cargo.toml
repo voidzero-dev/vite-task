@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "vtt"
-path = "src/vtt.rs"
+path = "src/vtt/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }

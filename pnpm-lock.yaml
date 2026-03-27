@@ -62,9 +62,6 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.17.0
-      vite-task-tools:
-        specifier: 'link:'
-        version: 'link:'
 
 packages:
 
