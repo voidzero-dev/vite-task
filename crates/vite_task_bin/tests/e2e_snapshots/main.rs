@@ -9,7 +9,6 @@ use std::{
 };
 
 use cp_r::CopyOptions;
-use pathdiff::diff_paths;
 use pty_terminal::{geo::ScreenSize, terminal::CommandBuilder};
 use pty_terminal_test::TestTerminal;
 use redact::redact_e2e_output;
@@ -24,10 +23,6 @@ const STEP_TIMEOUT: Duration =
 
 /// Screen size for the PTY terminal. Large enough to avoid line wrapping.
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
-
-const COMPILE_TIME_VT_PATH: &str = env!("CARGO_BIN_EXE_vt");
-const COMPILE_TIME_VTT_PATH: &str = env!("CARGO_BIN_EXE_vtt");
-const COMPILE_TIME_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Get the shell executable for running e2e test steps.
 /// On Unix, uses /bin/sh.
@@ -57,40 +52,6 @@ fn get_shell_exe() -> std::path::PathBuf {
     } else {
         std::path::PathBuf::from("/bin/sh")
     }
-}
-
-/// Resolve a binary's runtime path from its compile-time path.
-///
-/// Computes `join(runtime_manifest, diff(compile_time_bin, compile_time_manifest))`.
-/// This handles cases where compile-time and runtime paths differ (e.g. CI caches).
-#[expect(
-    clippy::disallowed_types,
-    reason = "PathBuf required for compile-time/runtime binary path remapping"
-)]
-fn resolve_runtime_bin_path(compile_time_bin_path: &str) -> AbsolutePathBuf {
-    let compile_time_bin = std::path::PathBuf::from(compile_time_bin_path);
-    let compile_time_manifest = std::path::PathBuf::from(COMPILE_TIME_MANIFEST_DIR);
-    let runtime_manifest =
-        std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-
-    let relative_bin = diff_paths(&compile_time_bin, &compile_time_manifest).unwrap_or_else(|| {
-        panic!(
-            "Failed to diff binary path. bin={} manifest={}",
-            compile_time_bin.display(),
-            compile_time_manifest.display(),
-        )
-    });
-    let runtime_bin = runtime_manifest.join(&relative_bin);
-
-    let runtime_bin = runtime_bin.canonicalize().unwrap_or_else(|_| {
-        panic!(
-            "Remapped binary path does not exist: {} (relative: {})",
-            runtime_bin.display(),
-            relative_bin.display(),
-        )
-    });
-
-    AbsolutePathBuf::new(runtime_bin).unwrap()
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -271,8 +232,9 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
     let shell_exe = get_shell_exe();
 
     // Prepare PATH for e2e tests: include vt and vtt binary directories.
-    let bin_dirs: [Arc<OsStr>; 2] = [COMPILE_TIME_VT_PATH, COMPILE_TIME_VTT_PATH].map(|p| {
-        let bin = resolve_runtime_bin_path(p);
+    let bin_dirs: [Arc<OsStr>; 2] = ["CARGO_BIN_EXE_vt", "CARGO_BIN_EXE_vtt"].map(|var| {
+        let bin_path = env::var_os(var).unwrap_or_else(|| panic!("{var} not set"));
+        let bin = AbsolutePathBuf::new(std::path::PathBuf::from(bin_path)).unwrap();
         Arc::<OsStr>::from(bin.parent().unwrap().as_path().as_os_str())
     });
     let e2e_env_path = join_paths(
