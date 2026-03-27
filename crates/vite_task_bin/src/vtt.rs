@@ -6,82 +6,36 @@
 #![expect(clippy::print_stderr, reason = "CLI tool error output")]
 #![expect(clippy::print_stdout, reason = "CLI tool output")]
 
-use clap::{Parser, Subcommand};
-
-#[derive(Parser)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Cross-platform concurrency barrier for testing.
-    /// Creates `<dir>/<prefix>_<pid>`, then polls until `<count>` files matching
-    /// `<prefix>_*` exist in `<dir>`.
-    Barrier {
-        dir: String,
-        prefix: String,
-        count: usize,
-        /// Exit with the given code after the barrier is met.
-        #[arg(long = "exit", default_value_t = 0)]
-        exit_code: i32,
-        /// Keep process alive after the barrier (for kill tests).
-        #[arg(long)]
-        hang: bool,
-        /// Close stdout/stderr but keep process alive (for daemon kill tests).
-        #[arg(long)]
-        daemonize: bool,
-    },
-    /// Print whether stdin/stdout/stderr are a TTY.
-    CheckTty,
-    /// Print the given arguments joined by spaces.
-    Print {
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
-    },
-    /// Print the current working directory.
-    PrintCwd,
-    /// Print the value of an environment variable.
-    PrintEnv { var_name: String },
-    /// Print the contents of one or more files.
-    PrintFile {
-        #[arg(trailing_var_arg = true)]
-        files: Vec<String>,
-    },
-    /// Echo stdin to stdout.
-    ReadStdin,
-    /// Replace the first occurrence of a search value in a file.
-    ReplaceFileContent { filename: String, search_value: String, new_value: String },
-    /// Update a file's mtime (file must exist).
-    TouchFile { filename: String },
-}
-
 fn main() {
-    let cli = Cli::parse();
-    let result: Result<(), Box<dyn std::error::Error>> = match cli.command {
-        Commands::Barrier { dir, prefix, count, exit_code, hang, daemonize } => {
-            cmd_barrier(&dir, &prefix, count, exit_code, hang, daemonize)
-        }
-        Commands::CheckTty => {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        eprintln!("Usage: vtt <subcommand> [args...]");
+        eprintln!(
+            "Subcommands: barrier, check-tty, print, print-cwd, print-env, print-file, read-stdin, replace-file-content, touch-file"
+        );
+        std::process::exit(1);
+    }
+
+    let result: Result<(), Box<dyn std::error::Error>> = match args[1].as_str() {
+        "barrier" => cmd_barrier(&args[2..]),
+        "check-tty" => {
             cmd_check_tty();
             Ok(())
         }
-        Commands::Print { args } => {
-            cmd_print(&args);
+        "print" => {
+            cmd_print(&args[2..]);
             Ok(())
         }
-        Commands::PrintCwd => cmd_print_cwd(),
-        Commands::PrintEnv { var_name } => {
-            cmd_print_env(&var_name);
-            Ok(())
+        "print-cwd" => cmd_print_cwd(),
+        "print-env" => cmd_print_env(&args[2..]),
+        "print-file" => cmd_print_file(&args[2..]),
+        "read-stdin" => cmd_read_stdin(),
+        "replace-file-content" => cmd_replace_file_content(&args[2..]),
+        "touch-file" => cmd_touch_file(&args[2..]),
+        other => {
+            eprintln!("Unknown subcommand: {other}");
+            std::process::exit(1);
         }
-        Commands::PrintFile { files } => cmd_print_file(&files),
-        Commands::ReadStdin => cmd_read_stdin(),
-        Commands::ReplaceFileContent { filename, search_value, new_value } => {
-            cmd_replace_file_content(&filename, &search_value, &new_value)
-        }
-        Commands::TouchFile { filename } => cmd_touch_file(&filename),
     };
 
     if let Err(err) = result {
@@ -90,17 +44,46 @@ fn main() {
     }
 }
 
-fn cmd_barrier(
-    dir: &str,
-    prefix: &str,
-    count: usize,
-    exit_code: i32,
-    hang: bool,
-    daemonize: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+/// barrier `<dir>` `<prefix>` `<count>` \[--exit=`<code>`\] \[--hang\] \[--daemonize\]
+///
+/// Cross-platform concurrency barrier for testing.
+/// Creates `<dir>/<prefix>_<pid>`, then polls until `<count>` files matching
+/// `<prefix>_*` exist in `<dir>`.
+///
+/// Options:
+/// - `--exit=<code>`: Exit with the given code after the barrier is met.
+/// - `--hang`: Keep process alive after the barrier (for kill tests).
+/// - `--daemonize`: Close stdout/stderr but keep process alive (for daemon kill tests).
+fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     use notify::Watcher as _;
+    let mut positional: Vec<&str> = Vec::new();
+    let mut exit_code: i32 = 0;
+    let mut hang = false;
+    let mut daemonize = false;
 
-    let dir = std::path::Path::new(dir);
+    for arg in args {
+        if let Some(code) = arg.strip_prefix("--exit=") {
+            exit_code = code.parse()?;
+        } else if arg == "--hang" {
+            hang = true;
+        } else if arg == "--daemonize" {
+            daemonize = true;
+        } else {
+            positional.push(arg.as_str());
+        }
+    }
+
+    if positional.len() < 3 {
+        return Err(
+            "Usage: vtt barrier <dir> <prefix> <count> [--exit=<code>] [--hang] [--daemonize]"
+                .into(),
+        );
+    }
+
+    let dir = std::path::Path::new(positional[0]);
+    let prefix = positional[1];
+    let count: usize = positional[2].parse()?;
+
     std::fs::create_dir_all(dir)?;
 
     // Create this participant's marker file.
@@ -171,16 +154,20 @@ fn cmd_print_cwd() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn cmd_print_env(var_name: &str) {
-    let value = std::env::var(var_name).unwrap_or_else(|_| "(undefined)".to_string());
+fn cmd_print_env(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.is_empty() {
+        return Err("Usage: vtt print-env <VAR_NAME>".into());
+    }
+    let value = std::env::var(&args[0]).unwrap_or_else(|_| "(undefined)".to_string());
     println!("{value}");
+    Ok(())
 }
 
-fn cmd_print_file(files: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_print_file(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write as _;
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    for file in files {
+    for file in args {
         match std::fs::read(file) {
             Ok(content) => out.write_all(&content)?,
             Err(_) => eprintln!("{file}: not found"),
@@ -203,11 +190,14 @@ fn cmd_read_stdin() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn cmd_replace_file_content(
-    filename: &str,
-    search_value: &str,
-    new_value: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_replace_file_content(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 3 {
+        return Err("Usage: vtt replace-file-content <filename> <searchValue> <newValue>".into());
+    }
+    let filename = &args[0];
+    let search_value = &args[1];
+    let new_value = &args[2];
+
     let filepath = std::path::Path::new(filename).canonicalize()?;
     let content = std::fs::read_to_string(&filepath)?;
     if !content.contains(search_value) {
@@ -218,7 +208,10 @@ fn cmd_replace_file_content(
     Ok(())
 }
 
-fn cmd_touch_file(filename: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let _file = std::fs::OpenOptions::new().read(true).write(true).open(filename)?;
+fn cmd_touch_file(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.is_empty() {
+        return Err("Usage: vtt touch-file <filename>".into());
+    }
+    let _file = std::fs::OpenOptions::new().read(true).write(true).open(&args[0])?;
     Ok(())
 }
