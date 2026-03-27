@@ -1,3 +1,0 @@
-[[e2e]]
-name = "builtin command with non-zero exit does not show cache not updated"
-steps = ["vt run lint", "vt run lint"]

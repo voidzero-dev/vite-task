@@ -1,5 +1,0 @@
-{
-  "scripts": {
-    "lint": "vt tool print-file a.js"
-  }
-}

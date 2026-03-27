@@ -1,7 +1,0 @@
-{
-  "name": "e2e-lint-cache",
-  "private": true,
-  "scripts": {
-    "lint": "vt tool print-file main.js"
-  }
-}
