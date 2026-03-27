@@ -10,6 +10,7 @@ alias r := ready
 
 init:
   cargo binstall watchexec-cli cargo-insta typos-cli cargo-shear@1.11.1 taplo-cli -y
+  pnpm install
 
 ready:
   git diff --exit-code --quiet
@@ -39,6 +40,7 @@ test:
 
 lint:
   cargo clippy --workspace --all-targets --all-features -- --deny warnings
+  pnpm oxlint
 
 lint-linux:
   cargo-zigbuild clippy --workspace --all-targets --all-features --target x86_64-unknown-linux-gnu -- --deny warnings
