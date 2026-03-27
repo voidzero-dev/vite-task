@@ -106,12 +106,6 @@ impl CompactPlan {
     }
 }
 
-/// Redact workspace paths from error strings for snapshot stability.
-///
-/// On Windows, error messages may contain Debug-format paths with escaped
-/// backslashes (`\\`). This function tries both raw and escaped variants
-/// of the workspace root, then normalizes backslashes to forward slashes.
-
 #[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
 fn run_case(
     runtime: &Runtime,

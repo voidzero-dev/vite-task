@@ -62,6 +62,7 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
 
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    #[expect(clippy::disallowed_types, reason = "PathBuf needed to build fake-bin path from env")]
     let tools_dir_str = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("tests/plan_snapshots/fake-bin")
         .to_str()
