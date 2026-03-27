@@ -1,8 +1,8 @@
 use std::process::ExitCode;
 
-use clap::Parser;
-use vite_task::{ExitStatus, Session};
-use vite_task_bin::{Args, OwnedSessionConfig};
+use clap::Parser as _;
+use vite_task::{Command, ExitStatus, Session};
+use vite_task_bin::OwnedSessionConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
@@ -11,17 +11,8 @@ async fn main() -> anyhow::Result<ExitCode> {
 }
 
 async fn run() -> anyhow::Result<ExitStatus> {
-    let args = Args::parse();
+    let args = Command::parse();
     let mut owned_config = OwnedSessionConfig::default();
     let session = Session::init(owned_config.as_config())?;
-    match args {
-        Args::Task(parsed) => session.main(parsed).await,
-        args @ Args::Tool { .. } => {
-            #[expect(clippy::print_stdout, reason = "CLI binary output for non-task commands")]
-            {
-                println!("{args:?}");
-            }
-            Ok(ExitStatus::SUCCESS)
-        }
-    }
+    session.main(args).await
 }

@@ -46,14 +46,25 @@ pub fn find_executable(
     Ok(executable_path.into_os_string().into())
 }
 
+/// Internal argument parser for `vt`/`vp` commands that appear inside task scripts.
+///
+/// [`CommandHandler`] uses this to parse the command line when it intercepts a `vt` or `vp`
+/// invocation during script execution. It extends [`Command`] with a `tool` subcommand that
+/// forwards to the `vtt` test-utility binary — a subcommand that only makes sense within
+/// script execution and is therefore not exposed on the top-level `vt` CLI entry point.
 #[derive(Debug, Parser)]
 #[command(name = "vt", version)]
-pub enum Args {
-    /// Run a tool via vtt.
+enum Args {
+    /// Forward arguments to the `vtt` test-utility binary.
+    ///
+    /// Resolves `vtt` via `node_modules/.bin` lookup (same as any other script executable),
+    /// then synthesizes a cached invocation with the given arguments. The `--` separator,
+    /// if present, is stripped before forwarding.
     Tool {
         #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<Str>,
     },
+    /// Any other `vt` subcommand, delegated to the standard [`Command`] parser.
     #[command(flatten)]
     Task(Command),
 }
