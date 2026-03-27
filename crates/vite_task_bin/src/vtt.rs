@@ -55,6 +55,7 @@ fn main() {
 /// - `--hang`: Keep process alive after the barrier (for kill tests).
 /// - `--daemonize`: Close stdout/stderr but keep process alive (for daemon kill tests).
 fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use notify::Watcher as _;
     let mut positional: Vec<&str> = Vec::new();
     let mut exit_code: i32 = 0;
     let mut hang = false;
@@ -99,18 +100,13 @@ fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .count()
             >= count)
     };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(tx)?;
+    watcher.watch(dir, notify::RecursiveMode::NonRecursive)?;
     if !count_matches(dir)? {
-        use notify::Watcher as _;
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut watcher = notify::recommended_watcher(tx)?;
-        watcher.watch(dir, notify::RecursiveMode::NonRecursive)?;
-        // Re-check after setting up the watcher to avoid missing events created
-        // between our marker write and the watcher registration.
-        if !count_matches(dir)? {
-            for _ in rx {
-                if count_matches(dir)? {
-                    break;
-                }
+        for _ in rx {
+            if count_matches(dir)? {
+                break;
             }
         }
     }
@@ -125,13 +121,13 @@ fn cmd_barrier(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             libc::close(2);
         }
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(3600));
+            std::thread::park();
         }
     }
 
     if hang {
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(3600));
+            std::thread::park();
         }
     }
 
