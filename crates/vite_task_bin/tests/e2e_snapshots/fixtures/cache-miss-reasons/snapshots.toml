@@ -3,73 +3,257 @@
 [[e2e]]
 name = "env value changed"
 steps = [
-  "MY_ENV=1 vt run test # cache miss",
-  "MY_ENV=2 vt run test # cache miss: env value changed",
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], envs = [
+    [
+      "MY_ENV",
+      "1",
+    ],
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], envs = [
+    [
+      "MY_ENV",
+      "2",
+    ],
+  ], comment = "cache miss: env value changed" },
 ]
 
 [[e2e]]
 name = "env added"
-steps = ["vt run test # cache miss", "MY_ENV=1 vt run test # cache miss: env added"]
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], envs = [
+    [
+      "MY_ENV",
+      "1",
+    ],
+  ], comment = "cache miss: env added" },
+]
 
 [[e2e]]
 name = "env removed"
-steps = ["MY_ENV=1 vt run test # cache miss", "vt run test # cache miss: env removed"]
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], envs = [
+    [
+      "MY_ENV",
+      "1",
+    ],
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: env removed" },
+]
 
 [[e2e]]
 name = "untracked env added"
 steps = [
-  "vt run test # cache miss",
-  """vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "untrackedEnv": ["MY_UNTRACKED"]' # add untracked env""",
-  "vt run test # cache miss: untracked env added",
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "\"cache\": true",
+    "\"cache\": true, \"untrackedEnv\": [\"MY_UNTRACKED\"]",
+  ], comment = "add untracked env" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: untracked env added" },
 ]
 
 [[e2e]]
 name = "untracked env removed"
 steps = [
-  """vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "untrackedEnv": ["MY_UNTRACKED"]' # setup""",
-  "vt run test # cache miss",
-  """vtt replace-file-content vite-task.json '"cache": true, "untrackedEnv": ["MY_UNTRACKED"]' '"cache": true' # remove untracked env""",
-  "vt run test # cache miss: untracked env removed",
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "\"cache\": true",
+    "\"cache\": true, \"untrackedEnv\": [\"MY_UNTRACKED\"]",
+  ], comment = "setup" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "\"cache\": true, \"untrackedEnv\": [\"MY_UNTRACKED\"]",
+    "\"cache\": true",
+  ], comment = "remove untracked env" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: untracked env removed" },
 ]
 
 [[e2e]]
 name = "cwd changed"
 steps = [
-  "vt run test # cache miss",
-  "mkdir -p subfolder",
-  "cp test.txt subfolder/test.txt",
-  """vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "cwd": "subfolder"' # change cwd""",
-  "vt run test # cache miss: cwd changed",
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss" },
+  [
+    "vtt",
+    "mkdir",
+    "-p",
+    "subfolder",
+  ],
+  [
+    "vtt",
+    "cp",
+    "test.txt",
+    "subfolder/test.txt",
+  ],
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "\"cache\": true",
+    "\"cache\": true, \"cwd\": \"subfolder\"",
+  ], comment = "change cwd" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: cwd changed" },
 ]
 
 [[e2e]]
 name = "inferred input changes"
 steps = [
-  "vt run test # cache miss",
-  "vtt replace-file-content test.txt initial modified # modify input",
-  "vt run test # cache miss: input modified",
-  "rm test.txt # remove tracked input",
-  "vt run test # cache miss: input removed",
-  "echo new content > test.txt # recreate previously removed file",
-  "vt run test # cache miss: input added",
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "test.txt",
+    "initial",
+    "modified",
+  ], comment = "modify input" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: input modified" },
+  { argv = [
+    "vtt",
+    "rm",
+    "test.txt",
+  ], comment = "remove tracked input" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: input removed" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "test.txt",
+    "new content",
+  ], comment = "recreate previously removed file" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: input added" },
 ]
 
 [[e2e]]
 name = "input config changed"
 steps = [
-  "vt run test # cache miss",
-  """vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "input": ["test.txt"]' # change input config""",
-  "vt run test # cache miss: configuration changed",
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "\"cache\": true",
+    "\"cache\": true, \"input\": [\"test.txt\"]",
+  ], comment = "change input config" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: configuration changed" },
 ]
 
 [[e2e]]
 name = "glob input changes"
 steps = [
-  "vt run glob-test # cache miss",
-  "vtt replace-file-content test.txt initial modified # modify glob input",
-  "vt run glob-test # cache miss: input modified",
-  "echo new content > new.txt # add a new .txt file",
-  "vt run glob-test # cache miss: input added",
-  "rm extra.txt # remove a .txt file",
-  "vt run glob-test # cache miss: input removed",
+  { argv = [
+    "vt",
+    "run",
+    "glob-test",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "test.txt",
+    "initial",
+    "modified",
+  ], comment = "modify glob input" },
+  { argv = [
+    "vt",
+    "run",
+    "glob-test",
+  ], comment = "cache miss: input modified" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "new.txt",
+    "new content",
+  ], comment = "add a new .txt file" },
+  { argv = [
+    "vt",
+    "run",
+    "glob-test",
+  ], comment = "cache miss: input added" },
+  { argv = [
+    "vtt",
+    "rm",
+    "extra.txt",
+  ], comment = "remove a .txt file" },
+  { argv = [
+    "vt",
+    "run",
+    "glob-test",
+  ], comment = "cache miss: input removed" },
 ]

@@ -2,6 +2,6 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> echo from-stdin | vt run read-stdin
+> vtt pipe-stdin from-stdin -- vt run read-stdin
 $ vtt read-stdin ⊘ cache disabled
 from-stdin

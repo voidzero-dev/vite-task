@@ -13,7 +13,7 @@ export const main = 'initial';
 
 ---
 vt run: cache hit.
-> rm -rf src
+> vtt rm -rf src
 
 > vt run folder-input
 $ vtt print-file src/main.ts ◉ cache hit, replaying

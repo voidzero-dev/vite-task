@@ -11,32 +11,60 @@
 
 [[e2e]]
 name = "single task, cache off, piped stdio"
-steps = ["vt run --log=labeled check-tty"]
+steps = [["vt", "run", "--log=labeled", "check-tty"]]
 
 [[e2e]]
 name = "multiple tasks, cache off, piped stdio"
-steps = ["vt run --log=labeled -r check-tty"]
+steps = [["vt", "run", "--log=labeled", "-r", "check-tty"]]
 
 [[e2e]]
 name = "single task, cache miss, piped stdio"
-steps = ["vt run --log=labeled check-tty-cached"]
+steps = [["vt", "run", "--log=labeled", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple tasks, cache miss, piped stdio"
-steps = ["vt run --log=labeled -r check-tty-cached"]
+steps = [["vt", "run", "--log=labeled", "-r", "check-tty-cached"]]
 
 # ─── cache hit → replayed with labels ─────────────────────────
 
 [[e2e]]
 name = "single task, cache hit, replayed"
-steps = ["vt run --log=labeled check-tty-cached", "vt run --log=labeled check-tty-cached"]
+steps = [
+  [
+    "vt",
+    "run",
+    "--log=labeled",
+    "check-tty-cached",
+  ],
+  [
+    "vt",
+    "run",
+    "--log=labeled",
+    "check-tty-cached",
+  ],
+]
 
 [[e2e]]
 name = "multiple tasks, cache hit, replayed"
-steps = ["vt run --log=labeled -r check-tty-cached", "vt run --log=labeled -r check-tty-cached"]
+steps = [
+  [
+    "vt",
+    "run",
+    "--log=labeled",
+    "-r",
+    "check-tty-cached",
+  ],
+  [
+    "vt",
+    "run",
+    "--log=labeled",
+    "-r",
+    "check-tty-cached",
+  ],
+]
 
 # ─── stdin: always null ───────────────────────────────────────
 
 [[e2e]]
 name = "stdin is always null"
-steps = ["echo from-stdin | vt run --log=labeled read-stdin"]
+steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "--log=labeled", "read-stdin"]]

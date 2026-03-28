@@ -12,8 +12,8 @@
 
 [[e2e]]
 name = "recursive build skips root self-reference"
-steps = ["vt run -r build # only a and b run, root is skipped"]
+steps = [{ argv = ["vt", "run", "-r", "build"], comment = "only a and b run, root is skipped" }]
 
 [[e2e]]
 name = "build from root prunes root from nested expansion"
-steps = ["vt run build # only a and b run under root, root is pruned"]
+steps = [{ argv = ["vt", "run", "build"], comment = "only a and b run under root, root is pruned" }]

@@ -4,7 +4,7 @@ expression: e2e_outputs
 info:
   cwd: packages/lib
 ---
-> echo '' | vt run
+> vtt pipe-stdin -- vt run
   build: echo build lib
   lint: echo lint lib
   test: echo test lib

@@ -1,8 +1,24 @@
 [[e2e]]
 name = "cache clean"
 steps = [
-  "vt run cached-task # cache miss",
-  "vt run cached-task # cache hit",
-  "vt cache clean",
-  "vt run cached-task # cache miss after clean",
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache hit" },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache miss after clean" },
 ]

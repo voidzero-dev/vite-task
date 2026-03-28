@@ -3849,6 +3849,7 @@ version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eab68b56840f69efb0fefbe3ab6661499217ffdc58e2eef7c3f6f69835386322"
 dependencies = [
+ "serde",
  "smallvec 1.15.1",
 ]
 
@@ -3988,9 +3989,11 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "shell-escape",
  "tempfile",
  "tokio",
  "toml",
+ "vec1",
  "vite_path",
  "vite_str",
  "vite_task",

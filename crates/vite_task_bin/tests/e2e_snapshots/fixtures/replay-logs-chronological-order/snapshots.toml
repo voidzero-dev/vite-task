@@ -2,4 +2,20 @@
 
 [[e2e]]
 name = "replay logs chronological order"
-steps = ["vt run build # cache miss", "vt run build # cache hit", "vt run build # cache hit"]
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "cache hit" },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "cache hit" },
+]

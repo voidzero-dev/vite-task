@@ -3,8 +3,44 @@
 [[e2e]]
 name = "individual cache for env"
 steps = [
-  "FOO=1 vt run hello # cache miss",
-  "FOO=2 vt run hello # cache miss, different env",
-  "FOO=1 vt run hello # cache hit",
-  "FOO=2 vt run hello # cache hit",
+  { argv = [
+    "vt",
+    "run",
+    "hello",
+  ], envs = [
+    [
+      "FOO",
+      "1",
+    ],
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "hello",
+  ], envs = [
+    [
+      "FOO",
+      "2",
+    ],
+  ], comment = "cache miss, different env" },
+  { argv = [
+    "vt",
+    "run",
+    "hello",
+  ], envs = [
+    [
+      "FOO",
+      "1",
+    ],
+  ], comment = "cache hit" },
+  { argv = [
+    "vt",
+    "run",
+    "hello",
+  ], envs = [
+    [
+      "FOO",
+      "2",
+    ],
+  ], comment = "cache hit" },
 ]

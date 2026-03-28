@@ -3,14 +3,14 @@
 
 [[e2e]]
 name = "recursive build runs dependencies before dependents"
-steps = ["vt run -r build # core -> lib -> app"]
+steps = [{ argv = ["vt", "run", "-r", "build"], comment = "core -> lib -> app" }]
 
 [[e2e]]
 name = "transitive build from app runs all dependencies"
 cwd = "packages/app"
-steps = ["vt run -t build # core -> lib -> app"]
+steps = [{ argv = ["vt", "run", "-t", "build"], comment = "core -> lib -> app" }]
 
 [[e2e]]
 name = "transitive build from lib runs only its dependencies"
 cwd = "packages/lib"
-steps = ["vt run -t build # core -> lib"]
+steps = [{ argv = ["vt", "run", "-t", "build"], comment = "core -> lib" }]

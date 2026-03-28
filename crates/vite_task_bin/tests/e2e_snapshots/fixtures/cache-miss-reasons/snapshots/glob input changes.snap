@@ -10,12 +10,12 @@ glob-test
 > vt run glob-test # cache miss: input modified
 $ vtt print glob-test ○ cache miss: 'test.txt' modified, executing
 glob-test
-> echo new content > new.txt # add a new .txt file
+> vtt write-file new.txt 'new content' # add a new .txt file
 
 > vt run glob-test # cache miss: input added
 $ vtt print glob-test ○ cache miss: 'new.txt' added in workspace root, executing
 glob-test
-> rm extra.txt # remove a .txt file
+> vtt rm extra.txt # remove a .txt file
 
 > vt run glob-test # cache miss: input removed
 $ vtt print glob-test ○ cache miss: 'extra.txt' removed from workspace root, executing

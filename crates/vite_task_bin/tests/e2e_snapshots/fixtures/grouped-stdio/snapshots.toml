@@ -11,32 +11,60 @@
 
 [[e2e]]
 name = "single task, cache off, grouped output"
-steps = ["vt run --log=grouped check-tty"]
+steps = [["vt", "run", "--log=grouped", "check-tty"]]
 
 [[e2e]]
 name = "multiple tasks, cache off, grouped output"
-steps = ["vt run --log=grouped -r check-tty"]
+steps = [["vt", "run", "--log=grouped", "-r", "check-tty"]]
 
 [[e2e]]
 name = "single task, cache miss, grouped output"
-steps = ["vt run --log=grouped check-tty-cached"]
+steps = [["vt", "run", "--log=grouped", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple tasks, cache miss, grouped output"
-steps = ["vt run --log=grouped -r check-tty-cached"]
+steps = [["vt", "run", "--log=grouped", "-r", "check-tty-cached"]]
 
 # ─── cache hit → replayed in grouped blocks ───────────────────
 
 [[e2e]]
 name = "single task, cache hit, replayed"
-steps = ["vt run --log=grouped check-tty-cached", "vt run --log=grouped check-tty-cached"]
+steps = [
+  [
+    "vt",
+    "run",
+    "--log=grouped",
+    "check-tty-cached",
+  ],
+  [
+    "vt",
+    "run",
+    "--log=grouped",
+    "check-tty-cached",
+  ],
+]
 
 [[e2e]]
 name = "multiple tasks, cache hit, replayed"
-steps = ["vt run --log=grouped -r check-tty-cached", "vt run --log=grouped -r check-tty-cached"]
+steps = [
+  [
+    "vt",
+    "run",
+    "--log=grouped",
+    "-r",
+    "check-tty-cached",
+  ],
+  [
+    "vt",
+    "run",
+    "--log=grouped",
+    "-r",
+    "check-tty-cached",
+  ],
+]
 
 # ─── stdin: always null ───────────────────────────────────────
 
 [[e2e]]
 name = "stdin is always null"
-steps = ["echo from-stdin | vt run --log=grouped read-stdin"]
+steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "--log=grouped", "read-stdin"]]
