@@ -1,4 +1,4 @@
-/// pipe-stdin `<data>` -- `<command>` [`<args>`...]
+/// pipe-stdin `<data>` -- `<command>` \[`<args>`...\]
 ///
 /// Spawns `<command>` with `<data>` piped to its stdin, then exits with
 /// the child's exit code. If `<data>` is empty, an empty stdin is provided.

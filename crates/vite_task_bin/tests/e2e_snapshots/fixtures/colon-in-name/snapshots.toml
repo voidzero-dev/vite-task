@@ -1,4 +1,4 @@
-# Tests that fs.read('node:fs') with colon in filename works correctly
+# Tests that a task name with colon works correctly with caching
 
 [[e2e]]
 name = "read file with colon in name"

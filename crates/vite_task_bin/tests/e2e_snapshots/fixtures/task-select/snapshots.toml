@@ -242,7 +242,10 @@ steps = [["vt", "run", "run-typo-task"]]
 name = "interactive ctrl-c cancels"
 cwd = "packages/app"
 steps = [
-  { command = "vt run", interactions = [
+  { argv = [
+    "vt",
+    "run",
+  ], interactions = [
     { "expect-milestone" = "task-select::0" },
     { "write-key" = "ctrl-c" },
   ] },

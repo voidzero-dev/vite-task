@@ -1,5 +1,5 @@
 {
   "scripts": {
-    "read_colon_in_name": "node read_node_fs.js"
+    "read_colon_in_name": "vtt print-file node:fs"
   }
 }

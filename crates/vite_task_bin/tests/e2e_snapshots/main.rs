@@ -92,14 +92,14 @@ impl Step {
     fn interactions(&self) -> &[Interaction] {
         match self {
             Self::Detailed(config) => &config.interactions,
-            _ => &[],
+            Self::Simple(_) => &[],
         }
     }
 
     fn envs(&self) -> &[(Str, Str)] {
         match self {
             Self::Detailed(config) => &config.envs,
-            _ => &[],
+            Self::Simple(_) => &[],
         }
     }
 }
