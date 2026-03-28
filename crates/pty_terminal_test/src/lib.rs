@@ -1,7 +1,4 @@
-use std::{
-    collections::VecDeque,
-    io::{BufReader, Read},
-};
+use std::io::{BufReader, Read};
 
 pub use portable_pty::CommandBuilder;
 use pty_terminal::terminal::{PtyReader, Terminal};
@@ -28,8 +25,6 @@ pub struct TestTerminal {
 pub struct Reader {
     pty: BufReader<PtyReader>,
     child_handle: ChildHandle,
-    /// OSC sequences taken from the PTY but not yet consumed by `expect_milestone`.
-    pending_osc: VecDeque<Vec<Vec<u8>>>,
 }
 
 impl TestTerminal {
@@ -42,11 +37,7 @@ impl TestTerminal {
         let Terminal { pty_reader, pty_writer, child_handle, .. } = Terminal::spawn(size, cmd)?;
         Ok(Self {
             writer: pty_writer,
-            reader: Reader {
-                pty: BufReader::new(pty_reader),
-                child_handle: child_handle.clone(),
-                pending_osc: VecDeque::new(),
-            },
+            reader: Reader { pty: BufReader::new(pty_reader), child_handle: child_handle.clone() },
             child_handle,
         })
     }
@@ -80,24 +71,15 @@ impl Reader {
         let mut buf = [0u8; 4096];
 
         loop {
-            // Drain new sequences from the PTY into our local buffer.
-            self.pending_osc.append(&mut self.pty.get_ref().take_unhandled_osc_sequences());
-
-            // Scan for the first matching milestone, keeping the rest.
-            let mut found = false;
-            let mut remaining = VecDeque::with_capacity(self.pending_osc.len());
-            for params in self.pending_osc.drain(..) {
-                if !found
-                    && pty_terminal_test_client::decode_milestone_from_osc8_params(&params)
-                        .is_some_and(|decoded| decoded == name)
-                {
-                    found = true;
-                    continue;
-                }
-                remaining.push_back(params);
-            }
-            self.pending_osc = remaining;
-
+            let found = self
+                .pty
+                .get_ref()
+                .take_unhandled_osc_sequences()
+                .into_iter()
+                .filter_map(|params| {
+                    pty_terminal_test_client::decode_milestone_from_osc8_params(&params)
+                })
+                .any(|decoded| decoded == name);
             if found {
                 return self.screen_contents();
             }

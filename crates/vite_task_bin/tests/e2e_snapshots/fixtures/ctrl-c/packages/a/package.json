@@ -1,6 +1,0 @@
-{
-  "name": "@ctrl-c/a",
-  "scripts": {
-    "dev": "vtt exit-on-ctrlc"
-  }
-}
