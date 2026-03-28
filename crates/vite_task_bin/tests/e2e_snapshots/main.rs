@@ -122,13 +122,14 @@ struct WriteKeyInteraction {
 }
 
 #[derive(serde::Deserialize, Debug, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 enum WriteKey {
     Up,
     Down,
     Enter,
     Escape,
     Backspace,
+    CtrlC,
 }
 
 impl WriteKey {
@@ -139,6 +140,7 @@ impl WriteKey {
             Self::Enter => "enter",
             Self::Escape => "escape",
             Self::Backspace => "backspace",
+            Self::CtrlC => "ctrl-c",
         }
     }
 
@@ -149,6 +151,7 @@ impl WriteKey {
             Self::Enter => b"\r",
             Self::Escape => b"\x1b",
             Self::Backspace => b"\x7f",
+            Self::CtrlC => b"\x03",
         }
     }
 }

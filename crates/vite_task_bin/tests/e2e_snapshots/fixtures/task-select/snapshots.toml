@@ -203,6 +203,17 @@ steps = [
 name = "typo in task script fails without list"
 steps = ["vt run run-typo-task"]
 
+# Interactive: Ctrl+C cancels selection and exits with code 130
+[[e2e]]
+name = "interactive ctrl-c cancels"
+cwd = "packages/app"
+steps = [
+  { command = "vt run", interactions = [
+    { "expect-milestone" = "task-select::0" },
+    { "write-key" = "ctrl-c" },
+  ] },
+]
+
 # --verbose without task: not bare, errors with "no task specifier provided"
 [[e2e]]
 name = "verbose without task errors"
