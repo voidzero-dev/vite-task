@@ -101,6 +101,27 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let mise_warning_regex = regex::Regex::new(r"(?m)^mise WARN\s+.*\n?").unwrap();
     output = mise_warning_regex.replace_all(&output, "").into_owned();
 
+    // Remove ^C echo that Unix terminal drivers emit when ETX (0x03) is written
+    // to the PTY. Windows ConPTY does not echo it.
+    {
+        use cow_utils::CowUtils as _;
+        if let Cow::Owned(replaced) = output.as_str().cow_replace("^C", "") {
+            output = replaced;
+        }
+    }
+
+    // Normalize "ctrl-c received" output: when vt and tasks all receive SIGINT,
+    // it's a race whether one or both tasks print before the process exits.
+    // Normalize to a single occurrence for stable snapshots.
+    {
+        use cow_utils::CowUtils as _;
+        if let Cow::Owned(replaced) =
+            output.as_str().cow_replace("ctrl-c receivedctrl-c received", "ctrl-c received")
+        {
+            output = replaced;
+        }
+    }
+
     // Sort consecutive diagnostic blocks to handle non-deterministic tool output
     // (e.g., oxlint reports warnings in arbitrary order due to multi-threading).
     // Each block starts with "  ! " and ends at the next empty line.

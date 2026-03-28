@@ -16,8 +16,10 @@ path = "src/vtt/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+ctrlc = { workspace = true }
 libc = { workspace = true }
 notify = { workspace = true }
+pty_terminal_test_client = { workspace = true, features = ["testing"] }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 jsonc-parser = { workspace = true }

@@ -1,0 +1,18 @@
+# Tests that Ctrl+C (SIGINT) propagates to and terminates running tasks.
+# Two packages run concurrently; both set up ctrl-c handlers and emit
+# a "ready" milestone. After both are ready, ctrl-c is sent.
+
+[[e2e]]
+name = "ctrl-c terminates running tasks"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "-r",
+    "dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ] },
+]
