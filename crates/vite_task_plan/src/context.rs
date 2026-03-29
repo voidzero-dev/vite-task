@@ -45,12 +45,17 @@ pub struct PlanContext<'a> {
     /// Final resolved global cache config, combining the graph's config with any CLI override.
     resolved_global_cache: ResolvedGlobalCacheConfig,
 
+    /// Resolved concurrency limit inherited from the parent level.
+    /// At the root level this defaults to [`crate::DEFAULT_CONCURRENCY_LIMIT`].
+    resolved_concurrency: usize,
+
     /// The query that caused the current expansion.
     /// Used by the skip rule to detect and skip duplicate nested expansions.
     parent_query: Arc<TaskQuery>,
 }
 
 impl<'a> PlanContext<'a> {
+    #[expect(clippy::too_many_arguments, reason = "context initialization requires all fields")]
     pub fn new(
         workspace_path: &'a Arc<AbsolutePath>,
         cwd: Arc<AbsolutePath>,
@@ -58,6 +63,7 @@ impl<'a> PlanContext<'a> {
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
         indexed_task_graph: &'a IndexedTaskGraph,
         resolved_global_cache: ResolvedGlobalCacheConfig,
+        resolved_concurrency: usize,
         parent_query: Arc<TaskQuery>,
     ) -> Self {
         Self {
@@ -69,6 +75,7 @@ impl<'a> PlanContext<'a> {
             indexed_task_graph,
             extra_args: Arc::default(),
             resolved_global_cache,
+            resolved_concurrency,
             parent_query,
         }
     }
@@ -136,6 +143,14 @@ impl<'a> PlanContext<'a> {
         self.resolved_global_cache = config;
     }
 
+    pub const fn resolved_concurrency(&self) -> usize {
+        self.resolved_concurrency
+    }
+
+    pub const fn set_resolved_concurrency(&mut self, concurrency: usize) {
+        self.resolved_concurrency = concurrency;
+    }
+
     pub fn parent_query(&self) -> &TaskQuery {
         &self.parent_query
     }
@@ -160,6 +175,7 @@ impl<'a> PlanContext<'a> {
             indexed_task_graph: self.indexed_task_graph,
             extra_args: Arc::clone(&self.extra_args),
             resolved_global_cache: self.resolved_global_cache,
+            resolved_concurrency: self.resolved_concurrency,
             parent_query: Arc::clone(&self.parent_query),
         }
     }

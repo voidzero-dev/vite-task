@@ -51,6 +51,16 @@ pub struct RunFlags {
     /// How task output is displayed.
     #[clap(long, default_value = "interleaved")]
     pub log: LogMode,
+
+    /// Maximum number of tasks to run concurrently per execution graph level.
+    /// Accepts a number (e.g. `5`) or a percentage of available CPU cores (e.g. `50%`).
+    #[clap(long)]
+    pub concurrency: Option<Str>,
+
+    /// Run tasks without dependency ordering. Sets concurrency to unlimited
+    /// unless `--concurrency` is also specified.
+    #[clap(long, default_value = "false")]
+    pub parallel: bool,
 }
 
 impl RunFlags {
@@ -182,12 +192,36 @@ impl RunCommand {
 }
 
 #[derive(thiserror::Error, Debug)]
+pub enum ConcurrencyParseError {
+    #[error("invalid concurrency value: {0}")]
+    InvalidValue(Str),
+}
+
+/// Parse a `--concurrency` value: either a plain number or a percentage (e.g. `50%`).
+/// The result is always clamped to at least 1.
+fn parse_concurrency(raw: &str) -> Result<usize, ConcurrencyParseError> {
+    if let Some(pct_str) = raw.strip_suffix('%') {
+        let pct: usize =
+            pct_str.parse().map_err(|_| ConcurrencyParseError::InvalidValue(Str::from(raw)))?;
+        let cpus = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        Ok((cpus * pct / 100).max(1))
+    } else {
+        let n: usize =
+            raw.parse().map_err(|_| ConcurrencyParseError::InvalidValue(Str::from(raw)))?;
+        Ok(n.max(1))
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
 pub enum CLITaskQueryError {
     #[error("no task specifier provided")]
     MissingTaskSpecifier,
 
     #[error(transparent)]
     PackageQuery(#[from] PackageQueryError),
+
+    #[error(transparent)]
+    Concurrency(#[from] ConcurrencyParseError),
 }
 
 impl ResolvedRunCommand {
@@ -206,6 +240,8 @@ impl ResolvedRunCommand {
 
         let cache_override = self.flags.cache_override();
         let include_explicit_deps = !self.flags.ignore_depends_on;
+        let concurrency = self.flags.concurrency.as_deref().map(parse_concurrency).transpose()?;
+        let parallel = self.flags.parallel;
 
         let (package_query, is_cwd_only) =
             self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;
@@ -220,6 +256,8 @@ impl ResolvedRunCommand {
                 plan_options: PlanOptions {
                     extra_args: self.additional_args.into(),
                     cache_override,
+                    concurrency,
+                    parallel,
                 },
             },
             is_cwd_only,

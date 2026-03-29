@@ -1,0 +1,42 @@
+# Baseline: normal recursive build preserves topo edges
+[[plan]]
+name = "baseline recursive build"
+args = ["run", "-r", "build"]
+compact = true
+
+# --parallel discards all edges at this level
+[[plan]]
+name = "parallel discards edges"
+args = ["run", "-r", "--parallel", "build"]
+compact = true
+
+# --parallel only affects the current level; nested Expanded graph preserves edges
+[[plan]]
+name = "parallel only affects current level"
+args = ["run", "--parallel", "build"]
+compact = true
+
+# --concurrency with explicit value
+[[plan]]
+name = "concurrency with explicit value"
+args = ["run", "-r", "--concurrency", "5", "build"]
+
+# --parallel without --concurrency sets concurrency to max
+[[plan]]
+name = "parallel without concurrency"
+args = ["run", "-r", "--parallel", "build"]
+
+# --parallel with --concurrency uses explicit concurrency, not max
+[[plan]]
+name = "parallel with concurrency"
+args = ["run", "-r", "--parallel", "--concurrency", "3", "build"]
+
+# Nested vt run inherits parent concurrency
+[[plan]]
+name = "nested inherits parent concurrency"
+args = ["run", "--concurrency", "2", "build"]
+
+# Nested vt run with explicit --concurrency overrides parent
+[[plan]]
+name = "nested overrides parent concurrency"
+args = ["run", "--concurrency", "2", "build-with-concurrency"]

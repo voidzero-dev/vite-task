@@ -273,7 +273,7 @@ impl<'a> Session<'a> {
                     let (graph, is_cwd_only) =
                         self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?;
 
-                    if graph.node_count() == 0 {
+                    if graph.graph.node_count() == 0 {
                         // No tasks matched. With is_cwd_only (no scope flags) the
                         // task name is a typo — show the selector. Otherwise error.
                         if is_cwd_only {
@@ -508,6 +508,8 @@ impl<'a> Session<'a> {
             plan_options: PlanOptions {
                 extra_args: run_command.additional_args.clone().into(),
                 cache_override: run_command.flags.cache_override(),
+                concurrency: None,
+                parallel: false,
             },
         })
     }

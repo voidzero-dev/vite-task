@@ -50,10 +50,6 @@ pub enum SpawnOutcome {
     Failed,
 }
 
-/// Maximum number of tasks that can execute concurrently within a single
-/// execution graph level.
-const CONCURRENCY_LIMIT: usize = 10;
-
 /// Holds shared references needed during graph execution.
 ///
 /// The `reporter` field is wrapped in `RefCell` because concurrent futures
@@ -88,17 +84,17 @@ impl ExecutionContext<'_> {
     /// closes the semaphore, drains remaining futures, and returns.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn execute_expanded_graph(&self, graph: &ExecutionGraph) {
-        if graph.node_count() == 0 {
+        if graph.graph.node_count() == 0 {
             return;
         }
 
-        let semaphore = Arc::new(Semaphore::new(CONCURRENCY_LIMIT));
+        let semaphore = Arc::new(Semaphore::new(graph.concurrency_limit));
 
         // Compute dependency count for each node.
         // Edge A→B means "A depends on B", so A's dependency count = outgoing edge count.
         let mut dep_count: FxHashMap<ExecutionNodeIndex, usize> = FxHashMap::default();
-        for node_ix in graph.node_indices() {
-            dep_count.insert(node_ix, graph.neighbors(node_ix).count());
+        for node_ix in graph.graph.node_indices() {
+            dep_count.insert(node_ix, graph.graph.neighbors(node_ix).count());
         }
 
         let mut futures = FuturesUnordered::new();
@@ -123,7 +119,7 @@ impl ExecutionContext<'_> {
             // Find dependents of the completed node (nodes that depend on it).
             // Edge X→completed means "X depends on completed", so X is a predecessor
             // in graph direction = neighbor in Incoming direction.
-            for dependent in graph.neighbors_directed(completed_ix, Direction::Incoming) {
+            for dependent in graph.graph.neighbors_directed(completed_ix, Direction::Incoming) {
                 let count = dep_count.get_mut(&dependent).expect("all nodes are in dep_count");
                 *count -= 1;
                 if *count == 0 {
@@ -162,7 +158,7 @@ impl ExecutionContext<'_> {
     /// in order; if any item fails, `execute_leaf` cancels the `CancellationToken`
     /// and remaining items are skipped (preserving `&&` semantics).
     async fn execute_node(&self, graph: &ExecutionGraph, node_ix: ExecutionNodeIndex) {
-        let task_execution = &graph[node_ix];
+        let task_execution = &graph.graph[node_ix];
 
         for item in &task_execution.items {
             if self.cancellation_token.is_cancelled() {

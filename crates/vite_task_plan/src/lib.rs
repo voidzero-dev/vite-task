@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 
 use context::PlanContext;
 pub use error::Error;
-pub use execution_graph::ExecutionGraph;
+pub use execution_graph::{DEFAULT_CONCURRENCY_LIMIT, ExecutionGraph};
 pub use in_process::InProcessExecution;
 pub use path_env::{get_path_env, prepend_path_env};
 use plan::{ParentCacheConfig, plan_query_request, plan_synthetic_request};
@@ -138,10 +138,6 @@ pub enum LeafExecutionKind {
     InProcess(InProcessExecution),
 }
 
-/// Serialize an `ExecutionGraph` using `serialize_by_key`.
-///
-/// `vite_graph_ser::serialize_by_key` expects `&DiGraph<N, E, Ix>`, so we call `.inner()`
-/// to get the underlying `DiGraph` reference.
 /// An execution item, from a split subcommand in a task's command (`item1 && item2 && ...`).
 #[derive(Debug, Serialize)]
 #[expect(
@@ -213,6 +209,7 @@ pub async fn plan_query(
         plan_request_parser,
         indexed_task_graph,
         resolved_global_cache,
+        DEFAULT_CONCURRENCY_LIMIT,
         Arc::clone(&query),
     );
     plan_query_request(query, plan_options, context).await

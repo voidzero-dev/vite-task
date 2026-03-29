@@ -255,7 +255,7 @@ async fn plan_task_as_execution_node(
                     // An empty execution graph means no tasks matched the query.
                     // At the top level the session shows the task selector UI,
                     // but in a nested context there is no UI — propagate as an error.
-                    if execution_graph.node_count() == 0 {
+                    if execution_graph.graph.node_count() == 0 {
                         return Err(Error::NestPlan {
                             task_display: task_node.task_display.clone(),
                             command: Str::from(&command_str[add_item_span]),
@@ -675,6 +675,25 @@ pub async fn plan_query_request(
         );
         context.set_resolved_global_cache(final_cache);
     }
+    // Resolve effective concurrency for this level.
+    //
+    // When `Some(n)`, use the explicit value. When `None`, inherit from the
+    // parent context — unless `--parallel` is set without `--concurrency`,
+    // in which case use unlimited concurrency.
+    let effective_concurrency = match plan_options.concurrency {
+        Some(n) => n,
+        None => {
+            if plan_options.parallel {
+                usize::MAX
+            } else {
+                context.resolved_concurrency()
+            }
+        }
+    };
+    context.set_resolved_concurrency(effective_concurrency);
+
+    let parallel = plan_options.parallel;
+
     context.set_extra_args(plan_options.extra_args);
     context.set_parent_query(Arc::clone(&query));
 
@@ -751,10 +770,15 @@ pub async fn plan_query_request(
         }
     }
 
+    // If --parallel, discard all edges so tasks run independently.
+    if parallel {
+        inner_graph.clear_edges();
+    }
+
     // Validate the graph is acyclic.
     // `try_from_graph` performs a DFS; if a cycle is found, it returns
     // `CycleError` containing the full cycle path as node indices.
-    ExecutionGraph::try_from_graph(inner_graph).map_err(|cycle| {
+    ExecutionGraph::try_from_graph(inner_graph, effective_concurrency).map_err(|cycle| {
         // Map each execution node index in the cycle path to its human-readable TaskDisplay.
         // Every node in the cycle was added via `inner_graph.add_node()` above,
         // with a corresponding entry in `execution_node_indices_by_task_index`.
