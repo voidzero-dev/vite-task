@@ -679,8 +679,8 @@ pub async fn plan_query_request(
     //
     // Priority (highest to lowest):
     // 1. `--concurrency-limit N` CLI flag
-    // 2. `VP_RUN_CONCURRENCY_LIMIT` env var
-    // 3. `--parallel` (without the above) → unlimited
+    // 2. `--parallel` (without the above) → unlimited
+    // 3. `VP_RUN_CONCURRENCY_LIMIT` env var
     // 4. `DEFAULT_CONCURRENCY_LIMIT` (4)
     let effective_concurrency = match plan_options.concurrency_limit {
         Some(n) => n,

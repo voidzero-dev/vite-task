@@ -54,6 +54,6 @@ Equivalent flags in other tools:
 The concurrency limit is resolved in this order (first match wins):
 
 1. `--concurrency-limit` CLI flag
-2. `VP_RUN_CONCURRENCY_LIMIT` env var
-3. `--parallel` without the above → unlimited
+2. `--parallel` without the above → unlimited
+3. `VP_RUN_CONCURRENCY_LIMIT` env var
 4. Default: 4
