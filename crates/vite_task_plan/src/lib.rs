@@ -209,7 +209,6 @@ pub async fn plan_query(
         plan_request_parser,
         indexed_task_graph,
         resolved_global_cache,
-        DEFAULT_CONCURRENCY_LIMIT,
         Arc::clone(&query),
     );
     plan_query_request(query, plan_options, context).await

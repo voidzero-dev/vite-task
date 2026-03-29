@@ -591,6 +591,11 @@ impl<'a> Session<'a> {
         &self.envs
     }
 
+    /// Mutably access the environment map, cloning the `Arc` if shared.
+    pub fn envs_mut(&mut self) -> &mut FxHashMap<Arc<OsStr>, Arc<OsStr>> {
+        Arc::make_mut(&mut self.envs)
+    }
+
     pub const fn cwd(&self) -> &Arc<AbsolutePath> {
         &self.cwd
     }

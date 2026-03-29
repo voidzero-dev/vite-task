@@ -31,12 +31,19 @@ args = ["run", "-r", "--parallel", "build"]
 name = "parallel with concurrency-limit"
 args = ["run", "-r", "--parallel", "--concurrency-limit", "3", "build"]
 
-# Nested vt run inherits parent concurrency
+# Nested vt run with explicit --concurrency-limit
 [[plan]]
-name = "nested inherits parent concurrency"
-args = ["run", "--concurrency-limit", "2", "build"]
+name = "nested with explicit concurrency-limit"
+args = ["run", "build-with-concurrency"]
 
-# Nested vt run with explicit --concurrency-limit overrides parent
+# VP_RUN_CONCURRENCY_LIMIT env var sets concurrency
 [[plan]]
-name = "nested overrides parent concurrency"
-args = ["run", "--concurrency-limit", "2", "build-with-concurrency"]
+name = "env var sets concurrency"
+args = ["run", "-r", "build"]
+env = { VP_RUN_CONCURRENCY_LIMIT = "7" }
+
+# --concurrency-limit flag takes priority over VP_RUN_CONCURRENCY_LIMIT env
+[[plan]]
+name = "cli flag overrides env var"
+args = ["run", "-r", "--concurrency-limit", "3", "build"]
+env = { VP_RUN_CONCURRENCY_LIMIT = "7" }

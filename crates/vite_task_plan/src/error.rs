@@ -154,6 +154,9 @@ pub enum Error {
     #[error("Task \"{0}\" not found")]
     NoTasksMatched(Str),
 
+    #[error("Invalid value for VP_RUN_CONCURRENCY_LIMIT: {0:?}")]
+    InvalidConcurrencyLimitEnv(Arc<OsStr>),
+
     /// A cycle was detected in the task dependency graph during planning.
     ///
     /// This is caught by `AcyclicGraph::try_from_graph`, which validates that the

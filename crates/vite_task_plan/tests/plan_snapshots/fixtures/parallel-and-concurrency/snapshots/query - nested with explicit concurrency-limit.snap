@@ -4,9 +4,7 @@ expression: "&plan_json"
 info:
   args:
     - run
-    - "--concurrency-limit"
-    - "2"
-    - build
+    - build-with-concurrency
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-concurrency
 ---
 {
@@ -14,12 +12,12 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
     {
       "key": [
         "<workspace>/",
-        "build"
+        "build-with-concurrency"
       ],
       "node": {
         "task_display": {
           "package_name": "test-workspace",
-          "task_name": "build",
+          "task_name": "build-with-concurrency",
           "package_path": "<workspace>/"
         },
         "items": [
@@ -27,16 +25,31 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
             "execution_item_display": {
               "task_display": {
                 "package_name": "test-workspace",
-                "task_name": "build",
+                "task_name": "build-with-concurrency",
                 "package_path": "<workspace>/"
               },
-              "command": "vt run -r build",
+              "command": "vt run -r --concurrency-limit 5 build",
               "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
               "Expanded": {
                 "graph": [
+                  {
+                    "key": [
+                      "<workspace>/",
+                      "build"
+                    ],
+                    "node": {
+                      "task_display": {
+                        "package_name": "test-workspace",
+                        "task_name": "build",
+                        "package_path": "<workspace>/"
+                      },
+                      "items": []
+                    },
+                    "neighbors": []
+                  },
                   {
                     "key": [
                       "<workspace>/packages/a",
@@ -177,7 +190,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
                     "neighbors": []
                   }
                 ],
-                "concurrency_limit": 2
+                "concurrency_limit": 5
               }
             }
           }
@@ -186,5 +199,5 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
       "neighbors": []
     }
   ],
-  "concurrency_limit": 2
+  "concurrency_limit": 4
 }

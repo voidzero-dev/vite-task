@@ -36,6 +36,8 @@ struct Plan {
     pub cwd: RelativePathBuf,
     #[serde(default)]
     pub compact: bool,
+    #[serde(default)]
+    pub env: BTreeMap<Str, Str>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -248,6 +250,17 @@ fn run_case_inner(
                 panic!("only `run` commands supported in plan tests")
             };
 
+            // Inject per-case environment variables, removing them after the plan call.
+            let env_keys: Vec<Arc<OsStr>> = plan
+                .env
+                .iter()
+                .map(|(k, v)| {
+                    let key = Arc::<OsStr>::from(OsStr::new(k.as_str()));
+                    session.envs_mut().insert(Arc::clone(&key), Arc::from(OsStr::new(v.as_str())));
+                    key
+                })
+                .collect();
+
             let plan_result = session
                 .plan_from_cli_run(workspace_root.path.join(plan.cwd).into(), run_command)
                 .await;
@@ -283,6 +296,11 @@ fn run_case_inner(
             } else {
                 let plan_json = redact_snapshot(&plan, workspace_root_str);
                 insta::assert_json_snapshot!(snapshot_name.as_str(), &plan_json);
+            }
+
+            // Clean up per-case environment variables.
+            for key in env_keys {
+                session.envs_mut().remove(&key);
             }
         }
     });

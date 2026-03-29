@@ -677,20 +677,22 @@ pub async fn plan_query_request(
     }
     // Resolve effective concurrency for this level.
     //
-    // When `Some(n)`, use the explicit value. When `None`, inherit from the
-    // parent context — unless `--parallel` is set without `--concurrency-limit`,
-    // in which case use unlimited concurrency.
+    // Priority (highest to lowest):
+    // 1. `--concurrency-limit N` CLI flag
+    // 2. `VP_RUN_CONCURRENCY_LIMIT` env var
+    // 3. `--parallel` (without the above) → unlimited
+    // 4. `DEFAULT_CONCURRENCY_LIMIT` (4)
     let effective_concurrency = match plan_options.concurrency_limit {
         Some(n) => n,
         None => {
             if plan_options.parallel {
                 usize::MAX
             } else {
-                context.resolved_concurrency()
+                concurrency_limit_from_env(context.envs())?
+                    .unwrap_or(crate::DEFAULT_CONCURRENCY_LIMIT)
             }
         }
     };
-    context.set_resolved_concurrency(effective_concurrency);
 
     let parallel = plan_options.parallel;
 
@@ -800,6 +802,22 @@ pub async fn plan_query_request(
             .collect();
         Error::CycleDependencyDetected(displays)
     })
+}
+
+/// Parse `VP_RUN_CONCURRENCY_LIMIT` from the environment variables.
+///
+/// Returns `Ok(None)` if the variable is not set.
+/// Returns `Err` if the variable is set but cannot be parsed as a positive integer.
+#[expect(clippy::result_large_err, reason = "Error type is shared across all plan functions")]
+fn concurrency_limit_from_env(
+    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+) -> Result<Option<usize>, Error> {
+    let Some(value) = envs.get(OsStr::new("VP_RUN_CONCURRENCY_LIMIT")) else {
+        return Ok(None);
+    };
+    let s = value.to_str().ok_or_else(|| Error::InvalidConcurrencyLimitEnv(Arc::clone(value)))?;
+    let n: usize = s.parse().map_err(|_| Error::InvalidConcurrencyLimitEnv(Arc::clone(value)))?;
+    Ok(Some(n.max(1)))
 }
 
 #[cfg(test)]
