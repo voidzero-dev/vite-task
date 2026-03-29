@@ -274,9 +274,13 @@ impl<'a> Session<'a> {
                         self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?;
 
                     if graph.graph.node_count() == 0 {
-                        // No tasks matched. With is_cwd_only (no scope flags) the
-                        // task name is a typo — show the selector. Otherwise error.
-                        if is_cwd_only {
+                        // No tasks matched. Show the interactive selector only when
+                        // the command has no scope flags and no execution flags
+                        // (concurrency-limit, parallel) — otherwise the user intended
+                        // a specific execution mode and a typo should be an error.
+                        let has_execution_flags = run_command.flags.concurrency_limit.is_some()
+                            || run_command.flags.parallel;
+                        if is_cwd_only && !has_execution_flags {
                             let qpr = self.handle_no_task(is_interactive, &run_command).await?;
                             self.plan_from_query(qpr).await?
                         } else {

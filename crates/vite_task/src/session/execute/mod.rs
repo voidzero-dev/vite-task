@@ -88,7 +88,8 @@ impl ExecutionContext<'_> {
             return;
         }
 
-        let semaphore = Arc::new(Semaphore::new(graph.concurrency_limit));
+        let semaphore =
+            Arc::new(Semaphore::new(graph.concurrency_limit.min(Semaphore::MAX_PERMITS)));
 
         // Compute dependency count for each node.
         // Edge A→B means "A depends on B", so A's dependency count = outgoing edge count.
