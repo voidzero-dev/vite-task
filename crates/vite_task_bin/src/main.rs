@@ -3,12 +3,6 @@ use vite_task::{Command, ExitStatus, Session};
 use vite_task_bin::OwnedSessionConfig;
 
 fn main() -> ! {
-    // Ignore SIGINT/CTRL_C before the tokio runtime starts. Child tasks
-    // receive the signal directly from the terminal driver and handle it
-    // themselves. This lets the runner wait for tasks to exit and report
-    // their actual exit status rather than being killed mid-flight.
-    let _ = ctrlc::set_handler(|| {});
-
     let exit_code: i32 =
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
             match run().await {

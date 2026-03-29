@@ -1,0 +1,13 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vt run --log=labeled dev
+@ expect-milestone: ready
+[ctrl-c-test#dev] $ vtt exit-on-ctrlc ⊘ cache disabled
+[ctrl-c-test#dev] 
+@ write-key: ctrl-c
+[ctrl-c-test#dev] $ vtt exit-on-ctrlc ⊘ cache disabled
+[ctrl-c-test#dev] 
+
+[ctrl-c-test#dev] ctrl-c received

@@ -33,6 +33,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     pty_terminal_test_client::mark_milestone("ready");
+    // Print a newline so the milestone bytes get flushed through line-buffered
+    // writers (labeled/grouped log modes).
+    println!();
 
     loop {
         std::thread::park();

@@ -327,6 +327,13 @@ impl<'a> Session<'a> {
                     Some(self.make_summary_writer()),
                     self.program_name.clone(),
                 ));
+                // Ignore SIGINT/CTRL_C before executing tasks. Child tasks
+                // receive the signal directly from the terminal driver and handle
+                // it themselves. This lets the runner wait for tasks to exit and
+                // report their actual exit status rather than being killed
+                // mid-flight.
+                let _ = ctrlc::set_handler(|| {});
+
                 self.execute_graph(graph, builder).await.map_err(SessionError::EarlyExit)
             }
         }

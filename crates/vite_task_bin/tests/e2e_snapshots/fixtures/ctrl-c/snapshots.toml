@@ -12,3 +12,30 @@ steps = [
     { "write-key" = "ctrl-c" },
   ] },
 ]
+
+[[e2e]]
+name = "ctrl-c terminates running tasks (labeled)"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--log=labeled",
+    "dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ] },
+]
+
+[[e2e]]
+name = "ctrl-c terminates running tasks (cached)"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "dev-cached",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ] },
+]

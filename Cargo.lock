@@ -3942,6 +3942,7 @@ dependencies = [
  "bincode",
  "bstr",
  "clap",
+ "ctrlc",
  "derive_more",
  "fspy",
  "futures-util",
