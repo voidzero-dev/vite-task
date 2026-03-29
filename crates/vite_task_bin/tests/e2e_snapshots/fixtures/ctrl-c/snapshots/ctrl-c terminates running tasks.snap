@@ -7,5 +7,4 @@ expression: e2e_outputs
 $ vtt exit-on-ctrlc ⊘ cache disabled
 @ write-key: ctrl-c
 $ vtt exit-on-ctrlc ⊘ cache disabled
-
 ctrl-c received

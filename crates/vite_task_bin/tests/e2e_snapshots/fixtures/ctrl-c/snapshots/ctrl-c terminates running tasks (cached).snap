@@ -7,5 +7,4 @@ expression: e2e_outputs
 $ vtt exit-on-ctrlc
 @ write-key: ctrl-c
 $ vtt exit-on-ctrlc
-
 ctrl-c received

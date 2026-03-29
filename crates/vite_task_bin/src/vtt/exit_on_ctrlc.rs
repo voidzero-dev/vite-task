@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 /// exit-on-ctrlc
 ///
 /// Sets up a Ctrl+C handler, emits a "ready" milestone, then waits.
@@ -25,19 +27,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    ctrlc::set_handler(move || {
-        use std::io::Write;
-        let _ = write!(std::io::stdout(), "ctrl-c received");
-        let _ = std::io::stdout().flush();
-        std::process::exit(0);
+    let ctrlc_once_lock = Arc::new(std::sync::OnceLock::<()>::new());
+
+    ctrlc::set_handler({
+        let ctrlc_once_lock = Arc::clone(&ctrlc_once_lock);
+        move || {
+            let _ = ctrlc_once_lock.set(());
+        }
     })?;
 
     pty_terminal_test_client::mark_milestone("ready");
-    // Print a newline so the milestone bytes get flushed through line-buffered
-    // writers (labeled/grouped log modes).
-    println!();
 
-    loop {
-        std::thread::park();
-    }
+    ctrlc_once_lock.wait();
+    println!("ctrl-c received");
+    Ok(())
 }
