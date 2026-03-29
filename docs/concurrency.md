@@ -1,6 +1,6 @@
 # Concurrency
 
-`vp run` runs up to 4 tasks at once, respecting dependency order.
+`vp run` runs up to 4 tasks at once by default, respecting dependency order.
 
 ## `--concurrency-limit`/`VP_RUN_CONCURRENCY_LIMIT`
 
