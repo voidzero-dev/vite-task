@@ -1,7 +1,7 @@
 # Changelog
 
-- **Added** `--concurrency` flag to limit the number of concurrent tasks per execution graph level, supporting both absolute values (e.g. `--concurrency 5`) and percentages of CPU cores (e.g. `--concurrency 50%`)
-- **Added** `--parallel` flag to discard dependency edges between tasks, running them all independently with unlimited concurrency (unless `--concurrency` is also specified)
+- **Added** `--concurrency` flag to limit the number of concurrent tasks per execution graph level, supporting both absolute values (e.g. `--concurrency 5`) and percentages of CPU cores (e.g. `--concurrency 50%`) ([#288](https://github.com/voidzero-dev/vite-task/pull/288), [#309](https://github.com/voidzero-dev/vite-task/pull/309))
+- **Added** `--parallel` flag to discard dependency edges between tasks, running them all independently with unlimited concurrency (unless `--concurrency` is also specified) ([#309](https://github.com/voidzero-dev/vite-task/pull/309))
 - **Added** object form for `input` entries: `{ "pattern": "...", "base": "workspace" | "package" }` to resolve glob patterns relative to the workspace root instead of the package directory ([#295](https://github.com/voidzero-dev/vite-task/pull/295))
 - **Fixed** arguments after the task name being consumed by `vp` instead of passed through to the task ([#286](https://github.com/voidzero-dev/vite-task/pull/286), [#290](https://github.com/voidzero-dev/vite-task/pull/290))
 - **Changed** default untracked env patterns to align with Turborepo, covering more CI and platform-specific variables ([#262](https://github.com/voidzero-dev/vite-task/pull/262))
