@@ -76,7 +76,7 @@ impl ExecutionContext<'_> {
     ///
     /// Uses a DAG scheduler: tasks whose dependencies have all completed are scheduled
     /// onto a `FuturesUnordered`, bounded by a per-graph `Semaphore` with
-    /// [`CONCURRENCY_LIMIT`] permits. Each recursive `Expanded` graph creates its own
+    /// `concurrency_limit` permits. Each recursive `Expanded` graph creates its own
     /// semaphore, so nested graphs have independent concurrency limits.
     ///
     /// Fast-fail: if any task fails, `execute_leaf` cancels the `CancellationToken`
