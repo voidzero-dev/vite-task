@@ -5,8 +5,9 @@ info:
   args:
     - run
     - "-r"
-    - "--concurrency"
-    - "5"
+    - "--parallel"
+    - "--concurrency-limit"
+    - "3"
     - build
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-concurrency
 ---
@@ -68,12 +69,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
           }
         ]
       },
-      "neighbors": [
-        [
-          "<workspace>/packages/b",
-          "build"
-        ]
-      ]
+      "neighbors": []
     },
     {
       "key": [
@@ -116,12 +112,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
           }
         ]
       },
-      "neighbors": [
-        [
-          "<workspace>/packages/c",
-          "build"
-        ]
-      ]
+      "neighbors": []
     },
     {
       "key": [
@@ -167,5 +158,5 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
       "neighbors": []
     }
   ],
-  "concurrency_limit": 5
+  "concurrency_limit": 3
 }

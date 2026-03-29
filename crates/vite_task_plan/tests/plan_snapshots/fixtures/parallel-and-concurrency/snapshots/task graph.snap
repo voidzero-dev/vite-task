@@ -50,7 +50,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt run -r --concurrency 5 build",
+        "command": "vt run -r --concurrency-limit 5 build",
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

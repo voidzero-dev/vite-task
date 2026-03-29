@@ -162,7 +162,7 @@ impl<N: vite_graph_ser::GetKey + Serialize, Ix: IndexType> Serialize for Acyclic
 }
 
 /// The default concurrency limit for task execution within a single graph level.
-pub const DEFAULT_CONCURRENCY_LIMIT: usize = 10;
+pub const DEFAULT_CONCURRENCY_LIMIT: usize = 4;
 
 /// An execution graph with a per-level concurrency limit.
 ///

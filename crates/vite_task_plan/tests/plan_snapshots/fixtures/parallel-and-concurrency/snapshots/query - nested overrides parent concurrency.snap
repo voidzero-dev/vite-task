@@ -4,7 +4,7 @@ expression: "&plan_json"
 info:
   args:
     - run
-    - "--concurrency"
+    - "--concurrency-limit"
     - "2"
     - build-with-concurrency
 input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-concurrency
@@ -30,7 +30,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/parallel-and-con
                 "task_name": "build-with-concurrency",
                 "package_path": "<workspace>/"
               },
-              "command": "vt run -r --concurrency 5 build",
+              "command": "vt run -r --concurrency-limit 5 build",
               "and_item_index": null,
               "cwd": "<workspace>/"
             },

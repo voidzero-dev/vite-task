@@ -678,9 +678,9 @@ pub async fn plan_query_request(
     // Resolve effective concurrency for this level.
     //
     // When `Some(n)`, use the explicit value. When `None`, inherit from the
-    // parent context — unless `--parallel` is set without `--concurrency`,
+    // parent context — unless `--parallel` is set without `--concurrency-limit`,
     // in which case use unlimited concurrency.
-    let effective_concurrency = match plan_options.concurrency {
+    let effective_concurrency = match plan_options.concurrency_limit {
         Some(n) => n,
         None => {
             if plan_options.parallel {

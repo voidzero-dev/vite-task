@@ -16,27 +16,27 @@ name = "parallel only affects current level"
 args = ["run", "--parallel", "build"]
 compact = true
 
-# --concurrency with explicit value
+# --concurrency-limit with explicit value
 [[plan]]
-name = "concurrency with explicit value"
-args = ["run", "-r", "--concurrency", "5", "build"]
+name = "concurrency-limit with explicit value"
+args = ["run", "-r", "--concurrency-limit", "5", "build"]
 
-# --parallel without --concurrency sets concurrency to max
+# --parallel without --concurrency-limit sets concurrency to max
 [[plan]]
-name = "parallel without concurrency"
+name = "parallel without concurrency-limit"
 args = ["run", "-r", "--parallel", "build"]
 
-# --parallel with --concurrency uses explicit concurrency, not max
+# --parallel with --concurrency-limit uses explicit concurrency, not max
 [[plan]]
-name = "parallel with concurrency"
-args = ["run", "-r", "--parallel", "--concurrency", "3", "build"]
+name = "parallel with concurrency-limit"
+args = ["run", "-r", "--parallel", "--concurrency-limit", "3", "build"]
 
 # Nested vt run inherits parent concurrency
 [[plan]]
 name = "nested inherits parent concurrency"
-args = ["run", "--concurrency", "2", "build"]
+args = ["run", "--concurrency-limit", "2", "build"]
 
-# Nested vt run with explicit --concurrency overrides parent
+# Nested vt run with explicit --concurrency-limit overrides parent
 [[plan]]
 name = "nested overrides parent concurrency"
-args = ["run", "--concurrency", "2", "build-with-concurrency"]
+args = ["run", "--concurrency-limit", "2", "build-with-concurrency"]

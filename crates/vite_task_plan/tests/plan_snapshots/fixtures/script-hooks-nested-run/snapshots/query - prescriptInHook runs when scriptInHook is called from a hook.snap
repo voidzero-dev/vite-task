@@ -104,7 +104,7 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/script-hooks-nes
                     "neighbors": []
                   }
                 ],
-                "concurrency_limit": 10
+                "concurrency_limit": 4
               }
             }
           },
@@ -139,5 +139,5 @@ input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/script-hooks-nes
       "neighbors": []
     }
   ],
-  "concurrency_limit": 10
+  "concurrency_limit": 4
 }
