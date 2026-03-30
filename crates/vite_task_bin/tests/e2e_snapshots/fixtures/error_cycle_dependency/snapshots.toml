@@ -2,4 +2,4 @@
 
 [[e2e]]
 name = "cycle dependency error"
-steps = ["vt run task-a # task-a -> task-b -> task-a cycle"]
+steps = [{ argv = ["vt", "run", "task-a"], comment = "task-a -> task-b -> task-a cycle" }]

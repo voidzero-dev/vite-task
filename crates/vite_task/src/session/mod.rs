@@ -327,6 +327,13 @@ impl<'a> Session<'a> {
                     Some(self.make_summary_writer()),
                     self.program_name.clone(),
                 ));
+                // Ignore SIGINT/CTRL_C before executing tasks. Child tasks
+                // receive the signal directly from the terminal driver and handle
+                // it themselves. This lets the runner wait for tasks to exit and
+                // report their actual exit status rather than being killed
+                // mid-flight.
+                let _ = ctrlc::set_handler(|| {});
+
                 self.execute_graph(graph, builder).await.map_err(SessionError::EarlyExit)
             }
         }
@@ -449,7 +456,7 @@ impl<'a> Session<'a> {
             page_size: 12,
         };
 
-        vite_select::select_list(&mut stdout, &params, mode, |state| {
+        let select_result = vite_select::select_list(&mut stdout, &params, mode, |state| {
             use std::io::Write;
             let milestone_name =
                 vite_str::format!("task-select:{}:{}", state.query, state.selected_index);
@@ -458,6 +465,10 @@ impl<'a> Session<'a> {
             let _ = out.write_all(&milestone_bytes);
             let _ = out.flush();
         })?;
+
+        if matches!(select_result, vite_select::SelectResult::Cancelled) {
+            return Err(SessionError::EarlyExit(ExitStatus(130)));
+        }
 
         let Some(selected_index) = selected_index else {
             // Non-interactive, the list was printed.

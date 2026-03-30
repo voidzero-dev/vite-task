@@ -3,8 +3,26 @@
 [[e2e]]
 name = "associate existing cache"
 steps = [
-  "vt run script1 # cache miss",
-  "vt run script2 # cache hit, same command as script1",
-  "vtt replace-file-content package.json '\"script2\": \"vtt print hello\"' '\"script2\": \"vtt print world\"' # change script2",
-  "vt run script2 # cache miss",
+  { argv = [
+    "vt",
+    "run",
+    "script1",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "script2",
+  ], comment = "cache hit, same command as script1" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "package.json",
+    "\"script2\": \"vtt print hello\"",
+    "\"script2\": \"vtt print world\"",
+  ], comment = "change script2" },
+  { argv = [
+    "vt",
+    "run",
+    "script2",
+  ], comment = "cache miss" },
 ]

@@ -2,4 +2,4 @@
 
 [[e2e]]
 name = "no trailing newline"
-steps = ["vt run hello # runs echo -n hello"]
+steps = [{ argv = ["vt", "run", "hello"], comment = "runs echo -n hello" }]

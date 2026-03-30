@@ -3,8 +3,24 @@
 [[e2e]]
 name = "builtin different cwd"
 steps = [
-  "vt run cwd1 # cache miss in folder1",
-  "vt run cwd2 # cache miss in folder2 (different cwd)",
-  "vt run cwd1 # cache hit in folder1",
-  "vt run cwd2 # cache hit in folder2",
+  { argv = [
+    "vt",
+    "run",
+    "cwd1",
+  ], comment = "cache miss in folder1" },
+  { argv = [
+    "vt",
+    "run",
+    "cwd2",
+  ], comment = "cache miss in folder2 (different cwd)" },
+  { argv = [
+    "vt",
+    "run",
+    "cwd1",
+  ], comment = "cache hit in folder1" },
+  { argv = [
+    "vt",
+    "run",
+    "cwd2",
+  ], comment = "cache hit in folder2" },
 ]

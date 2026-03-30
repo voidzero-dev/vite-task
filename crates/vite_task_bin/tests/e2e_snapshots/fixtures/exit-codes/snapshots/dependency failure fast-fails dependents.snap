@@ -5,4 +5,4 @@ info:
   cwd: packages/pkg-b
 ---
 [1]> vt run -t check # pkg-a fails, pkg-b is skipped
-~/packages/pkg-a$ node -e "process.exit(1)"
+~/packages/pkg-a$ vtt exit 1

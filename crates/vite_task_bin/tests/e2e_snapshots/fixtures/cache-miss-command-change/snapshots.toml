@@ -3,9 +3,33 @@
 [[e2e]]
 name = "cache miss command change"
 steps = [
-  "vt run task # cache miss",
-  "vtt replace-file-content vite-task.json 'vtt print foo && vtt print bar' 'vtt print baz && vtt print bar' # change first subtask",
-  "vt run task # first: cache miss, second: cache hit",
-  "vtt replace-file-content vite-task.json 'vtt print baz && vtt print bar' 'vtt print bar' # remove first subtask",
-  "vt run task # cache hit",
+  { argv = [
+    "vt",
+    "run",
+    "task",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "vtt print foo && vtt print bar",
+    "vtt print baz && vtt print bar",
+  ], comment = "change first subtask" },
+  { argv = [
+    "vt",
+    "run",
+    "task",
+  ], comment = "first: cache miss, second: cache hit" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "vtt print baz && vtt print bar",
+    "vtt print bar",
+  ], comment = "remove first subtask" },
+  { argv = [
+    "vt",
+    "run",
+    "task",
+  ], comment = "cache hit" },
 ]

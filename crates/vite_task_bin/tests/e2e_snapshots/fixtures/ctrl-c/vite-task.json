@@ -1,0 +1,13 @@
+{
+  "cache": true,
+  "tasks": {
+    "dev": {
+      "command": "vtt exit-on-ctrlc",
+      "cache": false
+    },
+    "dev-cached": {
+      "command": "vtt exit-on-ctrlc",
+      "cache": true
+    }
+  }
+}

@@ -2,7 +2,7 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> echo '' | vt run
+> vtt pipe-stdin -- vt run
   check: echo check root
   clean: echo clean root
   deploy: echo deploy root

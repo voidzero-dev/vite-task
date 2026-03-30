@@ -305,8 +305,12 @@ fn send_ctrl_c_interrupts_process() {
         // On macOS/Windows, use ctrlc which works fine (no .init_array/musl issue).
         #[cfg(not(target_os = "linux"))]
         {
-            // On Windows, clear the "ignore CTRL_C" flag set by Rust runtime
-            // so that CTRL_C_EVENT reaches the ctrlc handler.
+            // On Windows, an ancestor process may have been created with
+            // CREATE_NEW_PROCESS_GROUP, which implicitly sets the per-process
+            // CTRL_C ignore flag (CONSOLE_IGNORE_CTRL_C in PEB ConsoleFlags).
+            // This flag is inherited by all descendants and silently drops
+            // CTRL_C_EVENT before it reaches registered handlers. Clear it.
+            // Ref: https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
             #[cfg(windows)]
             {
                 // SAFETY: Declaring correct signature for SetConsoleCtrlHandler from kernel32.

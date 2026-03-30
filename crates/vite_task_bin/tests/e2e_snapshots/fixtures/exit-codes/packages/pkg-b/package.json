@@ -1,7 +1,7 @@
 {
   "name": "pkg-b",
   "scripts": {
-    "fail": "node -e \"process.exit(7)\"",
+    "fail": "vtt exit 7",
     "check": "echo 'pkg-b check passed'"
   },
   "dependencies": {

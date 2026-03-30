@@ -50,16 +50,26 @@ pub struct SelectParams<'a> {
     pub page_size: usize,
 }
 
+/// Result of an interactive selection.
+pub enum SelectResult {
+    /// The user selected an item.
+    Selected,
+    /// The user cancelled the selection (e.g. Ctrl+C).
+    Cancelled,
+}
+
 /// Show a task selection list.
 ///
 /// In [`Mode::Interactive`], enters a terminal UI with fuzzy search and
 /// keyboard navigation. `after_render` is called after every render with the
 /// current visible state (useful for emitting test milestones). On Enter,
 /// `*selected_index` is set to the chosen item's index in the original
-/// `items` slice.
+/// `items` slice. Returns [`SelectResult::Cancelled`] if the user presses
+/// Ctrl+C.
 ///
 /// In [`Mode::NonInteractive`], renders the list once to `writer` and
-/// returns. `page_size` and `after_render` are ignored.
+/// returns [`SelectResult::Selected`]. `page_size` and `after_render` are
+/// ignored.
 ///
 /// # Errors
 ///
@@ -69,7 +79,7 @@ pub fn select_list(
     params: &SelectParams<'_>,
     mode: Mode<'_>,
     after_render: impl FnMut(&RenderState<'_>),
-) -> anyhow::Result<()> {
+) -> anyhow::Result<SelectResult> {
     match mode {
         Mode::Interactive { selected_index } => interactive::run(
             params.items,
@@ -79,7 +89,10 @@ pub fn select_list(
             params.page_size,
             after_render,
         ),
-        Mode::NonInteractive => non_interactive(writer, params.items, params.query, params.header),
+        Mode::NonInteractive => {
+            non_interactive(writer, params.items, params.query, params.header)?;
+            Ok(SelectResult::Selected)
+        }
     }
 }
 

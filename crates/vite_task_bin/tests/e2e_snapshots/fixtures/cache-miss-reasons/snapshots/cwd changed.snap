@@ -5,9 +5,9 @@ expression: e2e_outputs
 > vt run test # cache miss
 $ vtt print-file test.txt
 initial content
-> mkdir -p subfolder
+> vtt mkdir -p subfolder
 
-> cp test.txt subfolder/test.txt
+> vtt cp test.txt subfolder/test.txt
 
 > vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "cwd": "subfolder"' # change cwd
 

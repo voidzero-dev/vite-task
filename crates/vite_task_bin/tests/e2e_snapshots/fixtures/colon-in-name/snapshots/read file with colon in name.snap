@@ -3,9 +3,11 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 > vt run read_colon_in_name # cache miss
-$ node read_node_fs.js
+$ vtt print-file node:fs
+node:fs: not found
 > vt run read_colon_in_name # cache hit
-$ node read_node_fs.js ◉ cache hit, replaying
+$ vtt print-file node:fs ◉ cache hit, replaying
+node:fs: not found
 
 ---
 vt run: cache hit.

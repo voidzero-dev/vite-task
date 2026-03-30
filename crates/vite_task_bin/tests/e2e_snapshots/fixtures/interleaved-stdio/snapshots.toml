@@ -13,40 +13,40 @@
 
 [[e2e]]
 name = "single task, cache off, inherits stdio"
-steps = ["vt run check-tty"]
+steps = [["vt", "run", "check-tty"]]
 
 [[e2e]]
 name = "multiple tasks, cache off, inherit stdio"
-steps = ["vt run -r check-tty"]
+steps = [["vt", "run", "-r", "check-tty"]]
 
 # ─── stdout/stderr: cache on, miss → piped (not-tty) ────────────
 
 [[e2e]]
 name = "single task, cache miss, piped stdio"
-steps = ["vt run check-tty-cached"]
+steps = [["vt", "run", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple tasks, cache miss, piped stdio"
-steps = ["vt run -r check-tty-cached"]
+steps = [["vt", "run", "-r", "check-tty-cached"]]
 
 # ─── stdout/stderr: cache on, hit → replayed ────────────────────
 
 [[e2e]]
 name = "single task, cache hit, replayed"
-steps = ["vt run check-tty-cached", "vt run check-tty-cached"]
+steps = [["vt", "run", "check-tty-cached"], ["vt", "run", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple tasks, cache hit, replayed"
-steps = ["vt run -r check-tty-cached", "vt run -r check-tty-cached"]
+steps = [["vt", "run", "-r", "check-tty-cached"], ["vt", "run", "-r", "check-tty-cached"]]
 
 # ─── stdin: cache off → inherited ───────────────────────────────
 
 [[e2e]]
 name = "cache off inherits stdin"
-steps = ["echo from-stdin | vt run read-stdin"]
+steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "read-stdin"]]
 
 # ─── stdin: cache on → null ─────────────────────────────────────
 
 [[e2e]]
 name = "cache on gets null stdin"
-steps = ["echo from-stdin | vt run read-stdin-cached"]
+steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "read-stdin-cached"]]

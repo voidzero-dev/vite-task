@@ -1,13 +1,21 @@
-use std::process::ExitCode;
-
 use clap::Parser as _;
 use vite_task::{Command, ExitStatus, Session};
 use vite_task_bin::OwnedSessionConfig;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<ExitCode> {
-    let exit_status = run().await?;
-    Ok(exit_status.0.into())
+fn main() -> ! {
+    let exit_code: i32 =
+        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
+            match run().await {
+                Ok(status) => i32::from(status.0),
+                #[expect(clippy::print_stderr, reason = "top-level error reporting")]
+                Err(err) => {
+                    eprintln!("Error: {err:?}");
+                    1
+                }
+            }
+        });
+
+    std::process::exit(exit_code);
 }
 
 async fn run() -> anyhow::Result<ExitStatus> {

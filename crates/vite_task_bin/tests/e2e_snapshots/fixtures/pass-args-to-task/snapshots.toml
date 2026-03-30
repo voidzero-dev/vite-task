@@ -4,8 +4,8 @@
 [[e2e]]
 name = "pass args to task"
 steps = [
-  "vt run echo --help", # Should just print `help` instead of Vite task's help
-  "vt run echo --version", # Should just print `version` instead of Vite task's version
-  "vt run echo -v", # Should just print `-v`
-  "vt run echo -a", # Should just print `-a`
+  ["vt", "run", "echo", "--help"], # Should just print `help` instead of Vite task's help
+  ["vt", "run", "echo", "--version"], # Should just print `version` instead of Vite task's version
+  ["vt", "run", "echo", "-v"], # Should just print `-v`
+  ["vt", "run", "echo", "-a"], # Should just print `-a`
 ]

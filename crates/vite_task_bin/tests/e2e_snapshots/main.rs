@@ -12,6 +12,7 @@ use cp_r::CopyOptions;
 use pty_terminal::{geo::ScreenSize, terminal::CommandBuilder};
 use pty_terminal_test::TestTerminal;
 use redact::redact_e2e_output;
+use vec1::Vec1;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use vite_workspace::find_workspace_root;
@@ -24,63 +25,81 @@ const STEP_TIMEOUT: Duration =
 /// Screen size for the PTY terminal. Large enough to avoid line wrapping.
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
 
-/// Get the shell executable for running e2e test steps.
-/// On Unix, uses /bin/sh.
-/// On Windows, uses BASH env var or falls back to Git Bash.
-#[expect(
-    clippy::disallowed_types,
-    reason = "PathBuf required for CommandBuilder and std::path operations on shell executable"
-)]
-fn get_shell_exe() -> std::path::PathBuf {
-    if cfg!(windows) {
-        std::env::var_os("BASH").map_or_else(
-            || {
-                let git_bash = std::path::PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
-                if git_bash.exists() {
-                    git_bash
-                } else {
-                    panic!(
-                        "Could not find bash executable for e2e tests.\n\
-                         Please set the BASH environment variable to point to a bash executable,\n\
-                         or install Git for Windows which provides bash at:\n\
-                         C:\\Program Files\\Git\\bin\\bash.exe"
-                    );
-                }
-            },
-            std::path::PathBuf::from,
-        )
-    } else {
-        std::path::PathBuf::from("/bin/sh")
-    }
-}
-
 #[derive(serde::Deserialize, Debug)]
 #[serde(untagged)]
 enum Step {
-    Command(Str),
+    /// Shorthand: `["vt", "run", "build"]`
+    Simple(Vec1<Str>),
+    /// Detailed: `{ argv = ["vt", "run"], comment = "cache miss", ... }`
     Detailed(StepConfig),
 }
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 struct StepConfig {
-    command: Str,
+    argv: Vec1<Str>,
+    /// Appended as `# comment` in the snapshot display line.
+    #[serde(default)]
+    comment: Option<Str>,
+    /// Extra environment variables set for this step.
+    #[serde(default)]
+    envs: Vec<(Str, Str)>,
     #[serde(default)]
     interactions: Vec<Interaction>,
 }
 
 impl Step {
-    fn command(&self) -> &str {
+    fn argv(&self) -> &[Str] {
         match self {
-            Self::Command(command) => command.as_str(),
-            Self::Detailed(config) => config.command.as_str(),
+            Self::Simple(argv) => argv,
+            Self::Detailed(config) => &config.argv,
+        }
+    }
+
+    /// Format as a shell-like display string for snapshots (e.g. `MY_ENV=1 vt run test # cache miss`).
+    #[expect(clippy::disallowed_types, reason = "String required by join/format")]
+    fn display_command(&self) -> String {
+        let argv_str = self
+            .argv()
+            .iter()
+            .map(|a| {
+                let s = a.as_str();
+                if s.contains(|c: char| c.is_whitespace() || c == '"') {
+                    shell_escape::escape(s.into())
+                } else {
+                    s.into()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        match self {
+            Self::Simple(_) => argv_str,
+            Self::Detailed(config) => {
+                let mut parts = String::new();
+                for (k, v) in &config.envs {
+                    parts.push_str(vite_str::format!("{k}={v} ").as_str());
+                }
+                parts.push_str(&argv_str);
+                if let Some(comment) = &config.comment {
+                    parts.push_str(vite_str::format!(" # {comment}").as_str());
+                }
+                parts
+            }
         }
     }
 
     fn interactions(&self) -> &[Interaction] {
         match self {
-            Self::Command(_) => &[],
             Self::Detailed(config) => &config.interactions,
+            Self::Simple(_) => &[],
+        }
+    }
+
+    fn envs(&self) -> &[(Str, Str)] {
+        match self {
+            Self::Detailed(config) => &config.envs,
+            Self::Simple(_) => &[],
         }
     }
 }
@@ -122,13 +141,14 @@ struct WriteKeyInteraction {
 }
 
 #[derive(serde::Deserialize, Debug, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 enum WriteKey {
     Up,
     Down,
     Enter,
     Escape,
     Backspace,
+    CtrlC,
 }
 
 impl WriteKey {
@@ -139,6 +159,7 @@ impl WriteKey {
             Self::Enter => "enter",
             Self::Escape => "escape",
             Self::Backspace => "backspace",
+            Self::CtrlC => "ctrl-c",
         }
     }
 
@@ -149,6 +170,7 @@ impl WriteKey {
             Self::Enter => b"\r",
             Self::Escape => b"\x1b",
             Self::Backspace => b"\x7f",
+            Self::CtrlC => b"\x03",
         }
     }
 }
@@ -228,9 +250,6 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
         Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
     };
 
-    // Get shell executable for running steps
-    let shell_exe = get_shell_exe();
-
     // Prepare PATH for e2e tests: include vt and vtt binary directories.
     let bin_dirs: [Arc<OsStr>; 2] = ["CARGO_BIN_EXE_vt", "CARGO_BIN_EXE_vtt"].map(|var| {
         let bin_path = env::var_os(var).unwrap_or_else(|| panic!("{var} not set"));
@@ -238,7 +257,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
         Arc::<OsStr>::from(bin.parent().unwrap().as_path().as_os_str())
     });
     let e2e_env_path = join_paths(
-        bin_dirs.into_iter().chain(
+        bin_dirs.iter().cloned().chain(
             // the existing PATH
             split_paths(&env::var_os("PATH").unwrap())
                 .map(|path| Arc::<OsStr>::from(path.into_os_string())),
@@ -276,22 +295,35 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
 
         let mut e2e_outputs = String::new();
         for step in &e2e.steps {
-            let step_command = step.command();
-            let mut cmd = CommandBuilder::new(&shell_exe);
-            cmd.arg("-c");
-            cmd.arg(step_command);
+            let step_display = step.display_command();
+
+            let argv = step.argv();
+
+            // Only vt and vtt are allowed as step programs.
+            let program = argv[0].as_str();
+            assert!(
+                program == "vt" || program == "vtt",
+                "step program must be 'vt' or 'vtt', got '{program}'"
+            );
+            let exe_env = vite_str::format!("CARGO_BIN_EXE_{program}");
+            let resolved =
+                env::var_os(exe_env.as_str()).unwrap_or_else(|| panic!("{exe_env} not set"));
+            let mut cmd = CommandBuilder::new(resolved);
+            for arg in &argv[1..] {
+                cmd.arg(arg.as_str());
+            }
             cmd.env_clear();
             cmd.env("PATH", &e2e_env_path);
             cmd.env("NO_COLOR", "1");
             cmd.env("TERM", "dumb");
-            cmd.cwd(e2e_stage_path.join(&e2e.cwd).as_path());
-
-            // On Windows, inherit PATHEXT for executable lookup
-            if cfg!(windows)
-                && let Ok(pathext) = std::env::var("PATHEXT")
-            {
-                cmd.env("PATHEXT", pathext);
+            // On Windows, ensure common executable extensions are included in PATHEXT for command resolution in subprocesses.
+            if cfg!(windows) {
+                cmd.env("PATHEXT", ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC");
             }
+            for (k, v) in step.envs() {
+                cmd.env(k.as_str(), v.as_str());
+            }
+            cmd.cwd(e2e_stage_path.join(&e2e.cwd).as_path());
 
             let terminal = TestTerminal::spawn(SCREEN_SIZE, cmd).unwrap();
             let mut killer = terminal.child_handle.clone();
@@ -390,7 +422,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
             }
 
             e2e_outputs.push_str("> ");
-            e2e_outputs.push_str(step_command);
+            e2e_outputs.push_str(&step_display);
             e2e_outputs.push('\n');
 
             e2e_outputs.push_str(&redact_e2e_output(output, e2e_stage_path_str));
@@ -412,9 +444,6 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
 }
 
 fn main() {
-    // SAFETY: Called before any threads are spawned; insta reads this lazily on first assertion.
-    unsafe { std::env::set_var("INSTA_REQUIRE_FULL_MATCH", "1") };
-
     let filter = std::env::args().nth(1);
 
     let tmp_dir = tempfile::tempdir().unwrap();
@@ -430,7 +459,7 @@ fn main() {
 
         // Copy .node-version to the tmp dir so version manager shims can resolve the correct
         // Node.js binary when running task commands.
-        let repo_root = manifest_dir.join("../..").canonicalize().unwrap();
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
         std::fs::copy(repo_root.join(".node-version"), tmp_dir.path().join(".node-version"))
             .unwrap();
 

@@ -1,0 +1,10 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vt run dev
+@ expect-milestone: ready
+$ vtt exit-on-ctrlc ⊘ cache disabled
+@ write-key: ctrl-c
+$ vtt exit-on-ctrlc ⊘ cache disabled
+ctrl-c received

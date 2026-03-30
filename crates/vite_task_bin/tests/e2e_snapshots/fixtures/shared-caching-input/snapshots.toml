@@ -3,9 +3,31 @@
 [[e2e]]
 name = "shared caching input"
 steps = [
-  "vt run script1 # cache miss",
-  "vt run script2 # cache hit, same command as script1",
-  "vtt replace-file-content foo.txt initial modified # modify shared input",
-  "vt run script2 # cache miss, input changed",
-  "vt run script1 # cache hit, script2 already warmed cache",
+  { argv = [
+    "vt",
+    "run",
+    "script1",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "script2",
+  ], comment = "cache hit, same command as script1" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "foo.txt",
+    "initial",
+    "modified",
+  ], comment = "modify shared input" },
+  { argv = [
+    "vt",
+    "run",
+    "script2",
+  ], comment = "cache miss, input changed" },
+  { argv = [
+    "vt",
+    "run",
+    "script1",
+  ], comment = "cache hit, script2 already warmed cache" },
 ]

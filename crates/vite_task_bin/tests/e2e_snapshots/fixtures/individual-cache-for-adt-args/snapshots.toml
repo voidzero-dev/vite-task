@@ -3,8 +3,28 @@
 [[e2e]]
 name = "individual cache for extra args"
 steps = [
-  "vt run say a # cache miss",
-  "vt run say b # cache miss, different args",
-  "vt run say a # cache hit",
-  "vt run say b # cache hit",
+  { argv = [
+    "vt",
+    "run",
+    "say",
+    "a",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "say",
+    "b",
+  ], comment = "cache miss, different args" },
+  { argv = [
+    "vt",
+    "run",
+    "say",
+    "a",
+  ], comment = "cache hit" },
+  { argv = [
+    "vt",
+    "run",
+    "say",
+    "b",
+  ], comment = "cache hit" },
 ]

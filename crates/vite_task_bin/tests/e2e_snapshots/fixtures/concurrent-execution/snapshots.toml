@@ -5,7 +5,7 @@
 
 [[e2e]]
 name = "independent tasks run concurrently"
-steps = ["vt run -r build"]
+steps = [["vt", "run", "-r", "build"]]
 
 # Both tasks use a single-command barrier (no && splitting). Task a exits with
 # code 1 after the barrier, task b hangs after the barrier. Since both
@@ -13,17 +13,17 @@ steps = ["vt run -r build"]
 # The test completing without timeout proves cancellation kills b.
 [[e2e]]
 name = "failure kills concurrent tasks"
-steps = ["vt run -r test"]
+steps = [["vt", "run", "-r", "test"]]
 
 # Same as above but with --cache to exercise the piped stdio / fspy path
 # (spawn_with_tracking) instead of the inherited stdio path (spawn_inherited).
 [[e2e]]
 name = "failure kills concurrent cached tasks"
-steps = ["vt run -r --cache test"]
+steps = [["vt", "run", "-r", "--cache", "test"]]
 
 # Task b closes stdout/stderr after the barrier but stays alive (daemonizes).
 # The pipe reads EOF but the process doesn't exit. The runner must still be
 # able to kill it via the cancellation token + Job Object.
 [[e2e]]
 name = "failure kills daemonized concurrent tasks"
-steps = ["vt run -r --cache daemon"]
+steps = [["vt", "run", "-r", "--cache", "daemon"]]

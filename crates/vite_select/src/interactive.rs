@@ -489,7 +489,7 @@ pub fn run(
     header: Option<&str>,
     page_size: usize,
     mut after_render: impl FnMut(&RenderState<'_>),
-) -> anyhow::Result<()> {
+) -> anyhow::Result<super::SelectResult> {
     if items.is_empty() {
         anyhow::bail!("No tasks available");
     }
@@ -516,7 +516,7 @@ pub fn run(
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                     cleanup(&mut out, &state)?;
-                    std::process::exit(130);
+                    return Ok(super::SelectResult::Cancelled);
                 }
                 KeyCode::Enter => {
                     let Some(idx) = state.selected_item_index() else {
@@ -524,7 +524,7 @@ pub fn run(
                     };
                     *selected_index = idx;
                     cleanup(&mut out, &state)?;
-                    return Ok(());
+                    return Ok(super::SelectResult::Selected);
                 }
                 KeyCode::Up => {
                     state.move_up();
