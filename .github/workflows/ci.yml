@@ -58,6 +58,7 @@ jobs:
 
       - run: rustup target add x86_64-unknown-linux-musl
       - run: pipx install cargo-zigbuild
+      - uses: mlugg/setup-zig@v2
 
       # --locked: verify Cargo.lock is up to date (replaces the removed `cargo check --locked`)
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
@@ -105,6 +106,9 @@ jobs:
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
 
       - run: pipx install cargo-zigbuild
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+
+      - uses: mlugg/setup-zig@v2
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
 
       # For x86_64-apple-darwin on arm64 runner, install x64 node so fspy preload dylib
