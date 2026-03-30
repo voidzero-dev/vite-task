@@ -15,8 +15,6 @@
     "oxlint-tsgolint": "catalog:"
   },
   "lint-staged": {
-    "*": "oxfmt --no-error-on-unmatched-pattern",
-    "*.@(js|ts|tsx)": "oxlint -- --fix",
     "*.rs": "cargo fmt --"
   },
   "engines": {

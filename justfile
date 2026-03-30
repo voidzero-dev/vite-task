@@ -26,7 +26,6 @@ watch *args='':
 fmt:
   cargo shear --fix
   cargo fmt --all
-  pnpm oxfmt
 
 check:
   cargo check --workspace --all-features --all-targets --locked
