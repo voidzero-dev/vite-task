@@ -13,6 +13,10 @@ vp run -t @my/app#build   # run in a package and its transitive dependencies
 vp run --cache build      # run with caching enabled
 ```
 
+## Sponsors
+
+Thanks to [namespace.so](https://namespace.so) for powering our CI/CD pipelines with fast, free macOS and Linux runners.
+
 ## License
 
 [MIT](LICENSE)
