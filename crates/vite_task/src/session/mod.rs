@@ -335,6 +335,25 @@ impl<'a> Session<'a> {
                 // the signal directly from the terminal driver and handle it
                 // themselves. Cancelling the interrupt token prevents scheduling
                 // new tasks and caching results of in-flight tasks.
+                //
+                // On Windows, an ancestor process (e.g. cargo) may have been
+                // created with CREATE_NEW_PROCESS_GROUP, which sets a per-process
+                // flag that silently drops CTRL_C_EVENT before it reaches
+                // registered handlers. Clear it so our handler fires.
+                #[cfg(windows)]
+                {
+                    // SAFETY: Passing (None, FALSE) clears the inherited
+                    // CTRL_C ignore flag.
+                    unsafe extern "system" {
+                        fn SetConsoleCtrlHandler(
+                            handler: Option<unsafe extern "system" fn(u32) -> i32>,
+                            add: i32,
+                        ) -> i32;
+                    }
+                    unsafe {
+                        SetConsoleCtrlHandler(None, 0);
+                    }
+                }
                 let interrupt_token = tokio_util::sync::CancellationToken::new();
                 let ct = interrupt_token.clone();
                 ctrlc::set_handler(move || {
