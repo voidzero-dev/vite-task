@@ -187,7 +187,7 @@ fn run_case_inner(
         let workspace_root_str = workspace_root.path.as_path().to_str().unwrap();
         let mut owned_config = vite_task_bin::OwnedSessionConfig::default();
         let mut session = Session::init_with(
-            plan_envs,
+            plan_envs.clone(),
             Arc::clone(&workspace_root.path),
             owned_config.as_config(),
         )
@@ -250,20 +250,20 @@ fn run_case_inner(
                 panic!("only `run` commands supported in plan tests")
             };
 
-            // Inject per-case environment variables, removing them after the plan call.
-            let env_keys: Vec<Arc<OsStr>> = plan
-                .env
-                .iter()
-                .map(|(k, v)| {
-                    let key = Arc::<OsStr>::from(OsStr::new(k.as_str()));
-                    session.envs_mut().insert(Arc::clone(&key), Arc::from(OsStr::new(v.as_str())));
-                    key
-                })
-                .collect();
+            // Create a fresh session per plan case with case-specific env vars and cwd.
+            let mut case_envs = plan_envs.clone();
+            for (k, v) in &plan.env {
+                case_envs
+                    .insert(Arc::from(OsStr::new(k.as_str())), Arc::from(OsStr::new(v.as_str())));
+            }
+            let case_cwd: Arc<AbsolutePath> = workspace_root.path.join(plan.cwd).into();
+            let mut case_owned_config = vite_task_bin::OwnedSessionConfig::default();
+            let mut case_session =
+                Session::init_with(case_envs, Arc::clone(&case_cwd), case_owned_config.as_config())
+                    .unwrap();
+            case_session.ensure_task_graph_loaded().await.unwrap();
 
-            let plan_result = session
-                .plan_from_cli_run(workspace_root.path.join(plan.cwd).into(), run_command)
-                .await;
+            let plan_result = case_session.plan_from_cli_run(case_cwd, run_command).await;
 
             let plan = match plan_result {
                 Ok(graph) => graph,
@@ -296,11 +296,6 @@ fn run_case_inner(
             } else {
                 let plan_json = redact_snapshot(&plan, workspace_root_str);
                 insta::assert_json_snapshot!(snapshot_name.as_str(), &plan_json);
-            }
-
-            // Clean up per-case environment variables.
-            for key in env_keys {
-                session.envs_mut().remove(&key);
             }
         }
     });
