@@ -1,0 +1,1 @@
+console.log('Typechecking lib');

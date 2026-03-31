@@ -1,0 +1,23 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .: {}
+
+  packages/app:
+    dependencies:
+      '@playground/lib':
+        specifier: workspace:*
+        version: link:../lib
+
+  packages/lib:
+    dependencies:
+      '@playground/utils':
+        specifier: workspace:*
+        version: link:../utils
+
+  packages/utils: {}
