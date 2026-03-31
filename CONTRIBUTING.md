@@ -36,7 +36,9 @@ just lint     # Clippy linting
 just doc      # Generate documentation
 ```
 
-### Running Specific Tests
+## Testing
+
+### Running Tests
 
 ```bash
 cargo test                                              # All tests
@@ -54,6 +56,17 @@ Integration tests (e2e, plan, fspy) require `pnpm install` in `packages/tools` f
 - **E2E snapshots** — `crates/vite_task_bin/tests/e2e_snapshots/fixtures/` — needed for testing actual execution, caching behavior, and output styling
 
 See individual crate READMEs for crate-specific testing details.
+
+### Playground
+
+The `playground/` directory is a small workspace for manually testing the task runner. It has three packages (`app → lib → utils`) with cached tasks (`build`, `test`, `lint`, `typecheck`) and an uncached `dev` script.
+
+```bash
+cargo run --bin vt -- run -r build          # run build across all packages
+cargo run --bin vt -- run -r --parallel dev  # start all dev scripts in parallel
+```
+
+See `playground/README.md` for the full task list and dependency structure.
 
 ## Cross-Platform Development
 
