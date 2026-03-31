@@ -1,6 +1,6 @@
 # Playground
 
-A workspace for manually testing `vp run` (the task runner).
+A workspace for manually testing `cargo run --bin vt run ...`.
 
 ## Structure
 
