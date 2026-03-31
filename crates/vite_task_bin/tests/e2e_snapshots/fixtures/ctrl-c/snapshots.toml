@@ -6,7 +6,8 @@ steps = [
   { argv = [
     "vt",
     "run",
-    "dev",
+    "--no-cache",
+    "@ctrl-c/a#dev",
   ], interactions = [
     { "expect-milestone" = "ready" },
     { "write-key" = "ctrl-c" },
@@ -19,9 +20,49 @@ steps = [
   { argv = [
     "vt",
     "run",
-    "dev-cached",
+    "@ctrl-c/a#dev",
   ], interactions = [
     { "expect-milestone" = "ready" },
     { "write-key" = "ctrl-c" },
   ] },
+]
+
+# Package b depends on a, so without --parallel they run sequentially.
+# After Ctrl-C terminates a, b should not be scheduled.
+[[e2e]]
+name = "ctrl-c prevents future tasks"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "-r",
+    "--no-cache",
+    "dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ] },
+]
+
+# dev exits 0 after Ctrl-C but the result should not be cached.
+# The second run should be a cache miss, not a hit.
+[[e2e]]
+name = "ctrl-c prevents caching"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "@ctrl-c/a#dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "exits 0 but should not be cached" },
+  { argv = [
+    "vt",
+    "run",
+    "@ctrl-c/a#dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "should be cache miss, not hit" },
 ]

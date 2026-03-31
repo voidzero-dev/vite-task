@@ -1,3 +1,4 @@
 {
-  "name": "ctrl-c-test"
+  "name": "ctrl-c-test",
+  "private": true
 }

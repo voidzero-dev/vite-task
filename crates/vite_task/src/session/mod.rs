@@ -331,14 +331,19 @@ impl<'a> Session<'a> {
                     Some(self.make_summary_writer()),
                     self.program_name.clone(),
                 ));
-                // Ignore SIGINT/CTRL_C before executing tasks. Child tasks
-                // receive the signal directly from the terminal driver and handle
-                // it themselves. This lets the runner wait for tasks to exit and
-                // report their actual exit status rather than being killed
-                // mid-flight.
-                let _ = ctrlc::set_handler(|| {});
+                // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
+                // the signal directly from the terminal driver and handle it
+                // themselves. Cancelling the interrupt token prevents scheduling
+                // new tasks and caching results of in-flight tasks.
+                let interrupt_token = tokio_util::sync::CancellationToken::new();
+                let ct = interrupt_token.clone();
+                let _ = ctrlc::set_handler(move || {
+                    ct.cancel();
+                });
 
-                self.execute_graph(graph, builder).await.map_err(SessionError::EarlyExit)
+                self.execute_graph(graph, builder, interrupt_token)
+                    .await
+                    .map_err(SessionError::EarlyExit)
             }
         }
     }
@@ -647,6 +652,7 @@ impl<'a> Session<'a> {
             &spawn_execution,
             cache,
             &self.workspace_path,
+            tokio_util::sync::CancellationToken::new(),
             tokio_util::sync::CancellationToken::new(),
         )
         .await;
