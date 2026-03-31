@@ -337,9 +337,9 @@ impl<'a> Session<'a> {
                 // new tasks and caching results of in-flight tasks.
                 let interrupt_token = tokio_util::sync::CancellationToken::new();
                 let ct = interrupt_token.clone();
-                let _ = ctrlc::set_handler(move || {
+                ctrlc::set_handler(move || {
                     ct.cancel();
-                });
+                })?;
 
                 self.execute_graph(graph, builder, interrupt_token)
                     .await
