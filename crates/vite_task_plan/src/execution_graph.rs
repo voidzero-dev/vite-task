@@ -155,12 +155,41 @@ impl<N, Ix: IndexType> Index<NodeIndex<Ix>> for AcyclicGraph<N, Ix> {
     }
 }
 
-/// The execution graph type alias, specialized for task execution.
-pub type ExecutionGraph = AcyclicGraph<TaskExecution, ExecutionIx>;
-
 impl<N: vite_graph_ser::GetKey + Serialize, Ix: IndexType> Serialize for AcyclicGraph<N, Ix> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         vite_graph_ser::serialize_by_key(&self.graph, serializer)
+    }
+}
+
+/// The default concurrency limit for task execution within a single graph level.
+pub const DEFAULT_CONCURRENCY_LIMIT: usize = 4;
+
+/// An execution graph with a per-level concurrency limit.
+///
+/// Wraps an [`AcyclicGraph`] of task executions together with the maximum number
+/// of tasks that may run concurrently within this graph level. Nested `Expanded`
+/// graphs carry their own concurrency limit, enabling per-level control.
+#[derive(Debug, Serialize)]
+pub struct ExecutionGraph {
+    /// The underlying acyclic task execution graph.
+    pub graph: AcyclicGraph<TaskExecution, ExecutionIx>,
+
+    /// Maximum number of tasks that can execute concurrently within this graph level.
+    pub concurrency_limit: usize,
+}
+
+impl ExecutionGraph {
+    /// Validate that `graph` is acyclic and wrap it in an `ExecutionGraph` with
+    /// the given concurrency limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CycleError`] if the graph contains a cycle.
+    pub fn try_from_graph(
+        graph: InnerExecutionGraph,
+        concurrency_limit: usize,
+    ) -> Result<Self, CycleError<ExecutionIx>> {
+        Ok(Self { graph: AcyclicGraph::try_from_graph(graph)?, concurrency_limit })
     }
 }
 

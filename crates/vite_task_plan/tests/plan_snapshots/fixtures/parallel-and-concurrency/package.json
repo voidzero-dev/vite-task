@@ -1,0 +1,8 @@
+{
+  "name": "test-workspace",
+  "private": true,
+  "scripts": {
+    "build": "vt run -r build",
+    "build-with-concurrency": "vt run -r --concurrency-limit 5 build"
+  }
+}

@@ -33,17 +33,41 @@ struct PnpmWorkspace {
     packages: Vec<Str>,
 }
 
-/// The workspace configuration for npm/yarn.
+/// The `workspaces` field in package.json can be either an array of glob patterns
+/// or an object with a `packages` field (used by Bun catalogs and Yarn classic nohoist).
+///
+/// Array form: `"workspaces": ["packages/*", "apps/*"]`
+/// Object form: `"workspaces": {"packages": ["packages/*", "apps/*"], "catalog": {...}}`
+///
+/// Bun: <https://bun.sh/docs/pm/workspaces>
+/// Yarn classic: <https://classic.yarnpkg.com/en/docs/workspaces/>
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum NpmWorkspaces {
+    /// Array of glob patterns (npm, yarn, bun).
+    Array(Vec<Str>),
+    /// Object form with a `packages` field (Bun catalogs, Yarn classic nohoist).
+    Object { packages: Vec<Str> },
+}
+
+impl NpmWorkspaces {
+    fn into_packages(self) -> Vec<Str> {
+        match self {
+            Self::Array(packages) | Self::Object { packages } => packages,
+        }
+    }
+}
+
+/// The workspace configuration for npm/yarn/bun.
 ///
 /// npm: <https://docs.npmjs.com/cli/v11/using-npm/workspaces>
 /// yarn: <https://yarnpkg.com/features/workspaces>
+/// bun: <https://bun.sh/docs/pm/workspaces>
 #[derive(Debug, Deserialize)]
 struct NpmWorkspace {
-    /// Array of folder glob patterns referencing the workspaces of the project.
-    ///
-    /// <https://docs.npmjs.com/cli/v11/configuring-npm/package-json#workspaces>
-    /// <https://yarnpkg.com/configuration/manifest#workspaces>
-    workspaces: Vec<Str>,
+    /// Glob patterns referencing the workspaces of the project.
+    /// Accepts both array form and object form (with `packages` key).
+    workspaces: NpmWorkspaces,
 }
 
 #[derive(Debug)]
@@ -237,7 +261,7 @@ pub fn load_package_graph(
                     file_path: Arc::clone(file_with_path.path()),
                     serde_json_error: e,
                 })?;
-            workspace.workspaces
+            workspace.workspaces.into_packages()
         }
         WorkspaceFile::NonWorkspacePackage(file_with_path) => {
             // For non-workspace packages, add the package.json to the graph as a root package
@@ -1095,5 +1119,116 @@ mod tests {
 
         // External dependencies should not create edges
         assert_eq!(graph.edge_count(), 1, "Should only have one edge for workspace dependency");
+    }
+
+    #[test]
+    fn test_get_package_graph_npm_workspace_object_form() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        // Create package.json with object-form workspaces (Bun/Yarn classic style)
+        let root_package = serde_json::json!({
+            "name": "bun-monorepo",
+            "private": true,
+            "workspaces": {
+                "packages": ["packages/*", "apps/*"]
+            }
+        });
+        fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
+
+        // Create packages directory structure
+        fs::create_dir_all(temp_dir_path.join("packages")).unwrap();
+        fs::create_dir_all(temp_dir_path.join("apps")).unwrap();
+
+        // Create shared library package
+        fs::create_dir_all(temp_dir_path.join("packages/shared")).unwrap();
+        let shared_pkg = serde_json::json!({
+            "name": "@myorg/shared",
+            "version": "1.0.0"
+        });
+        fs::write(temp_dir_path.join("packages/shared/package.json"), shared_pkg.to_string())
+            .unwrap();
+
+        // Create app that depends on shared
+        fs::create_dir_all(temp_dir_path.join("apps/web")).unwrap();
+        let web_app = serde_json::json!({
+            "name": "web-app",
+            "version": "0.1.0",
+            "dependencies": {
+                "@myorg/shared": "workspace:*"
+            }
+        });
+        fs::write(temp_dir_path.join("apps/web/package.json"), web_app.to_string()).unwrap();
+
+        let graph = discover_package_graph(temp_dir_path).unwrap();
+
+        // Should have 3 nodes: root + shared + web-app
+        assert_eq!(graph.node_count(), 3);
+
+        // Verify packages were found
+        let mut packages_found = FxHashSet::<Str>::default();
+        for node in graph.node_weights() {
+            packages_found.insert(node.package_json.name.clone());
+        }
+        assert!(packages_found.contains("bun-monorepo"));
+        assert!(packages_found.contains("@myorg/shared"));
+        assert!(packages_found.contains("web-app"));
+
+        // Verify dependency edge
+        let mut found_web_to_shared = false;
+        for edge_ref in graph.edge_references() {
+            let source = &graph[edge_ref.source()];
+            let target = &graph[edge_ref.target()];
+            if source.package_json.name == "web-app" && target.package_json.name == "@myorg/shared"
+            {
+                found_web_to_shared = true;
+            }
+        }
+        assert!(found_web_to_shared, "Web app should depend on shared");
+    }
+
+    #[test]
+    fn test_get_package_graph_bun_workspace_with_catalog() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        // Create package.json with Bun catalog in object-form workspaces
+        let root_package = serde_json::json!({
+            "name": "bun-catalog-monorepo",
+            "private": true,
+            "workspaces": {
+                "packages": ["packages/*"],
+                "catalog": {
+                    "react": "^19.0.0",
+                    "vite": "npm:@voidzero-dev/vite-plus-core@latest"
+                }
+            }
+        });
+        fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
+
+        // Create packages directory
+        fs::create_dir_all(temp_dir_path.join("packages")).unwrap();
+
+        // Create a package
+        fs::create_dir_all(temp_dir_path.join("packages/app")).unwrap();
+        let app_pkg = serde_json::json!({
+            "name": "my-app",
+            "dependencies": {
+                "react": "catalog:"
+            }
+        });
+        fs::write(temp_dir_path.join("packages/app/package.json"), app_pkg.to_string()).unwrap();
+
+        let graph = discover_package_graph(temp_dir_path).unwrap();
+
+        // Should have 2 nodes: root + app (catalog field is silently ignored)
+        assert_eq!(graph.node_count(), 2);
+
+        let mut packages_found = FxHashSet::<Str>::default();
+        for node in graph.node_weights() {
+            packages_found.insert(node.package_json.name.clone());
+        }
+        assert!(packages_found.contains("bun-catalog-monorepo"));
+        assert!(packages_found.contains("my-app"));
     }
 }

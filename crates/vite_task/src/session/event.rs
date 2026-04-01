@@ -59,6 +59,13 @@ pub enum CacheNotUpdatedReason {
     CacheDisabled,
     /// Execution exited with non-zero status
     NonZeroExitStatus,
+    /// Execution was cancelled before the result could be trusted.
+    /// Two possible causes:
+    /// - Ctrl-C: the user interrupted execution; the task may have
+    ///   exited successfully but without completing its intended work.
+    /// - Fast-fail: a sibling task failed, triggering cancellation
+    ///   while this task was still running.
+    Cancelled,
     /// Task modified files it read during execution (read-write overlap detected by fspy).
     /// Caching such tasks is unsound because the prerun input hashes become stale.
     InputModified {

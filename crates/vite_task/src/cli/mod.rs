@@ -51,6 +51,15 @@ pub struct RunFlags {
     /// How task output is displayed.
     #[clap(long, default_value = "interleaved")]
     pub log: LogMode,
+
+    /// Maximum number of tasks to run concurrently. Defaults to 4.
+    #[clap(long)]
+    pub concurrency_limit: Option<usize>,
+
+    /// Run tasks without dependency ordering. Sets concurrency to unlimited
+    /// unless `--concurrency-limit` is also specified.
+    #[clap(long, default_value = "false")]
+    pub parallel: bool,
 }
 
 impl RunFlags {
@@ -206,6 +215,8 @@ impl ResolvedRunCommand {
 
         let cache_override = self.flags.cache_override();
         let include_explicit_deps = !self.flags.ignore_depends_on;
+        let concurrency_limit = self.flags.concurrency_limit.map(|n| n.max(1));
+        let parallel = self.flags.parallel;
 
         let (package_query, is_cwd_only) =
             self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;
@@ -220,6 +231,8 @@ impl ResolvedRunCommand {
                 plan_options: PlanOptions {
                     extra_args: self.additional_args.into(),
                     cache_override,
+                    concurrency_limit,
+                    parallel,
                 },
             },
             is_cwd_only,

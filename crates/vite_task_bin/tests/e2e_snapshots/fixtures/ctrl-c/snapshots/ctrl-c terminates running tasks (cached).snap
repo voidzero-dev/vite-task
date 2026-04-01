@@ -2,9 +2,9 @@
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
-> vt run dev-cached
+> vt run @ctrl-c/a#dev
 @ expect-milestone: ready
-$ vtt exit-on-ctrlc
+~/packages/a$ vtt exit-on-ctrlc
 @ write-key: ctrl-c
-$ vtt exit-on-ctrlc
+~/packages/a$ vtt exit-on-ctrlc
 ctrl-c received

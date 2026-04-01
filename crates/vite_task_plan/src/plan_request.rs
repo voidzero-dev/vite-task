@@ -49,6 +49,13 @@ pub enum CacheOverride {
 pub struct PlanOptions {
     pub extra_args: Arc<[Str]>,
     pub cache_override: CacheOverride,
+    /// Per-level concurrency limit. `None` means inherit from the parent level
+    /// (or default to [`crate::DEFAULT_CONCURRENCY_LIMIT`] at the root).
+    pub concurrency_limit: Option<usize>,
+    /// When `true`, discard dependency edges between tasks at this level,
+    /// running all tasks as independent. If `concurrency` is also `None`,
+    /// this sets the effective concurrency to `usize::MAX`.
+    pub parallel: bool,
 }
 
 #[derive(Debug)]

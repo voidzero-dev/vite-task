@@ -1,0 +1,49 @@
+# Baseline: normal recursive build preserves topo edges
+[[plan]]
+name = "baseline recursive build"
+args = ["run", "-r", "build"]
+compact = true
+
+# --parallel discards all edges at this level
+[[plan]]
+name = "parallel discards edges"
+args = ["run", "-r", "--parallel", "build"]
+compact = true
+
+# --parallel only affects the current level; nested Expanded graph preserves edges
+[[plan]]
+name = "parallel only affects current level"
+args = ["run", "--parallel", "build"]
+compact = true
+
+# --concurrency-limit with explicit value
+[[plan]]
+name = "concurrency-limit with explicit value"
+args = ["run", "-r", "--concurrency-limit", "5", "build"]
+
+# --parallel without --concurrency-limit sets concurrency to max
+[[plan]]
+name = "parallel without concurrency-limit"
+args = ["run", "-r", "--parallel", "build"]
+
+# --parallel with --concurrency-limit uses explicit concurrency, not max
+[[plan]]
+name = "parallel with concurrency-limit"
+args = ["run", "-r", "--parallel", "--concurrency-limit", "3", "build"]
+
+# Nested vt run with explicit --concurrency-limit
+[[plan]]
+name = "nested with explicit concurrency-limit"
+args = ["run", "build-with-concurrency"]
+
+# VP_RUN_CONCURRENCY_LIMIT env var sets concurrency
+[[plan]]
+name = "env var sets concurrency"
+args = ["run", "-r", "build"]
+env = { VP_RUN_CONCURRENCY_LIMIT = "7" }
+
+# --concurrency-limit flag takes priority over VP_RUN_CONCURRENCY_LIMIT env
+[[plan]]
+name = "cli flag overrides env var"
+args = ["run", "-r", "--concurrency-limit", "3", "build"]
+env = { VP_RUN_CONCURRENCY_LIMIT = "7" }

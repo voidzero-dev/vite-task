@@ -255,7 +255,7 @@ async fn plan_task_as_execution_node(
                     // An empty execution graph means no tasks matched the query.
                     // At the top level the session shows the task selector UI,
                     // but in a nested context there is no UI — propagate as an error.
-                    if execution_graph.node_count() == 0 {
+                    if execution_graph.graph.node_count() == 0 {
                         return Err(Error::NestPlan {
                             task_display: task_node.task_display.clone(),
                             command: Str::from(&command_str[add_item_span]),
@@ -675,6 +675,27 @@ pub async fn plan_query_request(
         );
         context.set_resolved_global_cache(final_cache);
     }
+    // Resolve effective concurrency for this level.
+    //
+    // Priority (highest to lowest):
+    // 1. `--concurrency-limit N` CLI flag
+    // 2. `--parallel` (without the above) → unlimited
+    // 3. `VP_RUN_CONCURRENCY_LIMIT` env var
+    // 4. `DEFAULT_CONCURRENCY_LIMIT` (4)
+    let effective_concurrency = match plan_options.concurrency_limit {
+        Some(n) => n,
+        None => {
+            if plan_options.parallel {
+                usize::MAX
+            } else {
+                concurrency_limit_from_env(context.envs())?
+                    .unwrap_or(crate::DEFAULT_CONCURRENCY_LIMIT)
+            }
+        }
+    };
+
+    let parallel = plan_options.parallel;
+
     context.set_extra_args(plan_options.extra_args);
     context.set_parent_query(Arc::clone(&query));
 
@@ -751,10 +772,15 @@ pub async fn plan_query_request(
         }
     }
 
+    // If --parallel, discard all edges so tasks run independently.
+    if parallel {
+        inner_graph.clear_edges();
+    }
+
     // Validate the graph is acyclic.
     // `try_from_graph` performs a DFS; if a cycle is found, it returns
     // `CycleError` containing the full cycle path as node indices.
-    ExecutionGraph::try_from_graph(inner_graph).map_err(|cycle| {
+    ExecutionGraph::try_from_graph(inner_graph, effective_concurrency).map_err(|cycle| {
         // Map each execution node index in the cycle path to its human-readable TaskDisplay.
         // Every node in the cycle was added via `inner_graph.add_node()` above,
         // with a corresponding entry in `execution_node_indices_by_task_index`.
@@ -776,6 +802,22 @@ pub async fn plan_query_request(
             .collect();
         Error::CycleDependencyDetected(displays)
     })
+}
+
+/// Parse `VP_RUN_CONCURRENCY_LIMIT` from the environment variables.
+///
+/// Returns `Ok(None)` if the variable is not set.
+/// Returns `Err` if the variable is set but cannot be parsed as a positive integer.
+#[expect(clippy::result_large_err, reason = "Error type is shared across all plan functions")]
+fn concurrency_limit_from_env(
+    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+) -> Result<Option<usize>, Error> {
+    let Some(value) = envs.get(OsStr::new("VP_RUN_CONCURRENCY_LIMIT")) else {
+        return Ok(None);
+    };
+    let s = value.to_str().ok_or_else(|| Error::InvalidConcurrencyLimitEnv(Arc::clone(value)))?;
+    let n: usize = s.parse().map_err(|_| Error::InvalidConcurrencyLimitEnv(Arc::clone(value)))?;
+    Ok(Some(n.max(1)))
 }
 
 #[cfg(test)]

@@ -1,0 +1,11 @@
+{
+  "name": "@playground/app",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node dev.mjs"
+  },
+  "dependencies": {
+    "@playground/lib": "workspace:*"
+  }
+}

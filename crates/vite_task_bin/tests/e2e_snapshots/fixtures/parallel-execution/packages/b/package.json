@@ -1,0 +1,9 @@
+{
+  "name": "@parallel/b",
+  "scripts": {
+    "build": "vtt barrier ../../.barrier sync 2"
+  },
+  "dependencies": {
+    "@parallel/a": "workspace:*"
+  }
+}

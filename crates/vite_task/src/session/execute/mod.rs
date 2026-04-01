@@ -50,10 +50,6 @@ pub enum SpawnOutcome {
     Failed,
 }
 
-/// Maximum number of tasks that can execute concurrently within a single
-/// execution graph level.
-const CONCURRENCY_LIMIT: usize = 10;
-
 /// Holds shared references needed during graph execution.
 ///
 /// The `reporter` field is wrapped in `RefCell` because concurrent futures
@@ -71,34 +67,48 @@ struct ExecutionContext<'a> {
     /// Base path for resolving relative paths in cache entries.
     /// Typically the workspace root.
     cache_base_path: &'a Arc<AbsolutePath>,
-    /// Token for cancelling in-flight child processes.
-    cancellation_token: CancellationToken,
+    /// Token cancelled when a task fails. Kills in-flight child processes
+    /// (via `start_kill` in spawn.rs), prevents scheduling new tasks, and
+    /// prevents caching results of concurrently-running tasks.
+    fast_fail_token: CancellationToken,
+    /// Token cancelled by Ctrl-C. Unlike `fast_fail_token` (which kills
+    /// children), this only prevents scheduling new tasks and caching
+    /// results — running processes are left to handle SIGINT naturally.
+    interrupt_token: CancellationToken,
 }
 
 impl ExecutionContext<'_> {
+    /// Returns true if execution has been cancelled, either by a task
+    /// failure (fast-fail) or by Ctrl-C (interrupt).
+    fn cancelled(&self) -> bool {
+        self.fast_fail_token.is_cancelled() || self.interrupt_token.is_cancelled()
+    }
+
     /// Execute all tasks in an execution graph concurrently, respecting dependencies.
     ///
     /// Uses a DAG scheduler: tasks whose dependencies have all completed are scheduled
     /// onto a `FuturesUnordered`, bounded by a per-graph `Semaphore` with
-    /// [`CONCURRENCY_LIMIT`] permits. Each recursive `Expanded` graph creates its own
+    /// `concurrency_limit` permits. Each recursive `Expanded` graph creates its own
     /// semaphore, so nested graphs have independent concurrency limits.
     ///
-    /// Fast-fail: if any task fails, `execute_leaf` cancels the `CancellationToken`
-    /// (killing in-flight child processes). This method detects the cancellation,
-    /// closes the semaphore, drains remaining futures, and returns.
+    /// Fast-fail: if any task fails, `execute_leaf` cancels the `fast_fail_token`
+    /// (killing in-flight child processes). Ctrl-C cancels the `interrupt_token`.
+    /// Either cancellation causes this method to close the semaphore, drain
+    /// remaining futures, and return.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn execute_expanded_graph(&self, graph: &ExecutionGraph) {
-        if graph.node_count() == 0 {
+        if graph.graph.node_count() == 0 {
             return;
         }
 
-        let semaphore = Arc::new(Semaphore::new(CONCURRENCY_LIMIT));
+        let semaphore =
+            Arc::new(Semaphore::new(graph.concurrency_limit.min(Semaphore::MAX_PERMITS)));
 
         // Compute dependency count for each node.
         // Edge A→B means "A depends on B", so A's dependency count = outgoing edge count.
         let mut dep_count: FxHashMap<ExecutionNodeIndex, usize> = FxHashMap::default();
-        for node_ix in graph.node_indices() {
-            dep_count.insert(node_ix, graph.neighbors(node_ix).count());
+        for node_ix in graph.graph.node_indices() {
+            dep_count.insert(node_ix, graph.graph.neighbors(node_ix).count());
         }
 
         let mut futures = FuturesUnordered::new();
@@ -114,7 +124,7 @@ impl ExecutionContext<'_> {
         // On failure, `execute_leaf` cancels the token — we detect it here, close
         // the semaphore (so pending acquires fail immediately), and drain.
         while let Some(completed_ix) = futures.next().await {
-            if self.cancellation_token.is_cancelled() {
+            if self.cancelled() {
                 semaphore.close();
                 while futures.next().await.is_some() {}
                 return;
@@ -123,7 +133,7 @@ impl ExecutionContext<'_> {
             // Find dependents of the completed node (nodes that depend on it).
             // Edge X→completed means "X depends on completed", so X is a predecessor
             // in graph direction = neighbor in Incoming direction.
-            for dependent in graph.neighbors_directed(completed_ix, Direction::Incoming) {
+            for dependent in graph.graph.neighbors_directed(completed_ix, Direction::Incoming) {
                 let count = dep_count.get_mut(&dependent).expect("all nodes are in dep_count");
                 *count -= 1;
                 if *count == 0 {
@@ -135,7 +145,7 @@ impl ExecutionContext<'_> {
 
     /// Create a future that acquires a semaphore permit, then executes a graph node.
     ///
-    /// On failure, `execute_node` cancels the `CancellationToken` — the caller
+    /// On failure, `execute_node` cancels the `fast_fail_token` — the caller
     /// detects this after the future completes. On semaphore closure or prior
     /// cancellation, the node is skipped.
     fn spawn_node<'a>(
@@ -147,7 +157,7 @@ impl ExecutionContext<'_> {
         let sem = semaphore.clone();
         async move {
             if let Ok(_permit) = sem.acquire_owned().await
-                && !self.cancellation_token.is_cancelled()
+                && !self.cancelled()
             {
                 self.execute_node(graph, node_ix).await;
             }
@@ -159,13 +169,13 @@ impl ExecutionContext<'_> {
     /// Execute a single node's items sequentially.
     ///
     /// A node may have multiple items (from `&&`-split commands). Items are executed
-    /// in order; if any item fails, `execute_leaf` cancels the `CancellationToken`
+    /// in order; if any item fails, `execute_leaf` cancels the `fast_fail_token`
     /// and remaining items are skipped (preserving `&&` semantics).
     async fn execute_node(&self, graph: &ExecutionGraph, node_ix: ExecutionNodeIndex) {
-        let task_execution = &graph[node_ix];
+        let task_execution = &graph.graph[node_ix];
 
         for item in &task_execution.items {
-            if self.cancellation_token.is_cancelled() {
+            if self.cancelled() {
                 return;
             }
             match &item.kind {
@@ -183,7 +193,7 @@ impl ExecutionContext<'_> {
     ///
     /// Creates a [`LeafExecutionReporter`] from the graph reporter and delegates
     /// to the appropriate execution method. On failure (non-zero exit or
-    /// infrastructure error), cancels the `CancellationToken`.
+    /// infrastructure error), cancels the `fast_fail_token`.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn execute_leaf(&self, display: &ExecutionItemDisplay, leaf_kind: &LeafExecutionKind) {
         // Borrow the reporter briefly to create the leaf reporter, then drop
@@ -218,7 +228,8 @@ impl ExecutionContext<'_> {
                     spawn_execution,
                     self.cache,
                     self.cache_base_path,
-                    self.cancellation_token.clone(),
+                    self.fast_fail_token.clone(),
+                    self.interrupt_token.clone(),
                 )
                 .await;
                 match outcome {
@@ -229,7 +240,7 @@ impl ExecutionContext<'_> {
             }
         };
         if failed {
-            self.cancellation_token.cancel();
+            self.fast_fail_token.cancel();
         }
     }
 }
@@ -258,7 +269,8 @@ pub async fn execute_spawn(
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
     cache_base_path: &Arc<AbsolutePath>,
-    cancellation_token: CancellationToken,
+    fast_fail_token: CancellationToken,
+    interrupt_token: CancellationToken,
 ) -> SpawnOutcome {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
@@ -351,7 +363,7 @@ pub async fn execute_spawn(
         // while the child also writes to the same FD.
         drop(stdio_config);
 
-        match spawn_inherited(&spawn_execution.spawn_command, cancellation_token).await {
+        match spawn_inherited(&spawn_execution.spawn_command, fast_fail_token).await {
             Ok(result) => {
                 leaf_reporter.finish(
                     Some(result.exit_status),
@@ -422,7 +434,7 @@ pub async fn execute_spawn(
         std_outputs.as_mut(),
         path_accesses.as_mut(),
         &resolved_negatives,
-        cancellation_token,
+        fast_fail_token.clone(),
     )
     .await
     {
@@ -442,7 +454,11 @@ pub async fn execute_spawn(
     let (cache_update_status, cache_error) = if let Some((cache_metadata, globbed_inputs)) =
         cache_metadata_and_inputs
     {
-        if result.exit_status.success() {
+        let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
+        if cancelled {
+            // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
+            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None)
+        } else if result.exit_status.success() {
             // Check for read-write overlap: if the task wrote to any file it also
             // read, the inputs were modified during execution — don't cache.
             // Note: this only checks fspy-inferred reads, not globbed_inputs keys.
@@ -522,7 +538,7 @@ pub async fn execute_spawn(
 #[tracing::instrument(level = "debug", skip_all)]
 async fn spawn_inherited(
     spawn_command: &SpawnCommand,
-    cancellation_token: CancellationToken,
+    fast_fail_token: CancellationToken,
 ) -> anyhow::Result<SpawnResult> {
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
     cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
@@ -582,7 +598,7 @@ async fn spawn_inherited(
 
     let exit_status = tokio::select! {
         status = child.wait() => status?,
-        () = cancellation_token.cancelled() => {
+        () = fast_fail_token.cancelled() => {
             child.start_kill()?;
             child.wait().await?
         }
@@ -697,6 +713,7 @@ impl Session<'_> {
         &self,
         execution_graph: ExecutionGraph,
         builder: Box<dyn GraphExecutionReporterBuilder>,
+        interrupt_token: CancellationToken,
     ) -> Result<(), ExitStatus> {
         // Initialize cache before building the reporter. Cache errors are reported
         // directly to stderr and cause an early exit, keeping the reporter flow clean
@@ -716,7 +733,8 @@ impl Session<'_> {
             reporter: &reporter,
             cache,
             cache_base_path: &self.workspace_path,
-            cancellation_token: CancellationToken::new(),
+            fast_fail_token: CancellationToken::new(),
+            interrupt_token,
         };
 
         // Execute the graph with fast-fail: if any task fails, remaining tasks

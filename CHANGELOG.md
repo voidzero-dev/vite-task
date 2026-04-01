@@ -1,5 +1,8 @@
 # Changelog
 
+- **Fixed** Ctrl-C now prevents future tasks from being scheduled and prevents caching of in-flight task results ([#309](https://github.com/voidzero-dev/vite-task/pull/309))
+- **Added** `--concurrency-limit` flag to limit the number of tasks running at the same time (defaults to 4) ([#288](https://github.com/voidzero-dev/vite-task/pull/288), [#309](https://github.com/voidzero-dev/vite-task/pull/309))
+- **Added** `--parallel` flag to ignore task dependencies and run all tasks at once with unlimited concurrency (unless `--concurrency-limit` is also specified) ([#309](https://github.com/voidzero-dev/vite-task/pull/309))
 - **Added** object form for `input` entries: `{ "pattern": "...", "base": "workspace" | "package" }` to resolve glob patterns relative to the workspace root instead of the package directory ([#295](https://github.com/voidzero-dev/vite-task/pull/295))
 - **Fixed** arguments after the task name being consumed by `vp` instead of passed through to the task ([#286](https://github.com/voidzero-dev/vite-task/pull/286), [#290](https://github.com/voidzero-dev/vite-task/pull/290))
 - **Changed** default untracked env patterns to align with Turborepo, covering more CI and platform-specific variables ([#262](https://github.com/voidzero-dev/vite-task/pull/262))

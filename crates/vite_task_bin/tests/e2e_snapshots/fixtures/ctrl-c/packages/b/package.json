@@ -1,0 +1,9 @@
+{
+  "name": "@ctrl-c/b",
+  "scripts": {
+    "dev": "vtt print b-ran"
+  },
+  "dependencies": {
+    "@ctrl-c/a": "workspace:*"
+  }
+}

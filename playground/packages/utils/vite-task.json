@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "build": {
+      "command": "node build.mjs"
+    },
+    "test": {
+      "command": "node test.mjs"
+    },
+    "lint": {
+      "command": "node lint.mjs"
+    }
+  }
+}

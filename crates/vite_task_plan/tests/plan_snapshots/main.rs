@@ -36,6 +36,8 @@ struct Plan {
     pub cwd: RelativePathBuf,
     #[serde(default)]
     pub compact: bool,
+    #[serde(default)]
+    pub env: BTreeMap<Str, Str>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -65,13 +67,16 @@ impl CompactPlan {
     fn from_execution_graph(graph: &ExecutionGraph, workspace_root: &AbsolutePath) -> Self {
         use petgraph::visit::EdgeRef as _;
         let mut map = BTreeMap::<Str, CompactNode>::new();
-        for node_idx in graph.node_indices() {
-            let node = &graph[node_idx];
+        for node_idx in graph.graph.node_indices() {
+            let node = &graph.graph[node_idx];
             let key = Self::task_key(&node.task_display, workspace_root);
 
             let neighbors: BTreeSet<Str> = graph
+                .graph
                 .edges(node_idx)
-                .map(|edge| Self::task_key(&graph[edge.target()].task_display, workspace_root))
+                .map(|edge| {
+                    Self::task_key(&graph.graph[edge.target()].task_display, workspace_root)
+                })
                 .collect();
 
             let expanded_items: Vec<Self> = node
@@ -182,7 +187,7 @@ fn run_case_inner(
         let workspace_root_str = workspace_root.path.as_path().to_str().unwrap();
         let mut owned_config = vite_task_bin::OwnedSessionConfig::default();
         let mut session = Session::init_with(
-            plan_envs,
+            plan_envs.clone(),
             Arc::clone(&workspace_root.path),
             owned_config.as_config(),
         )
@@ -245,9 +250,20 @@ fn run_case_inner(
                 panic!("only `run` commands supported in plan tests")
             };
 
-            let plan_result = session
-                .plan_from_cli_run(workspace_root.path.join(plan.cwd).into(), run_command)
-                .await;
+            // Create a fresh session per plan case with case-specific env vars and cwd.
+            let mut case_envs = plan_envs.clone();
+            for (k, v) in &plan.env {
+                case_envs
+                    .insert(Arc::from(OsStr::new(k.as_str())), Arc::from(OsStr::new(v.as_str())));
+            }
+            let case_cwd: Arc<AbsolutePath> = workspace_root.path.join(plan.cwd).into();
+            let mut case_owned_config = vite_task_bin::OwnedSessionConfig::default();
+            let mut case_session =
+                Session::init_with(case_envs, Arc::clone(&case_cwd), case_owned_config.as_config())
+                    .unwrap();
+            case_session.ensure_task_graph_loaded().await.unwrap();
+
+            let plan_result = case_session.plan_from_cli_run(case_cwd, run_command).await;
 
             let plan = match plan_result {
                 Ok(graph) => graph,

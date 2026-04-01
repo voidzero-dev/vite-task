@@ -1,0 +1,16 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> vt run @ctrl-c/a#dev # exits 0 but should not be cached
+@ expect-milestone: ready
+~/packages/a$ vtt exit-on-ctrlc
+@ write-key: ctrl-c
+~/packages/a$ vtt exit-on-ctrlc
+ctrl-c received
+> vt run @ctrl-c/a#dev # should be cache miss, not hit
+@ expect-milestone: ready
+~/packages/a$ vtt exit-on-ctrlc
+@ write-key: ctrl-c
+~/packages/a$ vtt exit-on-ctrlc
+ctrl-c received

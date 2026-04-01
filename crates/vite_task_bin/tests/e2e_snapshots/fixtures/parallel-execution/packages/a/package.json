@@ -1,0 +1,6 @@
+{
+  "name": "@parallel/a",
+  "scripts": {
+    "build": "vtt barrier ../../.barrier sync 2"
+  }
+}

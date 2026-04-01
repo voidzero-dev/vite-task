@@ -92,7 +92,7 @@ pub async fn spawn_with_tracking(
     std_outputs: Option<&mut Vec<StdOutput>>,
     path_accesses: Option<&mut TrackedPathAccesses>,
     resolved_negatives: &[wax::Glob<'static>],
-    cancellation_token: CancellationToken,
+    fast_fail_token: CancellationToken,
 ) -> anyhow::Result<SpawnResult> {
     let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
     cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
@@ -108,7 +108,7 @@ pub async fn spawn_with_tracking(
     let (mut child_stdout, mut child_stderr, mut child_wait) = if path_accesses.is_some() {
         // fspy tracking enabled — fspy manages cancellation internally via a clone
         // of the token. We keep the original for the pipe read loop.
-        let mut tracked_child = cmd.spawn(cancellation_token.clone()).await?;
+        let mut tracked_child = cmd.spawn(fast_fail_token.clone()).await?;
         let stdout = tracked_child.stdout.take().unwrap();
         let stderr = tracked_child.stderr.take().unwrap();
         #[cfg(windows)]
@@ -193,7 +193,7 @@ pub async fn spawn_with_tracking(
                     }
                 }
             }
-            () = cancellation_token.cancelled() => {
+            () = fast_fail_token.cancelled() => {
                 // Kill the direct child (no-op for fspy which handles it internally).
                 if let ChildWait::Tokio(ref mut child) = child_wait {
                     let _ = child.start_kill();
@@ -291,7 +291,7 @@ pub async fn spawn_with_tracking(
         ChildWait::Tokio(mut child) => {
             let exit_status = tokio::select! {
                 status = child.wait() => status?,
-                () = cancellation_token.cancelled() => {
+                () = fast_fail_token.cancelled() => {
                     child.start_kill()?;
                     child.wait().await?
                 }
