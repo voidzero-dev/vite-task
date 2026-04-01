@@ -39,7 +39,7 @@ struct PnpmWorkspace {
 /// Array form: `"workspaces": ["packages/*", "apps/*"]`
 /// Object form: `"workspaces": {"packages": ["packages/*", "apps/*"], "catalog": {...}}`
 ///
-/// Bun: <https://bun.sh/docs/install/workspaces>
+/// Bun: <https://bun.sh/docs/pm/workspaces>
 /// Yarn classic: <https://classic.yarnpkg.com/en/docs/workspaces/>
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -62,7 +62,7 @@ impl NpmWorkspaces {
 ///
 /// npm: <https://docs.npmjs.com/cli/v11/using-npm/workspaces>
 /// yarn: <https://yarnpkg.com/features/workspaces>
-/// bun: <https://bun.sh/docs/install/workspaces>
+/// bun: <https://bun.sh/docs/pm/workspaces>
 #[derive(Debug, Deserialize)]
 struct NpmWorkspace {
     /// Glob patterns referencing the workspaces of the project.
