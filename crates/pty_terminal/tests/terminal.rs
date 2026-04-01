@@ -140,7 +140,10 @@ fn write_interactive_prompt() {
     let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
         use std::io::{Write, stdin, stdout};
         let mut stdout = stdout();
-        print!("Name: ");
+        // Use "Name:\n" instead of "Name: " so the test can synchronize with
+        // `read_until(b'\n')`.  On Windows ConPTY, `read_until(b' ')` on the
+        // raw PTY stream can hang.
+        println!("Name:");
         stdout.flush().unwrap();
 
         let mut input = std::string::String::new();
@@ -152,12 +155,12 @@ fn write_interactive_prompt() {
     let Terminal { mut pty_reader, mut pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
-    // Wait for prompt "Name: " (read until the space after colon)
+    // Wait for the "Name:" prompt line.
     {
         let mut buf_reader = BufReader::new(&mut pty_reader);
-        let mut buf = Vec::new();
-        buf_reader.read_until(b' ', &mut buf).unwrap();
-        assert!(String::from_utf8_lossy(&buf).contains("Name:"));
+        let mut line = Vec::new();
+        buf_reader.read_until(b'\n', &mut line).unwrap();
+        assert!(String::from_utf8_lossy(&line).contains("Name:"));
     }
 
     // Send response
@@ -168,7 +171,7 @@ fn write_interactive_prompt() {
     let _ = child_handle.wait().unwrap();
 
     let output = pty_reader.screen_contents();
-    assert_eq!(output.trim(), "Name: Alice\nHello, Alice");
+    assert_eq!(output.trim(), "Name:\nAlice\nHello, Alice");
 }
 
 #[test]
