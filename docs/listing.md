@@ -2,10 +2,13 @@
 
 `vp run --list` shows all available tasks across the workspace and exits without running anything. Combined with `--json`, it produces machine-readable output for CI pipelines, shell completion, and tooling integration.
 
-## `--list`
+`vp run --help` displays a hint about the `--list` flag so that users (and AI agents) can discover it.
+
+## `--list` / `-l`
 
 ```sh
 vp run --list
+vp run -l        # short alias
 ```
 
 Prints a flat list of all tasks with their commands:
@@ -168,3 +171,18 @@ vp run --list --filter "./infra/*"
 | `--last-details` | **Error** — mutually exclusive             |
 
 `--json` without `--list` is an error.
+
+## Discoverability
+
+`vp run --help` includes a hint about the `--list` flag so that users and AI agents can discover it without prior knowledge:
+
+```
+Options:
+  -l, --list        List all available tasks and exit without running
+      --json        Output task list as JSON (requires --list)
+  ...
+
+Tip: use `--list` to see all available tasks.
+```
+
+This hint is rendered via clap's `after_help` attribute on the `run` subcommand.
