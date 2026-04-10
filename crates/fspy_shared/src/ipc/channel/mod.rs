@@ -1,19 +1,17 @@
 //! Fast mpsc IPC channel implementation based on shared memory.
 
-mod shm_io;
-
 use std::{env::temp_dir, fs::File, io, ops::Deref, path::PathBuf, sync::Arc};
 
 use bincode::{Decode, Encode};
-use shared_memory::{Shmem, ShmemConf};
-pub use shm_io::FrameMut;
 use shm_io::{ShmReader, ShmWriter};
 use tracing::debug;
 use uuid::Uuid;
 
 use super::NativeStr;
 
-/// Serializable configuration to create channel senders.
+mod backend;
+mod shm_io;
+
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct ChannelConf {
     lock_file_path: Box<NativeStr>,
@@ -21,31 +19,24 @@ pub struct ChannelConf {
     shm_size: usize,
 }
 
-/// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders
-#[expect(
-    clippy::missing_errors_doc,
-    reason = "non-vite crate: cannot use vite_str/vite_path types"
-)]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
-    // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
 
-    #[cfg_attr(
-        not(windows),
-        expect(unused_mut, reason = "mut required on Windows, unused on Unix")
-    )]
-    let mut conf = ShmemConf::new().size(capacity);
-    // On Windows, allow opening raw shared memory (without backing file) for DLL injection scenarios
-    #[cfg(target_os = "windows")]
-    {
-        conf = conf.allow_raw(true);
-    }
+    let shm = backend::create(capacity)?;
 
-    let shm = conf.create().map_err(io::Error::other)?;
-
+    #[cfg(target_os = "android")]
     let conf = ChannelConf {
         lock_file_path: lock_file_path.as_os_str().into(),
-        shm_id: shm.get_os_id().into(),
+
+        shm_id: shm.fd_path.clone(),
+        shm_size: capacity,
+    };
+
+    #[cfg(not(target_os = "android"))]
+    let conf = ChannelConf {
+        lock_file_path: lock_file_path.as_os_str().into(),
+
+        os_id: shm.os_id.clone().into(),
         shm_size: capacity,
     };
 
@@ -65,26 +56,38 @@ impl ChannelConf {
         let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
         lock_file.try_lock_shared()?;
 
-        #[cfg_attr(
-            not(windows),
-            expect(unused_mut, reason = "mut required on Windows, unused on Unix")
-        )]
-        let mut conf = ShmemConf::new().size(self.shm_size).os_id(&self.shm_id);
-        // On Windows, allow opening raw shared memory (without backing file) for DLL injection scenarios
-        #[cfg(target_os = "windows")]
-        {
-            conf = conf.allow_raw(true);
-        }
-        let shm = conf.open().map_err(io::Error::other)?;
-        // SAFETY: `shm` is a freshly opened shared memory region with valid pointer and size.
-        // Exclusive write access is ensured by the shared file lock held by this sender.
-        let writer = unsafe { ShmWriter::new(shm) };
+        #[cfg(target_os = "android")]
+        let writer = {
+            let mmap = backend::open(&self.shm_id, self.shm_size)?;
+
+            WriterHandle::MemFd(unsafe { ShmWriter::new(mmap) })
+        };
+
+        #[cfg(not(target_os = "android"))]
+        let writer = {
+            #[cfg_attr(
+                not(windows),
+                expect(unused_mut, reason = "mut required on Windows, unused on Unix")
+            )]
+            let mut conf = ShmemConf::new().size(self.shm_size).os_id(&self.shm_id);
+
+            #[cfg(target_os = "windows")]
+            {
+                conf = conf.allow_raw(true);
+            }
+
+            let shm = conf.open().map_err(io::Error::other)?;
+
+            // SAFETY: shm valide + lock garantit exclusivité
+            unsafe { ShmWriter::new(shm) }
+        };
+
         Ok(Sender { writer, lock_file, lock_file_path: self.lock_file_path.clone() })
     }
 }
 
 pub struct Sender {
-    writer: ShmWriter<Shmem>,
+    writer: WriterHandle,
     lock_file_path: Box<NativeStr>,
     lock_file: File,
 }
@@ -98,7 +101,7 @@ impl Drop for Sender {
 }
 
 impl Deref for Sender {
-    type Target = ShmWriter<Shmem>;
+    type Target = WriterHandle;
 
     fn deref(&self) -> &Self::Target {
         &self.writer
@@ -115,22 +118,27 @@ unsafe impl Send for Sender {}
 /// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
 unsafe impl Sync for Sender {}
 
-/// The unique receiver side of an IPC channel.
-/// Owns the lock file and removes it on drop.
+enum ShmHandle {
+    #[cfg(target_os = "android")]
+    MemFd(memmap2::MmapMut),
+    #[cfg(not(target_os = "android"))]
+    Shmem(shared_memory::Shmem),
+}
+
+pub enum WriterHandle {
+    #[cfg(target_os = "android")]
+    MemFd(ShmWriter<memmap2::MmapMut>),
+    #[cfg(not(target_os = "android"))]
+    Shmem(ShmWriter<shared_memory::Shmem>),
+}
+
 pub struct Receiver {
     lock_file_path: PathBuf,
     lock_file: File,
-    shm: Shmem,
+    shm: ShmHandle,
 }
 
-#[expect(
-    clippy::non_send_fields_in_send_ty,
-    reason = "Receiver doesn't read or write `shm`. It only pass it to `ReceiverLockGuard` under the lock"
-)]
-/// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
 unsafe impl Send for Receiver {}
-
-/// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
 unsafe impl Sync for Receiver {}
 
 impl Drop for Receiver {
@@ -142,8 +150,15 @@ impl Drop for Receiver {
 }
 
 impl Receiver {
-    fn new(lock_file_path: PathBuf, shm: Shmem) -> io::Result<Self> {
+    fn new(lock_file_path: PathBuf, shm: backend::Shm) -> io::Result<Self> {
         let lock_file = File::create(&lock_file_path)?;
+
+        #[cfg(target_os = "android")]
+        let shm = ShmHandle::MemFd(shm.mmap);
+
+        #[cfg(not(target_os = "android"))]
+        let shm = ShmHandle::Shmem(shm.shm);
+
         Ok(Self { lock_file_path, lock_file, shm })
     }
 
@@ -156,9 +171,19 @@ impl Receiver {
     )]
     pub fn lock(&self) -> io::Result<ReceiverLockGuard<'_>> {
         self.lock_file.lock()?;
-        // SAFETY: The exclusive file lock is held, so no writers can access the shared memory.
-        // The lock ensures all prior writes are visible to this thread.
-        let reader = ShmReader::new(unsafe { self.shm.as_slice() });
+
+        let slice: &[u8] = match &self.shm {
+            #[cfg(target_os = "android")]
+            ShmHandle::MemFd(mmap) => unsafe {
+                std::slice::from_raw_parts(mmap.as_ptr(), mmap.len())
+            },
+
+            #[cfg(not(target_os = "android"))]
+            ShmHandle::Shmem(shm) => unsafe { shm.as_slice() },
+        };
+
+        let reader = ShmReader::new(slice);
+
         Ok(ReceiverLockGuard { reader, lock_file: &self.lock_file })
     }
 }

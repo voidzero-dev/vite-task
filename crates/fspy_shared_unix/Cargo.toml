@@ -15,7 +15,7 @@ stackalloc = { workspace = true }
 
 [dev-dependencies]
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "android",target_os = "linux"))'.dependencies]
 elf = { workspace = true }
 fspy_seccomp_unotify = { workspace = true, features = ["target"] }
 memmap2 = { workspace = true }

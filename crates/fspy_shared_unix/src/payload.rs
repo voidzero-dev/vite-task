@@ -3,7 +3,7 @@ use std::os::unix::ffi::OsStringExt;
 use base64::{Engine as _, prelude::BASE64_STANDARD_NO_PAD};
 use bincode::{Decode, Encode, config::standard};
 use bstr::BString;
-#[cfg(not(target_env = "musl"))]
+#[cfg(all(not(target_os = "android"), not(target_env = "musl")))]
 use fspy_shared::ipc::NativeStr;
 use fspy_shared::ipc::channel::ChannelConf;
 
@@ -11,7 +11,7 @@ use fspy_shared::ipc::channel::ChannelConf;
 pub struct Payload {
     pub ipc_channel_conf: ChannelConf,
 
-    #[cfg(not(target_env = "musl"))]
+    #[cfg(all(not(target_os = "android"), not(target_env = "musl")))]
     pub preload_path: Box<NativeStr>,
 
     #[cfg(target_os = "macos")]

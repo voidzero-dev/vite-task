@@ -1,9 +1,9 @@
 #![cfg_attr(target_os = "windows", feature(windows_process_extensions_main_thread_handle))]
-#![feature(once_cell_try)]
+#![cfg_attr(not(target_os = "android"), feature(once_cell_try))]
 
 // Persist the injected DLL/shared library somewhere in the filesystem.
 // Not needed on musl (seccomp-only tracking).
-#[cfg(not(target_env = "musl"))]
+#[cfg(all(not(target_os = "android"), not(target_env = "musl")))]
 mod artifact;
 
 pub mod error;

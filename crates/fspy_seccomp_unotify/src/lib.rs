@@ -1,4 +1,4 @@
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "android", target_os = "linux"))]
 
 #[cfg(any(feature = "supervisor", feature = "target"))]
 mod bindings;

@@ -1,4 +1,4 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "android", target_os = "linux"))]
 #[path = "./linux/mod.rs"]
 mod os_specific;
 

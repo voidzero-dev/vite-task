@@ -10,10 +10,16 @@ bincode = { workspace = true }
 bitflags = { workspace = true }
 bstr = { workspace = true }
 bytemuck = { workspace = true, features = ["must_cast", "derive"] }
-shared_memory = { workspace = true, features = ["logging"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+shared_memory = { workspace = true, features = ["logging"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+memmap2 = "0.9.10"
+memfd = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 bytemuck = { workspace = true }

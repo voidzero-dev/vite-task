@@ -28,7 +28,7 @@ macro_rules! artifact {
 pub use artifact;
 
 impl Artifact {
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(not(target_os = "android"), not(target_os = "linux")))]
     pub const fn new(name: &'static str, content: &'static [u8], hash: &'static str) -> Self {
         Self { name, content, hash }
     }
