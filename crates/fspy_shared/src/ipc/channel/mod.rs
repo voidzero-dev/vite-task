@@ -81,7 +81,7 @@ impl ChannelConf {
             let shm = conf.open().map_err(io::Error::other)?;
 
             // SAFETY: shm valide + lock garantit exclusivité
-            unsafe { ShmWriter::new(shm) }
+            WriterHandle::Shmem(unsafe { ShmWriter::new(shm) })
         };
 
         Ok(Sender { writer, lock_file, lock_file_path: self.lock_file_path.clone() })
