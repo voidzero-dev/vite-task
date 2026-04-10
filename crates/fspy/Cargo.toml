@@ -29,8 +29,8 @@ fspy_seccomp_unotify = { workspace = true, features = ["supervisor"] }
 nix = { workspace = true, features = ["uio"] }
 tokio = { workspace = true, features = ["bytes"] }
 
-#[target.'cfg(all(unix, any(not(target_env = "musl"), not(target_os = "android"))))'.dependencies]
-#fspy_preload_unix = { workspace = true }
+[target.'cfg(all(unix, all(not(target_env = "musl"), not(target_os = "android"))))'.dependencies]
+fspy_preload_unix = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 fspy_shared_unix = { workspace = true }
