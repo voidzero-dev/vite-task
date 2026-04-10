@@ -38,7 +38,7 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     let conf = ChannelConf {
         lock_file_path: lock_file_path.as_os_str().into(),
 
-        os_id: shm.os_id.clone().into(),
+        shm_id: shm.os_id.clone().into(),
         shm_size: capacity,
     };
 
