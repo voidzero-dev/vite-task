@@ -3,6 +3,8 @@
 use std::{env::temp_dir, fs::File, io, ops::Deref, path::PathBuf, sync::Arc};
 
 use bincode::{Decode, Encode};
+#[cfg(not(target_os = "android"))]
+use shared_memory::{Shmem, ShmemConf};
 use shm_io::{ShmReader, ShmWriter};
 use tracing::debug;
 use uuid::Uuid;
