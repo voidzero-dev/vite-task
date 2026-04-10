@@ -7,6 +7,8 @@ use std::{
 };
 
 use libc::sock_filter;
+#[cfg(target_os = "android")]
+use libc::{PR_SET_NO_NEW_PRIVS, prctl};
 #[cfg(not(target_os = "android"))]
 use nix::sys::prctl::set_no_new_privs;
 use passfd::FdPassingExt;
@@ -22,12 +24,13 @@ use crate::{bindings::install_unotify_filter, payload::SeccompPayload};
 pub fn install_target(payload: &SeccompPayload) -> nix::Result<()> {
     #[cfg(not(target_os = "android"))]
     set_no_new_privs()?;
-    #[cfg(target_os = "android")]
-    use libc::{PR_SET_NO_NEW_PRIVS, prctl};
 
-    let ret = unsafe { prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
-    if ret != 0 {
-        return Err(nix::Error::last());
+    #[cfg(target_os = "android")]
+    {
+        let ret = unsafe { prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
+        if ret != 0 {
+            return Err(nix::Error::last());
+        }
     }
 
     let sock_filters =
