@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "android"))]
 pub mod channel;
 mod native_path;
 pub(crate) mod native_str;
