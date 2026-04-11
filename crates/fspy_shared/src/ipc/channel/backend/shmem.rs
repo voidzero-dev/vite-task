@@ -14,7 +14,3 @@ pub fn create(size: usize) -> io::Result<Shm> {
 
     Ok(Shm { shm, os_id })
 }
-
-pub fn open(os_id: &str, size: usize) -> io::Result<Shmem> {
-    ShmemConf::new().size(size).os_id(os_id).open().map_err(io::Error::other)
-}
