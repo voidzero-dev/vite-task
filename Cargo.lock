@@ -1167,6 +1167,7 @@ dependencies = [
  "derive_more",
  "flate2",
  "fspy_detours_sys",
+ "fspy_preload_unix",
  "fspy_preload_windows",
  "fspy_seccomp_unotify",
  "fspy_shared",

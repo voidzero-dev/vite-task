@@ -5,10 +5,12 @@ use bincode::{Decode, Encode, config::standard};
 use bstr::BString;
 #[cfg(all(not(target_os = "android"), not(target_env = "musl")))]
 use fspy_shared::ipc::NativeStr;
+#[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::channel::ChannelConf;
 
 #[derive(Debug, Encode, Decode)]
 pub struct Payload {
+    #[cfg(not(target_env = "musl"))]
     pub ipc_channel_conf: ChannelConf,
 
     #[cfg(all(not(target_os = "android"), not(target_env = "musl")))]
@@ -18,7 +20,10 @@ pub struct Payload {
     pub artifacts: Artifacts,
 
     #[cfg(target_os = "linux")]
-    #[expect(clippy::struct_field_names, reason = "descriptive field name for clarity")]
+    #[cfg_attr(
+        not(target_env = "musl"),
+        expect(clippy::struct_field_names, reason = "descriptive field name for clarity")
+    )]
     pub seccomp_payload: fspy_seccomp_unotify::payload::SeccompPayload,
 }
 
