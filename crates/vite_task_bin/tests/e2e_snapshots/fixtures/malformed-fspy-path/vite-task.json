@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "read-malformed-path": {
+      "command": "vtt print-file foo/C:/bar",
+      "cache": true,
+      "input": [
+        {
+          "auto": true
+        }
+      ]
+    }
+  }
+}

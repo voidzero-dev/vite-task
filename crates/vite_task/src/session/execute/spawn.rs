@@ -3,6 +3,7 @@
 use std::{
     collections::hash_map::Entry,
     io::Write,
+    path::Path,
     process::{ExitStatus, Stdio},
     time::{Duration, Instant},
 };
@@ -55,6 +56,34 @@ pub struct TrackedPathAccesses {
 
     /// Tracked path writes
     pub path_writes: FxHashSet<RelativePathBuf>,
+}
+
+fn normalize_tracked_workspace_path(
+    stripped_path: &Path,
+    resolved_negatives: &[wax::Glob<'static>],
+) -> Option<RelativePathBuf> {
+    // On Windows, paths are possible to be still absolute after stripping the workspace root.
+    // For example: c:\workspace\subdir\c:\workspace\subdir
+    // Just ignore those accesses.
+    let relative = RelativePathBuf::new(stripped_path).ok()?;
+
+    // Clean `..` components — fspy may report paths like
+    // `packages/sub-pkg/../shared/dist/output.js`. Normalize them for
+    // consistent behavior across platforms and clean user-facing messages.
+    let relative = relative.clean();
+
+    // Skip .git directory accesses (workaround for tools like oxlint)
+    if relative.as_path().strip_prefix(".git").is_ok() {
+        return None;
+    }
+
+    if !resolved_negatives.is_empty()
+        && resolved_negatives.iter().any(|neg| neg.is_match(relative.as_str()))
+    {
+        return None;
+    }
+
+    Some(relative)
 }
 
 /// How the child process is awaited after stdout/stderr are drained.
@@ -231,28 +260,7 @@ pub async fn spawn_with_tracking(
                     let Ok(stripped_path) = strip_result else {
                         return None;
                     };
-                    // On Windows, paths are possible to be still absolute after stripping the workspace root.
-                    // For example: c:\workspace\subdir\c:\workspace\subdir
-                    // Just ignore those accesses.
-                    let relative = RelativePathBuf::new(stripped_path).ok()?;
-
-                    // Clean `..` components — fspy may report paths like
-                    // `packages/sub-pkg/../shared/dist/output.js`. Normalize them for
-                    // consistent behavior across platforms and clean user-facing messages.
-                    let relative = relative.clean();
-
-                    // Skip .git directory accesses (workaround for tools like oxlint)
-                    if relative.as_path().strip_prefix(".git").is_ok() {
-                        return None;
-                    }
-
-                    if !resolved_negatives.is_empty()
-                        && resolved_negatives.iter().any(|neg| neg.is_match(relative.as_str()))
-                    {
-                        return None;
-                    }
-
-                    Some(relative)
+                    normalize_tracked_workspace_path(stripped_path, resolved_negatives)
                 });
 
                 let Some(relative_path) = relative_path else {
@@ -298,5 +306,18 @@ pub async fn spawn_with_tracking(
             };
             Ok(SpawnResult { exit_status, duration: start.elapsed() })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(windows)]
+    use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn malformed_windows_drive_path_after_workspace_strip_is_ignored() {
+        let relative_path = normalize_tracked_workspace_path(Path::new(r"foo\C:\bar"), &[]);
+        assert!(relative_path.is_none());
     }
 }

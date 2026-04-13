@@ -1,0 +1,7 @@
+---
+source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
+expression: e2e_outputs
+---
+> TEMP=. TMP=. vt run read-malformed-path
+$ vtt print-file foo/C:/bar
+foo/C:/bar: not found
