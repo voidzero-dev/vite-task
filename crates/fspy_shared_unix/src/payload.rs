@@ -5,10 +5,12 @@ use bincode::{Decode, Encode, config::standard};
 use bstr::BString;
 #[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::NativeStr;
+#[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::channel::ChannelConf;
 
 #[derive(Debug, Encode, Decode)]
 pub struct Payload {
+    #[cfg(not(target_env = "musl"))]
     pub ipc_channel_conf: ChannelConf,
 
     #[cfg(not(target_env = "musl"))]
