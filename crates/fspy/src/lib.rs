@@ -8,7 +8,7 @@ mod artifact;
 
 pub mod error;
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(all(not(target_os = "android"), not(target_env = "musl")))]
 mod ipc;
 
 #[cfg(unix)]
