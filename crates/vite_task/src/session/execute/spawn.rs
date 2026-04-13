@@ -70,7 +70,7 @@ fn normalize_tracked_workspace_path(
     // Clean `..` components — fspy may report paths like
     // `packages/sub-pkg/../shared/dist/output.js`. Normalize them for
     // consistent behavior across platforms and clean user-facing messages.
-    let relative = relative.clean();
+    let relative = relative.clean().ok()?;
 
     // Skip .git directory accesses (workaround for tools like oxlint)
     if relative.as_path().strip_prefix(".git").is_ok() {
