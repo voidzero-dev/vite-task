@@ -29,12 +29,18 @@ use crate::{IndexedTaskGraph, TaskDependencyType, TaskId, TaskNodeIndex};
 /// Nodes in `graph` are `TaskNodeIndex` values into the full `TaskGraph`.
 /// Edges represent the final dependency relationships between tasks (no weights).
 ///
-/// `requested` tracks the tasks the user explicitly asked for — i.e. the
-/// nodes added by `map_subgraph_to_tasks` (stage 2), excluding nodes that
-/// were only pulled in via `dependsOn` expansion in [`Self::add_dependencies`]
-/// (stage 3). This distinction lets the planner forward CLI extra args to
-/// only the requested tasks, keeping `dependsOn` tasks insulated from
-/// caller-specific arguments.
+/// `requested` is the subset of nodes the user typed on the CLI — i.e. the
+/// nodes added by `map_subgraph_to_tasks` (stage 2), not the ones reached
+/// only via `dependsOn` expansion in [`Self::add_dependencies`] (stage 3).
+///
+/// For example, given `test` with `dependsOn: ["build"]` and the command
+/// `vp run test some-filter`:
+///
+/// - `graph` contains both `test` and `build` with an edge between them.
+/// - `requested` contains only `test`.
+///
+/// The planner uses this distinction to forward `some-filter` to `test`
+/// while running `build` with no extra args.
 #[derive(Debug, Default, Clone)]
 pub struct TaskExecutionGraph {
     pub graph: DiGraphMap<TaskNodeIndex, ()>,
