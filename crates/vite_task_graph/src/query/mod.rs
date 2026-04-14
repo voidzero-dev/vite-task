@@ -31,7 +31,7 @@ use crate::{IndexedTaskGraph, TaskDependencyType, TaskId, TaskNodeIndex};
 ///
 /// `requested` is the subset of nodes the user typed on the CLI — i.e. the
 /// nodes added by `map_subgraph_to_tasks` (stage 2), not the ones reached
-/// only via `dependsOn` expansion in [`Self::add_dependencies`] (stage 3).
+/// only via `dependsOn` expansion in `IndexedTaskGraph::add_dependencies` (stage 3).
 ///
 /// For example, given `test` with `dependsOn: ["build"]` and the command
 /// `vp run test some-filter`:

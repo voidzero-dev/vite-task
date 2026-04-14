@@ -703,6 +703,9 @@ pub async fn plan_query_request(
     // caller-specific CLI args don't pollute dependency tasks.
     // See https://github.com/voidzero-dev/vite-task/issues/324.
     let extra_args = plan_options.extra_args;
+    // Allocated once and shared across every dep-only task's context below,
+    // instead of calling `Arc::new([])` inside the per-task loop.
+    let empty_extra_args: Arc<[Str]> = Arc::from([]);
     context.set_parent_query(Arc::clone(&query));
 
     // Query matching tasks from the task graph.
@@ -747,7 +750,7 @@ pub async fn plan_query_request(
         if task_node_index_graph.requested.contains(&task_index) {
             task_context.set_extra_args(Arc::clone(&extra_args));
         } else {
-            task_context.set_extra_args(Arc::new([]));
+            task_context.set_extra_args(Arc::clone(&empty_extra_args));
         }
         let task_execution =
             plan_task_as_execution_node(task_index, task_context, true).boxed_local().await?;
