@@ -355,6 +355,8 @@ impl<'a> Session<'a> {
                             add: i32,
                         ) -> i32;
                     }
+                    // SAFETY: Passing (None, FALSE) clears the inherited
+                    // CTRL_C ignore flag.
                     unsafe {
                         SetConsoleCtrlHandler(None, 0);
                     }

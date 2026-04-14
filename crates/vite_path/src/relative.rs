@@ -77,7 +77,6 @@ impl RelativePath {
     /// Returns an error if the cleaned path is no longer a valid relative path.
     /// This can happen on Windows when malformed inputs such as `foo/C:/bar`
     /// are cleaned into drive-prefixed paths.
-    #[must_use]
     pub fn clean(&self) -> Result<RelativePathBuf, FromPathError> {
         use path_clean::PathClean as _;
 

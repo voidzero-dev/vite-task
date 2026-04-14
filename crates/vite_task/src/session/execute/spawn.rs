@@ -3,7 +3,6 @@
 use std::{
     collections::hash_map::Entry,
     io::Write,
-    path::Path,
     process::{ExitStatus, Stdio},
     time::{Duration, Instant},
 };
@@ -58,8 +57,12 @@ pub struct TrackedPathAccesses {
     pub path_writes: FxHashSet<RelativePathBuf>,
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "fspy strip_path_prefix exposes std::path::Path; convert to RelativePathBuf immediately"
+)]
 fn normalize_tracked_workspace_path(
-    stripped_path: &Path,
+    stripped_path: &std::path::Path,
     resolved_negatives: &[wax::Glob<'static>],
 ) -> Option<RelativePathBuf> {
     // On Windows, paths are possible to be still absolute after stripping the workspace root.
@@ -317,7 +320,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn malformed_windows_drive_path_after_workspace_strip_is_ignored() {
-        let relative_path = normalize_tracked_workspace_path(Path::new(r"foo\C:\bar"), &[]);
+        let relative_path =
+            normalize_tracked_workspace_path(std::path::Path::new(r"foo\C:\bar"), &[]);
         assert!(relative_path.is_none());
     }
 }
