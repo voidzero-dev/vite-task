@@ -320,6 +320,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn malformed_windows_drive_path_after_workspace_strip_is_ignored() {
+        #[expect(
+            clippy::disallowed_types,
+            reason = "normalize_tracked_workspace_path requires std::path::Path for fspy strip_path_prefix output"
+        )]
         let relative_path =
             normalize_tracked_workspace_path(std::path::Path::new(r"foo\C:\bar"), &[]);
         assert!(relative_path.is_none());
