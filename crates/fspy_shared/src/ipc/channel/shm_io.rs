@@ -12,9 +12,6 @@ use bincode::{
     Encode, config::Config, enc::write::SizeWriter, encode_into_slice, encode_into_writer,
 };
 use bytemuck::must_cast;
-#[cfg(target_os = "android")]
-use memmap2::MmapMut;
-#[cfg(not(target_os = "android"))]
 use shared_memory::Shmem;
 
 // `ShmWriter` writes headers using atomic operations to prevent partial writes due to crashes,
@@ -33,16 +30,9 @@ pub trait AsRawSlice {
     fn as_raw_slice(&self) -> *mut [u8];
 }
 
-#[cfg(not(target_os = "android"))]
 impl AsRawSlice for Shmem {
     fn as_raw_slice(&self) -> *mut [u8] {
         slice_from_raw_parts_mut(self.as_ptr(), self.len())
-    }
-}
-#[cfg(target_os = "android")]
-impl AsRawSlice for MmapMut {
-    fn as_raw_slice(&self) -> *mut [u8] {
-        slice_from_raw_parts_mut(self.as_ptr() as *mut u8, self.len())
     }
 }
 
