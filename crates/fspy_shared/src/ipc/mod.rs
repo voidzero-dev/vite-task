@@ -1,8 +1,6 @@
 #[cfg(all(not(target_os = "android"), not(target_env = "musl")))]
 pub mod channel;
 mod native_path;
-pub(crate) mod native_str;
-
 use std::fmt::Debug;
 
 use bitflags::bitflags;

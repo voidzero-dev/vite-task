@@ -9,14 +9,13 @@ use std::{
 
 use allocator_api2::alloc::Allocator;
 use bytemuck::TransparentWrapper;
+use native_str::NativeStr;
 use wincode::{
     SchemaRead, SchemaWrite,
     config::Config,
     error::{ReadResult, WriteResult},
     io::{Reader, Writer},
 };
-
-use super::native_str::NativeStr;
 
 /// An opaque path type used in [`super::PathAccess`].
 ///

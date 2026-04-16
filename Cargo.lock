@@ -1287,8 +1287,7 @@ dependencies = [
  "bstr",
  "bytemuck",
  "ctor",
- "memfd",
- "memmap2",
+ "native_str",
  "os_str_bytes",
  "rustc-hash",
  "shared_memory",
@@ -1968,6 +1967,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "native_str"
+version = "0.0.0"
+dependencies = [
+ "allocator-api2",
+ "bytemuck",
+ "wincode",
 ]
 
 [[package]]
@@ -3016,7 +3024,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "seccompiler"
 version = "0.5.0"
-source = "git+https://github.com/branchseer/seccompiler?branch=seccomp-action-raw#dbccf624efc19685e8b85beb7b0a9fdda0678da2"
+source = "git+https://github.com/rust-vmm/seccompiler?rev=08587106340b8e3cb361c7561411510039436857#08587106340b8e3cb361c7561411510039436857"
 dependencies = [
  "libc",
 ]

@@ -10,6 +10,8 @@ wincode = { workspace = true, features = ["derive"] }
 bitflags = { workspace = true }
 bstr = { workspace = true }
 bytemuck = { workspace = true, features = ["must_cast", "derive"] }
+native_str = { workspace = true }
+
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
