@@ -71,7 +71,7 @@ pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Re
     let seccomp_filter = SeccompFilter::new(
         H::syscalls().iter().map(|sysno| (sysno.id().into(), vec![])).collect(),
         SeccompAction::Allow,
-        SeccompAction::Raw(libc::SECCOMP_RET_USER_NOTIF),
+        SeccompAction::UserNotif,
         std::env::consts::ARCH.try_into().unwrap(),
     )
     .unwrap();
