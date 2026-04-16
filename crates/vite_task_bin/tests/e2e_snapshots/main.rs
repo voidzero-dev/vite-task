@@ -437,7 +437,13 @@ fn main() {
         .collect::<Vec<_>>();
     fixture_paths.sort();
 
-    let args = libtest_mimic::Arguments::from_args();
+    let mut args = libtest_mimic::Arguments::from_args();
+    // Force single-threaded execution: e2e tests spawn PTY child processes and
+    // send signals (ctrl-c); running them in parallel causes signal routing
+    // races and PTY resource contention on CI.
+    if args.test_threads.is_none() {
+        args.test_threads = Some(1);
+    }
 
     let tests: Vec<libtest_mimic::Trial> = fixture_paths
         .into_iter()
