@@ -1,0 +1,13 @@
+---
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
+expression: err_str.as_ref()
+info:
+  args:
+    - run
+    - "-d"
+    - "--filter"
+    - "@test/app"
+    - build
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/direct-dependencies
+---
+Invalid vite task command: vt with args [] under cwd "<workspace>/": --filter and --direct cannot be used together

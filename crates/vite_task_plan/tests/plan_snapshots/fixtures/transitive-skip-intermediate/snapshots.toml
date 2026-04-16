@@ -40,3 +40,18 @@ cwd = "packages/middle"
 compact = true
 name = "transitive with package specifier lacking task"
 args = ["run", "-t", "@test/middle#build"]
+
+# -d from top: direct deps are {middle}. middle lacks build → empty.
+# Unlike -t which walks transitively through middle to find bottom.
+[[plan]]
+compact = true
+name = "direct from top stops at direct deps"
+args = ["run", "-d", "build"]
+cwd = "packages/top"
+
+# -d from middle: direct dep is {bottom}. bottom has build → bottom#build.
+[[plan]]
+compact = true
+name = "direct from middle finds direct dep"
+args = ["run", "-d", "build"]
+cwd = "packages/middle"

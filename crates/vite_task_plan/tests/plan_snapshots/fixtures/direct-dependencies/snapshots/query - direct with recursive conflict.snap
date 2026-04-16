@@ -1,0 +1,16 @@
+---
+source: crates/vite_task_plan/tests/plan_snapshots/main.rs
+expression: err
+info:
+  args:
+    - run
+    - "-d"
+    - "-r"
+    - build
+input_file: crates/vite_task_plan/tests/plan_snapshots/fixtures/direct-dependencies
+---
+error: the argument '--direct' cannot be used with '--recursive'
+
+Usage: vt run --direct <TASK_SPECIFIER> <ADDITIONAL_ARGS>...
+
+For more information, try '--help'.

@@ -1,0 +1,61 @@
+# Tests --direct / -d flag: select direct dependencies only (one hop).
+# Topology: app → utils (dependency), app → core (devDependency), utils → core
+# Both dependency types are traversed.
+
+# -d from app: should select utils (dep) and core (devDep), NOT app itself.
+[[plan]]
+compact = true
+name = "dependencies from app"
+args = ["run", "-d", "build"]
+cwd = "packages/app"
+
+# -d from utils: should select core only (direct dep), NOT utils itself.
+[[plan]]
+compact = true
+name = "dependencies from utils"
+args = ["run", "-d", "build"]
+cwd = "packages/utils"
+
+# -d from core: core has no deps, so no packages selected.
+[[plan]]
+compact = true
+name = "dependencies from leaf package"
+args = ["run", "-d", "build"]
+cwd = "packages/core"
+
+# Contrast with -t from app: should select app, utils, AND core (full transitive).
+[[plan]]
+compact = true
+name = "transitive from app for comparison"
+args = ["run", "-t", "build"]
+cwd = "packages/app"
+
+# -d with package specifier: direct deps of @test/app.
+[[plan]]
+compact = true
+name = "dependencies with package specifier"
+args = ["run", "-d", "@test/app#build"]
+
+# -d with --workspace-root: direct deps of the workspace root package.
+[[plan]]
+compact = true
+name = "dependencies with workspace root"
+args = ["run", "-d", "-w", "build"]
+
+# Error: -d and -r conflict.
+[[plan]]
+compact = true
+name = "direct with recursive conflict"
+args = ["run", "-d", "-r", "build"]
+
+# Error: -d and -t conflict.
+[[plan]]
+compact = true
+name = "direct with transitive conflict"
+args = ["run", "-d", "-t", "build"]
+
+# Error: -d and --filter conflict.
+[[plan]]
+compact = true
+name = "direct with filter conflict"
+args = ["run", "-d", "--filter", "@test/app", "build"]

@@ -431,23 +431,39 @@ impl IndexedPackageGraph {
 
         let mut reachable = FxHashSet::default();
 
-        match traversal.direction {
-            TraversalDirection::Dependencies => {
-                self.bfs_outgoing(&seeds, &mut reachable);
+        if traversal.direct_only {
+            // One-hop traversal: only direct neighbors, no recursive expansion.
+            match traversal.direction {
+                TraversalDirection::Dependencies => {
+                    self.direct_outgoing(&seeds, &mut reachable);
+                }
+                TraversalDirection::Dependents => {
+                    self.direct_incoming(&seeds, &mut reachable);
+                }
+                TraversalDirection::Both => {
+                    self.direct_outgoing(&seeds, &mut reachable);
+                    self.direct_incoming(&seeds, &mut reachable);
+                }
             }
-            TraversalDirection::Dependents => {
-                self.bfs_incoming(&seeds, &mut reachable);
-            }
-            TraversalDirection::Both => {
-                // Walk dependents first, then walk dependencies of ALL dependents found
-                // (including the original seeds).
-                // pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L265-L267>
-                let mut dependents = FxHashSet::default();
-                self.bfs_incoming(&seeds, &mut dependents);
-                let all_dep_seeds: FxHashSet<_> =
-                    seeds.iter().chain(dependents.iter()).copied().collect();
-                self.bfs_outgoing(&all_dep_seeds, &mut reachable);
-                reachable.extend(dependents);
+        } else {
+            match traversal.direction {
+                TraversalDirection::Dependencies => {
+                    self.bfs_outgoing(&seeds, &mut reachable);
+                }
+                TraversalDirection::Dependents => {
+                    self.bfs_incoming(&seeds, &mut reachable);
+                }
+                TraversalDirection::Both => {
+                    // Walk dependents first, then walk dependencies of ALL dependents found
+                    // (including the original seeds).
+                    // pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L265-L267>
+                    let mut dependents = FxHashSet::default();
+                    self.bfs_incoming(&seeds, &mut dependents);
+                    let all_dep_seeds: FxHashSet<_> =
+                        seeds.iter().chain(dependents.iter()).copied().collect();
+                    self.bfs_outgoing(&all_dep_seeds, &mut reachable);
+                    reachable.extend(dependents);
+                }
             }
         }
 
@@ -460,6 +476,36 @@ impl IndexedPackageGraph {
         }
 
         reachable
+    }
+
+    /// Collect direct (one-hop) outgoing neighbors of `seeds`.
+    ///
+    /// Seeds are NOT added to `out`.
+    fn direct_outgoing(
+        &self,
+        seeds: &FxHashSet<PackageNodeIndex>,
+        out: &mut FxHashSet<PackageNodeIndex>,
+    ) {
+        for &node in seeds {
+            for edge in self.graph.edges(node) {
+                out.insert(edge.target());
+            }
+        }
+    }
+
+    /// Collect direct (one-hop) incoming neighbors of `seeds`.
+    ///
+    /// Seeds are NOT added to `out`.
+    fn direct_incoming(
+        &self,
+        seeds: &FxHashSet<PackageNodeIndex>,
+        out: &mut FxHashSet<PackageNodeIndex>,
+    ) {
+        for &node in seeds {
+            for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                out.insert(edge.source());
+            }
+        }
     }
 
     /// BFS along outgoing (dependency) edges from `seeds`, collecting all reachable nodes.
