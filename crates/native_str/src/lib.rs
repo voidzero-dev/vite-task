@@ -19,11 +19,24 @@ use wincode::{
     io::{Reader, Writer},
 };
 
-/// Similar to `OsStr`, but
+/// A platform-native string type for lossless, zero-copy IPC.
+///
+/// Similar to [`OsStr`], but:
 /// - Can be infallibly and losslessly encoded/decoded using wincode.
-///   (`SchemaWrite`/`SchemaRead` implementations for `OsStr` requires it to be valid UTF-8. This does not.)
+///   (`SchemaWrite`/`SchemaRead` implementations for `OsStr` require it to be valid UTF-8. This does not.)
 /// - Can be constructed from wide characters on Windows with zero copy.
 /// - Supports zero-copy `SchemaRead`.
+///
+/// # Platform representation
+///
+/// - **Unix**: raw bytes of the `OsStr`.
+/// - **Windows**: raw bytes transmuted from `&[u16]` (wide chars). See `to_os_string` for decoding.
+///
+/// # Limitations
+///
+/// **Not portable across platforms.** The binary representation is platform-specific.
+/// Deserializing a `NativeStr` serialized on a different platform leads to unspecified
+/// behavior (garbage data), but is not unsafe. Designed for same-platform IPC only.
 #[derive(TransparentWrapper, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct NativeStr {
@@ -73,6 +86,23 @@ impl NativeStr {
         #[cfg(unix)]
         return Cow::Borrowed(self.as_os_str());
     }
+
+    pub fn clone_in<'new_alloc, A>(&self, alloc: &'new_alloc A) -> &'new_alloc Self
+    where
+        &'new_alloc A: Allocator,
+    {
+        use allocator_api2::vec::Vec;
+        let mut data = Vec::<u8, _>::with_capacity_in(self.data.len(), alloc);
+        data.extend_from_slice(&self.data);
+        let data = data.leak::<'new_alloc>();
+        Self::wrap_ref(data)
+    }
+}
+
+impl Debug for NativeStr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <OsStr as Debug>::fmt(self.to_cow_os_str().as_ref(), f)
+    }
 }
 
 // Manual impl: wincode derive requires Sized, but NativeStr wraps unsized [u8].
@@ -86,12 +116,6 @@ unsafe impl<C: Config> SchemaWrite<C> for NativeStr {
 
     fn write(writer: impl Writer, src: &Self::Src) -> WriteResult<()> {
         <[u8] as SchemaWrite<C>>::write(writer, &src.data)
-    }
-}
-
-impl Debug for NativeStr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <OsStr as Debug>::fmt(self.to_cow_os_str().as_ref(), f)
     }
 }
 
@@ -156,19 +180,6 @@ impl<S: AsRef<OsStr>> From<S> for Box<NativeStr> {
         let wide: Vec<u16> = value.as_ref().encode_wide().collect();
         let data: &[u8] = must_cast_slice(&wide);
         NativeStr::wrap_box(data.into())
-    }
-}
-
-impl NativeStr {
-    pub fn clone_in<'new_alloc, A>(&self, alloc: &'new_alloc A) -> &'new_alloc Self
-    where
-        &'new_alloc A: Allocator,
-    {
-        use allocator_api2::vec::Vec;
-        let mut data = Vec::<u8, _>::with_capacity_in(self.data.len(), alloc);
-        data.extend_from_slice(&self.data);
-        let data = data.leak::<'new_alloc>();
-        Self::wrap_ref(data)
     }
 }
 

@@ -1287,6 +1287,7 @@ dependencies = [
  "bstr",
  "bytemuck",
  "ctor",
+ "native_str",
  "os_str_bytes",
  "rustc-hash",
  "shared_memory",
@@ -1957,6 +1958,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "native_str"
+version = "0.0.0"
+dependencies = [
+ "allocator-api2",
+ "bytemuck",
+ "wincode",
 ]
 
 [[package]]

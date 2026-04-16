@@ -85,6 +85,7 @@ jsonc-parser = { version = "0.29.0", features = ["serde"] }
 libc = "0.2.172"
 memmap2 = "0.9.7"
 monostate = "1.0.2"
+native_str = { path = "crates/native_str" }
 nix = { version = "0.30.1", features = ["dir", "signal"] }
 ntapi = "0.4.1"
 nucleo-matcher = "0.3.1"
