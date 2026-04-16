@@ -1,0 +1,7 @@
+# Tests that extra args (`vt run test some-filter`) are forwarded only to the
+# explicitly requested task (`test`), not to `dependsOn` tasks (`build`).
+# https://github.com/voidzero-dev/vite-task/issues/324
+
+[[plan]]
+name = "extra args only reach requested task"
+args = ["run", "test", "some-filter"]

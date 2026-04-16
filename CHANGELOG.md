@@ -1,5 +1,7 @@
 # Changelog
 
+- **Changed** Arguments passed after a task name (e.g. `vp run test some-filter`) are now forwarded only to that task. Tasks pulled in via `dependsOn` no longer receive them ([#324](https://github.com/voidzero-dev/vite-task/issues/324))
+- **Fixed** Windows file access tracking no longer panics when a task touches malformed paths that cannot be represented as workspace-relative inputs ([#330](https://github.com/voidzero-dev/vite-task/pull/330))
 - **Fixed** `vp run --cache` now supports running without a task specifier and opens the interactive task selector, matching bare `vp run` behavior ([#312](https://github.com/voidzero-dev/vite-task/pull/313))
 - **Fixed** Ctrl-C now prevents future tasks from being scheduled and prevents caching of in-flight task results ([#309](https://github.com/voidzero-dev/vite-task/pull/309))
 - **Added** `--concurrency-limit` flag to limit the number of tasks running at the same time (defaults to 4) ([#288](https://github.com/voidzero-dev/vite-task/pull/288), [#309](https://github.com/voidzero-dev/vite-task/pull/309))

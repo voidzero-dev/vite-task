@@ -26,9 +26,26 @@ use crate::{IndexedTaskGraph, TaskDependencyType, TaskId, TaskNodeIndex};
 
 /// A task execution graph queried from a `TaskQuery`.
 ///
-/// Nodes are `TaskNodeIndex` values into the full `TaskGraph`.
+/// Nodes in `graph` are `TaskNodeIndex` values into the full `TaskGraph`.
 /// Edges represent the final dependency relationships between tasks (no weights).
-pub type TaskExecutionGraph = DiGraphMap<TaskNodeIndex, ()>;
+///
+/// `requested` is the subset of nodes the user typed on the CLI — i.e. the
+/// nodes added by `map_subgraph_to_tasks` (stage 2), not the ones reached
+/// only via `dependsOn` expansion in `IndexedTaskGraph::add_dependencies` (stage 3).
+///
+/// For example, given `test` with `dependsOn: ["build"]` and the command
+/// `vp run test some-filter`:
+///
+/// - `graph` contains both `test` and `build` with an edge between them.
+/// - `requested` contains only `test`.
+///
+/// The planner uses this distinction to forward `some-filter` to `test`
+/// while running `build` with no extra args.
+#[derive(Debug, Default, Clone)]
+pub struct TaskExecutionGraph {
+    pub graph: DiGraphMap<TaskNodeIndex, ()>,
+    pub requested: FxHashSet<TaskNodeIndex>,
+}
 
 /// A query for which tasks to run.
 ///
@@ -167,13 +184,17 @@ impl IndexedTaskGraph {
         // Map remaining nodes and their edges to task nodes.
         // Every node still in `subgraph` is in `pkg_to_task`; the index operator
         // panics on a missing key — that would be a bug in the loop above.
+        //
+        // All nodes added here are explicitly-requested tasks, so they are
+        // inserted into both the inner graph and the `requested` set.
         for &task_idx in pkg_to_task.values() {
-            execution_graph.add_node(task_idx);
+            execution_graph.graph.add_node(task_idx);
+            execution_graph.requested.insert(task_idx);
         }
         for (src, dst, ()) in subgraph.all_edges() {
             let st = pkg_to_task[&src];
             let dt = pkg_to_task[&dst];
-            execution_graph.add_edge(st, dt, ());
+            execution_graph.graph.add_edge(st, dt, ());
         }
     }
 
@@ -187,9 +208,13 @@ impl IndexedTaskGraph {
         execution_graph: &mut TaskExecutionGraph,
         mut filter_edge: impl FnMut(TaskDependencyType) -> bool,
     ) {
-        let mut frontier: FxHashSet<TaskNodeIndex> = execution_graph.nodes().collect();
+        let mut frontier: FxHashSet<TaskNodeIndex> = execution_graph.graph.nodes().collect();
 
         // Continue until no new nodes are added to the frontier.
+        //
+        // Nodes added here are dependency-only tasks and must NOT be marked as
+        // `requested` — the planner uses that distinction to decide whether to
+        // forward CLI extra args to a task.
         while !frontier.is_empty() {
             let mut next_frontier = FxHashSet::<TaskNodeIndex>::default();
 
@@ -198,8 +223,8 @@ impl IndexedTaskGraph {
                     let to_node = edge_ref.target();
                     let dep_type = *edge_ref.weight();
                     if filter_edge(dep_type) {
-                        let is_new = !execution_graph.contains_node(to_node);
-                        execution_graph.add_edge(from_node, to_node, ());
+                        let is_new = !execution_graph.graph.contains_node(to_node);
+                        execution_graph.graph.add_edge(from_node, to_node, ());
                         if is_new {
                             next_frontier.insert(to_node);
                         }

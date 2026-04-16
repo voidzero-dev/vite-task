@@ -72,16 +72,16 @@ impl RelativePath {
     /// yields `a/c` instead of the correct `x/c`. Use
     /// [`std::fs::canonicalize`] when you need symlink-correct resolution.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the cleaned path is no longer a valid relative path, which
-    /// should never happen in practice.
-    #[must_use]
-    pub fn clean(&self) -> RelativePathBuf {
+    /// Returns an error if the cleaned path is no longer a valid relative path.
+    /// This can happen on Windows when malformed inputs such as `foo/C:/bar`
+    /// are cleaned into drive-prefixed paths.
+    pub fn clean(&self) -> Result<RelativePathBuf, FromPathError> {
         use path_clean::PathClean as _;
 
         let cleaned = self.as_path().clean();
-        RelativePathBuf::new(cleaned).expect("cleaning a relative path preserves relativity")
+        RelativePathBuf::new(cleaned)
     }
 
     /// Returns a path that, when joined onto `base`, yields `self`.
@@ -439,6 +439,20 @@ mod tests {
         let rel_path = RelativePathBuf::new("").unwrap();
         let joined_path = rel_path.as_relative_path().join(RelativePathBuf::new("baz").unwrap());
         assert_eq!(joined_path.as_str(), "baz");
+    }
+
+    #[test]
+    fn clean() {
+        let rel_path = RelativePathBuf::new("../foo/../bar").unwrap();
+        let cleaned = rel_path.clean().unwrap();
+        assert_eq!(cleaned.as_str(), "../bar");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn clean_malformed_drive_path() {
+        let rel_path = RelativePathBuf::new(r"foo\C:\bar").unwrap();
+        let_assert!(Err(FromPathError::NonRelative) = rel_path.clean());
     }
 
     #[test]

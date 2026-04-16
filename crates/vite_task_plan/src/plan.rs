@@ -653,6 +653,7 @@ fn plan_spawn_execution(
 /// `vp run build` produces a different query than the script's `vp run -r build`,
 /// so the skip rule doesn't fire, but the prune rule catches root in the result).
 /// Like the skip rule, extra args don't affect this — only the `TaskQuery` matters.
+#[expect(clippy::too_many_lines, reason = "sequential planning steps are clearer in one function")]
 pub async fn plan_query_request(
     query: Arc<TaskQuery>,
     plan_options: PlanOptions,
@@ -696,7 +697,15 @@ pub async fn plan_query_request(
 
     let parallel = plan_options.parallel;
 
-    context.set_extra_args(plan_options.extra_args);
+    // Extra args are applied per-task below, not globally on the context.
+    // Tasks explicitly requested by the query receive `extra_args`; tasks
+    // only reached via `dependsOn` expansion receive an empty slice so that
+    // caller-specific CLI args don't pollute dependency tasks.
+    // See https://github.com/voidzero-dev/vite-task/issues/324.
+    let extra_args = plan_options.extra_args;
+    // Allocated once and shared across every dep-only task's context below,
+    // instead of calling `Arc::new([])` inside the per-task loop.
+    let empty_extra_args: Arc<[Str]> = Arc::from([]);
     context.set_parent_query(Arc::clone(&query));
 
     // Query matching tasks from the task graph.
@@ -715,35 +724,43 @@ pub async fn plan_query_request(
     // This handles cases like root `"build": "vp run build"` — the root's build
     // task is in the result but expanding it would recurse, so we remove it and
     // reconnect its predecessors directly to its successors.
-    let pruned_task = context.expanding_task().filter(|t| task_node_index_graph.contains_node(*t));
+    let pruned_task =
+        context.expanding_task().filter(|t| task_node_index_graph.graph.contains_node(*t));
 
     let mut execution_node_indices_by_task_index =
         FxHashMap::<TaskNodeIndex, ExecutionNodeIndex>::with_capacity_and_hasher(
-            task_node_index_graph.node_count(),
+            task_node_index_graph.graph.node_count(),
             rustc_hash::FxBuildHasher,
         );
 
     // Build the inner DiGraph first, then validate acyclicity at the end.
     let mut inner_graph = InnerExecutionGraph::with_capacity(
-        task_node_index_graph.node_count(),
-        task_node_index_graph.edge_count(),
+        task_node_index_graph.graph.node_count(),
+        task_node_index_graph.graph.edge_count(),
     );
 
     // Plan each task node as execution nodes, skipping the pruned task
-    for task_index in task_node_index_graph.nodes() {
+    for task_index in task_node_index_graph.graph.nodes() {
         if Some(task_index) == pruned_task {
             continue;
         }
-        let task_execution = plan_task_as_execution_node(task_index, context.duplicate(), true)
-            .boxed_local()
-            .await?;
+        let mut task_context = context.duplicate();
+        // Only the explicitly requested tasks receive CLI extra args.
+        // Dep-only tasks (pulled in via `dependsOn`) run with empty extras.
+        if task_node_index_graph.requested.contains(&task_index) {
+            task_context.set_extra_args(Arc::clone(&extra_args));
+        } else {
+            task_context.set_extra_args(Arc::clone(&empty_extra_args));
+        }
+        let task_execution =
+            plan_task_as_execution_node(task_index, task_context, true).boxed_local().await?;
         execution_node_indices_by_task_index
             .insert(task_index, inner_graph.add_node(task_execution));
     }
 
     // Add edges between execution nodes according to task dependencies,
     // skipping edges involving the pruned task.
-    for (from_task_index, to_task_index, ()) in task_node_index_graph.all_edges() {
+    for (from_task_index, to_task_index, ()) in task_node_index_graph.graph.all_edges() {
         if Some(from_task_index) == pruned_task || Some(to_task_index) == pruned_task {
             continue;
         }
@@ -757,9 +774,9 @@ pub async fn plan_query_request(
     // Reconnect through the pruned node: wire each predecessor directly to each successor.
     if let Some(pruned) = pruned_task {
         let preds: Vec<_> =
-            task_node_index_graph.neighbors_directed(pruned, Direction::Incoming).collect();
+            task_node_index_graph.graph.neighbors_directed(pruned, Direction::Incoming).collect();
         let succs: Vec<_> =
-            task_node_index_graph.neighbors_directed(pruned, Direction::Outgoing).collect();
+            task_node_index_graph.graph.neighbors_directed(pruned, Direction::Outgoing).collect();
         for &pred in &preds {
             for &succ in &succs {
                 if let (Some(&pe), Some(&se)) = (

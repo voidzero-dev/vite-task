@@ -1,0 +1,12 @@
+{
+  "cache": true,
+  "tasks": {
+    "build": {
+      "command": "vt tool print build"
+    },
+    "test": {
+      "command": "vt tool print test",
+      "dependsOn": ["build"]
+    }
+  }
+}

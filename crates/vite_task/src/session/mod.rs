@@ -345,19 +345,18 @@ impl<'a> Session<'a> {
                 // created with CREATE_NEW_PROCESS_GROUP, which sets a per-process
                 // flag that silently drops CTRL_C_EVENT before it reaches
                 // registered handlers. Clear it so our handler fires.
+                //
+                // SAFETY: Passing (None, FALSE) clears the inherited
+                // CTRL_C ignore flag.
                 #[cfg(windows)]
-                {
-                    // SAFETY: Passing (None, FALSE) clears the inherited
-                    // CTRL_C ignore flag.
+                unsafe {
                     unsafe extern "system" {
                         fn SetConsoleCtrlHandler(
                             handler: Option<unsafe extern "system" fn(u32) -> i32>,
                             add: i32,
                         ) -> i32;
                     }
-                    unsafe {
-                        SetConsoleCtrlHandler(None, 0);
-                    }
+                    SetConsoleCtrlHandler(None, 0);
                 }
                 let interrupt_token = tokio_util::sync::CancellationToken::new();
                 let ct = interrupt_token.clone();
