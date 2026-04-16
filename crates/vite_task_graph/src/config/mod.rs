@@ -2,7 +2,6 @@ pub mod user;
 
 use std::{collections::BTreeSet, sync::Arc};
 
-use bincode::{Decode, Encode};
 use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
@@ -13,6 +12,7 @@ pub use user::{
 };
 use vite_path::AbsolutePath;
 use vite_str::Str;
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::config::user::UserTaskOptions;
 
@@ -103,7 +103,7 @@ pub struct CacheConfig {
 /// - `includes_auto`: Whether automatic file tracking is enabled
 /// - `positive_globs`: Glob patterns for files to include (without `!` prefix)
 /// - `negative_globs`: Glob patterns for files to exclude (without `!` prefix)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, SchemaWrite, SchemaRead)]
 pub struct ResolvedInputConfig {
     /// Whether automatic file tracking is enabled
     pub includes_auto: bool,

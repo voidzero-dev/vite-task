@@ -7,7 +7,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bincode::{Decode, Encode};
 use fspy::AccessMode;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
@@ -16,6 +15,7 @@ use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::SpawnCommand;
 use wax::Program as _;
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::collections::HashMap;
 
@@ -26,14 +26,14 @@ pub struct PathRead {
 }
 
 /// Output kind for stdout/stderr
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Encode, Decode, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, SchemaWrite, SchemaRead, Serialize)]
 pub enum OutputKind {
     StdOut,
     StdErr,
 }
 
 /// Output chunk with stream kind
-#[derive(Debug, Encode, Decode, Serialize, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize, Clone)]
 pub struct StdOutput {
     pub kind: OutputKind,
     pub content: Vec<u8>,

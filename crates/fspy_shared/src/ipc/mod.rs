@@ -5,14 +5,12 @@ pub(crate) mod native_str;
 
 use std::fmt::Debug;
 
-use bincode::{BorrowDecode, Encode, config::Configuration};
 use bitflags::bitflags;
 pub use native_path::NativePath;
 pub use native_str::NativeStr;
+use wincode::{SchemaRead, SchemaWrite};
 
-pub const BINCODE_CONFIG: Configuration = bincode::config::standard();
-
-#[derive(Encode, BorrowDecode, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[derive(SchemaWrite, SchemaRead, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct AccessMode(u8);
 
 bitflags! {
@@ -35,7 +33,7 @@ impl Debug for AccessMode {
     }
 }
 
-#[derive(Encode, BorrowDecode, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(SchemaWrite, SchemaRead, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathAccess<'a> {
     pub mode: AccessMode,
     pub path: &'a NativePath,

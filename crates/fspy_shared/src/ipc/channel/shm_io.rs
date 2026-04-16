@@ -8,11 +8,9 @@ use std::{
     sync::atomic::{AtomicI32, AtomicUsize, Ordering, fence},
 };
 
-use bincode::{
-    Encode, config::Config, enc::write::SizeWriter, encode_into_slice, encode_into_writer,
-};
 use bytemuck::must_cast;
 use shared_memory::Shmem;
+use wincode::{SchemaWrite, Serialize as _, config::DefaultConfig};
 
 // `ShmWriter` writes headers using atomic operations to prevent partial writes due to crashes,
 // while `ShmReader` reads headers by simple pointer dereferences.
@@ -109,7 +107,7 @@ impl Drop for FrameMut<'_> {
 #[derive(thiserror::Error, Debug)]
 pub enum WriteEncodedError {
     #[error("Failed to encode value into shared memory")]
-    EncodeError(#[from] bincode::error::EncodeError),
+    EncodeError(#[from] wincode::error::WriteError),
     #[error("Tried to write a frame of zero size into shared memory")]
     ZeroSizedFrame,
     #[error("Not enough space in shared memory to write the encoded frame")]
@@ -226,23 +224,23 @@ impl<M: AsRawSlice> ShmWriter<M> {
     }
 
     /// Append an encoded value into the shared memory.
-    pub fn write_encoded<T: Encode, C: Config>(
+    pub fn write_encoded<T: SchemaWrite<DefaultConfig, Src = T>>(
         &self,
         value: &T,
-        config: C,
     ) -> Result<(), WriteEncodedError> {
-        let mut size_writer = SizeWriter::default();
-        encode_into_writer(value, &mut size_writer, config)?;
+        let serialized_size =
+            usize::try_from(T::serialized_size(value)?).expect("serialized size exceeds usize");
 
-        let Some(frame_size) = NonZeroUsize::new(size_writer.bytes_written) else {
+        let Some(frame_size) = NonZeroUsize::new(serialized_size) else {
             return Err(WriteEncodedError::ZeroSizedFrame);
         };
         let Some(mut frame) = self.claim_frame(frame_size) else {
             return Err(WriteEncodedError::InsufficientSpace);
         };
 
-        let written_size = encode_into_slice(value, &mut frame, config)?;
-        assert_eq!(written_size, size_writer.bytes_written);
+        let mut writer: &mut [u8] = &mut frame;
+        T::serialize_into(&mut writer, value)?;
+        assert_eq!(writer.len(), 0);
 
         Ok(())
     }

@@ -6,7 +6,7 @@ members = ["crates/*"]
 authors = ["Vite+ Authors"]
 edition = "2024"
 license = "MIT"
-rust-version = "1.88.0"
+rust-version = "1.89.0"
 
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
@@ -44,7 +44,7 @@ assert2 = "0.3.16"
 assertables = "9.8.1"
 async-trait = "0.1.89"
 base64 = "0.22.1"
-bincode = "2.0.1"
+wincode = "0.5.2"
 bindgen = "0.72.1"
 bitflags = "2.10.0"
 # The newest released version (0.3.0) of brush-parser has a bug that reports incorrect locations for some ast nodes.
@@ -154,6 +154,8 @@ widestring = "1.2.0"
 winapi = "0.3.9"
 winsafe = { version = "0.0.24", features = ["kernel"] }
 xxhash-rust = { version = "0.8.15", features = ["const_xxh3"] }
+ntest = "0.9.5"
+terminal_size = "0.4"
 
 [workspace.metadata.cargo-shear]
 ignored = [

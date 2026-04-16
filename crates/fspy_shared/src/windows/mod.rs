@@ -1,5 +1,5 @@
-use bincode::{BorrowDecode, Encode};
 use winapi::DEFINE_GUID;
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::ipc::channel::ChannelConf;
 
@@ -20,7 +20,7 @@ DEFINE_GUID!(
     0x33
 );
 
-#[derive(Encode, BorrowDecode, Debug, Clone)]
+#[derive(SchemaWrite, SchemaRead, Debug, Clone)]
 pub struct Payload<'a> {
     pub channel_conf: ChannelConf,
     pub ansi_dll_path_with_nul: &'a [u8],

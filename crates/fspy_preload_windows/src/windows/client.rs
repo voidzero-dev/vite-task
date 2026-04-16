@@ -1,9 +1,8 @@
 use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
 
-use bincode::{borrow_decode_from_slice, encode_to_vec};
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
-    ipc::{BINCODE_CONFIG, PathAccess, channel::Sender},
+    ipc::{PathAccess, channel::Sender},
     windows::{PAYLOAD_ID, Payload},
 };
 use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
@@ -15,9 +14,7 @@ pub struct Client<'a> {
 
 impl<'a> Client<'a> {
     pub fn from_payload_bytes(payload_bytes: &'a [u8]) -> Self {
-        let (payload, decoded_len) =
-            borrow_decode_from_slice::<'a, Payload, _>(payload_bytes, BINCODE_CONFIG).unwrap();
-        assert_eq!(decoded_len, payload_bytes.len());
+        let payload: Payload<'a> = wincode::deserialize_exact(payload_bytes).unwrap();
 
         let ipc_sender = match payload.channel_conf.sender() {
             Ok(sender) => Some(sender),
@@ -43,11 +40,11 @@ impl<'a> Client<'a> {
         let Some(sender) = &self.ipc_sender else {
             return;
         };
-        sender.write_encoded(&access, BINCODE_CONFIG).expect("failed to send path access");
+        sender.write_encoded(&access).expect("failed to send path access");
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {
-        let payload_bytes = encode_to_vec(&self.payload, BINCODE_CONFIG).unwrap();
+        let payload_bytes = wincode::serialize(&self.payload).unwrap();
         // SAFETY: FFI call to DetourCopyPayloadToProcess with valid handle and payload buffer
         unsafe {
             DetourCopyPayloadToProcess(

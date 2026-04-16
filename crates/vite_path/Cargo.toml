@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-bincode = { workspace = true }
+wincode = { workspace = true, features = ["derive"] }
 diff-struct = { workspace = true }
 path-clean = { workspace = true }
 ref-cast = { workspace = true }

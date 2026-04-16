@@ -1,6 +1,5 @@
-use std::{collections::BTreeMap, ffi::OsStr, sync::Arc};
+use std::{collections::BTreeMap, ffi::OsStr, mem::MaybeUninit, sync::Arc};
 
-use bincode::{Decode, Encode};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -8,16 +7,50 @@ use supports_color::{Stream, on};
 use vite_glob::GlobPatternSet;
 use vite_str::Str;
 use vite_task_graph::config::EnvConfig;
+use wincode::{
+    SchemaRead, SchemaWrite,
+    config::Config,
+    error::{ReadResult, WriteResult},
+    io::{Reader, Writer},
+};
+
+/// wincode schema adapter for `Arc<str>`, which is a foreign type with unsized inner.
+struct ArcStrSchema;
+
+// SAFETY: Delegates to `str`'s SchemaWrite impl, preserving its size/write invariants.
+unsafe impl<C: Config> SchemaWrite<C> for ArcStrSchema {
+    type Src = Arc<str>;
+
+    fn size_of(src: &Self::Src) -> WriteResult<usize> {
+        <str as SchemaWrite<C>>::size_of(src)
+    }
+
+    fn write(writer: impl Writer, src: &Self::Src) -> WriteResult<()> {
+        <str as SchemaWrite<C>>::write(writer, src)
+    }
+}
+
+// SAFETY: Delegates to `&str`'s SchemaRead impl; dst is initialized on Ok.
+unsafe impl<'de, C: Config> SchemaRead<'de, C> for ArcStrSchema {
+    type Dst = Arc<str>;
+
+    fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
+        let s: &str = <&str as SchemaRead<'de, C>>::get(&mut reader)?;
+        dst.write(Arc::from(s));
+        Ok(())
+    }
+}
 
 /// Environment variable fingerprints for a task execution.
 ///
 /// Contents of this struct are only for fingerprinting and cache key computation (some of envs may be hashed for security).
 /// The actual environment variables to be passed to the execution are in `LeafExecutionItem.all_envs`.
-#[derive(Debug, Encode, Decode, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct EnvFingerprints {
     /// Environment variables that should be fingerprinted for this execution.
     ///
     /// Use `BTreeMap` to ensure stable order.
+    #[wincode(with = "BTreeMap<Str, ArcStrSchema>")]
     pub fingerprinted_envs: BTreeMap<Str, Arc<str>>,
 
     /// Environment variable names that should be passed through without values being fingerprinted.

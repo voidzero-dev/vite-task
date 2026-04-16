@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, fmt::Display, ops::Range};
 
-use bincode::{Decode, Encode};
 use brush_parser::{
     Parser, ParserOptions,
     ast::{
@@ -13,9 +12,10 @@ use brush_parser::{
 use diff::Diff;
 use serde::{Deserialize, Serialize};
 use vite_str::Str;
+use wincode::{SchemaRead, SchemaWrite};
 
 /// "FOO=BAR program arg1 arg2"
-#[derive(Encode, Decode, Serialize, Deserialize, Debug, PartialEq, Eq, Diff, Clone)]
+#[derive(SchemaWrite, SchemaRead, Serialize, Deserialize, Debug, PartialEq, Eq, Diff, Clone)]
 #[diff(attr(#[derive(Debug)]))]
 pub struct TaskParsedCommand {
     pub envs: BTreeMap<Str, Str>,
@@ -298,8 +298,6 @@ mod tests {
 
     #[test]
     fn test_task_parsed_command_serialization_stability() {
-        use bincode::{decode_from_slice, encode_to_vec};
-
         // Create a command with multiple environment variables
         let cmd = TaskParsedCommand {
             envs: [
@@ -313,15 +311,14 @@ mod tests {
         };
 
         // Serialize multiple times
-        let config = bincode::config::standard();
-        let bytes1 = encode_to_vec(&cmd, config).unwrap();
-        let bytes2 = encode_to_vec(&cmd, config).unwrap();
+        let bytes1 = wincode::serialize(&cmd).unwrap();
+        let bytes2 = wincode::serialize(&cmd).unwrap();
 
         // Verify serialization is stable
         assert_eq!(bytes1, bytes2);
 
         // Verify deserialization works and maintains order
-        let (decoded, _): (TaskParsedCommand, _) = decode_from_slice(&bytes1, config).unwrap();
+        let decoded: TaskParsedCommand = wincode::deserialize(&bytes1).unwrap();
         assert_eq!(decoded, cmd);
 
         // Verify the decoded command still has stable string representation

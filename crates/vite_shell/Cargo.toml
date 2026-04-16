@@ -8,7 +8,7 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-bincode = { workspace = true }
+wincode = { workspace = true, features = ["derive"] }
 brush-parser = { workspace = true }
 diff-struct = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

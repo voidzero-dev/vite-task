@@ -3,24 +3,23 @@ use std::{
     borrow::Borrow,
     ffi::OsStr,
     fmt::{Debug, Display},
+    mem::MaybeUninit,
     ops::Deref,
     path::Path,
-    str::from_utf8,
     sync::Arc,
 };
 
-use bincode::{
-    Decode, Encode,
-    de::{Decoder, read::Reader},
-    enc::Encoder,
-    error::{DecodeError, EncodeError},
-    impl_borrow_decode,
-};
 use compact_str::CompactString;
 #[doc(hidden)] // for `format` macro only
 pub use compact_str::format_compact;
 use diff::Diff;
 use serde::{Deserialize, Serialize};
+use wincode::{
+    SchemaRead, SchemaWrite,
+    config::Config,
+    error::{ReadResult, WriteResult},
+    io::{Reader, Writer},
+};
 
 #[macro_export]
 macro_rules! format {
@@ -116,34 +115,29 @@ impl Debug for Str {
     }
 }
 
-impl Encode for Str {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        self.0.encode(encoder)
+// SAFETY: Delegates to `str`'s SchemaWrite impl, preserving its size/write invariants.
+unsafe impl<C: Config> SchemaWrite<C> for Str {
+    type Src = Self;
+
+    fn size_of(src: &Self::Src) -> WriteResult<usize> {
+        <str as SchemaWrite<C>>::size_of(src.as_str())
+    }
+
+    fn write(writer: impl Writer, src: &Self::Src) -> WriteResult<()> {
+        <str as SchemaWrite<C>>::write(writer, src.as_str())
     }
 }
 
-// https://github.com/bincode-org/bincode/blob/48ac8d4e8057387696a7ed3af2dda198ead23246/src/de/mod.rs#L331
-fn decode_slice_len<D: Decoder>(decoder: &mut D) -> Result<usize, DecodeError> {
-    let v = u64::decode(decoder)?;
-    v.try_into().map_err(|_| DecodeError::OutsideUsizeRange(v))
-}
-impl<Context> Decode<Context> for Str {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let len = decode_slice_len(decoder)?;
-        decoder.claim_container_read::<u8>(len)?;
+// SAFETY: Delegates to `&str`'s SchemaRead impl and wraps the result; dst is initialized on Ok.
+unsafe impl<'de, C: Config> SchemaRead<'de, C> for Str {
+    type Dst = Self;
 
-        let mut compact_str = CompactString::with_capacity(len);
-        // SAFETY: we write exactly `len` bytes into the spare capacity, validate UTF-8, then set length
-        unsafe {
-            let buf = &mut compact_str.as_mut_bytes()[..len];
-            decoder.reader().read(buf)?;
-            from_utf8(buf).map_err(|utf8_error| DecodeError::Utf8 { inner: utf8_error })?;
-            compact_str.set_len(len);
-        }
-        Ok(Self(compact_str))
+    fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
+        let s: &str = <&str as SchemaRead<'de, C>>::get(&mut reader)?;
+        dst.write(Self(CompactString::from(s)));
+        Ok(())
     }
 }
-impl_borrow_decode!(Str);
 
 impl From<&str> for Str {
     fn from(value: &str) -> Self {
@@ -188,7 +182,7 @@ mod ts_impl {
 
     use super::Str;
 
-    #[expect(clippy::disallowed_types, reason = "ts-rs trait requires returning String")]
+    #[expect(clippy::disallowed_types, reason = "ts_rs::TS trait requires returning String")]
     impl TS for Str {
         type OptionInnerType = Self;
         type WithoutGenerics = Self;
@@ -217,17 +211,13 @@ mod ts_impl {
 
 #[cfg(test)]
 mod tests {
-    use bincode::{config::standard, decode_from_slice, encode_to_vec};
-
     use super::*;
 
     #[test]
     fn test_str_encode_decode() {
-        let config = standard();
         let original = Str::from("Hello, World!");
-        let encoded = encode_to_vec(&original, config).unwrap();
-
-        let decoded: Str = decode_from_slice(&encoded, config).unwrap().0;
+        let encoded = wincode::serialize(&original).unwrap();
+        let decoded: Str = wincode::deserialize(&encoded).unwrap();
         assert_eq!(original, decoded);
     }
 }

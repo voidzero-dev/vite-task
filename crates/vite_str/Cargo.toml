@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-bincode = { workspace = true }
+wincode = { workspace = true }
 compact_str = { workspace = true, features = ["serde"] }
 diff-struct = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

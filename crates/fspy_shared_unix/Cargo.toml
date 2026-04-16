@@ -7,7 +7,7 @@ publish = false
 [target.'cfg(unix)'.dependencies]
 anyhow = { workspace = true }
 base64 = { workspace = true }
-bincode = { workspace = true }
+wincode = { workspace = true, features = ["derive"] }
 bstr = { workspace = true }
 fspy_shared = { workspace = true }
 nix = { workspace = true, features = ["fs"] }

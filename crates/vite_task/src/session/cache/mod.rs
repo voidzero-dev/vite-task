@@ -4,7 +4,6 @@ pub mod display;
 
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
 
-use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 // Re-export display functions for convenience
 pub use display::format_cache_status_inline;
 pub use display::{
@@ -17,6 +16,12 @@ use tokio::sync::Mutex;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_graph::config::ResolvedInputConfig;
 use vite_task_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
+use wincode::{
+    SchemaRead, SchemaReadOwned, SchemaWrite,
+    config::{ConfigCore, DefaultConfig},
+    error::{ReadResult, WriteResult},
+    io::{Reader, Writer},
+};
 
 use super::execute::{fingerprint::PostRunFingerprint, spawn::StdOutput};
 
@@ -32,7 +37,7 @@ use super::execute::{fingerprint::PostRunFingerprint, spawn::StdOutput};
 /// overwrite the existing entry (e.g., input file hashes — there's no
 /// reason to keep the old hash around, and storing them in the value
 /// lets us report exactly *which file* changed).
-#[derive(Debug, Encode, Decode, Serialize, PartialEq, Eq, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize, PartialEq, Eq, Clone)]
 pub struct CacheEntryKey {
     /// The spawn fingerprint (command, args, cwd, envs)
     pub spawn_fingerprint: SpawnFingerprint,
@@ -50,14 +55,48 @@ impl CacheEntryKey {
     }
 }
 
+/// wincode schema adapter for `Duration`.
+struct DurationSchema;
+
+// SAFETY: Writes exactly `size_of::<u64>() + size_of::<u32>()` bytes matching size_of.
+unsafe impl<C: ConfigCore> SchemaWrite<C> for DurationSchema {
+    type Src = Duration;
+
+    fn size_of(_src: &Self::Src) -> WriteResult<usize> {
+        Ok(size_of::<u64>() + size_of::<u32>())
+    }
+
+    fn write(mut writer: impl Writer, src: &Self::Src) -> WriteResult<()> {
+        <u64 as SchemaWrite<C>>::write(writer.by_ref(), &src.as_secs())?;
+        <u32 as SchemaWrite<C>>::write(writer.by_ref(), &src.subsec_nanos())?;
+        Ok(())
+    }
+}
+
+// SAFETY: Reads u64 + u32, matching the write format; dst is initialized on Ok.
+unsafe impl<'de, C: ConfigCore> SchemaRead<'de, C> for DurationSchema {
+    type Dst = Duration;
+
+    fn read(
+        mut reader: impl Reader<'de>,
+        dst: &mut std::mem::MaybeUninit<Self::Dst>,
+    ) -> ReadResult<()> {
+        let secs = <u64 as SchemaRead<'de, C>>::get(&mut reader)?;
+        let nanos = <u32 as SchemaRead<'de, C>>::get(&mut reader)?;
+        dst.write(Duration::new(secs, nanos));
+        Ok(())
+    }
+}
+
 /// Cached execution result for a task.
 ///
 /// Contains the post-run fingerprint (from fspy), captured outputs,
 /// execution duration, and explicit input file hashes.
-#[derive(Debug, Encode, Decode, Serialize)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize)]
 pub struct CacheEntryValue {
     pub post_run_fingerprint: PostRunFingerprint,
     pub std_outputs: Arc<[StdOutput]>,
+    #[wincode(with = "DurationSchema")]
     pub duration: Duration,
     /// Hashes of explicit input files computed from positive globs.
     /// Files matching negative globs are already filtered out.
@@ -70,8 +109,6 @@ pub struct CacheEntryValue {
 pub struct ExecutionCache {
     conn: Mutex<Connection>,
 }
-
-const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[expect(
@@ -146,10 +183,6 @@ impl ExecutionCache {
         // Use file lock to prevent race conditions when multiple processes initialize the database
         let lock_path = path.join("db_open.lock");
         let lock_file = File::create(lock_path.as_path())?;
-        #[expect(
-            clippy::incompatible_msrv,
-            reason = "File::lock is stable since 1.84.0, our MSRV 1.88.0 is higher; clippy false positive"
-        )]
         lock_file.lock()?;
 
         let db_path = path.join("cache.db");
@@ -168,16 +201,16 @@ impl ExecutionCache {
                         "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    conn.execute("PRAGMA user_version = 10", ())?;
+                    conn.execute("PRAGMA user_version = 11", ())?;
                 }
-                1..=9 => {
+                1..=10 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                10 => break, // current version
-                11.. => {
+                11 => break, // current version
+                12.. => {
                     return Err(anyhow::anyhow!("Unrecognized database version: {user_version}"));
                 }
             }
@@ -327,12 +360,15 @@ impl ExecutionCache {
         clippy::significant_drop_tightening,
         reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
     )]
-    async fn get_key_by_value<K: Encode, V: Decode<()>>(
+    async fn get_key_by_value<
+        K: SchemaWrite<DefaultConfig, Src = K>,
+        V: SchemaReadOwned<DefaultConfig, Dst = V>,
+    >(
         &self,
         table: &str,
         key: &K,
     ) -> anyhow::Result<Option<V>> {
-        let key_blob = encode_to_vec(key, BINCODE_CONFIG)?;
+        let key_blob = wincode::serialize(key)?;
         let value_blob = {
             let conn = self.conn.lock().await;
             #[expect(
@@ -348,7 +384,7 @@ impl ExecutionCache {
         let Some(value_blob) = value_blob else {
             return Ok(None);
         };
-        let (value, _) = decode_from_slice::<V, _>(&value_blob, BINCODE_CONFIG)?;
+        let value: V = wincode::deserialize(&value_blob)?;
         Ok(Some(value))
     }
 
@@ -370,14 +406,17 @@ impl ExecutionCache {
         clippy::significant_drop_tightening,
         reason = "lock guard must be held while executing the prepared statement"
     )]
-    async fn upsert<K: Encode, V: Encode>(
+    async fn upsert<
+        K: SchemaWrite<DefaultConfig, Src = K>,
+        V: SchemaWrite<DefaultConfig, Src = V>,
+    >(
         &self,
         table: &str,
         key: &K,
         value: &V,
     ) -> anyhow::Result<()> {
-        let key_blob = encode_to_vec(key, BINCODE_CONFIG)?;
-        let value_blob = encode_to_vec(value, BINCODE_CONFIG)?;
+        let key_blob = wincode::serialize(key)?;
+        let value_blob = wincode::serialize(value)?;
         let conn = self.conn.lock().await;
         #[expect(clippy::disallowed_macros, reason = "SQL query string for rusqlite requires String")]
         let mut update_stmt = conn.prepare_cached(&format!(
@@ -407,7 +446,10 @@ impl ExecutionCache {
         clippy::significant_drop_tightening,
         reason = "lock guard must be held while iterating over query rows"
     )]
-    async fn list_table<K: Decode<()> + Serialize, V: Decode<()> + Serialize>(
+    async fn list_table<
+        K: SchemaReadOwned<DefaultConfig, Dst = K> + Serialize,
+        V: SchemaReadOwned<DefaultConfig, Dst = V> + Serialize,
+    >(
         &self,
         table: &str,
         out: &mut impl Write,
@@ -422,8 +464,8 @@ impl ExecutionCache {
         while let Some(row) = rows.next()? {
             let key_blob: Vec<u8> = row.get(0)?;
             let value_blob: Vec<u8> = row.get(1)?;
-            let (key, _) = decode_from_slice::<K, _>(&key_blob, BINCODE_CONFIG)?;
-            let (value, _) = decode_from_slice::<V, _>(&value_blob, BINCODE_CONFIG)?;
+            let key: K = wincode::deserialize(&key_blob)?;
+            let value: V = wincode::deserialize(&value_blob)?;
             writeln!(
                 out,
                 "{} => {}",

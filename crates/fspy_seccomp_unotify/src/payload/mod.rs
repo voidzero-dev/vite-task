@@ -1,8 +1,8 @@
 mod filter;
-use bincode::{Decode, Encode};
 pub use filter::Filter;
+use wincode::{SchemaRead, SchemaWrite};
 
-#[derive(Debug, Encode, Decode, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Clone)]
 pub struct SeccompPayload {
     pub(crate) ipc_path: Vec<u8>,
     pub(crate) filter: Filter,

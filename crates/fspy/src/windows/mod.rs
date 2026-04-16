@@ -9,7 +9,7 @@ use std::{
 use const_format::formatcp;
 use fspy_detours_sys::{DetourCopyPayloadToProcess, DetourUpdateProcessWithDll};
 use fspy_shared::{
-    ipc::{BINCODE_CONFIG, PathAccess, channel::channel},
+    ipc::{PathAccess, channel::channel},
     windows::{PAYLOAD_ID, Payload},
 };
 use futures_util::FutureExt;
@@ -109,7 +109,7 @@ impl SpyImpl {
                     channel_conf: channel_conf.clone(),
                     ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
                 };
-                let payload_bytes = bincode::encode_to_vec(payload, BINCODE_CONFIG).unwrap();
+                let payload_bytes = wincode::serialize(&payload).unwrap();
                 // SAFETY: process_handle is valid, PAYLOAD_ID is a static GUID,
                 // payload_bytes is a valid buffer with correct length
                 let success = unsafe {

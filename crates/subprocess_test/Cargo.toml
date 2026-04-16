@@ -9,7 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 base64 = { workspace = true }
-bincode = { workspace = true }
+wincode = { workspace = true }
 ctor = { workspace = true }
 fspy = { workspace = true, optional = true }
 portable-pty = { workspace = true, optional = true }

@@ -6,15 +6,15 @@ use std::{
     sync::OnceLock,
 };
 
-use bincode::{enc::write::SizeWriter, encode_into_slice, encode_into_writer};
 use convert::{ToAbsolutePath, ToAccessMode};
-use fspy_shared::ipc::{BINCODE_CONFIG, PathAccess, channel::Sender};
+use fspy_shared::ipc::{PathAccess, channel::Sender};
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::EncodedPayload,
     spawn::{PreExec, handle_exec},
 };
 use raw_exec::RawExec;
+use wincode::Serialize as _;
 
 pub struct Client {
     encoded_payload: EncodedPayload,
@@ -72,17 +72,18 @@ impl Client {
             return Ok(());
         }
         let path_access = PathAccess { mode, path: path.into() };
-        let mut size_writer = SizeWriter::default();
-        encode_into_writer(path_access, &mut size_writer, BINCODE_CONFIG)?;
+        let serialized_size = usize::try_from(PathAccess::serialized_size(&path_access)?)
+            .expect("serialized size exceeds usize");
 
-        let frame_size = NonZeroUsize::new(size_writer.bytes_written)
+        let frame_size = NonZeroUsize::new(serialized_size)
             .expect("fspy: encoded PathAccess should never be empty");
 
         let mut frame = ipc_sender
             .claim_frame(frame_size)
             .expect("fspy: failed to claim frame in shared memory");
-        let written_size = encode_into_slice(path_access, &mut frame, BINCODE_CONFIG)?;
-        assert_eq!(written_size, size_writer.bytes_written);
+        let mut writer: &mut [u8] = &mut frame;
+        PathAccess::serialize_into(&mut writer, &path_access)?;
+        assert_eq!(writer.len(), 0);
 
         Ok(())
     }

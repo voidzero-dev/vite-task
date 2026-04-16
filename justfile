@@ -9,7 +9,7 @@ _default:
 alias r := ready
 
 init:
-  cargo binstall watchexec-cli cargo-insta typos-cli cargo-shear@1.11.1 taplo-cli -y
+  cargo binstall watchexec-cli cargo-insta typos-cli cargo-shear@1.11.1 cargo-autoinherit taplo-cli -y
 
 ready:
   git diff --exit-code --quiet
@@ -24,6 +24,7 @@ watch *args='':
   watchexec --no-vcs-ignore {{args}}
 
 fmt:
+  cargo autoinherit
   cargo shear --fix
   cargo fmt --all
   pnpm oxfmt

@@ -1,8 +1,8 @@
 use std::{env::current_exe, ffi::OsString, path::PathBuf, process::Command as StdCommand};
 
 use base64::{Engine, prelude::BASE64_STANDARD_NO_PAD};
-use bincode::{Decode, Encode, config};
 use rustc_hash::FxHashMap;
+use wincode::{SchemaReadOwned, SchemaWrite, config::DefaultConfig};
 
 /// A command configuration that can be converted to `std::process::Command`
 /// or `fspy::Command` for execution.
@@ -50,7 +50,7 @@ impl From<Command> for portable_pty::CommandBuilder {
 
 /// Creates a `subprocess_test::Command` that only executes the provided function.
 ///
-/// - $arg: The argument to pass to the function, must implement `Encode` and `Decode`.
+/// - $arg: The argument to pass to the function, must implement `SchemaWrite` and `SchemaReadOwned`.
 /// - $f: The function to run in the separate process, takes one argument of the type of $arg.
 #[macro_export]
 macro_rules! command_for_fn {
@@ -119,7 +119,7 @@ fn read_proc_cmdline() -> Option<Vec<String>> {
 }
 
 #[doc(hidden)]
-pub fn init_impl<A: Decode<()>>(expected_id: &str, f: impl FnOnce(A)) {
+pub fn init_impl<A: SchemaReadOwned<DefaultConfig, Dst = A>>(expected_id: &str, f: impl FnOnce(A)) {
     let args = get_args();
     // <test_binary> <expected_id> <arg_base64>
     let (Some(current_id), Some(arg_base64)) = (args.get(1), args.get(2)) else {
@@ -129,17 +129,15 @@ pub fn init_impl<A: Decode<()>>(expected_id: &str, f: impl FnOnce(A)) {
         return;
     }
     let arg_bytes = BASE64_STANDARD_NO_PAD.decode(arg_base64).expect("Failed to decode base64 arg");
-    let arg: A = bincode::decode_from_slice(&arg_bytes, config::standard())
-        .expect("Failed to decode bincode arg")
-        .0;
+    let arg: A = wincode::deserialize(&arg_bytes).expect("Failed to decode wincode arg");
     f(arg);
     std::process::exit(0);
 }
 
 #[doc(hidden)]
-pub fn create_command(id: &str, arg: impl Encode) -> Command {
+pub fn create_command<T: SchemaWrite<DefaultConfig, Src = T>>(id: &str, arg: T) -> Command {
     let program = current_exe().unwrap().into_os_string();
-    let arg_bytes = bincode::encode_to_vec(&arg, config::standard()).expect("Failed to encode arg");
+    let arg_bytes = wincode::serialize(&arg).expect("Failed to encode arg");
     let arg_base64 = BASE64_STANDARD_NO_PAD.encode(&arg_bytes);
 
     let args = vec![OsString::from(id), OsString::from(arg_base64)];

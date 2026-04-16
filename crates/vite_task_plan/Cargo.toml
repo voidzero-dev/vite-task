@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-bincode = { workspace = true }
+wincode = { workspace = true, features = ["derive"] }
 futures-util = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }
