@@ -438,10 +438,10 @@ fn main() {
     fixture_paths.sort();
 
     let mut args = libtest_mimic::Arguments::from_args();
-    // Force single-threaded execution: e2e tests spawn PTY child processes and
-    // send signals (ctrl-c); running them in parallel causes signal routing
-    // races and PTY resource contention on CI.
-    if args.test_threads.is_none() {
+    // On Linux, running e2e fixtures in parallel causes PTY and signal-routing
+    // contention (ctrl-c test intermittently fails). macOS and Windows are
+    // unaffected, so only force sequential execution on Linux.
+    if cfg!(target_os = "linux") && args.test_threads.is_none() {
         args.test_threads = Some(1);
     }
 
