@@ -4,12 +4,18 @@ mod execute;
 pub(crate) mod reporter;
 
 // Re-export types that are part of the public API
-use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, sync::Arc};
+use std::{
+    ffi::OsStr,
+    fmt::Debug,
+    io::{IsTerminal, Write as _},
+    sync::Arc,
+};
 
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
 use clap::Parser as _;
 use once_cell::sync::OnceCell;
+use owo_colors::{OwoColorize as _, Stream, Style};
 pub use reporter::ExitStatus;
 use reporter::{
     GroupedReporterBuilder, InterleavedReporterBuilder, LabeledReporterBuilder,
@@ -80,6 +86,11 @@ impl TaskGraphLoader for LazyTaskGraph<'_> {
     }
 }
 
+pub struct TaskErrorHints {
+    pub task_list_hint: Str,
+    pub task_source_hint: Str,
+}
+
 pub struct SessionConfig<'a> {
     pub command_handler: &'a mut (dyn CommandHandler + 'a),
     pub user_config_loader: &'a mut (dyn UserConfigLoader + 'a),
@@ -110,6 +121,9 @@ pub trait CommandHandler: Debug {
         &mut self,
         command: &mut ScriptCommand,
     ) -> anyhow::Result<HandledCommand>;
+
+    /// Returns hints shown to the user when a task is not found.
+    fn task_error_hints(&self) -> TaskErrorHints;
 }
 
 #[derive(derive_more::Debug)]
@@ -165,6 +179,7 @@ pub struct Session<'a> {
     plan_request_parser: PlanRequestParser<'a>,
 
     program_name: Str,
+    task_error_hints: TaskErrorHints,
 
     /// Cache is lazily initialized to avoid `SQLite` race conditions when multiple
     /// processes (e.g., parallel `vt lib` commands) start simultaneously.
@@ -227,6 +242,7 @@ impl<'a> Session<'a> {
         prepend_path_env(&mut envs, &workspace_node_modules_bin)?;
 
         // Cache is lazily initialized on first access to avoid SQLite race conditions
+        let task_error_hints = config.command_handler.task_error_hints();
         Ok(Self {
             workspace_path: Arc::clone(&workspace_root.path),
             lazy_task_graph: LazyTaskGraph::Uninitialized {
@@ -237,6 +253,7 @@ impl<'a> Session<'a> {
             cwd,
             plan_request_parser: PlanRequestParser { command_handler: config.command_handler },
             program_name: config.program_name,
+            task_error_hints,
             cache: OnceCell::new(),
             cache_path,
         })
@@ -246,13 +263,17 @@ impl<'a> Session<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error if planning or execution fails.
+    /// Prints user-facing CLI errors and returns an exit status.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
+    pub async fn main(mut self, command: Command) -> ExitStatus {
+        let verbose = matches!(&command, Command::Run(run) if run.flags.verbose);
         match self.main_inner(command).await {
-            Ok(()) => Ok(ExitStatus::SUCCESS),
-            Err(SessionError::EarlyExit(status)) => Ok(status),
-            Err(SessionError::Anyhow(err)) => Err(err),
+            Ok(()) => ExitStatus::SUCCESS,
+            Err(SessionError::EarlyExit(status)) => status,
+            Err(SessionError::Anyhow(err)) => {
+                self.print_cli_error(&err, verbose);
+                ExitStatus::FAILURE
+            }
         }
     }
 
@@ -380,6 +401,87 @@ impl<'a> Session<'a> {
             }
         }
         Ok(())
+    }
+
+    fn print_cli_error(&self, err: &anyhow::Error, verbose: bool) {
+        let mut stderr = std::io::stderr();
+
+        if let Some(plan_error) = err.downcast_ref::<vite_task_plan::Error>() {
+            if let Some(nested) = plan_error.nested_missing_task() {
+                let _ = writeln!(
+                    stderr,
+                    "{}",
+                    vite_str::format!("Task \"{}\" not found.", nested.task_name)
+                        .if_supports_color(Stream::Stderr, |text| {
+                            text.style(Style::new().red().bold())
+                        })
+                );
+                let _ = writeln!(
+                    stderr,
+                    "{} depends on \"{}\" via `{}`.",
+                    nested.parent_task, nested.task_name, nested.command
+                );
+                let _ = writeln!(stderr, "Next steps:");
+                let _ = writeln!(stderr, "  {}", self.task_error_hints.task_list_hint);
+                let _ = writeln!(stderr, "  {}", self.task_error_hints.task_source_hint);
+                if verbose {
+                    let _ = writeln!(stderr);
+                    let _ = writeln!(
+                        stderr,
+                        "{}",
+                        "Raw details:".if_supports_color(Stream::Stderr, |text| text.bold())
+                    );
+                    let _ = writeln!(stderr, "{err:#}");
+                    let _ = writeln!(stderr, "Exit code: {}", ExitStatus::FAILURE.0);
+                }
+                let _ = stderr.flush();
+                return;
+            }
+
+            if let vite_task_plan::Error::NoTasksMatched(task_name) = plan_error {
+                let _ = writeln!(
+                    stderr,
+                    "{}",
+                    vite_str::format!("Task \"{}\" not found.", task_name)
+                        .if_supports_color(Stream::Stderr, |text| text
+                            .style(Style::new().red().bold()))
+                );
+                let _ = writeln!(stderr, "Next steps:");
+                let _ = writeln!(stderr, "  {}", self.task_error_hints.task_list_hint);
+                let _ = writeln!(stderr, "  {}", self.task_error_hints.task_source_hint);
+                if verbose {
+                    let _ = writeln!(stderr);
+                    let _ = writeln!(
+                        stderr,
+                        "{}",
+                        "Raw details:".if_supports_color(Stream::Stderr, |text| text.bold())
+                    );
+                    let _ = writeln!(stderr, "{err:#}");
+                    let _ = writeln!(stderr, "Exit code: {}", ExitStatus::FAILURE.0);
+                }
+                let _ = stderr.flush();
+                return;
+            }
+        }
+
+        let _ = writeln!(
+            stderr,
+            "{} {}",
+            "✗".if_supports_color(Stream::Stderr, |text| text.style(Style::new().red().bold())),
+            err.to_string()
+                .if_supports_color(Stream::Stderr, |text| text.style(Style::new().red()))
+        );
+        if verbose {
+            let _ = writeln!(stderr);
+            let _ = writeln!(
+                stderr,
+                "{}",
+                "Raw details:".if_supports_color(Stream::Stderr, |text| text.bold())
+            );
+            let _ = writeln!(stderr, "{err:#}");
+            let _ = writeln!(stderr, "Exit code: {}", ExitStatus::FAILURE.0);
+        }
+        let _ = stderr.flush();
     }
 
     /// Show the task selector or list, and return a plan request for the selected task.

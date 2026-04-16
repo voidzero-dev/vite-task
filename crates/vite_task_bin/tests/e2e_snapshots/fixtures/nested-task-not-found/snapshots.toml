@@ -1,0 +1,7 @@
+[[e2e]]
+name = "nested task not found"
+steps = [["vt", "run", "repro"]]
+
+[[e2e]]
+name = "nested task not found verbose"
+steps = [["vt", "run", "repro", "--verbose"]]

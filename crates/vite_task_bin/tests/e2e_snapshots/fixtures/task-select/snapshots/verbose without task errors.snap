@@ -5,4 +5,8 @@ info:
   cwd: packages/app
 ---
 [1]> vt run --verbose
-Error: No task specifier provided for 'run' command
+✗ No task specifier provided for 'run' command
+
+Raw details:
+No task specifier provided for 'run' command
+Exit code: 1

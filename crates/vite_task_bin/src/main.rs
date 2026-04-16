@@ -22,5 +22,5 @@ async fn run() -> anyhow::Result<ExitStatus> {
     let args = Command::parse();
     let mut owned_config = OwnedSessionConfig::default();
     let session = Session::init(owned_config.as_config())?;
-    session.main(args).await
+    Ok(session.main(args).await)
 }

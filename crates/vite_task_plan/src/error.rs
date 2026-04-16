@@ -11,6 +11,13 @@ use vite_task_graph::display::TaskDisplay;
 
 use crate::{context::TaskRecursionError, envs::ResolveEnvError};
 
+#[derive(Debug, Clone)]
+pub struct NestedMissingTaskError<'a> {
+    pub parent_task: &'a TaskDisplay,
+    pub command: &'a Str,
+    pub task_name: &'a Str,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CdCommandError {
     #[error("No home directory found for 'cd' command with no arguments")]
@@ -164,4 +171,19 @@ pub enum Error {
     /// as a closed loop (the first and last elements are the same).
     #[error("Cycle dependency detected: {}", _0.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(" -> "))]
     CycleDependencyDetected(Vec<TaskDisplay>),
+}
+
+impl Error {
+    #[must_use]
+    pub fn nested_missing_task(&self) -> Option<NestedMissingTaskError<'_>> {
+        match self {
+            Self::NestPlan { task_display, command, error } => match error.as_ref() {
+                Self::NoTasksMatched(task_name) => {
+                    Some(NestedMissingTaskError { parent_task: task_display, command, task_name })
+                }
+                inner => inner.nested_missing_task(),
+            },
+            _ => None,
+        }
+    }
 }

@@ -1,0 +1,7 @@
+{
+  "tasks": {
+    "repro": {
+      "command": "vt run missing-task"
+    }
+  }
+}

@@ -3,4 +3,7 @@ source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
 ---
 [1]> vtt pipe-stdin -- vt run -r buid
-Error: Task "buid" not found
+Task "buid" not found.
+Next steps:
+  Run `vt run` to browse available tasks.
+  Check `vite-task.json` and `package.json` scripts where tasks are defined.

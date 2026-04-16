@@ -1,11 +1,10 @@
 ---
 source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
 expression: e2e_outputs
-info:
-  cwd: packages/app
 ---
-[1]> vt run -t buid
-Task "buid" not found.
+[1]> vt run repro
+Task "missing-task" not found.
+nested-task-not-found-test#repro depends on "missing-task" via `vt run missing-task`.
 Next steps:
   Run `vt run` to browse available tasks.
   Check `vite-task.json` and `package.json` scripts where tasks are defined.
