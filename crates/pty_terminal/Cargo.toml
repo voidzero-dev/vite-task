@@ -15,9 +15,9 @@ vt100 = { workspace = true }
 [dev-dependencies]
 ctor = { workspace = true }
 ctrlc = { workspace = true }
-ntest = "0.9.5"
+ntest = { workspace = true }
 subprocess_test = { workspace = true, features = ["portable-pty"] }
-terminal_size = "0.4"
+terminal_size = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true }

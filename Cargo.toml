@@ -154,6 +154,8 @@ widestring = "1.2.0"
 winapi = "0.3.9"
 winsafe = { version = "0.0.24", features = ["kernel"] }
 xxhash-rust = { version = "0.8.15", features = ["const_xxh3"] }
+ntest = "0.9.5"
+terminal_size = "0.4"
 
 [workspace.metadata.cargo-shear]
 ignored = [
