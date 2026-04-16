@@ -1,6 +1,5 @@
 mod cli;
 mod collections;
-mod maybe_str;
 pub mod session;
 
 // Public exports for vite_task_bin

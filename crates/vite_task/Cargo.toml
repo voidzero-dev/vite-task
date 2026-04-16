@@ -15,7 +15,6 @@ workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
-bstr = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true }
 derive_more = { workspace = true, features = ["from"] }

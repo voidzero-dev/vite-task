@@ -3948,7 +3948,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bstr",
  "clap",
  "ctrlc",
  "derive_more",
