@@ -1,9 +1,10 @@
 #![expect(
     clippy::disallowed_types,
     clippy::disallowed_macros,
+    clippy::disallowed_methods,
     clippy::missing_panics_doc,
     clippy::missing_errors_doc,
-    reason = "standalone test utility crate; std types and format! are appropriate"
+    reason = "standalone test utility crate; std types, methods, and format! are appropriate"
 )]
 
 use std::{
@@ -51,7 +52,7 @@ impl Snapshots {
         }
 
         let expected = match fs::read_to_string(&snap_path) {
-            Ok(content) => content,
+            Ok(content) => content.replace("\r\n", "\n"),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 fs::create_dir_all(&self.snapshot_dir)
                     .expect("failed to create snapshot directory");

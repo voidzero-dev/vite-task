@@ -445,7 +445,7 @@ fn main() {
             let name = fixture_path.file_name().unwrap().to_str().unwrap().to_owned();
             let tmp_dir_path = tmp_dir_path.clone();
             libtest_mimic::Trial::test(name, move || {
-                run_case(&tmp_dir_path, &fixture_path).map_err(|e| e.into())
+                run_case(&tmp_dir_path, &fixture_path).map_err(Into::into)
             })
         })
         .collect();

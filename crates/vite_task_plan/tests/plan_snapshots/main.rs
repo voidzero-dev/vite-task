@@ -195,10 +195,6 @@ fn run_case_inner(
         for plan in cases_file.plan_cases {
             let snapshot_base = vite_str::format!("query - {}", plan.name);
             let compact = plan.compact;
-            #[expect(
-                clippy::disallowed_types,
-                reason = "String required for building command display"
-            )]
             let args_display =
                 plan.args.iter().map(vite_str::Str::as_str).collect::<Vec<_>>().join(" ");
 
@@ -208,16 +204,10 @@ fn run_case_inner(
             ) {
                 Ok(ok) => ok,
                 Err(err) => {
-                    #[expect(
-                        clippy::disallowed_macros,
-                        reason = "Display impl of clap::Error uses std::format!"
-                    )]
-                    {
-                        snapshots.check_snapshot(
-                            vite_str::format!("{snapshot_base}.snap").as_str(),
-                            &err.to_string(),
-                        )?;
-                    }
+                    snapshots.check_snapshot(
+                        vite_str::format!("{snapshot_base}.snap").as_str(),
+                        &err.to_string(),
+                    )?;
                     continue;
                 }
             };
@@ -309,7 +299,7 @@ fn main() {
             let tmp_dir_path = tmp_dir_path.clone();
             let runtime = Arc::clone(&tokio_runtime);
             libtest_mimic::Trial::test(name, move || {
-                run_case(&runtime, &tmp_dir_path, &fixture_path).map_err(|e| e.into())
+                run_case(&runtime, &tmp_dir_path, &fixture_path).map_err(Into::into)
             })
         })
         .collect();
