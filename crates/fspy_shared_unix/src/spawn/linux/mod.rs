@@ -51,6 +51,6 @@ pub fn handle_exec(
     }
 
     command.envs.retain(|(name, _)| name != LD_PRELOAD && name != PAYLOAD_ENV_NAME);
-    Ok(None)
-    //  Ok(Some(PreExec(encoded_payload.payload.seccomp_payload.clone())))
+    
+    Ok(Some(PreExec(encoded_payload.payload.seccomp_payload.clone())))
 }
