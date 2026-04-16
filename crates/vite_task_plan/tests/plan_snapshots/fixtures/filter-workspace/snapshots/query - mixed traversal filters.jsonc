@@ -1,0 +1,10 @@
+// run --filter @test/lib... --filter @test/cli build
+{
+  "packages/cli#build": [
+    "packages/core#build"
+  ],
+  "packages/core#build": [],
+  "packages/lib#build": [
+    "packages/core#build"
+  ]
+}

@@ -1,0 +1,4 @@
+// run --filter @test/*{./packages/lib} build
+{
+  "packages/lib#build": []
+}

@@ -192,17 +192,11 @@ struct SnapshotsFile {
     pub e2e_cases: Vec<E2e>,
 }
 
-#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
-fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path) {
+#[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
+fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path) -> Result<(), String> {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
-
-    // Configure insta to write snapshots to fixture directory
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(fixture_path.join("snapshots"));
-    settings.set_prepend_module_to_snapshot(false);
-    settings.remove_snapshot_suffix();
-
-    settings.bind(|| run_case_inner(tmpdir, fixture_path, fixture_name));
+    let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
+    run_case_inner(tmpdir, fixture_path, fixture_name, &snapshots)
 }
 
 enum TerminationState {
@@ -216,9 +210,14 @@ enum TerminationState {
 )]
 #[expect(
     clippy::disallowed_types,
-    reason = "Path required by insta::glob! callback; String required by from_utf8_lossy and string accumulation"
+    reason = "Path required for fixture handling; String required by from_utf8_lossy and string accumulation"
 )]
-fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture_name: &str) {
+fn run_case_inner(
+    tmpdir: &AbsolutePath,
+    fixture_path: &std::path::Path,
+    fixture_name: &str,
+    snapshots: &snapshot_test::Snapshots,
+) -> Result<(), String> {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
     CopyOptions::new().copy_tree(fixture_path, stage_path.as_path()).unwrap();
@@ -265,14 +264,6 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 continue;
             }
         }
-
-        let _info_guard = if e2e.cwd.as_str().is_empty() {
-            None
-        } else {
-            let mut case_settings = insta::Settings::clone_current();
-            case_settings.set_info(&serde_json::json!({ "cwd": e2e.cwd.as_str() }));
-            Some(case_settings.bind_to_scope())
-        };
 
         let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_e2e_stage_{e2e_count}"));
         e2e_count += 1;
@@ -420,14 +411,9 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 break;
             }
         }
-        #[expect(
-            clippy::disallowed_macros,
-            reason = "insta::assert_snapshot! internally uses std::format!"
-        )]
-        {
-            insta::assert_snapshot!(e2e.name.as_str(), e2e_outputs);
-        }
+        snapshots.check_snapshot(vite_str::format!("{}.snap", e2e.name).as_str(), &e2e_outputs)?;
     }
+    Ok(())
 }
 
 #[expect(clippy::disallowed_types, reason = "Path required for CARGO_MANIFEST_DIR path traversal")]
@@ -459,8 +445,7 @@ fn main() {
             let name = fixture_path.file_name().unwrap().to_str().unwrap().to_owned();
             let tmp_dir_path = tmp_dir_path.clone();
             libtest_mimic::Trial::test(name, move || {
-                run_case(&tmp_dir_path, &fixture_path);
-                Ok(())
+                run_case(&tmp_dir_path, &fixture_path).map_err(|e| e.into())
             })
         })
         .collect();

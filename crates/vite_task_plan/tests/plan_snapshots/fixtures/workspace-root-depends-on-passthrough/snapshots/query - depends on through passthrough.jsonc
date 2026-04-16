@@ -1,0 +1,8 @@
+// run -r build
+{
+  "#build": [
+    "#lint"
+  ],
+  "#lint": [],
+  "packages/a#build": []
+}

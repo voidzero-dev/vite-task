@@ -1,0 +1,53 @@
+// run --cache deploy
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "deploy"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/cache-cli-override",
+          "task_name": "deploy",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/cache-cli-override",
+                "task_name": "deploy",
+                "package_path": "<workspace>/"
+              },
+              "command": "vtt print-file vite-task.json",
+              "and_item_index": null,
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null,
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print-file",
+                      "vite-task.json"
+                    ],
+                    "all_envs": {
+                      "NO_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

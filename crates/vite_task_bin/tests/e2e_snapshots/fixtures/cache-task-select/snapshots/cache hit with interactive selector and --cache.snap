@@ -1,8 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-assertion_line: 441
-expression: e2e_outputs
----
 > vt run --cache
 @ expect-milestone: task-select::0
 Select a task (↑/↓, Enter to run, type to search):

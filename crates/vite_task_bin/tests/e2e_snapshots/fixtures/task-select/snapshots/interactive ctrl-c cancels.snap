@@ -1,9 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
-info:
-  cwd: packages/app
----
 [130]> vt run
 @ expect-milestone: task-select::0
 Select a task (↑/↓, Enter to run, type to search):
@@ -22,3 +16,4 @@ Select a task (↑/↓, Enter to run, type to search):
       deploy        echo deploy root
   (…5 more)
 @ write-key: ctrl-c
+

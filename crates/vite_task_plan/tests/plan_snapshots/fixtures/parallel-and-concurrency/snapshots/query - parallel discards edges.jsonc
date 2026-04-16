@@ -1,0 +1,7 @@
+// run -r --parallel build
+{
+  "#build": [],
+  "packages/a#build": [],
+  "packages/b#build": [],
+  "packages/c#build": []
+}

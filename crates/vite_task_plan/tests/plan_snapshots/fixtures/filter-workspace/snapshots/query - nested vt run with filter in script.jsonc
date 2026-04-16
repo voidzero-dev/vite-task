@@ -1,0 +1,11 @@
+// run --filter @test/app deploy
+{
+  "packages/app#deploy": {
+    "items": [
+      {
+        "packages/app#build": []
+      }
+    ],
+    "neighbors": []
+  }
+}

@@ -1,0 +1,4 @@
+// run -t build
+{
+  "packages/bottom#build": []
+}

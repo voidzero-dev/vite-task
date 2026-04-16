@@ -34,7 +34,7 @@ which = { workspace = true }
 cow-utils = { workspace = true }
 cp_r = { workspace = true }
 libtest-mimic = { workspace = true }
-insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
+snapshot_test = { workspace = true }
 pty_terminal = { workspace = true }
 pty_terminal_test = { workspace = true }
 regex = { workspace = true }

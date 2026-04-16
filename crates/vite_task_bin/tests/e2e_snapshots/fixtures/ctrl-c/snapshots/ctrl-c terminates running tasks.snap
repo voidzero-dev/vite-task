@@ -1,7 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
 > vt run --no-cache @ctrl-c/a#dev
 @ expect-milestone: ready
 ~/packages/a$ vtt exit-on-ctrlc ⊘ cache disabled

@@ -1,0 +1,4 @@
+// run --filter @test/app build
+{
+  "packages/app#build": []
+}

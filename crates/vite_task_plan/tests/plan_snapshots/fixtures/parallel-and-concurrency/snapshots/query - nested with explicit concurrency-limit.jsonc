@@ -1,0 +1,195 @@
+// run build-with-concurrency
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "build-with-concurrency"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "test-workspace",
+          "task_name": "build-with-concurrency",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "test-workspace",
+                "task_name": "build-with-concurrency",
+                "package_path": "<workspace>/"
+              },
+              "command": "vt run -r --concurrency-limit 5 build",
+              "and_item_index": null,
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Expanded": {
+                "graph": [
+                  {
+                    "key": [
+                      "<workspace>/",
+                      "build"
+                    ],
+                    "node": {
+                      "task_display": {
+                        "package_name": "test-workspace",
+                        "task_name": "build",
+                        "package_path": "<workspace>/"
+                      },
+                      "items": []
+                    },
+                    "neighbors": []
+                  },
+                  {
+                    "key": [
+                      "<workspace>/packages/a",
+                      "build"
+                    ],
+                    "node": {
+                      "task_display": {
+                        "package_name": "@test/a",
+                        "task_name": "build",
+                        "package_path": "<workspace>/packages/a"
+                      },
+                      "items": [
+                        {
+                          "execution_item_display": {
+                            "task_display": {
+                              "package_name": "@test/a",
+                              "task_name": "build",
+                              "package_path": "<workspace>/packages/a"
+                            },
+                            "command": "echo building a",
+                            "and_item_index": null,
+                            "cwd": "<workspace>/packages/a"
+                          },
+                          "kind": {
+                            "Leaf": {
+                              "InProcess": {
+                                "kind": {
+                                  "Echo": {
+                                    "strings": [
+                                      "building",
+                                      "a"
+                                    ],
+                                    "trailing_newline": true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "neighbors": [
+                      [
+                        "<workspace>/packages/b",
+                        "build"
+                      ]
+                    ]
+                  },
+                  {
+                    "key": [
+                      "<workspace>/packages/b",
+                      "build"
+                    ],
+                    "node": {
+                      "task_display": {
+                        "package_name": "@test/b",
+                        "task_name": "build",
+                        "package_path": "<workspace>/packages/b"
+                      },
+                      "items": [
+                        {
+                          "execution_item_display": {
+                            "task_display": {
+                              "package_name": "@test/b",
+                              "task_name": "build",
+                              "package_path": "<workspace>/packages/b"
+                            },
+                            "command": "echo building b",
+                            "and_item_index": null,
+                            "cwd": "<workspace>/packages/b"
+                          },
+                          "kind": {
+                            "Leaf": {
+                              "InProcess": {
+                                "kind": {
+                                  "Echo": {
+                                    "strings": [
+                                      "building",
+                                      "b"
+                                    ],
+                                    "trailing_newline": true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "neighbors": [
+                      [
+                        "<workspace>/packages/c",
+                        "build"
+                      ]
+                    ]
+                  },
+                  {
+                    "key": [
+                      "<workspace>/packages/c",
+                      "build"
+                    ],
+                    "node": {
+                      "task_display": {
+                        "package_name": "@test/c",
+                        "task_name": "build",
+                        "package_path": "<workspace>/packages/c"
+                      },
+                      "items": [
+                        {
+                          "execution_item_display": {
+                            "task_display": {
+                              "package_name": "@test/c",
+                              "task_name": "build",
+                              "package_path": "<workspace>/packages/c"
+                            },
+                            "command": "echo building c",
+                            "and_item_index": null,
+                            "cwd": "<workspace>/packages/c"
+                          },
+                          "kind": {
+                            "Leaf": {
+                              "InProcess": {
+                                "kind": {
+                                  "Echo": {
+                                    "strings": [
+                                      "building",
+                                      "c"
+                                    ],
+                                    "trailing_newline": true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "neighbors": []
+                  }
+                ],
+                "concurrency_limit": 5
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

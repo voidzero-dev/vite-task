@@ -1,0 +1,53 @@
+// run lint-no-cache
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "lint-no-cache"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/synthetic-cache-disabled",
+          "task_name": "lint-no-cache",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/synthetic-cache-disabled",
+                "task_name": "lint-no-cache",
+                "package_path": "<workspace>/"
+              },
+              "command": "vt tool print lint",
+              "and_item_index": null,
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null,
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print",
+                      "lint"
+                    ],
+                    "all_envs": {
+                      "NO_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

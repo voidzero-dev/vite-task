@@ -1,7 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
 > vt run positive-globs-reads-unmatched
 $ vtt print-file src/main.ts src/utils.ts
 export const main = 'initial';
