@@ -297,7 +297,14 @@ fn run_case(
     let mut e2e_outputs = String::new();
     e2e_outputs.push_str(vite_str::format!("# {}\n", e2e.name).as_str());
     if let Some(comment) = file_comment {
-        let trimmed = comment.trim_matches('\n');
+        // Normalize CRLF → LF; on Windows, git checkouts with autocrlf embed
+        // `\r\n` inside TOML multi-line strings, which would make `actual`
+        // diverge from the stored `.md` (loaded via `\r\n` → `\n` normalization).
+        let normalized = {
+            use cow_utils::CowUtils as _;
+            comment.cow_replace("\r\n", "\n").into_owned()
+        };
+        let trimmed = normalized.trim_matches('\n');
         if !trimmed.is_empty() {
             e2e_outputs.push('\n');
             e2e_outputs.push_str(trimmed);
