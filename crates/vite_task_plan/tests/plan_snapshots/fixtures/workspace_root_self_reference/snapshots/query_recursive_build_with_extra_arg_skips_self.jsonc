@@ -1,0 +1,8 @@
+// run -r build extra_arg
+{
+  "#build": [],
+  "packages/a#build": [],
+  "packages/b#build": [
+    "packages/a#build"
+  ]
+}

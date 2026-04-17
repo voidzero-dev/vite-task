@@ -1,0 +1,4 @@
+[[plan]]
+name = "vpr_expands_to_vt_run"
+args = ["run", "all"]
+compact = true

@@ -1,0 +1,24 @@
+# interactive_select_with_typo
+
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
+## `vt run buid`
+
+**→ expect-milestone:** `task-select:buid:0`
+
+```
+Task "buid" not found.
+Select a task (↑/↓, Enter to run, type to search): buid
+
+  › build   echo build app
+    lib (packages/lib)
+      build echo build lib
+```
+
+**← write-key:** `enter`
+
+```
+Selected task: build
+~/packages/app$ echo build app ⊘ cache disabled
+build app
+```

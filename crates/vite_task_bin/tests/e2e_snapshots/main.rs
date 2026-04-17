@@ -56,9 +56,11 @@ impl Step {
         }
     }
 
-    /// Format as a shell-like display string for snapshots (e.g. `MY_ENV=1 vt run test # cache miss`).
+    /// Shell-escaped command line including any env-var prefix, without the
+    /// comment (e.g. `MY_ENV=1 vt run test`). The comment is surfaced
+    /// separately by [`Self::comment`].
     #[expect(clippy::disallowed_types, reason = "String required by join/format")]
-    fn display_command(&self) -> String {
+    fn display_command_line(&self) -> String {
         let argv_str = self
             .argv()
             .iter()
@@ -81,11 +83,15 @@ impl Step {
                     parts.push_str(vite_str::format!("{k}={v} ").as_str());
                 }
                 parts.push_str(&argv_str);
-                if let Some(comment) = &config.comment {
-                    parts.push_str(vite_str::format!(" # {comment}").as_str());
-                }
                 parts
             }
+        }
+    }
+
+    fn comment(&self) -> Option<&str> {
+        match self {
+            Self::Detailed(config) => config.comment.as_deref(),
+            Self::Simple(_) => None,
         }
     }
 
@@ -184,43 +190,62 @@ struct E2e {
     /// Optional platform filter: "unix" or "windows". If set, test only runs on that platform.
     #[serde(default)]
     pub platform: Option<Str>,
+    /// When true, the generated libtest-mimic trial is marked `#[ignore]`
+    /// (skipped by default, runnable with `cargo test -- --ignored`).
+    #[serde(default)]
+    pub ignore: bool,
 }
 
 #[derive(serde::Deserialize, Default)]
 struct SnapshotsFile {
+    /// Free-form description shared by every case in this file. Rendered under
+    /// the H1 heading of each generated snapshot.
+    #[serde(default)]
+    pub comment: Option<Str>,
     #[serde(rename = "e2e", default)] // toml usually uses singular for arrays
     pub e2e_cases: Vec<E2e>,
 }
 
-#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
-fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, filter: Option<&str>) {
-    let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
-    if fixture_name.starts_with('.') {
-        return; // skip hidden files like .DS_Store
-    }
+/// Fixture folder names and `[[e2e]].name` values must be made of
+/// `[A-Za-z0-9_]` only so trial names round-trip through shell filters
+/// and snapshot filenames don't carry whitespace or special characters.
+fn assert_identifier_like(kind: &str, value: &str) {
+    assert!(
+        !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+        "{kind} '{value}' must contain only ASCII letters, digits, and '_'"
+    );
+}
 
-    // Skip if filter doesn't match
-    if let Some(f) = filter
-        && !fixture_name.contains(f)
-    {
-        return;
+#[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
+fn load_snapshots_file(fixture_path: &std::path::Path) -> SnapshotsFile {
+    let cases_toml_path = fixture_path.join("snapshots.toml");
+    match std::fs::read(&cases_toml_path) {
+        Ok(content) => toml::from_slice(&content).unwrap(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SnapshotsFile::default(),
+        Err(err) => {
+            let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
+            panic!("Failed to read cases.toml for fixture {fixture_name}: {err}");
+        }
     }
-    #[expect(clippy::print_stdout, reason = "test progress output for e2e test runner")]
-    {
-        println!("{fixture_name}");
-    }
-    // Configure insta to write snapshots to fixture directory
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(fixture_path.join("snapshots"));
-    settings.set_prepend_module_to_snapshot(false);
-    settings.remove_snapshot_suffix();
-
-    settings.bind(|| run_case_inner(tmpdir, fixture_path, fixture_name));
 }
 
 enum TerminationState {
     Exited(i64),
     TimedOut,
+}
+
+/// Append a fenced markdown block containing `body`. The opening and closing
+/// fences sit on their own lines, and trailing whitespace inside `body` is
+/// trimmed so the close fence isn't preceded by blank lines.
+#[expect(clippy::disallowed_types, reason = "String required by mutable appender")]
+fn push_fenced_block(out: &mut String, body: &str) {
+    let trimmed = body.trim_end_matches(['\n', ' ', '\t']);
+    out.push_str("```\n");
+    if !trimmed.is_empty() {
+        out.push_str(trimmed);
+        out.push('\n');
+    }
+    out.push_str("```\n");
 }
 
 #[expect(
@@ -229,26 +254,28 @@ enum TerminationState {
 )]
 #[expect(
     clippy::disallowed_types,
-    reason = "Path required by insta::glob! callback; String required by from_utf8_lossy and string accumulation"
+    reason = "Path required for fixture handling; String required by from_utf8_lossy and string accumulation"
 )]
-fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture_name: &str) {
-    // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
-    let stage_path = tmpdir.join(fixture_name);
-    CopyOptions::new().copy_tree(fixture_path, stage_path.as_path()).unwrap();
+fn run_case(
+    tmpdir: &AbsolutePath,
+    fixture_path: &std::path::Path,
+    fixture_name: &str,
+    case_index: usize,
+    e2e: &E2e,
+    file_comment: Option<&str>,
+) -> Result<(), String> {
+    let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
 
-    let (workspace_root, _cwd) = find_workspace_root(&stage_path).unwrap();
+    // Copy the fixture to a per-case staging directory so the test runs in
+    // isolation and workspace-root discovery doesn't walk past the fixture.
+    let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_case_{case_index}"));
+    CopyOptions::new().copy_tree(fixture_path, e2e_stage_path.as_path()).unwrap();
 
+    let (workspace_root, _cwd) = find_workspace_root(&e2e_stage_path).unwrap();
     assert_eq!(
-        &stage_path, &*workspace_root.path,
+        &e2e_stage_path, &*workspace_root.path,
         "folder '{fixture_name}' should be a workspace root"
     );
-
-    let cases_toml_path = fixture_path.join("snapshots.toml");
-    let cases_file: SnapshotsFile = match std::fs::read(&cases_toml_path) {
-        Ok(content) => toml::from_slice(&content).unwrap(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SnapshotsFile::default(),
-        Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
-    };
 
     // Prepare PATH for e2e tests: include vt and vtt binary directories.
     let bin_dirs: [Arc<OsStr>; 2] = ["CARGO_BIN_EXE_vt", "CARGO_BIN_EXE_vtt"].map(|var| {
@@ -265,37 +292,29 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
     )
     .unwrap();
 
-    let mut e2e_count = 0u32;
-    for e2e in cases_file.e2e_cases {
-        // Skip test if platform doesn't match
-        if let Some(platform) = &e2e.platform {
-            let should_run = match platform.as_str() {
-                "unix" => cfg!(unix),
-                "windows" => cfg!(windows),
-                other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
-            };
-            if !should_run {
-                continue;
-            }
-        }
+    let e2e_stage_path_str = e2e_stage_path.as_path().to_str().unwrap();
 
-        let _info_guard = if e2e.cwd.as_str().is_empty() {
-            None
-        } else {
-            let mut case_settings = insta::Settings::clone_current();
-            case_settings.set_info(&serde_json::json!({ "cwd": e2e.cwd.as_str() }));
-            Some(case_settings.bind_to_scope())
+    let mut e2e_outputs = String::new();
+    e2e_outputs.push_str(vite_str::format!("# {}\n", e2e.name).as_str());
+    if let Some(comment) = file_comment {
+        // Normalize CRLF → LF; on Windows, git checkouts with autocrlf embed
+        // `\r\n` inside TOML multi-line strings, which would make `actual`
+        // diverge from the stored `.md` (loaded via `\r\n` → `\n` normalization).
+        let normalized = {
+            use cow_utils::CowUtils as _;
+            comment.cow_replace("\r\n", "\n").into_owned()
         };
-
-        let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_e2e_stage_{e2e_count}"));
-        e2e_count += 1;
-        CopyOptions::new().copy_tree(fixture_path, e2e_stage_path.as_path()).unwrap();
-
-        let e2e_stage_path_str = e2e_stage_path.as_path().to_str().unwrap();
-
-        let mut e2e_outputs = String::new();
+        let trimmed = normalized.trim_matches('\n');
+        if !trimmed.is_empty() {
+            e2e_outputs.push('\n');
+            e2e_outputs.push_str(trimmed);
+            e2e_outputs.push('\n');
+        }
+    }
+    {
         for step in &e2e.steps {
-            let step_display = step.display_command();
+            let step_display = step.display_command_line();
+            let step_comment = step.comment().map(str::to_owned);
 
             let argv = step.argv();
 
@@ -339,7 +358,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                         Interaction::ExpectMilestone(expect) => {
                             output_for_thread.lock().unwrap().push_str(
                                 vite_str::format!(
-                                    "@ expect-milestone: {}\n",
+                                    "**→ expect-milestone:** `{}`\n\n",
                                     expect.expect_milestone
                                 )
                                 .as_str(),
@@ -347,21 +366,23 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                             let milestone_screen =
                                 terminal.reader.expect_milestone(expect.expect_milestone.as_str());
                             let mut output = output_for_thread.lock().unwrap();
-                            output.push_str(&milestone_screen);
+                            push_fenced_block(&mut output, &milestone_screen);
                             output.push('\n');
                         }
                         Interaction::Write(write) => {
-                            output_for_thread
-                                .lock()
-                                .unwrap()
-                                .push_str(vite_str::format!("@ write: {}\n", write.write).as_str());
+                            output_for_thread.lock().unwrap().push_str(
+                                vite_str::format!("**← write:** `{}`\n\n", write.write).as_str(),
+                            );
                             terminal.writer.write_all(write.write.as_str().as_bytes()).unwrap();
                             terminal.writer.flush().unwrap();
                         }
                         Interaction::WriteLine(write_line) => {
                             output_for_thread.lock().unwrap().push_str(
-                                vite_str::format!("@ write-line: {}\n", write_line.write_line)
-                                    .as_str(),
+                                vite_str::format!(
+                                    "**← write-line:** `{}`\n\n",
+                                    write_line.write_line
+                                )
+                                .as_str(),
                             );
                             terminal
                                 .writer
@@ -370,10 +391,9 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                         }
                         Interaction::WriteKey(write_key) => {
                             let key_name = write_key.write_key.as_str();
-                            output_for_thread
-                                .lock()
-                                .unwrap()
-                                .push_str(vite_str::format!("@ write-key: {key_name}\n").as_str());
+                            output_for_thread.lock().unwrap().push_str(
+                                vite_str::format!("**← write-key:** `{key_name}`\n\n").as_str(),
+                            );
                             terminal.writer.write_all(write_key.write_key.bytes()).unwrap();
                             terminal.writer.flush().unwrap();
                         }
@@ -385,10 +405,7 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
 
                 {
                     let mut output = output_for_thread.lock().unwrap();
-                    if !output.is_empty() && !output.ends_with('\n') {
-                        output.push('\n');
-                    }
-                    output.push_str(&screen);
+                    push_fenced_block(&mut output, &screen);
                 }
 
                 let _ = tx.send(i64::from(status.exit_code()));
@@ -409,74 +426,122 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 }
             };
 
-            // Format output
+            // Blank line separator before every `##` (between the file's `#`
+            // heading and the first step, and between consecutive steps).
+            e2e_outputs.push('\n');
+
+            e2e_outputs.push_str("## `");
+            e2e_outputs.push_str(&step_display);
+            e2e_outputs.push_str("`\n\n");
+
+            if let Some(comment) = &step_comment {
+                e2e_outputs.push_str(comment);
+                e2e_outputs.push_str("\n\n");
+            }
+
             match &termination_state {
                 TerminationState::TimedOut => {
-                    e2e_outputs.push_str("[timeout]");
+                    e2e_outputs.push_str("**Exit code:** timeout\n\n");
                 }
                 TerminationState::Exited(exit_code) => {
                     if *exit_code != 0 {
-                        e2e_outputs.push_str(vite_str::format!("[{exit_code}]").as_str());
+                        e2e_outputs
+                            .push_str(vite_str::format!("**Exit code:** {exit_code}\n\n").as_str());
                     }
                 }
             }
 
-            e2e_outputs.push_str("> ");
-            e2e_outputs.push_str(&step_display);
-            e2e_outputs.push('\n');
-
             e2e_outputs.push_str(&redact_e2e_output(output, e2e_stage_path_str));
-            e2e_outputs.push('\n');
 
             // Skip remaining steps if timed out
             if matches!(termination_state, TerminationState::TimedOut) {
                 break;
             }
         }
-        #[expect(
-            clippy::disallowed_macros,
-            reason = "insta::assert_snapshot! internally uses std::format!"
-        )]
-        {
-            insta::assert_snapshot!(e2e.name.as_str(), e2e_outputs);
-        }
     }
+    snapshots.check_snapshot(vite_str::format!("{}.md", e2e.name).as_str(), &e2e_outputs)?;
+    Ok(())
 }
 
+#[expect(clippy::disallowed_types, reason = "Path required for CARGO_MANIFEST_DIR path traversal")]
 fn main() {
-    let filter = std::env::args().nth(1);
-
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
-    #[expect(
-        clippy::disallowed_types,
-        reason = "Path required for CARGO_MANIFEST_DIR path traversal"
-    )]
-    let fixtures_dir = {
-        let manifest_dir =
-            std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
 
-        // Copy .node-version to the tmp dir so version manager shims can resolve the correct
-        // Node.js binary when running task commands.
-        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
-        std::fs::copy(repo_root.join(".node-version"), tmp_dir.path().join(".node-version"))
-            .unwrap();
+    // Copy .node-version to the tmp dir so version manager shims can resolve the correct
+    // Node.js binary when running task commands.
+    let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+    std::fs::copy(repo_root.join(".node-version"), tmp_dir.path().join(".node-version")).unwrap();
 
-        manifest_dir.join("tests/e2e_snapshots/fixtures")
-    };
+    let fixtures_dir = manifest_dir.join("tests/e2e_snapshots/fixtures");
 
     let mut fixture_paths = std::fs::read_dir(fixtures_dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| !n.starts_with('.')))
         .collect::<Vec<_>>();
     fixture_paths.sort();
 
-    for case_path in &fixture_paths {
-        run_case(&tmp_dir_path, case_path, filter.as_deref());
+    let mut args = libtest_mimic::Arguments::from_args();
+    // On Linux, running e2e fixtures in parallel causes PTY and signal-routing
+    // contention (ctrl-c test intermittently fails). macOS and Windows are
+    // unaffected, so only force sequential execution on Linux.
+    if cfg!(target_os = "linux") && args.test_threads.is_none() {
+        args.test_threads = Some(1);
     }
-    #[expect(clippy::print_stdout, reason = "test summary")]
-    {
-        println!("All cases passed.");
-    }
+
+    let tests: Vec<libtest_mimic::Trial> = fixture_paths
+        .into_iter()
+        .flat_map(|fixture_path| {
+            let fixture_path = Arc::<std::path::Path>::from(fixture_path);
+            let fixture_name: Arc<str> =
+                Arc::from(fixture_path.file_name().unwrap().to_str().unwrap());
+            assert_identifier_like("fixture folder", &fixture_name);
+            let cases_file = load_snapshots_file(&fixture_path);
+            let file_comment: Arc<Option<Str>> = Arc::new(cases_file.comment);
+            cases_file.e2e_cases.into_iter().enumerate().filter_map({
+                let fixture_path = Arc::clone(&fixture_path);
+                let fixture_name = Arc::clone(&fixture_name);
+                let tmp_dir_path = tmp_dir_path.clone();
+                move |(case_index, e2e)| {
+                    assert_identifier_like("e2e case name", e2e.name.as_str());
+                    // Skip cases whose platform filter doesn't match this build.
+                    if let Some(platform) = &e2e.platform {
+                        let should_run = match platform.as_str() {
+                            "unix" => cfg!(unix),
+                            "windows" => cfg!(windows),
+                            other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
+                        };
+                        if !should_run {
+                            return None;
+                        }
+                    }
+                    let trial_name = vite_str::format!("{fixture_name}::{}", e2e.name);
+                    let ignored = e2e.ignore;
+                    let fixture_path = Arc::clone(&fixture_path);
+                    let fixture_name = Arc::clone(&fixture_name);
+                    let tmp_dir_path = tmp_dir_path.clone();
+                    let file_comment = Arc::clone(&file_comment);
+                    Some(
+                        libtest_mimic::Trial::test(trial_name.as_str(), move || {
+                            run_case(
+                                &tmp_dir_path,
+                                &fixture_path,
+                                &fixture_name,
+                                case_index,
+                                &e2e,
+                                file_comment.as_deref(),
+                            )
+                            .map_err(Into::into)
+                        })
+                        .with_ignored_flag(ignored),
+                    )
+                }
+            })
+        })
+        .collect();
+
+    libtest_mimic::run(&args, tests).exit();
 }

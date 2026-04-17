@@ -1,0 +1,25 @@
+comment = """
+Tests cache miss when input file is modified
+"""
+
+[[e2e]]
+name = "cache_hit_after_file_modification"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "test-task",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "main.js",
+    "foo",
+    "bar",
+  ], comment = "modify input file" },
+  { argv = [
+    "vt",
+    "run",
+    "test-task",
+  ], comment = "cache miss, main.js changed" },
+]

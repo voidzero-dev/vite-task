@@ -1,0 +1,33 @@
+comment = """
+Tests that cache: false in task config disables caching
+"""
+
+[[e2e]]
+name = "task_with_cache_disabled"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "no-cache-task",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "no-cache-task",
+  ], comment = "cache disabled, runs again" },
+]
+
+[[e2e]]
+name = "task_with_cache_enabled"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache hit" },
+]

@@ -45,10 +45,18 @@ cargo test                                              # All tests
 cargo test -p vite_task_bin --test e2e_snapshots        # E2E snapshot tests
 cargo test -p vite_task_plan --test plan_snapshots      # Plan snapshot tests
 cargo test --test e2e_snapshots -- stdin                # Filter by test name
-INSTA_UPDATE=always cargo test                          # Update snapshots
+UPDATE_SNAPSHOTS=1 cargo test                           # Update snapshots
 ```
 
-Integration tests (e2e, plan, fspy) require `pnpm install` in `packages/tools` first. You don't need `pnpm install` in test fixture directories.
+Integration tests that need Node.js or the `packages/tools` binaries (e.g. `oxlint`) are marked `#[ignore]` — and `[[e2e]]` cases in e2e snapshots.toml can opt in with `ignore = true`. Default `cargo test` runs only the tests that need nothing beyond the Rust toolchain; to run the rest:
+
+```bash
+pnpm install                           # at the workspace root (installs packages/tools too)
+cargo test -- --include-ignored        # run everything
+cargo test -- --ignored                # run only the previously-ignored tests
+```
+
+You don't need `pnpm install` in test fixture directories.
 
 ### Test Fixtures
 

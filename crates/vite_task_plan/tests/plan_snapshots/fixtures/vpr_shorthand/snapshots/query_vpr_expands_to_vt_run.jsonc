@@ -1,0 +1,11 @@
+// run all
+{
+  "#all": {
+    "items": [
+      {
+        "#build": []
+      }
+    ],
+    "neighbors": []
+  }
+}

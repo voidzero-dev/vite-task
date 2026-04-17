@@ -1,0 +1,5 @@
+# Tests tool synthetic command with environment variables
+
+[[plan]]
+name = "tool_synthetic_task_in_user_task"
+args = ["run", "env-test"]

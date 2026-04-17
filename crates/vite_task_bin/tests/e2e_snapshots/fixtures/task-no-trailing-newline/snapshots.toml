@@ -1,5 +1,0 @@
-# Tests output handling when task has no trailing newline
-
-[[e2e]]
-name = "no trailing newline"
-steps = [{ argv = ["vt", "run", "hello"], comment = "runs echo -n hello" }]

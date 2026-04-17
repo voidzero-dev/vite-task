@@ -1,0 +1,42 @@
+# cache_hit_with_interactive_selector_and___cache
+
+## `vt run --cache`
+
+**→ expect-milestone:** `task-select::0`
+
+```
+Select a task (↑/↓, Enter to run, type to search):
+
+  › build vtt print-file src/main.ts
+    lint  echo lint app
+```
+
+**← write-key:** `enter`
+
+```
+Selected task: build
+$ vtt print-file src/main.ts
+export const main = 'initial';
+```
+
+## `vt run --cache`
+
+**→ expect-milestone:** `task-select::0`
+
+```
+Select a task (↑/↓, Enter to run, type to search):
+
+  › build vtt print-file src/main.ts
+    lint  echo lint app
+```
+
+**← write-key:** `enter`
+
+```
+Selected task: build
+$ vtt print-file src/main.ts ◉ cache hit, replaying
+export const main = 'initial';
+
+---
+vt run: cache hit.
+```

@@ -1,0 +1,40 @@
+# associate_existing_cache
+
+Tests that tasks with identical commands share cache
+
+## `vt run script1`
+
+cache miss
+
+```
+$ vtt print hello
+hello
+```
+
+## `vt run script2`
+
+cache hit, same command as script1
+
+```
+$ vtt print hello ◉ cache hit, replaying
+hello
+
+---
+vt run: cache hit.
+```
+
+## `vtt replace-file-content package.json '"script2": "vtt print hello"' '"script2": "vtt print world"'`
+
+change script2
+
+```
+```
+
+## `vt run script2`
+
+cache miss
+
+```
+$ vtt print world ○ cache miss: args changed, executing
+world
+```

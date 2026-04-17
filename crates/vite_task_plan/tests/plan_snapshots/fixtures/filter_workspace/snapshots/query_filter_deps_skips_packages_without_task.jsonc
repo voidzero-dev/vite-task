@@ -1,0 +1,10 @@
+// run --filter @test/app... test
+{
+  "packages/app#test": [
+    "packages/lib#test"
+  ],
+  "packages/core#test": [],
+  "packages/lib#test": [
+    "packages/core#test"
+  ]
+}

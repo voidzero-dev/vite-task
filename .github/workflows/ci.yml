@@ -123,6 +123,15 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
 
+      - name: Build tests
+        run: ${{ matrix.cargo_cmd }} test --no-run --target ${{ matrix.build_target }}
+
+      # Default `cargo test` runs only tests that need nothing beyond the
+      # Rust toolchain; this step verifies that contract before Node.js
+      # and pnpm enter the picture.
+      - name: Run tests
+        run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }}
+
       # For x86_64-apple-darwin on arm64 runner, install x64 node so fspy preload dylib
       # (compiled for x86_64) can be injected into node processes running under Rosetta.
       # oxc-project/setup-node doesn't support the architecture input, so use
@@ -143,11 +152,8 @@ jobs:
       # Must run after setup-node so correct native binaries are installed
       - run: pnpm install
 
-      - name: Build tests
-        run: ${{ matrix.cargo_cmd }} test --no-run --target ${{ matrix.build_target }}
-
-      - name: Run tests
-        run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }}
+      - name: Run ignored tests
+        run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }} -- --ignored
 
   test-musl:
     needs: detect-changes
@@ -186,16 +192,22 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
+      - name: Build tests
+        run: cargo test --no-run
+
+      # Default `cargo test` runs only tests that need nothing beyond the
+      # Rust toolchain; this step verifies that contract before pnpm
+      # populates `packages/tools/node_modules`.
+      - name: Run tests
+        run: cargo test
+
       - name: Install pnpm and Node tools
         run: |
           corepack enable
           pnpm install
 
-      - name: Build tests
-        run: cargo test --no-run
-
-      - name: Run tests
-        run: cargo test
+      - name: Run ignored tests
+        run: cargo test -- --ignored
 
   fmt:
     name: Format and Check Deps

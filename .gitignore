@@ -6,3 +6,4 @@ dist
 .DS_Store
 /.vscode/settings.json
 *.snap.new
+*.md.new

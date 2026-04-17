@@ -1,0 +1,12 @@
+// run --filter {./packages/app}... build
+{
+  "packages/app#build": [
+    "packages/lib#build",
+    "packages/utils#build"
+  ],
+  "packages/core#build": [],
+  "packages/lib#build": [
+    "packages/core#build"
+  ],
+  "packages/utils#build": []
+}

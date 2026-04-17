@@ -1,0 +1,20 @@
+[[e2e]]
+name = "cache_hit_with_interactive_selector_and___cache"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+  ], interactions = [
+    { "expect-milestone" = "task-select::0" },
+    { "write-key" = "enter" },
+  ] },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+  ], interactions = [
+    { "expect-milestone" = "task-select::0" },
+    { "write-key" = "enter" },
+  ] },
+]

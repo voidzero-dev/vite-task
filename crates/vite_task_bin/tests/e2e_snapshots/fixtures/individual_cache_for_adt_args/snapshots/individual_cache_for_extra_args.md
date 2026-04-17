@@ -1,0 +1,45 @@
+# individual_cache_for_extra_args
+
+Tests that different extra args get separate cache entries
+
+## `vt run say a`
+
+cache miss
+
+```
+$ vtt print a
+a
+```
+
+## `vt run say b`
+
+cache miss, different args
+
+```
+$ vtt print b
+b
+```
+
+## `vt run say a`
+
+cache hit
+
+```
+$ vtt print a ◉ cache hit, replaying
+a
+
+---
+vt run: cache hit.
+```
+
+## `vt run say b`
+
+cache hit
+
+```
+$ vtt print b ◉ cache hit, replaying
+b
+
+---
+vt run: cache hit.
+```

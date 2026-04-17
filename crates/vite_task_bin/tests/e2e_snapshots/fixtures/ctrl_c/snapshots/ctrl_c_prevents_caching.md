@@ -1,0 +1,37 @@
+# ctrl_c_prevents_caching
+
+Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+
+## `vt run @ctrl-c/a#dev`
+
+exits 0 but should not be cached
+
+**→ expect-milestone:** `ready`
+
+```
+~/packages/a$ vtt exit-on-ctrlc
+```
+
+**← write-key:** `ctrl-c`
+
+```
+~/packages/a$ vtt exit-on-ctrlc
+ctrl-c received
+```
+
+## `vt run @ctrl-c/a#dev`
+
+should be cache miss, not hit
+
+**→ expect-milestone:** `ready`
+
+```
+~/packages/a$ vtt exit-on-ctrlc
+```
+
+**← write-key:** `ctrl-c`
+
+```
+~/packages/a$ vtt exit-on-ctrlc
+ctrl-c received
+```

@@ -1,0 +1,5 @@
+// run -w --filter @test/app check
+{
+  "#check": [],
+  "packages/app#check": []
+}

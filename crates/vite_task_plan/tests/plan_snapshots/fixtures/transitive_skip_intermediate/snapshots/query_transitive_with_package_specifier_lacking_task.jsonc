@@ -1,0 +1,4 @@
+// run -t @test/middle#build
+{
+  "packages/bottom#build": []
+}

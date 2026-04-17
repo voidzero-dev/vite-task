@@ -248,16 +248,16 @@ pub fn load_package_graph(
     let mut graph_builder = PackageGraphBuilder::default();
     let workspaces = match &workspace_root.workspace_file {
         WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
-            let workspace: PnpmWorkspace =
-                serde_yml::from_reader(file_with_path.file()).map_err(|e| Error::SerdeYml {
+            let workspace: PnpmWorkspace = serde_yml::from_slice(file_with_path.content())
+                .map_err(|e| Error::SerdeYml {
                     file_path: Arc::clone(file_with_path.path()),
                     serde_yml_error: e,
                 })?;
             workspace.packages
         }
         WorkspaceFile::NpmWorkspaceJson(file_with_path) => {
-            let workspace: NpmWorkspace =
-                serde_json::from_reader(file_with_path.file()).map_err(|e| Error::SerdeJson {
+            let workspace: NpmWorkspace = serde_json::from_slice(file_with_path.content())
+                .map_err(|e| Error::SerdeJson {
                     file_path: Arc::clone(file_with_path.path()),
                     serde_json_error: e,
                 })?;
@@ -265,7 +265,7 @@ pub fn load_package_graph(
         }
         WorkspaceFile::NonWorkspacePackage(file_with_path) => {
             // For non-workspace packages, add the package.json to the graph as a root package
-            let package_json: PackageJson = serde_json::from_reader(file_with_path.file())
+            let package_json: PackageJson = serde_json::from_slice(file_with_path.content())
                 .map_err(|e| Error::SerdeJson {
                     file_path: Arc::clone(file_with_path.path()),
                     serde_json_error: e,

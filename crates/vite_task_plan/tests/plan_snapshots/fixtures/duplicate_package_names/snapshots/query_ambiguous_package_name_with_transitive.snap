@@ -1,0 +1,1 @@
+Package name '@test/duplicate' is ambiguous; found in multiple locations: <workspace>/packages/pkg-a, <workspace>/packages/pkg-b

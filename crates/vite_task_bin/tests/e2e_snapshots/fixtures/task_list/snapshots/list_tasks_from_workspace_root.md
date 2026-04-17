@@ -1,0 +1,12 @@
+# list_tasks_from_workspace_root
+
+## `vtt pipe-stdin -- vt run`
+
+```
+  hello: echo hello from root
+  list-tasks: vt run
+  app#build: echo build app
+  app#lint: echo lint app
+  app#test: echo test app
+  lib#build: echo build lib
+```

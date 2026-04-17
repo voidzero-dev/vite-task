@@ -1,5 +1,0 @@
-# Tests shell fallback for pipe commands
-
-[[plan]]
-name = "shell fallback for pipe command"
-args = ["run", "pipe-test"]

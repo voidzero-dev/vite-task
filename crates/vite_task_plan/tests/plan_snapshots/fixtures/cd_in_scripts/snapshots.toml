@@ -1,0 +1,9 @@
+# Tests that `cd` in scripts interacts correctly with nested vt commands
+
+[[plan]]
+name = "cd_before_vt_run_should_not_affect_expanded_task_cwd"
+args = ["run", "cd-build"]
+
+[[plan]]
+name = "cd_before_vt_lint_should_put_synthetic_task_under_cwd"
+args = ["run", "cd-lint"]

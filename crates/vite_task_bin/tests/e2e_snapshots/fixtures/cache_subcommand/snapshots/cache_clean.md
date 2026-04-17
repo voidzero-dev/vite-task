@@ -1,0 +1,36 @@
+# cache_clean
+
+## `vt run cached-task`
+
+cache miss
+
+```
+$ vtt print-file test.txt
+test content
+```
+
+## `vt run cached-task`
+
+cache hit
+
+```
+$ vtt print-file test.txt ◉ cache hit, replaying
+test content
+
+---
+vt run: cache hit.
+```
+
+## `vt cache clean`
+
+```
+```
+
+## `vt run cached-task`
+
+cache miss after clean
+
+```
+$ vtt print-file test.txt
+test content
+```

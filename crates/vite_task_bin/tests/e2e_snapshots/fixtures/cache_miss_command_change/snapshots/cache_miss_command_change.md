@@ -1,0 +1,59 @@
+# cache_miss_command_change
+
+Tests cache behavior when command changes partially
+
+## `vt run task`
+
+cache miss
+
+```
+$ vtt print foo
+foo
+
+$ vtt print bar
+bar
+
+---
+vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+```
+
+## `vtt replace-file-content vite-task.json 'vtt print foo && vtt print bar' 'vtt print baz && vtt print bar'`
+
+change first subtask
+
+```
+```
+
+## `vt run task`
+
+first: cache miss, second: cache hit
+
+```
+$ vtt print baz ○ cache miss: args changed, executing
+baz
+
+$ vtt print bar ◉ cache hit, replaying
+bar
+
+---
+vt run: 1/2 cache hit (50%). (Run `vt run --last-details` for full details)
+```
+
+## `vtt replace-file-content vite-task.json 'vtt print baz && vtt print bar' 'vtt print bar'`
+
+remove first subtask
+
+```
+```
+
+## `vt run task`
+
+cache hit
+
+```
+$ vtt print bar ◉ cache hit, replaying
+bar
+
+---
+vt run: cache hit.
+```

@@ -1,0 +1,5 @@
+// run --filter @test/duplicate build
+{
+  "packages/pkg-a#build": [],
+  "packages/pkg-b#build": []
+}

@@ -1,0 +1,21 @@
+[[e2e]]
+name = "list_tasks_from_package_dir"
+cwd = "packages/app"
+steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
+
+[[e2e]]
+name = "list_tasks_from_workspace_root"
+steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
+
+[[e2e]]
+name = "vt_run_in_script"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "list-tasks",
+  ], interactions = [
+    { "expect-milestone" = "task-select::0" },
+    { "write-key" = "enter" },
+  ] },
+]

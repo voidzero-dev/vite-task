@@ -1,0 +1,10 @@
+// run --filter @test/app... --filter !@test/utils build
+{
+  "packages/app#build": [
+    "packages/lib#build"
+  ],
+  "packages/core#build": [],
+  "packages/lib#build": [
+    "packages/core#build"
+  ]
+}

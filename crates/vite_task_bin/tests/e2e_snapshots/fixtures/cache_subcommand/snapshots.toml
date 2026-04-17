@@ -1,0 +1,24 @@
+[[e2e]]
+name = "cache_clean"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache hit" },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache miss after clean" },
+]

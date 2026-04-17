@@ -1,0 +1,1 @@
+Failed to plan tasks from `vt run -r test` in task test-workspace#build: Failed to plan tasks from `vt run -r build` in task test-workspace#test: Detected a recursion in task call stack: the last frame calls the 1th frame

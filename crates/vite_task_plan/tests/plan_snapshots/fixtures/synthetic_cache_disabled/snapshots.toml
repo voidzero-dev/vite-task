@@ -1,0 +1,23 @@
+[[plan]]
+name = "script_without_cache_scripts_defaults_to_no_cache"
+args = ["run", "lint"]
+
+[[plan]]
+name = "task_with_cache_false_disables_synthetic_cache"
+args = ["run", "lint-no-cache"]
+
+[[plan]]
+name = "task_with_cache_true_enables_synthetic_cache"
+args = ["run", "lint-with-cache"]
+
+[[plan]]
+name = "task_untrackedEnv_inherited_by_synthetic"
+args = ["run", "lint-with-untracked-env"]
+
+[[plan]]
+name = "parent_cache_false_does_not_affect_expanded_query_tasks"
+args = ["run", "run-build-no-cache"]
+
+[[plan]]
+name = "script_cache_false_does_not_affect_expanded_synthetic_cache"
+args = ["run", "run-build-cache-false"]

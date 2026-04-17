@@ -1,0 +1,8 @@
+// run --filter @test/app^... build
+{
+  "packages/core#build": [],
+  "packages/lib#build": [
+    "packages/core#build"
+  ],
+  "packages/utils#build": []
+}

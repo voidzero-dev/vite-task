@@ -1,0 +1,37 @@
+comment = """
+Tests cache behavior when command changes partially
+"""
+
+[[e2e]]
+name = "cache_miss_command_change"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "task",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "vtt print foo && vtt print bar",
+    "vtt print baz && vtt print bar",
+  ], comment = "change first subtask" },
+  { argv = [
+    "vt",
+    "run",
+    "task",
+  ], comment = "first: cache miss, second: cache hit" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "vtt print baz && vtt print bar",
+    "vtt print bar",
+  ], comment = "remove first subtask" },
+  { argv = [
+    "vt",
+    "run",
+    "task",
+  ], comment = "cache hit" },
+]

@@ -1,0 +1,4 @@
+[[plan]]
+name = "allow__packages__in_pnpm_workspace_yaml_to_be_optional"
+args = ["run", "hello"]
+compact = true

@@ -1,0 +1,53 @@
+// run build
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "build"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/cache-cli-override",
+          "task_name": "build",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/cache-cli-override",
+                "task_name": "build",
+                "package_path": "<workspace>/"
+              },
+              "command": "vtt print-file package.json",
+              "and_item_index": null,
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null,
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print-file",
+                      "package.json"
+                    ],
+                    "all_envs": {
+                      "NO_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}
