@@ -23,7 +23,7 @@ use vite_task_plan::{
 use self::{
     fingerprint::PostRunFingerprint,
     glob_inputs::compute_globbed_inputs,
-    pipe::{StdOutput, pipe_stdio},
+    pipe::{PipeIo, pipe_stdio},
     spawn::{SpawnStdio, spawn},
     tracked_accesses::TrackedPathAccesses,
 };
@@ -275,14 +275,12 @@ enum ExecutionMode<'a> {
     },
 }
 
-/// Cached-only state carried from mode construction through drain into the
-/// cache-update phase. `std_outputs` is written during drain; the other fields
-/// are read during cache update.
+/// Cached-only state carried from mode construction through the cache-update
+/// phase. Captured stdout/stderr live in `PipeIo::capture` during drain and
+/// are handed to cache update separately.
 struct CacheState<'a> {
     metadata: &'a CacheMetadata,
     globbed_inputs: BTreeMap<RelativePathBuf, u64>,
-    /// Captured stdout/stderr chunks flow here during drain for cache replay.
-    std_outputs: Vec<StdOutput>,
     /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
     /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
     /// tracked accesses. `None` means fspy tracking is off for this task.
@@ -424,12 +422,7 @@ pub async fn execute_spawn(
             };
             ExecutionMode::Cached {
                 stdio_config,
-                state: CacheState {
-                    metadata,
-                    globbed_inputs,
-                    std_outputs: Vec::new(),
-                    fspy_negatives: fspy,
-                },
+                state: CacheState { metadata, globbed_inputs, fspy_negatives: fspy },
             }
         }
         None => ExecutionMode::Uncached {
@@ -469,34 +462,29 @@ pub async fn execute_spawn(
         }
     };
 
-    // 7. Consume `mode`: split into (stdio_config, cache_state) so the drain
-    //    below can run once regardless of variant.
-    let (mut stdio_config, mut cache_state): (Option<StdioConfig>, Option<CacheState<'_>>) =
-        match mode {
-            ExecutionMode::Cached { stdio_config, state } => (Some(stdio_config), Some(state)),
-            ExecutionMode::Uncached { stdio_config } => (stdio_config, None),
-        };
+    // 7. Consume `mode`: pair the `StdioConfig` with an optional capture
+    //    buffer as a `PipeIo`, and carry `CacheState` separately for the
+    //    cache-update phase.
+    let (mut pipe_io, cache_state): (Option<PipeIo>, Option<CacheState<'_>>) = match mode {
+        ExecutionMode::Cached { stdio_config, state } => {
+            (Some(PipeIo { stdio_config, capture: Some(Vec::new()) }), Some(state))
+        }
+        ExecutionMode::Uncached { stdio_config: Some(stdio_config) } => {
+            (Some(PipeIo { stdio_config, capture: None }), None)
+        }
+        ExecutionMode::Uncached { stdio_config: None } => (None, None),
+    };
 
-    // Drain stdout/stderr when piped; capture into `state.std_outputs` when
-    // caching is on. (`stdio_config` is `None` only in the inherited-uncached
-    // case.)
-    if let Some(stdio_config) = &mut stdio_config {
+    // Drain stdout/stderr when piped. `pipe_io` is `None` only in the
+    // inherited-uncached case.
+    if let Some(pipe_io) = &mut pipe_io {
         let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
         let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        let capture = cache_state.as_mut().map(|s| &mut s.std_outputs);
         #[expect(
             clippy::large_futures,
             reason = "pipe_stdio streams child I/O and creates a large future"
         )]
-        let pipe_result = pipe_stdio(
-            stdout,
-            stderr,
-            &mut *stdio_config.stdout_writer,
-            &mut *stdio_config.stderr_writer,
-            capture,
-            fast_fail_token.clone(),
-        )
-        .await;
+        let pipe_result = pipe_stdio(stdout, stderr, pipe_io, fast_fail_token.clone()).await;
         if let Err(err) = pipe_result {
             // Cancel so `child.wait` kills the child instead of orphaning it.
             fast_fail_token.cancel();
@@ -524,10 +512,15 @@ pub async fn execute_spawn(
     };
     let duration = start.elapsed();
 
+    // Capture buffer lives in `PipeIo` during drain; pull it back out now so
+    // cache update can own the captured stdout/stderr.
+    let captured_outputs = pipe_io.and_then(|io| io.capture);
+
     // 9. Cache update (only when we were in `Cached` mode). Errors during cache
     //    update are reported but do not affect the exit status we return.
     let (cache_update_status, cache_error) = if let Some(state) = cache_state {
-        let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
+        let CacheState { metadata, globbed_inputs, fspy_negatives } = state;
+        let std_outputs = captured_outputs.unwrap_or_default();
 
         // Normalize fspy accesses. `zip` gives `Some` iff fspy was enabled
         // (both outcome.path_accesses and fspy_negatives are Some together).

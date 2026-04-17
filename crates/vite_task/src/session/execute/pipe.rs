@@ -1,7 +1,5 @@
 //! Drain child stdout/stderr concurrently to writers, with optional capture.
 
-use std::io::Write;
-
 use serde::Serialize;
 use tokio::{
     io::AsyncReadExt as _,
@@ -9,6 +7,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use wincode::{SchemaRead, SchemaWrite};
+
+use crate::session::reporter::StdioConfig;
 
 /// Output kind for stdout/stderr
 #[derive(Debug, PartialEq, Eq, Clone, Copy, SchemaWrite, SchemaRead, Serialize)]
@@ -24,11 +24,18 @@ pub struct StdOutput {
     pub content: Vec<u8>,
 }
 
-/// Drain the child's stdout/stderr concurrently.
+/// Inputs for [`pipe_stdio`]: the reporter's writers plus an optional capture
+/// buffer. When `capture` is `Some`, chunks are appended there for cache replay.
+pub struct PipeIo {
+    pub stdio_config: StdioConfig,
+    pub capture: Option<Vec<StdOutput>>,
+}
+
+/// Drain the child's stdout/stderr concurrently into `io`.
 ///
-/// Bytes are written through to `stdout_writer` / `stderr_writer` in real time
-/// and, when `capture` is provided, also appended with adjacent same-kind chunks
-/// coalesced (for cache replay).
+/// Bytes are written through `io.stdio_config`'s writers in real time and,
+/// when `io.capture` is `Some`, also appended (with adjacent same-kind chunks
+/// coalesced) for cache replay.
 ///
 /// On cancellation: returns `Ok(())` without killing the child — the caller
 /// drives the child's cancellation-aware `wait` future next, which observes the
@@ -38,11 +45,11 @@ pub struct StdOutput {
 pub async fn pipe_stdio(
     mut stdout: ChildStdout,
     mut stderr: ChildStderr,
-    stdout_writer: &mut dyn Write,
-    stderr_writer: &mut dyn Write,
-    mut capture: Option<&mut Vec<StdOutput>>,
+    io: &mut PipeIo,
     cancellation_token: CancellationToken,
 ) -> std::io::Result<()> {
+    use std::io::Write as _;
+
     let mut stdout_buf = [0u8; 8192];
     let mut stderr_buf = [0u8; 8192];
     let mut stdout_done = false;
@@ -58,9 +65,9 @@ pub async fn pipe_stdio(
                     0 => stdout_done = true,
                     n => {
                         let bytes = &stdout_buf[..n];
-                        stdout_writer.write_all(bytes)?;
-                        stdout_writer.flush()?;
-                        if let Some(capture) = capture.as_deref_mut() {
+                        io.stdio_config.stdout_writer.write_all(bytes)?;
+                        io.stdio_config.stdout_writer.flush()?;
+                        if let Some(capture) = io.capture.as_mut() {
                             append_output_chunk(capture, OutputKind::StdOut, bytes);
                         }
                     }
@@ -71,9 +78,9 @@ pub async fn pipe_stdio(
                     0 => stderr_done = true,
                     n => {
                         let bytes = &stderr_buf[..n];
-                        stderr_writer.write_all(bytes)?;
-                        stderr_writer.flush()?;
-                        if let Some(capture) = capture.as_deref_mut() {
+                        io.stdio_config.stderr_writer.write_all(bytes)?;
+                        io.stdio_config.stderr_writer.flush()?;
+                        if let Some(capture) = io.capture.as_mut() {
                             append_output_chunk(capture, OutputKind::StdErr, bytes);
                         }
                     }
