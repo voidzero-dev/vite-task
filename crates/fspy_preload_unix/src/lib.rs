@@ -2,7 +2,7 @@
 // Compile as an empty crate to avoid build failures from missing libc symbols.
 #![cfg_attr(all(not(target_os = "android"), not(target_env = "musl")), feature(c_variadic))]
 
-#[cfg(all(target_os = "linux", not(target_env = "musl")))]
+#[cfg(all(unix, not(target_os = "android"), not(target_env = "musl")))]
 mod client;
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
