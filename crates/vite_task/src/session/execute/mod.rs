@@ -261,15 +261,10 @@ impl ExecutionContext<'_> {
 ///   that output can be captured for replay).
 enum ExecutionMode<'a> {
     Cached {
-        metadata: &'a CacheMetadata,
-        globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+        /// Consumed during drain; not needed for the cache update.
         stdio_config: StdioConfig,
-        /// Captured stdout/stderr chunks flow here during drain for cache replay.
-        std_outputs: Vec<StdOutput>,
-        /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
-        /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
-        /// tracked accesses. `None` means fspy tracking is off for this task.
-        fspy: Option<Vec<wax::Glob<'static>>>,
+        /// Carried through drain into the cache-update phase.
+        state: CacheState<'a>,
     },
     Uncached {
         /// `Some` iff the reporter suggested piped stdio. `None` means the
@@ -280,12 +275,17 @@ enum ExecutionMode<'a> {
     },
 }
 
-/// Cached-only state extracted from [`ExecutionMode::Cached`] after the drain
-/// phase, carried into the cache-update phase.
+/// Cached-only state carried from mode construction through drain into the
+/// cache-update phase. `std_outputs` is written during drain; the other fields
+/// are read during cache update.
 struct CacheState<'a> {
     metadata: &'a CacheMetadata,
     globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    /// Captured stdout/stderr chunks flow here during drain for cache replay.
     std_outputs: Vec<StdOutput>,
+    /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
+    /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
+    /// tracked accesses. `None` means fspy tracking is off for this task.
     fspy_negatives: Option<Vec<wax::Glob<'static>>>,
 }
 
@@ -423,11 +423,13 @@ pub async fn execute_spawn(
                 None
             };
             ExecutionMode::Cached {
-                metadata,
-                globbed_inputs,
                 stdio_config,
-                std_outputs: Vec::new(),
-                fspy,
+                state: CacheState {
+                    metadata,
+                    globbed_inputs,
+                    std_outputs: Vec::new(),
+                    fspy_negatives: fspy,
+                },
             }
         }
         None => ExecutionMode::Uncached {
@@ -438,7 +440,7 @@ pub async fn execute_spawn(
 
     // 5. Derive the arguments for `spawn()` from the mode without consuming it.
     let (spawn_stdio, fspy_enabled) = match &mode {
-        ExecutionMode::Cached { fspy, .. } => (SpawnStdio::Piped, fspy.is_some()),
+        ExecutionMode::Cached { state, .. } => (SpawnStdio::Piped, state.fspy_negatives.is_some()),
         ExecutionMode::Uncached { stdio_config: Some(_) } => (SpawnStdio::Piped, false),
         ExecutionMode::Uncached { stdio_config: None } => (SpawnStdio::Inherited, false),
     };
@@ -470,13 +472,7 @@ pub async fn execute_spawn(
     // 7. Consume `mode`: drain pipes (if piped), and for `Cached` keep the
     //    state we'll need for the cache update.
     let cache_state: Option<CacheState<'_>> = match mode {
-        ExecutionMode::Cached {
-            metadata,
-            globbed_inputs,
-            mut stdio_config,
-            mut std_outputs,
-            fspy,
-        } => {
+        ExecutionMode::Cached { mut stdio_config, mut state } => {
             let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
             let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
             #[expect(
@@ -488,7 +484,7 @@ pub async fn execute_spawn(
                 stderr,
                 &mut *stdio_config.stdout_writer,
                 &mut *stdio_config.stderr_writer,
-                Some(&mut std_outputs),
+                Some(&mut state.std_outputs),
                 fast_fail_token.clone(),
             )
             .await;
@@ -503,7 +499,7 @@ pub async fn execute_spawn(
                 );
                 return SpawnOutcome::Failed;
             }
-            Some(CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives: fspy })
+            Some(state)
         }
         ExecutionMode::Uncached { stdio_config: Some(mut stdio_config) } => {
             let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
