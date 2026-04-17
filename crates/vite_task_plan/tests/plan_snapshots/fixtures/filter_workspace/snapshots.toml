@@ -1,0 +1,227 @@
+# Tests pnpm-style --filter package selection
+
+# pnpm: "select just a package by name"
+[[plan]]
+compact = true
+name = "filter_by_exact_name"
+args = ["run", "--filter", "@test/app", "build"]
+
+# pnpm: name pattern matching with *
+[[plan]]
+compact = true
+name = "filter_by_glob"
+args = ["run", "--filter", "@test/*", "build"]
+
+# pnpm: "select package with dependencies"
+[[plan]]
+compact = true
+name = "filter_with_dependencies"
+args = ["run", "--filter", "@test/app...", "build"]
+
+# pnpm: "select only package dependencies (excluding the package itself)"
+[[plan]]
+compact = true
+name = "filter_dependencies_only_exclude_self"
+args = ["run", "--filter", "@test/app^...", "build"]
+
+# pnpm: "select package with dependents"
+[[plan]]
+compact = true
+name = "filter_with_dependents"
+args = ["run", "--filter", "...@test/core", "build"]
+
+# pnpm: "select dependents excluding package itself"
+[[plan]]
+compact = true
+name = "filter_dependents_only_exclude_self"
+args = ["run", "--filter", "...^@test/core", "build"]
+
+# pnpm: "select package with dependencies and dependents, including dependent dependencies"
+[[plan]]
+compact = true
+name = "filter_both_deps_and_dependents"
+args = ["run", "--filter", "...@test/lib...", "build"]
+
+# pnpm Example 4: two cherry-picked packages with a dependency between them.
+# app depends on lib. Both cherry-picked (no "..."). The induced subgraph
+# still preserves the app→lib edge — lib#build runs before app#build.
+[[plan]]
+compact = true
+name = "cherry_picked_filters_respect_dependency_order"
+args = ["run", "--filter", "@test/app", "--filter", "@test/lib", "build"]
+
+# pnpm: "filter using two selectors" (independent packages)
+[[plan]]
+compact = true
+name = "multiple_filters_union"
+args = ["run", "--filter", "@test/app", "--filter", "@test/cli", "build"]
+
+# pnpm: space-separated selectors in a single --filter value
+[[plan]]
+compact = true
+name = "filter_space_separated_in_single_value"
+args = ["run", "--filter", "@test/app @test/cli", "build"]
+
+# pnpm: "select by parentDir and exclude one package by pattern"
+[[plan]]
+compact = true
+name = "filter_include_and_exclude"
+args = ["run", "--filter", "@test/app...", "--filter", "!@test/utils", "build"]
+
+# pnpm: "select all packages except one"
+[[plan]]
+compact = true
+name = "exclude_only_filter"
+args = ["run", "--filter", "!@test/core", "build"]
+
+# pnpm: "select by parentDir" — exact path, no glob
+[[plan]]
+compact = true
+name = "filter_by_directory"
+args = ["run", "--filter", "./packages/app", "build"]
+
+# pnpm silently discards `...` on unbraced path selectors (ambiguity with `..`).
+# `./packages/app...` is equivalent to `./packages/app`. Use `{./packages/app}...` for traversal.
+# Ref: https://github.com/pnpm/pnpm/issues/1651
+[[plan]]
+compact = true
+name = "filter_by_directory_ignores_trailing_dots"
+args = ["run", "--filter", "./packages/app...", "build"]
+
+# `....` = `.` + `...` — traversal discarded on unbraced path, equivalent to `--filter .`
+[[plan]]
+compact = true
+name = "filter_dot_ignores_trailing_dots_from_package"
+args = ["run", "--filter", "....", "build"]
+cwd = "packages/app"
+
+# `.....` = `..` + `...` — traversal discarded on unbraced path, equivalent to `--filter ..`
+[[plan]]
+compact = true
+name = "filter_dotdot_ignores_trailing_dots"
+args = ["run", "--filter", ".....", "build"]
+cwd = "packages/app/src"
+
+# pnpm glob-dir: one level under packages/
+[[plan]]
+compact = true
+name = "filter_by_directory_glob_star"
+args = ["run", "--filter", "./packages/*", "build"]
+
+# pnpm glob-dir: recursive under packages/
+[[plan]]
+compact = true
+name = "filter_by_directory_glob_double_star"
+args = ["run", "--filter", "./packages/**", "build"]
+
+# -t flag: current package + transitive deps (NOT equivalent to `--filter ....`
+# because pnpm discards traversal on unbraced paths; -t bypasses parse_filter).
+[[plan]]
+compact = true
+name = "transitive_flag"
+args = ["run", "-t", "build"]
+cwd = "packages/app"
+
+# -t from a subfolder inside a package — ContainingPackage walks up to find app.
+[[plan]]
+compact = true
+name = "transitive_flag_from_package_subfolder"
+args = ["run", "-t", "build"]
+cwd = "packages/app/src/components"
+
+# -t with package#task specifier = --filter package... task
+[[plan]]
+compact = true
+name = "transitive_with_package_specifier"
+args = ["run", "-t", "@test/app#build"]
+
+# recursive flag = All
+[[plan]]
+compact = true
+name = "recursive_flag"
+args = ["run", "-r", "build"]
+
+# pnpm Example 5: lib... selects {lib,core}. cli is cherry-picked.
+# ALL original edges between selected packages are preserved (induced subgraph).
+# cli→core edge IS present — cli#build waits for core#build.
+[[plan]]
+compact = true
+name = "mixed_traversal_filters"
+args = ["run", "--filter", "@test/lib...", "--filter", "@test/cli", "build"]
+
+# pnpm Example 1 (partial): packages without the task are silently skipped.
+# @test/utils has no "test" — silently skipped; app, lib, core run in order.
+[[plan]]
+compact = true
+name = "filter_deps_skips_packages_without_task"
+args = ["run", "--filter", "@test/app...", "test"]
+
+# pnpm: braced path selector — `{./path}` is equivalent to `./path` for exact directories
+[[plan]]
+compact = true
+name = "filter_by_braced_path"
+args = ["run", "--filter", "{./packages/app}", "build"]
+
+# braced path with dependency traversal — `{./path}...`
+[[plan]]
+compact = true
+name = "filter_by_braced_path_with_dependencies"
+args = ["run", "--filter", "{./packages/app}...", "build"]
+
+# braced path with dependents traversal — `...{./path}`
+[[plan]]
+compact = true
+name = "filter_by_braced_path_with_dependents"
+args = ["run", "--filter", "...{./packages/core}", "build"]
+
+# pnpm: name AND directory intersection — `pattern{./dir}` matches packages
+# whose name matches the glob AND whose directory matches the path.
+[[plan]]
+compact = true
+name = "filter_by_name_and_directory_intersection"
+args = ["run", "--filter", "@test/*{./packages/lib}", "build"]
+
+# pnpm: multiple exclusion-only filters — each exclusion subtracts from the full set.
+[[plan]]
+compact = true
+name = "multiple_exclusion_only_filters"
+args = ["run", "--filter", "!@test/app", "--filter", "!@test/core", "build"]
+
+# pnpm: excluding a package that doesn't exist — no-op, returns all packages.
+[[plan]]
+compact = true
+name = "exclude_nonexistent_package"
+args = ["run", "--filter", "!nonexistent", "build"]
+
+# script containing "vt run --filter .... build" — expanded in plan
+[[plan]]
+compact = true
+name = "nested_vt_run_with_filter_in_script"
+args = ["run", "--filter", "@test/app", "deploy"]
+
+# -w / --workspace-root: run task on workspace root package only
+[[plan]]
+compact = true
+name = "workspace_root_flag"
+args = ["run", "-w", "check"]
+
+# pnpm: -w is additive — workspace root is unioned with filtered packages.
+# Both root and app have "check", so both appear (no dependency edge between them).
+[[plan]]
+compact = true
+name = "workspace_root_with_filter"
+args = ["run", "-w", "--filter", "@test/app", "check"]
+
+# -w with -r: redundant (all packages already includes root).
+# Root, app, and core all have "check" — root appears, proving -r already covers it.
+[[plan]]
+compact = true
+name = "workspace_root_with_recursive"
+args = ["run", "-w", "-r", "check"]
+
+# -w with -t: workspace root with transitive dependencies.
+# Root depends on @test/core; both have "check", so core#check → root#check.
+[[plan]]
+compact = true
+name = "workspace_root_with_transitive"
+args = ["run", "-w", "-t", "check"]

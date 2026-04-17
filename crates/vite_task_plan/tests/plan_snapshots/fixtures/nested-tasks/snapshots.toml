@@ -1,6 +1,0 @@
-# Tests nested vt run resolution
-
-[[plan]]
-name = "nested vt run"
-args = ["run", "script2"]
-compact = true

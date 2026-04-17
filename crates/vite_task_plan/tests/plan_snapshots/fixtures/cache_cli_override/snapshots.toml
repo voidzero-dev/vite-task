@@ -1,0 +1,41 @@
+# Tests --cache and --no-cache CLI flag overriding rules
+
+# Baseline: without flags, tasks are not cached because cache.tasks is false
+[[plan]]
+name = "baseline___tasks_not_cached_when_cache_tasks_is_false"
+args = ["run", "build"]
+
+# --cache enables caching for tasks that don't have explicit cache: false
+[[plan]]
+name = "__cache_enables_task_caching_even_when_cache_tasks_is_false"
+args = ["run", "--cache", "build"]
+
+# --cache does NOT force-enable tasks with explicit cache: false
+[[plan]]
+name = "__cache_does_not_override_per_task_cache_false"
+args = ["run", "--cache", "deploy"]
+
+# --cache enables script caching even when cache.scripts is not set
+[[plan]]
+name = "__cache_enables_script_caching"
+args = ["run", "--cache", "test"]
+
+# --no-cache disables caching for everything
+[[plan]]
+name = "__no_cache_disables_task_caching"
+args = ["run", "--no-cache", "build"]
+
+# --no-cache overrides per-task cache: true
+[[plan]]
+name = "__no_cache_overrides_per_task_cache_true"
+args = ["run", "--no-cache", "check"]
+
+# --cache on task with per-task cache: true (redundant but valid)
+[[plan]]
+name = "__cache_on_task_with_per_task_cache_true_enables_caching"
+args = ["run", "--cache", "check"]
+
+# --cache and --no-cache conflict
+[[plan]]
+name = "__cache_and___no_cache_conflict"
+args = ["run", "--cache", "--no-cache", "build"]

@@ -196,6 +196,16 @@ struct SnapshotsFile {
     pub e2e_cases: Vec<E2e>,
 }
 
+/// Fixture folder names and `[[e2e]].name` values must be made of
+/// `[A-Za-z0-9_]` only so trial names round-trip through shell filters
+/// and snapshot filenames don't carry whitespace or special characters.
+fn assert_identifier_like(kind: &str, value: &str) {
+    assert!(
+        !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+        "{kind} '{value}' must contain only ASCII letters, digits, and '_'"
+    );
+}
+
 #[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
 fn load_snapshots_file(fixture_path: &std::path::Path) -> SnapshotsFile {
     let cases_toml_path = fixture_path.join("snapshots.toml");
@@ -440,12 +450,14 @@ fn main() {
             let fixture_path = Arc::<std::path::Path>::from(fixture_path);
             let fixture_name: Arc<str> =
                 Arc::from(fixture_path.file_name().unwrap().to_str().unwrap());
+            assert_identifier_like("fixture folder", &fixture_name);
             let cases_file = load_snapshots_file(&fixture_path);
             cases_file.e2e_cases.into_iter().enumerate().filter_map({
                 let fixture_path = Arc::clone(&fixture_path);
                 let fixture_name = Arc::clone(&fixture_name);
                 let tmp_dir_path = tmp_dir_path.clone();
                 move |(case_index, e2e)| {
+                    assert_identifier_like("e2e case name", e2e.name.as_str());
                     // Skip cases whose platform filter doesn't match this build.
                     if let Some(platform) = &e2e.platform {
                         let should_run = match platform.as_str() {

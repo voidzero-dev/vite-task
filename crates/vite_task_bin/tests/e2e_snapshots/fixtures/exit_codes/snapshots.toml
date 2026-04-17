@@ -1,0 +1,24 @@
+# Tests exit code behavior for task failures
+
+[[e2e]]
+name = "single_task_failure_returns_task_exit_code"
+steps = [{ argv = ["vt", "run", "pkg-a#fail"], comment = "exits with code 42" }]
+
+[[e2e]]
+name = "task_failure_fast_fails_remaining_tasks"
+steps = [{ argv = ["vt", "run", "-r", "fail"], comment = "pkg-a fails, pkg-b is skipped" }]
+
+[[e2e]]
+name = "dependency_failure_fast_fails_dependents"
+cwd = "packages/pkg-b"
+steps = [{ argv = ["vt", "run", "-t", "check"], comment = "pkg-a fails, pkg-b is skipped" }]
+
+[[e2e]]
+name = "chained_command_with____stops_at_first_failure"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "pkg-a#chained",
+  ], comment = "first fails with exit code 3, second should not run" },
+]

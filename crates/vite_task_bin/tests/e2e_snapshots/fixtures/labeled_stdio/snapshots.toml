@@ -1,0 +1,70 @@
+# Tests stdio behavior in labeled mode (--log=labeled).
+#
+# In labeled mode, stdio is always piped regardless of cache state:
+# - stdin is /dev/null
+# - stdout/stderr are piped through a line-prefixing writer ([pkg#task])
+#
+# `check-tty` prints whether each stdio fd is a TTY.
+# `read-stdin` reads one line from stdin and prints it.
+
+# ─── stdout/stderr: always piped (not-tty) ────────────────────
+
+[[e2e]]
+name = "single_task__cache_off__piped_stdio"
+steps = [["vt", "run", "--log=labeled", "check-tty"]]
+
+[[e2e]]
+name = "multiple_tasks__cache_off__piped_stdio"
+steps = [["vt", "run", "--log=labeled", "-r", "check-tty"]]
+
+[[e2e]]
+name = "single_task__cache_miss__piped_stdio"
+steps = [["vt", "run", "--log=labeled", "check-tty-cached"]]
+
+[[e2e]]
+name = "multiple_tasks__cache_miss__piped_stdio"
+steps = [["vt", "run", "--log=labeled", "-r", "check-tty-cached"]]
+
+# ─── cache hit → replayed with labels ─────────────────────────
+
+[[e2e]]
+name = "single_task__cache_hit__replayed"
+steps = [
+  [
+    "vt",
+    "run",
+    "--log=labeled",
+    "check-tty-cached",
+  ],
+  [
+    "vt",
+    "run",
+    "--log=labeled",
+    "check-tty-cached",
+  ],
+]
+
+[[e2e]]
+name = "multiple_tasks__cache_hit__replayed"
+steps = [
+  [
+    "vt",
+    "run",
+    "--log=labeled",
+    "-r",
+    "check-tty-cached",
+  ],
+  [
+    "vt",
+    "run",
+    "--log=labeled",
+    "-r",
+    "check-tty-cached",
+  ],
+]
+
+# ─── stdin: always null ───────────────────────────────────────
+
+[[e2e]]
+name = "stdin_is_always_null"
+steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "--log=labeled", "read-stdin"]]

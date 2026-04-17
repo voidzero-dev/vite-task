@@ -111,6 +111,16 @@ impl CompactPlan {
     }
 }
 
+/// Fixture folder names and `[[plan]].name` values must be made of
+/// `[A-Za-z0-9_]` only so trial names round-trip through shell filters
+/// and snapshot filenames don't carry whitespace or special characters.
+fn assert_identifier_like(kind: &str, value: &str) {
+    assert!(
+        !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+        "{kind} '{value}' must contain only ASCII letters, digits, and '_'"
+    );
+}
+
 #[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
 fn run_case(
     runtime: &Runtime,
@@ -118,6 +128,7 @@ fn run_case(
     fixture_path: &std::path::Path,
 ) -> Result<(), String> {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
+    assert_identifier_like("fixture folder", fixture_name);
     let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
     run_case_inner(runtime, tmpdir, fixture_path, fixture_name, &snapshots)
 }
@@ -182,7 +193,7 @@ fn run_case_inner(
                 let err_str = err_formatted.as_str().cow_replace(workspace_root_str, "<workspace>");
                 let err_str =
                     if cfg!(windows) { err_str.as_ref().cow_replace('\\', "/") } else { err_str };
-                snapshots.check_snapshot("task graph load error.snap", err_str.as_ref())?;
+                snapshots.check_snapshot("task_graph_load_error.snap", err_str.as_ref())?;
                 return Ok(());
             }
         };
@@ -190,10 +201,11 @@ fn run_case_inner(
             &vite_graph_ser::SerializeByKey(task_graph.task_graph()),
             workspace_root_str,
         );
-        snapshots.check_json_snapshot("task graph", "task graph", &task_graph_json)?;
+        snapshots.check_json_snapshot("task_graph", "task graph", &task_graph_json)?;
 
         for plan in cases_file.plan_cases {
-            let snapshot_base = vite_str::format!("query - {}", plan.name);
+            assert_identifier_like("plan case name", plan.name.as_str());
+            let snapshot_base = vite_str::format!("query_{}", plan.name);
             let compact = plan.compact;
             let args_display =
                 plan.args.iter().map(vite_str::Str::as_str).collect::<Vec<_>>().join(" ");
