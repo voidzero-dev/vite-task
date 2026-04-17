@@ -2,13 +2,13 @@
 
 # Single task, cache miss → no summary at all
 [[e2e]]
-name = "single task cache miss shows no summary"
+name = "single_task_cache_miss_shows_no_summary"
 cwd = "packages/a"
 steps = [["vt", "run", "build"]]
 
 # Single task, cache hit → compact one-liner
 [[e2e]]
-name = "single task cache hit shows compact summary"
+name = "single_task_cache_hit_shows_compact_summary"
 cwd = "packages/a"
 steps = [
   { argv = [
@@ -25,12 +25,12 @@ steps = [
 
 # Multi-task (recursive), all cache miss → compact summary with 0 hits
 [[e2e]]
-name = "multi task all cache miss shows compact summary"
+name = "multi_task_all_cache_miss_shows_compact_summary"
 steps = [["vt", "run", "-r", "build"]]
 
 # Multi-task (recursive), some cache hits → compact summary with hit count
 [[e2e]]
-name = "multi task with cache hits shows compact summary"
+name = "multi_task_with_cache_hits_shows_compact_summary"
 steps = [
   { argv = [
     "vt",
@@ -48,18 +48,18 @@ steps = [
 
 # Single task with --verbose → full detailed summary
 [[e2e]]
-name = "single task verbose shows full summary"
+name = "single_task_verbose_shows_full_summary"
 cwd = "packages/a"
 steps = [["vt", "run", "-v", "build"]]
 
 # Multi-task with --verbose → full detailed summary
 [[e2e]]
-name = "multi task verbose shows full summary"
+name = "multi_task_verbose_shows_full_summary"
 steps = [["vt", "run", "-r", "-v", "build"]]
 
 # Multi-task with --verbose after cache hits
 [[e2e]]
-name = "multi task verbose with cache hits shows full summary"
+name = "multi_task_verbose_with_cache_hits_shows_full_summary"
 steps = [
   { argv = [
     "vt",
@@ -78,12 +78,12 @@ steps = [
 
 # --last-details with no previous run
 [[e2e]]
-name = "last details with no previous run shows error"
+name = "last_details_with_no_previous_run_shows_error"
 steps = [["vt", "run", "--last-details"]]
 
 # --last-details after a run shows saved summary
 [[e2e]]
-name = "last details after run shows saved summary"
+name = "last_details_after_run_shows_saved_summary"
 cwd = "packages/a"
 steps = [
   { argv = [
@@ -100,7 +100,7 @@ steps = [
 
 # --last-details after a multi-task run
 [[e2e]]
-name = "last details after multi task run shows saved summary"
+name = "last_details_after_multi_task_run_shows_saved_summary"
 steps = [
   { argv = [
     "vt",

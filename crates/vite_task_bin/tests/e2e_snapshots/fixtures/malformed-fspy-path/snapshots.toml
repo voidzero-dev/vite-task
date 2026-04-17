@@ -2,6 +2,6 @@
 # when fspy input inference normalizes workspace-relative accesses.
 
 [[e2e]]
-name = "malformed observed path does not panic"
+name = "malformed_observed_path_does_not_panic"
 platform = "windows"
 steps = [{ argv = ["vt", "run", "read-malformed-path"], envs = [["TEMP", "."], ["TMP", "."]] }]

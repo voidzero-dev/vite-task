@@ -4,7 +4,7 @@
 
 # 1. Root package - glob matches files in root's src/
 [[e2e]]
-name = "root glob - matches src files"
+name = "root_glob_-_matches_src_files"
 steps = [
   ["vt", "run", "root-glob-test"],
   # Modify matched file
@@ -14,7 +14,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "root glob - unmatched directory"
+name = "root_glob_-_unmatched_directory"
 steps = [
   ["vt", "run", "root-glob-test"],
   # Modify file outside glob pattern
@@ -24,7 +24,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "root glob - subpackage path unmatched by relative glob"
+name = "root_glob_-_subpackage_path_unmatched_by_relative_glob"
 steps = [
   ["vt", "run", "root-glob-test"],
   # Modify file in subpackage - relative glob src/** doesn't reach packages/sub-pkg/src/
@@ -35,7 +35,7 @@ steps = [
 
 # 2. Root package with custom cwd - glob still relative to package root
 [[e2e]]
-name = "root glob with cwd - glob relative to package not cwd"
+name = "root_glob_with_cwd_-_glob_relative_to_package_not_cwd"
 steps = [
   ["vt", "run", "root-glob-with-cwd"],
   # Modify file - glob is src/** relative to package root
@@ -46,7 +46,7 @@ steps = [
 
 # 3. Subpackage - glob matches files in subpackage's src/
 [[e2e]]
-name = "subpackage glob - matches own src files"
+name = "subpackage_glob_-_matches_own_src_files"
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-test"],
   # Modify matched file in subpackage
@@ -56,7 +56,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "subpackage glob - unmatched directory in subpackage"
+name = "subpackage_glob_-_unmatched_directory_in_subpackage"
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-test"],
   # Modify file outside glob pattern
@@ -66,7 +66,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "subpackage glob - root path unmatched by relative glob"
+name = "subpackage_glob_-_root_path_unmatched_by_relative_glob"
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-test"],
   # Modify file in root - relative glob src/** is resolved from subpackage dir
@@ -77,7 +77,7 @@ steps = [
 
 # 4. Subpackage with custom cwd - glob still relative to subpackage root
 [[e2e]]
-name = "subpackage glob with cwd - glob relative to package not cwd"
+name = "subpackage_glob_with_cwd_-_glob_relative_to_package_not_cwd"
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-with-cwd"],
   # Modify file - glob is src/** relative to subpackage root

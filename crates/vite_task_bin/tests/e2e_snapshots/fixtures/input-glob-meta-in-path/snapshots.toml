@@ -3,7 +3,7 @@
 # class matching 'l', 'i', or 'b' instead of the literal directory name.
 
 [[e2e]]
-name = "cache hit then miss on file change"
+name = "cache_hit_then_miss_on_file_change"
 steps = [
   [
     "vt",

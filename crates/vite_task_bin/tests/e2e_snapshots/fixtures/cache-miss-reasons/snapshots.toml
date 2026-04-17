@@ -1,7 +1,7 @@
 # Test all cache miss reason variants
 
 [[e2e]]
-name = "env value changed"
+name = "env_value_changed"
 steps = [
   { argv = [
     "vt",
@@ -26,7 +26,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "env added"
+name = "env_added"
 steps = [
   { argv = [
     "vt",
@@ -46,7 +46,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "env removed"
+name = "env_removed"
 steps = [
   { argv = [
     "vt",
@@ -66,7 +66,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "untracked env added"
+name = "untracked_env_added"
 steps = [
   { argv = [
     "vt",
@@ -88,7 +88,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "untracked env removed"
+name = "untracked_env_removed"
 steps = [
   { argv = [
     "vtt",
@@ -117,7 +117,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "cwd changed"
+name = "cwd_changed"
 steps = [
   { argv = [
     "vt",
@@ -151,7 +151,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "inferred input changes"
+name = "inferred_input_changes"
 steps = [
   { argv = [
     "vt",
@@ -194,7 +194,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "input config changed"
+name = "input_config_changed"
 steps = [
   { argv = [
     "vt",
@@ -216,7 +216,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "glob input changes"
+name = "glob_input_changes"
 steps = [
   { argv = [
     "vt",

@@ -4,5 +4,5 @@
 # --parallel discards dependency edges, allowing both to run at once.
 
 [[e2e]]
-name = "parallel flag runs dependent tasks concurrently"
+name = "parallel_flag_runs_dependent_tasks_concurrently"
 steps = [["vt", "run", "-r", "--parallel", "build"]]

@@ -1,7 +1,7 @@
 # Tests that tasks with identical commands share cache entries
 
 [[e2e]]
-name = "shared caching input"
+name = "shared_caching_input"
 steps = [
   { argv = [
     "vt",

@@ -1,7 +1,7 @@
 # Tests cache miss when input file is modified
 
 [[e2e]]
-name = "cache hit after file modification"
+name = "cache_hit_after_file_modification"
 steps = [
   { argv = [
     "vt",

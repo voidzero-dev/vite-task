@@ -1,7 +1,7 @@
 # Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
 
 [[e2e]]
-name = "ctrl-c terminates running tasks"
+name = "ctrl-c_terminates_running_tasks"
 steps = [
   { argv = [
     "vt",
@@ -15,7 +15,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "ctrl-c terminates running tasks (cached)"
+name = "ctrl-c_terminates_running_tasks_(cached)"
 steps = [
   { argv = [
     "vt",
@@ -30,7 +30,7 @@ steps = [
 # Package b depends on a, so without --parallel they run sequentially.
 # After Ctrl-C terminates a, b should not be scheduled.
 [[e2e]]
-name = "ctrl-c prevents future tasks"
+name = "ctrl-c_prevents_future_tasks"
 steps = [
   { argv = [
     "vt",
@@ -47,7 +47,7 @@ steps = [
 # dev exits 0 after Ctrl-C but the result should not be cached.
 # The second run should be a cache miss, not a hit.
 [[e2e]]
-name = "ctrl-c prevents caching"
+name = "ctrl-c_prevents_caching"
 steps = [
   { argv = [
     "vt",

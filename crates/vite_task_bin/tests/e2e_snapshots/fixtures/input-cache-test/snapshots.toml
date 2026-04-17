@@ -4,7 +4,7 @@
 # - Files matching the glob trigger cache invalidation
 # - Files outside the glob do NOT trigger cache invalidation
 [[e2e]]
-name = "positive globs only - cache hit on second run"
+name = "positive_globs_only_-_cache_hit_on_second_run"
 steps = [
   # First run - cache miss
   ["vt", "run", "positive-globs-only"],
@@ -13,7 +13,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "positive globs only - miss on matched file change"
+name = "positive_globs_only_-_miss_on_matched_file_change"
 steps = [
   # Initial run
   ["vt", "run", "positive-globs-only"],
@@ -24,7 +24,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "positive globs only - hit on unmatched file change"
+name = "positive_globs_only_-_hit_on_unmatched_file_change"
 steps = [
   # Initial run
   ["vt", "run", "positive-globs-only"],
@@ -38,7 +38,7 @@ steps = [
 # - File read by command but NOT matched by glob should NOT be fingerprinted
 # - This tests that inference is truly disabled when only explicit globs are used
 [[e2e]]
-name = "positive globs - hit on read but unmatched file"
+name = "positive_globs_-_hit_on_read_but_unmatched_file"
 steps = [
   # Initial run - reads both src/main.ts and src/utils.ts
   ["vt", "run", "positive-globs-reads-unmatched"],
@@ -52,7 +52,7 @@ steps = [
 # - Files matching positive but NOT negative trigger invalidation
 # - Files matching negative glob are excluded
 [[e2e]]
-name = "positive negative globs - miss on non-excluded file"
+name = "positive_negative_globs_-_miss_on_non-excluded_file"
 steps = [
   # Initial run
   ["vt", "run", "positive-negative-globs"],
@@ -63,7 +63,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "positive negative globs - hit on excluded file"
+name = "positive_negative_globs_-_hit_on_excluded_file"
 steps = [
   # Initial run
   ["vt", "run", "positive-negative-globs"],
@@ -77,7 +77,7 @@ steps = [
 # - Files read by the command trigger invalidation (fspy inference)
 # - Files NOT read by the command do NOT trigger invalidation
 [[e2e]]
-name = "auto only - miss on inferred file change"
+name = "auto_only_-_miss_on_inferred_file_change"
 steps = [
   # Initial run - reads src/main.ts
   ["vt", "run", "auto-only"],
@@ -88,7 +88,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "auto only - hit on non-inferred file change"
+name = "auto_only_-_hit_on_non-inferred_file_change"
 steps = [
   # Initial run - reads src/main.ts (NOT utils.ts)
   ["vt", "run", "auto-only"],
@@ -102,7 +102,7 @@ steps = [
 # - Inferred files are tracked, but negative globs filter them out
 # - Files in excluded directories don't trigger invalidation even if read
 [[e2e]]
-name = "auto with negative - hit on excluded inferred file"
+name = "auto_with_negative_-_hit_on_excluded_inferred_file"
 steps = [
   # Initial run - reads both src/main.ts and dist/output.js
   ["vt", "run", "auto-with-negative"],
@@ -113,7 +113,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "auto with negative - miss on non-excluded inferred file"
+name = "auto_with_negative_-_miss_on_non-excluded_inferred_file"
 steps = [
   # Initial run
   ["vt", "run", "auto-with-negative"],
@@ -127,7 +127,7 @@ steps = [
 # - Explicit globs AND inferred files are both tracked
 # - Negative globs apply to both explicit and inferred input
 [[e2e]]
-name = "positive auto negative - miss on explicit glob file"
+name = "positive_auto_negative_-_miss_on_explicit_glob_file"
 steps = [
   # Initial run
   ["vt", "run", "positive-auto-negative"],
@@ -138,7 +138,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "positive auto negative - miss on inferred file"
+name = "positive_auto_negative_-_miss_on_inferred_file"
 steps = [
   # Initial run
   ["vt", "run", "positive-auto-negative"],
@@ -149,7 +149,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "positive auto negative - hit on excluded file"
+name = "positive_auto_negative_-_hit_on_excluded_file"
 steps = [
   # Initial run
   ["vt", "run", "positive-auto-negative"],
@@ -163,7 +163,7 @@ steps = [
 # - No file changes affect the cache
 # - Only command/env changes trigger cache invalidation
 [[e2e]]
-name = "empty input - hit despite file changes"
+name = "empty_input_-_hit_despite_file_changes"
 steps = [
   # Initial run
   ["vt", "run", "empty-inputs"],
@@ -174,7 +174,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "empty input - miss on command change"
+name = "empty_input_-_miss_on_command_change"
 steps = [
   # Initial run
   [
@@ -202,14 +202,14 @@ steps = [
 # - FSPY=1 is set when fspy is enabled (includes_auto is true)
 # - FSPY is NOT set when fspy is disabled (explicit globs only)
 [[e2e]]
-name = "fspy env - set when auto inference enabled"
+name = "fspy_env_-_set_when_auto_inference_enabled"
 steps = [
   # Run task with auto inference - should see FSPY=1
   ["vt", "run", "check-fspy-env-with-auto"],
 ]
 
 [[e2e]]
-name = "fspy env - not set when auto inference disabled"
+name = "fspy_env_-_not_set_when_auto_inference_disabled"
 steps = [
   # Run task without auto inference - should see (undefined)
   ["vt", "run", "check-fspy-env-without-auto"],
@@ -220,7 +220,7 @@ steps = [
 # - Direct and nested file changes trigger cache invalidation
 # - Files outside the directory do NOT trigger cache invalidation
 [[e2e]]
-name = "folder slash input - miss on direct and nested file changes"
+name = "folder_slash_input_-_miss_on_direct_and_nested_file_changes"
 steps = [
   ["vt", "run", "folder-slash-input"],
   # Modify a direct file in src/
@@ -237,7 +237,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "folder slash input - hit on file outside directory"
+name = "folder_slash_input_-_hit_on_file_outside_directory"
 steps = [
   ["vt", "run", "folder-slash-input"],
   # Modify a file outside src/
@@ -250,7 +250,7 @@ steps = [
 # - A bare directory name matches nothing (directories are not files)
 # - File changes inside the folder should NOT trigger cache invalidation
 [[e2e]]
-name = "folder input - hit despite file changes and folder deletion"
+name = "folder_input_-_hit_despite_file_changes_and_folder_deletion"
 steps = [
   ["vt", "run", "folder-input"],
   # Modify a file inside the folder

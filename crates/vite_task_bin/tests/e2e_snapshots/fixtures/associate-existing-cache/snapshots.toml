@@ -1,7 +1,7 @@
 # Tests that tasks with identical commands share cache
 
 [[e2e]]
-name = "associate existing cache"
+name = "associate_existing_cache"
 steps = [
   { argv = [
     "vt",

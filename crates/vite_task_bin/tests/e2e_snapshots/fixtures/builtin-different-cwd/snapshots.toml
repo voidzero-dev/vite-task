@@ -1,7 +1,7 @@
 # Tests that synthetic tasks have separate cache per cwd
 
 [[e2e]]
-name = "builtin different cwd"
+name = "builtin_different_cwd"
 steps = [
   { argv = [
     "vt",

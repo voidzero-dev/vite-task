@@ -1,7 +1,7 @@
 # Tests cache behavior when command changes partially
 
 [[e2e]]
-name = "cache miss command change"
+name = "cache_miss_command_change"
 steps = [
   { argv = [
     "vt",

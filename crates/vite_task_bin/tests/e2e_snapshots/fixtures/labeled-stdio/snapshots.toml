@@ -10,25 +10,25 @@
 # ─── stdout/stderr: always piped (not-tty) ────────────────────
 
 [[e2e]]
-name = "single task, cache off, piped stdio"
+name = "single_task,_cache_off,_piped_stdio"
 steps = [["vt", "run", "--log=labeled", "check-tty"]]
 
 [[e2e]]
-name = "multiple tasks, cache off, piped stdio"
+name = "multiple_tasks,_cache_off,_piped_stdio"
 steps = [["vt", "run", "--log=labeled", "-r", "check-tty"]]
 
 [[e2e]]
-name = "single task, cache miss, piped stdio"
+name = "single_task,_cache_miss,_piped_stdio"
 steps = [["vt", "run", "--log=labeled", "check-tty-cached"]]
 
 [[e2e]]
-name = "multiple tasks, cache miss, piped stdio"
+name = "multiple_tasks,_cache_miss,_piped_stdio"
 steps = [["vt", "run", "--log=labeled", "-r", "check-tty-cached"]]
 
 # ─── cache hit → replayed with labels ─────────────────────────
 
 [[e2e]]
-name = "single task, cache hit, replayed"
+name = "single_task,_cache_hit,_replayed"
 steps = [
   [
     "vt",
@@ -45,7 +45,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "multiple tasks, cache hit, replayed"
+name = "multiple_tasks,_cache_hit,_replayed"
 steps = [
   [
     "vt",
@@ -66,5 +66,5 @@ steps = [
 # ─── stdin: always null ───────────────────────────────────────
 
 [[e2e]]
-name = "stdin is always null"
+name = "stdin_is_always_null"
 steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "--log=labeled", "read-stdin"]]

@@ -1,7 +1,7 @@
 # Tests that cache: false in task config disables caching
 
 [[e2e]]
-name = "task with cache disabled"
+name = "task_with_cache_disabled"
 steps = [
   { argv = [
     "vt",
@@ -16,7 +16,7 @@ steps = [
 ]
 
 [[e2e]]
-name = "task with cache enabled"
+name = "task_with_cache_enabled"
 steps = [
   { argv = [
     "vt",

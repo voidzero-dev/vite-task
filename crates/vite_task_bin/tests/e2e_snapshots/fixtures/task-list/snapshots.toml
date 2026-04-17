@@ -1,14 +1,14 @@
 [[e2e]]
-name = "list tasks from package dir"
+name = "list_tasks_from_package_dir"
 cwd = "packages/app"
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
 
 [[e2e]]
-name = "list tasks from workspace root"
+name = "list_tasks_from_workspace_root"
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
 
 [[e2e]]
-name = "vt run in script"
+name = "vt_run_in_script"
 steps = [
   { argv = [
     "vt",

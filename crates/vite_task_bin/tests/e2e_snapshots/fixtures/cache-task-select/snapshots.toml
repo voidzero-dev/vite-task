@@ -1,5 +1,5 @@
 [[e2e]]
-name = "cache hit with interactive selector and --cache"
+name = "cache_hit_with_interactive_selector_and_--cache"
 steps = [
   { argv = [
     "vt",

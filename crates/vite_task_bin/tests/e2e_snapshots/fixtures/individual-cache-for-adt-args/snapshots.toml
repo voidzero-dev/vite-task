@@ -1,7 +1,7 @@
 # Tests that different extra args get separate cache entries
 
 [[e2e]]
-name = "individual cache for extra args"
+name = "individual_cache_for_extra_args"
 steps = [
   { argv = [
     "vt",
