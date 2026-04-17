@@ -1,9 +1,0 @@
-> vt run positive-globs-only
-$ vtt print-file src/main.ts
-export const main = 'initial';
-> vt run positive-globs-only
-$ vtt print-file src/main.ts ◉ cache hit, replaying
-export const main = 'initial';
-
----
-vt run: cache hit.

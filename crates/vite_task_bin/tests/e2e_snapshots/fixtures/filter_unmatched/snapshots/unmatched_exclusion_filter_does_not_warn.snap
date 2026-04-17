@@ -1,3 +1,0 @@
-> vt run --filter @test/app --filter !nonexistent build
-~/packages/app$ vtt print built-app
-built-app

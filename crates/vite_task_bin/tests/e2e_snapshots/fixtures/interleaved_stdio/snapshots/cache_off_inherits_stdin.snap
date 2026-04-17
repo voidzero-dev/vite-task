@@ -1,3 +1,0 @@
-> vtt pipe-stdin from-stdin -- vt run read-stdin
-$ vtt read-stdin ⊘ cache disabled
-from-stdin

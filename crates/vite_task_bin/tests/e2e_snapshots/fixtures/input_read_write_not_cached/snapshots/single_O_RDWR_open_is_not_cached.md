@@ -1,0 +1,19 @@
+# single_O_RDWR_open_is_not_cached
+
+## `vt run task`
+
+```
+~/packages/touch-pkg$ vtt touch-file src/data.txt
+
+---
+vt run: @test/touch-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)
+```
+
+## `vt run task`
+
+```
+~/packages/touch-pkg$ vtt touch-file src/data.txt
+
+---
+vt run: @test/touch-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)
+```

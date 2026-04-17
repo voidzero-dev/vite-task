@@ -1,0 +1,43 @@
+# builtin_different_cwd
+
+## `vt run cwd1`
+
+cache miss in folder1
+
+```
+~/folder1$ vt tool print-cwd
+<workspace>/folder1
+```
+
+## `vt run cwd2`
+
+cache miss in folder2 (different cwd)
+
+```
+~/folder2$ vt tool print-cwd
+<workspace>/folder2
+```
+
+## `vt run cwd1`
+
+cache hit in folder1
+
+```
+~/folder1$ vt tool print-cwd ◉ cache hit, replaying
+<workspace>/folder1
+
+---
+vt run: cache hit.
+```
+
+## `vt run cwd2`
+
+cache hit in folder2
+
+```
+~/folder2$ vt tool print-cwd ◉ cache hit, replaying
+<workspace>/folder2
+
+---
+vt run: cache hit.
+```

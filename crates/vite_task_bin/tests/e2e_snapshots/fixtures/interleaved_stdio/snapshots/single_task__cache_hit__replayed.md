@@ -1,0 +1,22 @@
+# single_task__cache_hit__replayed
+
+## `vt run check-tty-cached`
+
+```
+$ vtt check-tty
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+```
+
+## `vt run check-tty-cached`
+
+```
+$ vtt check-tty ◉ cache hit, replaying
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+---
+vt run: cache hit.
+```

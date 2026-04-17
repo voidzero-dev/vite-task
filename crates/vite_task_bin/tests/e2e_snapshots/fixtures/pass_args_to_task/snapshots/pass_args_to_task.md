@@ -1,0 +1,29 @@
+# pass_args_to_task
+
+## `vt run echo --help`
+
+```
+$ echo --help ⊘ cache disabled
+--help
+```
+
+## `vt run echo --version`
+
+```
+$ echo --version ⊘ cache disabled
+--version
+```
+
+## `vt run echo -v`
+
+```
+$ echo -v ⊘ cache disabled
+-v
+```
+
+## `vt run echo -a`
+
+```
+$ echo -a ⊘ cache disabled
+-a
+```

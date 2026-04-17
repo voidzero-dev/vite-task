@@ -1,0 +1,12 @@
+# independent_tasks_run_concurrently
+
+## `vt run -r build`
+
+```
+~/packages/a$ vtt barrier ../../.barrier sync 2 ⊘ cache disabled
+~/packages/b$ vtt barrier ../../.barrier sync 2 ⊘ cache disabled
+
+
+---
+vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+```

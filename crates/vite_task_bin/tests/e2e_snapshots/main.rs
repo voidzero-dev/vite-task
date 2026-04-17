@@ -56,9 +56,11 @@ impl Step {
         }
     }
 
-    /// Format as a shell-like display string for snapshots (e.g. `MY_ENV=1 vt run test # cache miss`).
+    /// Shell-escaped command line including any env-var prefix, without the
+    /// comment (e.g. `MY_ENV=1 vt run test`). The comment is surfaced
+    /// separately by [`Self::comment`].
     #[expect(clippy::disallowed_types, reason = "String required by join/format")]
-    fn display_command(&self) -> String {
+    fn display_command_line(&self) -> String {
         let argv_str = self
             .argv()
             .iter()
@@ -81,11 +83,15 @@ impl Step {
                     parts.push_str(vite_str::format!("{k}={v} ").as_str());
                 }
                 parts.push_str(&argv_str);
-                if let Some(comment) = &config.comment {
-                    parts.push_str(vite_str::format!(" # {comment}").as_str());
-                }
                 parts
             }
+        }
+    }
+
+    fn comment(&self) -> Option<&str> {
+        match self {
+            Self::Detailed(config) => config.comment.as_deref(),
+            Self::Simple(_) => None,
         }
     }
 
@@ -224,6 +230,20 @@ enum TerminationState {
     TimedOut,
 }
 
+/// Append a fenced markdown block containing `body`. The opening and closing
+/// fences sit on their own lines, and trailing whitespace inside `body` is
+/// trimmed so the close fence isn't preceded by blank lines.
+#[expect(clippy::disallowed_types, reason = "String required by mutable appender")]
+fn push_fenced_block(out: &mut String, body: &str) {
+    let trimmed = body.trim_end_matches(['\n', ' ', '\t']);
+    out.push_str("```\n");
+    if !trimmed.is_empty() {
+        out.push_str(trimmed);
+        out.push('\n');
+    }
+    out.push_str("```\n");
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "e2e test runner with process management necessarily has many lines"
@@ -270,9 +290,11 @@ fn run_case(
     let e2e_stage_path_str = e2e_stage_path.as_path().to_str().unwrap();
 
     let mut e2e_outputs = String::new();
+    e2e_outputs.push_str(vite_str::format!("# {}\n", e2e.name).as_str());
     {
         for step in &e2e.steps {
-            let step_display = step.display_command();
+            let step_display = step.display_command_line();
+            let step_comment = step.comment().map(str::to_owned);
 
             let argv = step.argv();
 
@@ -316,7 +338,7 @@ fn run_case(
                         Interaction::ExpectMilestone(expect) => {
                             output_for_thread.lock().unwrap().push_str(
                                 vite_str::format!(
-                                    "@ expect-milestone: {}\n",
+                                    "**→ expect-milestone:** `{}`\n\n",
                                     expect.expect_milestone
                                 )
                                 .as_str(),
@@ -324,21 +346,23 @@ fn run_case(
                             let milestone_screen =
                                 terminal.reader.expect_milestone(expect.expect_milestone.as_str());
                             let mut output = output_for_thread.lock().unwrap();
-                            output.push_str(&milestone_screen);
+                            push_fenced_block(&mut output, &milestone_screen);
                             output.push('\n');
                         }
                         Interaction::Write(write) => {
-                            output_for_thread
-                                .lock()
-                                .unwrap()
-                                .push_str(vite_str::format!("@ write: {}\n", write.write).as_str());
+                            output_for_thread.lock().unwrap().push_str(
+                                vite_str::format!("**← write:** `{}`\n\n", write.write).as_str(),
+                            );
                             terminal.writer.write_all(write.write.as_str().as_bytes()).unwrap();
                             terminal.writer.flush().unwrap();
                         }
                         Interaction::WriteLine(write_line) => {
                             output_for_thread.lock().unwrap().push_str(
-                                vite_str::format!("@ write-line: {}\n", write_line.write_line)
-                                    .as_str(),
+                                vite_str::format!(
+                                    "**← write-line:** `{}`\n\n",
+                                    write_line.write_line
+                                )
+                                .as_str(),
                             );
                             terminal
                                 .writer
@@ -347,10 +371,9 @@ fn run_case(
                         }
                         Interaction::WriteKey(write_key) => {
                             let key_name = write_key.write_key.as_str();
-                            output_for_thread
-                                .lock()
-                                .unwrap()
-                                .push_str(vite_str::format!("@ write-key: {key_name}\n").as_str());
+                            output_for_thread.lock().unwrap().push_str(
+                                vite_str::format!("**← write-key:** `{key_name}`\n\n").as_str(),
+                            );
                             terminal.writer.write_all(write_key.write_key.bytes()).unwrap();
                             terminal.writer.flush().unwrap();
                         }
@@ -362,10 +385,7 @@ fn run_case(
 
                 {
                     let mut output = output_for_thread.lock().unwrap();
-                    if !output.is_empty() && !output.ends_with('\n') {
-                        output.push('\n');
-                    }
-                    output.push_str(&screen);
+                    push_fenced_block(&mut output, &screen);
                 }
 
                 let _ = tx.send(i64::from(status.exit_code()));
@@ -386,24 +406,32 @@ fn run_case(
                 }
             };
 
-            // Format output
+            // Blank line separator before every `##` (between the file's `#`
+            // heading and the first step, and between consecutive steps).
+            e2e_outputs.push('\n');
+
+            e2e_outputs.push_str("## `");
+            e2e_outputs.push_str(&step_display);
+            e2e_outputs.push_str("`\n\n");
+
+            if let Some(comment) = &step_comment {
+                e2e_outputs.push_str(comment);
+                e2e_outputs.push_str("\n\n");
+            }
+
             match &termination_state {
                 TerminationState::TimedOut => {
-                    e2e_outputs.push_str("[timeout]");
+                    e2e_outputs.push_str("**Exit code:** timeout\n\n");
                 }
                 TerminationState::Exited(exit_code) => {
                     if *exit_code != 0 {
-                        e2e_outputs.push_str(vite_str::format!("[{exit_code}]").as_str());
+                        e2e_outputs
+                            .push_str(vite_str::format!("**Exit code:** {exit_code}\n\n").as_str());
                     }
                 }
             }
 
-            e2e_outputs.push_str("> ");
-            e2e_outputs.push_str(&step_display);
-            e2e_outputs.push('\n');
-
             e2e_outputs.push_str(&redact_e2e_output(output, e2e_stage_path_str));
-            e2e_outputs.push('\n');
 
             // Skip remaining steps if timed out
             if matches!(termination_state, TerminationState::TimedOut) {
@@ -411,7 +439,7 @@ fn run_case(
             }
         }
     }
-    snapshots.check_snapshot(vite_str::format!("{}.snap", e2e.name).as_str(), &e2e_outputs)?;
+    snapshots.check_snapshot(vite_str::format!("{}.md", e2e.name).as_str(), &e2e_outputs)?;
     Ok(())
 }
 

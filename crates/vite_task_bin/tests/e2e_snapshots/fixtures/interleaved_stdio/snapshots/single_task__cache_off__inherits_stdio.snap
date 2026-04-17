@@ -1,5 +1,0 @@
-> vt run check-tty
-$ vtt check-tty ⊘ cache disabled
-stdin:tty
-stdout:tty
-stderr:tty

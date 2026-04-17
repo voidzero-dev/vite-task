@@ -1,0 +1,9 @@
+# unmatched_glob_filter_warns
+
+## `vt run --filter @test/app --filter @nope/* build`
+
+```
+No packages matched the filter: @nope/*
+~/packages/app$ vtt print built-app
+built-app
+```

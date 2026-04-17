@@ -1,3 +1,0 @@
-> vt run check-fspy-env-without-auto
-$ vtt print-env FSPY
-(undefined)

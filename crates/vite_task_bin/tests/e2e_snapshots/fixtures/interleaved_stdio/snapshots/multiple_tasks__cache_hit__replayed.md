@@ -1,0 +1,35 @@
+# multiple_tasks__cache_hit__replayed
+
+## `vt run -r check-tty-cached`
+
+```
+~/packages/other$ vtt check-tty
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+$ vtt check-tty
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+---
+vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+```
+
+## `vt run -r check-tty-cached`
+
+```
+~/packages/other$ vtt check-tty ◉ cache hit, replaying
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+$ vtt check-tty ◉ cache hit, replaying
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+
+---
+vt run: 2/2 cache hit (100%). (Run `vt run --last-details` for full details)
+```

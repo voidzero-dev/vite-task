@@ -1,0 +1,12 @@
+# list_tasks_from_package_dir
+
+## `vtt pipe-stdin -- vt run`
+
+```
+  build: echo build app
+  lint: echo lint app
+  test: echo test app
+  lib#build: echo build lib
+  task-list-test#hello: echo hello from root
+  task-list-test#list-tasks: vt run
+```

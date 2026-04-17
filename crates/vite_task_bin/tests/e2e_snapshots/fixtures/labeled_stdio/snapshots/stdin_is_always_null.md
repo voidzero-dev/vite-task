@@ -1,0 +1,7 @@
+# stdin_is_always_null
+
+## `vtt pipe-stdin from-stdin -- vt run --log=labeled read-stdin`
+
+```
+[labeled-stdio-test#read-stdin] $ vtt read-stdin ⊘ cache disabled
+```

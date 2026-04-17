@@ -1,0 +1,23 @@
+# positive_negative_globs___hit_on_excluded_file
+
+## `vt run positive-negative-globs`
+
+```
+$ vtt print-file src/main.ts
+export const main = 'initial';
+```
+
+## `vtt replace-file-content src/main.test.ts main modified`
+
+```
+```
+
+## `vt run positive-negative-globs`
+
+```
+$ vtt print-file src/main.ts ◉ cache hit, replaying
+export const main = 'initial';
+
+---
+vt run: cache hit.
+```

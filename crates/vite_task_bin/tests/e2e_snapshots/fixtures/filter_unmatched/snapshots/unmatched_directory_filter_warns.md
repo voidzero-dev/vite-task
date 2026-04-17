@@ -1,0 +1,9 @@
+# unmatched_directory_filter_warns
+
+## `vt run --filter @test/app --filter ./packages/nope build`
+
+```
+No packages matched the filter: ./packages/nope
+~/packages/app$ vtt print built-app
+built-app
+```

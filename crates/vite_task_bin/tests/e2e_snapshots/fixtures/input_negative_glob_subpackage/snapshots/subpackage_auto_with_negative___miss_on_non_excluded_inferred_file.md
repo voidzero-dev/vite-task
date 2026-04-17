@@ -1,0 +1,22 @@
+# subpackage_auto_with_negative___miss_on_non_excluded_inferred_file
+
+## `vt run sub-pkg#auto-with-negative`
+
+```
+~/packages/sub-pkg$ vtt print-file src/main.ts dist/output.js
+export const main = 'initial';
+// initial output
+```
+
+## `vtt replace-file-content packages/sub-pkg/src/main.ts initial modified`
+
+```
+```
+
+## `vt run sub-pkg#auto-with-negative`
+
+```
+~/packages/sub-pkg$ vtt print-file src/main.ts dist/output.js ○ cache miss: 'packages/sub-pkg/src/main.ts' modified, executing
+export const main = 'modified';
+// initial output
+```

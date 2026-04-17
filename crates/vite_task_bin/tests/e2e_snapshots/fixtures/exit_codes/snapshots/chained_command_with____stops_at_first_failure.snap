@@ -1,2 +1,0 @@
-[3]> vt run pkg-a#chained # first fails with exit code 3, second should not run
-~/packages/pkg-a$ vtt exit 3

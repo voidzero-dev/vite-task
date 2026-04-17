@@ -1,2 +1,0 @@
-[134]> vt run abort # SIGABRT -> exit code 134
-$ node -e "process.kill(process.pid, 6)"

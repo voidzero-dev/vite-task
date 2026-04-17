@@ -1,0 +1,22 @@
+# read_file_with_colon_in_name
+
+## `vt run read_colon_in_name`
+
+cache miss
+
+```
+$ vtt print-file node:fs
+node:fs: not found
+```
+
+## `vt run read_colon_in_name`
+
+cache hit
+
+```
+$ vtt print-file node:fs ◉ cache hit, replaying
+node:fs: not found
+
+---
+vt run: cache hit.
+```

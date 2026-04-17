@@ -1,0 +1,11 @@
+# single_task__cache_off__grouped_output
+
+## `vt run --log=grouped check-tty`
+
+```
+[grouped-stdio-test#check-tty] $ vtt check-tty ⊘ cache disabled
+── [grouped-stdio-test#check-tty] ──
+stdin:not-tty
+stdout:not-tty
+stderr:not-tty
+```
