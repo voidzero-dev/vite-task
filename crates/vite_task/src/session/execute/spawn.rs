@@ -7,7 +7,7 @@
 use std::{io, process::Stdio};
 
 use fspy::PathAccessIterable;
-use futures_util::{FutureExt, future::BoxFuture};
+use futures_util::{FutureExt, future::LocalBoxFuture};
 use tokio::process::{ChildStderr, ChildStdout};
 use tokio_util::sync::CancellationToken;
 use vite_task_plan::SpawnCommand;
@@ -33,7 +33,7 @@ pub enum SpawnStdio {
 pub struct ChildHandle {
     pub stdout: Option<ChildStdout>,
     pub stderr: Option<ChildStderr>,
-    pub wait: BoxFuture<'static, io::Result<ChildOutcome>>,
+    pub wait: LocalBoxFuture<'static, io::Result<ChildOutcome>>,
 }
 
 /// Result of waiting for a child to exit.
@@ -114,7 +114,7 @@ async fn spawn_fspy(
             path_accesses: Some(termination.path_accesses),
         })
     }
-    .boxed();
+    .boxed_local();
 
     Ok(ChildHandle { stdout, stderr, wait })
 }
@@ -154,7 +154,7 @@ fn spawn_tokio(
         drop(job);
         Ok(ChildOutcome { exit_status, path_accesses: None })
     }
-    .boxed();
+    .boxed_local();
 
     Ok(ChildHandle { stdout, stderr, wait })
 }
