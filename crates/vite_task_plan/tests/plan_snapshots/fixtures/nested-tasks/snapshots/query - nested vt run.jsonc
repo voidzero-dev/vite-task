@@ -1,0 +1,11 @@
+// run script2
+{
+  "#script2": {
+    "items": [
+      {
+        "#script1": []
+      }
+    ],
+    "neighbors": []
+  }
+}

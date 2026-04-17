@@ -1,0 +1,11 @@
+// run deploy
+{
+  "#deploy": {
+    "items": [
+      {
+        "packages/a#deploy": []
+      }
+    ],
+    "neighbors": []
+  }
+}

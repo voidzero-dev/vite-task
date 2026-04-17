@@ -1,7 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
 > vt run read_colon_in_name # cache miss
 $ vtt print-file node:fs
 node:fs: not found

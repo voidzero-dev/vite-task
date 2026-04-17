@@ -192,30 +192,11 @@ struct SnapshotsFile {
     pub e2e_cases: Vec<E2e>,
 }
 
-#[expect(clippy::disallowed_types, reason = "Path required by insta::glob! callback signature")]
-fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, filter: Option<&str>) {
+#[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
+fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path) -> Result<(), String> {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
-    if fixture_name.starts_with('.') {
-        return; // skip hidden files like .DS_Store
-    }
-
-    // Skip if filter doesn't match
-    if let Some(f) = filter
-        && !fixture_name.contains(f)
-    {
-        return;
-    }
-    #[expect(clippy::print_stdout, reason = "test progress output for e2e test runner")]
-    {
-        println!("{fixture_name}");
-    }
-    // Configure insta to write snapshots to fixture directory
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(fixture_path.join("snapshots"));
-    settings.set_prepend_module_to_snapshot(false);
-    settings.remove_snapshot_suffix();
-
-    settings.bind(|| run_case_inner(tmpdir, fixture_path, fixture_name));
+    let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
+    run_case_inner(tmpdir, fixture_path, fixture_name, &snapshots)
 }
 
 enum TerminationState {
@@ -229,9 +210,14 @@ enum TerminationState {
 )]
 #[expect(
     clippy::disallowed_types,
-    reason = "Path required by insta::glob! callback; String required by from_utf8_lossy and string accumulation"
+    reason = "Path required for fixture handling; String required by from_utf8_lossy and string accumulation"
 )]
-fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture_name: &str) {
+fn run_case_inner(
+    tmpdir: &AbsolutePath,
+    fixture_path: &std::path::Path,
+    fixture_name: &str,
+    snapshots: &snapshot_test::Snapshots,
+) -> Result<(), String> {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
     CopyOptions::new().copy_tree(fixture_path, stage_path.as_path()).unwrap();
@@ -278,14 +264,6 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 continue;
             }
         }
-
-        let _info_guard = if e2e.cwd.as_str().is_empty() {
-            None
-        } else {
-            let mut case_settings = insta::Settings::clone_current();
-            case_settings.set_info(&serde_json::json!({ "cwd": e2e.cwd.as_str() }));
-            Some(case_settings.bind_to_scope())
-        };
 
         let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_e2e_stage_{e2e_count}"));
         e2e_count += 1;
@@ -433,50 +411,50 @@ fn run_case_inner(tmpdir: &AbsolutePath, fixture_path: &std::path::Path, fixture
                 break;
             }
         }
-        #[expect(
-            clippy::disallowed_macros,
-            reason = "insta::assert_snapshot! internally uses std::format!"
-        )]
-        {
-            insta::assert_snapshot!(e2e.name.as_str(), e2e_outputs);
-        }
+        snapshots.check_snapshot(vite_str::format!("{}.snap", e2e.name).as_str(), &e2e_outputs)?;
     }
+    Ok(())
 }
 
+#[expect(clippy::disallowed_types, reason = "Path required for CARGO_MANIFEST_DIR path traversal")]
 fn main() {
-    let filter = std::env::args().nth(1);
-
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
-    #[expect(
-        clippy::disallowed_types,
-        reason = "Path required for CARGO_MANIFEST_DIR path traversal"
-    )]
-    let fixtures_dir = {
-        let manifest_dir =
-            std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
 
-        // Copy .node-version to the tmp dir so version manager shims can resolve the correct
-        // Node.js binary when running task commands.
-        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
-        std::fs::copy(repo_root.join(".node-version"), tmp_dir.path().join(".node-version"))
-            .unwrap();
+    // Copy .node-version to the tmp dir so version manager shims can resolve the correct
+    // Node.js binary when running task commands.
+    let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+    std::fs::copy(repo_root.join(".node-version"), tmp_dir.path().join(".node-version")).unwrap();
 
-        manifest_dir.join("tests/e2e_snapshots/fixtures")
-    };
+    let fixtures_dir = manifest_dir.join("tests/e2e_snapshots/fixtures");
 
     let mut fixture_paths = std::fs::read_dir(fixtures_dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| !n.starts_with('.')))
         .collect::<Vec<_>>();
     fixture_paths.sort();
 
-    for case_path in &fixture_paths {
-        run_case(&tmp_dir_path, case_path, filter.as_deref());
+    let mut args = libtest_mimic::Arguments::from_args();
+    // On Linux, running e2e fixtures in parallel causes PTY and signal-routing
+    // contention (ctrl-c test intermittently fails). macOS and Windows are
+    // unaffected, so only force sequential execution on Linux.
+    if cfg!(target_os = "linux") && args.test_threads.is_none() {
+        args.test_threads = Some(1);
     }
-    #[expect(clippy::print_stdout, reason = "test summary")]
-    {
-        println!("All cases passed.");
-    }
+
+    let tests: Vec<libtest_mimic::Trial> = fixture_paths
+        .into_iter()
+        .map(|fixture_path| {
+            let name = fixture_path.file_name().unwrap().to_str().unwrap().to_owned();
+            let tmp_dir_path = tmp_dir_path.clone();
+            libtest_mimic::Trial::test(name, move || {
+                run_case(&tmp_dir_path, &fixture_path).map_err(Into::into)
+            })
+        })
+        .collect();
+
+    libtest_mimic::run(&args, tests).exit();
 }

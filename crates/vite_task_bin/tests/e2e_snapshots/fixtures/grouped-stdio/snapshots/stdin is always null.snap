@@ -1,6 +1,2 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
 > vtt pipe-stdin from-stdin -- vt run --log=grouped read-stdin
 [grouped-stdio-test#read-stdin] $ vtt read-stdin ⊘ cache disabled

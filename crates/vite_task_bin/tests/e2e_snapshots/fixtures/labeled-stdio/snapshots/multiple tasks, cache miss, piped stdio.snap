@@ -1,7 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
 > vt run --log=labeled -r check-tty-cached
 [other#check-tty-cached] ~/packages/other$ vtt check-tty
 [other#check-tty-cached] stdin:not-tty

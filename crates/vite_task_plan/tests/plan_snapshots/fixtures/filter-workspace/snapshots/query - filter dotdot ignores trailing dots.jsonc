@@ -1,0 +1,4 @@
+// run --filter ..... build
+{
+  "packages/app#build": []
+}

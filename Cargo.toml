@@ -80,9 +80,9 @@ fspy_shared = { path = "crates/fspy_shared" }
 fspy_shared_unix = { path = "crates/fspy_shared_unix" }
 futures = "0.3.31"
 futures-util = "0.3.31"
-insta = "1.44.3"
 jsonc-parser = { version = "0.29.0", features = ["serde"] }
 libc = "0.2.172"
+libtest-mimic = "0.8.2"
 memmap2 = "0.9.7"
 monostate = "1.0.2"
 native_str = { path = "crates/native_str" }
@@ -118,7 +118,9 @@ serde_yml = "0.0.12"
 sha2 = "0.10.9"
 shared_memory = "0.12.4"
 shell-escape = "0.1.5"
+similar = "2.7.0"
 smallvec = { version = "2.0.0-alpha.12", features = ["std"] }
+snapshot_test = { path = "crates/snapshot_test" }
 stackalloc = "1.2.1"
 subprocess_test = { path = "crates/subprocess_test" }
 supports-color = "3.0.1"

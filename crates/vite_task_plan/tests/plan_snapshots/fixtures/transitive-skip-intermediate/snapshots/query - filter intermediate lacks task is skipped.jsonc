@@ -1,0 +1,7 @@
+// run --filter @test/top... build
+{
+  "packages/bottom#build": [],
+  "packages/top#build": [
+    "packages/bottom#build"
+  ]
+}

@@ -1,9 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
-info:
-  cwd: packages/rw-pkg
----
 > vt run -v task
 ~/packages/rw-pkg$ vtt replace-file-content src/data.txt i !
 

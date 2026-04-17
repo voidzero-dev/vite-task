@@ -1,9 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
-info:
-  cwd: packages/lib
----
 > vtt pipe-stdin -- vt run
   build: echo build lib
   lint: echo lint lib

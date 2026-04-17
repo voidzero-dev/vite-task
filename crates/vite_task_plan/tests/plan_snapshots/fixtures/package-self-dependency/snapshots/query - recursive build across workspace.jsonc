@@ -1,0 +1,4 @@
+// run -r build
+{
+  "packages/self-dep#build": []
+}

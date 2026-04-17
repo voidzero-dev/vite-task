@@ -1,0 +1,139 @@
+// task graph
+[
+  {
+    "key": [
+      "<workspace>/",
+      "echo-and-lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "echo-and-lint",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "echo Linting && vt tool print lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "PackageJsonScript"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "hello"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "hello",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vtt print-file",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "PackageJsonScript"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "lint",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vt tool print lint",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "PackageJsonScript"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "lint-and-echo"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "",
+        "task_name": "lint-and-echo",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": "vt tool print lint && echo",
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "PackageJsonScript"
+    },
+    "neighbors": []
+  }
+]

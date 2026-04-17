@@ -1,0 +1,14 @@
+// run build
+{
+  "#build": {
+    "items": [
+      {
+        "packages/a#build": [],
+        "packages/b#build": [
+          "packages/a#build"
+        ]
+      }
+    ],
+    "neighbors": []
+  }
+}

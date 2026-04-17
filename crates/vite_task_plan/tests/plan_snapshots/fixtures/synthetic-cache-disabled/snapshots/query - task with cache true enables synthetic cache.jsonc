@@ -1,0 +1,85 @@
+// run lint-with-cache
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "lint-with-cache"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/synthetic-cache-disabled",
+          "task_name": "lint-with-cache",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/synthetic-cache-disabled",
+                "task_name": "lint-with-cache",
+                "package_path": "<workspace>/"
+              },
+              "command": "vt tool print lint",
+              "and_item_index": null,
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "vtt"
+                        }
+                      },
+                      "args": [
+                        "print",
+                        "lint"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "lint-with-cache",
+                        "and_item_index": 0,
+                        "extra_args": [],
+                        "package_path": ""
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print",
+                      "lint"
+                    ],
+                    "all_envs": {
+                      "NO_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

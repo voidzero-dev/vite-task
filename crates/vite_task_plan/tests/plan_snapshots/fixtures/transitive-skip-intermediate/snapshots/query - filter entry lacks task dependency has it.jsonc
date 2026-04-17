@@ -1,0 +1,4 @@
+// run --filter @test/middle... build
+{
+  "packages/bottom#build": []
+}

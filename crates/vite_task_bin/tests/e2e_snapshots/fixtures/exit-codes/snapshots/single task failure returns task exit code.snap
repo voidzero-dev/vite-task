@@ -1,6 +1,2 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
 [42]> vt run pkg-a#fail # exits with code 42
 ~/packages/pkg-a$ vtt exit 42

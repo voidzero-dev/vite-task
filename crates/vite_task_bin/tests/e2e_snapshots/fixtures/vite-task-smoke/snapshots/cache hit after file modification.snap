@@ -1,7 +1,3 @@
----
-source: crates/vite_task_bin/tests/e2e_snapshots/main.rs
-expression: e2e_outputs
----
 > vt run test-task # cache miss
 $ echo hello ⊘ cache disabled
 hello

@@ -1,0 +1,17 @@
+// run --parallel build
+{
+  "#build": {
+    "items": [
+      {
+        "packages/a#build": [
+          "packages/b#build"
+        ],
+        "packages/b#build": [
+          "packages/c#build"
+        ],
+        "packages/c#build": []
+      }
+    ],
+    "neighbors": []
+  }
+}

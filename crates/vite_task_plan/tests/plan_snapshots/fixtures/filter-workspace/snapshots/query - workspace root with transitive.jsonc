@@ -1,0 +1,7 @@
+// run -w -t check
+{
+  "#check": [
+    "packages/core#check"
+  ],
+  "packages/core#check": []
+}

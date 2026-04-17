@@ -33,7 +33,8 @@ which = { workspace = true }
 [dev-dependencies]
 cow-utils = { workspace = true }
 cp_r = { workspace = true }
-insta = { workspace = true, features = ["glob", "json", "redactions", "filters", "ron"] }
+libtest-mimic = { workspace = true }
+snapshot_test = { workspace = true }
 pty_terminal = { workspace = true }
 pty_terminal_test = { workspace = true }
 regex = { workspace = true }
