@@ -1,5 +1,7 @@
 # folder_slash_input___hit_on_file_outside_directory
 
+Test all input configuration combinations for cache behavior
+
 ## `vt run folder-slash-input`
 
 ```

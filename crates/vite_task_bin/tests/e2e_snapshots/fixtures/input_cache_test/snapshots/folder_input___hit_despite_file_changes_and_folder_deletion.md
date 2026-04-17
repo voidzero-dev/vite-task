@@ -1,5 +1,7 @@
 # folder_input___hit_despite_file_changes_and_folder_deletion
 
+Test all input configuration combinations for cache behavior
+
 ## `vt run folder-input`
 
 ```

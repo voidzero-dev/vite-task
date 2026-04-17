@@ -1,4 +1,6 @@
-# Tests cache behavior when command changes partially
+comment = """
+Tests cache behavior when command changes partially
+"""
 
 [[e2e]]
 name = "cache_miss_command_change"

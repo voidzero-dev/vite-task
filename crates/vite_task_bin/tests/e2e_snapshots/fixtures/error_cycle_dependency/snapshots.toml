@@ -1,4 +1,6 @@
-# Tests error message for cyclic task dependencies
+comment = """
+Tests error message for cyclic task dependencies
+"""
 
 [[e2e]]
 name = "cycle_dependency_error"

@@ -1,5 +1,7 @@
 # interactive_select_from_other_package
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vt run`
 
 **→ expect-milestone:** `task-select::0`

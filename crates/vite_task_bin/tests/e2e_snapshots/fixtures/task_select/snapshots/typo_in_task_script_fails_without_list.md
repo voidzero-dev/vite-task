@@ -1,5 +1,7 @@
 # typo_in_task_script_fails_without_list
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vt run run-typo-task`
 
 **Exit code:** 1

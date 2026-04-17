@@ -1,4 +1,6 @@
-# Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+comment = """
+Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+"""
 
 [[e2e]]
 name = "ctrl_c_terminates_running_tasks"

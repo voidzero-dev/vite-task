@@ -1,5 +1,7 @@
 # no_trailing_newline
 
+Tests output handling when task has no trailing newline
+
 ## `vt run hello`
 
 runs echo -n hello

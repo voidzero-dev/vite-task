@@ -1,5 +1,7 @@
 # interactive_search_with_hash_skips_reorder
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vt run`
 
 **→ expect-milestone:** `task-select::0`

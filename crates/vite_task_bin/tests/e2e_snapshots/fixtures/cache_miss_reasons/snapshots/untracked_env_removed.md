@@ -1,5 +1,7 @@
 # untracked_env_removed
 
+Test all cache miss reason variants
+
 ## `vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "untrackedEnv": ["MY_UNTRACKED"]'`
 
 setup

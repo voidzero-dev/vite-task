@@ -1,5 +1,7 @@
 # folder_slash_input___miss_on_direct_and_nested_file_changes
 
+Test all input configuration combinations for cache behavior
+
 ## `vt run folder-slash-input`
 
 ```

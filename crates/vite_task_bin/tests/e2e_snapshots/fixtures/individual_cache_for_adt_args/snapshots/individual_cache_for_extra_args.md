@@ -1,5 +1,7 @@
 # individual_cache_for_extra_args
 
+Tests that different extra args get separate cache entries
+
 ## `vt run say a`
 
 cache miss

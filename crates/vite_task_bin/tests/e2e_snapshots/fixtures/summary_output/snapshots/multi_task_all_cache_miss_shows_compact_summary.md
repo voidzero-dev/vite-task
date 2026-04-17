@@ -1,5 +1,7 @@
 # multi_task_all_cache_miss_shows_compact_summary
 
+Tests for compact and verbose summary output
+
 ## `vt run -r build`
 
 ```

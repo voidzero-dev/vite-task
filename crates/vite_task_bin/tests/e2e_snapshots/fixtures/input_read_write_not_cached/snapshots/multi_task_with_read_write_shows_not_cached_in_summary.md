@@ -1,5 +1,8 @@
 # multi_task_with_read_write_shows_not_cached_in_summary
 
+Tests that tasks modifying their own inputs (read-write overlap) are not cached.
+vtt replace-file-content reads then writes the same file — fspy detects both.
+
 ## `vt run -r task`
 
 ```

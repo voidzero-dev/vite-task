@@ -1,4 +1,6 @@
-# Tests for unmatched --filter warnings on stderr
+comment = """
+Tests for unmatched --filter warnings on stderr
+"""
 
 # One filter matches, one doesn't → warning for the unmatched one, task still runs
 [[e2e]]

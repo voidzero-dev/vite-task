@@ -1,5 +1,7 @@
 # task_with_cache_enabled
 
+Tests that cache: false in task config disables caching
+
 ## `vt run cached-task`
 
 cache miss

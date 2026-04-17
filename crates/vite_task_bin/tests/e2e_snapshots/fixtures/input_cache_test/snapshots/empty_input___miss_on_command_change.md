@@ -1,5 +1,7 @@
 # empty_input___miss_on_command_change
 
+Test all input configuration combinations for cache behavior
+
 ## `vt run empty-inputs`
 
 ```

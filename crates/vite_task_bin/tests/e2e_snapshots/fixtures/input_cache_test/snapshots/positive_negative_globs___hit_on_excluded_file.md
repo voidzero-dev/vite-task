@@ -1,5 +1,7 @@
 # positive_negative_globs___hit_on_excluded_file
 
+Test all input configuration combinations for cache behavior
+
 ## `vt run positive-negative-globs`
 
 ```

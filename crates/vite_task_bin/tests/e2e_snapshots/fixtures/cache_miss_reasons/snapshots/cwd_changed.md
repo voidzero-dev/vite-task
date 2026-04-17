@@ -1,5 +1,7 @@
 # cwd_changed
 
+Test all cache miss reason variants
+
 ## `vt run test`
 
 cache miss

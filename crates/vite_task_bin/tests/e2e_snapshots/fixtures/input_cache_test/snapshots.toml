@@ -1,4 +1,6 @@
-# Test all input configuration combinations for cache behavior
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 
 # 1. Positive globs only: input: ["src/**/*.ts"]
 # - Files matching the glob trigger cache invalidation

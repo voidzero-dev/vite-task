@@ -1,7 +1,9 @@
-# Test that negative input globs work correctly for subpackages.
-# Bug: negative globs were matched against workspace-relative paths
-# instead of package-relative paths, so exclusions like !dist/**
-# failed for subpackages.
+comment = """
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+"""
 
 # Auto + negative in subpackage: input: [{ "auto": true }, "!dist/**"]
 # - dist/ should be excluded even though the package is a subpackage

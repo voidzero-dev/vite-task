@@ -1,5 +1,7 @@
 # env_value_changed
 
+Test all cache miss reason variants
+
 ## `MY_ENV=1 vt run test`
 
 cache miss

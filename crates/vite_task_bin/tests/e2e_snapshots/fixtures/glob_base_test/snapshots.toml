@@ -1,6 +1,8 @@
-# Test glob base directory behavior
-# Globs are relative to PACKAGE directory, NOT task cwd
-# No special cross-package filtering - just normal relative path matching
+comment = """
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+"""
 
 # 1. Root package - glob matches files in root's src/
 [[e2e]]

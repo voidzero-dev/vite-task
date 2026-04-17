@@ -1,4 +1,7 @@
-# Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
+
 [[e2e]]
 name = "non_interactive_list_tasks"
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]

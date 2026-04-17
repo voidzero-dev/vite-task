@@ -1,5 +1,7 @@
 # builtin_different_cwd
 
+Tests that synthetic tasks have separate cache per cwd
+
 ## `vt run cwd1`
 
 cache miss in folder1

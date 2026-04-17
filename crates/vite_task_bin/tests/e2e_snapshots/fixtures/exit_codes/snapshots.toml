@@ -1,4 +1,6 @@
-# Tests exit code behavior for task failures
+comment = """
+Tests exit code behavior for task failures
+"""
 
 [[e2e]]
 name = "single_task_failure_returns_task_exit_code"

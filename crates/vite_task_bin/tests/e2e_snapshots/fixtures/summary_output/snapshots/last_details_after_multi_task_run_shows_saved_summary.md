@@ -1,5 +1,7 @@
 # last_details_after_multi_task_run_shows_saved_summary
 
+Tests for compact and verbose summary output
+
 ## `vt run -r build`
 
 populate summary file

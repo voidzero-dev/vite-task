@@ -1,5 +1,7 @@
 # interactive_long_command_truncated
 
+Interactive: long commands are truncated to terminal width (no line wrapping)
+
 ## `vt run`
 
 **→ expect-milestone:** `task-select::0`

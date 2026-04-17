@@ -1,5 +1,10 @@
 # dotdot_positive_glob___miss_on_sibling_file_change
 
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+
 ## `vt run sub-pkg#dotdot-positive`
 
 ```

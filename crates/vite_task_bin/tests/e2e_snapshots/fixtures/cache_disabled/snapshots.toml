@@ -1,4 +1,6 @@
-# Tests that cache: false in task config disables caching
+comment = """
+Tests that cache: false in task config disables caching
+"""
 
 [[e2e]]
 name = "task_with_cache_disabled"

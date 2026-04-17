@@ -1,5 +1,7 @@
 # glob_input_changes
 
+Test all cache miss reason variants
+
 ## `vt run glob-test`
 
 cache miss

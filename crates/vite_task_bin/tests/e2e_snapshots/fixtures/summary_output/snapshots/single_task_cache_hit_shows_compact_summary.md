@@ -1,5 +1,7 @@
 # single_task_cache_hit_shows_compact_summary
 
+Tests for compact and verbose summary output
+
 ## `vt run build`
 
 first run, cache miss

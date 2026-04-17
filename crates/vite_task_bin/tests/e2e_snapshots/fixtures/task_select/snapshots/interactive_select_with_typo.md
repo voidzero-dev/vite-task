@@ -1,5 +1,7 @@
 # interactive_select_with_typo
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vt run buid`
 
 **→ expect-milestone:** `task-select:buid:0`

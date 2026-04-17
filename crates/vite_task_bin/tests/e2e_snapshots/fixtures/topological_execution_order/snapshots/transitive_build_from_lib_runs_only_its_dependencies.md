@@ -1,5 +1,8 @@
 # transitive_build_from_lib_runs_only_its_dependencies
 
+Tests that tasks execute in dependency (topological) order.
+Dependency chain: @topo/core <- @topo/lib <- @topo/app
+
 ## `vt run -t build`
 
 core -> lib

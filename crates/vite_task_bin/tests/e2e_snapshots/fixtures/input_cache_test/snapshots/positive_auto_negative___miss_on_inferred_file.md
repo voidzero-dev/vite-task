@@ -1,5 +1,7 @@
 # positive_auto_negative___miss_on_inferred_file
 
+Test all input configuration combinations for cache behavior
+
 ## `vt run positive-auto-negative`
 
 ```

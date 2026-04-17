@@ -1,5 +1,7 @@
 # read_file_with_colon_in_name
 
+Tests that a task name with colon works correctly with caching
+
 ## `vt run read_colon_in_name`
 
 cache miss

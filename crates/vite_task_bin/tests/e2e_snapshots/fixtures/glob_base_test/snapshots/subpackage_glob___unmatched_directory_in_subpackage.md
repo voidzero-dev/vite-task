@@ -1,5 +1,9 @@
 # subpackage_glob___unmatched_directory_in_subpackage
 
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+
 ## `vt run sub-pkg#sub-glob-test`
 
 ```

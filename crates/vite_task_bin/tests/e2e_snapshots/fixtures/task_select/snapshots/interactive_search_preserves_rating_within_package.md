@@ -1,5 +1,7 @@
 # interactive_search_preserves_rating_within_package
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vt run`
 
 **→ expect-milestone:** `task-select::0`

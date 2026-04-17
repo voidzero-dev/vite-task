@@ -1,5 +1,7 @@
 # non_interactive_list_tasks
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vtt pipe-stdin -- vt run`
 
 ```

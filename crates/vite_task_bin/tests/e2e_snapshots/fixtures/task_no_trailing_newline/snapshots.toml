@@ -1,4 +1,6 @@
-# Tests output handling when task has no trailing newline
+comment = """
+Tests output handling when task has no trailing newline
+"""
 
 [[e2e]]
 name = "no_trailing_newline"

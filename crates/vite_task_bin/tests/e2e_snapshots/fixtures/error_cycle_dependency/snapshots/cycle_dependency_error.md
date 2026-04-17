@@ -1,5 +1,7 @@
 # cycle_dependency_error
 
+Tests error message for cyclic task dependencies
+
 ## `vt run task-a`
 
 task-a -> task-b -> task-a cycle

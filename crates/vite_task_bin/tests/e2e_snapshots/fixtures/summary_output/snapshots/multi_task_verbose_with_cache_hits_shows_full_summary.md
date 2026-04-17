@@ -1,5 +1,7 @@
 # multi_task_verbose_with_cache_hits_shows_full_summary
 
+Tests for compact and verbose summary output
+
 ## `vt run -r build`
 
 first run, populate cache

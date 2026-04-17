@@ -1,5 +1,7 @@
 # ctrl_c_terminates_running_tasks
 
+Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+
 ## `vt run --no-cache @ctrl-c/a#dev`
 
 **→ expect-milestone:** `ready`

@@ -1,5 +1,7 @@
-# Tests that tasks execute in dependency (topological) order.
-# Dependency chain: @topo/core <- @topo/lib <- @topo/app
+comment = """
+Tests that tasks execute in dependency (topological) order.
+Dependency chain: @topo/core <- @topo/lib <- @topo/app
+"""
 
 [[e2e]]
 name = "recursive_build_runs_dependencies_before_dependents"

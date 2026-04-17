@@ -1,5 +1,7 @@
 # shared_caching_input
 
+Tests that tasks with identical commands share cache entries
+
 ## `vt run script1`
 
 cache miss

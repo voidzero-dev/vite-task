@@ -1,4 +1,6 @@
-# Tests for compact and verbose summary output
+comment = """
+Tests for compact and verbose summary output
+"""
 
 # Single task, cache miss → no summary at all
 [[e2e]]

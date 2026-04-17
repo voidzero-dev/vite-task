@@ -1,5 +1,7 @@
 # verbose_with_typo_enters_selector
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vt run --verbose buid`
 
 **→ expect-milestone:** `task-select:buid:0`

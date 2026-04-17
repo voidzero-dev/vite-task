@@ -1,4 +1,7 @@
-# Interactive: long commands are truncated to terminal width (no line wrapping)
+comment = """
+Interactive: long commands are truncated to terminal width (no line wrapping)
+"""
+
 [[e2e]]
 name = "interactive_long_command_truncated"
 cwd = "packages/app"

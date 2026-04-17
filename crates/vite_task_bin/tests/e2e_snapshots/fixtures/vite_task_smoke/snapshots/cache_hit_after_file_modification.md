@@ -1,5 +1,7 @@
 # cache_hit_after_file_modification
 
+Tests cache miss when input file is modified
+
 ## `vt run test-task`
 
 cache miss

@@ -1,4 +1,6 @@
-# Tests that tasks with identical commands share cache entries
+comment = """
+Tests that tasks with identical commands share cache entries
+"""
 
 [[e2e]]
 name = "shared_caching_input"

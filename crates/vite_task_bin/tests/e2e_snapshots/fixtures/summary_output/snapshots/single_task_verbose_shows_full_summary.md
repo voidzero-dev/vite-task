@@ -1,5 +1,7 @@
 # single_task_verbose_shows_full_summary
 
+Tests for compact and verbose summary output
+
 ## `vt run -v build`
 
 ```

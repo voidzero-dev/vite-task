@@ -1,5 +1,7 @@
 # cache_miss_command_change
 
+Tests cache behavior when command changes partially
+
 ## `vt run task`
 
 cache miss

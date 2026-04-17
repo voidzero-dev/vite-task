@@ -1,5 +1,7 @@
 # auto_only___hit_on_non_inferred_file_change
 
+Test all input configuration combinations for cache behavior
+
 ## `vt run auto-only`
 
 ```

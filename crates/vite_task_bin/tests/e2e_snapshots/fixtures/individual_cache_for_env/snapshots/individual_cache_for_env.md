@@ -1,5 +1,7 @@
 # individual_cache_for_env
 
+Tests that different env values get separate cache entries
+
 ## `FOO=1 vt run hello`
 
 cache miss

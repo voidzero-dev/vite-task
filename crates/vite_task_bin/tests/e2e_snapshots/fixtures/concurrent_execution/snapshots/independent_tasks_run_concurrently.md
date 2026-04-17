@@ -1,5 +1,10 @@
 # independent_tasks_run_concurrently
 
+Tests that independent tasks execute concurrently.
+Packages a and b have no dependency relationship.
+Both use a barrier that requires 2 participants — if run sequentially,
+the first would wait forever and the test would timeout.
+
 ## `vt run -r build`
 
 ```

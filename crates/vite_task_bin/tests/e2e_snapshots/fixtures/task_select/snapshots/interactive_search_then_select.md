@@ -1,5 +1,7 @@
 # interactive_search_then_select
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vt run`
 
 **→ expect-milestone:** `task-select::0`

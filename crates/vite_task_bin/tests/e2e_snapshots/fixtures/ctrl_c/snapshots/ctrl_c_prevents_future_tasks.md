@@ -1,5 +1,7 @@
 # ctrl_c_prevents_future_tasks
 
+Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+
 ## `vt run -r --no-cache dev`
 
 **→ expect-milestone:** `ready`

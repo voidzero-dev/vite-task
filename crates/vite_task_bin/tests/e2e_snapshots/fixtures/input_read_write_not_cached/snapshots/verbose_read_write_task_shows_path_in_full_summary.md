@@ -1,5 +1,8 @@
 # verbose_read_write_task_shows_path_in_full_summary
 
+Tests that tasks modifying their own inputs (read-write overlap) are not cached.
+vtt replace-file-content reads then writes the same file — fspy detects both.
+
 ## `vt run -v task`
 
 ```

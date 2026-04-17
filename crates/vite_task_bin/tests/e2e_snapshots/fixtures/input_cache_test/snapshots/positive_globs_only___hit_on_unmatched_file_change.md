@@ -1,5 +1,7 @@
 # positive_globs_only___hit_on_unmatched_file_change
 
+Test all input configuration combinations for cache behavior
+
 ## `vt run positive-globs-only`
 
 ```

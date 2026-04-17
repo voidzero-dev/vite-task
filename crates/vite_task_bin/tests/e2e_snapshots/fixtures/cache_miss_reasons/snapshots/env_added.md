@@ -1,5 +1,7 @@
 # env_added
 
+Test all cache miss reason variants
+
 ## `vt run test`
 
 cache miss

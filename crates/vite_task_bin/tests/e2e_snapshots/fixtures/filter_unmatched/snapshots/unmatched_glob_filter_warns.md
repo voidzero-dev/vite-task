@@ -1,5 +1,7 @@
 # unmatched_glob_filter_warns
 
+Tests for unmatched --filter warnings on stderr
+
 ## `vt run --filter @test/app --filter @nope/* build`
 
 ```

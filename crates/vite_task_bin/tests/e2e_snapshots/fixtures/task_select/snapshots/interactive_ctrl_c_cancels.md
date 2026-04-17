@@ -1,5 +1,7 @@
 # interactive_ctrl_c_cancels
 
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+
 ## `vt run`
 
 **Exit code:** 130

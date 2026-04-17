@@ -1,5 +1,7 @@
 # associate_existing_cache
 
+Tests that tasks with identical commands share cache
+
 ## `vt run script1`
 
 cache miss
