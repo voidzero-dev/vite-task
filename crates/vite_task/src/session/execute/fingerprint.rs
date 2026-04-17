@@ -16,7 +16,7 @@ use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
 
-use super::spawn::PathRead;
+use super::tracked_accesses::PathRead;
 use crate::{collections::HashMap, session::cache::InputChangeKind};
 
 /// Post-run fingerprint capturing file state after execution.
@@ -53,7 +53,8 @@ pub enum DirEntryKind {
 impl PostRunFingerprint {
     /// Creates a new fingerprint from path accesses after task execution.
     ///
-    /// Negative glob filtering is done upstream in `spawn_with_tracking`.
+    /// Negative glob filtering is done upstream (see
+    /// [`super::tracked_accesses::TrackedPathAccesses::from_raw`]).
     /// Paths already present in `globbed_inputs` are skipped — they are
     /// already tracked by the prerun glob fingerprint, and the read-write
     /// overlap check in `execute_spawn` guarantees the task did not modify

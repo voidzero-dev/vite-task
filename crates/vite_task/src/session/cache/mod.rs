@@ -23,7 +23,7 @@ use wincode::{
     io::{Reader, Writer},
 };
 
-use super::execute::{fingerprint::PostRunFingerprint, spawn::StdOutput};
+use super::execute::{fingerprint::PostRunFingerprint, pipe::StdOutput};
 
 /// Cache lookup key identifying a task's execution configuration.
 ///
