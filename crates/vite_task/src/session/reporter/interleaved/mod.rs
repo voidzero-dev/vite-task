@@ -7,7 +7,8 @@ use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-    StdioConfig, StdioSuggestion, format_command_with_cache_status, write_leaf_trailing_output,
+    PipeWriters, StdioConfig, StdioSuggestion, format_command_with_cache_status,
+    write_leaf_trailing_output,
 };
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
 
@@ -84,8 +85,10 @@ impl LeafExecutionReporter for InterleavedLeafReporter {
 
         StdioConfig {
             suggestion: self.stdio_suggestion,
-            stdout_writer: Box::new(std::io::stdout()),
-            stderr_writer: Box::new(std::io::stderr()),
+            writers: PipeWriters {
+                stdout_writer: Box::new(std::io::stdout()),
+                stderr_writer: Box::new(std::io::stderr()),
+            },
         }
     }
 

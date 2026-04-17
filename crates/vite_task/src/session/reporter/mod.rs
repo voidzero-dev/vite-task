@@ -96,9 +96,12 @@ pub enum StdioSuggestion {
 pub struct StdioConfig {
     /// The reporter's preferred stdio mode.
     pub suggestion: StdioSuggestion,
-    /// Writer for the child process's stdout (used in piped mode and cache replay).
+    ///  Writer for the child process's stderr and stdout (used in piped mode and cache replay).
+    pub writers: PipeWriters,
+}
+
+pub struct PipeWriters {
     pub stdout_writer: Box<dyn Write>,
-    /// Writer for the child process's stderr (used in piped mode and cache replay).
     pub stderr_writer: Box<dyn Write>,
 }
 

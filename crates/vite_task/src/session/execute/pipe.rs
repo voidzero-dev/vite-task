@@ -1,5 +1,7 @@
 //! Drain child stdout/stderr concurrently to writers, with optional capture.
 
+use std::io::Write;
+
 use serde::Serialize;
 use tokio::{
     io::AsyncReadExt as _,
@@ -7,8 +9,6 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use wincode::{SchemaRead, SchemaWrite};
-
-use crate::session::reporter::StdioConfig;
 
 /// Output kind for stdout/stderr
 #[derive(Debug, PartialEq, Eq, Clone, Copy, SchemaWrite, SchemaRead, Serialize)]
@@ -24,18 +24,20 @@ pub struct StdOutput {
     pub content: Vec<u8>,
 }
 
-/// Inputs for [`pipe_stdio`]: the reporter's writers plus an optional capture
-/// buffer. When `capture` is `Some`, chunks are appended there for cache replay.
-pub struct PipeIo {
-    pub stdio_config: StdioConfig,
-    pub capture: Option<Vec<StdOutput>>,
+/// Downstream destinations for bytes read from the child's stdout/stderr:
+/// two pass-through writers plus an optional capture buffer (populated in
+/// place during drain for cache replay).
+pub struct PipeSinks<'a> {
+    pub stdout_writer: &'a mut dyn Write,
+    pub stderr_writer: &'a mut dyn Write,
+    pub capture: Option<&'a mut Vec<StdOutput>>,
 }
 
-/// Drain the child's stdout/stderr concurrently into `io`.
+/// Drain the child's stdout/stderr concurrently into `sinks`.
 ///
-/// Bytes are written through `io.stdio_config`'s writers in real time and,
-/// when `io.capture` is `Some`, also appended (with adjacent same-kind chunks
-/// coalesced) for cache replay.
+/// Bytes are written through `sinks.stdout_writer` / `sinks.stderr_writer` in
+/// real time and, when `sinks.capture` is `Some`, also appended (with adjacent
+/// same-kind chunks coalesced) for cache replay.
 ///
 /// On cancellation: returns `Ok(())` without killing the child — the caller
 /// drives the child's cancellation-aware `wait` future next, which observes the
@@ -45,11 +47,9 @@ pub struct PipeIo {
 pub async fn pipe_stdio(
     mut stdout: ChildStdout,
     mut stderr: ChildStderr,
-    io: &mut PipeIo,
+    mut sinks: PipeSinks<'_>,
     cancellation_token: CancellationToken,
 ) -> std::io::Result<()> {
-    use std::io::Write as _;
-
     let mut stdout_buf = [0u8; 8192];
     let mut stderr_buf = [0u8; 8192];
     let mut stdout_done = false;
@@ -65,9 +65,9 @@ pub async fn pipe_stdio(
                     0 => stdout_done = true,
                     n => {
                         let bytes = &stdout_buf[..n];
-                        io.stdio_config.stdout_writer.write_all(bytes)?;
-                        io.stdio_config.stdout_writer.flush()?;
-                        if let Some(capture) = io.capture.as_mut() {
+                        sinks.stdout_writer.write_all(bytes)?;
+                        sinks.stdout_writer.flush()?;
+                        if let Some(capture) = &mut sinks.capture {
                             append_output_chunk(capture, OutputKind::StdOut, bytes);
                         }
                     }
@@ -78,9 +78,9 @@ pub async fn pipe_stdio(
                     0 => stderr_done = true,
                     n => {
                         let bytes = &stderr_buf[..n];
-                        io.stdio_config.stderr_writer.write_all(bytes)?;
-                        io.stdio_config.stderr_writer.flush()?;
-                        if let Some(capture) = io.capture.as_mut() {
+                        sinks.stderr_writer.write_all(bytes)?;
+                        sinks.stderr_writer.flush()?;
+                        if let Some(capture) = &mut sinks.capture {
                             append_output_chunk(capture, OutputKind::StdErr, bytes);
                         }
                     }

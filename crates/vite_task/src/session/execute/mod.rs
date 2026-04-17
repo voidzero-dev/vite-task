@@ -23,7 +23,7 @@ use vite_task_plan::{
 use self::{
     fingerprint::PostRunFingerprint,
     glob_inputs::compute_globbed_inputs,
-    pipe::{PipeIo, StdOutput, pipe_stdio},
+    pipe::{PipeSinks, StdOutput, pipe_stdio},
     spawn::{SpawnStdio, spawn},
     tracked_accesses::TrackedPathAccesses,
 };
@@ -35,7 +35,7 @@ use super::{
     },
     reporter::{
         ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-        StdioConfig, StdioSuggestion,
+        PipeWriters, StdioSuggestion,
     },
 };
 use crate::{Session, collections::HashMap};
@@ -214,8 +214,8 @@ impl ExecutionContext<'_> {
 
                 let execution_output = in_process_execution.execute();
                 // Write output to the stdout writer from StdioConfig
-                let _ = stdio_config.stdout_writer.write_all(&execution_output.stdout);
-                let _ = stdio_config.stdout_writer.flush();
+                let _ = stdio_config.writers.stdout_writer.write_all(&execution_output.stdout);
+                let _ = stdio_config.writers.stdout_writer.flush();
 
                 leaf_reporter.finish(
                     None,
@@ -257,32 +257,33 @@ impl ExecutionContext<'_> {
 /// The type shape enforces two invariants statically:
 /// - fspy tracking only exists inside [`ExecutionMode::Cached`] (fspy requires
 ///   `includes_auto`, which only lives on cache metadata).
-/// - Cached execution always keeps its `StdioConfig` (piped stdio is forced so
+/// - Cached execution always owns [`PipeWriters`] (piped stdio is forced so
 ///   that output can be captured for replay).
 enum ExecutionMode<'a> {
     Cached {
-        /// Consumed during drain; not needed for the cache update.
-        stdio_config: StdioConfig,
-        /// Carried through drain into the cache-update phase.
+        /// Borrowed by [`PipeSinks`] during drain; dropped at end of function.
+        pipe_writers: PipeWriters,
+        /// Carried through drain into the cache-update phase. Drain writes
+        /// into `state.std_outputs` in place via a borrow inside `PipeSinks`.
         state: CacheState<'a>,
     },
     Uncached {
         /// `Some` iff the reporter suggested piped stdio. `None` means the
-        /// child inherits stdin/stdout/stderr from the parent; the original
-        /// `StdioConfig` was already dropped so we don't hold `std::io::Stdout`
-        /// while the child writes to the same FD.
-        stdio_config: Option<StdioConfig>,
+        /// child inherits stdin/stdout/stderr from the parent; the reporter's
+        /// writers were dropped here so we don't hold `std::io::Stdout` while
+        /// the child writes to the same FD.
+        pipe_writers: Option<PipeWriters>,
     },
 }
 
 /// Cached-only state carried from mode construction through the cache-update
-/// phase. `std_outputs` is empty at construction time and filled post-drain by
-/// moving the buffer out of `PipeIo::capture`.
+/// phase. `std_outputs` starts empty and is written in place during drain via
+/// a borrow inside [`PipeSinks::capture`].
 struct CacheState<'a> {
     metadata: &'a CacheMetadata,
     globbed_inputs: BTreeMap<RelativePathBuf, u64>,
-    /// Captured stdout/stderr for cache replay. Populated after drain; always
-    /// present (possibly empty) once we reach the cache-update phase.
+    /// Captured stdout/stderr for cache replay. Written in place during drain;
+    /// always present (possibly empty) once we reach the cache-update phase.
     std_outputs: Vec<StdOutput>,
     /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
     /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
@@ -380,8 +381,8 @@ pub async fn execute_spawn(
     if let Some(cached) = cached_value {
         for output in cached.std_outputs.iter() {
             let writer: &mut dyn std::io::Write = match output.kind {
-                pipe::OutputKind::StdOut => &mut stdio_config.stdout_writer,
-                pipe::OutputKind::StdErr => &mut stdio_config.stderr_writer,
+                pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
+                pipe::OutputKind::StdErr => &mut stdio_config.writers.stderr_writer,
             };
             let _ = writer.write_all(&output.content);
             let _ = writer.flush();
@@ -398,7 +399,17 @@ pub async fn execute_spawn(
     //    and their associated state into a single value whose shape encodes
     //    the valid combinations. The inherited arm drops `stdio_config` here so
     //    we don't hold `std::io::Stdout` while the child writes to the same FD.
-    let mode: ExecutionMode<'_> = match cache_metadata {
+    //
+    // ─────────────────────────────────────────────────────────────────────
+    //  Before adding a new local variable alongside `mode`: think twice.
+    //  Does it make sense for every variant, or only for some?  If it's
+    //  variant-specific (only for `Cached`, only when fspy is on, etc.) put
+    //  it inside the variant (or `CacheState`) so the compiler enforces the
+    //  invariant at construction. Sibling locals drift out of sync with the
+    //  mode and force re-derivation (`if let Some(_) = _`,
+    //  `cache_metadata.is_some_and(_)`) at every downstream use site.
+    // ─────────────────────────────────────────────────────────────────────
+    let mut mode: ExecutionMode<'_> = match cache_metadata {
         Some(metadata) => {
             let fspy = if metadata.input_config.includes_auto {
                 // Resolve negative globs for fspy path filtering
@@ -424,7 +435,7 @@ pub async fn execute_spawn(
                 None
             };
             ExecutionMode::Cached {
-                stdio_config,
+                pipe_writers: stdio_config.writers,
                 state: CacheState {
                     metadata,
                     globbed_inputs,
@@ -434,16 +445,16 @@ pub async fn execute_spawn(
             }
         }
         None => ExecutionMode::Uncached {
-            stdio_config: (stdio_config.suggestion == StdioSuggestion::Piped)
-                .then_some(stdio_config),
+            pipe_writers: (stdio_config.suggestion == StdioSuggestion::Piped)
+                .then_some(stdio_config.writers),
         },
     };
 
     // 5. Derive the arguments for `spawn()` from the mode without consuming it.
     let (spawn_stdio, fspy_enabled) = match &mode {
         ExecutionMode::Cached { state, .. } => (SpawnStdio::Piped, state.fspy_negatives.is_some()),
-        ExecutionMode::Uncached { stdio_config: Some(_) } => (SpawnStdio::Piped, false),
-        ExecutionMode::Uncached { stdio_config: None } => (SpawnStdio::Inherited, false),
+        ExecutionMode::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
+        ExecutionMode::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
     };
 
     // Measure end-to-end duration here — spawn() no longer tracks time.
@@ -470,29 +481,32 @@ pub async fn execute_spawn(
         }
     };
 
-    // 7. Consume `mode`: pair the `StdioConfig` with an optional capture
-    //    buffer as a `PipeIo`, and carry `CacheState` separately for the
-    //    cache-update phase.
-    let (mut pipe_io, mut cache_state): (Option<PipeIo>, Option<CacheState<'_>>) = match mode {
-        ExecutionMode::Cached { stdio_config, state } => {
-            (Some(PipeIo { stdio_config, capture: Some(Vec::new()) }), Some(state))
-        }
-        ExecutionMode::Uncached { stdio_config: Some(stdio_config) } => {
-            (Some(PipeIo { stdio_config, capture: None }), None)
-        }
-        ExecutionMode::Uncached { stdio_config: None } => (None, None),
+    // 7. Build `PipeSinks` by borrowing into `mode`. The drain fills
+    //    `state.std_outputs` in place (via the borrow inside `capture`), so no
+    //    post-drain transfer is needed. `sinks` is `None` only in the
+    //    inherited-uncached case, where there are no pipes to drain.
+    let sinks: Option<PipeSinks<'_>> = match &mut mode {
+        ExecutionMode::Cached { pipe_writers, state } => Some(PipeSinks {
+            stdout_writer: &mut pipe_writers.stdout_writer,
+            stderr_writer: &mut pipe_writers.stderr_writer,
+            capture: Some(&mut state.std_outputs),
+        }),
+        ExecutionMode::Uncached { pipe_writers: Some(pipe_writers) } => Some(PipeSinks {
+            stdout_writer: &mut pipe_writers.stdout_writer,
+            stderr_writer: &mut pipe_writers.stderr_writer,
+            capture: None,
+        }),
+        ExecutionMode::Uncached { pipe_writers: None } => None,
     };
 
-    // Drain stdout/stderr when piped. `pipe_io` is `None` only in the
-    // inherited-uncached case.
-    if let Some(pipe_io) = &mut pipe_io {
+    if let Some(sinks) = sinks {
         let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
         let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
         #[expect(
             clippy::large_futures,
             reason = "pipe_stdio streams child I/O and creates a large future"
         )]
-        let pipe_result = pipe_stdio(stdout, stderr, pipe_io, fast_fail_token.clone()).await;
+        let pipe_result = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
         if let Err(err) = pipe_result {
             // Cancel so `child.wait` kills the child instead of orphaning it.
             fast_fail_token.cancel();
@@ -520,18 +534,9 @@ pub async fn execute_spawn(
     };
     let duration = start.elapsed();
 
-    // Move captured stdout/stderr out of `PipeIo` and into `CacheState` so the
-    // cache update can own them. `pipe_io.capture` is `Some` iff caching was
-    // on, which is exactly when `cache_state` is `Some`.
-    if let Some(state) = cache_state.as_mut() {
-        state.std_outputs = pipe_io
-            .and_then(|io| io.capture)
-            .expect("cached mode always initializes `PipeIo::capture`");
-    }
-
     // 9. Cache update (only when we were in `Cached` mode). Errors during cache
     //    update are reported but do not affect the exit status we return.
-    let (cache_update_status, cache_error) = if let Some(state) = cache_state {
+    let (cache_update_status, cache_error) = if let ExecutionMode::Cached { state, .. } = mode {
         let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
 
         // Normalize fspy accesses. `zip` gives `Some` iff fspy was enabled

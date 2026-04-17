@@ -8,8 +8,8 @@ use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ColorizeExt, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
-    LeafExecutionReporter, StdioConfig, StdioSuggestion, format_command_with_cache_status,
-    format_task_label, write_leaf_trailing_output,
+    LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
+    format_command_with_cache_status, format_task_label, write_leaf_trailing_output,
 };
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
 
@@ -94,8 +94,10 @@ impl LeafExecutionReporter for GroupedLeafReporter {
 
         StdioConfig {
             suggestion: StdioSuggestion::Piped,
-            stdout_writer: Box::new(GroupedWriter::new(Rc::clone(&buffer))),
-            stderr_writer: Box::new(GroupedWriter::new(buffer)),
+            writers: PipeWriters {
+                stdout_writer: Box::new(GroupedWriter::new(Rc::clone(&buffer))),
+                stderr_writer: Box::new(GroupedWriter::new(buffer)),
+            },
         }
     }
 
