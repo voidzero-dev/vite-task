@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 use vite_task_plan::SpawnCommand;
 
 /// How the child's stdin/stdout/stderr are configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnStdio {
     /// All three fds inherited from the parent. On Unix, [`spawn`] also clears
     /// `FD_CLOEXEC` on fds 0-2 (libuv workaround —

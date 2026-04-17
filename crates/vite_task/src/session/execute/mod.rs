@@ -35,7 +35,7 @@ use super::{
     },
     reporter::{
         ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-        StdioSuggestion,
+        StdioConfig, StdioSuggestion,
     },
 };
 use crate::{Session, collections::HashMap};
@@ -251,6 +251,21 @@ impl ExecutionContext<'_> {
     }
 }
 
+/// Stdio-mode-specific state for a leaf execution.
+///
+/// `Piped` owns the reporter's writers plus an optional capture buffer used for
+/// cache replay; `Inherited` owns nothing (the reporter's `StdioConfig` has
+/// already been dropped so we don't hold `std::io::Stdout` while the child
+/// writes to the same FD).
+enum Pipe {
+    Piped {
+        stdio_config: StdioConfig,
+        /// `Some` when caching is on — chunks are appended for cache replay.
+        capture: Option<Vec<StdOutput>>,
+    },
+    Inherited,
+}
+
 /// Execute a spawned process with cache-aware lifecycle.
 ///
 /// This is a free function (not tied to `ExecutionContext`) so it can be reused
@@ -260,8 +275,8 @@ impl ExecutionContext<'_> {
 /// 1. Cache lookup (determines cache status)
 /// 2. `leaf_reporter.start(cache_status)` → `StdioConfig`
 /// 3. If cache hit: replay cached outputs via `StdioConfig` writers → finish
-/// 4. If `Inherited` suggestion AND caching disabled: `spawn_inherited()` → finish
-/// 5. Else (piped): `spawn_with_tracking()` with writers → cache update → finish
+/// 4. Otherwise: `spawn()` with the chosen stdio mode, optionally `pipe_stdio()`
+///    to drain, then `child.wait` → cache update → finish
 ///
 /// Errors (cache lookup failure, spawn failure, cache update failure) are reported
 /// through `leaf_reporter.finish()` and do not abort the caller.
@@ -355,12 +370,17 @@ pub async fn execute_spawn(
         return SpawnOutcome::CacheHit;
     }
 
-    // 4. Decide fspy and stdio mode independently.
+    // 4. Decide fspy and stdio mode.
     //    - fspy tracking runs only when caching is on and `includes_auto` is set.
     //    - Piped stdio is forced whenever caching is on (we need to capture output
     //      for replay); otherwise we honor the reporter's suggestion.
     let fspy_enabled = cache_metadata.is_some_and(|m| m.input_config.includes_auto);
-    let use_piped = cache_metadata.is_some() || stdio_config.suggestion == StdioSuggestion::Piped;
+    let spawn_stdio =
+        if cache_metadata.is_some() || stdio_config.suggestion == StdioSuggestion::Piped {
+            SpawnStdio::Piped
+        } else {
+            SpawnStdio::Inherited
+        };
 
     // Build negative globs for fspy path filtering (already workspace-root-relative).
     let resolved_negatives: Vec<wax::Glob<'static>> = if let Some(cache_metadata) = cache_metadata {
@@ -385,22 +405,25 @@ pub async fn execute_spawn(
         Vec::new()
     };
 
-    // Capture stdout/stderr when caching is enabled (for cache replay).
-    let mut std_outputs: Option<Vec<StdOutput>> = cache_metadata.map(|_| Vec::new());
-
-    // In inherited mode we must release the StdioConfig writers before spawning
-    // so we don't hold `std::io::Stdout` while the child writes to the same FD.
-    // `bool::then(|| stdio_config)` moves stdio_config into the closure; when
-    // `use_piped` is false, `then` returns `None` and the closure (and its
-    // captured stdio_config) is dropped here.
-    let stdio_config = use_piped.then_some(stdio_config);
+    // Bundle stdio-mode-specific state. `Pipe::Piped` owns the writers plus an
+    // optional capture buffer (Some when caching is on). In the inherited arm
+    // we drop `stdio_config` right here, so we don't hold `std::io::Stdout`
+    // while the child writes to the same FD.
+    let pipe = match spawn_stdio {
+        SpawnStdio::Piped => {
+            Pipe::Piped { stdio_config, capture: cache_metadata.map(|_| Vec::new()) }
+        }
+        SpawnStdio::Inherited => {
+            drop(stdio_config);
+            Pipe::Inherited
+        }
+    };
 
     // Measure end-to-end duration here — spawn() no longer tracks time.
     let start = Instant::now();
 
     // 5. Spawn. Returns pipes (Piped) or `None` (Inherited) plus a
     //    cancellation-aware wait future.
-    let spawn_stdio = if use_piped { SpawnStdio::Piped } else { SpawnStdio::Inherited };
     let mut child = match spawn(
         &spawn_execution.spawn_command,
         fspy_enabled,
@@ -420,35 +443,40 @@ pub async fn execute_spawn(
         }
     };
 
-    // 6. If piped, drain stdout/stderr concurrently, capturing for cache replay.
-    if let Some(mut stdio_config) = stdio_config {
-        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        #[expect(
-            clippy::large_futures,
-            reason = "pipe_stdio streams child I/O and creates a large future"
-        )]
-        let pipe_result = pipe_stdio(
-            stdout,
-            stderr,
-            &mut *stdio_config.stdout_writer,
-            &mut *stdio_config.stderr_writer,
-            std_outputs.as_mut(),
-            fast_fail_token.clone(),
-        )
-        .await;
-        if let Err(err) = pipe_result {
-            // Cancel so `child.wait` kills the child instead of orphaning it.
-            fast_fail_token.cancel();
-            let _ = child.wait.await;
-            leaf_reporter.finish(
-                None,
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Spawn(err.into())),
-            );
-            return SpawnOutcome::Failed;
+    // 6. If piped, drain stdout/stderr; capture chunks flow to `std_outputs`
+    //    for the cache update below.
+    let std_outputs: Option<Vec<StdOutput>> = match pipe {
+        Pipe::Piped { mut stdio_config, mut capture } => {
+            let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+            let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+            #[expect(
+                clippy::large_futures,
+                reason = "pipe_stdio streams child I/O and creates a large future"
+            )]
+            let pipe_result = pipe_stdio(
+                stdout,
+                stderr,
+                &mut *stdio_config.stdout_writer,
+                &mut *stdio_config.stderr_writer,
+                capture.as_mut(),
+                fast_fail_token.clone(),
+            )
+            .await;
+            if let Err(err) = pipe_result {
+                // Cancel so `child.wait` kills the child instead of orphaning it.
+                fast_fail_token.cancel();
+                let _ = child.wait.await;
+                leaf_reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    Some(ExecutionError::Spawn(err.into())),
+                );
+                return SpawnOutcome::Failed;
+            }
+            capture
         }
-    }
+        Pipe::Inherited => None,
+    };
 
     // 7. Wait for exit (handles cancellation internally).
     let outcome = match child.wait.await {
