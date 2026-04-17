@@ -8,5 +8,5 @@ extend-exclude = [
   "crates/fspy_detours_sys/src/generated_bindings.rs",
   # Intentional typos for testing fuzzy matching and "did you mean" suggestions
   "crates/vite_select/src/fuzzy.rs",
-  "crates/vite_task_bin/tests/e2e_snapshots/fixtures/task-select",
+  "crates/vite_task_bin/tests/e2e_snapshots/fixtures/task_select",
 ]
