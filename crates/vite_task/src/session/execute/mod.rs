@@ -469,68 +469,46 @@ pub async fn execute_spawn(
         }
     };
 
-    // 7. Consume `mode`: drain pipes (if piped), and for `Cached` keep the
-    //    state we'll need for the cache update.
-    let cache_state: Option<CacheState<'_>> = match mode {
-        ExecutionMode::Cached { mut stdio_config, mut state } => {
-            let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-            let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-            #[expect(
-                clippy::large_futures,
-                reason = "pipe_stdio streams child I/O and creates a large future"
-            )]
-            let pipe_result = pipe_stdio(
-                stdout,
-                stderr,
-                &mut *stdio_config.stdout_writer,
-                &mut *stdio_config.stderr_writer,
-                Some(&mut state.std_outputs),
-                fast_fail_token.clone(),
-            )
-            .await;
-            if let Err(err) = pipe_result {
-                // Cancel so `child.wait` kills the child instead of orphaning it.
-                fast_fail_token.cancel();
-                let _ = child.wait.await;
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Spawn(err.into())),
-                );
-                return SpawnOutcome::Failed;
-            }
-            Some(state)
-        }
-        ExecutionMode::Uncached { stdio_config: Some(mut stdio_config) } => {
-            let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-            let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-            #[expect(
-                clippy::large_futures,
-                reason = "pipe_stdio streams child I/O and creates a large future"
-            )]
-            let pipe_result = pipe_stdio(
-                stdout,
-                stderr,
-                &mut *stdio_config.stdout_writer,
-                &mut *stdio_config.stderr_writer,
+    // 7. Consume `mode`: split into (stdio_config, cache_state) so the drain
+    //    below can run once regardless of variant.
+    let (mut stdio_config, mut cache_state): (Option<StdioConfig>, Option<CacheState<'_>>) =
+        match mode {
+            ExecutionMode::Cached { stdio_config, state } => (Some(stdio_config), Some(state)),
+            ExecutionMode::Uncached { stdio_config } => (stdio_config, None),
+        };
+
+    // Drain stdout/stderr when piped; capture into `state.std_outputs` when
+    // caching is on. (`stdio_config` is `None` only in the inherited-uncached
+    // case.)
+    if let Some(stdio_config) = &mut stdio_config {
+        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+        let capture = cache_state.as_mut().map(|s| &mut s.std_outputs);
+        #[expect(
+            clippy::large_futures,
+            reason = "pipe_stdio streams child I/O and creates a large future"
+        )]
+        let pipe_result = pipe_stdio(
+            stdout,
+            stderr,
+            &mut *stdio_config.stdout_writer,
+            &mut *stdio_config.stderr_writer,
+            capture,
+            fast_fail_token.clone(),
+        )
+        .await;
+        if let Err(err) = pipe_result {
+            // Cancel so `child.wait` kills the child instead of orphaning it.
+            fast_fail_token.cancel();
+            let _ = child.wait.await;
+            leaf_reporter.finish(
                 None,
-                fast_fail_token.clone(),
-            )
-            .await;
-            if let Err(err) = pipe_result {
-                fast_fail_token.cancel();
-                let _ = child.wait.await;
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Spawn(err.into())),
-                );
-                return SpawnOutcome::Failed;
-            }
-            None
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                Some(ExecutionError::Spawn(err.into())),
+            );
+            return SpawnOutcome::Failed;
         }
-        ExecutionMode::Uncached { stdio_config: None } => None,
-    };
+    }
 
     // 8. Wait for exit (handles cancellation internally).
     let outcome = match child.wait.await {
