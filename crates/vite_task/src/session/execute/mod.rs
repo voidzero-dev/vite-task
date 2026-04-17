@@ -1,25 +1,31 @@
 pub mod fingerprint;
 pub mod glob_inputs;
 mod hash;
+pub mod pipe;
 pub mod spawn;
+pub mod tracked_accesses;
+#[cfg(windows)]
+mod win_job;
 
-use std::{cell::RefCell, collections::BTreeMap, io::Write as _, process::Stdio, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, io::Write as _, sync::Arc, time::Instant};
 
 use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
 use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
-use vite_path::AbsolutePath;
+use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::{
-    ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnCommand,
-    SpawnExecution, execution_graph::ExecutionNodeIndex,
+    ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnExecution,
+    cache_metadata::CacheMetadata, execution_graph::ExecutionNodeIndex,
 };
 
 use self::{
     fingerprint::PostRunFingerprint,
     glob_inputs::compute_globbed_inputs,
-    spawn::{SpawnResult, TrackedPathAccesses, spawn_with_tracking},
+    pipe::{PipeSinks, StdOutput, pipe_stdio},
+    spawn::{SpawnStdio, spawn},
+    tracked_accesses::TrackedPathAccesses,
 };
 use super::{
     cache::{CacheEntryValue, ExecutionCache},
@@ -29,7 +35,7 @@ use super::{
     },
     reporter::{
         ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-        StdioSuggestion,
+        PipeWriters, StdioSuggestion,
     },
 };
 use crate::{Session, collections::HashMap};
@@ -208,8 +214,8 @@ impl ExecutionContext<'_> {
 
                 let execution_output = in_process_execution.execute();
                 // Write output to the stdout writer from StdioConfig
-                let _ = stdio_config.stdout_writer.write_all(&execution_output.stdout);
-                let _ = stdio_config.stdout_writer.flush();
+                let _ = stdio_config.writers.stdout_writer.write_all(&execution_output.stdout);
+                let _ = stdio_config.writers.stdout_writer.flush();
 
                 leaf_reporter.finish(
                     None,
@@ -245,6 +251,46 @@ impl ExecutionContext<'_> {
     }
 }
 
+/// All valid runtime configurations for a leaf execution, after the cache-hit
+/// early-return has been ruled out.
+///
+/// The type shape enforces two invariants statically:
+/// - fspy tracking only exists inside [`ExecutionMode::Cached`] (fspy requires
+///   `includes_auto`, which only lives on cache metadata).
+/// - Cached execution always owns [`PipeWriters`] (piped stdio is forced so
+///   that output can be captured for replay).
+enum ExecutionMode<'a> {
+    Cached {
+        /// Borrowed by [`PipeSinks`] during drain; dropped at end of function.
+        pipe_writers: PipeWriters,
+        /// Carried through drain into the cache-update phase. Drain writes
+        /// into `state.std_outputs` in place via a borrow inside `PipeSinks`.
+        state: CacheState<'a>,
+    },
+    Uncached {
+        /// `Some` iff the reporter suggested piped stdio. `None` means the
+        /// child inherits stdin/stdout/stderr from the parent; the reporter's
+        /// writers were dropped here so we don't hold `std::io::Stdout` while
+        /// the child writes to the same FD.
+        pipe_writers: Option<PipeWriters>,
+    },
+}
+
+/// Cached-only state carried from mode construction through the cache-update
+/// phase. `std_outputs` starts empty and is written in place during drain via
+/// a borrow inside [`PipeSinks::capture`].
+struct CacheState<'a> {
+    metadata: &'a CacheMetadata,
+    globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    /// Captured stdout/stderr for cache replay. Written in place during drain;
+    /// always present (possibly empty) once we reach the cache-update phase.
+    std_outputs: Vec<StdOutput>,
+    /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
+    /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
+    /// tracked accesses. `None` means fspy tracking is off for this task.
+    fspy_negatives: Option<Vec<wax::Glob<'static>>>,
+}
+
 /// Execute a spawned process with cache-aware lifecycle.
 ///
 /// This is a free function (not tied to `ExecutionContext`) so it can be reused
@@ -254,8 +300,8 @@ impl ExecutionContext<'_> {
 /// 1. Cache lookup (determines cache status)
 /// 2. `leaf_reporter.start(cache_status)` → `StdioConfig`
 /// 3. If cache hit: replay cached outputs via `StdioConfig` writers → finish
-/// 4. If `Inherited` suggestion AND caching disabled: `spawn_inherited()` → finish
-/// 5. Else (piped): `spawn_with_tracking()` with writers → cache update → finish
+/// 4. Otherwise: `spawn()` with the chosen stdio mode, optionally `pipe_stdio()`
+///    to drain, then `child.wait` → cache update → finish
 ///
 /// Errors (cache lookup failure, spawn failure, cache update failure) are reported
 /// through `leaf_reporter.finish()` and do not abort the caller.
@@ -335,8 +381,8 @@ pub async fn execute_spawn(
     if let Some(cached) = cached_value {
         for output in cached.std_outputs.iter() {
             let writer: &mut dyn std::io::Write = match output.kind {
-                spawn::OutputKind::StdOut => &mut stdio_config.stdout_writer,
-                spawn::OutputKind::StdErr => &mut stdio_config.stderr_writer,
+                pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
+                pipe::OutputKind::StdErr => &mut stdio_config.writers.stderr_writer,
             };
             let _ = writer.write_all(&output.content);
             let _ = writer.flush();
@@ -349,96 +395,82 @@ pub async fn execute_spawn(
         return SpawnOutcome::CacheHit;
     }
 
-    // 4. Determine actual stdio mode based on the suggestion AND cache state.
-    //    Inherited stdio is only used when the reporter suggests it AND caching is
-    //    completely disabled (no cache_metadata). If caching is enabled but missed,
-    //    we still need piped mode to capture output for the cache update.
-    let use_inherited =
-        stdio_config.suggestion == StdioSuggestion::Inherited && cache_metadata.is_none();
-
-    if use_inherited {
-        // Inherited mode: all three stdio FDs (stdin, stdout, stderr) are inherited
-        // from the parent process. No fspy tracking, no output capture.
-        // Drop the StdioConfig writers before spawning to avoid holding std::io::Stdout
-        // while the child also writes to the same FD.
-        drop(stdio_config);
-
-        match spawn_inherited(&spawn_execution.spawn_command, fast_fail_token).await {
-            Ok(result) => {
-                leaf_reporter.finish(
-                    Some(result.exit_status),
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    None,
-                );
-                return SpawnOutcome::Spawned(result.exit_status);
-            }
-            Err(err) => {
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Spawn(err)),
-                );
-                return SpawnOutcome::Failed;
+    // 4. Build the execution mode. This folds the cache/fspy/stdio decisions
+    //    and their associated state into a single value whose shape encodes
+    //    the valid combinations. The inherited arm drops `stdio_config` here so
+    //    we don't hold `std::io::Stdout` while the child writes to the same FD.
+    //
+    // ─────────────────────────────────────────────────────────────────────
+    //  Before adding a new local variable alongside `mode`: think twice.
+    //  Does it make sense for every variant, or only for some?  If it's
+    //  variant-specific (only for `Cached`, only when fspy is on, etc.) put
+    //  it inside the variant (or `CacheState`) so the compiler enforces the
+    //  invariant at construction. Sibling locals drift out of sync with the
+    //  mode and force re-derivation (`if let Some(_) = _`,
+    //  `cache_metadata.is_some_and(_)`) at every downstream use site.
+    // ─────────────────────────────────────────────────────────────────────
+    let mut mode: ExecutionMode<'_> = match cache_metadata {
+        Some(metadata) => {
+            let fspy = if metadata.input_config.includes_auto {
+                // Resolve negative globs for fspy path filtering
+                // (already workspace-root-relative).
+                match metadata
+                    .input_config
+                    .negative_globs
+                    .iter()
+                    .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
+                    .collect::<anyhow::Result<Vec<_>>>()
+                {
+                    Ok(negs) => Some(negs),
+                    Err(err) => {
+                        leaf_reporter.finish(
+                            None,
+                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                            Some(ExecutionError::PostRunFingerprint(err)),
+                        );
+                        return SpawnOutcome::Failed;
+                    }
+                }
+            } else {
+                None
+            };
+            ExecutionMode::Cached {
+                pipe_writers: stdio_config.writers,
+                state: CacheState {
+                    metadata,
+                    globbed_inputs,
+                    std_outputs: Vec::new(),
+                    fspy_negatives: fspy,
+                },
             }
         }
-    }
+        None => ExecutionMode::Uncached {
+            pipe_writers: (stdio_config.suggestion == StdioSuggestion::Piped)
+                .then_some(stdio_config.writers),
+        },
+    };
 
-    // 5. Piped mode: execute spawn with tracking, streaming output to writers.
-    //    - std_outputs: always captured when caching is enabled (for cache replay)
-    //    - path_accesses: only tracked when includes_auto is true (fspy inference)
-    let (mut std_outputs, mut path_accesses, cache_metadata_and_inputs) =
-        cache_metadata.map_or((None, None, None), |cache_metadata| {
-            // On musl targets, LD_PRELOAD-based tracking is unavailable but seccomp
-            // unotify provides equivalent file access tracing.
-            let path_accesses = if cache_metadata.input_config.includes_auto {
-                Some(TrackedPathAccesses::default())
-            } else {
-                None // Skip fspy when inference is disabled or unavailable
-            };
-            (Some(Vec::new()), path_accesses, Some((cache_metadata, globbed_inputs)))
-        });
+    // 5. Derive the arguments for `spawn()` from the mode without consuming it.
+    let (spawn_stdio, fspy_enabled) = match &mode {
+        ExecutionMode::Cached { state, .. } => (SpawnStdio::Piped, state.fspy_negatives.is_some()),
+        ExecutionMode::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
+        ExecutionMode::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
+    };
 
-    // Build negative globs for fspy path filtering (already workspace-root-relative)
-    let resolved_negatives: Vec<wax::Glob<'static>> =
-        if let Some((cache_metadata, _)) = &cache_metadata_and_inputs {
-            match cache_metadata
-                .input_config
-                .negative_globs
-                .iter()
-                .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
-                .collect::<anyhow::Result<Vec<_>>>()
-            {
-                Ok(negs) => negs,
-                Err(err) => {
-                    leaf_reporter.finish(
-                        None,
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::PostRunFingerprint(err)),
-                    );
-                    return SpawnOutcome::Failed;
-                }
-            }
-        } else {
-            Vec::new()
-        };
+    // Measure end-to-end duration here — spawn() no longer tracks time.
+    let start = Instant::now();
 
-    #[expect(
-        clippy::large_futures,
-        reason = "spawn_with_tracking manages process I/O and creates a large future"
-    )]
-    let result = match spawn_with_tracking(
+    // 6. Spawn. Returns pipes (Piped) or `None` (Inherited) plus a
+    //    cancellation-aware wait future.
+    let mut child = match spawn(
         &spawn_execution.spawn_command,
-        cache_base_path,
-        &mut *stdio_config.stdout_writer,
-        &mut *stdio_config.stderr_writer,
-        std_outputs.as_mut(),
-        path_accesses.as_mut(),
-        &resolved_negatives,
+        fspy_enabled,
+        spawn_stdio,
         fast_fail_token.clone(),
     )
     .await
     {
-        Ok(result) => result,
+        Ok(child) => child,
         Err(err) => {
             leaf_reporter.finish(
                 None,
@@ -449,16 +481,77 @@ pub async fn execute_spawn(
         }
     };
 
-    // 6. Update cache if successful and determine cache update status.
-    //    Errors during cache update are terminal (reported through finish).
-    let (cache_update_status, cache_error) = if let Some((cache_metadata, globbed_inputs)) =
-        cache_metadata_and_inputs
-    {
+    // 7. Build `PipeSinks` by borrowing into `mode`. The drain fills
+    //    `state.std_outputs` in place (via the borrow inside `capture`), so no
+    //    post-drain transfer is needed. `sinks` is `None` only in the
+    //    inherited-uncached case, where there are no pipes to drain.
+    let sinks: Option<PipeSinks<'_>> = match &mut mode {
+        ExecutionMode::Cached { pipe_writers, state } => Some(PipeSinks {
+            stdout_writer: &mut pipe_writers.stdout_writer,
+            stderr_writer: &mut pipe_writers.stderr_writer,
+            capture: Some(&mut state.std_outputs),
+        }),
+        ExecutionMode::Uncached { pipe_writers: Some(pipe_writers) } => Some(PipeSinks {
+            stdout_writer: &mut pipe_writers.stdout_writer,
+            stderr_writer: &mut pipe_writers.stderr_writer,
+            capture: None,
+        }),
+        ExecutionMode::Uncached { pipe_writers: None } => None,
+    };
+
+    if let Some(sinks) = sinks {
+        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+        #[expect(
+            clippy::large_futures,
+            reason = "pipe_stdio streams child I/O and creates a large future"
+        )]
+        let pipe_result = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
+        if let Err(err) = pipe_result {
+            // Cancel so `child.wait` kills the child instead of orphaning it.
+            fast_fail_token.cancel();
+            let _ = child.wait.await;
+            leaf_reporter.finish(
+                None,
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                Some(ExecutionError::Spawn(err.into())),
+            );
+            return SpawnOutcome::Failed;
+        }
+    }
+
+    // 8. Wait for exit (handles cancellation internally).
+    let outcome = match child.wait.await {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            leaf_reporter.finish(
+                None,
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                Some(ExecutionError::Spawn(err.into())),
+            );
+            return SpawnOutcome::Failed;
+        }
+    };
+    let duration = start.elapsed();
+
+    // 9. Cache update (only when we were in `Cached` mode). Errors during cache
+    //    update are reported but do not affect the exit status we return.
+    let (cache_update_status, cache_error) = if let ExecutionMode::Cached { state, .. } = mode {
+        let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
+
+        // Normalize fspy accesses. `zip` gives `Some` iff fspy was enabled
+        // (both outcome.path_accesses and fspy_negatives are Some together).
+        let path_accesses = outcome
+            .path_accesses
+            .as_ref()
+            .zip(fspy_negatives.as_deref())
+            .map(|(raw, negs)| TrackedPathAccesses::from_raw(raw, cache_base_path, negs));
+
         let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
         if cancelled {
             // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
             (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None)
-        } else if result.exit_status.success() {
+        } else if outcome.exit_status.success() {
             // Check for read-write overlap: if the task wrote to any file it also
             // read, the inputs were modified during execution — don't cache.
             // Note: this only checks fspy-inferred reads, not globbed_inputs keys.
@@ -488,11 +581,11 @@ pub async fn execute_spawn(
                     Ok(post_run_fingerprint) => {
                         let new_cache_value = CacheEntryValue {
                             post_run_fingerprint,
-                            std_outputs: std_outputs.unwrap_or_default().into(),
-                            duration: result.duration,
+                            std_outputs: std_outputs.into(),
+                            duration,
                             globbed_inputs,
                         };
-                        match cache.update(cache_metadata, new_cache_value).await {
+                        match cache.update(metadata, new_cache_value).await {
                             Ok(()) => (CacheUpdateStatus::Updated, None),
                             Err(err) => (
                                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
@@ -521,182 +614,9 @@ pub async fn execute_spawn(
     // 7. Finish the leaf execution with the result and optional cache error.
     //    Cache update/fingerprint failures are reported but do not affect the outcome —
     //    the process ran, so we return its actual exit status.
-    leaf_reporter.finish(Some(result.exit_status), cache_update_status, cache_error);
+    leaf_reporter.finish(Some(outcome.exit_status), cache_update_status, cache_error);
 
-    SpawnOutcome::Spawned(result.exit_status)
-}
-
-/// Spawn a command with all three stdio file descriptors inherited from the parent.
-///
-/// Used when the reporter suggests inherited stdio AND caching is disabled.
-/// All three FDs (stdin, stdout, stderr) are inherited, allowing interactive input
-/// and direct terminal output. No fspy tracking is performed since there's no
-/// cache to update.
-///
-/// The child process will see `is_terminal() == true` for stdout/stderr when the
-/// parent is running in a terminal. This is expected behavior.
-#[tracing::instrument(level = "debug", skip_all)]
-async fn spawn_inherited(
-    spawn_command: &SpawnCommand,
-    fast_fail_token: CancellationToken,
-) -> anyhow::Result<SpawnResult> {
-    let mut cmd = fspy::Command::new(spawn_command.program_path.as_path());
-    cmd.args(spawn_command.args.iter().map(vite_str::Str::as_str));
-    cmd.envs(spawn_command.all_envs.iter());
-    cmd.current_dir(&*spawn_command.cwd);
-    cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
-
-    let start = std::time::Instant::now();
-    let mut tokio_cmd = cmd.into_tokio_command();
-
-    // Clear FD_CLOEXEC on stdio fds before exec. libuv (used by Node.js) marks
-    // stdin/stdout/stderr as close-on-exec, which causes them to be closed when
-    // the child process calls exec(). Without this fix, the child's fds 0-2 are
-    // closed after exec and Node.js reopens them as /dev/null, losing all output.
-    // See: https://github.com/libuv/libuv/issues/2062
-    // SAFETY: The pre_exec closure only performs fcntl operations to clear
-    // FD_CLOEXEC flags on stdio fds, which is safe in a post-fork context.
-    #[cfg(unix)]
-    unsafe {
-        tokio_cmd.pre_exec(|| {
-            use std::os::fd::BorrowedFd;
-
-            use nix::{
-                fcntl::{FcntlArg, FdFlag, fcntl},
-                libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
-            };
-            for fd in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
-                // SAFETY: fds 0-2 are always valid in a post-fork context
-                let borrowed = BorrowedFd::borrow_raw(fd);
-                if let Ok(flags) = fcntl(borrowed, FcntlArg::F_GETFD) {
-                    let mut fd_flags = FdFlag::from_bits_retain(flags);
-                    if fd_flags.contains(FdFlag::FD_CLOEXEC) {
-                        fd_flags.remove(FdFlag::FD_CLOEXEC);
-                        let _ = fcntl(borrowed, FcntlArg::F_SETFD(fd_flags));
-                    }
-                }
-            }
-            Ok(())
-        });
-    }
-
-    let mut child = tokio_cmd.spawn()?;
-
-    // On Windows, assign the child to a Job Object with KILL_ON_JOB_CLOSE so that
-    // all descendant processes (e.g., node.exe spawned by a .cmd shim) are killed
-    // when the job handle is dropped. Without this, TerminateProcess only kills the
-    // direct child, leaving grandchildren alive.
-    #[cfg(windows)]
-    let _job = {
-        use std::os::windows::io::{AsRawHandle, BorrowedHandle};
-        // Duplicate the process handle so the job outlives tokio's handle.
-        // SAFETY: The child was just spawned, so its raw handle is valid.
-        let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
-        let owned = borrowed.try_clone_to_owned()?;
-        win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?
-    };
-
-    let exit_status = tokio::select! {
-        status = child.wait() => status?,
-        () = fast_fail_token.cancelled() => {
-            child.start_kill()?;
-            child.wait().await?
-        }
-    };
-
-    Ok(SpawnResult { exit_status, duration: start.elapsed() })
-}
-
-/// Win32 Job Object utilities for process tree management.
-///
-/// On Windows, `TerminateProcess` only kills the direct child process, not its
-/// descendants. This module creates a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`,
-/// which automatically terminates all processes in the job when the handle is dropped.
-#[cfg(windows)]
-mod win_job {
-    use std::{io, os::windows::io::RawHandle};
-
-    use winapi::{
-        shared::minwindef::FALSE,
-        um::{
-            handleapi::CloseHandle,
-            jobapi2::{
-                AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
-                TerminateJobObject,
-            },
-            winnt::{
-                HANDLE, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            },
-        },
-    };
-
-    /// RAII wrapper around a Win32 Job Object `HANDLE` that closes it on drop.
-    pub(super) struct OwnedJobHandle(HANDLE);
-
-    impl OwnedJobHandle {
-        /// Immediately terminate all processes in the job.
-        ///
-        /// This is needed when pipes to a grandchild process must be closed before
-        /// the job handle is dropped (e.g., to unblock pipe reads in `spawn_with_tracking`).
-        pub(super) fn terminate(&self) {
-            // SAFETY: self.0 is a valid job handle from CreateJobObjectW.
-            unsafe { TerminateJobObject(self.0, 1) };
-        }
-    }
-
-    impl Drop for OwnedJobHandle {
-        fn drop(&mut self) {
-            // SAFETY: self.0 is a valid handle obtained from CreateJobObjectW.
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-
-    /// Create a Job Object with `KILL_ON_JOB_CLOSE` and assign a process to it.
-    ///
-    /// Returns the job handle wrapped in an RAII guard. When dropped, all processes
-    /// in the job (the child and its descendants) are terminated.
-    pub(super) fn assign_to_kill_on_close_job(
-        process_handle: RawHandle,
-    ) -> io::Result<OwnedJobHandle> {
-        // SAFETY: Creating an anonymous job object with no security attributes.
-        let job = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
-        if job.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        let job = OwnedJobHandle(job);
-
-        // Configure the job to kill all processes when the handle is closed.
-        // SAFETY: JOBOBJECT_EXTENDED_LIMIT_INFORMATION is a plain C struct (no pointers
-        // in the zeroed fields). Zeroing then setting LimitFlags is the standard pattern.
-        let mut info = unsafe {
-            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            info
-        };
-
-        // SAFETY: info is a valid JOBOBJECT_EXTENDED_LIMIT_INFORMATION, job.0 is a valid handle.
-        let ok = unsafe {
-            SetInformationJobObject(
-                job.0,
-                // JobObjectExtendedLimitInformation = 9
-                9,
-                std::ptr::from_mut(&mut info).cast(),
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>().try_into().unwrap(),
-            )
-        };
-        if ok == FALSE {
-            return Err(io::Error::last_os_error());
-        }
-
-        // SAFETY: Both handles are valid — job from CreateJobObjectW, process handle
-        // from the caller.
-        let ok = unsafe { AssignProcessToJobObject(job.0, process_handle as HANDLE) };
-        if ok == FALSE {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(job)
-    }
+    SpawnOutcome::Spawned(outcome.exit_status)
 }
 
 impl Session<'_> {

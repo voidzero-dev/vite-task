@@ -6,7 +6,7 @@
 use std::io::Write;
 
 use super::{
-    LeafExecutionReporter, StdioConfig, StdioSuggestion, format_cache_hit_message,
+    LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion, format_cache_hit_message,
     format_error_message,
 };
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
@@ -62,14 +62,18 @@ impl LeafExecutionReporter for PlainReporter {
         if self.silent_if_cache_hit && self.is_cache_hit {
             StdioConfig {
                 suggestion: StdioSuggestion::Inherited,
-                stdout_writer: Box::new(std::io::sink()),
-                stderr_writer: Box::new(std::io::sink()),
+                writers: PipeWriters {
+                    stdout_writer: Box::new(std::io::sink()),
+                    stderr_writer: Box::new(std::io::sink()),
+                },
             }
         } else {
             StdioConfig {
                 suggestion: StdioSuggestion::Inherited,
-                stdout_writer: Box::new(std::io::stdout()),
-                stderr_writer: Box::new(std::io::stderr()),
+                writers: PipeWriters {
+                    stdout_writer: Box::new(std::io::stdout()),
+                    stderr_writer: Box::new(std::io::stderr()),
+                },
             }
         }
     }
