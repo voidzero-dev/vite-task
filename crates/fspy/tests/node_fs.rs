@@ -23,6 +23,7 @@ async fn track_node_script(script: &str, args: &[&OsStr]) -> anyhow::Result<Path
 }
 
 #[test(tokio::test)]
+#[ignore = "requires node"]
 async fn read_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.readFileSync('hello') } catch {}", &[]).await?;
     assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
@@ -30,6 +31,7 @@ async fn read_sync() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires node"]
 async fn exist_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.existsSync('hello') } catch {}", &[]).await?;
     assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
@@ -37,6 +39,7 @@ async fn exist_sync() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires node"]
 async fn stat_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.statSync('hello') } catch {}", &[]).await?;
     assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
@@ -44,6 +47,7 @@ async fn stat_sync() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires node"]
 async fn create_read_stream() -> anyhow::Result<()> {
     let accesses = track_node_script(
         "try { fs.createReadStream('hello').on('error', () => {}) } catch {}",
@@ -55,6 +59,7 @@ async fn create_read_stream() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires node"]
 async fn create_write_stream() -> anyhow::Result<()> {
     let tmpdir = tempfile::tempdir()?;
     let file_path = tmpdir.path().join("hello");
@@ -68,6 +73,7 @@ async fn create_write_stream() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires node"]
 async fn write_sync() -> anyhow::Result<()> {
     let tmpdir = tempfile::tempdir()?;
     let file_path = tmpdir.path().join("hello");
@@ -81,6 +87,7 @@ async fn write_sync() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires node"]
 async fn read_dir_sync() -> anyhow::Result<()> {
     let accesses = track_node_script("try { fs.readdirSync('.') } catch {}", &[]).await?;
     assert_contains(&accesses, &current_dir().unwrap(), AccessMode::READ_DIR);
@@ -88,6 +95,7 @@ async fn read_dir_sync() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires node"]
 async fn subprocess() -> anyhow::Result<()> {
     let cmd = if cfg!(windows) {
         r"'cmd', ['/c', 'type hello']"

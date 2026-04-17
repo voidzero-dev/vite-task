@@ -450,9 +450,13 @@ fn main() {
         .map(|fixture_path| {
             let name = fixture_path.file_name().unwrap().to_str().unwrap().to_owned();
             let tmp_dir_path = tmp_dir_path.clone();
+            // Fixtures whose commands require `node` on PATH; ignored by default
+            // so `cargo test` works with only the Rust toolchain installed.
+            let requires_node = matches!(name.as_str(), "signal-exit");
             libtest_mimic::Trial::test(name, move || {
                 run_case(&tmp_dir_path, &fixture_path).map_err(Into::into)
             })
+            .with_ignored_flag(requires_node)
         })
         .collect();
 

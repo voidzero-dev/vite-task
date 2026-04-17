@@ -52,6 +52,7 @@ async fn track_oxlint(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<Pa
 }
 
 #[test(tokio::test)]
+#[ignore = "requires `pnpm install` (workspace root)"]
 async fn oxlint_reads_js_file() -> anyhow::Result<()> {
     let tmpdir = tempfile::tempdir()?;
     // on macOS, tmpdir.path() may be a symlink, so we need to canonicalize it
@@ -69,6 +70,7 @@ async fn oxlint_reads_js_file() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires `pnpm install` (workspace root)"]
 async fn oxlint_reads_directory() -> anyhow::Result<()> {
     let tmpdir = tempfile::tempdir()?;
 
@@ -84,6 +86,7 @@ async fn oxlint_reads_directory() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore = "requires `pnpm install` (workspace root)"]
 async fn oxlint_type_aware() -> anyhow::Result<()> {
     let tmpdir = tempfile::tempdir()?;
     // on macOS, tmpdir.path() may be a symlink, so we need to canonicalize it
