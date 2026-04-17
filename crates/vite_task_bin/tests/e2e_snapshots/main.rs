@@ -184,11 +184,10 @@ struct E2e {
     /// Optional platform filter: "unix" or "windows". If set, test only runs on that platform.
     #[serde(default)]
     pub platform: Option<Str>,
-    /// If set on any case in a fixture, the fixture's trial is marked
-    /// `#[ignore]` (skipped by default, runnable with `cargo test -- --ignored`).
-    /// The string is a free-form reason, e.g. "requires node".
+    /// When true, the generated libtest-mimic trial is marked `#[ignore]`
+    /// (skipped by default, runnable with `cargo test -- --ignored`).
     #[serde(default)]
-    pub ignore: Option<Str>,
+    pub ignore: bool,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -210,13 +209,6 @@ fn load_snapshots_file(fixture_path: &std::path::Path) -> SnapshotsFile {
     }
 }
 
-#[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
-fn run_case(tmpdir: &AbsolutePath, fixture_path: &std::path::Path) -> Result<(), String> {
-    let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
-    let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
-    run_case_inner(tmpdir, fixture_path, fixture_name, &snapshots)
-}
-
 enum TerminationState {
     Exited(i64),
     TimedOut,
@@ -230,24 +222,25 @@ enum TerminationState {
     clippy::disallowed_types,
     reason = "Path required for fixture handling; String required by from_utf8_lossy and string accumulation"
 )]
-fn run_case_inner(
+fn run_case(
     tmpdir: &AbsolutePath,
     fixture_path: &std::path::Path,
     fixture_name: &str,
-    snapshots: &snapshot_test::Snapshots,
+    case_index: usize,
+    e2e: &E2e,
 ) -> Result<(), String> {
-    // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
-    let stage_path = tmpdir.join(fixture_name);
-    CopyOptions::new().copy_tree(fixture_path, stage_path.as_path()).unwrap();
+    let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
 
-    let (workspace_root, _cwd) = find_workspace_root(&stage_path).unwrap();
+    // Copy the fixture to a per-case staging directory so the test runs in
+    // isolation and workspace-root discovery doesn't walk past the fixture.
+    let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_case_{case_index}"));
+    CopyOptions::new().copy_tree(fixture_path, e2e_stage_path.as_path()).unwrap();
 
+    let (workspace_root, _cwd) = find_workspace_root(&e2e_stage_path).unwrap();
     assert_eq!(
-        &stage_path, &*workspace_root.path,
+        &e2e_stage_path, &*workspace_root.path,
         "folder '{fixture_name}' should be a workspace root"
     );
-
-    let cases_file = load_snapshots_file(fixture_path);
 
     // Prepare PATH for e2e tests: include vt and vtt binary directories.
     let bin_dirs: [Arc<OsStr>; 2] = ["CARGO_BIN_EXE_vt", "CARGO_BIN_EXE_vtt"].map(|var| {
@@ -264,27 +257,10 @@ fn run_case_inner(
     )
     .unwrap();
 
-    let mut e2e_count = 0u32;
-    for e2e in cases_file.e2e_cases {
-        // Skip test if platform doesn't match
-        if let Some(platform) = &e2e.platform {
-            let should_run = match platform.as_str() {
-                "unix" => cfg!(unix),
-                "windows" => cfg!(windows),
-                other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
-            };
-            if !should_run {
-                continue;
-            }
-        }
+    let e2e_stage_path_str = e2e_stage_path.as_path().to_str().unwrap();
 
-        let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_e2e_stage_{e2e_count}"));
-        e2e_count += 1;
-        CopyOptions::new().copy_tree(fixture_path, e2e_stage_path.as_path()).unwrap();
-
-        let e2e_stage_path_str = e2e_stage_path.as_path().to_str().unwrap();
-
-        let mut e2e_outputs = String::new();
+    let mut e2e_outputs = String::new();
+    {
         for step in &e2e.steps {
             let step_display = step.display_command();
 
@@ -424,8 +400,8 @@ fn run_case_inner(
                 break;
             }
         }
-        snapshots.check_snapshot(vite_str::format!("{}.snap", e2e.name).as_str(), &e2e_outputs)?;
     }
+    snapshots.check_snapshot(vite_str::format!("{}.snap", e2e.name).as_str(), &e2e_outputs)?;
     Ok(())
 }
 
@@ -460,17 +436,41 @@ fn main() {
 
     let tests: Vec<libtest_mimic::Trial> = fixture_paths
         .into_iter()
-        .map(|fixture_path| {
-            let name = fixture_path.file_name().unwrap().to_str().unwrap().to_owned();
-            let tmp_dir_path = tmp_dir_path.clone();
-            // A fixture is considered ignored when any of its `[[e2e]]` cases
-            // sets `ignore = "<reason>"` in snapshots.toml.
-            let ignored =
-                load_snapshots_file(&fixture_path).e2e_cases.iter().any(|c| c.ignore.is_some());
-            libtest_mimic::Trial::test(name, move || {
-                run_case(&tmp_dir_path, &fixture_path).map_err(Into::into)
+        .flat_map(|fixture_path| {
+            let fixture_path = Arc::<std::path::Path>::from(fixture_path);
+            let fixture_name: Arc<str> =
+                Arc::from(fixture_path.file_name().unwrap().to_str().unwrap());
+            let cases_file = load_snapshots_file(&fixture_path);
+            cases_file.e2e_cases.into_iter().enumerate().filter_map({
+                let fixture_path = Arc::clone(&fixture_path);
+                let fixture_name = Arc::clone(&fixture_name);
+                let tmp_dir_path = tmp_dir_path.clone();
+                move |(case_index, e2e)| {
+                    // Skip cases whose platform filter doesn't match this build.
+                    if let Some(platform) = &e2e.platform {
+                        let should_run = match platform.as_str() {
+                            "unix" => cfg!(unix),
+                            "windows" => cfg!(windows),
+                            other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
+                        };
+                        if !should_run {
+                            return None;
+                        }
+                    }
+                    let trial_name = vite_str::format!("{fixture_name}::{}", e2e.name);
+                    let ignored = e2e.ignore;
+                    let fixture_path = Arc::clone(&fixture_path);
+                    let fixture_name = Arc::clone(&fixture_name);
+                    let tmp_dir_path = tmp_dir_path.clone();
+                    Some(
+                        libtest_mimic::Trial::test(trial_name.as_str(), move || {
+                            run_case(&tmp_dir_path, &fixture_path, &fixture_name, case_index, &e2e)
+                                .map_err(Into::into)
+                        })
+                        .with_ignored_flag(ignored),
+                    )
+                }
             })
-            .with_ignored_flag(ignored)
         })
         .collect();
 
