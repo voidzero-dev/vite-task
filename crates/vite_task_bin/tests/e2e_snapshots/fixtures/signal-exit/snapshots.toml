@@ -4,4 +4,5 @@
 [[e2e]]
 name = "signal terminated task returns non-zero exit code"
 platform = "unix"
+ignore = "requires node"
 steps = [{ argv = ["vt", "run", "abort"], comment = "SIGABRT -> exit code 134" }]

@@ -184,12 +184,30 @@ struct E2e {
     /// Optional platform filter: "unix" or "windows". If set, test only runs on that platform.
     #[serde(default)]
     pub platform: Option<Str>,
+    /// If set on any case in a fixture, the fixture's trial is marked
+    /// `#[ignore]` (skipped by default, runnable with `cargo test -- --ignored`).
+    /// The string is a free-form reason, e.g. "requires node".
+    #[serde(default)]
+    pub ignore: Option<Str>,
 }
 
 #[derive(serde::Deserialize, Default)]
 struct SnapshotsFile {
     #[serde(rename = "e2e", default)] // toml usually uses singular for arrays
     pub e2e_cases: Vec<E2e>,
+}
+
+#[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
+fn load_snapshots_file(fixture_path: &std::path::Path) -> SnapshotsFile {
+    let cases_toml_path = fixture_path.join("snapshots.toml");
+    match std::fs::read(&cases_toml_path) {
+        Ok(content) => toml::from_slice(&content).unwrap(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SnapshotsFile::default(),
+        Err(err) => {
+            let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
+            panic!("Failed to read cases.toml for fixture {fixture_name}: {err}");
+        }
+    }
 }
 
 #[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
@@ -229,12 +247,7 @@ fn run_case_inner(
         "folder '{fixture_name}' should be a workspace root"
     );
 
-    let cases_toml_path = fixture_path.join("snapshots.toml");
-    let cases_file: SnapshotsFile = match std::fs::read(&cases_toml_path) {
-        Ok(content) => toml::from_slice(&content).unwrap(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SnapshotsFile::default(),
-        Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
-    };
+    let cases_file = load_snapshots_file(fixture_path);
 
     // Prepare PATH for e2e tests: include vt and vtt binary directories.
     let bin_dirs: [Arc<OsStr>; 2] = ["CARGO_BIN_EXE_vt", "CARGO_BIN_EXE_vtt"].map(|var| {
@@ -450,13 +463,14 @@ fn main() {
         .map(|fixture_path| {
             let name = fixture_path.file_name().unwrap().to_str().unwrap().to_owned();
             let tmp_dir_path = tmp_dir_path.clone();
-            // Fixtures whose commands require `node` on PATH; ignored by default
-            // so `cargo test` works with only the Rust toolchain installed.
-            let requires_node = matches!(name.as_str(), "signal-exit");
+            // A fixture is considered ignored when any of its `[[e2e]]` cases
+            // sets `ignore = "<reason>"` in snapshots.toml.
+            let ignored =
+                load_snapshots_file(&fixture_path).e2e_cases.iter().any(|c| c.ignore.is_some());
             libtest_mimic::Trial::test(name, move || {
                 run_case(&tmp_dir_path, &fixture_path).map_err(Into::into)
             })
-            .with_ignored_flag(requires_node)
+            .with_ignored_flag(ignored)
         })
         .collect();
 
