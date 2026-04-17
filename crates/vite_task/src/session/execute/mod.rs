@@ -14,10 +14,10 @@ use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
-use vite_path::AbsolutePath;
+use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnExecution,
-    execution_graph::ExecutionNodeIndex,
+    cache_metadata::CacheMetadata, execution_graph::ExecutionNodeIndex,
 };
 
 use self::{
@@ -251,19 +251,42 @@ impl ExecutionContext<'_> {
     }
 }
 
-/// Stdio-mode-specific state for a leaf execution.
+/// All valid runtime configurations for a leaf execution, after the cache-hit
+/// early-return has been ruled out.
 ///
-/// `Piped` owns the reporter's writers plus an optional capture buffer used for
-/// cache replay; `Inherited` owns nothing (the reporter's `StdioConfig` has
-/// already been dropped so we don't hold `std::io::Stdout` while the child
-/// writes to the same FD).
-enum Pipe {
-    Piped {
+/// The type shape enforces two invariants statically:
+/// - fspy tracking only exists inside [`ExecutionMode::Cached`] (fspy requires
+///   `includes_auto`, which only lives on cache metadata).
+/// - Cached execution always keeps its `StdioConfig` (piped stdio is forced so
+///   that output can be captured for replay).
+enum ExecutionMode<'a> {
+    Cached {
+        metadata: &'a CacheMetadata,
+        globbed_inputs: BTreeMap<RelativePathBuf, u64>,
         stdio_config: StdioConfig,
-        /// `Some` when caching is on — chunks are appended for cache replay.
-        capture: Option<Vec<StdOutput>>,
+        /// Captured stdout/stderr chunks flow here during drain for cache replay.
+        std_outputs: Vec<StdOutput>,
+        /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
+        /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
+        /// tracked accesses. `None` means fspy tracking is off for this task.
+        fspy: Option<Vec<wax::Glob<'static>>>,
     },
-    Inherited,
+    Uncached {
+        /// `Some` iff the reporter suggested piped stdio. `None` means the
+        /// child inherits stdin/stdout/stderr from the parent; the original
+        /// `StdioConfig` was already dropped so we don't hold `std::io::Stdout`
+        /// while the child writes to the same FD.
+        stdio_config: Option<StdioConfig>,
+    },
+}
+
+/// Cached-only state extracted from [`ExecutionMode::Cached`] after the drain
+/// phase, carried into the cache-update phase.
+struct CacheState<'a> {
+    metadata: &'a CacheMetadata,
+    globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    std_outputs: Vec<StdOutput>,
+    fspy_negatives: Option<Vec<wax::Glob<'static>>>,
 }
 
 /// Execute a spawned process with cache-aware lifecycle.
@@ -370,59 +393,60 @@ pub async fn execute_spawn(
         return SpawnOutcome::CacheHit;
     }
 
-    // 4. Decide fspy and stdio mode.
-    //    - fspy tracking runs only when caching is on and `includes_auto` is set.
-    //    - Piped stdio is forced whenever caching is on (we need to capture output
-    //      for replay); otherwise we honor the reporter's suggestion.
-    let fspy_enabled = cache_metadata.is_some_and(|m| m.input_config.includes_auto);
-    let spawn_stdio =
-        if cache_metadata.is_some() || stdio_config.suggestion == StdioSuggestion::Piped {
-            SpawnStdio::Piped
-        } else {
-            SpawnStdio::Inherited
-        };
-
-    // Build negative globs for fspy path filtering (already workspace-root-relative).
-    let resolved_negatives: Vec<wax::Glob<'static>> = if let Some(cache_metadata) = cache_metadata {
-        match cache_metadata
-            .input_config
-            .negative_globs
-            .iter()
-            .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
-            .collect::<anyhow::Result<Vec<_>>>()
-        {
-            Ok(negs) => negs,
-            Err(err) => {
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::PostRunFingerprint(err)),
-                );
-                return SpawnOutcome::Failed;
+    // 4. Build the execution mode. This folds the cache/fspy/stdio decisions
+    //    and their associated state into a single value whose shape encodes
+    //    the valid combinations. The inherited arm drops `stdio_config` here so
+    //    we don't hold `std::io::Stdout` while the child writes to the same FD.
+    let mode: ExecutionMode<'_> = match cache_metadata {
+        Some(metadata) => {
+            let fspy = if metadata.input_config.includes_auto {
+                // Resolve negative globs for fspy path filtering
+                // (already workspace-root-relative).
+                match metadata
+                    .input_config
+                    .negative_globs
+                    .iter()
+                    .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
+                    .collect::<anyhow::Result<Vec<_>>>()
+                {
+                    Ok(negs) => Some(negs),
+                    Err(err) => {
+                        leaf_reporter.finish(
+                            None,
+                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                            Some(ExecutionError::PostRunFingerprint(err)),
+                        );
+                        return SpawnOutcome::Failed;
+                    }
+                }
+            } else {
+                None
+            };
+            ExecutionMode::Cached {
+                metadata,
+                globbed_inputs,
+                stdio_config,
+                std_outputs: Vec::new(),
+                fspy,
             }
         }
-    } else {
-        Vec::new()
+        None => ExecutionMode::Uncached {
+            stdio_config: (stdio_config.suggestion == StdioSuggestion::Piped)
+                .then_some(stdio_config),
+        },
     };
 
-    // Bundle stdio-mode-specific state. `Pipe::Piped` owns the writers plus an
-    // optional capture buffer (Some when caching is on). In the inherited arm
-    // we drop `stdio_config` right here, so we don't hold `std::io::Stdout`
-    // while the child writes to the same FD.
-    let pipe = match spawn_stdio {
-        SpawnStdio::Piped => {
-            Pipe::Piped { stdio_config, capture: cache_metadata.map(|_| Vec::new()) }
-        }
-        SpawnStdio::Inherited => {
-            drop(stdio_config);
-            Pipe::Inherited
-        }
+    // 5. Derive the arguments for `spawn()` from the mode without consuming it.
+    let (spawn_stdio, fspy_enabled) = match &mode {
+        ExecutionMode::Cached { fspy, .. } => (SpawnStdio::Piped, fspy.is_some()),
+        ExecutionMode::Uncached { stdio_config: Some(_) } => (SpawnStdio::Piped, false),
+        ExecutionMode::Uncached { stdio_config: None } => (SpawnStdio::Inherited, false),
     };
 
     // Measure end-to-end duration here — spawn() no longer tracks time.
     let start = Instant::now();
 
-    // 5. Spawn. Returns pipes (Piped) or `None` (Inherited) plus a
+    // 6. Spawn. Returns pipes (Piped) or `None` (Inherited) plus a
     //    cancellation-aware wait future.
     let mut child = match spawn(
         &spawn_execution.spawn_command,
@@ -443,10 +467,16 @@ pub async fn execute_spawn(
         }
     };
 
-    // 6. If piped, drain stdout/stderr; capture chunks flow to `std_outputs`
-    //    for the cache update below.
-    let std_outputs: Option<Vec<StdOutput>> = match pipe {
-        Pipe::Piped { mut stdio_config, mut capture } => {
+    // 7. Consume `mode`: drain pipes (if piped), and for `Cached` keep the
+    //    state we'll need for the cache update.
+    let cache_state: Option<CacheState<'_>> = match mode {
+        ExecutionMode::Cached {
+            metadata,
+            globbed_inputs,
+            mut stdio_config,
+            mut std_outputs,
+            fspy,
+        } => {
             let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
             let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
             #[expect(
@@ -458,7 +488,7 @@ pub async fn execute_spawn(
                 stderr,
                 &mut *stdio_config.stdout_writer,
                 &mut *stdio_config.stderr_writer,
-                capture.as_mut(),
+                Some(&mut std_outputs),
                 fast_fail_token.clone(),
             )
             .await;
@@ -473,12 +503,40 @@ pub async fn execute_spawn(
                 );
                 return SpawnOutcome::Failed;
             }
-            capture
+            Some(CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives: fspy })
         }
-        Pipe::Inherited => None,
+        ExecutionMode::Uncached { stdio_config: Some(mut stdio_config) } => {
+            let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+            let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+            #[expect(
+                clippy::large_futures,
+                reason = "pipe_stdio streams child I/O and creates a large future"
+            )]
+            let pipe_result = pipe_stdio(
+                stdout,
+                stderr,
+                &mut *stdio_config.stdout_writer,
+                &mut *stdio_config.stderr_writer,
+                None,
+                fast_fail_token.clone(),
+            )
+            .await;
+            if let Err(err) = pipe_result {
+                fast_fail_token.cancel();
+                let _ = child.wait.await;
+                leaf_reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                    Some(ExecutionError::Spawn(err.into())),
+                );
+                return SpawnOutcome::Failed;
+            }
+            None
+        }
+        ExecutionMode::Uncached { stdio_config: None } => None,
     };
 
-    // 7. Wait for exit (handles cancellation internally).
+    // 8. Wait for exit (handles cancellation internally).
     let outcome = match child.wait.await {
         Ok(outcome) => outcome,
         Err(err) => {
@@ -492,18 +550,19 @@ pub async fn execute_spawn(
     };
     let duration = start.elapsed();
 
-    // Normalize fspy accesses (workspace-relative, negative-glob filtered).
-    let path_accesses = outcome
-        .path_accesses
-        .as_ref()
-        .map(|raw| TrackedPathAccesses::from_raw(raw, cache_base_path, &resolved_negatives));
-    let cache_metadata_and_inputs = cache_metadata.map(|cm| (cm, globbed_inputs));
+    // 9. Cache update (only when we were in `Cached` mode). Errors during cache
+    //    update are reported but do not affect the exit status we return.
+    let (cache_update_status, cache_error) = if let Some(state) = cache_state {
+        let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
 
-    // 6. Update cache if successful and determine cache update status.
-    //    Errors during cache update are terminal (reported through finish).
-    let (cache_update_status, cache_error) = if let Some((cache_metadata, globbed_inputs)) =
-        cache_metadata_and_inputs
-    {
+        // Normalize fspy accesses. `zip` gives `Some` iff fspy was enabled
+        // (both outcome.path_accesses and fspy_negatives are Some together).
+        let path_accesses = outcome
+            .path_accesses
+            .as_ref()
+            .zip(fspy_negatives.as_deref())
+            .map(|(raw, negs)| TrackedPathAccesses::from_raw(raw, cache_base_path, negs));
+
         let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
         if cancelled {
             // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
@@ -538,11 +597,11 @@ pub async fn execute_spawn(
                     Ok(post_run_fingerprint) => {
                         let new_cache_value = CacheEntryValue {
                             post_run_fingerprint,
-                            std_outputs: std_outputs.unwrap_or_default().into(),
+                            std_outputs: std_outputs.into(),
                             duration,
                             globbed_inputs,
                         };
-                        match cache.update(cache_metadata, new_cache_value).await {
+                        match cache.update(metadata, new_cache_value).await {
                             Ok(()) => (CacheUpdateStatus::Updated, None),
                             Err(err) => (
                                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
