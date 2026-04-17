@@ -23,7 +23,7 @@ use vite_task_plan::{
 use self::{
     fingerprint::PostRunFingerprint,
     glob_inputs::compute_globbed_inputs,
-    pipe::{PipeIo, pipe_stdio},
+    pipe::{PipeIo, StdOutput, pipe_stdio},
     spawn::{SpawnStdio, spawn},
     tracked_accesses::TrackedPathAccesses,
 };
@@ -276,11 +276,14 @@ enum ExecutionMode<'a> {
 }
 
 /// Cached-only state carried from mode construction through the cache-update
-/// phase. Captured stdout/stderr live in `PipeIo::capture` during drain and
-/// are handed to cache update separately.
+/// phase. `std_outputs` is empty at construction time and filled post-drain by
+/// moving the buffer out of `PipeIo::capture`.
 struct CacheState<'a> {
     metadata: &'a CacheMetadata,
     globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    /// Captured stdout/stderr for cache replay. Populated after drain; always
+    /// present (possibly empty) once we reach the cache-update phase.
+    std_outputs: Vec<StdOutput>,
     /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
     /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
     /// tracked accesses. `None` means fspy tracking is off for this task.
@@ -422,7 +425,12 @@ pub async fn execute_spawn(
             };
             ExecutionMode::Cached {
                 stdio_config,
-                state: CacheState { metadata, globbed_inputs, fspy_negatives: fspy },
+                state: CacheState {
+                    metadata,
+                    globbed_inputs,
+                    std_outputs: Vec::new(),
+                    fspy_negatives: fspy,
+                },
             }
         }
         None => ExecutionMode::Uncached {
@@ -465,7 +473,7 @@ pub async fn execute_spawn(
     // 7. Consume `mode`: pair the `StdioConfig` with an optional capture
     //    buffer as a `PipeIo`, and carry `CacheState` separately for the
     //    cache-update phase.
-    let (mut pipe_io, cache_state): (Option<PipeIo>, Option<CacheState<'_>>) = match mode {
+    let (mut pipe_io, mut cache_state): (Option<PipeIo>, Option<CacheState<'_>>) = match mode {
         ExecutionMode::Cached { stdio_config, state } => {
             (Some(PipeIo { stdio_config, capture: Some(Vec::new()) }), Some(state))
         }
@@ -512,15 +520,19 @@ pub async fn execute_spawn(
     };
     let duration = start.elapsed();
 
-    // Capture buffer lives in `PipeIo` during drain; pull it back out now so
-    // cache update can own the captured stdout/stderr.
-    let captured_outputs = pipe_io.and_then(|io| io.capture);
+    // Move captured stdout/stderr out of `PipeIo` and into `CacheState` so the
+    // cache update can own them. `pipe_io.capture` is `Some` iff caching was
+    // on, which is exactly when `cache_state` is `Some`.
+    if let Some(state) = cache_state.as_mut() {
+        state.std_outputs = pipe_io
+            .and_then(|io| io.capture)
+            .expect("cached mode always initializes `PipeIo::capture`");
+    }
 
     // 9. Cache update (only when we were in `Cached` mode). Errors during cache
     //    update are reported but do not affect the exit status we return.
     let (cache_update_status, cache_error) = if let Some(state) = cache_state {
-        let CacheState { metadata, globbed_inputs, fspy_negatives } = state;
-        let std_outputs = captured_outputs.unwrap_or_default();
+        let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
 
         // Normalize fspy accesses. `zip` gives `Some` iff fspy was enabled
         // (both outcome.path_accesses and fspy_negatives are Some together).
