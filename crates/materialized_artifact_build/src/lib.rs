@@ -1,5 +1,8 @@
 use std::{fs, path::Path};
 
+/// Namespace prefix for the env vars set by [`register`] and consumed by
+/// `materialized_artifact`'s `artifact!` macro. Exported so both crates agree
+/// on the same prefix.
 pub const ENV_PREFIX: &str = "MATERIALIZED_ARTIFACT_";
 
 /// Publish an artifact at `path` so `materialized_artifact`'s `artifact!($name)`

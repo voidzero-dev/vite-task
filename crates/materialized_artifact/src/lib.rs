@@ -42,9 +42,6 @@ pub struct Artifact {
     hash: &'static str,
 }
 
-/// Construct an [`Artifact`] from the env vars published by a build script
-/// via `materialized_artifact_build::register`. Must match the `ENV_PREFIX`
-/// constant in `materialized_artifact_build`.
 #[macro_export]
 macro_rules! artifact {
     ($name:literal) => {
