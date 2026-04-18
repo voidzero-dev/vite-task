@@ -1,5 +1,5 @@
 [package]
-name = "bundled_artifact"
+name = "materialized_artifact_build"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
@@ -7,7 +7,7 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-tempfile = { workspace = true }
+xxhash-rust = { workspace = true, features = ["xxh3"] }
 
 [lints]
 workspace = true

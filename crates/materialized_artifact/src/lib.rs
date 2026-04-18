@@ -1,23 +1,24 @@
-//! Bundle a file into the executable and materialize it to disk on demand.
+//! Materialize a compile-time–embedded file to disk on demand.
 //!
 //! Some APIs need a file on disk — `LoadLibrary` and `LD_PRELOAD` take a
 //! path, and helper binaries have to exist as actual files to be spawned —
-//! but we want to ship a single executable. `bundled_artifact` embeds the
-//! file content as a `&'static [u8]` at compile time via the [`artifact!`]
-//! macro, and [`Artifact::ensure_in`] writes it out to disk when first
-//! needed.
+//! but we want to ship a single executable. `materialized_artifact` embeds
+//! the file content as a `&'static [u8]` at compile time via the
+//! [`artifact!`] macro (same as `include_bytes!`), and
+//! [`Artifact::ensure_in`] writes it out to disk when first needed — that
+//! materialization step is the value-add over a bare `include_bytes!`.
 //!
 //! Materialized files are named `{name}_{hash}{suffix}` in the caller-chosen
 //! directory. The hash (computed at build time by
-//! `bundled_artifact_build::register`) gives three properties without any
-//! coordination between processes:
+//! `materialized_artifact_build::register`) gives three properties without
+//! any coordination between processes:
 //!
 //! - **No repeated writes.** [`Artifact::ensure_in`] returns the existing
 //!   path if the file is already there; repeated calls and re-runs skip I/O.
 //! - **Correctness.** Two binaries with different embedded content produce
 //!   different filenames, so a stale file from an older build is never
 //!   mistaken for the current one.
-//! - **Coexistence.** Multiple versions of a bundled artifact (e.g. from
+//! - **Coexistence.** Multiple versions of a materialized artifact (e.g. from
 //!   different builds of the host program on the same machine) share `dir`
 //!   without overwriting each other.
 
@@ -27,9 +28,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// A file bundled into the executable. Construct with [`artifact!`];
-/// materialize to disk with [`Artifact::ensure_in`]. See the [crate docs]
-/// for the design rationale.
+/// A file embedded into the executable at compile time. Construct with
+/// [`artifact!`]; materialize to disk with [`Artifact::ensure_in`]. See the
+/// [crate docs] for the design rationale.
 ///
 /// [crate docs]: crate
 pub struct Artifact {
@@ -39,19 +40,19 @@ pub struct Artifact {
 }
 
 /// Construct an [`Artifact`] from the env vars published by a build script
-/// via `bundled_artifact_build::register`. Must match the `ENV_PREFIX`
-/// constant in `bundled_artifact_build`.
+/// via `materialized_artifact_build::register`. Must match the `ENV_PREFIX`
+/// constant in `materialized_artifact_build`.
 #[macro_export]
 macro_rules! artifact {
     ($name:literal) => {
         $crate::Artifact::__new(
             $name,
             ::core::include_bytes!(::core::env!(::core::concat!(
-                "BUNDLED_ARTIFACT_",
+                "MATERIALIZED_ARTIFACT_",
                 $name,
                 "_PATH"
             ))),
-            ::core::env!(::core::concat!("BUNDLED_ARTIFACT_", $name, "_HASH")),
+            ::core::env!(::core::concat!("MATERIALIZED_ARTIFACT_", $name, "_HASH")),
         )
     };
 }

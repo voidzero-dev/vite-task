@@ -10,7 +10,7 @@ wincode = { workspace = true }
 bstr = { workspace = true, default-features = false }
 bumpalo = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
-bundled_artifact = { workspace = true }
+materialized_artifact = { workspace = true }
 fspy_shared = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
@@ -60,7 +60,7 @@ fspy_test_bin = { path = "../fspy_test_bin", artifact = "bin", target = "x86_64-
 # builds are cheap.
 [build-dependencies]
 anyhow = { workspace = true }
-bundled_artifact_build = { workspace = true }
+materialized_artifact_build = { workspace = true }
 flate2 = { workspace = true }
 fspy_preload_unix = { workspace = true }
 fspy_preload_windows = { workspace = true }

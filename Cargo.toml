@@ -69,8 +69,8 @@ derive_more = "2.0.1"
 diff-struct = "0.5.3"
 directories = "6.0.0"
 elf = { version = "0.8.0", default-features = false }
-bundled_artifact = { path = "crates/bundled_artifact" }
-bundled_artifact_build = { path = "crates/bundled_artifact_build" }
+materialized_artifact = { path = "crates/materialized_artifact" }
+materialized_artifact_build = { path = "crates/materialized_artifact_build" }
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
 fspy_detours_sys = { path = "crates/fspy_detours_sys" }

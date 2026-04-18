@@ -1,18 +1,18 @@
 use std::{fs, path::Path};
 
 /// Namespace prefix for the env vars set by [`register`] and consumed by
-/// `bundled_artifact`'s `artifact!` macro. Exported so both crates agree on
-/// the same prefix.
-pub const ENV_PREFIX: &str = "BUNDLED_ARTIFACT_";
+/// `materialized_artifact`'s `artifact!` macro. Exported so both crates agree
+/// on the same prefix.
+pub const ENV_PREFIX: &str = "MATERIALIZED_ARTIFACT_";
 
-/// Publish an artifact at `path` so `bundled_artifact`'s `artifact!($name)`
+/// Publish an artifact at `path` so `materialized_artifact`'s `artifact!($name)`
 /// macro can embed it.
 ///
 /// Emits three `cargo:…` directives:
 /// `rerun-if-changed={path}`,
-/// `rustc-env=BUNDLED_ARTIFACT_{name}_PATH={path}`, and
-/// `rustc-env=BUNDLED_ARTIFACT_{name}_HASH={hex}`. The runtime resolves these
-/// at compile time via `include_bytes!(env!(…))` and `env!(…)`.
+/// `rustc-env=MATERIALIZED_ARTIFACT_{name}_PATH={path}`, and
+/// `rustc-env=MATERIALIZED_ARTIFACT_{name}_HASH={hex}`. The runtime resolves
+/// these at compile time via `include_bytes!(env!(…))` and `env!(…)`.
 ///
 /// `name` is used both as the env-var key and as the on-disk filename prefix
 /// (in `Artifact::ensure_in`), so it must be a valid identifier-like string

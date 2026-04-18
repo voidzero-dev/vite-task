@@ -1,4 +1,4 @@
-use bundled_artifact::{Artifact, artifact};
+use materialized_artifact::{Artifact, artifact};
 
 pub const COREUTILS_BINARY: Artifact = artifact!("coreutils");
 pub const OILS_BINARY: Artifact = artifact!("oils_for_unix");

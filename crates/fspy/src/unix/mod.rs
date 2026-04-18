@@ -45,7 +45,7 @@ impl SpyImpl {
     pub fn init_in(#[cfg_attr(target_env = "musl", allow(unused))] dir: &Path) -> io::Result<Self> {
         #[cfg(not(target_env = "musl"))]
         let preload_path = {
-            use bundled_artifact::{Artifact, artifact};
+            use materialized_artifact::{Artifact, artifact};
 
             const PRELOAD_CDYLIB: Artifact = artifact!("fspy_preload");
 

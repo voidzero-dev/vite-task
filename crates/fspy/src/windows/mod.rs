@@ -6,13 +6,13 @@ use std::{
     sync::Arc,
 };
 
-use bundled_artifact::{Artifact, artifact};
 use fspy_detours_sys::{DetourCopyPayloadToProcess, DetourUpdateProcessWithDll};
 use fspy_shared::{
     ipc::{PathAccess, channel::channel},
     windows::{PAYLOAD_ID, Payload},
 };
 use futures_util::FutureExt;
+use materialized_artifact::{Artifact, artifact};
 use tokio_util::sync::CancellationToken;
 use winapi::{
     shared::minwindef::TRUE,
