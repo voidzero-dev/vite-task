@@ -49,7 +49,7 @@ impl SpyImpl {
 
             const PRELOAD_CDYLIB: Artifact = artifact!("fspy_preload");
 
-            let preload_cdylib_path = PRELOAD_CDYLIB.ensure_in(dir, ".dylib", false)?;
+            let preload_cdylib_path = PRELOAD_CDYLIB.materialize_in(dir, ".dylib", false)?;
             preload_cdylib_path.as_path().into()
         };
 
@@ -58,8 +58,8 @@ impl SpyImpl {
             preload_path,
             #[cfg(target_os = "macos")]
             artifacts: {
-                let coreutils_path = macos_artifacts::COREUTILS_BINARY.ensure_in(dir, "", true)?;
-                let bash_path = macos_artifacts::OILS_BINARY.ensure_in(dir, "", true)?;
+                let coreutils_path = macos_artifacts::COREUTILS_BINARY.materialize_in(dir, "", true)?;
+                let bash_path = macos_artifacts::OILS_BINARY.materialize_in(dir, "", true)?;
                 Artifacts {
                     bash_path: bash_path.as_path().into(),
                     coreutils_path: coreutils_path.as_path().into(),

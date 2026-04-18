@@ -5,7 +5,7 @@
 //! but we want to ship a single executable. `materialized_artifact` embeds
 //! the file content as a `&'static [u8]` at compile time via the
 //! [`artifact!`] macro (same as `include_bytes!`), and
-//! [`Artifact::ensure_in`] writes it out to disk when first needed — that
+//! [`Artifact::materialize_in`] writes it out to disk when first needed — that
 //! materialization step is the value-add over a bare `include_bytes!`.
 //!
 //! Materialized files are named `{name}_{hash}{suffix}` in the caller-chosen
@@ -13,7 +13,7 @@
 //! `materialized_artifact_build::register`) gives three properties without
 //! any coordination between processes:
 //!
-//! - **No repeated writes.** [`Artifact::ensure_in`] returns the existing
+//! - **No repeated writes.** [`Artifact::materialize_in`] returns the existing
 //!   path if the file is already there; repeated calls and re-runs skip I/O.
 //! - **Correctness.** Two binaries with different embedded content produce
 //!   different filenames, so a stale file from an older build is never
@@ -29,7 +29,7 @@ use std::{
 };
 
 /// A file embedded into the executable at compile time. Construct with
-/// [`artifact!`]; materialize to disk with [`Artifact::ensure_in`]. See the
+/// [`artifact!`]; materialize to disk with [`Artifact::materialize_in`]. See the
 /// [crate docs] for the design rationale.
 ///
 /// [crate docs]: crate
@@ -82,7 +82,7 @@ impl Artifact {
     /// Returns an error if the directory can't be read/written, the stat
     /// fails for any reason other than not-found, or the temp-file rename
     /// fails and the destination still doesn't exist.
-    pub fn ensure_in(
+    pub fn materialize_in(
         &self,
         dir: impl AsRef<Path>,
         suffix: &str,
