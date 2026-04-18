@@ -14,7 +14,7 @@ mod tests {
     #[test]
     fn coreutils_functions() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let coreutils_path = COREUTILS_BINARY.materialize_in(&tmpdir, "", true).unwrap();
+        let coreutils_path = COREUTILS_BINARY.materialize().executable().at(&tmpdir).unwrap();
         let output = Command::new(coreutils_path).arg("--list").output().unwrap();
         let mut expected_functions: Vec<&str> = output
             .stdout

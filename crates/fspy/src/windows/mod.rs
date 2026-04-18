@@ -51,7 +51,7 @@ pub struct SpyImpl {
 
 impl SpyImpl {
     pub fn init_in(path: &Path) -> io::Result<Self> {
-        let dll_path = INTERPOSE_CDYLIB.materialize_in(path, ".dll", false)?;
+        let dll_path = INTERPOSE_CDYLIB.materialize().suffix(".dll").at(path)?;
 
         let wide_dll_path = dll_path.as_os_str().encode_wide().collect::<Vec<u16>>();
         let mut ansi_dll_path =

@@ -4,17 +4,17 @@
 //! path, and helper binaries have to exist as actual files to be spawned —
 //! but we want to ship a single executable. `materialized_artifact` embeds
 //! the file content as a `&'static [u8]` at compile time via the
-//! [`artifact!`] macro (same as `include_bytes!`), and
-//! [`Artifact::materialize_in`] writes it out to disk when first needed — that
-//! materialization step is the value-add over a bare `include_bytes!`.
+//! [`artifact!`] macro (same as `include_bytes!`), and [`Materialize::at`]
+//! writes it out to disk when first needed — that materialization step is
+//! the value-add over a bare `include_bytes!`.
 //!
 //! Materialized files are named `{name}_{hash}{suffix}` in the caller-chosen
 //! directory. The hash (computed at build time by
 //! `materialized_artifact_build::register`) gives three properties without
 //! any coordination between processes:
 //!
-//! - **No repeated writes.** [`Artifact::materialize_in`] returns the existing
-//!   path if the file is already there; repeated calls and re-runs skip I/O.
+//! - **No repeated writes.** [`Materialize::at`] returns the existing path if
+//!   the file is already there; repeated calls and re-runs skip I/O.
 //! - **Correctness.** Two binaries with different embedded content produce
 //!   different filenames, so a stale file from an older build is never
 //!   mistaken for the current one.
@@ -28,11 +28,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// A file embedded into the executable at compile time. Construct with
-/// [`artifact!`]; materialize to disk with [`Artifact::materialize_in`]. See the
-/// [crate docs] for the design rationale.
+/// A file embedded into the executable at compile time.
+///
+/// Construct with [`artifact!`]; materialize to disk via
+/// [`Artifact::materialize`] + [`Materialize::at`]. See the [crate docs] for
+/// the design rationale.
 ///
 /// [crate docs]: crate
+#[derive(Clone, Copy)]
 pub struct Artifact {
     name: &'static str,
     content: &'static [u8],
@@ -64,14 +67,55 @@ impl Artifact {
         Self { name, content, hash }
     }
 
-    /// Ensure the artifact is materialized in `dir` under a content-addressed
-    /// filename, writing it if missing. `executable` picks the Unix mode
-    /// (`0o755` vs `0o644`) for newly created files, and reconciles an
-    /// existing file's mode if it drifted. On non-Unix targets `executable`
-    /// has no effect.
+    /// Start a fluent materialize chain. Supply optional [`Materialize::suffix`]
+    /// / [`Materialize::executable`] knobs, then terminate with
+    /// [`Materialize::at`].
+    pub const fn materialize(&self) -> Materialize<'static> {
+        Materialize {
+            artifact: *self,
+            suffix: "",
+            #[cfg(unix)]
+            executable: false,
+        }
+    }
+}
+
+/// Builder returned by [`Artifact::materialize`]. Terminate with
+/// [`Materialize::at`] to write the file.
+#[derive(Clone, Copy)]
+#[must_use = "materialize() only configures — call .at(dir) to write the file"]
+pub struct Materialize<'a> {
+    artifact: Artifact,
+    suffix: &'a str,
+    #[cfg(unix)]
+    executable: bool,
+}
+
+impl<'a> Materialize<'a> {
+    /// Filename suffix appended after `{name}_{hash}` (e.g. `.dll`, `.dylib`).
+    /// Defaults to empty.
+    pub const fn suffix(mut self, suffix: &'a str) -> Self {
+        self.suffix = suffix;
+        self
+    }
+
+    /// Mark the materialized file as executable (`0o755` on Unix; no-op on
+    /// Windows where the filesystem has no executable bit).
+    pub const fn executable(mut self) -> Self {
+        #[cfg(unix)]
+        {
+            self.executable = true;
+        }
+        self
+    }
+
+    /// Materialize the artifact in `dir` under a content-addressed filename,
+    /// writing it if missing. On Unix, newly created files get `0o755` when
+    /// [`Materialize::executable`] was called and `0o644` otherwise, and an
+    /// existing file's mode is reconciled if it drifted.
     ///
     /// Returns the final path. If the target already exists and its mode
-    /// already matches `executable`, no I/O beyond the stat is performed.
+    /// already matches, no I/O beyond the stat is performed.
     ///
     /// # Preconditions
     ///
@@ -82,19 +126,13 @@ impl Artifact {
     /// Returns an error if the directory can't be read/written, the stat
     /// fails for any reason other than not-found, or the temp-file rename
     /// fails and the destination still doesn't exist.
-    pub fn materialize_in(
-        &self,
-        dir: impl AsRef<Path>,
-        suffix: &str,
-        executable: bool,
-    ) -> io::Result<PathBuf> {
+    pub fn at(self, dir: impl AsRef<Path>) -> io::Result<PathBuf> {
         let dir = dir.as_ref();
-        let path = dir.join(format!("{}_{}{}", self.name, self.hash, suffix));
+        let path =
+            dir.join(format!("{}_{}{}", self.artifact.name, self.artifact.hash, self.suffix));
 
         #[cfg(unix)]
-        let want_mode: u32 = if executable { 0o755 } else { 0o644 };
-        #[cfg(not(unix))]
-        let _ = executable; // Unix-mode concept; no-op on Windows.
+        let want_mode: u32 = if self.executable { 0o755 } else { 0o644 };
 
         // Fast path: one stat tells us both whether the file exists and,
         // on Unix, what its permission bits are. The content is assumed
@@ -138,7 +176,7 @@ impl Artifact {
         };
         #[cfg(not(unix))]
         let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-        tmp.as_file_mut().write_all(self.content)?;
+        tmp.as_file_mut().write_all(self.artifact.content)?;
 
         // `persist_noclobber` (link+unlink on Unix, MoveFileExW without
         // REPLACE_EXISTING on Windows) fails atomically if the destination

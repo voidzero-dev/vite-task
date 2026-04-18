@@ -15,7 +15,7 @@ pub const ENV_PREFIX: &str = "MATERIALIZED_ARTIFACT_";
 /// these at compile time via `include_bytes!(env!(…))` and `env!(…)`.
 ///
 /// `name` is used both as the env-var key and as the on-disk filename prefix
-/// (in `Artifact::materialize_in`), so it must be a valid identifier-like string
+/// (in `Materialize::at`), so it must be a valid identifier-like string
 /// that matches the one passed to `artifact!`.
 ///
 /// # Panics
