@@ -123,12 +123,15 @@ impl Artifact {
         }
 
         // Slow path: write to a unique temp file in the same directory, then
-        // rename into place atomically. `NamedTempFile`'s `Drop` removes the
-        // temp if we bail before `persist_noclobber`, avoiding orphaned files
-        // on errors.
+        // rename into place atomically. The temp must live in `dir` (not the
+        // system temp) so the final rename stays within one filesystem — cross-
+        // filesystem rename isn't atomic. `NamedTempFile`'s `Drop` removes the
+        // temp on any early return, so we never leak partial files on error.
         #[cfg(unix)]
         let mut tmp = {
             use std::os::unix::fs::PermissionsExt;
+            // `Builder::permissions` sets the mode at open(2) time, so there's
+            // no window where the temp exists with the wrong bits.
             tempfile::Builder::new()
                 .permissions(fs::Permissions::from_mode(want_mode))
                 .tempfile_in(dir)?
@@ -137,6 +140,10 @@ impl Artifact {
         let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
         tmp.as_file_mut().write_all(self.content)?;
 
+        // `persist_noclobber` (link+unlink on Unix, MoveFileExW without
+        // REPLACE_EXISTING on Windows) fails atomically if the destination
+        // already exists — so two racing processes can't clobber each other
+        // mid-write, and the loser sees the error below.
         if let Err(err) = tmp.persist_noclobber(&path) {
             // If another process won the race and the destination now exists,
             // treat that as success; `err.file` drops here, cleaning up our
