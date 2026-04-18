@@ -60,8 +60,9 @@ struct BinaryDownload {
     url: &'static str,
     /// Path of the binary within the tarball.
     path_in_targz: &'static str,
-    /// SHA-256 of the tarball at `url`. Each value can be obtained from the
-    /// release download page.
+    /// SHA-256 of the extracted binary. Doubles as the cache key: an
+    /// already-extracted binary in `OUT_DIR` whose content hashes to this
+    /// value is reused without hitting the network.
     expected_sha256: &'static str,
 }
 
@@ -74,14 +75,14 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
                 name: "oils_for_unix",
                 url: "https://github.com/branchseer/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-arm64.tar.gz",
                 path_in_targz: "oils-for-unix",
-                expected_sha256: "3a35f7ae2be85fcd32392cd8171522f5822f20a69125c5e9d8d68b2f5c857098",
+                expected_sha256: "ce4bb80b15f0a0371af08b19b65bfa5ea17d30429ebb911f487de3d2bcc7a07d",
             },
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
                 name: "coreutils",
                 url: "https://github.com/uutils/coreutils/releases/download/0.4.0/coreutils-0.4.0-aarch64-apple-darwin.tar.gz",
                 path_in_targz: "coreutils-0.4.0-aarch64-apple-darwin/coreutils",
-                expected_sha256: "a148b660eeaf409af7a4406903f93d0e6713a5eb9adcaf71a1d732f1e3cc3522",
+                expected_sha256: "8e8f38d9323135a19a73d617336fce85380f3c46fcb83d3ae3e031d1c0372f21",
             },
         ],
     ),
@@ -93,14 +94,14 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
                 name: "oils_for_unix",
                 url: "https://github.com/branchseer/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-x86_64.tar.gz",
                 path_in_targz: "oils-for-unix",
-                expected_sha256: "aa12258d1bd553020144ad61fdac18e7dfbe3fc3965da32ee458840153169151",
+                expected_sha256: "cf1a95993127770e2a5fff277cd256a2bb28cf97d7f83ae42fdccc172cdb540d",
             },
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
                 name: "coreutils",
                 url: "https://github.com/uutils/coreutils/releases/download/0.4.0/coreutils-0.4.0-x86_64-apple-darwin.tar.gz",
                 path_in_targz: "coreutils-0.4.0-x86_64-apple-darwin/coreutils",
-                expected_sha256: "6e4be8429efe86c9a60247ae7a930221ed11770a975fb4b6fd09ff8d39b9a15c",
+                expected_sha256: "6be8bee6e8b91fc44a465203b9cc30538af00084b6657dc136d9e55837753eb1",
             },
         ],
     ),
@@ -120,18 +121,21 @@ fn fetch_macos_binaries(out_dir: &Path) -> anyhow::Result<()> {
 
     for BinaryDownload { name, url, path_in_targz, expected_sha256 } in downloads {
         let dest = out_dir.join(name);
-        // Reuse the extracted binary if it's already in OUT_DIR; the sha256
-        // of the tarball was verified on the initial download. This avoids
-        // hitting the network on incremental build-script reruns.
-        if !dest.exists() {
+        // Cache hit: an already-extracted binary whose contents hash to
+        // `expected_sha256` is known-good and reused without redownloading.
+        let cached = matches!(
+            fs::read(&dest),
+            Ok(existing) if sha256_hex(&existing) == *expected_sha256,
+        );
+        if !cached {
             let tarball = download(url).context(format!("Failed to download {url}"))?;
-            let actual_sha256 = sha256_hex(&tarball);
-            assert_eq!(
-                &actual_sha256, expected_sha256,
-                "sha256 of {url} does not match — update expected value in MACOS_BINARY_DOWNLOADS",
-            );
             let data = unpack_tar_gz(Cursor::new(tarball), path_in_targz)
                 .context(format!("Failed to extract {path_in_targz} from {url}"))?;
+            let actual_sha256 = sha256_hex(&data);
+            assert_eq!(
+                &actual_sha256, expected_sha256,
+                "sha256 of {path_in_targz} in {url} does not match — update expected value in MACOS_BINARY_DOWNLOADS",
+            );
             fs::write(&dest, &data).with_context(|| format!("writing {}", dest.display()))?;
         }
         bundled_artifact_build::register(name, &dest);
