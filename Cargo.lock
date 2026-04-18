@@ -1214,7 +1214,6 @@ dependencies = [
  "libc",
  "nix 0.30.1",
  "ouroboros",
- "rand 0.9.2",
  "rustc-hash",
  "sha2",
  "subprocess_test",

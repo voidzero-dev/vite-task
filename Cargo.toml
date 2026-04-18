@@ -57,7 +57,6 @@ cc = "1.2.39"
 clap = "4.5.53"
 color-eyre = "0.6.5"
 compact_str = "0.9.0"
-const_format = "0.2.34"
 constcat = "0.6.1"
 copy_dir = "0.1.3"
 cow-utils = "0.1.3"
@@ -105,7 +104,6 @@ pretty_assertions = "1.4.1"
 pty_terminal = { path = "crates/pty_terminal" }
 pty_terminal_test = { path = "crates/pty_terminal_test" }
 pty_terminal_test_client = { path = "crates/pty_terminal_test_client" }
-rand = "0.9.1"
 ratatui = "0.30.0"
 rayon = "1.10.0"
 ref-cast = "1.0.24"
