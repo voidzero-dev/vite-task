@@ -91,16 +91,21 @@ pub struct Materialize<'a> {
     executable: bool,
 }
 
-impl<'a> Materialize<'a> {
+impl Materialize<'_> {
     /// Filename suffix appended after `{name}_{hash}` (e.g. `.dll`, `.dylib`).
     /// Defaults to empty.
-    pub const fn suffix(mut self, suffix: &'a str) -> Self {
-        self.suffix = suffix;
-        self
+    pub const fn suffix(self, suffix: &str) -> Materialize<'_> {
+        Materialize {
+            artifact: self.artifact,
+            suffix,
+            #[cfg(unix)]
+            executable: self.executable,
+        }
     }
 
     /// Mark the materialized file as executable (`0o755` on Unix; no-op on
     /// Windows where the filesystem has no executable bit).
+    #[cfg_attr(not(unix), expect(unused_mut, reason = "executable is Unix-only"))]
     pub const fn executable(mut self) -> Self {
         #[cfg(unix)]
         {
