@@ -63,8 +63,8 @@ fspy_test_bin = { path = "../fspy_test_bin", artifact = "bin", target = "x86_64-
 anyhow = { workspace = true }
 bundled_artifact_build = { workspace = true }
 flate2 = { workspace = true }
-fspy_preload_unix = { path = "../fspy_preload_unix", artifact = "cdylib", target = "target" }
-fspy_preload_windows = { path = "../fspy_preload_windows", artifact = "cdylib", target = "target" }
+fspy_preload_unix = { workspace = true }
+fspy_preload_windows = { workspace = true }
 sha2 = { workspace = true }
 tar = { workspace = true }
 
