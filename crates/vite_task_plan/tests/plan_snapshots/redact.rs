@@ -29,6 +29,40 @@ fn redact_string_in_json(value: &mut serde_json::Value, redactions: &[(&str, &st
     });
 }
 
+/// Replace the bare name `pwsh` / `powershell` (post-extension-strip) with a
+/// stable placeholder. The two hosts are interchangeable for our purposes,
+/// so the snapshot shouldn't care which one Windows CI happens to find.
+#[expect(
+    clippy::disallowed_types,
+    reason = "String mutation required by serde_json::Value::String which stores a String"
+)]
+fn redact_powershell_program_name(s: &mut String) {
+    if s == "pwsh" || s == "powershell" {
+        *s = "<powershell>".to_string();
+    }
+}
+
+/// Replace an absolute PowerShell-host path (post-extension-strip) with a
+/// stable placeholder so the snapshot doesn't pin a particular runner image's
+/// system layout (e.g. `C:\Windows\System32\WindowsPowerShell\v1.0\powershell`
+/// vs `C:\Program Files\PowerShell\7\pwsh`).
+#[expect(
+    clippy::disallowed_types,
+    reason = "String mutation required by serde_json::Value::String which stores a String"
+)]
+fn redact_powershell_program_path(s: &mut String) {
+    // Short-circuit by scanning for a substring would risk missing Windows
+    // paths with unexpected casing (e.g. `WINDOWSPOWERSHELL`), so just
+    // normalize. `cow_replace` and `cow_to_lowercase` both return
+    // `Cow::Borrowed` when there's nothing to change — typical lowercase
+    // POSIX paths cost one chained copy via `into_owned`, not a full scan.
+    let replaced = s.as_str().cow_replace('\\', "/");
+    let normalized = replaced.cow_to_lowercase();
+    if normalized.ends_with("/powershell") || normalized.ends_with("/pwsh") {
+        *s = "<powershell>".to_string();
+    }
+}
+
 /// Strip Windows executable extensions (case-insensitive) for cross-platform consistency
 #[expect(
     clippy::disallowed_types,
@@ -60,6 +94,7 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "linear sequence of redaction passes")]
 pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_json::Value {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     #[expect(clippy::disallowed_types, reason = "PathBuf needed to build fake-bin path from env")]
@@ -109,10 +144,12 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
         // Normalize program_name field
         if let Some(serde_json::Value::String(program_name)) = map.get_mut("program_name") {
             strip_windows_executable_extension(program_name);
+            redact_powershell_program_name(program_name);
         }
         // Normalize program_path field
         if let Some(serde_json::Value::String(program_path)) = map.get_mut("program_path") {
             strip_windows_executable_extension(program_path);
+            redact_powershell_program_path(program_path);
         }
     });
 

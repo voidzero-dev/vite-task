@@ -1,0 +1,17 @@
+# Windows-only: verifies the `.cmd` → PowerShell rewrite at plan time, and
+# that the resulting cache key stays portable regardless of how the user
+# navigated to the sub-package task. Both plan cases below target the same
+# task; their snapshots should be byte-identical apart from the plan query
+# itself, proving the cache key doesn't depend on invocation style.
+platform = "windows"
+
+# Direct invocation: user `cd`'d into the sub-package before running.
+[[plan]]
+name = "dev_in_subpackage"
+cwd = "packages/foo"
+args = ["run", "dev"]
+
+# Same sub-package task reached via `--filter` from the workspace root.
+[[plan]]
+name = "dev_filter_from_root"
+args = ["run", "--filter", "./packages/foo", "dev"]

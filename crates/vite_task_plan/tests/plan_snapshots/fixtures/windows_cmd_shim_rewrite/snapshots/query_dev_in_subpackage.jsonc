@@ -1,0 +1,97 @@
+// run dev
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/packages/foo",
+        "dev"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "foo",
+          "task_name": "dev",
+          "package_path": "<workspace>/packages/foo"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "foo",
+                "task_name": "dev",
+                "package_path": "<workspace>/packages/foo"
+              },
+              "command": "vite --port 3000",
+              "and_item_index": null,
+              "cwd": "<workspace>/packages/foo"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "packages/foo",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "<powershell>"
+                        }
+                      },
+                      "args": [
+                        "-NoProfile",
+                        "-NoLogo",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        "node_modules/.bin/vite.ps1",
+                        "--port",
+                        "3000"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "dev",
+                        "and_item_index": 0,
+                        "extra_args": [],
+                        "package_path": "packages/foo"
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<powershell>",
+                    "args": [
+                      "-NoProfile",
+                      "-NoLogo",
+                      "-ExecutionPolicy",
+                      "Bypass",
+                      "-File",
+                      "node_modules/.bin/vite.ps1",
+                      "--port",
+                      "3000"
+                    ],
+                    "all_envs": {
+                      "NO_COLOR": "1",
+                      "PATH": "<workspace>/packages/foo/node_modules/.bin:<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/packages/foo"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

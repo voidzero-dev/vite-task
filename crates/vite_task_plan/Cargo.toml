@@ -14,7 +14,9 @@ workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
+cow-utils = { workspace = true }
 futures-util = { workspace = true }
+pathdiff = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -35,7 +37,6 @@ which = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 copy_dir = { workspace = true }
 libtest-mimic = { workspace = true }
-cow-utils = { workspace = true }
 snapshot_test = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

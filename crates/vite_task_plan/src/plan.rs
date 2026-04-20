@@ -294,6 +294,12 @@ async fn plan_task_as_execution_node(
                         &script_command.envs,
                         &script_command.cwd,
                     )?;
+                    let (program_path, spawn_args) = crate::ps1_shim::rewrite_cmd_shim_with_args(
+                        program_path,
+                        script_command.args,
+                        &task_node.resolved_config.resolved_options.cwd,
+                        context.workspace_path(),
+                    );
                     let resolved_options = ResolvedTaskOptions {
                         cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
                         cache_config: effective_cache_config(
@@ -309,7 +315,7 @@ async fn plan_task_as_execution_node(
                         &resolved_options,
                         &script_command.envs,
                         program_path,
-                        script_command.args,
+                        spawn_args,
                     )?;
                     ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                 }
@@ -507,6 +513,8 @@ pub fn plan_synthetic_request(
     let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
     let program_path = which(&program, &envs, cwd)?;
+    let (program_path, args) =
+        crate::ps1_shim::rewrite_cmd_shim_with_args(program_path, args, cwd, workspace_path);
     let resolved_cache_config = resolve_synthetic_cache_config(
         parent_cache_config,
         cache_config,

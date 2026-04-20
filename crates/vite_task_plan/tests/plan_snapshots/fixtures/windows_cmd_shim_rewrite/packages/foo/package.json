@@ -1,0 +1,6 @@
+{
+  "name": "foo",
+  "scripts": {
+    "dev": "vite --port 3000"
+  }
+}

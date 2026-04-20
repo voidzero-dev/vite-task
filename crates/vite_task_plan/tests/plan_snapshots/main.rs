@@ -42,8 +42,28 @@ struct Plan {
 
 #[derive(serde::Deserialize, Default)]
 struct SnapshotsFile {
+    /// Optional platform filter: `"unix"` or `"windows"`. If set, the whole
+    /// fixture only runs on that platform. Fixtures whose filter doesn't
+    /// match the current build are dropped during trial enumeration so they
+    /// don't show up as "passed" when they never ran. Mirrors the per-case
+    /// filter used by the e2e harness.
+    #[serde(default)]
+    pub platform: Option<Str>,
     #[serde(rename = "plan", default)] // toml usually uses singular for arrays
     pub plan_cases: Vec<Plan>,
+}
+
+/// Returns whether the current build should run the fixture. Panics on an
+/// unknown platform string so typos surface loudly.
+fn should_run_on_this_platform(platform: Option<&Str>) -> bool {
+    match platform.map(Str::as_str) {
+        None => true,
+        Some("unix") => cfg!(unix),
+        Some("windows") => cfg!(windows),
+        Some(other) => {
+            panic!("Unknown platform filter '{other}' — expected \"unix\" or \"windows\"")
+        }
+    }
 }
 
 /// Compact plan: maps `"relative_path#task_name"` to either just neighbors (simple)
@@ -121,16 +141,32 @@ fn assert_identifier_like(kind: &str, value: &str) {
     );
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Path required for fixture handling; String required by std::fs::read and toml::from_slice"
+)]
+fn load_snapshots_file(fixture_path: &std::path::Path, fixture_name: &str) -> SnapshotsFile {
+    let cases_toml_path = fixture_path.join("snapshots.toml");
+    match std::fs::read(&cases_toml_path) {
+        Ok(content) => toml::from_slice(&content).unwrap_or_else(|err| {
+            panic!("Failed to parse snapshots.toml for fixture {fixture_name}: {err}")
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SnapshotsFile::default(),
+        Err(err) => panic!("Failed to read snapshots.toml for fixture {fixture_name}: {err}"),
+    }
+}
+
 #[expect(clippy::disallowed_types, reason = "Path required for fixture path handling")]
 fn run_case(
     runtime: &Runtime,
     tmpdir: &AbsolutePath,
     fixture_path: &std::path::Path,
+    cases_file: SnapshotsFile,
 ) -> Result<(), String> {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
     assert_identifier_like("fixture folder", fixture_name);
     let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
-    run_case_inner(runtime, tmpdir, fixture_path, fixture_name, &snapshots)
+    run_case_inner(runtime, tmpdir, fixture_path, fixture_name, &snapshots, cases_file)
 }
 
 #[expect(
@@ -144,6 +180,7 @@ fn run_case_inner(
     fixture_path: &std::path::Path,
     fixture_name: &str,
     snapshots: &snapshot_test::Snapshots,
+    cases_file: SnapshotsFile,
 ) -> Result<(), String> {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
@@ -155,13 +192,6 @@ fn run_case_inner(
         &stage_path, &*workspace_root.path,
         "folder '{fixture_name}' should be a workspace root"
     );
-
-    let cases_toml_path = fixture_path.join("snapshots.toml");
-    let cases_file: SnapshotsFile = match std::fs::read(&cases_toml_path) {
-        Ok(content) => toml::from_slice(&content).unwrap(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SnapshotsFile::default(),
-        Err(err) => panic!("Failed to read cases.toml for fixture {fixture_name}: {err}"),
-    };
 
     let fake_bin_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("tests/plan_snapshots/fake-bin");
@@ -306,13 +336,22 @@ fn main() {
 
     let tests: Vec<libtest_mimic::Trial> = fixture_paths
         .into_iter()
-        .map(|fixture_path| {
-            let name = fixture_path.file_name().unwrap().to_str().unwrap().to_owned();
+        .filter_map(|fixture_path| {
+            // Parse `snapshots.toml` once. Fixtures whose platform filter
+            // doesn't match the current build are dropped entirely — if we
+            // early-returned from the test body instead they'd report as
+            // "passed" without having run.
+            let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap().to_owned();
+            let cases_file = load_snapshots_file(&fixture_path, &fixture_name);
+            if !should_run_on_this_platform(cases_file.platform.as_ref()) {
+                return None;
+            }
+
             let tmp_dir_path = tmp_dir_path.clone();
             let runtime = Arc::clone(&tokio_runtime);
-            libtest_mimic::Trial::test(name, move || {
-                run_case(&runtime, &tmp_dir_path, &fixture_path).map_err(Into::into)
-            })
+            Some(libtest_mimic::Trial::test(fixture_name, move || {
+                run_case(&runtime, &tmp_dir_path, &fixture_path, cases_file).map_err(Into::into)
+            }))
         })
         .collect();
 

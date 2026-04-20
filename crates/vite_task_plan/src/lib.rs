@@ -7,6 +7,7 @@ mod in_process;
 mod path_env;
 mod plan;
 pub mod plan_request;
+mod ps1_shim;
 
 use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 
