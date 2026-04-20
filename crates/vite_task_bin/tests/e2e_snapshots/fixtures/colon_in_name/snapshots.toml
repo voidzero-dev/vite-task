@@ -1,9 +1,8 @@
+[[e2e]]
+name = "read_file_with_colon_in_name"
 comment = """
 Tests that a task name with colon works correctly with caching
 """
-
-[[e2e]]
-name = "read_file_with_colon_in_name"
 steps = [
   { argv = [
     "vt",

@@ -1,15 +1,14 @@
+# Auto + negative in subpackage: input: [{ "auto": true }, "!dist/**"]
+# - dist/ should be excluded even though the package is a subpackage
+# - Modifying dist/output.js should be a cache hit
+[[e2e]]
+name = "subpackage_auto_with_negative___hit_on_excluded_inferred_file"
 comment = """
 Test that negative input globs work correctly for subpackages.
 Bug: negative globs were matched against workspace-relative paths
 instead of package-relative paths, so exclusions like !dist/**
 failed for subpackages.
 """
-
-# Auto + negative in subpackage: input: [{ "auto": true }, "!dist/**"]
-# - dist/ should be excluded even though the package is a subpackage
-# - Modifying dist/output.js should be a cache hit
-[[e2e]]
-name = "subpackage_auto_with_negative___hit_on_excluded_inferred_file"
 steps = [
   # First run - reads both src/main.ts and dist/output.js
   ["vt", "run", "sub-pkg#auto-with-negative"],
@@ -21,6 +20,12 @@ steps = [
 
 [[e2e]]
 name = "subpackage_auto_with_negative___miss_on_non_excluded_inferred_file"
+comment = """
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+"""
 steps = [
   # First run
   ["vt", "run", "sub-pkg#auto-with-negative"],
@@ -35,6 +40,12 @@ steps = [
 # - Cache miss when sibling file changes, hit when unrelated file changes
 [[e2e]]
 name = "dotdot_positive_glob___miss_on_sibling_file_change"
+comment = """
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+"""
 steps = [
   ["vt", "run", "sub-pkg#dotdot-positive"],
   # Modify a file that matches ../shared/src/**
@@ -45,6 +56,12 @@ steps = [
 
 [[e2e]]
 name = "dotdot_positive_glob___hit_on_unmatched_file_change"
+comment = """
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+"""
 steps = [
   ["vt", "run", "sub-pkg#dotdot-positive"],
   # Modify a file NOT matched by ../shared/src/**
@@ -58,6 +75,12 @@ steps = [
 # - Negative glob excludes sibling dist/ via ..
 [[e2e]]
 name = "dotdot_positive_negative___miss_on_non_excluded_sibling_file"
+comment = """
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+"""
 steps = [
   ["vt", "run", "sub-pkg#dotdot-positive-negative"],
   # Modify file matching positive but NOT negative
@@ -68,6 +91,12 @@ steps = [
 
 [[e2e]]
 name = "dotdot_positive_negative___hit_on_excluded_sibling_file"
+comment = """
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+"""
 steps = [
   ["vt", "run", "sub-pkg#dotdot-positive-negative"],
   # Modify file in excluded sibling dist/
@@ -81,6 +110,12 @@ steps = [
 # - Negative glob excludes sibling dist/ from inferred input
 [[e2e]]
 name = "dotdot_auto_negative___hit_on_excluded_sibling_inferred_file"
+comment = """
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+"""
 steps = [
   ["vt", "run", "sub-pkg#dotdot-auto-negative"],
   # Modify file in excluded sibling dist/
@@ -91,6 +126,12 @@ steps = [
 
 [[e2e]]
 name = "dotdot_auto_negative___miss_on_non_excluded_sibling_inferred_file"
+comment = """
+Test that negative input globs work correctly for subpackages.
+Bug: negative globs were matched against workspace-relative paths
+instead of package-relative paths, so exclusions like !dist/**
+failed for subpackages.
+"""
 steps = [
   ["vt", "run", "sub-pkg#dotdot-auto-negative"],
   # Modify non-excluded sibling file

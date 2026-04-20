@@ -1,9 +1,8 @@
+[[e2e]]
+name = "builtin_different_cwd"
 comment = """
 Tests that synthetic tasks have separate cache per cwd
 """
-
-[[e2e]]
-name = "builtin_different_cwd"
 steps = [
   { argv = [
     "vt",

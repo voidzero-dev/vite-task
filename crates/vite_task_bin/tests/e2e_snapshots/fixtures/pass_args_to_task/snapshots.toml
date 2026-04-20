@@ -1,10 +1,9 @@
+[[e2e]]
+name = "pass_args_to_task"
 comment = """
 Tests that arguments after task name should be passed to the task
 https://github.com/voidzero-dev/vite-task/issues/285
 """
-
-[[e2e]]
-name = "pass_args_to_task"
 steps = [
   ["vt", "run", "echo", "--help"], # Should just print `help` instead of Vite task's help
   ["vt", "run", "echo", "--version"], # Should just print `version` instead of Vite task's version

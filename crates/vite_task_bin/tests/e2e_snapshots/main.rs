@@ -184,6 +184,9 @@ impl WriteKey {
 #[derive(serde::Deserialize, Debug)]
 struct E2e {
     pub name: Str,
+    /// Free-form description rendered under the H1 heading of the generated snapshot.
+    #[serde(default)]
+    pub comment: Option<Str>,
     #[serde(default)]
     pub cwd: RelativePathBuf,
     pub steps: Vec<Step>,
@@ -198,10 +201,6 @@ struct E2e {
 
 #[derive(serde::Deserialize, Default)]
 struct SnapshotsFile {
-    /// Free-form description shared by every case in this file. Rendered under
-    /// the H1 heading of each generated snapshot.
-    #[serde(default)]
-    pub comment: Option<Str>,
     #[serde(rename = "e2e", default)] // toml usually uses singular for arrays
     pub e2e_cases: Vec<E2e>,
 }
@@ -262,7 +261,6 @@ fn run_case(
     fixture_name: &str,
     case_index: usize,
     e2e: &E2e,
-    file_comment: Option<&str>,
 ) -> Result<(), String> {
     let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
 
@@ -296,7 +294,7 @@ fn run_case(
 
     let mut e2e_outputs = String::new();
     e2e_outputs.push_str(vite_str::format!("# {}\n", e2e.name).as_str());
-    if let Some(comment) = file_comment {
+    if let Some(comment) = e2e.comment.as_deref() {
         // Normalize CRLF → LF; on Windows, git checkouts with autocrlf embed
         // `\r\n` inside TOML multi-line strings, which would make `actual`
         // diverge from the stored `.md` (loaded via `\r\n` → `\n` normalization).
@@ -500,7 +498,6 @@ fn main() {
                 Arc::from(fixture_path.file_name().unwrap().to_str().unwrap());
             assert_identifier_like("fixture folder", &fixture_name);
             let cases_file = load_snapshots_file(&fixture_path);
-            let file_comment: Arc<Option<Str>> = Arc::new(cases_file.comment);
             cases_file.e2e_cases.into_iter().enumerate().filter_map({
                 let fixture_path = Arc::clone(&fixture_path);
                 let fixture_name = Arc::clone(&fixture_name);
@@ -523,18 +520,10 @@ fn main() {
                     let fixture_path = Arc::clone(&fixture_path);
                     let fixture_name = Arc::clone(&fixture_name);
                     let tmp_dir_path = tmp_dir_path.clone();
-                    let file_comment = Arc::clone(&file_comment);
                     Some(
                         libtest_mimic::Trial::test(trial_name.as_str(), move || {
-                            run_case(
-                                &tmp_dir_path,
-                                &fixture_path,
-                                &fixture_name,
-                                case_index,
-                                &e2e,
-                                file_comment.as_deref(),
-                            )
-                            .map_err(Into::into)
+                            run_case(&tmp_dir_path, &fixture_path, &fixture_name, case_index, &e2e)
+                                .map_err(Into::into)
                         })
                         .with_ignored_flag(ignored),
                     )

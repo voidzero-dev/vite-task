@@ -1,7 +1,6 @@
+[[e2e]]
+name = "cycle_dependency_error"
 comment = """
 Tests error message for cyclic task dependencies
 """
-
-[[e2e]]
-name = "cycle_dependency_error"
 steps = [{ argv = ["vt", "run", "task-a"], comment = "task-a -> task-b -> task-a cycle" }]

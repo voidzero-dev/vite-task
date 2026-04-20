@@ -1,9 +1,8 @@
+[[e2e]]
+name = "individual_cache_for_env"
 comment = """
 Tests that different env values get separate cache entries
 """
-
-[[e2e]]
-name = "individual_cache_for_env"
 steps = [
   { argv = [
     "vt",

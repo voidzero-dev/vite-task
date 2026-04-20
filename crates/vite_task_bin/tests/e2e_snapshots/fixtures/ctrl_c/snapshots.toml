@@ -1,9 +1,8 @@
+[[e2e]]
+name = "ctrl_c_terminates_running_tasks"
 comment = """
 Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
 """
-
-[[e2e]]
-name = "ctrl_c_terminates_running_tasks"
 steps = [
   { argv = [
     "vt",
@@ -18,6 +17,9 @@ steps = [
 
 [[e2e]]
 name = "ctrl_c_terminates_running_tasks__cached_"
+comment = """
+Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+"""
 steps = [
   { argv = [
     "vt",
@@ -33,6 +35,9 @@ steps = [
 # After Ctrl-C terminates a, b should not be scheduled.
 [[e2e]]
 name = "ctrl_c_prevents_future_tasks"
+comment = """
+Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+"""
 steps = [
   { argv = [
     "vt",
@@ -50,6 +55,9 @@ steps = [
 # The second run should be a cache miss, not a hit.
 [[e2e]]
 name = "ctrl_c_prevents_caching"
+comment = """
+Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+"""
 steps = [
   { argv = [
     "vt",

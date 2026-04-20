@@ -1,12 +1,11 @@
+# 1. Root package - glob matches files in root's src/
+[[e2e]]
+name = "root_glob___matches_src_files"
 comment = """
 Test glob base directory behavior
 Globs are relative to PACKAGE directory, NOT task cwd
 No special cross-package filtering - just normal relative path matching
 """
-
-# 1. Root package - glob matches files in root's src/
-[[e2e]]
-name = "root_glob___matches_src_files"
 steps = [
   ["vt", "run", "root-glob-test"],
   # Modify matched file
@@ -17,6 +16,11 @@ steps = [
 
 [[e2e]]
 name = "root_glob___unmatched_directory"
+comment = """
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+"""
 steps = [
   ["vt", "run", "root-glob-test"],
   # Modify file outside glob pattern
@@ -27,6 +31,11 @@ steps = [
 
 [[e2e]]
 name = "root_glob___subpackage_path_unmatched_by_relative_glob"
+comment = """
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+"""
 steps = [
   ["vt", "run", "root-glob-test"],
   # Modify file in subpackage - relative glob src/** doesn't reach packages/sub-pkg/src/
@@ -38,6 +47,11 @@ steps = [
 # 2. Root package with custom cwd - glob still relative to package root
 [[e2e]]
 name = "root_glob_with_cwd___glob_relative_to_package_not_cwd"
+comment = """
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+"""
 steps = [
   ["vt", "run", "root-glob-with-cwd"],
   # Modify file - glob is src/** relative to package root
@@ -49,6 +63,11 @@ steps = [
 # 3. Subpackage - glob matches files in subpackage's src/
 [[e2e]]
 name = "subpackage_glob___matches_own_src_files"
+comment = """
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+"""
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-test"],
   # Modify matched file in subpackage
@@ -59,6 +78,11 @@ steps = [
 
 [[e2e]]
 name = "subpackage_glob___unmatched_directory_in_subpackage"
+comment = """
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+"""
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-test"],
   # Modify file outside glob pattern
@@ -69,6 +93,11 @@ steps = [
 
 [[e2e]]
 name = "subpackage_glob___root_path_unmatched_by_relative_glob"
+comment = """
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+"""
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-test"],
   # Modify file in root - relative glob src/** is resolved from subpackage dir
@@ -80,6 +109,11 @@ steps = [
 # 4. Subpackage with custom cwd - glob still relative to subpackage root
 [[e2e]]
 name = "subpackage_glob_with_cwd___glob_relative_to_package_not_cwd"
+comment = """
+Test glob base directory behavior
+Globs are relative to PACKAGE directory, NOT task cwd
+No special cross-package filtering - just normal relative path matching
+"""
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-with-cwd"],
   # Modify file - glob is src/** relative to subpackage root

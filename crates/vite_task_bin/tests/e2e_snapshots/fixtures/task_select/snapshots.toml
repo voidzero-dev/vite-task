@@ -1,29 +1,40 @@
+[[e2e]]
+name = "non_interactive_list_tasks"
 comment = """
 Non-interactive: list all tasks (piped stdin forces non-interactive mode)
 """
-
-[[e2e]]
-name = "non_interactive_list_tasks"
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
 
 # Non-interactive: typo triggers "did you mean"
 [[e2e]]
 name = "non_interactive_did_you_mean"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "buid"]]
 
 # Non-interactive: typo with no fuzzy matches hides "did you mean"
 [[e2e]]
 name = "non_interactive_no_suggestions"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "zzzzz"]]
 
 # Non-interactive: typo with -r flag errors (not cwd_only)
 [[e2e]]
 name = "non_interactive_recursive_typo_errors"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "-r", "buid"]]
 
 # Interactive: navigate down and select second task
 [[e2e]]
 name = "interactive_select_task"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -40,6 +51,9 @@ steps = [
 # Interactive: typo pre-filled in search
 [[e2e]]
 name = "interactive_select_with_typo"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -55,6 +69,9 @@ steps = [
 # Interactive: type to search then select
 [[e2e]]
 name = "interactive_search_then_select"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -71,6 +88,9 @@ steps = [
 # Interactive: escape clears query and resets filter
 [[e2e]]
 name = "interactive_escape_clears_query"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -89,18 +109,27 @@ steps = [
 # -r flag without task errors (not bare)
 [[e2e]]
 name = "recursive_without_task_errors"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [["vt", "run", "-r"]]
 
 # -t flag + typo errors (not cwd_only)
 [[e2e]]
 name = "transitive_typo_errors"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [["vt", "run", "-t", "buid"]]
 
 # Interactive: scroll down past visible page, then select a task beyond the initial viewport
 [[e2e]]
 name = "interactive_scroll_long_list"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -133,12 +162,18 @@ steps = [
 # Non-interactive: list tasks from lib package (lib tasks first, unqualified)
 [[e2e]]
 name = "non_interactive_list_tasks_from_lib"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/lib"
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
 
 # Interactive: select from lib package (first item is lib's task)
 [[e2e]]
 name = "interactive_select_task_from_lib"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/lib"
 steps = [
   { argv = [
@@ -153,6 +188,9 @@ steps = [
 # Interactive: search for a task that only exists in another package
 [[e2e]]
 name = "interactive_search_other_package_task"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -169,6 +207,9 @@ steps = [
 # Interactive: '#' in query skips current-package reordering
 [[e2e]]
 name = "interactive_search_with_hash_skips_reorder"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -185,6 +226,9 @@ steps = [
 # Interactive: multiple current-package matches preserve fuzzy rating order
 [[e2e]]
 name = "interactive_search_preserves_rating_within_package"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/lib"
 steps = [
   { argv = [
@@ -201,6 +245,9 @@ steps = [
 # Interactive: Enter with no matching results does nothing
 [[e2e]]
 name = "interactive_enter_with_no_results_does_nothing"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -220,6 +267,9 @@ steps = [
 # Interactive: navigate into a package group, select a non-current-package task
 [[e2e]]
 name = "interactive_select_from_other_package"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -238,11 +288,17 @@ steps = [
 # Typo inside a task script should fail with an error, NOT show a list
 [[e2e]]
 name = "typo_in_task_script_fails_without_list"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 steps = [["vt", "run", "run-typo-task"]]
 
 # Interactive: Ctrl+C cancels selection and exits with code 130
 [[e2e]]
 name = "interactive_ctrl_c_cancels"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [
@@ -257,12 +313,18 @@ steps = [
 # --verbose without task: not bare, errors with "no task specifier provided"
 [[e2e]]
 name = "verbose_without_task_errors"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [["vt", "run", "--verbose"]]
 
 # --verbose with typo: is_cwd_only is true, shows interactive selector
 [[e2e]]
 name = "verbose_with_typo_enters_selector"
+comment = """
+Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+"""
 cwd = "packages/app"
 steps = [
   { argv = [

@@ -1,16 +1,18 @@
-comment = """
-Tests for compact and verbose summary output
-"""
-
 # Single task, cache miss → no summary at all
 [[e2e]]
 name = "single_task_cache_miss_shows_no_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 cwd = "packages/a"
 steps = [["vt", "run", "build"]]
 
 # Single task, cache hit → compact one-liner
 [[e2e]]
 name = "single_task_cache_hit_shows_compact_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 cwd = "packages/a"
 steps = [
   { argv = [
@@ -28,11 +30,17 @@ steps = [
 # Multi-task (recursive), all cache miss → compact summary with 0 hits
 [[e2e]]
 name = "multi_task_all_cache_miss_shows_compact_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 steps = [["vt", "run", "-r", "build"]]
 
 # Multi-task (recursive), some cache hits → compact summary with hit count
 [[e2e]]
 name = "multi_task_with_cache_hits_shows_compact_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 steps = [
   { argv = [
     "vt",
@@ -51,17 +59,26 @@ steps = [
 # Single task with --verbose → full detailed summary
 [[e2e]]
 name = "single_task_verbose_shows_full_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 cwd = "packages/a"
 steps = [["vt", "run", "-v", "build"]]
 
 # Multi-task with --verbose → full detailed summary
 [[e2e]]
 name = "multi_task_verbose_shows_full_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 steps = [["vt", "run", "-r", "-v", "build"]]
 
 # Multi-task with --verbose after cache hits
 [[e2e]]
 name = "multi_task_verbose_with_cache_hits_shows_full_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 steps = [
   { argv = [
     "vt",
@@ -81,11 +98,17 @@ steps = [
 # --last-details with no previous run
 [[e2e]]
 name = "last_details_with_no_previous_run_shows_error"
+comment = """
+Tests for compact and verbose summary output
+"""
 steps = [["vt", "run", "--last-details"]]
 
 # --last-details after a run shows saved summary
 [[e2e]]
 name = "last_details_after_run_shows_saved_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 cwd = "packages/a"
 steps = [
   { argv = [
@@ -103,6 +126,9 @@ steps = [
 # --last-details after a multi-task run
 [[e2e]]
 name = "last_details_after_multi_task_run_shows_saved_summary"
+comment = """
+Tests for compact and verbose summary output
+"""
 steps = [
   { argv = [
     "vt",

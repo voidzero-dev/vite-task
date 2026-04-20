@@ -1,10 +1,9 @@
+[[e2e]]
+name = "signal_terminated_task_returns_non_zero_exit_code"
 comment = """
 Tests exit code behavior for signal-terminated processes
 Unix-only: Windows doesn't have Unix signals, so exit codes differ
 """
-
-[[e2e]]
-name = "signal_terminated_task_returns_non_zero_exit_code"
 platform = "unix"
 ignore = true
 steps = [{ argv = ["vt", "run", "abort"], comment = "SIGABRT -> exit code 134" }]

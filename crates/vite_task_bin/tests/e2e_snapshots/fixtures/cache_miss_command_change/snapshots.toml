@@ -1,9 +1,8 @@
+[[e2e]]
+name = "cache_miss_command_change"
 comment = """
 Tests cache behavior when command changes partially
 """
-
-[[e2e]]
-name = "cache_miss_command_change"
 steps = [
   { argv = [
     "vt",

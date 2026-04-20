@@ -1,18 +1,25 @@
+[[e2e]]
+name = "recursive_build_runs_dependencies_before_dependents"
 comment = """
 Tests that tasks execute in dependency (topological) order.
 Dependency chain: @topo/core <- @topo/lib <- @topo/app
 """
-
-[[e2e]]
-name = "recursive_build_runs_dependencies_before_dependents"
 steps = [{ argv = ["vt", "run", "-r", "build"], comment = "core -> lib -> app" }]
 
 [[e2e]]
 name = "transitive_build_from_app_runs_all_dependencies"
+comment = """
+Tests that tasks execute in dependency (topological) order.
+Dependency chain: @topo/core <- @topo/lib <- @topo/app
+"""
 cwd = "packages/app"
 steps = [{ argv = ["vt", "run", "-t", "build"], comment = "core -> lib -> app" }]
 
 [[e2e]]
 name = "transitive_build_from_lib_runs_only_its_dependencies"
+comment = """
+Tests that tasks execute in dependency (topological) order.
+Dependency chain: @topo/core <- @topo/lib <- @topo/app
+"""
 cwd = "packages/lib"
 steps = [{ argv = ["vt", "run", "-t", "build"], comment = "core -> lib" }]

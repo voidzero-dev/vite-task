@@ -1,12 +1,11 @@
-comment = """
-Test all input configuration combinations for cache behavior
-"""
-
 # 1. Positive globs only: input: ["src/**/*.ts"]
 # - Files matching the glob trigger cache invalidation
 # - Files outside the glob do NOT trigger cache invalidation
 [[e2e]]
 name = "positive_globs_only___cache_hit_on_second_run"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # First run - cache miss
   ["vt", "run", "positive-globs-only"],
@@ -16,6 +15,9 @@ steps = [
 
 [[e2e]]
 name = "positive_globs_only___miss_on_matched_file_change"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "positive-globs-only"],
@@ -27,6 +29,9 @@ steps = [
 
 [[e2e]]
 name = "positive_globs_only___hit_on_unmatched_file_change"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "positive-globs-only"],
@@ -41,6 +46,9 @@ steps = [
 # - This tests that inference is truly disabled when only explicit globs are used
 [[e2e]]
 name = "positive_globs___hit_on_read_but_unmatched_file"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run - reads both src/main.ts and src/utils.ts
   ["vt", "run", "positive-globs-reads-unmatched"],
@@ -55,6 +63,9 @@ steps = [
 # - Files matching negative glob are excluded
 [[e2e]]
 name = "positive_negative_globs___miss_on_non_excluded_file"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "positive-negative-globs"],
@@ -66,6 +77,9 @@ steps = [
 
 [[e2e]]
 name = "positive_negative_globs___hit_on_excluded_file"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "positive-negative-globs"],
@@ -80,6 +94,9 @@ steps = [
 # - Files NOT read by the command do NOT trigger invalidation
 [[e2e]]
 name = "auto_only___miss_on_inferred_file_change"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run - reads src/main.ts
   ["vt", "run", "auto-only"],
@@ -91,6 +108,9 @@ steps = [
 
 [[e2e]]
 name = "auto_only___hit_on_non_inferred_file_change"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run - reads src/main.ts (NOT utils.ts)
   ["vt", "run", "auto-only"],
@@ -105,6 +125,9 @@ steps = [
 # - Files in excluded directories don't trigger invalidation even if read
 [[e2e]]
 name = "auto_with_negative___hit_on_excluded_inferred_file"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run - reads both src/main.ts and dist/output.js
   ["vt", "run", "auto-with-negative"],
@@ -116,6 +139,9 @@ steps = [
 
 [[e2e]]
 name = "auto_with_negative___miss_on_non_excluded_inferred_file"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "auto-with-negative"],
@@ -130,6 +156,9 @@ steps = [
 # - Negative globs apply to both explicit and inferred input
 [[e2e]]
 name = "positive_auto_negative___miss_on_explicit_glob_file"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "positive-auto-negative"],
@@ -141,6 +170,9 @@ steps = [
 
 [[e2e]]
 name = "positive_auto_negative___miss_on_inferred_file"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "positive-auto-negative"],
@@ -152,6 +184,9 @@ steps = [
 
 [[e2e]]
 name = "positive_auto_negative___hit_on_excluded_file"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "positive-auto-negative"],
@@ -166,6 +201,9 @@ steps = [
 # - Only command/env changes trigger cache invalidation
 [[e2e]]
 name = "empty_input___hit_despite_file_changes"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   ["vt", "run", "empty-inputs"],
@@ -177,6 +215,9 @@ steps = [
 
 [[e2e]]
 name = "empty_input___miss_on_command_change"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Initial run
   [
@@ -205,6 +246,9 @@ steps = [
 # - FSPY is NOT set when fspy is disabled (explicit globs only)
 [[e2e]]
 name = "fspy_env___set_when_auto_inference_enabled"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Run task with auto inference - should see FSPY=1
   ["vt", "run", "check-fspy-env-with-auto"],
@@ -212,6 +256,9 @@ steps = [
 
 [[e2e]]
 name = "fspy_env___not_set_when_auto_inference_disabled"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   # Run task without auto inference - should see (undefined)
   ["vt", "run", "check-fspy-env-without-auto"],
@@ -223,6 +270,9 @@ steps = [
 # - Files outside the directory do NOT trigger cache invalidation
 [[e2e]]
 name = "folder_slash_input___miss_on_direct_and_nested_file_changes"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   ["vt", "run", "folder-slash-input"],
   # Modify a direct file in src/
@@ -240,6 +290,9 @@ steps = [
 
 [[e2e]]
 name = "folder_slash_input___hit_on_file_outside_directory"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   ["vt", "run", "folder-slash-input"],
   # Modify a file outside src/
@@ -253,6 +306,9 @@ steps = [
 # - File changes inside the folder should NOT trigger cache invalidation
 [[e2e]]
 name = "folder_input___hit_despite_file_changes_and_folder_deletion"
+comment = """
+Test all input configuration combinations for cache behavior
+"""
 steps = [
   ["vt", "run", "folder-input"],
   # Modify a file inside the folder

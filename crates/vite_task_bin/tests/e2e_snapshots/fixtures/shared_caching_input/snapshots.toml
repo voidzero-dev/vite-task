@@ -1,9 +1,8 @@
+[[e2e]]
+name = "shared_caching_input"
 comment = """
 Tests that tasks with identical commands share cache entries
 """
-
-[[e2e]]
-name = "shared_caching_input"
 steps = [
   { argv = [
     "vt",

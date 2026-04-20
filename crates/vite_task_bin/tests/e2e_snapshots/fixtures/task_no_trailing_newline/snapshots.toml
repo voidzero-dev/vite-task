@@ -1,7 +1,6 @@
+[[e2e]]
+name = "no_trailing_newline"
 comment = """
 Tests output handling when task has no trailing newline
 """
-
-[[e2e]]
-name = "no_trailing_newline"
 steps = [{ argv = ["vt", "run", "hello"], comment = "runs echo -n hello" }]

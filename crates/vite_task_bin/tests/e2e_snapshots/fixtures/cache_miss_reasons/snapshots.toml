@@ -1,9 +1,8 @@
+[[e2e]]
+name = "env_value_changed"
 comment = """
 Test all cache miss reason variants
 """
-
-[[e2e]]
-name = "env_value_changed"
 steps = [
   { argv = [
     "vt",
@@ -29,6 +28,9 @@ steps = [
 
 [[e2e]]
 name = "env_added"
+comment = """
+Test all cache miss reason variants
+"""
 steps = [
   { argv = [
     "vt",
@@ -49,6 +51,9 @@ steps = [
 
 [[e2e]]
 name = "env_removed"
+comment = """
+Test all cache miss reason variants
+"""
 steps = [
   { argv = [
     "vt",
@@ -69,6 +74,9 @@ steps = [
 
 [[e2e]]
 name = "untracked_env_added"
+comment = """
+Test all cache miss reason variants
+"""
 steps = [
   { argv = [
     "vt",
@@ -91,6 +99,9 @@ steps = [
 
 [[e2e]]
 name = "untracked_env_removed"
+comment = """
+Test all cache miss reason variants
+"""
 steps = [
   { argv = [
     "vtt",
@@ -120,6 +131,9 @@ steps = [
 
 [[e2e]]
 name = "cwd_changed"
+comment = """
+Test all cache miss reason variants
+"""
 steps = [
   { argv = [
     "vt",
@@ -154,6 +168,9 @@ steps = [
 
 [[e2e]]
 name = "inferred_input_changes"
+comment = """
+Test all cache miss reason variants
+"""
 steps = [
   { argv = [
     "vt",
@@ -197,6 +214,9 @@ steps = [
 
 [[e2e]]
 name = "input_config_changed"
+comment = """
+Test all cache miss reason variants
+"""
 steps = [
   { argv = [
     "vt",
@@ -219,6 +239,9 @@ steps = [
 
 [[e2e]]
 name = "glob_input_changes"
+comment = """
+Test all cache miss reason variants
+"""
 steps = [
   { argv = [
     "vt",

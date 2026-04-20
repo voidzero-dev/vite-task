@@ -1,9 +1,8 @@
+[[e2e]]
+name = "task_with_cache_disabled"
 comment = """
 Tests that cache: false in task config disables caching
 """
-
-[[e2e]]
-name = "task_with_cache_disabled"
 steps = [
   { argv = [
     "vt",
@@ -19,6 +18,9 @@ steps = [
 
 [[e2e]]
 name = "task_with_cache_enabled"
+comment = """
+Tests that cache: false in task config disables caching
+"""
 steps = [
   { argv = [
     "vt",

@@ -1,9 +1,8 @@
+[[e2e]]
+name = "associate_existing_cache"
 comment = """
 Tests that tasks with identical commands share cache
 """
-
-[[e2e]]
-name = "associate_existing_cache"
 steps = [
   { argv = [
     "vt",
