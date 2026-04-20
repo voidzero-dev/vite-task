@@ -1,6 +1,6 @@
 # cwd_changed
 
-Test all cache miss reason variants
+Changing the task's `cwd` should invalidate the cache, even if the input file exists at the new location.
 
 ## `vt run test`
 

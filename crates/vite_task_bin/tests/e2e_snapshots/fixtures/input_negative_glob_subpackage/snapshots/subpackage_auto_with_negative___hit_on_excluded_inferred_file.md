@@ -1,9 +1,9 @@
 # subpackage_auto_with_negative___hit_on_excluded_inferred_file
 
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A subpackage's `!dist/**` exclusion should apply package-relative, not
+workspace-relative — modifying the subpackage's own `dist/` file stays a
+cache hit. (Regression: the exclusion used to resolve against the workspace
+root.)
 
 ## `vt run sub-pkg#auto-with-negative`
 

@@ -1,13 +1,7 @@
 # multiple_tasks__cache_hit__replayed
 
-Tests stdio behavior in grouped mode (--log=grouped).
-
-In grouped mode, stdio is always piped regardless of cache state:
-- stdin is /dev/null
-- stdout/stderr are buffered per task and printed as a block on completion
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+Cache-hit replays for multiple tasks under grouped mode should each produce
+their own block, matching the original (non-replayed) output.
 
 ## `vt run --log=grouped -r check-tty-cached`
 

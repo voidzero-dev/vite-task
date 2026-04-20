@@ -1,6 +1,7 @@
 # interactive_select_from_other_package
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Navigating past the current-package group should expose tasks in other
+packages, which must also be selectable.
 
 ## `vt run`
 

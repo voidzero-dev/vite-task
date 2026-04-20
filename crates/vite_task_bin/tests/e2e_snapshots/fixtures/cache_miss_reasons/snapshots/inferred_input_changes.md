@@ -1,6 +1,6 @@
 # inferred_input_changes
 
-Test all cache miss reason variants
+Modifying, removing, and re-adding an input file (tracked via fspy inference) should each invalidate the cache.
 
 ## `vt run test`
 

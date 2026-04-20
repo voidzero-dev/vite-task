@@ -1,9 +1,8 @@
 # failure_kills_concurrent_tasks
 
-Tests that independent tasks execute concurrently.
-Packages a and b have no dependency relationship.
-Both use a barrier that requires 2 participants — if run sequentially,
-the first would wait forever and the test would timeout.
+When one concurrent task fails, the sibling running under inherited stdio must
+be cancelled. Task a exits 1 after the shared barrier, task b hangs after it —
+completing without timeout proves cancellation killed b.
 
 ## `vt run -r test`
 

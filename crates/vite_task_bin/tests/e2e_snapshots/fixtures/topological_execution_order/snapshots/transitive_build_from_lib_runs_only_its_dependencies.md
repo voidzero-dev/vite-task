@@ -1,7 +1,7 @@
 # transitive_build_from_lib_runs_only_its_dependencies
 
-Tests that tasks execute in dependency (topological) order.
-Dependency chain: @topo/core <- @topo/lib <- @topo/app
+`vt run -t build` from an intermediate package should limit the run to that
+package and its own dependencies — `@topo/app` must not run.
 
 ## `vt run -t build`
 

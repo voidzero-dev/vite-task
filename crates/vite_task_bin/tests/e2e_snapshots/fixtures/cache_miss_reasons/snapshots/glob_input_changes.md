@@ -1,6 +1,6 @@
 # glob_input_changes
 
-Test all cache miss reason variants
+Modifying, adding, or removing files matched by a glob `input` pattern should each invalidate the cache.
 
 ## `vt run glob-test`
 

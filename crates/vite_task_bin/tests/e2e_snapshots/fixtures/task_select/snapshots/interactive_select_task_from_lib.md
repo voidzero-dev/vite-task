@@ -1,6 +1,7 @@
 # interactive_select_task_from_lib
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+In the interactive selector launched from `packages/lib`, the first entry
+should be a lib-owned task.
 
 ## `vt run`
 

@@ -1,13 +1,7 @@
 # multiple_tasks__cache_hit__replayed
 
-Tests stdio behavior in labeled mode (--log=labeled).
-
-In labeled mode, stdio is always piped regardless of cache state:
-- stdin is /dev/null
-- stdout/stderr are piped through a line-prefixing writer ([pkg#task])
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+A cache-hit replay across multiple tasks under labeled mode should reproduce
+each task's labeled output.
 
 ## `vt run --log=labeled -r check-tty-cached`
 

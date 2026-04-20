@@ -1,6 +1,6 @@
 # task_failure_fast_fails_remaining_tasks
 
-Tests exit code behavior for task failures
+A failing task under `-r` should fast-fail the run and skip any remaining packages.
 
 ## `vt run -r fail`
 

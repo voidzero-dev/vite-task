@@ -1,6 +1,6 @@
 # input_config_changed
 
-Test all cache miss reason variants
+Changing the task's `input` configuration should invalidate the cache even when the underlying files are unchanged.
 
 ## `vt run test`
 

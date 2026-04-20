@@ -1,13 +1,7 @@
 # single_task__cache_off__grouped_output
 
-Tests stdio behavior in grouped mode (--log=grouped).
-
-In grouped mode, stdio is always piped regardless of cache state:
-- stdin is /dev/null
-- stdout/stderr are buffered per task and printed as a block on completion
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+Under `--log=grouped` with caching off, a single task's piped stdout/stderr
+should be printed as one grouped block; none of the fds should be TTYs.
 
 ## `vt run --log=grouped check-tty`
 

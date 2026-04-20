@@ -1,6 +1,7 @@
 # folder_slash_input___miss_on_direct_and_nested_file_changes
 
-Test all input configuration combinations for cache behavior
+A trailing-slash input (`src/`) should expand to `src/**`, so both direct
+and nested file changes under it invalidate the cache.
 
 ## `vt run folder-slash-input`
 

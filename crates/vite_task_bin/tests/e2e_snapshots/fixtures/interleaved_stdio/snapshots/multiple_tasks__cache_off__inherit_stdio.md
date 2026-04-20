@@ -1,15 +1,7 @@
 # multiple_tasks__cache_off__inherit_stdio
 
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+In interleaved mode with caching off, multiple tasks under `-r` should each
+inherit stdio (TTY-preserving behavior applies per task regardless of count).
 
 ## `vt run -r check-tty`
 

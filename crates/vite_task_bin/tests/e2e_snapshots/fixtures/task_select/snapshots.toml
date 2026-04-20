@@ -1,39 +1,40 @@
 [[e2e]]
 name = "non_interactive_list_tasks"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+With piped stdin (non-interactive), `vt run` with no task argument should
+list all available tasks instead of launching the picker.
 """
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
 
-# Non-interactive: typo triggers "did you mean"
 [[e2e]]
 name = "non_interactive_did_you_mean"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+In non-interactive mode, a typo that has close fuzzy matches should produce
+"did you mean" suggestions.
 """
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "buid"]]
 
-# Non-interactive: typo with no fuzzy matches hides "did you mean"
 [[e2e]]
 name = "non_interactive_no_suggestions"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+In non-interactive mode, a typo with no close fuzzy matches should omit the
+"did you mean" block entirely.
 """
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "zzzzz"]]
 
-# Non-interactive: typo with -r flag errors (not cwd_only)
 [[e2e]]
 name = "non_interactive_recursive_typo_errors"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+A typoed task name combined with `-r` (not cwd-only) should error without
+listing tasks — the `-r` signal rules out the interactive selector fallback.
 """
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "-r", "buid"]]
 
-# Interactive: navigate down and select second task
 [[e2e]]
 name = "interactive_select_task"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+In interactive mode, navigating down one entry and pressing Enter should
+select the second task.
 """
 cwd = "packages/app"
 steps = [
@@ -48,11 +49,11 @@ steps = [
   ] },
 ]
 
-# Interactive: typo pre-filled in search
 [[e2e]]
 name = "interactive_select_with_typo"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+When a typoed task name launches the selector, the typo should be pre-filled
+as the initial search query.
 """
 cwd = "packages/app"
 steps = [
@@ -66,11 +67,11 @@ steps = [
   ] },
 ]
 
-# Interactive: type to search then select
 [[e2e]]
 name = "interactive_search_then_select"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Typing characters in the selector should filter the list in real time, then
+Enter should pick the highlighted result.
 """
 cwd = "packages/app"
 steps = [
@@ -85,11 +86,11 @@ steps = [
   ] },
 ]
 
-# Interactive: escape clears query and resets filter
 [[e2e]]
 name = "interactive_escape_clears_query"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Escape in the selector should clear the current query and restore the
+unfiltered list at cursor position 0.
 """
 cwd = "packages/app"
 steps = [
@@ -106,29 +107,29 @@ steps = [
   ] },
 ]
 
-# -r flag without task errors (not bare)
 [[e2e]]
 name = "recursive_without_task_errors"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+`vt run -r` with no task argument is not treated as a bare run — it should
+error instead of opening the selector.
 """
 cwd = "packages/app"
 steps = [["vt", "run", "-r"]]
 
-# -t flag + typo errors (not cwd_only)
 [[e2e]]
 name = "transitive_typo_errors"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+`vt run -t <typo>` is not cwd-only, so a typo should error rather than fall
+back to the interactive selector.
 """
 cwd = "packages/app"
 steps = [["vt", "run", "-t", "buid"]]
 
-# Interactive: scroll down past visible page, then select a task beyond the initial viewport
 [[e2e]]
 name = "interactive_scroll_long_list"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+With a list taller than the 8-row page, navigating past the viewport should
+scroll down, and navigating back should scroll the view up to index 0.
 """
 cwd = "packages/app"
 steps = [
@@ -159,20 +160,20 @@ steps = [
   ] },
 ]
 
-# Non-interactive: list tasks from lib package (lib tasks first, unqualified)
 [[e2e]]
 name = "non_interactive_list_tasks_from_lib"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+When listing from a subpackage's cwd, that package's tasks should appear
+first and be listed unqualified.
 """
 cwd = "packages/lib"
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
 
-# Interactive: select from lib package (first item is lib's task)
 [[e2e]]
 name = "interactive_select_task_from_lib"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+In the interactive selector launched from `packages/lib`, the first entry
+should be a lib-owned task.
 """
 cwd = "packages/lib"
 steps = [
@@ -185,11 +186,11 @@ steps = [
   ] },
 ]
 
-# Interactive: search for a task that only exists in another package
 [[e2e]]
 name = "interactive_search_other_package_task"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+A search query can match a task that lives only in another package; that
+task should become selectable.
 """
 cwd = "packages/app"
 steps = [
@@ -204,11 +205,11 @@ steps = [
   ] },
 ]
 
-# Interactive: '#' in query skips current-package reordering
 [[e2e]]
 name = "interactive_search_with_hash_skips_reorder"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Including `#` in the query means "target a specific package#task" and should
+disable the current-package reordering in the filtered list.
 """
 cwd = "packages/app"
 steps = [
@@ -223,11 +224,11 @@ steps = [
   ] },
 ]
 
-# Interactive: multiple current-package matches preserve fuzzy rating order
 [[e2e]]
 name = "interactive_search_preserves_rating_within_package"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+When multiple current-package tasks match, the fuzzy-rating order between
+them should be preserved (not broken by current-package grouping).
 """
 cwd = "packages/lib"
 steps = [
@@ -242,11 +243,11 @@ steps = [
   ] },
 ]
 
-# Interactive: Enter with no matching results does nothing
 [[e2e]]
 name = "interactive_enter_with_no_results_does_nothing"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Pressing Enter while the filtered list is empty should be a no-op — the
+selector should remain open and accept new input.
 """
 cwd = "packages/app"
 steps = [
@@ -264,11 +265,11 @@ steps = [
   ] },
 ]
 
-# Interactive: navigate into a package group, select a non-current-package task
 [[e2e]]
 name = "interactive_select_from_other_package"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Navigating past the current-package group should expose tasks in other
+packages, which must also be selectable.
 """
 cwd = "packages/app"
 steps = [
@@ -285,19 +286,19 @@ steps = [
   ] },
 ]
 
-# Typo inside a task script should fail with an error, NOT show a list
 [[e2e]]
 name = "typo_in_task_script_fails_without_list"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+A typo inside a task's own script (i.e. a nested `vp run` command) should
+surface the real failure, not launch the task picker.
 """
 steps = [["vt", "run", "run-typo-task"]]
 
-# Interactive: Ctrl+C cancels selection and exits with code 130
 [[e2e]]
 name = "interactive_ctrl_c_cancels"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Ctrl+C inside the interactive selector should cancel and exit 130 without
+running any task.
 """
 cwd = "packages/app"
 steps = [
@@ -310,20 +311,20 @@ steps = [
   ] },
 ]
 
-# --verbose without task: not bare, errors with "no task specifier provided"
 [[e2e]]
 name = "verbose_without_task_errors"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+`vt run --verbose` with no task argument is not bare, so it should error
+with "no task specifier provided" rather than opening the selector.
 """
 cwd = "packages/app"
 steps = [["vt", "run", "--verbose"]]
 
-# --verbose with typo: is_cwd_only is true, shows interactive selector
 [[e2e]]
 name = "verbose_with_typo_enters_selector"
 comment = """
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+`vt run --verbose <typo>` still qualifies as cwd-only, so it should fall
+back to the interactive selector pre-filled with the typo.
 """
 cwd = "packages/app"
 steps = [

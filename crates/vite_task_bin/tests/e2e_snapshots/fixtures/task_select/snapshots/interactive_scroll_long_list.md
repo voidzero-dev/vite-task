@@ -1,6 +1,7 @@
 # interactive_scroll_long_list
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+With a list taller than the 8-row page, navigating past the viewport should
+scroll down, and navigating back should scroll the view up to index 0.
 
 ## `vt run`
 

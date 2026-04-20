@@ -1,9 +1,7 @@
 # dotdot_positive_glob___hit_on_unmatched_file_change
 
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A `../` positive glob should only match the paths it names — sibling files
+outside the glob (e.g. sibling `dist/`) should not affect the cache.
 
 ## `vt run sub-pkg#dotdot-positive`
 

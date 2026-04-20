@@ -1,8 +1,6 @@
 # subpackage_glob___matches_own_src_files
 
-Test glob base directory behavior
-Globs are relative to PACKAGE directory, NOT task cwd
-No special cross-package filtering - just normal relative path matching
+A subpackage's glob should match files under its own `src/` directory.
 
 ## `vt run sub-pkg#sub-glob-test`
 

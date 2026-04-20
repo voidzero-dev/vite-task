@@ -1,6 +1,7 @@
 # chained_command_with____stops_at_first_failure
 
-Tests exit code behavior for task failures
+In a `&&`-chained command, a non-zero exit from the first sub-command should
+short-circuit and skip the rest.
 
 ## `vt run pkg-a#chained`
 

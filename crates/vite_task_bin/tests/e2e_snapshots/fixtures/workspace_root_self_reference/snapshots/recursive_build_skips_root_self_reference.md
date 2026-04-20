@@ -1,16 +1,8 @@
 # recursive_build_skips_root_self_reference
 
-Tests that workspace root self-referencing tasks don't cause infinite recursion.
-Root build = `vt run -r build` (delegates to all packages recursively).
-
-Skip rule: `vt run -r build` from root produces the same query as the
-nested `vt run -r build` in root's script, so root's expansion is skipped.
-Only packages a and b actually run.
-
-Prune rule: `vt run build` from root produces a ContainingPackage query,
-but root's script `vt run -r build` produces an All query. The queries
-differ so the skip rule doesn't fire. Instead the prune rule removes root
-from the nested result, leaving only a and b.
+`vt run -r build` from the workspace root, when root's own `build` script is
+itself `vt run -r build`, should hit the skip rule: the nested expansion is
+the same query, so root's step is skipped and only packages a and b run.
 
 ## `vt run -r build`
 

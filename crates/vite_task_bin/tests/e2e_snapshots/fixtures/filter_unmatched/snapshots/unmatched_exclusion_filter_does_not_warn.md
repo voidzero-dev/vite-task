@@ -1,6 +1,7 @@
 # unmatched_exclusion_filter_does_not_warn
 
-Tests for unmatched --filter warnings on stderr
+An exclusion filter (`!...`) that matches nothing should be silent; only
+unmatched inclusion filters warn.
 
 ## `vt run --filter @test/app --filter !nonexistent build`
 

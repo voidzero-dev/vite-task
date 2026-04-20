@@ -1,6 +1,7 @@
 # last_details_after_run_shows_saved_summary
 
-Tests for compact and verbose summary output
+After a single-task run, `vt run --last-details` should display the saved
+summary from disk.
 
 ## `vt run build`
 

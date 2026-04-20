@@ -1,6 +1,7 @@
 # non_interactive_list_tasks_from_lib
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+When listing from a subpackage's cwd, that package's tasks should appear
+first and be listed unqualified.
 
 ## `vtt pipe-stdin -- vt run`
 

@@ -1,6 +1,7 @@
 # ctrl_c_prevents_caching
 
-Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+A task interrupted by Ctrl+C must not populate the cache, even if it happens to
+exit 0 — the following run should be a cache miss, not a hit.
 
 ## `vt run @ctrl-c/a#dev`
 

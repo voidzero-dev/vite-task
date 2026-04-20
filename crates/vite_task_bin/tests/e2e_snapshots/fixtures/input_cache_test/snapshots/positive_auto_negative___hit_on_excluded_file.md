@@ -1,6 +1,7 @@
 # positive_auto_negative___hit_on_excluded_file
 
-Test all input configuration combinations for cache behavior
+Under combined positive + `auto` + negative config, a negative glob should
+still filter files contributed by either source.
 
 ## `vt run positive-auto-negative`
 

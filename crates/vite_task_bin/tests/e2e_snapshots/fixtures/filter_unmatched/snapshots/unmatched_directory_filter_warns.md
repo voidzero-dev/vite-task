@@ -1,6 +1,7 @@
 # unmatched_directory_filter_warns
 
-Tests for unmatched --filter warnings on stderr
+A directory-style `--filter` (`./packages/...`) that points nowhere should
+warn just like an unmatched name filter.
 
 ## `vt run --filter @test/app --filter ./packages/nope build`
 

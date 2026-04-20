@@ -1,6 +1,7 @@
 # multi_task_all_cache_miss_shows_compact_summary
 
-Tests for compact and verbose summary output
+A multi-task (`-r`) run where every task misses should still print a compact
+summary with 0 hits.
 
 ## `vt run -r build`
 

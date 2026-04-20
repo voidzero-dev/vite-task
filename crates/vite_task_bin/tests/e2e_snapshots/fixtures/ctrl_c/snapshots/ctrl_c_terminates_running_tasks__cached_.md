@@ -1,6 +1,6 @@
 # ctrl_c_terminates_running_tasks__cached_
 
-Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+Same as above, but under the cached execution path (piped stdio + fspy tracking).
 
 ## `vt run @ctrl-c/a#dev`
 

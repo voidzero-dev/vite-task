@@ -1,6 +1,6 @@
 # env_value_changed
 
-Test all cache miss reason variants
+Changing the value of a tracked env var between runs should invalidate the cache.
 
 ## `MY_ENV=1 vt run test`
 

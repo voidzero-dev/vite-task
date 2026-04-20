@@ -1,9 +1,7 @@
 # dotdot_auto_negative___hit_on_excluded_sibling_inferred_file
 
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A `!../shared/dist/**` negative glob should filter inferred reads that land
+in the sibling package's `dist/` directory.
 
 ## `vt run sub-pkg#dotdot-auto-negative`
 

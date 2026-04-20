@@ -1,6 +1,7 @@
 # positive_globs___hit_on_read_but_unmatched_file
 
-Test all input configuration combinations for cache behavior
+With only positive globs (no `auto`), files read at runtime but not matched
+by the glob should not be fingerprinted — inference is truly disabled.
 
 ## `vt run positive-globs-reads-unmatched`
 

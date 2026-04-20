@@ -1,6 +1,7 @@
 # interactive_select_task
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+In interactive mode, navigating down one entry and pressing Enter should
+select the second task.
 
 ## `vt run`
 

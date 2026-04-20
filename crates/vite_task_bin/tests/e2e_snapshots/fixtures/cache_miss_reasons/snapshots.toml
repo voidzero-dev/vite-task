@@ -1,7 +1,7 @@
 [[e2e]]
 name = "env_value_changed"
 comment = """
-Test all cache miss reason variants
+Changing the value of a tracked env var between runs should invalidate the cache.
 """
 steps = [
   { argv = [
@@ -29,7 +29,7 @@ steps = [
 [[e2e]]
 name = "env_added"
 comment = """
-Test all cache miss reason variants
+Setting a tracked env var that was previously unset should invalidate the cache.
 """
 steps = [
   { argv = [
@@ -52,7 +52,7 @@ steps = [
 [[e2e]]
 name = "env_removed"
 comment = """
-Test all cache miss reason variants
+Unsetting a tracked env var that was previously set should invalidate the cache.
 """
 steps = [
   { argv = [
@@ -75,7 +75,7 @@ steps = [
 [[e2e]]
 name = "untracked_env_added"
 comment = """
-Test all cache miss reason variants
+Adding an `untrackedEnv` entry to the task config should invalidate the cache.
 """
 steps = [
   { argv = [
@@ -100,7 +100,7 @@ steps = [
 [[e2e]]
 name = "untracked_env_removed"
 comment = """
-Test all cache miss reason variants
+Removing an existing `untrackedEnv` entry from the task config should invalidate the cache.
 """
 steps = [
   { argv = [
@@ -132,7 +132,7 @@ steps = [
 [[e2e]]
 name = "cwd_changed"
 comment = """
-Test all cache miss reason variants
+Changing the task's `cwd` should invalidate the cache, even if the input file exists at the new location.
 """
 steps = [
   { argv = [
@@ -169,7 +169,7 @@ steps = [
 [[e2e]]
 name = "inferred_input_changes"
 comment = """
-Test all cache miss reason variants
+Modifying, removing, and re-adding an input file (tracked via fspy inference) should each invalidate the cache.
 """
 steps = [
   { argv = [
@@ -215,7 +215,7 @@ steps = [
 [[e2e]]
 name = "input_config_changed"
 comment = """
-Test all cache miss reason variants
+Changing the task's `input` configuration should invalidate the cache even when the underlying files are unchanged.
 """
 steps = [
   { argv = [
@@ -240,7 +240,7 @@ steps = [
 [[e2e]]
 name = "glob_input_changes"
 comment = """
-Test all cache miss reason variants
+Modifying, adding, or removing files matched by a glob `input` pattern should each invalidate the cache.
 """
 steps = [
   { argv = [

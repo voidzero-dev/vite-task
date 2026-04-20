@@ -1,6 +1,7 @@
 # interactive_enter_with_no_results_does_nothing
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Pressing Enter while the filtered list is empty should be a no-op — the
+selector should remain open and accept new input.
 
 ## `vt run`
 

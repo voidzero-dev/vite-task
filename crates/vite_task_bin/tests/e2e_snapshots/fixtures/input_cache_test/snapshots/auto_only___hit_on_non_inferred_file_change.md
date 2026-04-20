@@ -1,6 +1,7 @@
 # auto_only___hit_on_non_inferred_file_change
 
-Test all input configuration combinations for cache behavior
+With `auto: true`, a file never read by the command should not affect the
+cache, even if it sits next to files that are read.
 
 ## `vt run auto-only`
 

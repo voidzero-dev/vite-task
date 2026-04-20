@@ -1,8 +1,7 @@
 # subpackage_glob___root_path_unmatched_by_relative_glob
 
-Test glob base directory behavior
-Globs are relative to PACKAGE directory, NOT task cwd
-No special cross-package filtering - just normal relative path matching
+A subpackage-anchored relative glob should not reach up into the root
+package's `src/` — a root-package file change stays a cache hit.
 
 ## `vt run sub-pkg#sub-glob-test`
 

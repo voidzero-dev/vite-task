@@ -1,13 +1,10 @@
-# Auto + negative in subpackage: input: [{ "auto": true }, "!dist/**"]
-# - dist/ should be excluded even though the package is a subpackage
-# - Modifying dist/output.js should be a cache hit
 [[e2e]]
 name = "subpackage_auto_with_negative___hit_on_excluded_inferred_file"
 comment = """
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A subpackage's `!dist/**` exclusion should apply package-relative, not
+workspace-relative — modifying the subpackage's own `dist/` file stays a
+cache hit. (Regression: the exclusion used to resolve against the workspace
+root.)
 """
 steps = [
   # First run - reads both src/main.ts and dist/output.js
@@ -21,10 +18,8 @@ steps = [
 [[e2e]]
 name = "subpackage_auto_with_negative___miss_on_non_excluded_inferred_file"
 comment = """
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+In a subpackage with `auto: true` plus `!dist/**`, changes to inferred inputs
+outside `dist/` should still invalidate the cache.
 """
 steps = [
   # First run
@@ -35,16 +30,11 @@ steps = [
   ["vt", "run", "sub-pkg#auto-with-negative"],
 ]
 
-# .. prefix positive globs: input: ["../shared/src/**"]
-# - Should find files in sibling package via ..
-# - Cache miss when sibling file changes, hit when unrelated file changes
 [[e2e]]
 name = "dotdot_positive_glob___miss_on_sibling_file_change"
 comment = """
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A `../` positive glob should reach into sibling packages; modifying a matched
+sibling file should invalidate the cache.
 """
 steps = [
   ["vt", "run", "sub-pkg#dotdot-positive"],
@@ -57,10 +47,8 @@ steps = [
 [[e2e]]
 name = "dotdot_positive_glob___hit_on_unmatched_file_change"
 comment = """
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A `../` positive glob should only match the paths it names — sibling files
+outside the glob (e.g. sibling `dist/`) should not affect the cache.
 """
 steps = [
   ["vt", "run", "sub-pkg#dotdot-positive"],
@@ -70,16 +58,11 @@ steps = [
   ["vt", "run", "sub-pkg#dotdot-positive"],
 ]
 
-# .. prefix positive + negative globs: input: ["../shared/**", "!../shared/dist/**"]
-# - Positive glob matches sibling package files via ..
-# - Negative glob excludes sibling dist/ via ..
 [[e2e]]
 name = "dotdot_positive_negative___miss_on_non_excluded_sibling_file"
 comment = """
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+With `../shared/**` plus `!../shared/dist/**`, modifying a sibling file
+outside the exclusion should invalidate the cache.
 """
 steps = [
   ["vt", "run", "sub-pkg#dotdot-positive-negative"],
@@ -92,10 +75,8 @@ steps = [
 [[e2e]]
 name = "dotdot_positive_negative___hit_on_excluded_sibling_file"
 comment = """
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A `../`-prefixed negative glob should correctly exclude files in the sibling
+package's `dist/` directory.
 """
 steps = [
   ["vt", "run", "sub-pkg#dotdot-positive-negative"],
@@ -105,16 +86,11 @@ steps = [
   ["vt", "run", "sub-pkg#dotdot-positive-negative"],
 ]
 
-# .. prefix auto + negative: input: [{ "auto": true }, "!../shared/dist/**"]
-# - Auto-inferred files from sibling package are tracked
-# - Negative glob excludes sibling dist/ from inferred input
 [[e2e]]
 name = "dotdot_auto_negative___hit_on_excluded_sibling_inferred_file"
 comment = """
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A `!../shared/dist/**` negative glob should filter inferred reads that land
+in the sibling package's `dist/` directory.
 """
 steps = [
   ["vt", "run", "sub-pkg#dotdot-auto-negative"],
@@ -127,10 +103,8 @@ steps = [
 [[e2e]]
 name = "dotdot_auto_negative___miss_on_non_excluded_sibling_inferred_file"
 comment = """
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+Under `auto: true` plus a `../` negative glob, inferred reads from sibling
+files outside the exclusion should still invalidate the cache.
 """
 steps = [
   ["vt", "run", "sub-pkg#dotdot-auto-negative"],

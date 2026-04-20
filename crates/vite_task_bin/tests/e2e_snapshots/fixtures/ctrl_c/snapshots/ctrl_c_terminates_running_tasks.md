@@ -1,6 +1,6 @@
 # ctrl_c_terminates_running_tasks
 
-Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+Ctrl+C (SIGINT) on an uncached run should propagate to the running task and terminate it.
 
 ## `vt run --no-cache @ctrl-c/a#dev`
 

@@ -1,6 +1,7 @@
 # ctrl_c_prevents_future_tasks
 
-Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+Ctrl+C while running sequentially (b depends on a) should terminate a and
+prevent b from being scheduled.
 
 ## `vt run -r --no-cache dev`
 

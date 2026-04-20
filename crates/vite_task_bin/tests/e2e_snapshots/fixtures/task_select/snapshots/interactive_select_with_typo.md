@@ -1,6 +1,7 @@
 # interactive_select_with_typo
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+When a typoed task name launches the selector, the typo should be pre-filled
+as the initial search query.
 
 ## `vt run buid`
 

@@ -1,15 +1,7 @@
 # single_task__cache_hit__replayed
 
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+A cache-hit second run should replay the previously captured output verbatim
+instead of re-executing the task.
 
 ## `vt run check-tty-cached`
 

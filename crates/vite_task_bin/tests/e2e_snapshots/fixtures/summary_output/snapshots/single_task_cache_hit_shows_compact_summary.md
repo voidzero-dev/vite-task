@@ -1,6 +1,7 @@
 # single_task_cache_hit_shows_compact_summary
 
-Tests for compact and verbose summary output
+When a single task hits the cache on a re-run, the compact one-line summary
+should be emitted.
 
 ## `vt run build`
 

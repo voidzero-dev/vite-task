@@ -1,6 +1,7 @@
 # auto_with_negative___miss_on_non_excluded_inferred_file
 
-Test all input configuration combinations for cache behavior
+With `auto: true` plus a negative glob, changes to inferred inputs outside
+the excluded range should still invalidate the cache.
 
 ## `vt run auto-with-negative`
 

@@ -1,8 +1,7 @@
 # root_glob___matches_src_files
 
-Test glob base directory behavior
-Globs are relative to PACKAGE directory, NOT task cwd
-No special cross-package filtering - just normal relative path matching
+A root-package glob should match files under the package's own `src/` —
+modifying such a file invalidates the cache.
 
 ## `vt run root-glob-test`
 

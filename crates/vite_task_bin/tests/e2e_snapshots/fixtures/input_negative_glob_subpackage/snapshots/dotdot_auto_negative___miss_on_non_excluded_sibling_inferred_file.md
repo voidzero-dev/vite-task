@@ -1,9 +1,7 @@
 # dotdot_auto_negative___miss_on_non_excluded_sibling_inferred_file
 
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+Under `auto: true` plus a `../` negative glob, inferred reads from sibling
+files outside the exclusion should still invalidate the cache.
 
 ## `vt run sub-pkg#dotdot-auto-negative`
 

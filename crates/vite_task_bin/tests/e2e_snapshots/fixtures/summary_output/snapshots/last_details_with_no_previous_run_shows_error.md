@@ -1,6 +1,7 @@
 # last_details_with_no_previous_run_shows_error
 
-Tests for compact and verbose summary output
+`vt run --last-details` with no prior run in the workspace should produce a
+clear error rather than empty output.
 
 ## `vt run --last-details`
 

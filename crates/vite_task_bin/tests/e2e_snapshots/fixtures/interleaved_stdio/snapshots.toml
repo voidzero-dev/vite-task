@@ -1,137 +1,63 @@
-# ─── stdout/stderr: cache off → inherited (tty) ─────────────────
-
 [[e2e]]
 name = "single_task__cache_off__inherits_stdio"
 comment = """
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+In interleaved mode with caching off, a single task should inherit stdio from
+the parent — all fds should be TTYs.
 """
 steps = [["vt", "run", "check-tty"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_off__inherit_stdio"
 comment = """
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+In interleaved mode with caching off, multiple tasks under `-r` should each
+inherit stdio (TTY-preserving behavior applies per task regardless of count).
 """
 steps = [["vt", "run", "-r", "check-tty"]]
-
-# ─── stdout/stderr: cache on, miss → piped (not-tty) ────────────
 
 [[e2e]]
 name = "single_task__cache_miss__piped_stdio"
 comment = """
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+On a cache miss in interleaved mode, stdio must be piped (not a TTY) so that
+output can be captured for future replay.
 """
 steps = [["vt", "run", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_miss__piped_stdio"
 comment = """
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+Across multiple tasks on a cache miss, each one should still see piped
+(non-TTY) stdio for output capture.
 """
 steps = [["vt", "run", "-r", "check-tty-cached"]]
-
-# ─── stdout/stderr: cache on, hit → replayed ────────────────────
 
 [[e2e]]
 name = "single_task__cache_hit__replayed"
 comment = """
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+A cache-hit second run should replay the previously captured output verbatim
+instead of re-executing the task.
 """
 steps = [["vt", "run", "check-tty-cached"], ["vt", "run", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_hit__replayed"
 comment = """
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+Across multiple tasks, the second run should be all cache hits with each
+task's captured output replayed.
 """
 steps = [["vt", "run", "-r", "check-tty-cached"], ["vt", "run", "-r", "check-tty-cached"]]
-
-# ─── stdin: cache off → inherited ───────────────────────────────
 
 [[e2e]]
 name = "cache_off_inherits_stdin"
 comment = """
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+With caching off, stdin piped into `vp run` should flow through to the task
+process.
 """
 steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "read-stdin"]]
-
-# ─── stdin: cache on → null ─────────────────────────────────────
 
 [[e2e]]
 name = "cache_on_gets_null_stdin"
 comment = """
-Tests stdio behavior in interleaved mode (default --log mode).
-
-In interleaved mode:
-- cache off  → all stdio inherited (stdin from parent, stdout/stderr to terminal)
-- cache on   → stdin is /dev/null, stdout/stderr are piped (for capture/replay)
-
-This applies identically regardless of task count.
-
-`check-tty` prints whether each stdio fd is a TTY.
-`read-stdin` reads one line from stdin and prints it.
+With caching on, task stdin should be replaced with `/dev/null` — piping data
+in from outside must not reach the task.
 """
 steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "read-stdin-cached"]]

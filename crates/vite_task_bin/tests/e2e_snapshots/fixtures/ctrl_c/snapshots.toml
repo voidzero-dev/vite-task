@@ -1,7 +1,7 @@
 [[e2e]]
 name = "ctrl_c_terminates_running_tasks"
 comment = """
-Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+Ctrl+C (SIGINT) on an uncached run should propagate to the running task and terminate it.
 """
 steps = [
   { argv = [
@@ -18,7 +18,7 @@ steps = [
 [[e2e]]
 name = "ctrl_c_terminates_running_tasks__cached_"
 comment = """
-Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+Same as above, but under the cached execution path (piped stdio + fspy tracking).
 """
 steps = [
   { argv = [
@@ -31,12 +31,11 @@ steps = [
   ] },
 ]
 
-# Package b depends on a, so without --parallel they run sequentially.
-# After Ctrl-C terminates a, b should not be scheduled.
 [[e2e]]
 name = "ctrl_c_prevents_future_tasks"
 comment = """
-Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+Ctrl+C while running sequentially (b depends on a) should terminate a and
+prevent b from being scheduled.
 """
 steps = [
   { argv = [
@@ -51,12 +50,11 @@ steps = [
   ] },
 ]
 
-# dev exits 0 after Ctrl-C but the result should not be cached.
-# The second run should be a cache miss, not a hit.
 [[e2e]]
 name = "ctrl_c_prevents_caching"
 comment = """
-Tests that Ctrl+C (SIGINT) propagates to and terminates a running task.
+A task interrupted by Ctrl+C must not populate the cache, even if it happens to
+exit 0 — the following run should be a cache miss, not a hit.
 """
 steps = [
   { argv = [

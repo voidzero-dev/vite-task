@@ -1,6 +1,7 @@
 # transitive_typo_errors
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+`vt run -t <typo>` is not cwd-only, so a typo should error rather than fall
+back to the interactive selector.
 
 ## `vt run -t buid`
 

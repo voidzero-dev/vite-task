@@ -1,8 +1,7 @@
 # subpackage_glob_with_cwd___glob_relative_to_package_not_cwd
 
-Test glob base directory behavior
-Globs are relative to PACKAGE directory, NOT task cwd
-No special cross-package filtering - just normal relative path matching
+A custom `cwd` on a subpackage task should not shift its glob base — `src/**`
+still resolves relative to the subpackage directory.
 
 ## `vt run sub-pkg#sub-glob-with-cwd`
 

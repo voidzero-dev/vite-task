@@ -1,6 +1,7 @@
 # interactive_escape_clears_query
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Escape in the selector should clear the current query and restore the
+unfiltered list at cursor position 0.
 
 ## `vt run`
 

@@ -1,6 +1,7 @@
 # last_details_after_multi_task_run_shows_saved_summary
 
-Tests for compact and verbose summary output
+After a multi-task (`-r`) run, `vt run --last-details` should display the
+saved summary covering every task.
 
 ## `vt run -r build`
 

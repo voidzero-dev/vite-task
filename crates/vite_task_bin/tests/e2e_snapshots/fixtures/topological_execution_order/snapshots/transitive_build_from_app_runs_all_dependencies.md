@@ -1,7 +1,7 @@
 # transitive_build_from_app_runs_all_dependencies
 
-Tests that tasks execute in dependency (topological) order.
-Dependency chain: @topo/core <- @topo/lib <- @topo/app
+`vt run -t build` from the leaf package should include the full transitive
+closure of its dependencies in topological order.
 
 ## `vt run -t build`
 

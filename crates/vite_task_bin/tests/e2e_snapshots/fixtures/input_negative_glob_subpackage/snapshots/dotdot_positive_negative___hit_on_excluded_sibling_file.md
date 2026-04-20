@@ -1,9 +1,7 @@
 # dotdot_positive_negative___hit_on_excluded_sibling_file
 
-Test that negative input globs work correctly for subpackages.
-Bug: negative globs were matched against workspace-relative paths
-instead of package-relative paths, so exclusions like !dist/**
-failed for subpackages.
+A `../`-prefixed negative glob should correctly exclude files in the sibling
+package's `dist/` directory.
 
 ## `vt run sub-pkg#dotdot-positive-negative`
 

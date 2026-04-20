@@ -1,6 +1,7 @@
 # unmatched_glob_filter_warns
 
-Tests for unmatched --filter warnings on stderr
+A glob `--filter` that matches no packages should warn like any other
+unmatched inclusion filter.
 
 ## `vt run --filter @test/app --filter @nope/* build`
 

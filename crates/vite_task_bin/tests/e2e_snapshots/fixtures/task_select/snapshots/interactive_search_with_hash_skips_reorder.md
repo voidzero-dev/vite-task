@@ -1,6 +1,7 @@
 # interactive_search_with_hash_skips_reorder
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Including `#` in the query means "target a specific package#task" and should
+disable the current-package reordering in the filtered list.
 
 ## `vt run`
 

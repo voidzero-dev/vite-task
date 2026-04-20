@@ -1,6 +1,7 @@
 # dependency_failure_fast_fails_dependents
 
-Tests exit code behavior for task failures
+When a dependency fails under `-t`, dependents should be skipped rather than
+run anyway.
 
 ## `vt run -t check`
 

@@ -1,7 +1,7 @@
 # recursive_build_runs_dependencies_before_dependents
 
-Tests that tasks execute in dependency (topological) order.
-Dependency chain: @topo/core <- @topo/lib <- @topo/app
+`vt run -r build` across the workspace should execute packages in
+topological order: `@topo/core` before `@topo/lib` before `@topo/app`.
 
 ## `vt run -r build`
 

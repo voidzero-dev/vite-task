@@ -1,6 +1,7 @@
 # whitespace_split_filter_warns_for_unmatched_token
 
-Tests for unmatched --filter warnings on stderr
+A whitespace-split `--filter` argument should warn about each of its individual
+unmatched tokens.
 
 ## `vt run --filter '@test/app nope' build`
 

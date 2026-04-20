@@ -1,6 +1,7 @@
 # positive_globs_only___cache_hit_on_second_run
 
-Test all input configuration combinations for cache behavior
+With only positive globs (`src/**/*.ts`) and no file changes, a second run
+should be a cache hit.
 
 ## `vt run positive-globs-only`
 

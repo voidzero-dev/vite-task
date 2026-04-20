@@ -1,8 +1,7 @@
 # subpackage_glob___unmatched_directory_in_subpackage
 
-Test glob base directory behavior
-Globs are relative to PACKAGE directory, NOT task cwd
-No special cross-package filtering - just normal relative path matching
+Changes to a sibling directory within the subpackage that the glob does not
+cover (e.g. `other/`) should leave the cache hit intact.
 
 ## `vt run sub-pkg#sub-glob-test`
 

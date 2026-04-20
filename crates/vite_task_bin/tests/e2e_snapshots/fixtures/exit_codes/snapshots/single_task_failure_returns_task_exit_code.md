@@ -1,6 +1,6 @@
 # single_task_failure_returns_task_exit_code
 
-Tests exit code behavior for task failures
+`vp run` should exit with the underlying task's exit code when a single task fails.
 
 ## `vt run pkg-a#fail`
 

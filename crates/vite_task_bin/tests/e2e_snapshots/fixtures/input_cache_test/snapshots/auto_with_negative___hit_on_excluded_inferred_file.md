@@ -1,6 +1,7 @@
 # auto_with_negative___hit_on_excluded_inferred_file
 
-Test all input configuration combinations for cache behavior
+A negative glob should filter out inferred inputs — a `dist/**`-excluded file
+that the command happens to read should not invalidate the cache.
 
 ## `vt run auto-with-negative`
 

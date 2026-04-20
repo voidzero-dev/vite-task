@@ -1,6 +1,7 @@
 # folder_input___hit_despite_file_changes_and_folder_deletion
 
-Test all input configuration combinations for cache behavior
+A bare directory name as input (`src`) matches only the directory entry,
+not its contents — neither file edits nor folder deletion affect the cache.
 
 ## `vt run folder-input`
 

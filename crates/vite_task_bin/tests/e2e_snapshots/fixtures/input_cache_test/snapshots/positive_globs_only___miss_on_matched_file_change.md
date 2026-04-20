@@ -1,6 +1,6 @@
 # positive_globs_only___miss_on_matched_file_change
 
-Test all input configuration combinations for cache behavior
+Modifying a file matched by a positive glob should invalidate the cache.
 
 ## `vt run positive-globs-only`
 

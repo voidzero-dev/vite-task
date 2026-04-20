@@ -1,6 +1,7 @@
 # interactive_search_preserves_rating_within_package
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+When multiple current-package tasks match, the fuzzy-rating order between
+them should be preserved (not broken by current-package grouping).
 
 ## `vt run`
 

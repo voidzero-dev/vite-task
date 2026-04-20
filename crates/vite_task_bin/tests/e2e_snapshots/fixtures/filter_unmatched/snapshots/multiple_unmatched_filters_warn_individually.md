@@ -1,6 +1,7 @@
 # multiple_unmatched_filters_warn_individually
 
-Tests for unmatched --filter warnings on stderr
+Each unmatched `--filter` should produce its own warning — warnings must not
+be collapsed into a single message.
 
 ## `vt run --filter @test/app --filter nope1 --filter nope2 build`
 

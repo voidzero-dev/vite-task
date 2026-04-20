@@ -1,6 +1,7 @@
 # interactive_search_then_select
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Typing characters in the selector should filter the list in real time, then
+Enter should pick the highlighted result.
 
 ## `vt run`
 

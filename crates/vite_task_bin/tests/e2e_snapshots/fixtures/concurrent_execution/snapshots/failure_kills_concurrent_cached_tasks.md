@@ -1,9 +1,8 @@
 # failure_kills_concurrent_cached_tasks
 
-Tests that independent tasks execute concurrently.
-Packages a and b have no dependency relationship.
-Both use a barrier that requires 2 participants — if run sequentially,
-the first would wait forever and the test would timeout.
+Same failure-cancellation scenario, but with `--cache` so execution goes through
+the piped stdio / fspy path (spawn_with_tracking) instead of the inherited-stdio
+path.
 
 ## `vt run -r --cache test`
 

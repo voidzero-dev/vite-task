@@ -1,6 +1,6 @@
 # task_with_cache_enabled
 
-Tests that cache: false in task config disables caching
+A task with caching enabled should produce a cache hit on the second run.
 
 ## `vt run cached-task`
 

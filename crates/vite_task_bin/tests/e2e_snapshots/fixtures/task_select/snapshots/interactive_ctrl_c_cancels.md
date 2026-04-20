@@ -1,6 +1,7 @@
 # interactive_ctrl_c_cancels
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+Ctrl+C inside the interactive selector should cancel and exit 130 without
+running any task.
 
 ## `vt run`
 

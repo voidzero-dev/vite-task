@@ -1,6 +1,7 @@
 # multi_task_with_cache_hits_shows_compact_summary
 
-Tests for compact and verbose summary output
+On the second multi-task (`-r`) run, the compact summary should report the
+correct hit count.
 
 ## `vt run -r build`
 

@@ -1,16 +1,16 @@
 [[e2e]]
 name = "recursive_build_runs_dependencies_before_dependents"
 comment = """
-Tests that tasks execute in dependency (topological) order.
-Dependency chain: @topo/core <- @topo/lib <- @topo/app
+`vt run -r build` across the workspace should execute packages in
+topological order: `@topo/core` before `@topo/lib` before `@topo/app`.
 """
 steps = [{ argv = ["vt", "run", "-r", "build"], comment = "core -> lib -> app" }]
 
 [[e2e]]
 name = "transitive_build_from_app_runs_all_dependencies"
 comment = """
-Tests that tasks execute in dependency (topological) order.
-Dependency chain: @topo/core <- @topo/lib <- @topo/app
+`vt run -t build` from the leaf package should include the full transitive
+closure of its dependencies in topological order.
 """
 cwd = "packages/app"
 steps = [{ argv = ["vt", "run", "-t", "build"], comment = "core -> lib -> app" }]
@@ -18,8 +18,8 @@ steps = [{ argv = ["vt", "run", "-t", "build"], comment = "core -> lib -> app" }
 [[e2e]]
 name = "transitive_build_from_lib_runs_only_its_dependencies"
 comment = """
-Tests that tasks execute in dependency (topological) order.
-Dependency chain: @topo/core <- @topo/lib <- @topo/app
+`vt run -t build` from an intermediate package should limit the run to that
+package and its own dependencies — `@topo/app` must not run.
 """
 cwd = "packages/lib"
 steps = [{ argv = ["vt", "run", "-t", "build"], comment = "core -> lib" }]

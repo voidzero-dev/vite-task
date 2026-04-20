@@ -1,9 +1,8 @@
 # failure_kills_daemonized_concurrent_tasks
 
-Tests that independent tasks execute concurrently.
-Packages a and b have no dependency relationship.
-Both use a barrier that requires 2 participants — if run sequentially,
-the first would wait forever and the test would timeout.
+Cancellation must also kill a sibling that has daemonized — closing stdout/stderr
+(EOF on the pipe) while the process itself stays alive. The runner must reach
+the process via the cancellation token + Job Object, not by pipe closure.
 
 ## `vt run -r --cache daemon`
 

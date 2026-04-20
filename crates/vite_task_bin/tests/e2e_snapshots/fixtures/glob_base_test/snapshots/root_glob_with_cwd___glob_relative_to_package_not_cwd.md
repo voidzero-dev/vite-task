@@ -1,8 +1,7 @@
 # root_glob_with_cwd___glob_relative_to_package_not_cwd
 
-Test glob base directory behavior
-Globs are relative to PACKAGE directory, NOT task cwd
-No special cross-package filtering - just normal relative path matching
+Even when the task declares a custom `cwd`, its glob stays anchored at the
+package root — `src/**` still matches `src/root.ts`.
 
 ## `vt run root-glob-with-cwd`
 

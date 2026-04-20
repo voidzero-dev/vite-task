@@ -1,6 +1,7 @@
 # verbose_with_typo_enters_selector
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+`vt run --verbose <typo>` still qualifies as cwd-only, so it should fall
+back to the interactive selector pre-filled with the typo.
 
 ## `vt run --verbose buid`
 

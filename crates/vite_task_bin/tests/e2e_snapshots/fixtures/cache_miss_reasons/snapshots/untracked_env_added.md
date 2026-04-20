@@ -1,6 +1,6 @@
 # untracked_env_added
 
-Test all cache miss reason variants
+Adding an `untrackedEnv` entry to the task config should invalidate the cache.
 
 ## `vt run test`
 

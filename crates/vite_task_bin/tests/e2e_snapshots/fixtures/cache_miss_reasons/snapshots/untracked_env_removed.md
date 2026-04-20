@@ -1,6 +1,6 @@
 # untracked_env_removed
 
-Test all cache miss reason variants
+Removing an existing `untrackedEnv` entry from the task config should invalidate the cache.
 
 ## `vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "untrackedEnv": ["MY_UNTRACKED"]'`
 

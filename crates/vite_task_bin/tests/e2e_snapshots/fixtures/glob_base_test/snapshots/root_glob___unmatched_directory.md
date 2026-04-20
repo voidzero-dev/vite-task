@@ -1,8 +1,7 @@
 # root_glob___unmatched_directory
 
-Test glob base directory behavior
-Globs are relative to PACKAGE directory, NOT task cwd
-No special cross-package filtering - just normal relative path matching
+Modifying a file outside the glob pattern (e.g. `other/`) should leave the
+cache hit intact.
 
 ## `vt run root-glob-test`
 

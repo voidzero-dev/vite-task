@@ -1,6 +1,7 @@
 # positive_auto_negative___miss_on_inferred_file
 
-Test all input configuration combinations for cache behavior
+Under combined positive + `auto` + negative config, modifying a file that
+only the `auto` inference discovered should still invalidate the cache.
 
 ## `vt run positive-auto-negative`
 

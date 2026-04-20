@@ -1,6 +1,7 @@
 # folder_slash_input___hit_on_file_outside_directory
 
-Test all input configuration combinations for cache behavior
+With a trailing-slash input (`src/`), files outside the directory should not
+be part of the fingerprint.
 
 ## `vt run folder-slash-input`
 

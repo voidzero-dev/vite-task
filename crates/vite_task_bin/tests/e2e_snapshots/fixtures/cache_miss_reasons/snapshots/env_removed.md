@@ -1,6 +1,6 @@
 # env_removed
 
-Test all cache miss reason variants
+Unsetting a tracked env var that was previously set should invalidate the cache.
 
 ## `MY_ENV=1 vt run test`
 

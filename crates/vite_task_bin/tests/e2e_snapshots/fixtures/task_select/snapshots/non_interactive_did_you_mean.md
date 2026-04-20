@@ -1,6 +1,7 @@
 # non_interactive_did_you_mean
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+In non-interactive mode, a typo that has close fuzzy matches should produce
+"did you mean" suggestions.
 
 ## `vtt pipe-stdin -- vt run buid`
 

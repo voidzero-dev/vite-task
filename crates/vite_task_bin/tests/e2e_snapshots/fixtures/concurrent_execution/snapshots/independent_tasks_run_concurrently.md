@@ -1,9 +1,8 @@
 # independent_tasks_run_concurrently
 
-Tests that independent tasks execute concurrently.
-Packages a and b have no dependency relationship.
-Both use a barrier that requires 2 participants — if run sequentially,
-the first would wait forever and the test would timeout.
+Two packages with no dependency relationship should run concurrently. Both tasks
+participate in a 2-way barrier, so sequential execution would hang forever and
+time out.
 
 ## `vt run -r build`
 

@@ -1,6 +1,7 @@
 # non_interactive_no_suggestions
 
-Non-interactive: list all tasks (piped stdin forces non-interactive mode)
+In non-interactive mode, a typo with no close fuzzy matches should omit the
+"did you mean" block entirely.
 
 ## `vtt pipe-stdin -- vt run zzzzz`
 

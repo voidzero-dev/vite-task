@@ -1,7 +1,8 @@
 # single_O_RDWR_open_is_not_cached
 
-Tests that tasks modifying their own inputs (read-write overlap) are not cached.
-vtt replace-file-content reads then writes the same file — fspy detects both.
+Opening a single file with `O_RDWR` (e.g. `touch` keeping the file) should
+count as a read-write overlap and prevent caching, just like separate
+read+write syscalls.
 
 ## `vt run task`
 
