@@ -102,7 +102,7 @@ impl SpyImpl {
             #[cfg(all(not(target_os = "android"), not(target_env = "musl")))]
             preload_path: self.preload_path.clone(),
 
-            #[cfg(target_os = "linux")]
+            #[cfg(any(not(target_os = "android"), target_os = "linux"))]
             seccomp_payload: supervisor.payload().clone(),
         };
 

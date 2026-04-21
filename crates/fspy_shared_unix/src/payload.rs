@@ -19,7 +19,7 @@ pub struct Payload {
     #[cfg(target_os = "macos")]
     pub artifacts: Artifacts,
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(not(target_os = "android"), target_os = "linux"))]
     #[cfg_attr(
         not(target_env = "musl"),
         expect(clippy::struct_field_names, reason = "descriptive field name for clarity")

@@ -28,7 +28,7 @@ impl PreExec {
 
 pub fn handle_exec(
     command: &mut Exec,
-    _encoded_payload: &EncodedPayload,
+    #[cfg_attr(target_os = "android", allow(unused))] encoded_payload: &EncodedPayload,
 ) -> nix::Result<Option<PreExec>> {
     // On musl targets, LD_PRELOAD is not available (cdylib not supported).
     // Always use seccomp-based tracking instead.
@@ -51,6 +51,10 @@ pub fn handle_exec(
     }
 
     command.envs.retain(|(name, _)| name != LD_PRELOAD && name != PAYLOAD_ENV_NAME);
-    
+
+    #[cfg(target_os = "android")]
+    return Ok(None);
+
+    #[cfg(target_os = "linux")]
     Ok(Some(PreExec(encoded_payload.payload.seccomp_payload.clone())))
 }
