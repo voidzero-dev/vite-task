@@ -538,9 +538,7 @@ fn main() {
                             // seccomp-unotify and strips LD_PRELOAD from
                             // spawned children, which breaks fixtures that
                             // depend on interposer ordering.
-                            "linux-gnu" => {
-                                cfg!(target_os = "linux") && !cfg!(target_env = "musl")
-                            }
+                            "linux-gnu" => cfg!(target_os = "linux") && !cfg!(target_env = "musl"),
                             other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
                         };
                         if !should_run {
