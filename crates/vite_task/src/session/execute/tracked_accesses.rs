@@ -1,4 +1,5 @@
 //! Normalize raw fspy path accesses into workspace-relative, filtered form.
+#![cfg(fspy)]
 
 use std::collections::hash_map::Entry;
 
@@ -6,13 +7,8 @@ use fspy::{AccessMode, PathAccessIterable};
 use rustc_hash::FxHashSet;
 use vite_path::{AbsolutePath, RelativePathBuf};
 
+use super::fingerprint::PathRead;
 use crate::collections::HashMap;
-
-/// Path read access info
-#[derive(Debug, Clone, Copy)]
-pub struct PathRead {
-    pub read_dir_entries: bool,
-}
 
 /// Tracked file accesses from fspy, normalized to workspace-relative paths.
 #[derive(Default, Debug)]

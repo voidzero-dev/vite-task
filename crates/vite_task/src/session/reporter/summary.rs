@@ -102,6 +102,11 @@ pub enum SpawnOutcome {
         /// First path that was both read and written, causing cache to be skipped.
         /// Only set when fspy detected a read-write overlap.
         input_modified_path: Option<Str>,
+        /// `true` when the task required fspy auto-inference but the binary was
+        /// built without `cfg(fspy)` (e.g., cross-compiled to an unsupported OS).
+        /// Task ran successfully but cache was not updated.
+        #[serde(default)]
+        fspy_unsupported: bool,
     },
 
     /// Process exited with non-zero status.
@@ -282,6 +287,10 @@ impl TaskResult {
             }
             _ => None,
         };
+        let fspy_unsupported = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported)
+        );
 
         match cache_status {
             CacheStatus::Hit { replayed_duration } => {
@@ -294,6 +303,7 @@ impl TaskResult {
                     exit_status,
                     saved_error,
                     input_modified_path,
+                    fspy_unsupported,
                 ),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
@@ -304,6 +314,7 @@ impl TaskResult {
                     exit_status,
                     saved_error,
                     input_modified_path,
+                    fspy_unsupported,
                 ),
             },
         }
@@ -315,14 +326,17 @@ fn spawn_outcome_from_execution(
     exit_status: Option<std::process::ExitStatus>,
     saved_error: Option<&SavedExecutionError>,
     input_modified_path: Option<Str>,
+    fspy_unsupported: bool,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
         (None, Some(err)) => SpawnOutcome::SpawnError(err.clone()),
         // Process exited successfully, possible infra error
-        (Some(status), _) if status.success() => {
-            SpawnOutcome::Success { infra_error: saved_error.cloned(), input_modified_path }
-        }
+        (Some(status), _) if status.success() => SpawnOutcome::Success {
+            infra_error: saved_error.cloned(),
+            input_modified_path,
+            fspy_unsupported,
+        },
         // Process exited with non-zero code
         (Some(status), _) => {
             let code = crate::session::event::exit_status_to_code(status);
@@ -336,7 +350,11 @@ fn spawn_outcome_from_execution(
         // No exit status, no error — this is the cache hit / in-process path,
         // handled by TaskResult::CacheHit / InProcess before reaching here.
         // If we somehow get here, treat as success.
-        (None, None) => SpawnOutcome::Success { infra_error: None, input_modified_path: None },
+        (None, None) => SpawnOutcome::Success {
+            infra_error: None,
+            input_modified_path: None,
+            fspy_unsupported: false,
+        },
     }
 }
 
@@ -454,6 +472,15 @@ impl TaskResult {
         } = self
         {
             return vite_str::format!("→ Not cached: read and wrote '{path}'");
+        }
+        // fspy-unsupported-on-this-OS message — same overrides precedence as above
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { fspy_unsupported: true, .. }, ..
+        } = self
+        {
+            return Str::from(
+                "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
+            );
         }
 
         match self {

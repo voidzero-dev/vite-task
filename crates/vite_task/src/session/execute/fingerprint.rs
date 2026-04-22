@@ -16,8 +16,13 @@ use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
 
-use super::tracked_accesses::PathRead;
 use crate::{collections::HashMap, session::cache::InputChangeKind};
+
+/// Path read access info
+#[derive(Debug, Clone, Copy)]
+pub struct PathRead {
+    pub read_dir_entries: bool,
+}
 
 /// Post-run fingerprint capturing file state after execution.
 /// Used to validate whether cached outputs are still valid.

@@ -2,10 +2,12 @@
 //!
 //! [`spawn`] does one thing: hand back the child's stdio pipes plus a
 //! cancellation-aware `wait` future. Draining the pipes is [`super::pipe`]'s
-//! job; normalizing fspy path accesses is [`super::tracked_accesses`]'s.
+//! job; normalizing fspy path accesses is [`super::tracked_accesses`]'s (only
+//! compiled when `cfg(fspy)` is on).
 
 use std::{io, process::Stdio};
 
+#[cfg(fspy)]
 use fspy::PathAccessIterable;
 use futures_util::{FutureExt, future::LocalBoxFuture};
 use tokio::process::{ChildStderr, ChildStdout};
@@ -40,6 +42,7 @@ pub struct ChildHandle {
 pub struct ChildOutcome {
     pub exit_status: std::process::ExitStatus,
     /// Raw fspy accesses. `Some` iff `fspy` was `true` at spawn time.
+    #[cfg(fspy)]
     pub path_accesses: Option<PathAccessIterable>,
 }
 
@@ -47,10 +50,35 @@ pub struct ChildOutcome {
 ///
 /// Cancellation is unified: whether fspy is enabled or not, the returned `wait`
 /// future observes `cancellation_token` and kills the child before resolving.
+///
+/// On builds without `cfg(fspy)`, the `fspy` argument is ignored and the tokio
+/// path is always taken.
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn spawn(
     cmd: &SpawnCommand,
     fspy: bool,
+    stdio: SpawnStdio,
+    cancellation_token: CancellationToken,
+) -> anyhow::Result<ChildHandle> {
+    #[cfg(fspy)]
+    if fspy {
+        return spawn_fspy(cmd, stdio, cancellation_token).await;
+    }
+    #[cfg(not(fspy))]
+    let _ = fspy;
+
+    let mut tokio_cmd = tokio::process::Command::new(cmd.program_path.as_path());
+    tokio_cmd.args(cmd.args.iter().map(vite_str::Str::as_str));
+    tokio_cmd.env_clear();
+    tokio_cmd.envs(cmd.all_envs.iter());
+    tokio_cmd.current_dir(&*cmd.cwd);
+    apply_stdio(&mut tokio_cmd, stdio);
+    spawn_tokio(tokio_cmd, cancellation_token)
+}
+
+#[cfg(fspy)]
+async fn spawn_fspy(
+    cmd: &SpawnCommand,
     stdio: SpawnStdio,
     cancellation_token: CancellationToken,
 ) -> anyhow::Result<ChildHandle> {
@@ -77,18 +105,7 @@ pub async fn spawn(
         }
     }
 
-    if fspy {
-        spawn_fspy(fspy_cmd, cancellation_token).await
-    } else {
-        spawn_tokio(fspy_cmd, cancellation_token)
-    }
-}
-
-async fn spawn_fspy(
-    cmd: fspy::Command,
-    cancellation_token: CancellationToken,
-) -> anyhow::Result<ChildHandle> {
-    let mut tracked = cmd.spawn(cancellation_token).await?;
+    let mut tracked = fspy_cmd.spawn(cancellation_token).await?;
 
     // On Windows, assign the child to a Job Object so that killing the child
     // also kills all descendant processes (e.g., node.exe via a .cmd shim).
@@ -120,10 +137,10 @@ async fn spawn_fspy(
 }
 
 fn spawn_tokio(
-    cmd: fspy::Command,
+    mut cmd: tokio::process::Command,
     cancellation_token: CancellationToken,
 ) -> anyhow::Result<ChildHandle> {
-    let mut child = cmd.into_tokio_command().spawn()?;
+    let mut child = cmd.spawn()?;
 
     #[cfg(windows)]
     let job = {
@@ -152,11 +169,35 @@ fn spawn_tokio(
         // `job` drops here on Windows, terminating any stragglers.
         #[cfg(windows)]
         drop(job);
-        Ok(ChildOutcome { exit_status, path_accesses: None })
+        Ok(ChildOutcome {
+            exit_status,
+            #[cfg(fspy)]
+            path_accesses: None,
+        })
     }
     .boxed_local();
 
     Ok(ChildHandle { stdout, stderr, wait })
+}
+
+fn apply_stdio(cmd: &mut tokio::process::Command, stdio: SpawnStdio) {
+    match stdio {
+        SpawnStdio::Inherited => {
+            cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+            // libuv (used by Node.js) marks stdin/stdout/stderr as close-on-exec;
+            // without this fix the child reopens fds 0-2 as /dev/null after exec.
+            // See: https://github.com/libuv/libuv/issues/2062
+            // SAFETY: the pre_exec closure only performs fcntl operations on
+            // stdio fds, which is safe in a post-fork context.
+            #[cfg(unix)]
+            unsafe {
+                cmd.pre_exec(clear_stdio_cloexec);
+            }
+        }
+        SpawnStdio::Piped => {
+            cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        }
+    }
 }
 
 #[cfg(unix)]

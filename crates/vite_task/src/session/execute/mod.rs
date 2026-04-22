@@ -3,6 +3,7 @@ pub mod glob_inputs;
 mod hash;
 pub mod pipe;
 pub mod spawn;
+#[cfg(fspy)]
 pub mod tracked_accesses;
 #[cfg(windows)]
 mod win_job;
@@ -20,12 +21,13 @@ use vite_task_plan::{
     cache_metadata::CacheMetadata, execution_graph::ExecutionNodeIndex,
 };
 
+#[cfg(fspy)]
+use self::tracked_accesses::TrackedPathAccesses;
 use self::{
-    fingerprint::PostRunFingerprint,
+    fingerprint::{PathRead, PostRunFingerprint},
     glob_inputs::compute_globbed_inputs,
     pipe::{PipeSinks, StdOutput, pipe_stdio},
     spawn::{SpawnStdio, spawn},
-    tracked_accesses::TrackedPathAccesses,
 };
 use super::{
     cache::{CacheEntryValue, ExecutionCache},
@@ -291,6 +293,17 @@ struct CacheState<'a> {
     fspy_negatives: Option<Vec<wax::Glob<'static>>>,
 }
 
+/// Post-execution summary of what fspy observed for a single task. Used in the
+/// cache-update step. Fields are cfg-agnostic so the downstream match logic
+/// doesn't need `cfg(fspy)` — the value is only ever `Some` when tracking
+/// happened (see the `let tracking = ...` fork in `execute_spawn`).
+struct TrackingOutcome {
+    path_reads: HashMap<RelativePathBuf, PathRead>,
+    /// First path that was both read and written during execution, if any.
+    /// A non-empty value means caching this task is unsound.
+    read_write_overlap: Option<RelativePathBuf>,
+}
+
 /// Execute a spawned process with cache-aware lifecycle.
 ///
 /// This is a free function (not tied to `ExecutionContext`) so it can be reused
@@ -539,44 +552,57 @@ pub async fn execute_spawn(
     let (cache_update_status, cache_error) = if let ExecutionMode::Cached { state, .. } = mode {
         let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
 
-        // Normalize fspy accesses. `zip` gives `Some` iff fspy was enabled
-        // (both outcome.path_accesses and fspy_negatives are Some together).
-        let path_accesses = outcome
-            .path_accesses
-            .as_ref()
-            .zip(fspy_negatives.as_deref())
-            .map(|(raw, negs)| TrackedPathAccesses::from_raw(raw, cache_base_path, negs));
+        // Post-execution summary of what fspy observed. `Some` iff tracking was
+        // both requested (`fspy_negatives.is_some()`) and compiled in (`cfg(fspy)`).
+        // On a `cfg(not(fspy))` build this is always `None`, and the match below
+        // short-circuits to `FspyUnsupported` when tracking was needed.
+        let tracking: Option<TrackingOutcome> = {
+            #[cfg(fspy)]
+            {
+                outcome.path_accesses.as_ref().zip(fspy_negatives.as_deref()).map(|(raw, negs)| {
+                    let tracked = TrackedPathAccesses::from_raw(raw, cache_base_path, negs);
+                    let read_write_overlap = tracked
+                        .path_reads
+                        .keys()
+                        .find(|p| tracked.path_writes.contains(*p))
+                        .cloned();
+                    TrackingOutcome { path_reads: tracked.path_reads, read_write_overlap }
+                })
+            }
+            #[cfg(not(fspy))]
+            {
+                None
+            }
+        };
 
         let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
         if cancelled {
             // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
             (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None)
         } else if outcome.exit_status.success() {
-            // Check for read-write overlap: if the task wrote to any file it also
-            // read, the inputs were modified during execution — don't cache.
-            // Note: this only checks fspy-inferred reads, not globbed_inputs keys.
-            // A task that writes to a glob-matched file without reading it causes
-            // perpetual cache misses (glob detects the hash change) but not a
-            // correctness bug, so we don't handle that case here.
-            if let Some(path) = path_accesses
-                .as_ref()
-                .and_then(|pa| pa.path_reads.keys().find(|p| pa.path_writes.contains(*p)))
-            {
+            // fspy-inferred read-write overlap: the task wrote to a file it also
+            // read, so the prerun input hashes are stale and caching is unsound.
+            // (We only check fspy-inferred reads, not globbed_inputs. A task that
+            // writes to a glob-matched file without reading it produces perpetual
+            // cache misses but not a correctness bug.)
+            if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &tracking {
                 (
                     CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
                         path: path.clone(),
                     }),
                     None,
                 )
+            } else if tracking.is_none() && fspy_negatives.is_some() {
+                // Task requested fspy auto-inference but this binary was built
+                // without `cfg(fspy)`. Task ran, but we can't compute a valid
+                // cache entry without tracked path accesses.
+                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None)
             } else {
-                // path_reads is empty when inference is disabled (path_accesses is None)
+                // Paths already in globbed_inputs are skipped: the overlap check
+                // above guarantees no input modification, so the prerun hash is
+                // the correct post-exec hash.
                 let empty_path_reads = HashMap::default();
-                let path_reads =
-                    path_accesses.as_ref().map_or(&empty_path_reads, |pa| &pa.path_reads);
-
-                // Execution succeeded — attempt to create fingerprint and update cache.
-                // Paths already in globbed_inputs are skipped: Rule 1 (above) guarantees
-                // no input modification, so the prerun hash is the correct post-exec hash.
+                let path_reads = tracking.as_ref().map_or(&empty_path_reads, |t| &t.path_reads);
                 match PostRunFingerprint::create(path_reads, cache_base_path, &globbed_inputs) {
                     Ok(post_run_fingerprint) => {
                         let new_cache_value = CacheEntryValue {

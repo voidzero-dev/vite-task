@@ -72,6 +72,10 @@ pub enum CacheNotUpdatedReason {
         /// First path that was both read and written during execution.
         path: RelativePathBuf,
     },
+    /// fspy isn't compiled in on this build and the task requires fspy
+    /// (its `input` config includes auto-inference). Task ran but cannot
+    /// be cached without tracked path accesses.
+    FspyUnsupported,
 }
 
 #[derive(Debug)]

@@ -2,7 +2,7 @@
 name = "vite_task"
 version = "0.0.0"
 edition.workspace = true
-include = ["/src"]
+include = ["/src", "/build.rs"]
 license.workspace = true
 publish = false
 readme = "README.md"
@@ -17,8 +17,7 @@ async-trait = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true }
-derive_more = { workspace = true, features = ["from"] }
-fspy = { workspace = true }
+derive_more = { workspace = true, features = ["debug", "from"] }
 futures-util = { workspace = true }
 once_cell = { workspace = true }
 owo-colors = { workspace = true }
@@ -30,7 +29,14 @@ rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "io-std", "io-util", "macros", "sync"] }
+tokio = { workspace = true, features = [
+  "rt-multi-thread",
+  "io-std",
+  "io-util",
+  "macros",
+  "process",
+  "sync",
+] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
@@ -44,6 +50,9 @@ wax = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+fspy = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
