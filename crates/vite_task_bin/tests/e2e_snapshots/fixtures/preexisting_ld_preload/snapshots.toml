@@ -49,7 +49,7 @@ steps = [
     "vtt",
     "write-file",
     "preload_test_short_circuit.txt",
-    "modified short-circuited content\n",
+    "modified short-circuited content",
   ], comment = "modify the untracked (short-circuited) file" },
   { argv = [
     "vt",
@@ -65,7 +65,7 @@ steps = [
     "vtt",
     "write-file",
     "real.txt",
-    "modified real content\n",
+    "modified real content",
   ], comment = "modify the tracked file" },
   { argv = [
     "vt",

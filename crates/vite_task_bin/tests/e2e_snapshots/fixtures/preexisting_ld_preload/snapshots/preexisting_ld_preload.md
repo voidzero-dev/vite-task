@@ -48,8 +48,7 @@ preload_test_short_circuit.txt: not found
 vt run: 2/2 cache hit (100%). (Run `vt run --last-details` for full details)
 ```
 
-## `vtt write-file preload_test_short_circuit.txt 'modified short-circuited content
-'`
+## `vtt write-file preload_test_short_circuit.txt 'modified short-circuited content'`
 
 modify the untracked (short-circuited) file
 
@@ -71,8 +70,7 @@ preload_test_short_circuit.txt: not found
 vt run: 2/2 cache hit (100%). (Run `vt run --last-details` for full details)
 ```
 
-## `vtt write-file real.txt 'modified real content
-'`
+## `vtt write-file real.txt 'modified real content'`
 
 modify the tracked file
 
@@ -86,7 +84,6 @@ cache miss: tracked input changed
 ```
 $ vtt print-file real.txt ○ cache miss: 'real.txt' modified, executing
 modified real content
-
 $ vtt print-file preload_test_short_circuit.txt ◉ cache hit, replaying
 preload_test_short_circuit.txt: not found
 
