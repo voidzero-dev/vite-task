@@ -2,6 +2,7 @@
 name = "fspy_seccomp_unotify"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 publish = false
 
 [target.'cfg(target_os = "linux")'.dependencies]

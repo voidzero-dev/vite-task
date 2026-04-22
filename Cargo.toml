@@ -127,7 +127,7 @@ stackalloc = "1.2.1"
 subprocess_test = { path = "crates/subprocess_test" }
 supports-color = "3.0.1"
 syscalls = { version = "0.6.18", default-features = false }
-tar = "0.4.43"
+tar = "0.4.45"
 tempfile = "3.14.0"
 test-log = { version = "0.2.18", features = ["trace"] }
 thiserror = "2"

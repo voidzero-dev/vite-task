@@ -1,6 +1,7 @@
 [package]
 name = "fspy_preload_unix"
 edition = "2024"
+license.workspace = true
 publish = false
 
 [lib]
