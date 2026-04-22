@@ -4,6 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 include = ["/src"]
 license.workspace = true
+publish = false
 readme = "README.md"
 rust-version.workspace = true
 
