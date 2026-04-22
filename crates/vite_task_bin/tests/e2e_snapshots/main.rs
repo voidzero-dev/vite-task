@@ -190,8 +190,8 @@ struct E2e {
     #[serde(default)]
     pub cwd: RelativePathBuf,
     pub steps: Vec<Step>,
-    /// Optional platform filter: "unix", "linux", "macos", or "windows".
-    /// If set, test only runs on that platform.
+    /// Optional platform filter: "unix", "linux", "linux-gnu", "macos", or
+    /// "windows". If set, test only runs on that platform.
     #[serde(default)]
     pub platform: Option<Str>,
     /// When true, the generated libtest-mimic trial is marked `#[ignore]`
@@ -533,6 +533,14 @@ fn main() {
                             "windows" => cfg!(windows),
                             "linux" => cfg!(target_os = "linux"),
                             "macos" => cfg!(target_os = "macos"),
+                            // fspy's LD_PRELOAD injection path is only active
+                            // on glibc-Linux; on musl, fspy switches to
+                            // seccomp-unotify and strips LD_PRELOAD from
+                            // spawned children, which breaks fixtures that
+                            // depend on interposer ordering.
+                            "linux-gnu" => {
+                                cfg!(target_os = "linux") && !cfg!(target_env = "musl")
+                            }
                             other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
                         };
                         if !should_run {

@@ -1,6 +1,10 @@
 [[e2e]]
 name = "preexisting_ld_preload"
-platform = "linux"
+# Requires fspy's LD_PRELOAD injection path, which is only active on
+# glibc-Linux. On musl fspy uses seccomp-unotify instead and strips
+# LD_PRELOAD from spawned children, so the fixture's interposer-chain
+# assumptions don't hold.
+platform = "linux-gnu"
 comment = """
 Reproduces #340 and verifies that fspy tolerates a user-supplied
 `LD_PRELOAD` by appending its shim instead of rejecting the spawn.
