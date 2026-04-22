@@ -83,12 +83,12 @@ fspy_shared_unix = { path = "crates/fspy_shared_unix" }
 futures = "0.3.31"
 futures-util = "0.3.31"
 jsonc-parser = { version = "0.29.0", features = ["serde"] }
-libc = "0.2.172"
+libc = "0.2.185"
 libtest-mimic = "0.8.2"
 memmap2 = "0.9.7"
 monostate = "1.0.2"
 native_str = { path = "crates/native_str" }
-nix = { version = "0.30.1", features = ["dir", "signal"] }
+nix = { version = "0.31.2", features = ["dir", "signal"] }
 ntapi = "0.4.1"
 nucleo-matcher = "0.3.1"
 once_cell = "1.19"
