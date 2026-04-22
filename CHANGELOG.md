@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** `vp run` no longer aborts with `failed to prepare the command for injection: Invalid argument` when the user environment already has `LD_PRELOAD` (Linux) or `DYLD_INSERT_LIBRARIES` (macOS) set. The tracer shim is now appended to any existing value and placed last, so user preloads keep their symbol-interposition precedence ([#340](https://github.com/voidzero-dev/vite-task/issues/340))
 - **Changed** Arguments passed after a task name (e.g. `vp run test some-filter`) are now forwarded only to that task. Tasks pulled in via `dependsOn` no longer receive them ([#324](https://github.com/voidzero-dev/vite-task/issues/324))
 - **Fixed** Windows file access tracking no longer panics when a task touches malformed paths that cannot be represented as workspace-relative inputs ([#330](https://github.com/voidzero-dev/vite-task/pull/330))
 - **Fixed** `vp run --cache` now supports running without a task specifier and opens the interactive task selector, matching bare `vp run` behavior ([#312](https://github.com/voidzero-dev/vite-task/pull/313))

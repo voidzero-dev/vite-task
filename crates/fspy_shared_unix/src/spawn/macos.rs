@@ -8,7 +8,7 @@ use std::{
 use phf::{Set, phf_set};
 
 use crate::{
-    exec::{Exec, ensure_env},
+    exec::{Exec, append_path_env, ensure_env},
     payload::{EncodedPayload, PAYLOAD_ENV_NAME},
 };
 
@@ -60,11 +60,15 @@ pub fn handle_exec(
     };
 
     if injectable {
-        ensure_env(
+        // Append (don't overwrite) so a user-provided DYLD_INSERT_LIBRARIES
+        // keeps working. fspy's shim goes last so user preloads that
+        // short-circuit a libc call stay invisible to fspy — what the OS
+        // actually executed is what we want to record.
+        append_path_env(
             &mut command.envs,
             DYLD_INSERT_LIBRARIES,
             encoded_payload.payload.preload_path.as_os_str().as_bytes(),
-        )?;
+        );
         ensure_env(&mut command.envs, PAYLOAD_ENV_NAME, &encoded_payload.encoded_string)?;
     } else {
         command.envs.retain(|(name, _)| {

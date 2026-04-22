@@ -47,6 +47,14 @@ vec1 = { workspace = true, features = ["serde"] }
 vite_path = { workspace = true, features = ["absolute-redaction"] }
 vite_workspace = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# Artifact dep: the cdylib is built and its path is exposed to the e2e
+# test harness via `CARGO_CDYLIB_FILE_PRELOAD_TEST_LIB` at test-runtime.
+preload_test_lib = { path = "../preload_test_lib", artifact = "cdylib" }
+
+[package.metadata.cargo-shear]
+ignored = ["preload_test_lib"]
+
 [lints]
 workspace = true
 

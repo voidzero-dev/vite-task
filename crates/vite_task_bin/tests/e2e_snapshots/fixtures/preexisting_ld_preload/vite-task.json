@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "read": {
+      "command": "vtt print-file real.txt && vtt print-file preload_test_short_circuit.txt",
+      "cache": true
+    }
+  }
+}

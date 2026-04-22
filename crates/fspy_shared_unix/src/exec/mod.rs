@@ -175,3 +175,122 @@ pub fn ensure_env(
     envs.push((name.to_owned(), Some(value.to_owned())));
     Ok(())
 }
+
+/// Ensures `value` is the trailing colon-separated entry of env var `name`.
+///
+/// Used for `LD_PRELOAD` / `DYLD_INSERT_LIBRARIES`, which the dynamic loader
+/// treats as colon-separated lists. Appending (rather than overwriting)
+/// preserves any user-provided preload, and appending to the *end* keeps
+/// fspy's shim as the last interposer so a user preload that short-circuits
+/// a call (returning without forwarding to libc) stays invisible to fspy —
+/// mirroring what the OS actually did.
+///
+/// - Absent: inserts `(name, value)`.
+/// - Present with `value` already as the last colon-separated entry: no
+///   change (idempotent across nested execs within the preloaded shim).
+/// - Present otherwise: rewrites to `{existing}:{value}`. If `existing` is
+///   empty, sets to `value` alone to avoid a leading `:` (which glibc's
+///   `ld.so` interprets as the current directory).
+pub fn append_path_env(
+    envs: &mut Vec<(BString, Option<BString>)>,
+    name: impl AsRef<BStr>,
+    value: impl AsRef<BStr>,
+) {
+    let name = name.as_ref();
+    let value = value.as_ref();
+    if let Some(entry) = envs.iter_mut().find(|(n, _)| n == name) {
+        let existing: &[u8] = entry.1.as_deref().map_or(&[][..], |v| v.as_ref());
+        let value_bytes: &[u8] = value.as_ref();
+        let already_last = existing == value_bytes
+            || (existing.len() > value_bytes.len()
+                && existing.ends_with(value_bytes)
+                && existing[existing.len() - value_bytes.len() - 1] == b':');
+        if already_last {
+            return;
+        }
+        let mut new_value = Vec::with_capacity(existing.len() + 1 + value_bytes.len());
+        if !existing.is_empty() {
+            new_value.extend_from_slice(existing);
+            new_value.push(b':');
+        }
+        new_value.extend_from_slice(value_bytes);
+        entry.1 = Some(BString::from(new_value));
+    } else {
+        envs.push((name.to_owned(), Some(value.to_owned())));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bstr::BString;
+
+    use super::append_path_env;
+
+    fn env(envs: &[(BString, Option<BString>)], name: &[u8]) -> Option<Vec<u8>> {
+        envs.iter()
+            .find(|(n, _)| AsRef::<[u8]>::as_ref(n) == name)
+            .and_then(|(_, v)| v.as_ref().map(|v| AsRef::<[u8]>::as_ref(v).to_vec()))
+    }
+
+    #[test]
+    fn inserts_when_absent() {
+        let mut envs: Vec<(BString, Option<BString>)> = vec![];
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
+    }
+
+    #[test]
+    fn noop_when_equal() {
+        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("/a.so")))];
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
+    }
+
+    #[test]
+    fn noop_when_value_is_last_entry() {
+        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("/user.so:/a.so")))];
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/user.so:/a.so".to_vec()));
+    }
+
+    #[test]
+    fn appends_with_colon_when_present_and_different() {
+        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("/user.so")))];
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/user.so:/a.so".to_vec()));
+    }
+
+    #[test]
+    fn sets_without_leading_colon_when_existing_is_empty() {
+        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("")))];
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
+    }
+
+    #[test]
+    fn idempotent_on_repeat() {
+        let mut envs: Vec<(BString, Option<BString>)> = vec![];
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
+    }
+
+    #[test]
+    fn does_not_false_match_prefix_without_preceding_colon() {
+        // `lib/a.so` ends with `/a.so` as bytes, but the preceding byte is
+        // `b` not `:`, so it must NOT be treated as already-present.
+        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("/lib/a.so")))];
+        append_path_env(&mut envs, "LD_PRELOAD", "a.so");
+        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/lib/a.so:a.so".to_vec()));
+    }
+
+    #[test]
+    fn inserts_when_present_with_none_value() {
+        // An env var present in the list but with `None` value (name without
+        // `=`) should be rewritten to `Some(value)`.
+        let mut envs = vec![(BString::from("LD_PRELOAD"), None)];
+        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
+        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
+    }
+}

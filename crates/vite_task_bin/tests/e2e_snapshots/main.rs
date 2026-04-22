@@ -190,7 +190,8 @@ struct E2e {
     #[serde(default)]
     pub cwd: RelativePathBuf,
     pub steps: Vec<Step>,
-    /// Optional platform filter: "unix" or "windows". If set, test only runs on that platform.
+    /// Optional platform filter: "unix", "linux", "macos", or "windows".
+    /// If set, test only runs on that platform.
     #[serde(default)]
     pub platform: Option<Str>,
     /// When true, the generated libtest-mimic trial is marked `#[ignore]`
@@ -231,6 +232,26 @@ fn load_snapshots_file(fixture_path: &std::path::Path) -> SnapshotsFile {
 enum TerminationState {
     Exited(i64),
     TimedOut,
+}
+
+/// Substitutes sentinels in step env values with values only known at
+/// test-run time. Currently supports `<PRELOAD_TEST_LIB_PATH>`, which
+/// expands to the path of the `preload_test_lib` cdylib built via the
+/// artifact dependency (Linux only — the sentinel is only used by the
+/// `preload_test_lib`-gated e2e fixture). Keeps the raw sentinel in the
+/// snapshot's displayed command line, so snapshots stay machine-independent.
+fn resolve_env_placeholder(raw: &str) -> std::borrow::Cow<'_, OsStr> {
+    if raw == "<PRELOAD_TEST_LIB_PATH>" {
+        let path = env::var_os("CARGO_CDYLIB_FILE_PRELOAD_TEST_LIB").unwrap_or_else(|| {
+            panic!(
+                "CARGO_CDYLIB_FILE_PRELOAD_TEST_LIB not set; the e2e harness requires \
+                 the preload_test_lib cdylib artifact to be built by cargo"
+            )
+        });
+        std::borrow::Cow::Owned(path)
+    } else {
+        std::borrow::Cow::Borrowed(OsStr::new(raw))
+    }
 }
 
 /// Append a fenced markdown block containing `body`. The opening and closing
@@ -338,7 +359,8 @@ fn run_case(
                 cmd.env("PATHEXT", ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC");
             }
             for (k, v) in step.envs() {
-                cmd.env(k.as_str(), v.as_str());
+                let resolved = resolve_env_placeholder(v.as_str());
+                cmd.env(k.as_str(), AsRef::<OsStr>::as_ref(&resolved));
             }
             cmd.cwd(e2e_stage_path.join(&e2e.cwd).as_path());
 
@@ -509,6 +531,8 @@ fn main() {
                         let should_run = match platform.as_str() {
                             "unix" => cfg!(unix),
                             "windows" => cfg!(windows),
+                            "linux" => cfg!(target_os = "linux"),
+                            "macos" => cfg!(target_os = "macos"),
                             other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
                         };
                         if !should_run {

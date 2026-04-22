@@ -6,7 +6,11 @@ use fspy_seccomp_unotify::{payload::SeccompPayload, target::install_target};
 use memmap2::Mmap;
 
 #[cfg(not(target_env = "musl"))]
-use crate::{elf, exec::ensure_env, open_exec::open_executable};
+use crate::{
+    elf,
+    exec::{append_path_env, ensure_env},
+    open_exec::open_executable,
+};
 use crate::{
     exec::Exec,
     payload::{EncodedPayload, PAYLOAD_ENV_NAME},
@@ -40,11 +44,15 @@ pub fn handle_exec(
             nix::Error::try_from(io_error).unwrap_or(nix::Error::UnknownErrno)
         })?;
         if elf::is_dynamically_linked_to_libc(executable_mmap)? {
-            ensure_env(
+            // Append (don't overwrite) so a user-provided LD_PRELOAD keeps
+            // working. fspy's shim goes last so user preloads that
+            // short-circuit a libc call stay invisible to fspy — what the
+            // OS actually executed is what we want to record.
+            append_path_env(
                 &mut command.envs,
                 LD_PRELOAD,
                 encoded_payload.payload.preload_path.as_os_str().as_bytes(),
-            )?;
+            );
             ensure_env(&mut command.envs, PAYLOAD_ENV_NAME, &encoded_payload.encoded_string)?;
             return Ok(None);
         }
