@@ -14,7 +14,7 @@ rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 # use `preserve_order` feature to preserve the order of the fields in `package.json`
 serde_json = { workspace = true, features = ["preserve_order"] }
-serde_yml = { workspace = true }
+serde_norway = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 vec1 = { workspace = true, features = ["smallvec-v1"] }

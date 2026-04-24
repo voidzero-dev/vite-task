@@ -43,10 +43,10 @@ pub enum Error {
     },
 
     #[error("Failed to parse YAML file at {file_path:?}")]
-    SerdeYml {
+    SerdeYaml {
         file_path: Arc<AbsolutePath>,
         #[source]
-        serde_yml_error: serde_yml::Error,
+        serde_yaml_error: serde_norway::Error,
     },
 
     #[error(transparent)]

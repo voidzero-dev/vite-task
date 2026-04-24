@@ -248,10 +248,10 @@ pub fn load_package_graph(
     let mut graph_builder = PackageGraphBuilder::default();
     let workspaces = match &workspace_root.workspace_file {
         WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
-            let workspace: PnpmWorkspace = serde_yml::from_slice(file_with_path.content())
-                .map_err(|e| Error::SerdeYml {
+            let workspace: PnpmWorkspace = serde_norway::from_slice(file_with_path.content())
+                .map_err(|e| Error::SerdeYaml {
                     file_path: Arc::clone(file_with_path.path()),
-                    serde_yml_error: e,
+                    serde_yaml_error: e,
                 })?;
             workspace.packages
         }
