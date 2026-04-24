@@ -46,7 +46,7 @@ pub enum Error {
     SerdeYaml {
         file_path: Arc<AbsolutePath>,
         #[source]
-        serde_yaml_error: serde_yaml_ng::Error,
+        serde_yaml_error: serde_norway::Error,
     },
 
     #[error(transparent)]
