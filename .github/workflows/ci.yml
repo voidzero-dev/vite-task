@@ -32,7 +32,7 @@ jobs:
       code-changed: ${{ steps.filter.outputs.code }}
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
         id: filter
         with:
           filters: |
@@ -50,7 +50,7 @@ jobs:
       - name: Update submodules
         run: git submodule update --init --recursive
 
-      - uses: oxc-project/setup-rust@d286d43bc1f606abbd98096666ff8be68c8d5f57 # v1.0.2
+      - uses: oxc-project/setup-rust@23f38cfb0c04af97a055f76acee94d5be71c7c82 # v1.0.16
         with:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: clippy
@@ -60,7 +60,7 @@ jobs:
       - run: pipx install cargo-zigbuild
       # pipx isolates cargo-zigbuild in its own venv, so its ziglang dependency
       # (which bundles zig) isn't on PATH. Install zig separately.
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
 
       # --locked: verify Cargo.lock is up to date (replaces the removed `cargo check --locked`)
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
@@ -105,7 +105,7 @@ jobs:
             CARGO_HOME,{{ DEV_DRIVE }}/.cargo
             RUSTUP_HOME,{{ DEV_DRIVE }}/.rustup
 
-      - uses: oxc-project/setup-rust@d286d43bc1f606abbd98096666ff8be68c8d5f57 # v1.0.2
+      - uses: oxc-project/setup-rust@23f38cfb0c04af97a055f76acee94d5be71c7c82 # v1.0.16
         with:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: test
@@ -120,7 +120,7 @@ jobs:
 
       # pipx isolates cargo-zigbuild in its own venv, so its ziglang dependency
       # (which bundles zig) isn't on PATH. Install zig separately.
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
 
       - name: Build tests
@@ -136,16 +136,16 @@ jobs:
       # (compiled for x86_64) can be injected into node processes running under Rosetta.
       # oxc-project/setup-node doesn't support the architecture input, so use
       # pnpm/action-setup + actions/setup-node directly.
-      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}
 
-      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: .node-version
           architecture: x64
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}
 
-      - uses: oxc-project/setup-node@fdbf0dfd334c4e6d56ceeb77d91c76339c2a0885 # v1.0.4
+      - uses: oxc-project/setup-node@4c26e7cb3605b6bdef5450dacd02c434b10fd8ba # v1.2.0
         if: ${{ matrix.target != 'x86_64-apple-darwin' }}
 
       # `pnpm install` prepares test bins used in snapshot tests
@@ -218,14 +218,14 @@ jobs:
       - name: Update submodules
         run: git submodule update --init --recursive
 
-      - uses: oxc-project/setup-rust@d286d43bc1f606abbd98096666ff8be68c8d5f57 # v1.0.2
+      - uses: oxc-project/setup-rust@23f38cfb0c04af97a055f76acee94d5be71c7c82 # v1.0.16
         with:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: fmt
           tools: cargo-shear@1.11.1,cargo-autoinherit@0.1.6
           components: clippy rust-docs rustfmt
 
-      - uses: oxc-project/setup-node@fdbf0dfd334c4e6d56ceeb77d91c76339c2a0885 # v1.0.4
+      - uses: oxc-project/setup-node@4c26e7cb3605b6bdef5450dacd02c434b10fd8ba # v1.2.0
       - run: pnpm oxfmt --check
       - run: cargo autoinherit && git diff --exit-code
       - run: cargo shear --deny-warnings
