@@ -382,6 +382,7 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "HOMEDRIVE",
     "HOMEPATH",
     "WINDIR",
+    "PATHEXT",
     "ProgramFiles",
     "ProgramFiles[(]x86[)]", // Parens escaped for glob syntax (Turborepo uses literal `ProgramFiles(x86)`)
     // IDE specific (exact matches)

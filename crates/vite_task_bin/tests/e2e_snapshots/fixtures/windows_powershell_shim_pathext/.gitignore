@@ -1,0 +1,3 @@
+# This fixture intentionally tracks package-shim files under node_modules/.bin.
+!node_modules
+!node_modules/**

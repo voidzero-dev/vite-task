@@ -1,0 +1,4 @@
+[[e2e]]
+name = "powershell_package_shim_keeps_pathext"
+platform = "windows"
+steps = [["vt", "run", "probe"], ["vtt", "print-file", "marker.txt"]]

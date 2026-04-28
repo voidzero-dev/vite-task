@@ -1,0 +1,10 @@
+{
+  "cache": true,
+  "tasks": {
+    "probe": {
+      "command": "probe-cli",
+      "cache": true,
+      "input": []
+    }
+  }
+}
