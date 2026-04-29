@@ -183,7 +183,7 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - uses: oxc-project/setup-node@6d1b0ae8445197eb4ee006b276f8e5b29e4a544d # auto-skip-alpine
+      - uses: oxc-project/setup-node@a866f096daf8febf6999d4227cbc424f1ac7eddc # auto-skip-alpine
 
       - name: Run ignored tests
         run: cargo test -- --ignored
