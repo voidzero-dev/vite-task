@@ -3890,6 +3890,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vite_powershell"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "tracing",
+ "vite_path",
+ "which",
+]
+
+[[package]]
 name = "vite_select"
 version = "0.0.0"
 dependencies = [
@@ -4046,6 +4056,7 @@ dependencies = [
  "vite_glob",
  "vite_graph_ser",
  "vite_path",
+ "vite_powershell",
  "vite_shell",
  "vite_str",
  "vite_task",

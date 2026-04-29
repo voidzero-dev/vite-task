@@ -21,6 +21,10 @@
 //! globally installed tool's shim somewhere on the user's system PATH — is
 //! left alone even if it happens to live under some other `node_modules/.bin`.
 //!
+//! Cross-platform primitives (`POWERSHELL_PREFIX`, `powershell_host`,
+//! `find_ps1_sibling`) live in the `vite_powershell` crate so
+//! `vite_command::ps1_shim` can share them.
+//!
 //! See <https://github.com/voidzero-dev/vite-plus/issues/1176>.
 
 use std::sync::Arc;
@@ -31,13 +35,6 @@ use vite_path::AbsolutePath;
 #[cfg(any(windows, test))]
 use vite_path::AbsolutePathBuf;
 use vite_str::Str;
-
-/// Fixed arguments prepended before the `.ps1` path. `-NoProfile`/`-NoLogo`
-/// skip user profile loading; `-ExecutionPolicy Bypass` allows running the
-/// unsigned shims that npm/pnpm install into `node_modules/.bin`.
-#[cfg(any(windows, test))]
-const POWERSHELL_PREFIX: &[&str] =
-    &["-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File"];
 
 /// Rewrite a `node_modules/.bin/*.cmd` invocation to go through PowerShell.
 /// See the module docstring for the full contract; the short form: returns
@@ -51,7 +48,7 @@ pub fn rewrite_cmd_shim_with_args(
     cwd: &AbsolutePath,
     workspace_root: &AbsolutePath,
 ) -> (Arc<AbsolutePath>, Arc<[Str]>) {
-    if let Some(host) = powershell_host()
+    if let Some(host) = vite_powershell::powershell_host()
         && let Some(rewritten) = rewrite_with_host(&resolved, &args, cwd, workspace_root, host)
     {
         return rewritten;
@@ -70,21 +67,6 @@ pub const fn rewrite_cmd_shim_with_args(
     (resolved, args)
 }
 
-/// Cached location of the PowerShell host used to run `.ps1` shims. Prefers
-/// cross-platform `pwsh.exe` when present, falling back to the Windows
-/// built-in `powershell.exe`. `None` means no host was found in PATH (or we
-/// aren't on Windows).
-#[cfg(windows)]
-fn powershell_host() -> Option<&'static Arc<AbsolutePath>> {
-    use std::sync::LazyLock;
-
-    static POWERSHELL_HOST: LazyLock<Option<Arc<AbsolutePath>>> = LazyLock::new(|| {
-        let resolved = which::which("pwsh.exe").or_else(|_| which::which("powershell.exe")).ok()?;
-        AbsolutePathBuf::new(resolved).map(Arc::<AbsolutePath>::from)
-    });
-    POWERSHELL_HOST.as_ref()
-}
-
 /// Pure rewrite logic, factored out so tests can exercise it on any platform
 /// without depending on a real `powershell.exe` being on PATH.
 #[cfg(any(windows, test))]
@@ -93,9 +75,12 @@ fn rewrite_with_host(
     args: &Arc<[Str]>,
     cwd: &AbsolutePath,
     workspace_root: &AbsolutePath,
-    host: &Arc<AbsolutePath>,
+    host: &AbsolutePathBuf,
 ) -> Option<(Arc<AbsolutePath>, Arc<[Str]>)> {
-    let ps1 = find_ps1_sibling(resolved, workspace_root)?;
+    if !is_in_workspace_node_modules_bin(resolved, workspace_root) {
+        return None;
+    }
+    let ps1 = vite_powershell::find_ps1_sibling(resolved)?;
     let ps1_rel = pathdiff::diff_paths(ps1.as_path(), cwd.as_path())?;
     let ps1_rel_str = ps1_rel.to_str()?.cow_replace('\\', "/");
 
@@ -106,7 +91,7 @@ fn rewrite_with_host(
         ps1_rel_str,
     );
 
-    let new_args: Arc<[Str]> = POWERSHELL_PREFIX
+    let new_args: Arc<[Str]> = vite_powershell::POWERSHELL_PREFIX
         .iter()
         .copied()
         .map(Str::from)
@@ -114,41 +99,30 @@ fn rewrite_with_host(
         .chain(args.iter().cloned())
         .collect();
 
-    Some((Arc::clone(host), new_args))
+    let host_arc = Arc::<AbsolutePath>::from(host.clone());
+    Some((host_arc, new_args))
 }
 
+/// True when `resolved` is a `<workspace>/.../node_modules/.bin/<file>` path
+/// inside the workspace. Used to keep the rewrite hands-off for globally
+/// installed shims (e.g. `%AppData%\npm\node_modules\.bin`).
 #[cfg(any(windows, test))]
-fn find_ps1_sibling(
+fn is_in_workspace_node_modules_bin(
     resolved: &AbsolutePath,
     workspace_root: &AbsolutePath,
-) -> Option<AbsolutePathBuf> {
+) -> bool {
     let path = resolved.as_path();
-    let ext = path.extension().and_then(|e| e.to_str())?;
-    if !ext.eq_ignore_ascii_case("cmd") {
-        return None;
-    }
-
-    // Must live inside the workspace so we don't retarget system-wide /
-    // globally installed shims (e.g. a user's `%AppData%\npm\node_modules\.bin`).
     if !path.starts_with(workspace_root.as_path()) {
-        return None;
+        return false;
     }
-
     let mut parents = path.components().rev();
-    parents.next()?; // shim filename
-    if !parents.next()?.as_os_str().eq_ignore_ascii_case(".bin") {
-        return None;
+    let Some(_) = parents.next() else { return false }; // shim filename
+    let Some(bin) = parents.next() else { return false };
+    if !bin.as_os_str().eq_ignore_ascii_case(".bin") {
+        return false;
     }
-    if !parents.next()?.as_os_str().eq_ignore_ascii_case("node_modules") {
-        return None;
-    }
-
-    let ps1 = path.with_extension("ps1");
-    if !ps1.is_file() {
-        return None;
-    }
-
-    AbsolutePathBuf::new(ps1)
+    let Some(node_modules) = parents.next() else { return false };
+    node_modules.as_os_str().eq_ignore_ascii_case("node_modules")
 }
 
 #[cfg(test)]
@@ -171,6 +145,10 @@ mod tests {
         bin
     }
 
+    fn host_buf(root: &AbsolutePath) -> AbsolutePathBuf {
+        AbsolutePathBuf::new(root.as_path().join("powershell.exe")).unwrap()
+    }
+
     #[test]
     fn rewrites_cmd_to_cwd_relative_ps1_at_workspace_root() {
         let dir = tempdir().unwrap();
@@ -179,7 +157,7 @@ mod tests {
         fs::write(bin.join("vite.CMD"), "").unwrap();
         fs::write(bin.join("vite.ps1"), "").unwrap();
 
-        let host = abs(workspace.as_path().join("powershell.exe"));
+        let host = host_buf(&workspace);
         let resolved = abs(bin.join("vite.CMD"));
         let args: Arc<[Str]> = Arc::from(vec![Str::from("--port"), Str::from("3000")]);
 
@@ -219,7 +197,7 @@ mod tests {
         fs::create_dir_all(&sub_pkg_path).unwrap();
         let sub_pkg = abs(sub_pkg_path);
 
-        let host = abs(workspace.as_path().join("powershell.exe"));
+        let host = host_buf(&workspace);
         let resolved = abs(bin.join("vite.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![]);
 
@@ -240,7 +218,7 @@ mod tests {
         let bin = bin_dir(workspace.as_path());
         fs::write(bin.join("vite.cmd"), "").unwrap();
 
-        let host = abs(workspace.as_path().join("powershell.exe"));
+        let host = host_buf(&workspace);
         let resolved = abs(bin.join("vite.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![Str::from("build")]);
 
@@ -254,7 +232,7 @@ mod tests {
         fs::write(workspace.as_path().join("where.cmd"), "").unwrap();
         fs::write(workspace.as_path().join("where.ps1"), "").unwrap();
 
-        let host = abs(workspace.as_path().join("powershell.exe"));
+        let host = host_buf(&workspace);
         let resolved = abs(workspace.as_path().join("where.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![]);
 
@@ -269,7 +247,7 @@ mod tests {
         fs::write(bin.join("node.exe"), "").unwrap();
         fs::write(bin.join("node.ps1"), "").unwrap();
 
-        let host = abs(workspace.as_path().join("powershell.exe"));
+        let host = host_buf(&workspace);
         let resolved = abs(bin.join("node.exe"));
         let args: Arc<[Str]> = Arc::from(vec![Str::from("--version")]);
 
@@ -294,7 +272,7 @@ mod tests {
         fs::write(global_bin.join("vite.cmd"), "").unwrap();
         fs::write(global_bin.join("vite.ps1"), "").unwrap();
 
-        let host = abs(root.as_path().join("powershell.exe"));
+        let host = host_buf(&workspace);
         let resolved = abs(global_bin.join("vite.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![]);
 

@@ -145,6 +145,7 @@ vec1 = "1.12.1"
 vite_glob = { path = "crates/vite_glob" }
 vite_graph_ser = { path = "crates/vite_graph_ser" }
 vite_path = { path = "crates/vite_path" }
+vite_powershell = { path = "crates/vite_powershell" }
 vite_select = { path = "crates/vite_select" }
 vite_shell = { path = "crates/vite_shell" }
 vite_str = { path = "crates/vite_str" }
