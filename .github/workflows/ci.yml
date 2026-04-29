@@ -201,10 +201,11 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - name: Install pnpm and Node tools
-        run: |
-          corepack enable
-          pnpm install
+      - uses: oxc-project/setup-node@4c26e7cb3605b6bdef5450dacd02c434b10fd8ba # v1.2.0
+
+      # `pnpm install` prepares test bins used in snapshot tests
+      # Must run after setup-node so correct native binaries are installed
+      - run: pnpm install
 
       - name: Run ignored tests
         run: cargo test -- --ignored
