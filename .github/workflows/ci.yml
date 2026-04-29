@@ -132,7 +132,7 @@ jobs:
       - name: Run tests
         run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }}
 
-      - uses: oxc-project/setup-node@4c26e7cb3605b6bdef5450dacd02c434b10fd8ba # v1.2.0
+      - uses: oxc-project/setup-node@ab97f03642370d79a7e96dd286bd02a1be40e0ba # v1.3.0
 
       - name: Run ignored tests
         run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }} -- --ignored
@@ -183,7 +183,7 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - uses: oxc-project/setup-node@a866f096daf8febf6999d4227cbc424f1ac7eddc # auto-skip-alpine
+      - uses: oxc-project/setup-node@ab97f03642370d79a7e96dd286bd02a1be40e0ba # v1.3.0
 
       - name: Run ignored tests
         run: cargo test -- --ignored
@@ -204,7 +204,7 @@ jobs:
           tools: cargo-shear@1.11.1,cargo-autoinherit@0.1.6
           components: clippy rust-docs rustfmt
 
-      - uses: oxc-project/setup-node@4c26e7cb3605b6bdef5450dacd02c434b10fd8ba # v1.2.0
+      - uses: oxc-project/setup-node@ab97f03642370d79a7e96dd286bd02a1be40e0ba # v1.3.0
       - run: pnpm oxfmt --check
       - run: cargo autoinherit && git diff --exit-code
       - run: cargo shear --deny-warnings
