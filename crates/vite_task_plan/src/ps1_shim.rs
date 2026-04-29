@@ -32,8 +32,6 @@ use std::sync::Arc;
 #[cfg(any(windows, test))]
 use cow_utils::CowUtils as _;
 use vite_path::AbsolutePath;
-#[cfg(test)]
-use vite_path::AbsolutePathBuf;
 use vite_str::Str;
 
 /// Rewrite a `node_modules/.bin/*.cmd` invocation to go through PowerShell.
@@ -129,8 +127,9 @@ mod tests {
     use std::fs;
 
     use tempfile::tempdir;
+    use vite_path::AbsolutePathBuf;
 
-    use super::{AbsolutePath, AbsolutePathBuf, Arc, Str, rewrite_with_host};
+    use super::{AbsolutePath, Arc, Str, rewrite_with_host};
 
     #[expect(clippy::disallowed_types, reason = "tempdir bridges std PathBuf into AbsolutePath")]
     fn abs(buf: std::path::PathBuf) -> Arc<AbsolutePath> {
