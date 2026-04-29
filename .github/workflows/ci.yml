@@ -190,9 +190,7 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      # oxc-project/setup-node calls actions/setup-node, which only ships glibc
-      # Node binaries that can't run on Alpine's musl. The container's bundled
-      # Node is musl-native, so just install pnpm directly via npm.
+      # Alpine ships musl Node; actions/setup-node only has glibc binaries.
       - name: Install pnpm
         run: npm install -g pnpm
 
