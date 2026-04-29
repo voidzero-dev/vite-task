@@ -75,7 +75,7 @@ fn rewrite_with_host(
     args: &Arc<[Str]>,
     cwd: &AbsolutePath,
     workspace_root: &AbsolutePath,
-    host: &AbsolutePathBuf,
+    host: &Arc<AbsolutePath>,
 ) -> Option<(Arc<AbsolutePath>, Arc<[Str]>)> {
     if !is_in_workspace_node_modules_bin(resolved, workspace_root) {
         return None;
@@ -99,8 +99,7 @@ fn rewrite_with_host(
         .chain(args.iter().cloned())
         .collect();
 
-    let host_arc = Arc::<AbsolutePath>::from(host.clone());
-    Some((host_arc, new_args))
+    Some((Arc::clone(host), new_args))
 }
 
 /// True when `resolved` is a `<workspace>/.../node_modules/.bin/<file>` path
@@ -116,7 +115,7 @@ fn is_in_workspace_node_modules_bin(
         return false;
     }
     let mut parents = path.components().rev();
-    let Some(_) = parents.next() else { return false }; // shim filename
+    parents.next(); // shim filename
     let Some(bin) = parents.next() else { return false };
     if !bin.as_os_str().eq_ignore_ascii_case(".bin") {
         return false;
@@ -145,8 +144,10 @@ mod tests {
         bin
     }
 
-    fn host_buf(root: &AbsolutePath) -> AbsolutePathBuf {
-        AbsolutePathBuf::new(root.as_path().join("powershell.exe")).unwrap()
+    fn host_arc(root: &AbsolutePath) -> Arc<AbsolutePath> {
+        Arc::<AbsolutePath>::from(
+            AbsolutePathBuf::new(root.as_path().join("powershell.exe")).unwrap(),
+        )
     }
 
     #[test]
@@ -157,7 +158,7 @@ mod tests {
         fs::write(bin.join("vite.CMD"), "").unwrap();
         fs::write(bin.join("vite.ps1"), "").unwrap();
 
-        let host = host_buf(&workspace);
+        let host = host_arc(&workspace);
         let resolved = abs(bin.join("vite.CMD"));
         let args: Arc<[Str]> = Arc::from(vec![Str::from("--port"), Str::from("3000")]);
 
@@ -197,7 +198,7 @@ mod tests {
         fs::create_dir_all(&sub_pkg_path).unwrap();
         let sub_pkg = abs(sub_pkg_path);
 
-        let host = host_buf(&workspace);
+        let host = host_arc(&workspace);
         let resolved = abs(bin.join("vite.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![]);
 
@@ -218,7 +219,7 @@ mod tests {
         let bin = bin_dir(workspace.as_path());
         fs::write(bin.join("vite.cmd"), "").unwrap();
 
-        let host = host_buf(&workspace);
+        let host = host_arc(&workspace);
         let resolved = abs(bin.join("vite.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![Str::from("build")]);
 
@@ -232,7 +233,7 @@ mod tests {
         fs::write(workspace.as_path().join("where.cmd"), "").unwrap();
         fs::write(workspace.as_path().join("where.ps1"), "").unwrap();
 
-        let host = host_buf(&workspace);
+        let host = host_arc(&workspace);
         let resolved = abs(workspace.as_path().join("where.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![]);
 
@@ -247,7 +248,7 @@ mod tests {
         fs::write(bin.join("node.exe"), "").unwrap();
         fs::write(bin.join("node.ps1"), "").unwrap();
 
-        let host = host_buf(&workspace);
+        let host = host_arc(&workspace);
         let resolved = abs(bin.join("node.exe"));
         let args: Arc<[Str]> = Arc::from(vec![Str::from("--version")]);
 
@@ -272,7 +273,7 @@ mod tests {
         fs::write(global_bin.join("vite.cmd"), "").unwrap();
         fs::write(global_bin.join("vite.ps1"), "").unwrap();
 
-        let host = host_buf(&workspace);
+        let host = host_arc(&workspace);
         let resolved = abs(global_bin.join("vite.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![]);
 

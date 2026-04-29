@@ -17,6 +17,8 @@
 //! See <https://github.com/voidzero-dev/vite-plus/issues/1176> and
 //! <https://github.com/voidzero-dev/vite-plus/issues/1489>.
 
+use std::sync::Arc;
+
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 
 /// Fixed arguments prepended before the `.ps1` path. `-NoProfile`/`-NoLogo`
@@ -29,21 +31,25 @@ pub const POWERSHELL_PREFIX: &[&str] =
 /// `pwsh.exe` when present, falling back to the Windows built-in
 /// `powershell.exe`. Returns `None` on non-Windows or when neither host
 /// is on `PATH`.
+///
+/// Cached as `Arc<AbsolutePath>` so callers that want shared ownership
+/// (e.g. `vite_task_plan`'s plan-time rewrite) can do `Arc::clone(host)`
+/// without copying the path.
 #[cfg(windows)]
 #[must_use]
-pub fn powershell_host() -> Option<&'static AbsolutePathBuf> {
+pub fn powershell_host() -> Option<&'static Arc<AbsolutePath>> {
     use std::sync::LazyLock;
 
-    static POWERSHELL_HOST: LazyLock<Option<AbsolutePathBuf>> = LazyLock::new(|| {
+    static POWERSHELL_HOST: LazyLock<Option<Arc<AbsolutePath>>> = LazyLock::new(|| {
         let resolved = which::which("pwsh.exe").or_else(|_| which::which("powershell.exe")).ok()?;
-        AbsolutePathBuf::new(resolved)
+        AbsolutePathBuf::new(resolved).map(Arc::<AbsolutePath>::from)
     });
     POWERSHELL_HOST.as_ref()
 }
 
 #[cfg(not(windows))]
 #[must_use]
-pub const fn powershell_host() -> Option<&'static AbsolutePathBuf> {
+pub const fn powershell_host() -> Option<&'static Arc<AbsolutePath>> {
     None
 }
 
