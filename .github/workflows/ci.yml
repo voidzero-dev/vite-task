@@ -190,11 +190,7 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      # Alpine ships musl Node; actions/setup-node only has glibc binaries.
-      - name: Install pnpm
-        run: npm install -g pnpm
-
-      - run: pnpm install
+      - uses: oxc-project/setup-node@6d1b0ae8445197eb4ee006b276f8e5b29e4a544d # auto-skip-alpine
 
       - name: Run ignored tests
         run: cargo test -- --ignored
