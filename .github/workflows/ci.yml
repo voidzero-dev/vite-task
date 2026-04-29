@@ -32,7 +32,7 @@ jobs:
       code-changed: ${{ steps.filter.outputs.code }}
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
-      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
         with:
           filters: |
@@ -147,7 +147,7 @@ jobs:
     name: Test (musl)
     runs-on: namespace-profile-linux-x64-default
     container:
-      image: node:22-alpine3.21
+      image: node:25-alpine3.21
       options: --shm-size=256m # shm_io tests need bigger shared memory
     env:
       # Override all rustflags to skip the zig cross-linker from .cargo/config.toml.
