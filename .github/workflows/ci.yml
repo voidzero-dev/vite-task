@@ -132,13 +132,6 @@ jobs:
       - name: Run tests
         run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }}
 
-      # For x86_64-apple-darwin on arm64 runner, install x64 node so fspy preload dylib
-      # (compiled for x86_64) can be injected into node processes running under Rosetta.
-      # oxc-project/setup-node doesn't support the architecture input, so use
-      # pnpm/action-setup + actions/setup-node directly.
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
-
       - uses: oxc-project/setup-node@4c26e7cb3605b6bdef5450dacd02c434b10fd8ba # v1.2.0
 
       - name: Run ignored tests
