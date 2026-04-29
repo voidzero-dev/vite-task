@@ -32,7 +32,7 @@ use std::sync::Arc;
 #[cfg(any(windows, test))]
 use cow_utils::CowUtils as _;
 use vite_path::AbsolutePath;
-#[cfg(any(windows, test))]
+#[cfg(test)]
 use vite_path::AbsolutePathBuf;
 use vite_str::Str;
 

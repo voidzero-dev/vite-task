@@ -8,7 +8,6 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-tracing = { workspace = true }
 vite_path = { workspace = true }
 which = { workspace = true }
 
