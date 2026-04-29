@@ -244,15 +244,20 @@ impl<'a> Session<'a> {
 
     /// Primary entry point for CLI usage. Plans and executes the given command.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if planning or execution fails.
+    /// This function prints user-facing errors itself and returns an exit status
+    /// code only. This allows downstream CLIs (like `vp run`) to simply
+    /// `std::process::exit(i32::from(status.0))` without duplicating error
+    /// reporting.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
+    pub async fn main(mut self, command: Command) -> ExitStatus {
         match self.main_inner(command).await {
-            Ok(()) => Ok(ExitStatus::SUCCESS),
-            Err(SessionError::EarlyExit(status)) => Ok(status),
-            Err(SessionError::Anyhow(err)) => Err(err),
+            Ok(()) => ExitStatus::SUCCESS,
+            Err(SessionError::EarlyExit(status)) => status,
+            #[expect(clippy::print_stderr, reason = "top-level error reporting")]
+            Err(SessionError::Anyhow(err)) => {
+                eprintln!("Error: {err:?}");
+                ExitStatus::FAILURE
+            }
         }
     }
 
