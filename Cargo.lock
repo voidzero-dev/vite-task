@@ -3894,7 +3894,6 @@ name = "vite_powershell"
 version = "0.1.0"
 dependencies = [
  "tempfile",
- "tracing",
  "vite_path",
  "which",
 ]
