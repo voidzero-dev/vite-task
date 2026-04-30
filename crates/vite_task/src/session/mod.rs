@@ -554,7 +554,9 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the cache database cannot be loaded or created.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
-        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(&self.cache_path))
+        self.cache.get_or_try_init(|| {
+            ExecutionCache::load_from_path(&self.cache_path, &self.program_name)
+        })
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {

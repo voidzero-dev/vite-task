@@ -176,7 +176,7 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
 
 impl ExecutionCache {
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
+    pub fn load_from_path(path: &AbsolutePath, program_name: &str) -> anyhow::Result<Self> {
         tracing::info!("Creating task cache directory at {:?}", path);
         std::fs::create_dir_all(path)?;
 
@@ -211,7 +211,11 @@ impl ExecutionCache {
                 }
                 11 => break, // current version
                 12.. => {
-                    return Err(anyhow::anyhow!("Unrecognized database version: {user_version}"));
+                    return Err(anyhow::anyhow!(
+                        "Unrecognized database version: {user_version}. \
+                         The cache may have been created by a newer version of Vite Task. \
+                         Run `{program_name} cache clean` to remove it."
+                    ));
                 }
             }
         }
