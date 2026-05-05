@@ -91,7 +91,7 @@ cache?: UserGlobalCacheConfig,
 /**
  * Task definitions
  */
-tasks?: { [key in string]?: Task }, 
+tasks?: { [key in string]: Task }, 
 /**
  * Whether to automatically run `preX`/`postX` package.json scripts as
  * lifecycle hooks when script `X` is executed.

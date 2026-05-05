@@ -295,7 +295,7 @@ impl UserRunConfig {
                 // Only collect declarations from types that are exportable
                 // (i.e., have an output path - built-in types like HashMap don't)
                 if T::output_path().is_some() {
-                    self.decls.push(T::decl());
+                    self.decls.push(T::decl(&ts_rs::Config::default()));
                 }
                 // Recursively visit dependencies of T
                 T::visit_dependencies(self);
@@ -323,7 +323,7 @@ impl UserRunConfig {
 
         // Export the main type
         types.push_str("\n\nexport ");
-        types.push_str(&Self::decl());
+        types.push_str(&Self::decl(&ts_rs::Config::default()));
 
         types
     }

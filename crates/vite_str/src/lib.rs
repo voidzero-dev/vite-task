@@ -187,23 +187,23 @@ mod ts_impl {
         type OptionInnerType = Self;
         type WithoutGenerics = Self;
 
-        fn name() -> String {
+        fn name(_cfg: &ts_rs::Config) -> String {
             "string".to_owned()
         }
 
-        fn inline() -> String {
+        fn inline(_cfg: &ts_rs::Config) -> String {
             "string".to_owned()
         }
 
-        fn inline_flattened() -> String {
+        fn inline_flattened(_cfg: &ts_rs::Config) -> String {
             panic!("Str cannot be flattened")
         }
 
-        fn decl() -> String {
+        fn decl(_cfg: &ts_rs::Config) -> String {
             panic!("Str is a primitive type")
         }
 
-        fn decl_concrete() -> String {
+        fn decl_concrete(_cfg: &ts_rs::Config) -> String {
             panic!("Str is a primitive type")
         }
     }
