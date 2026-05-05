@@ -1321,6 +1321,7 @@ dependencies = [
  "bytemuck",
  "ctor",
  "native_str",
+ "nix 0.30.1",
  "os_str_bytes",
  "rustc-hash",
  "shared_memory",

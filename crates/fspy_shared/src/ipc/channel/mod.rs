@@ -299,4 +299,130 @@ mod tests {
         received_values.sort_unstable();
         assert_eq!(received_values, (0u16..200).collect::<Vec<u16>>());
     }
+
+    /// Regression test for <https://github.com/voidzero-dev/vite-plus/issues/1453>.
+    ///
+    /// The current implementation backs the channel with POSIX shared memory
+    /// (`shm_open`), which stores its file under `/dev/shm`. On hosts where
+    /// `/dev/shm` is size-capped (e.g. Docker's 64 MiB default) a workload
+    /// whose path-access stream exceeds that cap triggers `SIGBUS` in the
+    /// sender when tmpfs can't allocate the next page. `cache: false` works
+    /// around it by skipping fspy entirely.
+    ///
+    /// This test reproduces the crash without `sudo` and without needing the
+    /// test environment itself to have a small `/dev/shm`: it enters an
+    /// unprivileged user+mount namespace in a subprocess and remounts
+    /// `/dev/shm` as a 1 MiB tmpfs, then writes past the cap via the real
+    /// `channel()` API. The test asserts the subprocess completes cleanly;
+    /// today it dies from `SIGBUS`. Switching the backing store to
+    /// `memfd_create` (which is sized against RAM + overcommit, not
+    /// `/dev/shm`) will let this test pass unchanged — the subprocess's
+    /// `/dev/shm` constraint becomes irrelevant.
+    #[test]
+    #[cfg(target_os = "linux")]
+    #[cfg_attr(miri, ignore = "miri can't mmap or unshare")]
+    fn channel_survives_constrained_dev_shm() {
+        use std::os::unix::process::ExitStatusExt;
+
+        // Capacity chosen to comfortably exceed the 1 MiB tmpfs cap. The
+        // `ftruncate` inside `shared_memory` is lazy on tmpfs, so this
+        // allocation itself succeeds; the crash happens when the sender
+        // later writes into pages that tmpfs can no longer back.
+        const CAPACITY: usize = 16 * 1024 * 1024;
+
+        let cmd = command_for_fn!((), |(): ()| {
+            enter_userns_with_small_dev_shm();
+
+            let (conf, _receiver) = super::channel(CAPACITY).expect("channel creation");
+            let sender = conf.sender().expect("sender creation");
+
+            // Claim a single 4 MiB frame and fill it byte-by-byte. The
+            // first ~1 MiB of writes fit within the tmpfs quota; the next
+            // byte faults on an un-backed page -> SIGBUS.
+            let frame_size = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
+            let mut frame = sender.claim_frame(frame_size).expect("claim_frame");
+            frame.fill(0xAB);
+        });
+
+        let status = std::process::Command::from(cmd).status().unwrap();
+
+        assert!(
+            status.success(),
+            "channel writes should survive a constrained /dev/shm, but the \
+             subprocess exited abnormally: code={:?} signal={:?}. \
+             SIGBUS ({sigbus}) indicates the issue #1453 reproduction: tmpfs \
+             page allocation failed on a write to the shm-backed mapping.",
+            status.code(),
+            status.signal(),
+            sigbus = nix::sys::signal::Signal::SIGBUS as i32,
+        );
+    }
+
+    /// Procfs files must be opened without `O_CREAT` — synthetic inodes
+    /// reject the create bit on some hosts with `EACCES`. `std::fs::write`
+    /// uses `File::create` (which sets `O_CREAT`), so we can't use it here.
+    #[cfg(target_os = "linux")]
+    fn write_procfs(path: &str, content: &str) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().write(true).open(path)?;
+        f.write_all(content.as_bytes())
+    }
+
+    /// Enter a fresh user + mount namespace in which the current uid is
+    /// mapped to 0, then remount `/dev/shm` as a 1 MiB tmpfs. Must be called
+    /// before any threads are spawned in the current process. Panics on any
+    /// failure — unprivileged user namespace support is a hard requirement
+    /// for this reproduction.
+    #[cfg(target_os = "linux")]
+    fn enter_userns_with_small_dev_shm() {
+        use nix::mount::{MsFlags, mount};
+        use nix::sched::{CloneFlags, unshare};
+        use nix::unistd::{Gid, Uid};
+
+        let uid = Uid::current().as_raw();
+        let gid = Gid::current().as_raw();
+
+        unshare(CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNS)
+            .expect("unshare(CLONE_NEWUSER|CLONE_NEWNS)");
+
+        // Inside the new user namespace the current process starts as
+        // "nobody" until the id maps are written.
+        write_procfs("/proc/self/uid_map", &std::format!("0 {uid} 1\n"))
+            .expect("write /proc/self/uid_map");
+        // setgroups must be denied before an unprivileged gid_map write
+        // will be accepted (user_namespaces(7)). An absent
+        // /proc/self/setgroups means setgroups(2) is already permanently
+        // denied in an ancestor user namespace, so the gid_map
+        // precondition is already satisfied — not an environment skip.
+        match write_procfs("/proc/self/setgroups", "deny") {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => panic!("write /proc/self/setgroups: {err}"),
+        }
+        write_procfs("/proc/self/gid_map", &std::format!("0 {gid} 1\n"))
+            .expect("write /proc/self/gid_map");
+
+        // Make the root mount private recursively so tmpfs mounts inside
+        // this namespace don't propagate back to the host.
+        mount(
+            None::<&str>,
+            "/",
+            None::<&str>,
+            MsFlags::MS_REC | MsFlags::MS_PRIVATE,
+            None::<&str>,
+        )
+        .expect("mount --make-rprivate /");
+
+        // Remount /dev/shm as a 1 MiB tmpfs. The size= option is honored by
+        // tmpfs and enforced at page-fault time: accesses to pages the
+        // tmpfs can't back raise SIGBUS.
+        mount(
+            Some("tmpfs"),
+            "/dev/shm",
+            Some("tmpfs"),
+            MsFlags::empty(),
+            Some("size=1m"),
+        )
+        .expect("mount tmpfs size=1m at /dev/shm");
+    }
 }
