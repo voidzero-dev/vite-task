@@ -1,15 +1,37 @@
 {
   "tasks": {
-    "build": {
-      "command": "vtt write-file dist/output.txt built",
-      "input": ["src/**"],
+    "auto-output": {
+      "command": "vtt write-file dist/out.txt built",
+      "cache": true
+    },
+    "glob-output": {
+      "command": "vtt write-file dist/out.txt built && vtt write-file tmp/temp.txt temp",
       "output": ["dist/**"],
       "cache": true
     },
-    "build-with-negative": {
-      "command": "vtt write-file dist/keep.txt keep && vtt write-file dist/skip.txt skip",
+    "auto-output-no-auto-input": {
+      "command": "vtt write-file dist/out.txt built",
       "input": ["src/**"],
-      "output": ["dist/**", "!dist/skip.txt"],
+      "cache": true
+    },
+    "negative-output": {
+      "command": "vtt write-file dist/out.txt built && vtt write-file dist/cache/tmp.txt temp",
+      "output": [{ "auto": true }, "!dist/cache/**"],
+      "cache": true
+    },
+    "output-config-change": {
+      "command": "vtt write-file dist/out.txt built",
+      "output": ["REPLACE_ME"],
+      "cache": true
+    },
+    "input-neg-dist-auto-output": {
+      "command": "vtt write-file dist/out.txt built",
+      "input": [{ "auto": true }, "!dist/**"],
+      "cache": true
+    },
+    "explicit-input-auto-output": {
+      "command": "vtt print-file README.md",
+      "input": ["src/**"],
       "cache": true
     }
   }

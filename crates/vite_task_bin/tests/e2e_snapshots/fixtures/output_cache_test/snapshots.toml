@@ -1,38 +1,226 @@
 [[e2e]]
-name = "output_globs___files_restored_on_cache_hit"
+name = "auto_output___files_restored_on_cache_hit"
 comment = """
-With explicit output globs (`dist/**`), the first run writes a file to
-`dist/`. After deleting `dist/`, a second run with no input changes is a
-cache hit and the archived output file is restored.
+Auto output detection (default): output files written by the task are
+restored on a cache hit.
 """
 steps = [
-  # First run - cache miss, writes dist/output.txt
-  ["vt", "run", "build"],
-  # Verify file was written
-  ["vtt", "print-file", "dist/output.txt"],
-  # Delete dist/ to prove restoration is real
-  ["vtt", "rm", "-rf", "dist"],
-  # Second run - cache hit, restores dist/output.txt from archive
-  ["vt", "run", "build"],
-  # File should be restored
-  ["vtt", "print-file", "dist/output.txt"],
+  { argv = [
+    "vt",
+    "run",
+    "auto-output",
+  ], comment = "first run writes dist/out.txt" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "output exists after the build" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/out.txt",
+  ], comment = "delete only the file (keep dir to avoid an fspy inferred-input miss on Windows)" },
+  { argv = [
+    "vt",
+    "run",
+    "auto-output",
+  ], comment = "cache hit, should restore dist/out.txt" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "output was restored from the archive" },
 ]
 
 [[e2e]]
-name = "output_globs___negative_excludes_files_from_archive"
+name = "glob_output___only_matched_files_restored"
 comment = """
-A file matched by a negative output glob is not archived, so it is not
-restored on cache hit.
+Glob output: only files matching the configured output globs are restored
+on a cache hit; files produced outside those globs are left alone.
 """
 steps = [
-  # First run - writes both dist/keep.txt and dist/skip.txt
-  ["vt", "run", "build-with-negative"],
-  # Both files exist after the run
-  ["vtt", "print-file", "dist/keep.txt"],
-  ["vtt", "print-file", "dist/skip.txt"],
-  # Delete dist/ to prove restoration is real
-  ["vtt", "rm", "-rf", "dist"],
-  # Second run - cache hit, only dist/keep.txt is restored
-  ["vt", "run", "build-with-negative"],
-  ["vtt", "print-file", "dist/keep.txt"],
+  { argv = [
+    "vt",
+    "run",
+    "glob-output",
+  ], comment = "first run writes dist/out.txt and tmp/temp.txt" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/out.txt",
+  ], comment = "delete the glob-matched output" },
+  { argv = [
+    "vtt",
+    "rm",
+    "tmp/temp.txt",
+  ], comment = "delete the non-matched output" },
+  { argv = [
+    "vt",
+    "run",
+    "glob-output",
+  ], comment = "cache hit: should restore dist/out.txt but not tmp/temp.txt" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "dist/out.txt was restored" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "tmp/temp.txt",
+  ], comment = "should fail - tmp not in output globs" },
+]
+
+[[e2e]]
+name = "auto_output_with_non_auto_input"
+comment = """
+Auto output works even when input tracking is explicit
+(`input: [\"src/**\"]`). Output auto-detection and input auto-detection
+are independent.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-no-auto-input",
+  ], comment = "first run: input src/** (no auto), output default (auto)" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/out.txt",
+  ], comment = "delete the output" },
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-no-auto-input",
+  ], comment = "cache hit - output files should still be restored" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "output was restored" },
+]
+
+[[e2e]]
+name = "negative_output___excluded_files_not_restored"
+comment = """
+Negative output globs exclude matching files from the cache archive, so
+they are not restored on a cache hit even though the task produced them.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "negative-output",
+  ], comment = "first run writes dist/out.txt and dist/cache/tmp.txt" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/out.txt",
+  ], comment = "delete the archived output" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/cache/tmp.txt",
+  ], comment = "delete the excluded output" },
+  { argv = [
+    "vt",
+    "run",
+    "negative-output",
+  ], comment = "cache hit: should restore dist/out.txt but NOT dist/cache/tmp.txt" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "dist/out.txt was restored" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/cache/tmp.txt",
+  ], comment = "should fail - excluded by !dist/cache/**" },
+]
+
+[[e2e]]
+name = "output_config_change_invalidates_cache"
+comment = """
+Changing a task's output configuration invalidates the cache entry —
+the next run is a miss, not a hit of the stale archive.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "output-config-change",
+  ], comment = "first run populates the cache" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "REPLACE_ME",
+    "dist/**",
+  ], comment = "change the output globs in the task config" },
+  { argv = [
+    "vt",
+    "run",
+    "output-config-change",
+  ], comment = "cache miss: output config changed" },
+]
+
+[[e2e]]
+name = "input_negative_does_not_drop_output_writes"
+comment = """
+Input negative globs must not drop matching writes from the output
+archive. Here the user excludes `dist/**` from inferred inputs (so
+rewriting dist/ won't mark inputs as modified), but default auto output
+should still capture dist writes and restore them on a cache hit.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "input-neg-dist-auto-output",
+  ], comment = "first run writes dist/out.txt" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/out.txt",
+  ], comment = "delete the output" },
+  { argv = [
+    "vt",
+    "run",
+    "input-neg-dist-auto-output",
+  ], comment = "cache hit should restore dist/out.txt" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "output was restored despite dist/** being a negative input glob" },
+]
+
+[[e2e]]
+name = "explicit_input_ignores_fspy_reads"
+comment = """
+When input auto is disabled (explicit globs only), unrelated reads
+tracked by fspy must NOT become inferred inputs. Default auto output
+still needs fspy for write tracking, but reads outside `input: [\"src/**\"]`
+should be ignored.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "explicit-input-auto-output",
+  ], comment = "first run reads README.md (not in input globs) and captures the output" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "README.md",
+    "v1",
+    "v2",
+  ], comment = "modify README.md — not an input, so it must not invalidate the cache" },
+  { argv = [
+    "vt",
+    "run",
+    "explicit-input-auto-output",
+  ], comment = "cache hit: README.md not in input globs" },
 ]

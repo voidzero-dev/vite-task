@@ -92,7 +92,7 @@ The cache entry key uniquely identifies a command execution context:
 ```rust
 pub struct CacheEntryKey {
     pub spawn_fingerprint: SpawnFingerprint,
-    pub input_config: ResolvedInputConfig,
+    pub input_config: ResolvedGlobConfig,
 }
 ```
 
@@ -303,7 +303,7 @@ Cache entries are serialized using `bincode` for efficient storage.
 │  ──────────────────────                                      │
 │    CacheEntryKey {                                           │
 │        spawn_fingerprint: SpawnFingerprint { ... },          │
-│        input_config: ResolvedInputConfig { ... },            │
+│        input_config: ResolvedGlobConfig { ... },            │
 │    }                                                         │
 │    ExecutionCacheKey::UserTask {                              │
 │        task_name: "build",                                   │

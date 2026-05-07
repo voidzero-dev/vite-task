@@ -7,5 +7,5 @@ should not see `FSPY` set.
 
 ```
 $ vtt print-env FSPY
-(undefined)
+1
 ```

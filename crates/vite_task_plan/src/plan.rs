@@ -495,7 +495,7 @@ fn resolve_synthetic_cache_config(
                     }
 
                     if let Some(output) = output {
-                        let synthetic_output = ResolvedGlobConfig::from_user_output_config(
+                        let synthetic_output = ResolvedGlobConfig::from_user_config(
                             Some(&output),
                             package_dir,
                             workspace_path,
@@ -903,11 +903,7 @@ mod tests {
                 positive_globs: positive_globs.iter().map(|s| Str::from(*s)).collect(),
                 negative_globs: BTreeSet::new(),
             },
-            output_config: ResolvedGlobConfig {
-                includes_auto: false,
-                positive_globs: BTreeSet::new(),
-                negative_globs: BTreeSet::new(),
-            },
+            output_config: ResolvedGlobConfig::default_auto(),
         }
     }
 
