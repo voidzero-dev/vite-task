@@ -26,6 +26,11 @@
               "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": false,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -60,6 +65,11 @@
               "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": false,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }
@@ -92,6 +102,11 @@
             },
             "input_config": {
               "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": false,
               "positive_globs": [],
               "negative_globs": []
             }

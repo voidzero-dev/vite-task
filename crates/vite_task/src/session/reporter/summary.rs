@@ -259,7 +259,9 @@ impl SavedCacheMissReason {
                 FingerprintMismatch::SpawnFingerprint { old, new } => {
                     Self::SpawnFingerprintChanged(detect_spawn_fingerprint_changes(old, new))
                 }
-                FingerprintMismatch::InputConfig => Self::ConfigChanged,
+                FingerprintMismatch::InputConfig | FingerprintMismatch::OutputConfig => {
+                    Self::ConfigChanged
+                }
                 FingerprintMismatch::InputChanged { kind, path } => {
                     Self::InputChanged { kind: *kind, path: Str::from(path.as_str()) }
                 }

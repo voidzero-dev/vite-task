@@ -30,6 +30,11 @@
               "negative_globs": [
                 "dist/**"
               ]
+            },
+            "output_config": {
+              "includes_auto": false,
+              "positive_globs": [],
+              "negative_globs": []
             }
           }
         }

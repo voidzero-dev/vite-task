@@ -1,5 +1,6 @@
 # Changelog
 
+- **Added** `output` field for cached tasks: archives output files matching the configured globs after a successful run and restores them on cache hit. Patterns are relative to the package directory; supports negative patterns (e.g. `"!dist/cache/**"`) and `{pattern, base}` form for explicit base. ([#321](https://github.com/voidzero-dev/vite-task/pull/321))
 - **Fixed** Windows cached tasks can now run package shims rewritten through PowerShell; default env passthrough now preserves `PATHEXT` ([#366](https://github.com/voidzero-dev/vite-task/pull/366))
 - **Added** Platform support for targets without `input` auto-inference (e.g. Android). Tasks still run; those relying on auto-inference run uncached, with the summary noting that `input` must be configured manually to enable caching ([#352](https://github.com/voidzero-dev/vite-task/pull/352))
 - **Fixed** `vp run` no longer aborts with `failed to prepare the command for injection: Invalid argument` when the user environment already has `LD_PRELOAD` (Linux) or `DYLD_INSERT_LIBRARIES` (macOS) set. The tracer shim is now appended to any existing value and placed last, so user preloads keep their symbol-interposition precedence ([#340](https://github.com/voidzero-dev/vite-task/issues/340))

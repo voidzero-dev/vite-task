@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use vite_path::RelativePathBuf;
 use vite_str::{self, Str};
-use vite_task_graph::config::ResolvedInputConfig;
+use vite_task_graph::config::ResolvedGlobConfig;
 use wincode::{SchemaRead, SchemaWrite};
 
 use crate::envs::EnvFingerprints;
@@ -45,7 +45,11 @@ pub struct CacheMetadata {
 
     /// Resolved input configuration for cache fingerprinting.
     /// Used at execution time to determine what files to track.
-    pub input_config: ResolvedInputConfig,
+    pub input_config: ResolvedGlobConfig,
+
+    /// Resolved output configuration for cache restoration.
+    /// Used at execution time to determine what output files to archive.
+    pub output_config: ResolvedGlobConfig,
 }
 
 /// Fingerprint for spawn execution that affects caching.

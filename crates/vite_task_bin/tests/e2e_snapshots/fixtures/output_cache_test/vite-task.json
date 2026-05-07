@@ -1,0 +1,16 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt write-file dist/output.txt built",
+      "input": ["src/**"],
+      "output": ["dist/**"],
+      "cache": true
+    },
+    "build-with-negative": {
+      "command": "vtt write-file dist/keep.txt keep && vtt write-file dist/skip.txt skip",
+      "input": ["src/**"],
+      "output": ["dist/**", "!dist/skip.txt"],
+      "cache": true
+    }
+  }
+}

@@ -109,6 +109,58 @@ pub fn compute_globbed_inputs(
     Ok(result)
 }
 
+/// Collect file paths matching positive globs, filtered by negative globs.
+///
+/// Like [`compute_globbed_inputs`] but only collects paths (no hashing).
+/// Used for determining which output files to archive.
+pub fn collect_glob_paths(
+    workspace_root: &AbsolutePath,
+    positive_globs: &std::collections::BTreeSet<Str>,
+    negative_globs: &std::collections::BTreeSet<Str>,
+) -> anyhow::Result<Vec<RelativePathBuf>> {
+    if positive_globs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let negatives: Vec<Glob<'static>> = negative_globs
+        .iter()
+        .map(|p| Ok(Glob::new(p.as_str())?.into_owned()))
+        .collect::<anyhow::Result<_>>()?;
+    let negation = wax::any(negatives)?;
+
+    let mut result = Vec::new();
+
+    for pattern in positive_globs {
+        let glob = Glob::new(pattern.as_str())?.into_owned();
+        let walk = glob.walk(workspace_root.as_path());
+        for entry in walk.not(negation.clone())? {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    let io_err: io::Error = err.into();
+                    if io_err.kind() == io::ErrorKind::NotFound {
+                        continue;
+                    }
+                    return Err(io_err.into());
+                }
+            };
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let Some(stripped) = path.strip_prefix(workspace_root.as_path()).ok() else {
+                continue;
+            };
+            let relative = RelativePathBuf::new(stripped)?;
+            result.push(relative);
+        }
+    }
+
+    result.sort();
+    result.dedup();
+    Ok(result)
+}
+
 #[expect(clippy::disallowed_types, reason = "receives std::path::Path from wax glob walker")]
 fn hash_file_content(path: &std::path::Path) -> io::Result<u64> {
     super::hash::hash_content(io::BufReader::new(File::open(path)?))

@@ -65,6 +65,22 @@ pub enum UserInputEntry {
 /// Default (when field omitted): `[{auto: true}]` - infer from file accesses.
 pub type UserInputsConfig = Vec<UserInputEntry>;
 
+/// A single output entry in the `output` array.
+///
+/// Outputs can be:
+/// - Glob patterns as strings (resolved relative to the package directory)
+/// - Object form with explicit base: `{ "pattern": "...", "base": "workspace" | "package" }`
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(untagged)]
+pub enum UserOutputEntry {
+    /// Glob pattern (positive or negative starting with `!`), resolved relative to package dir
+    Glob(Str),
+    /// Glob pattern with explicit base directory
+    GlobWithBase(GlobWithBase),
+}
+
 /// Cache-related fields of a task defined by user in `vite.config.*`
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
@@ -125,6 +141,16 @@ pub struct EnabledCacheConfig {
     #[serde(default)]
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
     pub input: Option<UserInputsConfig>,
+
+    /// Output files to archive after a successful run and restore on cache hit.
+    ///
+    /// - Omitted or `[]` (empty): no output archiving (default)
+    /// - Glob patterns (e.g. `"dist/**"`) select specific output files, relative to the package directory
+    /// - `{pattern: "...", base: "workspace" | "package"}` specifies a glob with an explicit base directory
+    /// - Negative patterns (e.g. `"!dist/cache/**"`) exclude matched files
+    #[serde(default)]
+    #[cfg_attr(all(test, not(clippy)), ts(inline))]
+    pub output: Option<Vec<UserOutputEntry>>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -160,6 +186,7 @@ impl Default for UserTaskOptions {
                     env: None,
                     untracked_env: None,
                     input: None,
+                    output: None,
                 },
             },
         }
@@ -428,6 +455,7 @@ mod tests {
                     env: Some(std::iter::once("NODE_ENV".into()).collect()),
                     untracked_env: Some(std::iter::once("FOO".into()).collect()),
                     input: None,
+                    output: None,
                 }
             },
         );

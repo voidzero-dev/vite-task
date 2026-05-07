@@ -98,6 +98,7 @@ impl vite_task::CommandHandler for CommandHandler {
                         env: None,
                         untracked_env: None,
                         input: None,
+                        output: None,
                     }),
                     envs: Arc::clone(&command.envs),
                 }))

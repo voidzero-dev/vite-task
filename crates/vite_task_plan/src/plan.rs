@@ -20,7 +20,7 @@ use vite_str::Str;
 use vite_task_graph::{
     TaskNodeIndex, TaskSource,
     config::{
-        CacheConfig, EnabledCacheConfig, ResolvedGlobalCacheConfig, ResolvedInputConfig,
+        CacheConfig, EnabledCacheConfig, ResolvedGlobConfig, ResolvedGlobalCacheConfig,
         ResolvedTaskOptions,
         user::{UserCacheConfig, UserTaskOptions},
     },
@@ -466,7 +466,8 @@ fn resolve_synthetic_cache_config(
             Ok(match synthetic_cache_config {
                 UserCacheConfig::Disabled { .. } => Option::None,
                 UserCacheConfig::Enabled { enabled_cache_config, .. } => {
-                    let EnabledCacheConfig { env, untracked_env, input } = enabled_cache_config;
+                    let EnabledCacheConfig { env, untracked_env, input, output } =
+                        enabled_cache_config;
                     parent_config.env_config.fingerprinted_envs.extend(env.unwrap_or_default());
                     parent_config
                         .env_config
@@ -474,7 +475,7 @@ fn resolve_synthetic_cache_config(
                         .extend(untracked_env.unwrap_or_default());
 
                     if let Some(input) = input {
-                        let synthetic_input = ResolvedInputConfig::from_user_config(
+                        let synthetic_input = ResolvedGlobConfig::from_user_config(
                             Some(&input),
                             package_dir,
                             workspace_path,
@@ -491,6 +492,23 @@ fn resolve_synthetic_cache_config(
                             .input_config
                             .negative_globs
                             .extend(synthetic_input.negative_globs);
+                    }
+
+                    if let Some(output) = output {
+                        let synthetic_output = ResolvedGlobConfig::from_user_output_config(
+                            Some(&output),
+                            package_dir,
+                            workspace_path,
+                        )
+                        .map_err(Error::ResolveTaskConfig)?;
+                        parent_config
+                            .output_config
+                            .positive_globs
+                            .extend(synthetic_output.positive_globs);
+                        parent_config
+                            .output_config
+                            .negative_globs
+                            .extend(synthetic_output.negative_globs);
                     }
 
                     Some(parent_config)
@@ -628,6 +646,7 @@ fn plan_spawn_execution(
                 spawn_fingerprint,
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
+                output_config: cache_config.output_config.clone(),
             });
         }
     }
@@ -853,7 +872,7 @@ mod tests {
     use vite_path::AbsolutePathBuf;
     use vite_str::Str;
     use vite_task_graph::config::{
-        CacheConfig, EnabledCacheConfig, EnvConfig, ResolvedInputConfig,
+        CacheConfig, EnabledCacheConfig, EnvConfig, ResolvedGlobConfig,
         user::{UserCacheConfig, UserInputEntry},
     };
 
@@ -879,9 +898,14 @@ mod tests {
                 fingerprinted_envs: FxHashSet::default(),
                 untracked_env: FxHashSet::default(),
             },
-            input_config: ResolvedInputConfig {
+            input_config: ResolvedGlobConfig {
                 includes_auto,
                 positive_globs: positive_globs.iter().map(|s| Str::from(*s)).collect(),
+                negative_globs: BTreeSet::new(),
+            },
+            output_config: ResolvedGlobConfig {
+                includes_auto: false,
+                positive_globs: BTreeSet::new(),
                 negative_globs: BTreeSet::new(),
             },
         }
@@ -901,6 +925,7 @@ mod tests {
                 env: None,
                 untracked_env: None,
                 input: None,
+                output: None,
             }),
             &pkg,
             &ws,
@@ -922,6 +947,7 @@ mod tests {
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
+                output: None,
             }),
             &pkg,
             &ws,
@@ -943,6 +969,7 @@ mod tests {
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
+                output: None,
             }),
             &pkg,
             &ws,
@@ -970,6 +997,7 @@ mod tests {
                     UserInputEntry::Glob("config/**".into()),
                     UserInputEntry::Auto(vite_task_graph::config::user::AutoInput { auto: true }),
                 ]),
+                output: None,
             }),
             &pkg,
             &ws,
@@ -995,6 +1023,7 @@ mod tests {
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
+                output: None,
             }),
             &pkg,
             &ws,
@@ -1018,6 +1047,7 @@ mod tests {
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
+                output: None,
             }),
             &pkg,
             &ws,
@@ -1050,6 +1080,7 @@ mod tests {
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("!dist/**".into())]),
+                output: None,
             }),
             &pkg,
             &ws,

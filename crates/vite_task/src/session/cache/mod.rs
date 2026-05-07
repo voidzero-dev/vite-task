@@ -1,5 +1,6 @@
 //! Execution cache for storing and retrieving cached command results.
 
+pub mod archive;
 pub mod display;
 
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
@@ -14,7 +15,8 @@ use rusqlite::{Connection, OptionalExtension as _, config::DbConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use vite_path::{AbsolutePath, RelativePathBuf};
-use vite_task_graph::config::ResolvedInputConfig;
+use vite_str::Str;
+use vite_task_graph::config::ResolvedGlobConfig;
 use vite_task_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
 use wincode::{
     SchemaRead, SchemaReadOwned, SchemaWrite,
@@ -43,7 +45,10 @@ pub struct CacheEntryKey {
     pub spawn_fingerprint: SpawnFingerprint,
     /// Resolved input configuration that affects cache behavior.
     /// Glob patterns are workspace-root-relative.
-    pub input_config: ResolvedInputConfig,
+    pub input_config: ResolvedGlobConfig,
+    /// Resolved output configuration that affects cache restoration.
+    /// Glob patterns are workspace-root-relative.
+    pub output_config: ResolvedGlobConfig,
 }
 
 impl CacheEntryKey {
@@ -51,6 +56,7 @@ impl CacheEntryKey {
         Self {
             spawn_fingerprint: cache_metadata.spawn_fingerprint.clone(),
             input_config: cache_metadata.input_config.clone(),
+            output_config: cache_metadata.output_config.clone(),
         }
     }
 }
@@ -103,6 +109,9 @@ pub struct CacheEntryValue {
     /// Path is relative to workspace root, value is `xxHash3_64` of file content.
     /// Stored in the value (not the key) so changes can be detected and reported.
     pub globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    /// Filename of the output archive (e.g. `{uuid}.tar.zst`) stored alongside
+    /// `cache.db` in the cache directory. `None` if no output files were produced.
+    pub output_archive: Option<Str>,
 }
 
 #[derive(Debug)]
@@ -142,6 +151,8 @@ pub enum FingerprintMismatch {
     },
     /// Found a previous cache entry key for the same task, but `input_config` differs.
     InputConfig,
+    /// Found a previous cache entry key for the same task, but `output_config` differs.
+    OutputConfig,
 
     InputChanged {
         kind: InputChangeKind,
@@ -157,6 +168,9 @@ impl Display for FingerprintMismatch {
             }
             Self::InputConfig => {
                 write!(f, "input configuration changed")
+            }
+            Self::OutputConfig => {
+                write!(f, "output configuration changed")
             }
             Self::InputChanged { kind, path } => {
                 write!(f, "{}", display::format_input_change_str(*kind, path.as_str()))
@@ -201,16 +215,16 @@ impl ExecutionCache {
                         "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    conn.execute("PRAGMA user_version = 11", ())?;
+                    conn.execute("PRAGMA user_version = 12", ())?;
                 }
-                1..=10 => {
+                1..=11 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                11 => break, // current version
-                12.. => {
+                12 => break, // current version
+                13.. => {
                     return Err(anyhow::anyhow!(
                         "Unrecognized database version: {user_version}. \
                          The cache may have been created by a newer version of Vite Task. \
@@ -270,11 +284,20 @@ impl ExecutionCache {
             self.get_cache_key_by_execution_key(execution_cache_key).await?
         {
             // Destructure to ensure we handle all fields when new ones are added
-            let CacheEntryKey { spawn_fingerprint: old_spawn_fingerprint, input_config: _ } =
-                old_cache_key;
+            let CacheEntryKey {
+                spawn_fingerprint: old_spawn_fingerprint,
+                input_config: old_input_config,
+                output_config: old_output_config,
+            } = old_cache_key;
             let mismatch = if old_spawn_fingerprint == *spawn_fingerprint {
-                // spawn fingerprint is the same but input_config or glob_base changed
-                FingerprintMismatch::InputConfig
+                // spawn fingerprint is the same but input_config or output_config changed
+                if old_input_config != cache_metadata.input_config {
+                    FingerprintMismatch::InputConfig
+                } else if old_output_config != cache_metadata.output_config {
+                    FingerprintMismatch::OutputConfig
+                } else {
+                    FingerprintMismatch::InputConfig
+                }
             } else {
                 FingerprintMismatch::SpawnFingerprint {
                     old: old_spawn_fingerprint,
@@ -288,15 +311,32 @@ impl ExecutionCache {
     }
 
     /// Update cache after successful execution.
+    ///
+    /// If a previous entry exists for the same cache key with a different
+    /// `output_archive`, the stale archive file in `cache_dir` is removed
+    /// (best-effort) so it doesn't accumulate on disk.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn update(
         &self,
         cache_metadata: &CacheMetadata,
         cache_value: CacheEntryValue,
+        cache_dir: &AbsolutePath,
     ) -> anyhow::Result<()> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
+
+        // If a previous entry exists with a stale output archive, delete the
+        // old file so the cache directory doesn't accumulate orphaned archives.
+        if let Some(old_value) = self.get_by_cache_key(&cache_key).await?
+            && let Some(old_archive) = old_value.output_archive
+            && cache_value.output_archive.as_ref() != Some(&old_archive)
+        {
+            let old_archive_path = cache_dir.join(old_archive.as_str());
+            // Best-effort cleanup: a missing file (e.g. after a crash or manual
+            // cache clear) is fine, so we ignore the error.
+            let _ = std::fs::remove_file(old_archive_path.as_path());
+        }
 
         self.upsert_cache_entry(&cache_key, &cache_value).await?;
         self.upsert_task_fingerprint(execution_cache_key, &cache_key).await?;

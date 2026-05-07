@@ -1,0 +1,38 @@
+[[e2e]]
+name = "output_globs___files_restored_on_cache_hit"
+comment = """
+With explicit output globs (`dist/**`), the first run writes a file to
+`dist/`. After deleting `dist/`, a second run with no input changes is a
+cache hit and the archived output file is restored.
+"""
+steps = [
+  # First run - cache miss, writes dist/output.txt
+  ["vt", "run", "build"],
+  # Verify file was written
+  ["vtt", "print-file", "dist/output.txt"],
+  # Delete dist/ to prove restoration is real
+  ["vtt", "rm", "-rf", "dist"],
+  # Second run - cache hit, restores dist/output.txt from archive
+  ["vt", "run", "build"],
+  # File should be restored
+  ["vtt", "print-file", "dist/output.txt"],
+]
+
+[[e2e]]
+name = "output_globs___negative_excludes_files_from_archive"
+comment = """
+A file matched by a negative output glob is not archived, so it is not
+restored on cache hit.
+"""
+steps = [
+  # First run - writes both dist/keep.txt and dist/skip.txt
+  ["vt", "run", "build-with-negative"],
+  # Both files exist after the run
+  ["vtt", "print-file", "dist/keep.txt"],
+  ["vtt", "print-file", "dist/skip.txt"],
+  # Delete dist/ to prove restoration is real
+  ["vtt", "rm", "-rf", "dist"],
+  # Second run - cache hit, only dist/keep.txt is restored
+  ["vt", "run", "build-with-negative"],
+  ["vtt", "print-file", "dist/keep.txt"],
+]
