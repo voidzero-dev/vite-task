@@ -283,26 +283,25 @@ impl ExecutionCache {
         if let Some(old_cache_key) =
             self.get_cache_key_by_execution_key(execution_cache_key).await?
         {
-            // Destructure to ensure we handle all fields when new ones are added
+            // Destructure to ensure we handle all fields when new ones are added.
+            // `get_by_cache_key` above returned None for the *current* cache key,
+            // so at least one field on `old_cache_key` must differ from the
+            // current metadata — checked in priority order (spawn → input → output).
             let CacheEntryKey {
                 spawn_fingerprint: old_spawn_fingerprint,
                 input_config: old_input_config,
                 output_config: old_output_config,
             } = old_cache_key;
-            let mismatch = if old_spawn_fingerprint == *spawn_fingerprint {
-                // spawn fingerprint is the same but input_config or output_config changed
-                if old_input_config != cache_metadata.input_config {
-                    FingerprintMismatch::InputConfig
-                } else if old_output_config != cache_metadata.output_config {
-                    FingerprintMismatch::OutputConfig
-                } else {
-                    FingerprintMismatch::InputConfig
-                }
-            } else {
+            let mismatch = if old_spawn_fingerprint != *spawn_fingerprint {
                 FingerprintMismatch::SpawnFingerprint {
                     old: old_spawn_fingerprint,
                     new: spawn_fingerprint.clone(),
                 }
+            } else if old_input_config != cache_metadata.input_config {
+                FingerprintMismatch::InputConfig
+            } else {
+                debug_assert!(old_output_config != cache_metadata.output_config);
+                FingerprintMismatch::OutputConfig
             };
             return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
         }
