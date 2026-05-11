@@ -11,6 +11,7 @@ mod check_tty;
 mod cp;
 mod exit;
 mod exit_on_ctrlc;
+mod list_dir;
 mod mkdir;
 mod pipe_stdin;
 mod print;
@@ -28,7 +29,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, mkdir, pipe-stdin, print, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, list-dir, mkdir, pipe-stdin, print, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -42,6 +43,7 @@ fn main() {
         "cp" => cp::run(&args[2..]),
         "exit" => exit::run(&args[2..]),
         "exit-on-ctrlc" => exit_on_ctrlc::run(),
+        "list-dir" => list_dir::run(&args[2..]),
         "mkdir" => mkdir::run(&args[2..]),
         "pipe-stdin" => pipe_stdin::run(&args[2..]),
         "print" => {

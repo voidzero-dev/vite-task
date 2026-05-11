@@ -19,6 +19,27 @@ steps = [
 ]
 
 [[e2e]]
+name = "output_globs___old_archive_removed_on_rewrite"
+comment = """
+When a cached task re-runs (cache miss because an input changed), it
+writes a new archive and the previous archive file is cleaned up. After
+two runs of the same task the cache directory still contains only one
+\\\".tar.zst\\\" file.
+"""
+steps = [
+  # First run - cache miss, produces archive A
+  ["vt", "run", "build"],
+  # Exactly one archive on disk
+  ["vtt", "list-dir", "node_modules/.vite/task-cache", "--ext", ".tar.zst"],
+  # Modify the input so the next run is a cache miss
+  ["vtt", "write-file", "src/main.ts", "changed"],
+  # Second run - cache miss, produces archive B; archive A is deleted
+  ["vt", "run", "build"],
+  # Still only one archive on disk (A removed, B written)
+  ["vtt", "list-dir", "node_modules/.vite/task-cache", "--ext", ".tar.zst"],
+]
+
+[[e2e]]
 name = "output_globs___negative_excludes_files_from_archive"
 comment = """
 A file matched by a negative output glob is not archived, so it is not

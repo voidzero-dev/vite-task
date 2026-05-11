@@ -64,6 +64,11 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
 
     redact_string(&mut output, &redactions);
 
+    // Redact UUIDs (e.g. cache archive filenames `<uuid>.tar.zst`) to "<uuid>"
+    let uuid_regex =
+        regex::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap();
+    output = uuid_regex.replace_all(&output, "<uuid>").into_owned();
+
     // Redact durations like "0ns", "123ms" or "1.23s" to "<duration>"
     let duration_regex = regex::Regex::new(r"\d+(\.\d+)?(ns|ms|s)").unwrap();
     output = duration_regex.replace_all(&output, "<duration>").into_owned();
