@@ -6,11 +6,15 @@ cache hit and the archived output file is restored.
 
 ## `vt run build`
 
+first run — cache miss, writes dist/output.txt
+
 ```
 $ vtt write-file dist/output.txt built
 ```
 
 ## `vtt print-file dist/output.txt`
+
+file is on disk after the run
 
 ```
 built
@@ -18,10 +22,14 @@ built
 
 ## `vtt rm -rf dist`
 
+delete dist/ to prove the restore is real
+
 ```
 ```
 
 ## `vt run build`
+
+second run — cache hit, restores from archive
 
 ```
 $ vtt write-file dist/output.txt built ◉ cache hit, replaying
@@ -31,6 +39,8 @@ vt run: cache hit.
 ```
 
 ## `vtt print-file dist/output.txt`
+
+file restored from archive
 
 ```
 built

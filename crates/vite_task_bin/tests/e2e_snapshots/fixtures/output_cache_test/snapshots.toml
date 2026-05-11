@@ -6,16 +6,32 @@ With explicit output globs (`dist/**`), the first run writes a file to
 cache hit and the archived output file is restored.
 """
 steps = [
-  # First run - cache miss, writes dist/output.txt
-  ["vt", "run", "build"],
-  # Verify file was written
-  ["vtt", "print-file", "dist/output.txt"],
-  # Delete dist/ to prove restoration is real
-  ["vtt", "rm", "-rf", "dist"],
-  # Second run - cache hit, restores dist/output.txt from archive
-  ["vt", "run", "build"],
-  # File should be restored
-  ["vtt", "print-file", "dist/output.txt"],
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "first run — cache miss, writes dist/output.txt" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/output.txt",
+  ], comment = "file is on disk after the run" },
+  { argv = [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ], comment = "delete dist/ to prove the restore is real" },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "second run — cache hit, restores from archive" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/output.txt",
+  ], comment = "file restored from archive" },
 ]
 
 [[e2e]]
@@ -23,20 +39,40 @@ name = "output_globs___old_archive_removed_on_rewrite"
 comment = """
 When a cached task re-runs (cache miss because an input changed), it
 writes a new archive and the previous archive file is cleaned up. After
-two runs of the same task the cache directory still contains only one
-\\\".tar.zst\\\" file.
+two cache-missing runs of the same task the cache directory still
+contains only one `.tar.zst` archive.
 """
 steps = [
-  # First run - cache miss, produces archive A
-  ["vt", "run", "build"],
-  # Exactly one archive on disk
-  ["vtt", "list-dir", "node_modules/.vite/task-cache", "--ext", ".tar.zst"],
-  # Modify the input so the next run is a cache miss
-  ["vtt", "write-file", "src/main.ts", "changed"],
-  # Second run - cache miss, produces archive B; archive A is deleted
-  ["vt", "run", "build"],
-  # Still only one archive on disk (A removed, B written)
-  ["vtt", "list-dir", "node_modules/.vite/task-cache", "--ext", ".tar.zst"],
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "first run — cache miss, writes archive A" },
+  { argv = [
+    "vtt",
+    "list-dir",
+    "node_modules/.vite/task-cache",
+    "--ext",
+    ".tar.zst",
+  ], comment = "exactly one archive on disk" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "src/main.ts",
+    "changed",
+  ], comment = "modify an input so the next run is a cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "second run — cache miss, writes archive B and removes A" },
+  { argv = [
+    "vtt",
+    "list-dir",
+    "node_modules/.vite/task-cache",
+    "--ext",
+    ".tar.zst",
+  ], comment = "still exactly one archive — A was cleaned up" },
 ]
 
 [[e2e]]
@@ -46,14 +82,40 @@ A file matched by a negative output glob is not archived, so it is not
 restored on cache hit.
 """
 steps = [
-  # First run - writes both dist/keep.txt and dist/skip.txt
-  ["vt", "run", "build-with-negative"],
-  # Both files exist after the run
-  ["vtt", "print-file", "dist/keep.txt"],
-  ["vtt", "print-file", "dist/skip.txt"],
-  # Delete dist/ to prove restoration is real
-  ["vtt", "rm", "-rf", "dist"],
-  # Second run - cache hit, only dist/keep.txt is restored
-  ["vt", "run", "build-with-negative"],
-  ["vtt", "print-file", "dist/keep.txt"],
+  { argv = [
+    "vt",
+    "run",
+    "build-with-negative",
+  ], comment = "first run — writes dist/keep.txt and dist/skip.txt" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/keep.txt",
+  ], comment = "keep.txt was written" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/skip.txt",
+  ], comment = "skip.txt was written" },
+  { argv = [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ], comment = "delete dist/ to prove the restore is real" },
+  { argv = [
+    "vt",
+    "run",
+    "build-with-negative",
+  ], comment = "second run — cache hit, restores from archive" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/keep.txt",
+  ], comment = "keep.txt restored from archive" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/skip.txt",
+  ], comment = "skip.txt is NOT restored — it was excluded by the negative glob" },
 ]
