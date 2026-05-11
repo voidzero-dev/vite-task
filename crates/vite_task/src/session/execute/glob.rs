@@ -2,36 +2,30 @@
 //! archiving.
 //!
 //! Both rely on the same walker — positive globs collect candidate files,
-//! negative globs filter them out, all workspace-root-relative. The input
-//! path adds per-file content hashing on top; the output path only needs
-//! the paths.
+//! negative globs filter them out. The input path adds per-file content
+//! hashing on top; the output path only needs the paths.
 
-use std::{collections::BTreeMap, fs::File, io};
+use std::{collections::BTreeMap, fs::File, io, ops::ControlFlow};
 
-#[cfg(test)]
-use vite_path::AbsolutePathBuf;
-use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use wax::{
     Glob,
     walk::{Entry as _, FileIterator as _},
 };
 
-/// Walk positive globs, filtering with negative globs, and call `for_each_file`
-/// with the workspace-relative path of each file entry. The absolute path is
-/// also passed for callers that need to read file contents (e.g. hashing).
+/// Walk positive globs (rooted at `root`), filtering with negative globs, and
+/// call `for_each_file` with the absolute path of each file entry. Stripping
+/// the root prefix (if needed) is the caller's responsibility.
 ///
-/// Walk errors for non-existent directories are skipped gracefully.
-/// Returning an error from `for_each_file` aborts the walk.
-#[expect(
-    clippy::disallowed_types,
-    reason = "wax::walk::Entry::path returns std::path::Path; callers convert as needed"
-)]
+/// Walk errors for non-existent directories are skipped gracefully. Returning
+/// `Err` from `for_each_file` aborts the walk with that error; returning
+/// `Ok(ControlFlow::Break(()))` stops the walk cleanly.
 fn walk_glob_files(
-    workspace_root: &AbsolutePath,
+    root: &AbsolutePath,
     positive_globs: &std::collections::BTreeSet<Str>,
     negative_globs: &std::collections::BTreeSet<Str>,
-    mut for_each_file: impl FnMut(&std::path::Path, RelativePathBuf) -> anyhow::Result<()>,
+    mut for_each_file: impl FnMut(AbsolutePathBuf) -> anyhow::Result<ControlFlow<()>>,
 ) -> anyhow::Result<()> {
     if positive_globs.is_empty() {
         return Ok(());
@@ -45,7 +39,7 @@ fn walk_glob_files(
 
     for pattern in positive_globs {
         let glob = Glob::new(pattern.as_str())?.into_owned();
-        let walk = glob.walk(workspace_root.as_path());
+        let walk = glob.walk(root.as_path());
         for entry in walk.not(negation.clone())? {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -61,12 +55,12 @@ fn walk_glob_files(
             if !entry.file_type().is_file() {
                 continue;
             }
-            let path = entry.path();
-            let Some(stripped) = path.strip_prefix(workspace_root.as_path()).ok() else {
-                continue; // Skip if path is outside workspace_root
+            let Some(absolute) = AbsolutePathBuf::new(entry.path().to_path_buf()) else {
+                continue; // wax can hand back non-absolute paths in some cases
             };
-            let relative = RelativePathBuf::new(stripped)?;
-            for_each_file(path, relative)?;
+            if for_each_file(absolute)?.is_break() {
+                return Ok(());
+            }
         }
     }
     Ok(())
@@ -74,28 +68,23 @@ fn walk_glob_files(
 
 /// Compute globbed inputs by walking positive glob patterns and filtering with negative patterns.
 ///
-/// All globs are workspace-root-relative (resolved at task graph stage).
-/// Positive globs are walked from `workspace_root`, and negative globs filter the results.
-///
-/// # Arguments
-/// * `workspace_root` - The workspace root (globs are relative to this)
-/// * `positive_globs` - Workspace-root-relative glob patterns for files to include
-/// * `negative_globs` - Workspace-root-relative glob patterns for files to exclude
-///
-/// # Returns
-/// A sorted map of relative paths (from `workspace_root`) to their content hashes.
-/// Only files are included (directories are skipped).
+/// Globs are rooted at `root` (typically the workspace root, resolved at task
+/// graph stage). Returns a sorted map of paths relative to `root` to their
+/// content hashes. Only files are included (directories are skipped).
 pub fn compute_globbed_inputs(
-    workspace_root: &AbsolutePath,
+    root: &AbsolutePath,
     positive_globs: &std::collections::BTreeSet<Str>,
     negative_globs: &std::collections::BTreeSet<Str>,
 ) -> anyhow::Result<BTreeMap<RelativePathBuf, u64>> {
     let mut result = BTreeMap::new();
-    walk_glob_files(workspace_root, positive_globs, negative_globs, |path, relative| {
-        let std::collections::btree_map::Entry::Vacant(vacant) = result.entry(relative) else {
-            return Ok(()); // Already hashed by a previous glob pattern
+    walk_glob_files(root, positive_globs, negative_globs, |absolute| {
+        let Some(relative) = strip_root(root, &absolute)? else {
+            return Ok(ControlFlow::Continue(())); // outside root
         };
-        match hash_file_content(path) {
+        let std::collections::btree_map::Entry::Vacant(vacant) = result.entry(relative) else {
+            return Ok(ControlFlow::Continue(())); // already hashed via earlier pattern
+        };
+        match hash_file_content(&absolute) {
             Ok(hash) => {
                 vacant.insert(hash);
             }
@@ -104,7 +93,7 @@ pub fn compute_globbed_inputs(
             }
             Err(err) => return Err(err.into()),
         }
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     })?;
     Ok(result)
 }
@@ -114,23 +103,34 @@ pub fn compute_globbed_inputs(
 /// Like [`compute_globbed_inputs`] but only collects paths (no hashing).
 /// Used for determining which output files to archive.
 pub fn collect_glob_paths(
-    workspace_root: &AbsolutePath,
+    root: &AbsolutePath,
     positive_globs: &std::collections::BTreeSet<Str>,
     negative_globs: &std::collections::BTreeSet<Str>,
 ) -> anyhow::Result<Vec<RelativePathBuf>> {
     let mut result = Vec::new();
-    walk_glob_files(workspace_root, positive_globs, negative_globs, |_, relative| {
-        result.push(relative);
-        Ok(())
+    walk_glob_files(root, positive_globs, negative_globs, |absolute| {
+        if let Some(relative) = strip_root(root, &absolute)? {
+            result.push(relative);
+        }
+        Ok(ControlFlow::Continue(()))
     })?;
     result.sort();
     result.dedup();
     Ok(result)
 }
 
-#[expect(clippy::disallowed_types, reason = "receives std::path::Path from wax glob walker")]
-fn hash_file_content(path: &std::path::Path) -> io::Result<u64> {
-    super::hash::hash_content(io::BufReader::new(File::open(path)?))
+/// Strip `root` from `absolute`, returning `None` when the path is outside it.
+/// Wraps [`AbsolutePath::strip_prefix`] so callers can use `?` without
+/// borrowing `absolute` past the call.
+fn strip_root(
+    root: &AbsolutePath,
+    absolute: &AbsolutePath,
+) -> anyhow::Result<Option<RelativePathBuf>> {
+    absolute.strip_prefix(root).map_err(|err| anyhow::anyhow!("{err}"))
+}
+
+fn hash_file_content(path: &AbsolutePath) -> io::Result<u64> {
+    super::hash::hash_content(io::BufReader::new(File::open(path.as_path())?))
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 pub mod fingerprint;
-pub mod glob_inputs;
+pub mod glob;
 mod hash;
 pub mod pipe;
 pub mod spawn;
@@ -26,7 +26,7 @@ use vite_task_plan::{
 use self::tracked_accesses::TrackedPathAccesses;
 use self::{
     fingerprint::{PathRead, PostRunFingerprint},
-    glob_inputs::compute_globbed_inputs,
+    glob::compute_globbed_inputs,
     pipe::{PipeSinks, StdOutput, pipe_stdio},
     spawn::{SpawnStdio, spawn},
 };
@@ -721,7 +721,7 @@ fn collect_and_archive_outputs(
         return Ok(None);
     }
 
-    let output_files = glob_inputs::collect_glob_paths(
+    let output_files = glob::collect_glob_paths(
         workspace_root,
         &output_config.positive_globs,
         &output_config.negative_globs,
