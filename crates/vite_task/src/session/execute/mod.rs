@@ -78,6 +78,9 @@ struct ExecutionContext<'a> {
     cache_base_path: &'a Arc<AbsolutePath>,
     /// Directory where cache files (db, archives) are stored.
     cache_dir: &'a AbsolutePath,
+    /// Public-facing program name (e.g. `vp`), used in user-facing error
+    /// messages that suggest a CLI command (e.g. `cache clean`).
+    program_name: &'a str,
     /// Token cancelled when a task fails. Kills in-flight child processes
     /// (via `start_kill` in spawn.rs), prevents scheduling new tasks, and
     /// prevents caching results of concurrently-running tasks.
@@ -240,6 +243,7 @@ impl ExecutionContext<'_> {
                     self.cache,
                     self.cache_base_path,
                     self.cache_dir,
+                    self.program_name,
                     self.fast_fail_token.clone(),
                     self.interrupt_token.clone(),
                 )
@@ -327,12 +331,17 @@ struct TrackingOutcome {
     clippy::too_many_lines,
     reason = "sequential cache check, execute, and update steps are clearer in one function"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "these are the unavoidable inputs for a free-function cache-aware spawn"
+)]
 pub async fn execute_spawn(
     mut leaf_reporter: Box<dyn LeafExecutionReporter>,
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
     cache_base_path: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
+    program_name: &str,
     fast_fail_token: CancellationToken,
     interrupt_token: CancellationToken,
 ) -> SpawnOutcome {
@@ -405,10 +414,19 @@ pub async fn execute_spawn(
             let _ = writer.write_all(&output.content);
             let _ = writer.flush();
         }
-        // Restore output files from the cached archive
+        // Restore output files from the cached archive. Failure here means the
+        // archive file is missing, truncated, or otherwise unreadable — the
+        // task can't proceed because the cache promised the outputs would be
+        // restored. Surface a recovery instruction rather than just the raw
+        // I/O error so users know to clear the cache.
         if let Some(ref archive_name) = cached.output_archive {
             let archive_path = cache_dir.join(archive_name.as_str());
             if let Err(err) = archive::extract_output_archive(cache_base_path, &archive_path) {
+                let err = err.context(vite_str::format!(
+                    "failed to restore cached outputs from {}; the archive may have been deleted \
+                     or corrupted. Run `{program_name} cache clean` to clear the cache.",
+                    archive_path.as_path().display()
+                ));
                 leaf_reporter.finish(
                     None,
                     CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
@@ -756,6 +774,7 @@ impl Session<'_> {
             cache,
             cache_base_path: &self.workspace_path,
             cache_dir: &self.cache_path,
+            program_name: self.program_name.as_str(),
             fast_fail_token: CancellationToken::new(),
             interrupt_token,
         };

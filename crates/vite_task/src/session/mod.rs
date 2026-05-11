@@ -678,6 +678,7 @@ impl<'a> Session<'a> {
             cache,
             &self.workspace_path,
             &self.cache_path,
+            self.program_name.as_str(),
             tokio_util::sync::CancellationToken::new(),
             tokio_util::sync::CancellationToken::new(),
         )
