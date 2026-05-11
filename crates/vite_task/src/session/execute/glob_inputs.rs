@@ -1,9 +1,10 @@
-//! Glob-based input file discovery and fingerprinting.
+//! Glob-based file discovery used by cache input fingerprinting and output
+//! archiving.
 //!
-//! This module provides functions to walk glob patterns and compute file hashes
-//! for cache invalidation based on explicit input patterns.
-//!
-//! All glob patterns are workspace-root-relative (resolved at task graph stage).
+//! Both rely on the same walker — positive globs collect candidate files,
+//! negative globs filter them out, all workspace-root-relative. The input
+//! path adds per-file content hashing on top; the output path only needs
+//! the paths.
 
 use std::{collections::BTreeMap, fs::File, io};
 
@@ -16,55 +17,56 @@ use wax::{
     walk::{Entry as _, FileIterator as _},
 };
 
-/// Collect walk entries into the result map.
+/// Walk positive globs, filtering with negative globs, and call `for_each_file`
+/// with the workspace-relative path of each file entry. The absolute path is
+/// also passed for callers that need to read file contents (e.g. hashing).
 ///
 /// Walk errors for non-existent directories are skipped gracefully.
-fn collect_walk_entries(
-    walk: impl Iterator<Item = Result<wax::walk::GlobEntry, wax::walk::WalkError>>,
+/// Returning an error from `for_each_file` aborts the walk.
+#[expect(
+    clippy::disallowed_types,
+    reason = "wax::walk::Entry::path returns std::path::Path; callers convert as needed"
+)]
+fn walk_glob_files(
     workspace_root: &AbsolutePath,
-    result: &mut BTreeMap<RelativePathBuf, u64>,
+    positive_globs: &std::collections::BTreeSet<Str>,
+    negative_globs: &std::collections::BTreeSet<Str>,
+    mut for_each_file: impl FnMut(&std::path::Path, RelativePathBuf) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
-    for entry in walk {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(err) => {
-                // WalkError -> io::Error preserves the error kind
-                let io_err: io::Error = err.into();
-                if io_err.kind() == io::ErrorKind::NotFound {
-                    continue;
+    if positive_globs.is_empty() {
+        return Ok(());
+    }
+
+    let negatives: Vec<Glob<'static>> = negative_globs
+        .iter()
+        .map(|p| Ok(Glob::new(p.as_str())?.into_owned()))
+        .collect::<anyhow::Result<_>>()?;
+    let negation = wax::any(negatives)?;
+
+    for pattern in positive_globs {
+        let glob = Glob::new(pattern.as_str())?.into_owned();
+        let walk = glob.walk(workspace_root.as_path());
+        for entry in walk.not(negation.clone())? {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    // WalkError -> io::Error preserves the error kind
+                    let io_err: io::Error = err.into();
+                    if io_err.kind() == io::ErrorKind::NotFound {
+                        continue;
+                    }
+                    return Err(io_err.into());
                 }
-                return Err(io_err.into());
+            };
+            if !entry.file_type().is_file() {
+                continue;
             }
-        };
-        if !entry.file_type().is_file() {
-            continue;
-        }
-
-        let path = entry.path();
-
-        // Compute path relative to workspace_root for the result
-        let Some(stripped) = path.strip_prefix(workspace_root.as_path()).ok() else {
-            continue; // Skip if path is outside workspace_root
-        };
-        let relative_to_workspace = RelativePathBuf::new(stripped)?;
-
-        let std::collections::btree_map::Entry::Vacant(vacant) =
-            result.entry(relative_to_workspace)
-        else {
-            continue; // Already hashed by a previous glob pattern
-        };
-
-        // Hash file content
-        match hash_file_content(path) {
-            Ok(hash) => {
-                vacant.insert(hash);
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                // File was deleted between walk and hash, skip it
-            }
-            Err(err) => {
-                return Err(err.into());
-            }
+            let path = entry.path();
+            let Some(stripped) = path.strip_prefix(workspace_root.as_path()).ok() else {
+                continue; // Skip if path is outside workspace_root
+            };
+            let relative = RelativePathBuf::new(stripped)?;
+            for_each_file(path, relative)?;
         }
     }
     Ok(())
@@ -88,24 +90,22 @@ pub fn compute_globbed_inputs(
     positive_globs: &std::collections::BTreeSet<Str>,
     negative_globs: &std::collections::BTreeSet<Str>,
 ) -> anyhow::Result<BTreeMap<RelativePathBuf, u64>> {
-    if positive_globs.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let negatives: Vec<Glob<'static>> = negative_globs
-        .iter()
-        .map(|p| Ok(Glob::new(p.as_str())?.into_owned()))
-        .collect::<anyhow::Result<_>>()?;
-    let negation = wax::any(negatives)?;
-
     let mut result = BTreeMap::new();
-
-    for pattern in positive_globs {
-        let glob = Glob::new(pattern.as_str())?.into_owned();
-        let walk = glob.walk(workspace_root.as_path());
-        collect_walk_entries(walk.not(negation.clone())?, workspace_root, &mut result)?;
-    }
-
+    walk_glob_files(workspace_root, positive_globs, negative_globs, |path, relative| {
+        let std::collections::btree_map::Entry::Vacant(vacant) = result.entry(relative) else {
+            return Ok(()); // Already hashed by a previous glob pattern
+        };
+        match hash_file_content(path) {
+            Ok(hash) => {
+                vacant.insert(hash);
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                // File was deleted between walk and hash, skip it
+            }
+            Err(err) => return Err(err.into()),
+        }
+        Ok(())
+    })?;
     Ok(result)
 }
 
@@ -118,44 +118,11 @@ pub fn collect_glob_paths(
     positive_globs: &std::collections::BTreeSet<Str>,
     negative_globs: &std::collections::BTreeSet<Str>,
 ) -> anyhow::Result<Vec<RelativePathBuf>> {
-    if positive_globs.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let negatives: Vec<Glob<'static>> = negative_globs
-        .iter()
-        .map(|p| Ok(Glob::new(p.as_str())?.into_owned()))
-        .collect::<anyhow::Result<_>>()?;
-    let negation = wax::any(negatives)?;
-
     let mut result = Vec::new();
-
-    for pattern in positive_globs {
-        let glob = Glob::new(pattern.as_str())?.into_owned();
-        let walk = glob.walk(workspace_root.as_path());
-        for entry in walk.not(negation.clone())? {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(err) => {
-                    let io_err: io::Error = err.into();
-                    if io_err.kind() == io::ErrorKind::NotFound {
-                        continue;
-                    }
-                    return Err(io_err.into());
-                }
-            };
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let path = entry.path();
-            let Some(stripped) = path.strip_prefix(workspace_root.as_path()).ok() else {
-                continue;
-            };
-            let relative = RelativePathBuf::new(stripped)?;
-            result.push(relative);
-        }
-    }
-
+    walk_glob_files(workspace_root, positive_globs, negative_globs, |_, relative| {
+        result.push(relative);
+        Ok(())
+    })?;
     result.sort();
     result.dedup();
     Ok(result)
