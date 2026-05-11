@@ -1,6 +1,6 @@
 //! Output archive creation and extraction using tar + zstd compression.
 
-use std::fs::File;
+use std::{fs::File, io};
 
 use vite_path::{AbsolutePath, RelativePathBuf};
 
@@ -23,11 +23,13 @@ pub fn create_output_archive(
 
     for rel_path in output_files {
         let abs_path = workspace_root.join(rel_path);
-        // Skip files that no longer exist (task may delete temp files)
-        if !abs_path.as_path().exists() {
-            continue;
-        }
-        let metadata = std::fs::metadata(abs_path.as_path())?;
+        // Skip files that no longer exist (task may delete temp files between
+        // glob walk and archiving). Any other error is propagated.
+        let metadata = match std::fs::metadata(abs_path.as_path()) {
+            Ok(m) => m,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err.into()),
+        };
         if metadata.is_file() {
             let mut file = File::open(abs_path.as_path())?;
             let mut header = tar::Header::new_gnu();
