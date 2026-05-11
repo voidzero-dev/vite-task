@@ -201,6 +201,10 @@ impl ResolvedGlobConfig {
     /// Unlike [`Self::from_user_config`], `None` and `Some([])` both produce an empty config
     /// with `includes_auto = false` (no output archiving).
     ///
+    /// TODO: remove this method once auto output inference lands; at that point
+    /// `output` becomes a `UserInputsConfig` and routes through
+    /// [`Self::from_user_config`] like inputs.
+    ///
     /// # Errors
     ///
     /// Returns [`ResolveTaskConfigError`] if a glob pattern is invalid or resolves
