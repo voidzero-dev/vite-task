@@ -33,10 +33,12 @@ render them.
 Plain-text snapshot steps use the default `vt100::Screen::contents()`
 renderer, which flattens any rendered ANSI styling into plain characters
 (so colors don't pollute snapshots). The two `formatted-snapshot = true`
-steps switch to `contents_formatted()`, which re-emits the screen with
-inline SGR escapes (rendered as `\\\\e[…m` for review readability). Those
-two steps prove that the cached bytes contained colour all along — even
-when the corresponding initial run had displayed them in plain text.
+steps switch to `contents_formatted()`, then route every non-newline byte
+through `std::ascii::escape_default` so escape sequences appear as
+`\\xNN`. Newlines are kept literal so the snapshot stays multi-line.
+Those two steps prove that the cached bytes contained colour all along
+— even when the corresponding initial run had displayed them in plain
+text.
 """
 
 [[e2e.steps]]

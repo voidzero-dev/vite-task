@@ -267,29 +267,17 @@ fn resolve_env_placeholder(raw: &str) -> std::borrow::Cow<'_, OsStr> {
 }
 
 /// Render a vt100 `contents_formatted` byte stream into a snapshot-friendly
-/// string. Escape (`\x1b`), carriage return (`\r`), bell (`\x07`) and
-/// other ASCII control bytes are made visible as `\\e`, `\\r`, etc., so the
-/// markdown snapshot remains UTF-8 text and review diffs stay readable.
+/// string by feeding every byte through [`std::ascii::escape_default`].
+/// Newlines are kept literal so the snapshot stays readable in markdown;
+/// other bytes outside printable ASCII (escape sequences, control characters,
+/// multi-byte UTF-8) come out as `\xNN`, `\t`, etc.
 #[expect(clippy::disallowed_types, reason = "String required for snapshot rendering")]
 fn render_formatted_screen(bytes: &[u8]) -> String {
-    // vt100 emits valid UTF-8 except for the escape sequences themselves; treat
-    // those (and other low control bytes) as opaque markers and pass through
-    // the rest as UTF-8.
-    let text = std::string::String::from_utf8_lossy(bytes);
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '\x1b' => out.push_str("\\e"),
-            '\n' => out.push('\n'),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\x07' => out.push_str("\\a"),
-            '\x08' => out.push_str("\\b"),
-            c if (c as u32) < 0x20 || c == '\x7f' => {
-                use std::fmt::Write as _;
-                let _ = write!(&mut out, "\\x{:02x}", c as u32);
-            }
-            c => out.push(c),
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        match b {
+            b'\n' => out.push('\n'),
+            _ => out.extend(std::ascii::escape_default(b).map(char::from)),
         }
     }
     out
