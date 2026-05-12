@@ -72,7 +72,7 @@
                       "echo hello | node -e \"process.stdin.pipe(process.stdout)\""
                     ],
                     "all_envs": {
-                      "NO_COLOR": "1",
+                      "FORCE_COLOR": "1",
                       "PATH": "<workspace>/node_modules/.bin:<tools>"
                     },
                     "cwd": "<workspace>/"

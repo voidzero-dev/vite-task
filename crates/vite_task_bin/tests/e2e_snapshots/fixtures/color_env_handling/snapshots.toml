@@ -1,0 +1,62 @@
+[[e2e]]
+name = "force_color_env_is_always_one_in_cached_child"
+comment = """
+The parent shell sets `FORCE_COLOR=0`, but a cached task's child always sees
+`FORCE_COLOR=1`. Color-related env vars are not passed through by default for
+cached tasks — the runner injects `FORCE_COLOR=1` so cached output is always
+colored, and the reporter strips colors at display time when the terminal
+does not support them. (For uncached tasks the parent's environment flows
+through untouched.)
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "print-force-color",
+  ], envs = [
+    [
+      "FORCE_COLOR",
+      "0",
+    ],
+  ], comment = "parent FORCE_COLOR=0, cached child should still see FORCE_COLOR=1" },
+]
+
+[[e2e]]
+name = "cached_output_keeps_colors_across_force_color_values"
+comment = """
+A task that emits ANSI escape sequences is run twice. Each cache entry
+carries the raw coloured bytes — the runner spawns cached tasks with
+`FORCE_COLOR=1` regardless of the parent's value — and the reporter
+strips colours at the writer level only when the user's terminal cannot
+render them.
+
+Plain-text snapshot steps use the default `vt100::Screen::contents()`
+renderer, which flattens any rendered ANSI styling into plain characters
+(so colors don't pollute snapshots). The two `formatted-snapshot = true`
+steps switch to `contents_formatted()`, which re-emits the screen with
+inline SGR escapes (rendered as `\\\\e[…m` for review readability). Those
+two steps prove that the cached bytes contained colour all along — even
+when the corresponding initial run had displayed them in plain text.
+"""
+
+[[e2e.steps]]
+argv = ["vt", "run", "print-colored-a"]
+envs = [["FORCE_COLOR", "1"]]
+comment = "task A — cache miss; parent FORCE_COLOR=1; formatted snapshot proves the child emitted ANSI codes"
+formatted-snapshot = true
+
+[[e2e.steps]]
+argv = ["vt", "run", "print-colored-a"]
+envs = [["FORCE_COLOR", "0"]]
+comment = "task A — cache hit replayed; plain snapshot collapses any colour styling to text"
+
+[[e2e.steps]]
+argv = ["vt", "run", "print-colored-b"]
+envs = [["FORCE_COLOR", "0"]]
+comment = "task B — cache miss; parent FORCE_COLOR=0, plain snapshot collapses styling. The cache still records the coloured bytes."
+
+[[e2e.steps]]
+argv = ["vt", "run", "print-colored-b"]
+envs = [["FORCE_COLOR", "1"]]
+comment = "task B — cache hit replayed; formatted snapshot proves the cached bytes were coloured, even though the cache-miss run (above) showed them as plain text"
+formatted-snapshot = true

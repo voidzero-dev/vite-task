@@ -128,6 +128,17 @@ impl PtyReader {
         self.parser.lock().unwrap().screen().contents()
     }
 
+    /// Returns the screen contents with inline ANSI SGR escape codes (as raw
+    /// bytes) — useful for snapshot tests that need to assert color/style.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parser lock is poisoned.
+    #[must_use]
+    pub fn screen_contents_formatted(&self) -> Vec<u8> {
+        self.parser.lock().unwrap().screen().contents_formatted()
+    }
+
     /// Drains and returns all unhandled OSC sequences received since the last call.
     ///
     /// Each entry is a list of byte-vector parameters from a single OSC sequence

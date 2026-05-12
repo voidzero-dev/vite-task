@@ -9,7 +9,8 @@ use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 use super::{
     ColorizeExt, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
     LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
-    format_command_with_cache_status, format_task_label, write_leaf_trailing_output,
+    format_command_with_cache_status, format_task_label, maybe_strip_writer,
+    write_leaf_trailing_output,
 };
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
 
@@ -23,8 +24,12 @@ pub struct GroupedReporterBuilder {
 }
 
 impl GroupedReporterBuilder {
-    pub fn new(workspace_path: Arc<AbsolutePath>, writer: Box<dyn Write>) -> Self {
-        Self { workspace_path, writer }
+    pub fn new(
+        workspace_path: Arc<AbsolutePath>,
+        writer: Box<dyn Write>,
+        color_support: bool,
+    ) -> Self {
+        Self { workspace_path, writer: maybe_strip_writer(writer, color_support) }
     }
 }
 
@@ -152,7 +157,8 @@ mod tests {
         let task = spawn_task("build");
         let item = &task.items[0];
 
-        let builder = Box::new(GroupedReporterBuilder::new(test_path(), Box::new(std::io::sink())));
+        let builder =
+            Box::new(GroupedReporterBuilder::new(test_path(), Box::new(std::io::sink()), false));
         let mut reporter = builder.build();
         let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));
         let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));

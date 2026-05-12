@@ -22,7 +22,6 @@ rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 sha2 = { workspace = true }
 shell-escape = { workspace = true }
-supports-color = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 vite_glob = { workspace = true }

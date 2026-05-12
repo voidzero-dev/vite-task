@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, ffi::OsStr, fmt::Write as _, mem::MaybeUninit, 
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use supports_color::{Stream, on};
 use vite_glob::GlobPatternSet;
 use vite_str::Str;
 use vite_task_graph::config::EnvConfig;
@@ -76,45 +75,27 @@ impl EnvFingerprints {
     ///
     /// Before the call, `all_envs` is expected to contain all available envs.
     /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + untracked).
+    ///
+    /// `FORCE_COLOR` is pre-inserted with value `"1"` so cached output is
+    /// always colored. Because `FORCE_COLOR` is part of `DEFAULT_UNTRACKED_ENV`,
+    /// the pattern filter below keeps it; its value (`"1"`) is left untracked
+    /// (not part of the cache fingerprint).
     pub fn resolve(
         all_envs: &mut FxHashMap<Arc<OsStr>, Arc<OsStr>>,
         env_config: &EnvConfig,
     ) -> Result<Self, ResolveEnvError> {
-        // Collect all envs matching fingerprinted or untracked envs in env_config
-        *all_envs = {
-            let mut new_all_envs = resolve_envs_with_patterns(
-                all_envs.iter(),
-                &env_config
-                    .untracked_env
-                    .iter()
-                    .map(std::convert::AsRef::as_ref)
-                    .chain(env_config.fingerprinted_envs.iter().map(std::convert::AsRef::as_ref))
-                    .collect::<Vec<&str>>(),
-            )?;
+        all_envs.insert(OsStr::new("FORCE_COLOR").into(), Arc::<OsStr>::from(OsStr::new("1")));
 
-            // Automatically add FORCE_COLOR environment variable if not already set
-            // This enables color output in subprocesses when color is supported
-            // TODO: will remove this temporarily until we have a better solution
-            if !all_envs.contains_key(OsStr::new("FORCE_COLOR"))
-                && !all_envs.contains_key(OsStr::new("NO_COLOR"))
-                && let Some(support) = on(Stream::Stdout)
-            {
-                let force_color_value = if support.has_16m {
-                    "3" // True color (16 million colors)
-                } else if support.has_256 {
-                    "2" // 256 colors
-                } else if support.has_basic {
-                    "1" // Basic ANSI colors
-                } else {
-                    "0" // No color support
-                };
-                new_all_envs.insert(
-                    OsStr::new("FORCE_COLOR").into(),
-                    Arc::<OsStr>::from(OsStr::new(force_color_value)),
-                );
-            }
-            new_all_envs
-        };
+        // Collect all envs matching fingerprinted or untracked envs in env_config
+        *all_envs = resolve_envs_with_patterns(
+            all_envs.iter(),
+            &env_config
+                .untracked_env
+                .iter()
+                .map(std::convert::AsRef::as_ref)
+                .chain(env_config.fingerprinted_envs.iter().map(std::convert::AsRef::as_ref))
+                .collect::<Vec<&str>>(),
+        )?;
 
         // Resolve fingerprinted envs
         let mut fingerprinted_envs = BTreeMap::<Str, Arc<str>>::new();
@@ -242,48 +223,55 @@ mod tests {
     }
 
     #[test]
-    fn test_force_color_auto_detection() {
-        // Test when FORCE_COLOR is not already set
-        let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin")]);
-        let env_config = create_env_config(&[], &["PATH"]);
-
-        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
-
-        // FORCE_COLOR should be automatically added if color is supported
-        // Note: This test might vary based on the test environment
-        let force_color_present = all_envs.contains_key(OsStr::new("FORCE_COLOR"));
-        if force_color_present {
-            let force_color_value = all_envs.get(OsStr::new("FORCE_COLOR")).unwrap();
-            let force_color_str = force_color_value.to_str().unwrap();
-            // Should be a valid FORCE_COLOR level
-            assert!(matches!(force_color_str, "0" | "1" | "2" | "3"));
-        }
-
-        // Test when FORCE_COLOR is already set - should not be overridden
+    fn test_force_color_always_set_to_one() {
+        // `FORCE_COLOR=1` is pre-injected before pattern filtering so cached
+        // output is always colored. Because the merged untracked-env list
+        // (config resolution adds DEFAULT_UNTRACKED_ENV, which includes
+        // `FORCE_COLOR`) keeps it, the child sees `FORCE_COLOR=1` regardless
+        // of the parent's value.
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin"), ("FORCE_COLOR", "2")]);
         let env_config = create_env_config(&[], &["PATH", "FORCE_COLOR"]);
 
         let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
-        // Should contain the original FORCE_COLOR value
-        assert!(all_envs.contains_key(OsStr::new("FORCE_COLOR")));
-        let force_color_value = all_envs.get(OsStr::new("FORCE_COLOR")).unwrap();
-        assert_eq!(force_color_value.to_str().unwrap(), "2");
+        let force_color_value = all_envs
+            .get(OsStr::new("FORCE_COLOR"))
+            .expect("FORCE_COLOR should be present after resolution");
+        assert_eq!(force_color_value.to_str().unwrap(), "1");
+    }
 
-        // FORCE_COLOR should not be in fingerprinted_envs since it's not declared
-        assert!(!result.fingerprinted_envs.contains_key("FORCE_COLOR"));
-
-        // Test when NO_COLOR is already set - FORCE_COLOR should not be automatically added
-        let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin"), ("NO_COLOR", "1")]);
-        let env_config = create_env_config(&[], &["PATH", "NO_COLOR"]);
+    #[test]
+    fn test_force_color_dropped_when_pattern_does_not_allow_it() {
+        // The resolver itself only pre-injects; it does not force-keep
+        // `FORCE_COLOR` through the filter. Real callers always provide
+        // patterns that include `FORCE_COLOR` (via `DEFAULT_UNTRACKED_ENV`),
+        // but this test pins the contract: if `FORCE_COLOR` is absent from
+        // the merged pattern list, the filter drops it.
+        let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin")]);
+        let env_config = create_env_config(&[], &["PATH"]);
 
         let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
-        assert!(all_envs.contains_key(OsStr::new("NO_COLOR")));
-        let no_color_value = all_envs.get(OsStr::new("NO_COLOR")).unwrap();
-        assert_eq!(no_color_value.to_str().unwrap(), "1");
-        // FORCE_COLOR should not be automatically added since NO_COLOR is set
         assert!(!all_envs.contains_key(OsStr::new("FORCE_COLOR")));
+    }
+
+    #[test]
+    fn test_force_color_value_one_overrides_user_fingerprinted_value() {
+        // A user can list `FORCE_COLOR` as a fingerprinted env, but the
+        // pre-injection still wins — fingerprint records `"1"`, not the
+        // parent's value. (`FORCE_COLOR` is the colour-pipeline contract;
+        // users wanting a different colour level should configure the tool
+        // they're running, not the runner.)
+        let mut all_envs = create_test_envs(vec![("FORCE_COLOR", "3")]);
+        let env_config = create_env_config(&["FORCE_COLOR"], &[]);
+
+        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+
+        assert_eq!(all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
+        assert_eq!(
+            result.fingerprinted_envs.get("FORCE_COLOR").map(std::convert::AsRef::as_ref),
+            Some("1")
+        );
     }
 
     #[test]

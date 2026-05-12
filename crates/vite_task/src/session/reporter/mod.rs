@@ -30,7 +30,7 @@ mod plain;
 pub mod summary;
 mod summary_reporter;
 
-use std::{io::Write, process::ExitStatus as StdExitStatus, sync::LazyLock};
+use std::{io::Write, process::ExitStatus as StdExitStatus};
 
 pub use grouped::GroupedReporterBuilder;
 pub use interleaved::InterleavedReporterBuilder;
@@ -103,6 +103,17 @@ pub struct StdioConfig {
 pub struct PipeWriters {
     pub stdout_writer: Box<dyn Write>,
     pub stderr_writer: Box<dyn Write>,
+}
+
+/// Wrap a writer with [`anstream::StripStream`] when `color_support` is
+/// `false`. Used by reporter builders to ensure ANSI escape sequences emitted
+/// by the reporter or by spawned tasks are stripped at display time when the
+/// user's terminal cannot render them.
+///
+/// [`anstream::StripStream`] is incremental: a single escape sequence split
+/// across multiple `write` calls is still removed correctly.
+pub(super) fn maybe_strip_writer(writer: Box<dyn Write>, color_support: bool) -> Box<dyn Write> {
+    if color_support { writer } else { Box::new(anstream::StripStream::new(writer)) }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -182,16 +193,16 @@ pub trait LeafExecutionReporter {
 // Shared display helpers
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// Wrap of `OwoColorize` that ignores style if `NO_COLOR` is set.
+/// Re-export of `owo_colors`'s [`Styled`] applier. The reporter unconditionally
+/// emits ANSI escape sequences via this trait; whether they reach the terminal
+/// is decided by the writer layer (see [`maybe_strip_writer`]).
 trait ColorizeExt {
     fn style(&self, style: Style) -> Styled<&Self>;
 }
 
 impl<T: owo_colors::OwoColorize> ColorizeExt for T {
     fn style(&self, style: Style) -> Styled<&Self> {
-        static NO_COLOR: LazyLock<bool> =
-            LazyLock::new(|| std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()));
-        owo_colors::OwoColorize::style(self, if *NO_COLOR { Style::new() } else { style })
+        owo_colors::OwoColorize::style(self, style)
     }
 }
 
@@ -299,6 +310,89 @@ fn write_leaf_trailing_output(
 /// Format the "cache hit, logs replayed" message for synthetic executions without display info.
 fn format_cache_hit_message() -> Str {
     vite_str::format!("{}\n", "◉ cache hit, logs replayed".style(Style::new().green().dimmed()))
+}
+
+#[cfg(test)]
+mod strip_writer_tests {
+    use std::io::Write;
+
+    use super::maybe_strip_writer;
+
+    /// Collect every byte written to an inner `Vec<u8>` via a wrapping writer.
+    /// Helper used to inspect what `maybe_strip_writer` actually emitted.
+    struct SharedSink(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+    impl Write for SharedSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn captured(color_support: bool, chunks: &[&[u8]]) -> Vec<u8> {
+        let sink: std::rc::Rc<std::cell::RefCell<Vec<u8>>> = std::rc::Rc::default();
+        let mut writer =
+            maybe_strip_writer(Box::new(SharedSink(std::rc::Rc::clone(&sink))), color_support);
+        for chunk in chunks {
+            writer.write_all(chunk).unwrap();
+        }
+        writer.flush().unwrap();
+        drop(writer);
+        sink.take()
+    }
+
+    #[test]
+    fn keeps_ansi_when_color_supported() {
+        let bytes = captured(true, &[b"\x1b[31mred\x1b[0m"]);
+        assert_eq!(bytes, b"\x1b[31mred\x1b[0m");
+    }
+
+    #[test]
+    fn strips_ansi_in_single_write() {
+        let bytes = captured(false, &[b"\x1b[31mred\x1b[0m plain"]);
+        assert_eq!(bytes, b"red plain");
+    }
+
+    #[test]
+    fn strips_ansi_across_write_split_at_csi() {
+        // `\x1b[` arrives, then the rest of the SGR.
+        let bytes = captured(false, &[b"hello \x1b[", b"31mWORLD\x1b[0m tail"]);
+        assert_eq!(bytes, b"hello WORLD tail");
+    }
+
+    #[test]
+    fn strips_ansi_across_write_split_inside_params() {
+        // Split inside the parameter section of a CSI SGR.
+        let bytes = captured(false, &[b"\x1b[3", b"8;5;208m", b"orange\x1b[0m"]);
+        assert_eq!(bytes, b"orange");
+    }
+
+    #[test]
+    fn strips_ansi_across_write_split_byte_by_byte() {
+        // Worst case: one byte per write.
+        let escape = b"\x1b[31mhi\x1b[0m";
+        let chunks: Vec<&[u8]> = escape.iter().map(std::slice::from_ref).collect();
+        let bytes = captured(false, &chunks);
+        assert_eq!(bytes, b"hi");
+    }
+
+    #[test]
+    fn strips_osc_hyperlink_across_writes() {
+        // OSC 8 hyperlink sequence ESC ] 8 ; ; URL ESC \ TEXT ESC ] 8 ; ; ESC \
+        let bytes =
+            captured(false, &[b"\x1b]8;;https://example.com\x1b\\", b"link", b"\x1b]8;;\x1b\\"]);
+        assert_eq!(bytes, b"link");
+    }
+
+    #[test]
+    fn leaves_plain_bytes_alone_when_stripping() {
+        let bytes = captured(false, &[b"plain text\n", b"another line\n"]);
+        assert_eq!(bytes, b"plain text\nanother line\n");
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

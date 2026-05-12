@@ -12,7 +12,7 @@ use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-    StdioConfig,
+    StdioConfig, maybe_strip_writer,
 };
 use crate::session::{
     event::{CacheStatus, CacheUpdateStatus, ExecutionError},
@@ -43,8 +43,16 @@ impl SummaryReporterBuilder {
         show_details: bool,
         write_summary: Option<WriteSummaryFn>,
         program_name: Str,
+        color_support: bool,
     ) -> Self {
-        Self { inner, workspace_path, writer, show_details, write_summary, program_name }
+        Self {
+            inner,
+            workspace_path,
+            writer: maybe_strip_writer(writer, color_support),
+            show_details,
+            write_summary,
+            program_name,
+        }
     }
 }
 

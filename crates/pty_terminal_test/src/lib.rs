@@ -52,6 +52,13 @@ impl Reader {
         contents
     }
 
+    /// Returns the screen contents with inline ANSI SGR escape codes preserved.
+    /// Useful for snapshot tests that need to assert colour or style attributes.
+    #[must_use]
+    pub fn screen_contents_formatted(&self) -> Vec<u8> {
+        self.pty.get_ref().screen_contents_formatted()
+    }
+
     /// Reads from the PTY until a milestone with the given name is encountered.
     ///
     /// Returns the terminal screen contents at the moment the milestone is detected.

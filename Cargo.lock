@@ -4093,6 +4093,7 @@ dependencies = [
 name = "vite_task"
 version = "0.0.0"
 dependencies = [
+ "anstream 0.6.21",
  "anyhow",
  "async-trait",
  "clap",
@@ -4110,6 +4111,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "supports-color 3.0.2",
  "tar",
  "tempfile",
  "thiserror 2.0.18",
@@ -4206,7 +4208,6 @@ dependencies = [
  "sha2 0.11.0",
  "shell-escape",
  "snapshot_test",
- "supports-color 3.0.2",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

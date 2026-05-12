@@ -15,6 +15,7 @@ mod list_dir;
 mod mkdir;
 mod pipe_stdin;
 mod print;
+mod print_color;
 mod print_cwd;
 mod print_env;
 mod print_file;
@@ -29,7 +30,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, list-dir, mkdir, pipe-stdin, print, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -50,6 +51,7 @@ fn main() {
             print::run(&args[2..]);
             Ok(())
         }
+        "print-color" => print_color::run(&args[2..]),
         "print-cwd" => print_cwd::run(),
         "print-env" => print_env::run(&args[2..]),
         "print-file" => print_file::run(&args[2..]),

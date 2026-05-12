@@ -12,6 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+anstream = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
@@ -28,6 +29,7 @@ rusqlite = { workspace = true, features = ["bundled"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
+supports-color = { workspace = true }
 thiserror = { workspace = true }
 tar = { workspace = true }
 tokio = { workspace = true, features = [

@@ -313,20 +313,32 @@ impl<'a> Session<'a> {
                 let workspace_path = self.workspace_path();
                 let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
 
-                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> =
-                    match run_command.flags.log {
-                        crate::cli::LogMode::Interleaved => Box::new(
-                            InterleavedReporterBuilder::new(Arc::clone(&workspace_path), writer),
-                        ),
-                        crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
-                            Arc::clone(&workspace_path),
-                            writer,
-                        )),
-                        crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
-                            Arc::clone(&workspace_path),
-                            writer,
-                        )),
-                    };
+                // Detect color support once at the point where reporters are
+                // constructed. The reporters and their pipe writers then strip
+                // ANSI escapes from cached/replayed output if the terminal
+                // can't render them.
+                let color_support = stdout_supports_color();
+
+                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match run_command
+                    .flags
+                    .log
+                {
+                    crate::cli::LogMode::Interleaved => Box::new(InterleavedReporterBuilder::new(
+                        Arc::clone(&workspace_path),
+                        writer,
+                        color_support,
+                    )),
+                    crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
+                        Arc::clone(&workspace_path),
+                        writer,
+                        color_support,
+                    )),
+                    crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
+                        Arc::clone(&workspace_path),
+                        writer,
+                        color_support,
+                    )),
+                };
 
                 let builder = Box::new(SummaryReporterBuilder::new(
                     inner,
@@ -335,6 +347,7 @@ impl<'a> Session<'a> {
                     run_command.flags.verbose,
                     Some(self.make_summary_writer()),
                     self.program_name.clone(),
+                    color_support,
                 ));
                 // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
                 // the signal directly from the terminal driver and handle it
@@ -668,8 +681,11 @@ impl<'a> Session<'a> {
         let cache = self.cache()?;
 
         // Create a plain (standalone) reporter — no graph awareness, no summary
-        let plain_reporter =
-            reporter::PlainReporter::new(silent_if_cache_hit, Box::new(std::io::stdout()));
+        let plain_reporter = reporter::PlainReporter::new(
+            silent_if_cache_hit,
+            Box::new(std::io::stdout()),
+            stdout_supports_color(),
+        );
 
         // Execute the spawn directly using the free function, bypassing the graph pipeline
         let outcome = execute::execute_spawn(
@@ -769,4 +785,13 @@ impl<'a> Session<'a> {
         )
         .await
     }
+}
+
+/// Whether stdout supports ANSI color output for the current process. Honors
+/// `NO_COLOR`/`FORCE_COLOR` and detects TTY capability via the `supports-color`
+/// crate. Result is cached for the process lifetime.
+fn stdout_supports_color() -> bool {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<bool> = OnceLock::new();
+    *CACHE.get_or_init(|| supports_color::on(supports_color::Stream::Stdout).is_some())
 }

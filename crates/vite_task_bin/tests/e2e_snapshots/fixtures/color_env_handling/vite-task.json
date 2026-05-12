@@ -1,0 +1,16 @@
+{
+  "tasks": {
+    "print-force-color": {
+      "command": "vtt print-env FORCE_COLOR",
+      "cache": true
+    },
+    "print-colored-a": {
+      "command": "vtt print-color red hello-world",
+      "cache": true
+    },
+    "print-colored-b": {
+      "command": "vtt print-color blue hello-again",
+      "cache": true
+    }
+  }
+}

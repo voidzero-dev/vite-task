@@ -40,6 +40,7 @@ future_not_send = "allow"
 
 [workspace.dependencies]
 allocator-api2 = { version = "0.2.21", default-features = false, features = ["alloc", "std"] }
+anstream = "0.6.21"
 anyhow = "1.0.98"
 assert2 = "0.4.0"
 assertables = "9.8.1"

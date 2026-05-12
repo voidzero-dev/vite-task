@@ -421,12 +421,16 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "DYLD_INSERT_LIBRARIES",
     "LIBPATH",
     // Terminal/display
-    "COLORTERM",
-    "TERM",
-    "TERM_PROGRAM",
+    //
+    // The only color-related var allowed through by default is `FORCE_COLOR`,
+    // which the planner pre-injects with value `1` before env resolution so
+    // cached output is always colored. The reporter strips colors at the
+    // writer level when the user's terminal cannot render them. Other
+    // color-related vars (`NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`)
+    // are intentionally NOT included — users may opt in to passing them
+    // through via a task's `env`/`untrackedEnv` config.
     "DISPLAY",
     "FORCE_COLOR",
-    "NO_COLOR",
     // Temporary directories
     "TMP",
     "TEMP",
