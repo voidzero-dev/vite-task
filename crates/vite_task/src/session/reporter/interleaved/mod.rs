@@ -19,16 +19,17 @@ pub struct InterleavedReporterBuilder {
 }
 
 impl InterleavedReporterBuilder {
+    /// The reporter's own writes (command lines, error banners) decide
+    /// colour-vs-plain at format time via [`ColorizeExt`], so `writer` is
+    /// stored unwrapped. `color_support` is forwarded to the pipe writers
+    /// in [`Self::start`], where ANSI emitted by child tasks is stripped
+    /// for non-terminal sinks.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,
         color_support: ColorSupport,
     ) -> Self {
-        Self {
-            workspace_path,
-            writer: maybe_strip_writer(writer, color_support.stdout),
-            color_support,
-        }
+        Self { workspace_path, writer, color_support }
     }
 }
 

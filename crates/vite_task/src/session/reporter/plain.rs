@@ -9,6 +9,9 @@ use super::{
     ColorSupport, LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
     format_cache_hit_message, format_error_message, maybe_strip_writer,
 };
+// `maybe_strip_writer` is used for the child-process pipe writers; reporter
+// output decides colour-vs-plain at format time via the `ColorizeExt` helpers
+// in [`super`].
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
 
 /// A self-contained [`LeafExecutionReporter`] for single-leaf executions
@@ -48,12 +51,7 @@ impl PlainReporter {
         writer: Box<dyn Write>,
         color_support: ColorSupport,
     ) -> Self {
-        Self {
-            writer: maybe_strip_writer(writer, color_support.stdout),
-            silent_if_cache_hit,
-            is_cache_hit: false,
-            color_support,
-        }
+        Self { writer, silent_if_cache_hit, is_cache_hit: false, color_support }
     }
 
     /// Returns true if output should be suppressed for this execution.

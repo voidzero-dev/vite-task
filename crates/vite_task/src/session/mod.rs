@@ -607,13 +607,14 @@ impl<'a> Session<'a> {
         let path = self.summary_file_path();
         match LastRunSummary::read_from_path(&path) {
             Ok(Some(summary)) => {
+                // `format_full_summary` decides colour vs plain text per
+                // styled span via `ColorizeExt` (which consults
+                // `supports-color`), so the buffer already matches the
+                // terminal's capability and we write it to stdout directly.
                 let buf = format_full_summary(&summary);
                 {
                     use std::io::Write;
-                    let mut stdout = reporter::maybe_strip_writer(
-                        Box::new(std::io::stdout()),
-                        stdout_supports_color(),
-                    );
+                    let mut stdout = std::io::stdout().lock();
                     stdout.write_all(&buf)?;
                     stdout.flush()?;
                 }

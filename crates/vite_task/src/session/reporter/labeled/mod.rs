@@ -24,16 +24,15 @@ pub struct LabeledReporterBuilder {
 }
 
 impl LabeledReporterBuilder {
+    /// `writer` is stored unwrapped — the reporter's own writes pick
+    /// colour-vs-plain at format time via [`ColorizeExt`]. Child-process
+    /// pipes are stripped per-stream inside [`Self::start`].
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,
         color_support: ColorSupport,
     ) -> Self {
-        Self {
-            workspace_path,
-            writer: maybe_strip_writer(writer, color_support.stdout),
-            color_support,
-        }
+        Self { workspace_path, writer, color_support }
     }
 }
 

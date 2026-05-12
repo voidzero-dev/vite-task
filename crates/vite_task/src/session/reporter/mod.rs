@@ -35,7 +35,7 @@ use std::{io::Write, process::ExitStatus as StdExitStatus};
 pub use grouped::GroupedReporterBuilder;
 pub use interleaved::InterleavedReporterBuilder;
 pub use labeled::LabeledReporterBuilder;
-use owo_colors::{OwoColorize as _, Style};
+use owo_colors::Style;
 pub use plain::PlainReporter;
 pub use summary_reporter::SummaryReporterBuilder;
 use vite_path::AbsolutePath;
@@ -216,6 +216,27 @@ pub trait LeafExecutionReporter {
 
 const COMMAND_STYLE: Style = Style::new().blue();
 const CACHE_MISS_STYLE: Style = Style::new().bright_black();
+
+/// Apply `style` to `self` only when stdout supports ANSI colours
+/// (auto-detected via the `supports-color` crate, honouring `NO_COLOR`,
+/// `FORCE_COLOR`, and TTY). Used by the format helpers that write to the
+/// reporter's main writer / saved-summary buffer; for child-process pipes
+/// see [`maybe_strip_writer`] instead, which strips bytes the runner does
+/// not control.
+trait ColorizeExt: owo_colors::OwoColorize {
+    fn style(&self, style: Style) -> impl std::fmt::Display + '_;
+}
+
+impl<T> ColorizeExt for T
+where
+    T: owo_colors::OwoColorize + std::fmt::Display,
+{
+    fn style(&self, style: Style) -> impl std::fmt::Display + '_ {
+        self.if_supports_color(owo_colors::Stream::Stdout, move |s| {
+            owo_colors::OwoColorize::style(s, style)
+        })
+    }
+}
 
 /// Format the display's cwd as a string relative to the workspace root.
 /// Returns an empty string if the cwd equals the workspace root.
