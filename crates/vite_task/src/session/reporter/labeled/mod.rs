@@ -25,8 +25,8 @@ pub struct LabeledReporterBuilder {
 
 impl LabeledReporterBuilder {
     /// `writer` is stored unwrapped — the reporter's own writes pick
-    /// colour-vs-plain at format time via [`ColorizeExt`]. Child-process
-    /// pipes are stripped per-stream inside [`Self::start`].
+    /// colour-vs-plain at format time via `ColorizeExt`. Child-process
+    /// pipes are stripped per-stream inside `LeafExecutionReporter::start`.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,

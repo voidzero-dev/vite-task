@@ -27,7 +27,7 @@ pub struct GroupedReporterBuilder {
 impl GroupedReporterBuilder {
     /// Grouped mode buffers child output and flushes it through `writer`
     /// in [`Self::finish`]. The pipe writers themselves (see
-    /// [`Self::start`]) strip ANSI on the way into the buffer, so by the
+    /// `LeafExecutionReporter::start`) strip ANSI on the way into the buffer, so by the
     /// time the buffer reaches `writer` it already matches the terminal's
     /// colour capability. `writer` is therefore stored unwrapped.
     pub fn new(

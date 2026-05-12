@@ -39,7 +39,7 @@ impl SummaryReporterBuilder {
     /// `writer` is the summary output stream. The wrapped inner builder
     /// owns per-stream stripping of the child-process pipe writers; the
     /// reporter's own summary text picks colour-vs-plain at format time
-    /// via [`ColorizeExt`], so `writer` is stored unwrapped.
+    /// via `ColorizeExt`, so `writer` is stored unwrapped.
     pub fn new(
         inner: Box<dyn GraphExecutionReporterBuilder>,
         workspace_path: Arc<AbsolutePath>,

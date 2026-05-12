@@ -20,9 +20,9 @@ pub struct InterleavedReporterBuilder {
 
 impl InterleavedReporterBuilder {
     /// The reporter's own writes (command lines, error banners) decide
-    /// colour-vs-plain at format time via [`ColorizeExt`], so `writer` is
+    /// colour-vs-plain at format time via `ColorizeExt`, so `writer` is
     /// stored unwrapped. `color_support` is forwarded to the pipe writers
-    /// in [`Self::start`], where ANSI emitted by child tasks is stripped
+    /// in `LeafExecutionReporter::start`, where ANSI emitted by child tasks is stripped
     /// for non-terminal sinks.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
