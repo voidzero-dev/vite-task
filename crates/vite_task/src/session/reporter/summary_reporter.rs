@@ -11,8 +11,8 @@ use vite_str::Str;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
-    ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-    StdioConfig, maybe_strip_writer,
+    ColorSupport, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
+    LeafExecutionReporter, StdioConfig, maybe_strip_writer,
 };
 use crate::session::{
     event::{CacheStatus, CacheUpdateStatus, ExecutionError},
@@ -36,6 +36,9 @@ pub struct SummaryReporterBuilder {
 }
 
 impl SummaryReporterBuilder {
+    /// `writer` is the summary output stream (assumed to be stdout, so
+    /// `color_support.stdout` decides stripping). The wrapped inner builder
+    /// owns per-stream stripping of the task-output writers.
     pub fn new(
         inner: Box<dyn GraphExecutionReporterBuilder>,
         workspace_path: Arc<AbsolutePath>,
@@ -43,12 +46,12 @@ impl SummaryReporterBuilder {
         show_details: bool,
         write_summary: Option<WriteSummaryFn>,
         program_name: Str,
-        color_support: bool,
+        color_support: ColorSupport,
     ) -> Self {
         Self {
             inner,
             workspace_path,
-            writer: maybe_strip_writer(writer, color_support),
+            writer: maybe_strip_writer(writer, color_support.stdout),
             show_details,
             write_summary,
             program_name,

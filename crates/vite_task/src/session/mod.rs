@@ -12,7 +12,7 @@ use clap::Parser as _;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
 use reporter::{
-    GroupedReporterBuilder, InterleavedReporterBuilder, LabeledReporterBuilder,
+    ColorSupport, GroupedReporterBuilder, InterleavedReporterBuilder, LabeledReporterBuilder,
     SummaryReporterBuilder,
     summary::{LastRunSummary, ReadSummaryError, format_full_summary},
 };
@@ -316,8 +316,12 @@ impl<'a> Session<'a> {
                 // Detect color support once at the point where reporters are
                 // constructed. The reporters and their pipe writers then strip
                 // ANSI escapes from cached/replayed output if the terminal
-                // can't render them.
-                let color_support = stdout_supports_color();
+                // can't render them. Detect per-stream so a redirected stdout
+                // doesn't trigger stripping of an interactive stderr.
+                let color_support = ColorSupport {
+                    stdout: stdout_supports_color(),
+                    stderr: stderr_supports_color(),
+                };
 
                 let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match run_command
                     .flags
@@ -684,7 +688,7 @@ impl<'a> Session<'a> {
         let plain_reporter = reporter::PlainReporter::new(
             silent_if_cache_hit,
             Box::new(std::io::stdout()),
-            stdout_supports_color(),
+            ColorSupport { stdout: stdout_supports_color(), stderr: stderr_supports_color() },
         );
 
         // Execute the spawn directly using the free function, bypassing the graph pipeline
@@ -794,4 +798,13 @@ fn stdout_supports_color() -> bool {
     use std::sync::OnceLock;
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| supports_color::on(supports_color::Stream::Stdout).is_some())
+}
+
+/// Whether stderr supports ANSI color output. Detected independently from
+/// stdout so a redirected stdout (non-TTY) does not strip ANSI from a stderr
+/// that is still an interactive terminal.
+fn stderr_supports_color() -> bool {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<bool> = OnceLock::new();
+    *CACHE.get_or_init(|| supports_color::on(supports_color::Stream::Stderr).is_some())
 }

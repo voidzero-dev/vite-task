@@ -105,6 +105,27 @@ pub struct PipeWriters {
     pub stderr_writer: Box<dyn Write>,
 }
 
+/// Color-support decision split per output stream. Reporter builders receive
+/// one of these so a non-TTY stdout doesn't accidentally strip colours from
+/// a TTY stderr (or vice versa).
+#[derive(Debug, Clone, Copy)]
+pub struct ColorSupport {
+    /// Whether the reporter's stdout writer (and stdout-bound pipe writers
+    /// for spawned tasks) supports ANSI escapes.
+    pub stdout: bool,
+    /// Whether stderr-bound pipe writers support ANSI escapes.
+    pub stderr: bool,
+}
+
+#[cfg(test)]
+impl ColorSupport {
+    /// Treat both streams the same — only used in tests to avoid duplicating
+    /// field assignments.
+    pub(super) const fn uniform(supported: bool) -> Self {
+        Self { stdout: supported, stderr: supported }
+    }
+}
+
 /// Wrap a writer with [`anstream::StripStream`] when `color_support` is
 /// `false`. Used by reporter builders to ensure ANSI escape sequences emitted
 /// by the reporter or by spawned tasks are stripped at display time when the

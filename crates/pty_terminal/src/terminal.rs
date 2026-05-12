@@ -158,9 +158,7 @@ impl PtyReader {
         let rows: Vec<Vec<u8>> = screen
             .rows_formatted(0, cols)
             .map(|mut row| {
-                while let Some(idx) =
-                    row.windows(RESET.len()).position(|w| w == RESET)
-                {
+                while let Some(idx) = row.windows(RESET.len()).position(|w| w == RESET) {
                     row.drain(idx..idx + RESET.len());
                 }
                 row

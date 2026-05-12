@@ -7,7 +7,7 @@ use vite_path::AbsolutePath;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
-    ColorizeExt, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
+    ColorSupport, ColorizeExt, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
     LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,
@@ -24,12 +24,15 @@ pub struct GroupedReporterBuilder {
 }
 
 impl GroupedReporterBuilder {
+    /// `color_support.stderr` is unused: grouped mode collapses every child
+    /// stream into a single buffer that is later flushed through the main
+    /// writer (assumed to be stdout), so the stdout flag drives stripping.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,
-        color_support: bool,
+        color_support: ColorSupport,
     ) -> Self {
-        Self { workspace_path, writer: maybe_strip_writer(writer, color_support) }
+        Self { workspace_path, writer: maybe_strip_writer(writer, color_support.stdout) }
     }
 }
 
@@ -157,8 +160,11 @@ mod tests {
         let task = spawn_task("build");
         let item = &task.items[0];
 
-        let builder =
-            Box::new(GroupedReporterBuilder::new(test_path(), Box::new(std::io::sink()), false));
+        let builder = Box::new(GroupedReporterBuilder::new(
+            test_path(),
+            Box::new(std::io::sink()),
+            ColorSupport::uniform(false),
+        ));
         let mut reporter = builder.build();
         let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));
         let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));

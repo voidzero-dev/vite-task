@@ -84,7 +84,7 @@
                       "3000"
                     ],
                     "all_envs": {
-                      "NO_COLOR": "1",
+                      "FORCE_COLOR": "1",
                       "PATH": "<workspace>/packages/foo/node_modules/.bin:<workspace>/node_modules/.bin:<tools>"
                     },
                     "cwd": "<workspace>/packages/foo"
