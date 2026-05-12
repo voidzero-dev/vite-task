@@ -1,6 +1,6 @@
 # Changelog
 
-- **Changed** Cached task output is always colored (`FORCE_COLOR=1` is auto-injected) and colors are stripped per stdout/stderr when the terminal does not support them. Other color-related env vars (`NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`) are no longer passed through by default. Opt in via a task's `env`/`untrackedEnv` ([#378](https://github.com/voidzero-dev/vite-task/pull/378))
+- **Changed** Cached output is stored with colors intact (`FORCE_COLOR=1` is auto-injected into spawned tasks). Colors are then stripped at display time when the terminal does not support them. Other color-related env vars (`NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`) are no longer passed through by default. Opt in via a task's `env`/`untrackedEnv` ([#378](https://github.com/voidzero-dev/vite-task/pull/378))
 - **Added** `output` field for cached tasks: archives matching files after a successful run and restores them on cache hit ([#375](https://github.com/voidzero-dev/vite-task/pull/375))
 - **Fixed** Windows cached tasks can now run package shims rewritten through PowerShell; default env passthrough now preserves `PATHEXT` ([#366](https://github.com/voidzero-dev/vite-task/pull/366))
 - **Added** Platform support for targets without `input` auto-inference (e.g. Android). Tasks still run; those relying on auto-inference run uncached, with the summary noting that `input` must be configured manually to enable caching ([#352](https://github.com/voidzero-dev/vite-task/pull/352))
