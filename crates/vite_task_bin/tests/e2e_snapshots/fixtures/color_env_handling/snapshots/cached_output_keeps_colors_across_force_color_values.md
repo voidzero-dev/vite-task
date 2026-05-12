@@ -52,9 +52,9 @@ hello-again
 task B — cache hit replayed; formatted snapshot proves the cached bytes were coloured, even though the cache-miss run (above) showed them as plain text
 
 ```
-\x1b[34m$ vtt print-color blue hello-again\x1b[m \x1b[32m\xe2\x97\x89\x1b[m \x1b[90mcache hit, replaying
+\x1b[34m$ vtt print-color blue hello-again \x1b[32m\xe2\x97\x89 \x1b[90mcache hit, replaying
 \x1b[34mhello-again
 
 \x1b[90m---
-\x1b[34;1mvt run:\x1b[m cache hit, \x1b[32;1m<duration>\x1b[m saved.
+\x1b[34;1mvt run: cache hit, \x1b[32;1m<duration> saved.
 ```
