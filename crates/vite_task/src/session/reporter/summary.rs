@@ -9,12 +9,12 @@
 
 use std::{io::Write, num::NonZeroI32, time::Duration};
 
-use owo_colors::Style;
+use owo_colors::{OwoColorize as _, Style};
 use serde::{Deserialize, Serialize};
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
-use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
+use super::{CACHE_MISS_STYLE, COMMAND_STYLE};
 use crate::session::{
     cache::{
         CacheMiss, FingerprintMismatch, InputChangeKind, SpawnFingerprintChange,

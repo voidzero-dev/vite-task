@@ -2,12 +2,12 @@
 
 use std::{cell::RefCell, io::Write, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
 
-use owo_colors::Style;
+use owo_colors::{OwoColorize as _, Style};
 use vite_path::AbsolutePath;
 use vite_task_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
-    ColorSupport, ColorizeExt, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
+    ColorSupport, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
     LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,

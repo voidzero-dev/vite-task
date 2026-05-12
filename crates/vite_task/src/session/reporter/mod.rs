@@ -35,7 +35,7 @@ use std::{io::Write, process::ExitStatus as StdExitStatus};
 pub use grouped::GroupedReporterBuilder;
 pub use interleaved::InterleavedReporterBuilder;
 pub use labeled::LabeledReporterBuilder;
-use owo_colors::{Style, Styled};
+use owo_colors::{OwoColorize as _, Style};
 pub use plain::PlainReporter;
 pub use summary_reporter::SummaryReporterBuilder;
 use vite_path::AbsolutePath;
@@ -213,19 +213,6 @@ pub trait LeafExecutionReporter {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Shared display helpers
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/// Re-export of `owo_colors`'s [`Styled`] applier. The reporter unconditionally
-/// emits ANSI escape sequences via this trait; whether they reach the terminal
-/// is decided by the writer layer (see [`maybe_strip_writer`]).
-trait ColorizeExt {
-    fn style(&self, style: Style) -> Styled<&Self>;
-}
-
-impl<T: owo_colors::OwoColorize> ColorizeExt for T {
-    fn style(&self, style: Style) -> Styled<&Self> {
-        owo_colors::OwoColorize::style(self, style)
-    }
-}
 
 const COMMAND_STYLE: Style = Style::new().blue();
 const CACHE_MISS_STYLE: Style = Style::new().bright_black();
