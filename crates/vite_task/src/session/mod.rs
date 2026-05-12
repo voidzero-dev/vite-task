@@ -610,7 +610,10 @@ impl<'a> Session<'a> {
                 let buf = format_full_summary(&summary);
                 {
                     use std::io::Write;
-                    let mut stdout = std::io::stdout().lock();
+                    let mut stdout = reporter::maybe_strip_writer(
+                        Box::new(std::io::stdout()),
+                        stdout_supports_color(),
+                    );
                     stdout.write_all(&buf)?;
                     stdout.flush()?;
                 }
