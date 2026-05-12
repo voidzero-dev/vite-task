@@ -266,11 +266,11 @@ fn resolve_env_placeholder(raw: &str) -> std::borrow::Cow<'_, OsStr> {
     }
 }
 
-/// Render a vt100 `contents_formatted` byte stream into a snapshot-friendly
-/// string by feeding every byte through [`std::ascii::escape_default`].
-/// Newlines are kept literal so the snapshot stays readable in markdown;
-/// other bytes outside printable ASCII (escape sequences, control characters,
-/// multi-byte UTF-8) come out as `\xNN`, `\t`, etc.
+/// Render the byte stream produced by `screen_contents_formatted` (which uses
+/// `vt100::Screen::rows_formatted` — see [`pty_terminal`]) into a
+/// snapshot-friendly string. Newlines (added as row separators by the PTY
+/// helper) stay literal so the snapshot remains multi-line; SGR escapes and
+/// other bytes outside printable ASCII come out as `\xNN`, `\t`, etc.
 #[expect(clippy::disallowed_types, reason = "String required for snapshot rendering")]
 fn render_formatted_screen(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len());
