@@ -422,15 +422,14 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "LIBPATH",
     // Terminal/display
     //
-    // The only color-related var allowed through by default is `FORCE_COLOR`,
-    // which the planner pre-injects with value `1` before env resolution so
-    // cached output is always colored. The reporter strips colors at the
-    // writer level when the user's terminal cannot render them. Other
-    // color-related vars (`NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`)
-    // are intentionally NOT included — users may opt in to passing them
-    // through via a task's `env`/`untrackedEnv` config.
+    // No color-related vars are included by default. The planner ensures
+    // `FORCE_COLOR=1` is set on the child after env resolution (as a fallback
+    // when neither the parent env nor task config provides one), so cached
+    // output is always colored. The reporter strips colors at the writer
+    // level when the user's terminal cannot render them. Users wanting to
+    // pass through `NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`, or
+    // override `FORCE_COLOR` can opt in via a task's `env`/`untrackedEnv`.
     "DISPLAY",
-    "FORCE_COLOR",
     // Temporary directories
     "TMP",
     "TEMP",

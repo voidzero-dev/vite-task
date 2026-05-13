@@ -76,16 +76,15 @@ impl EnvFingerprints {
     /// Before the call, `all_envs` is expected to contain all available envs.
     /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + untracked).
     ///
-    /// `FORCE_COLOR` is pre-inserted with value `"1"` so cached output is
-    /// always colored. Because `FORCE_COLOR` is part of `DEFAULT_UNTRACKED_ENV`,
-    /// the pattern filter below keeps it; its value (`"1"`) is left untracked
-    /// (not part of the cache fingerprint).
+    /// After pattern filtering, `FORCE_COLOR=1` is inserted as a fallback if
+    /// nothing else set it, so cached output is always colored by default.
+    /// Tasks that need a different value (e.g. `FORCE_COLOR=0` to suppress
+    /// ANSI for a misbehaving tool) can opt in to passthrough by listing
+    /// `FORCE_COLOR` in `env` or `untrackedEnv`.
     pub fn resolve(
         all_envs: &mut FxHashMap<Arc<OsStr>, Arc<OsStr>>,
         env_config: &EnvConfig,
     ) -> Result<Self, ResolveEnvError> {
-        all_envs.insert(OsStr::new("FORCE_COLOR").into(), Arc::<OsStr>::from(OsStr::new("1")));
-
         // Collect all envs matching fingerprinted or untracked envs in env_config
         *all_envs = resolve_envs_with_patterns(
             all_envs.iter(),
@@ -96,6 +95,14 @@ impl EnvFingerprints {
                 .chain(env_config.fingerprinted_envs.iter().map(std::convert::AsRef::as_ref))
                 .collect::<Vec<&str>>(),
         )?;
+
+        // Ensure cached output is colored by default. Skipped if the user
+        // opted into passing `FORCE_COLOR` through (via `env` / `untrackedEnv`)
+        // and the parent supplied a value — in that case the user's choice
+        // wins, even `FORCE_COLOR=0`.
+        all_envs
+            .entry(Arc::<OsStr>::from(OsStr::new("FORCE_COLOR")))
+            .or_insert_with(|| Arc::<OsStr>::from(OsStr::new("1")));
 
         // Resolve fingerprinted envs
         let mut fingerprinted_envs = BTreeMap::<Str, Arc<str>>::new();
@@ -223,14 +230,13 @@ mod tests {
     }
 
     #[test]
-    fn test_force_color_always_set_to_one() {
-        // `FORCE_COLOR=1` is pre-injected before pattern filtering so cached
-        // output is always colored. Because the merged untracked-env list
-        // (config resolution adds DEFAULT_UNTRACKED_ENV, which includes
-        // `FORCE_COLOR`) keeps it, the child sees `FORCE_COLOR=1` regardless
-        // of the parent's value.
+    fn test_force_color_defaults_to_one_when_user_does_not_opt_in() {
+        // The user did not list `FORCE_COLOR` in `env` or `untrackedEnv`, so
+        // the parent's value is filtered out by the pattern step. The
+        // post-resolution fallback then inserts `FORCE_COLOR=1` so cached
+        // output is colored.
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin"), ("FORCE_COLOR", "2")]);
-        let env_config = create_env_config(&[], &["PATH", "FORCE_COLOR"]);
+        let env_config = create_env_config(&[], &["PATH"]);
 
         let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
@@ -241,28 +247,56 @@ mod tests {
     }
 
     #[test]
-    fn test_force_color_dropped_when_pattern_does_not_allow_it() {
-        // The resolver itself only pre-injects; it does not force-keep
-        // `FORCE_COLOR` through the filter. Real callers always provide
-        // patterns that include `FORCE_COLOR` (via `DEFAULT_UNTRACKED_ENV`),
-        // but this test pins the contract: if `FORCE_COLOR` is absent from
-        // the merged pattern list, the filter drops it.
+    fn test_force_color_defaults_to_one_when_absent_from_parent() {
+        // Parent env has no `FORCE_COLOR` at all. The fallback still inserts
+        // `FORCE_COLOR=1` so the child emits colored output.
         let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin")]);
         let env_config = create_env_config(&[], &["PATH"]);
 
         let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
-        assert!(!all_envs.contains_key(OsStr::new("FORCE_COLOR")));
+        assert_eq!(
+            all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(),
+            "1"
+        );
     }
 
     #[test]
-    fn test_force_color_value_one_overrides_user_fingerprinted_value() {
-        // A user can list `FORCE_COLOR` as a fingerprinted env, but the
-        // pre-injection still wins — fingerprint records `"1"`, not the
-        // parent's value. (`FORCE_COLOR` is the colour-pipeline contract;
-        // users wanting a different colour level should configure the tool
-        // they're running, not the runner.)
+    fn test_force_color_passthrough_when_user_opts_in_via_untracked() {
+        // If the user lists `FORCE_COLOR` in `untrackedEnv`, the parent's
+        // value passes through verbatim and the fallback is skipped.
+        let mut all_envs = create_test_envs(vec![("FORCE_COLOR", "0")]);
+        let env_config = create_env_config(&[], &["FORCE_COLOR"]);
+
+        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+
+        assert_eq!(all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "0");
+        assert!(!result.fingerprinted_envs.contains_key("FORCE_COLOR"));
+    }
+
+    #[test]
+    fn test_force_color_passthrough_when_user_opts_in_via_fingerprinted() {
+        // If the user lists `FORCE_COLOR` in `env` (fingerprinted), the
+        // parent's value passes through and is recorded in the cache key.
         let mut all_envs = create_test_envs(vec![("FORCE_COLOR", "3")]);
+        let env_config = create_env_config(&["FORCE_COLOR"], &[]);
+
+        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+
+        assert_eq!(all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "3");
+        assert_eq!(
+            result.fingerprinted_envs.get("FORCE_COLOR").map(std::convert::AsRef::as_ref),
+            Some("3")
+        );
+    }
+
+    #[test]
+    fn test_force_color_fallback_fingerprinted_when_opted_in_but_parent_absent() {
+        // User opts in to `FORCE_COLOR` as fingerprinted, but parent has no
+        // value. The fallback supplies `1`, and because the fingerprint scan
+        // runs after the fallback, `1` is recorded in the cache key — keeping
+        // the fingerprint consistent with what the child actually sees.
+        let mut all_envs = create_test_envs(vec![]);
         let env_config = create_env_config(&["FORCE_COLOR"], &[]);
 
         let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
