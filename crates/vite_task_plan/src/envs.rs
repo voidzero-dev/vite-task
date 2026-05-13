@@ -255,10 +255,7 @@ mod tests {
 
         let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
 
-        assert_eq!(
-            all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(),
-            "1"
-        );
+        assert_eq!(all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
     }
 
     #[test]
