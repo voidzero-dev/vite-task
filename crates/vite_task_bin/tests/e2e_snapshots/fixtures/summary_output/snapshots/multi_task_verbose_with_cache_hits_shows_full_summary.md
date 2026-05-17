@@ -1,7 +1,6 @@
 # multi_task_verbose_with_cache_hits_shows_full_summary
 
-With `-v` on a multi-task re-run, the full summary should report per-task
-cache hits (not just overall stats).
+With `-v` on a multi-task re-run, the full summary should report per-task cache hits (not just overall stats).
 
 ## `vt run -r build`
 

@@ -1,7 +1,6 @@
 # positive_auto_negative___miss_on_explicit_glob_file
 
-When positive, `auto`, and negative globs are combined, modifying a file
-matched by the explicit positive glob should invalidate the cache.
+When positive, `auto`, and negative globs are combined, modifying a file matched by the explicit positive glob should invalidate the cache.
 
 ## `vt run positive-auto-negative`
 

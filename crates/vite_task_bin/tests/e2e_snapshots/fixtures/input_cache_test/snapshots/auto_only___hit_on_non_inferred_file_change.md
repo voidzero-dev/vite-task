@@ -1,7 +1,6 @@
 # auto_only___hit_on_non_inferred_file_change
 
-With `auto: true`, a file never read by the command should not affect the
-cache, even if it sits next to files that are read.
+With `auto: true`, a file never read by the command should not affect the cache, even if it sits next to files that are read.
 
 ## `vt run auto-only`
 

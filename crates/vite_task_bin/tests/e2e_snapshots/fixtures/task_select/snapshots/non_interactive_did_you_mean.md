@@ -1,7 +1,6 @@
 # non_interactive_did_you_mean
 
-In non-interactive mode, a typo that has close fuzzy matches should produce
-"did you mean" suggestions.
+In non-interactive mode, a typo that has close fuzzy matches should produce "did you mean" suggestions.
 
 ## `vtt pipe-stdin -- vt run buid`
 

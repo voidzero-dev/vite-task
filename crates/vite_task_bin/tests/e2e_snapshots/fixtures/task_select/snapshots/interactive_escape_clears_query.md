@@ -1,7 +1,6 @@
 # interactive_escape_clears_query
 
-Escape in the selector should clear the current query and restore the
-unfiltered list at cursor position 0.
+Escape in the selector should clear the current query and restore the unfiltered list at cursor position 0.
 
 ## `vt run`
 

@@ -1,7 +1,6 @@
 # root_glob___unmatched_directory
 
-Modifying a file outside the glob pattern (e.g. `other/`) should leave the
-cache hit intact.
+Modifying a file outside the glob pattern (e.g. `other/`) should leave the cache hit intact.
 
 ## `vt run root-glob-test`
 

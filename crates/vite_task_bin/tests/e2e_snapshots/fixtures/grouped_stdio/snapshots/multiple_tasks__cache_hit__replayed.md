@@ -1,7 +1,6 @@
 # multiple_tasks__cache_hit__replayed
 
-Cache-hit replays for multiple tasks under grouped mode should each produce
-their own block, matching the original (non-replayed) output.
+Cache-hit replays for multiple tasks under grouped mode should each produce their own block, matching the original (non-replayed) output.
 
 ## `vt run --log=grouped -r check-tty-cached`
 

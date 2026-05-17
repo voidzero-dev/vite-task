@@ -1,40 +1,35 @@
 [[e2e]]
 name = "single_task__cache_off__grouped_output"
 comment = """
-Under `--log=grouped` with caching off, a single task's piped stdout/stderr
-should be printed as one grouped block; none of the fds should be TTYs.
+Under `--log=grouped` with caching off, a single task's piped stdout/stderr should be printed as one grouped block; none of the fds should be TTYs.
 """
 steps = [["vt", "run", "--log=grouped", "check-tty"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_off__grouped_output"
 comment = """
-Under `--log=grouped` with caching off, each task's output should be emitted
-as its own grouped block (one block per task, never interleaved).
+Under `--log=grouped` with caching off, each task's output should be emitted as its own grouped block (one block per task, never interleaved).
 """
 steps = [["vt", "run", "--log=grouped", "-r", "check-tty"]]
 
 [[e2e]]
 name = "single_task__cache_miss__grouped_output"
 comment = """
-On a cache miss, grouped mode should still pipe stdio and emit one block for
-the single task.
+On a cache miss, grouped mode should still pipe stdio and emit one block for the single task.
 """
 steps = [["vt", "run", "--log=grouped", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_miss__grouped_output"
 comment = """
-On a cache miss across multiple tasks, grouped mode should emit one block
-per task with piped, non-TTY stdio.
+On a cache miss across multiple tasks, grouped mode should emit one block per task with piped, non-TTY stdio.
 """
 steps = [["vt", "run", "--log=grouped", "-r", "check-tty-cached"]]
 
 [[e2e]]
 name = "single_task__cache_hit__replayed"
 comment = """
-A cache-hit replay of a single task under grouped mode should reproduce the
-original grouped block from cached output.
+A cache-hit replay of a single task under grouped mode should reproduce the original grouped block from cached output.
 """
 steps = [
   [
@@ -54,8 +49,7 @@ steps = [
 [[e2e]]
 name = "multiple_tasks__cache_hit__replayed"
 comment = """
-Cache-hit replays for multiple tasks under grouped mode should each produce
-their own block, matching the original (non-replayed) output.
+Cache-hit replays for multiple tasks under grouped mode should each produce their own block, matching the original (non-replayed) output.
 """
 steps = [
   [
@@ -77,7 +71,6 @@ steps = [
 [[e2e]]
 name = "stdin_is_always_null"
 comment = """
-In grouped mode, task stdin is always `/dev/null` regardless of the parent's
-stdin — piping data in from outside must not reach the task.
+In grouped mode, task stdin is always `/dev/null` regardless of the parent's stdin — piping data in from outside must not reach the task.
 """
 steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "--log=grouped", "read-stdin"]]

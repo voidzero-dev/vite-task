@@ -1,7 +1,6 @@
 # pass_args_to_task
 
-Tests that arguments after task name should be passed to the task
-https://github.com/voidzero-dev/vite-task/issues/285
+Tests that arguments after task name should be passed to the task https://github.com/voidzero-dev/vite-task/issues/285
 
 ## `vt run echo --help`
 

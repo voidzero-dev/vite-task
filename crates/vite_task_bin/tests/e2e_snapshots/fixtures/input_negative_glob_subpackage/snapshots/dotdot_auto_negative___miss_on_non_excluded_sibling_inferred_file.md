@@ -1,7 +1,6 @@
 # dotdot_auto_negative___miss_on_non_excluded_sibling_inferred_file
 
-Under `auto: true` plus a `../` negative glob, inferred reads from sibling
-files outside the exclusion should still invalidate the cache.
+Under `auto: true` plus a `../` negative glob, inferred reads from sibling files outside the exclusion should still invalidate the cache.
 
 ## `vt run sub-pkg#dotdot-auto-negative`
 

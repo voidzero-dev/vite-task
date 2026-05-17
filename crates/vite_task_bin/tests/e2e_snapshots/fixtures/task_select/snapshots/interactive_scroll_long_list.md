@@ -1,7 +1,6 @@
 # interactive_scroll_long_list
 
-With a list taller than the 8-row page, navigating past the viewport should
-scroll down, and navigating back should scroll the view up to index 0.
+With a list taller than the 8-row page, navigating past the viewport should scroll down, and navigating back should scroll the view up to index 0.
 
 ## `vt run`
 

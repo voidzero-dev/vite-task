@@ -1,7 +1,6 @@
 # non_interactive_list_tasks
 
-With piped stdin (non-interactive), `vt run` with no task argument should
-list all available tasks instead of launching the picker.
+With piped stdin (non-interactive), `vt run` with no task argument should list all available tasks instead of launching the picker.
 
 ## `vtt pipe-stdin -- vt run`
 

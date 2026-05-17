@@ -1,7 +1,6 @@
 # multiple_tasks__cache_off__inherit_stdio
 
-In interleaved mode with caching off, multiple tasks under `-r` should each
-inherit stdio (TTY-preserving behavior applies per task regardless of count).
+In interleaved mode with caching off, multiple tasks under `-r` should each inherit stdio (TTY-preserving behavior applies per task regardless of count).
 
 ## `vt run -r check-tty`
 

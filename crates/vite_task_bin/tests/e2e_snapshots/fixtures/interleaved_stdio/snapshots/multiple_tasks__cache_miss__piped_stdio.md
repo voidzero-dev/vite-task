@@ -1,7 +1,6 @@
 # multiple_tasks__cache_miss__piped_stdio
 
-Across multiple tasks on a cache miss, each one should still see piped
-(non-TTY) stdio for output capture.
+Across multiple tasks on a cache miss, each one should still see piped (non-TTY) stdio for output capture.
 
 ## `vt run -r check-tty-cached`
 

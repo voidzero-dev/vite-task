@@ -1,8 +1,6 @@
 # output_globs___files_restored_on_cache_hit
 
-With explicit output globs (`dist/**`), the first run writes a file to
-`dist/`. After deleting `dist/`, a second run with no input changes is a
-cache hit and the archived output file is restored.
+With explicit output globs (`dist/**`), the first run writes a file to `dist/`. After deleting `dist/`, a second run with no input changes is a cache hit and the archived output file is restored.
 
 ## `vt run build`
 

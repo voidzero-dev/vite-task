@@ -1,8 +1,6 @@
 # independent_tasks_run_concurrently
 
-Two packages with no dependency relationship should run concurrently. Both tasks
-participate in a 2-way barrier, so sequential execution would hang forever and
-time out.
+Two packages with no dependency relationship should run concurrently. Both tasks participate in a 2-way barrier, so sequential execution would hang forever and time out.
 
 ## `vt run -r build`
 

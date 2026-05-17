@@ -1,7 +1,6 @@
 # single_task__cache_hit__replayed
 
-A cache-hit replay of a single task under labeled mode should reproduce the
-labeled output from cached data.
+A cache-hit replay of a single task under labeled mode should reproduce the labeled output from cached data.
 
 ## `vt run --log=labeled check-tty-cached`
 

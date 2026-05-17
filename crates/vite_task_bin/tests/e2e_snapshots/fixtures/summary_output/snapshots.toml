@@ -1,8 +1,7 @@
 [[e2e]]
 name = "single_task_cache_miss_shows_no_summary"
 comment = """
-A single task on its first run (cache miss) should produce no summary line
-at all — only the task's own output.
+A single task on its first run (cache miss) should produce no summary line at all — only the task's own output.
 """
 cwd = "packages/a"
 steps = [["vt", "run", "build"]]
@@ -10,8 +9,7 @@ steps = [["vt", "run", "build"]]
 [[e2e]]
 name = "single_task_cache_hit_shows_compact_summary"
 comment = """
-When a single task hits the cache on a re-run, the compact one-line summary
-should be emitted.
+When a single task hits the cache on a re-run, the compact one-line summary should be emitted.
 """
 cwd = "packages/a"
 steps = [
@@ -30,16 +28,14 @@ steps = [
 [[e2e]]
 name = "multi_task_all_cache_miss_shows_compact_summary"
 comment = """
-A multi-task (`-r`) run where every task misses should still print a compact
-summary with 0 hits.
+A multi-task (`-r`) run where every task misses should still print a compact summary with 0 hits.
 """
 steps = [["vt", "run", "-r", "build"]]
 
 [[e2e]]
 name = "multi_task_with_cache_hits_shows_compact_summary"
 comment = """
-On the second multi-task (`-r`) run, the compact summary should report the
-correct hit count.
+On the second multi-task (`-r`) run, the compact summary should report the correct hit count.
 """
 steps = [
   { argv = [
@@ -59,8 +55,7 @@ steps = [
 [[e2e]]
 name = "single_task_verbose_shows_full_summary"
 comment = """
-`vt run -v` on a single task should emit the full detailed summary, even on
-a first-run cache miss.
+`vt run -v` on a single task should emit the full detailed summary, even on a first-run cache miss.
 """
 cwd = "packages/a"
 steps = [["vt", "run", "-v", "build"]]
@@ -75,8 +70,7 @@ steps = [["vt", "run", "-r", "-v", "build"]]
 [[e2e]]
 name = "multi_task_verbose_with_cache_hits_shows_full_summary"
 comment = """
-With `-v` on a multi-task re-run, the full summary should report per-task
-cache hits (not just overall stats).
+With `-v` on a multi-task re-run, the full summary should report per-task cache hits (not just overall stats).
 """
 steps = [
   { argv = [
@@ -97,16 +91,14 @@ steps = [
 [[e2e]]
 name = "last_details_with_no_previous_run_shows_error"
 comment = """
-`vt run --last-details` with no prior run in the workspace should produce a
-clear error rather than empty output.
+`vt run --last-details` with no prior run in the workspace should produce a clear error rather than empty output.
 """
 steps = [["vt", "run", "--last-details"]]
 
 [[e2e]]
 name = "last_details_after_run_shows_saved_summary"
 comment = """
-After a single-task run, `vt run --last-details` should display the saved
-summary from disk.
+After a single-task run, `vt run --last-details` should display the saved summary from disk.
 """
 cwd = "packages/a"
 steps = [
@@ -125,8 +117,7 @@ steps = [
 [[e2e]]
 name = "last_details_after_multi_task_run_shows_saved_summary"
 comment = """
-After a multi-task (`-r`) run, `vt run --last-details` should display the
-saved summary covering every task.
+After a multi-task (`-r`) run, `vt run --last-details` should display the saved summary covering every task.
 """
 steps = [
   { argv = [

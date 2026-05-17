@@ -1,7 +1,6 @@
 # multi_task_with_read_write_shows_not_cached_in_summary
 
-In a multi-task (`-r`) run, tasks with a read-write overlap should appear in
-the compact summary stats alongside an `InputModified` notice.
+In a multi-task (`-r`) run, tasks with a read-write overlap should appear in the compact summary stats alongside an `InputModified` notice.
 
 ## `vt run -r task`
 

@@ -1,7 +1,6 @@
 # dotdot_positive_glob___hit_on_unmatched_file_change
 
-A `../` positive glob should only match the paths it names — sibling files
-outside the glob (e.g. sibling `dist/`) should not affect the cache.
+A `../` positive glob should only match the paths it names — sibling files outside the glob (e.g. sibling `dist/`) should not affect the cache.
 
 ## `vt run sub-pkg#dotdot-positive`
 

@@ -1,7 +1,6 @@
 # positive_globs_only___hit_on_unmatched_file_change
 
-Modifying a file outside the positive glob (e.g. under `test/`) should not
-invalidate the cache.
+Modifying a file outside the positive glob (e.g. under `test/`) should not invalidate the cache.
 
 ## `vt run positive-globs-only`
 

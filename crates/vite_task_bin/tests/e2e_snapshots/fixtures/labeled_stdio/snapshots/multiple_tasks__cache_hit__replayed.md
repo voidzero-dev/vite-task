@@ -1,7 +1,6 @@
 # multiple_tasks__cache_hit__replayed
 
-A cache-hit replay across multiple tasks under labeled mode should reproduce
-each task's labeled output.
+A cache-hit replay across multiple tasks under labeled mode should reproduce each task's labeled output.
 
 ## `vt run --log=labeled -r check-tty-cached`
 

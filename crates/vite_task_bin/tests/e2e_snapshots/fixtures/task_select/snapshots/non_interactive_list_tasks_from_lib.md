@@ -1,7 +1,6 @@
 # non_interactive_list_tasks_from_lib
 
-When listing from a subpackage's cwd, that package's tasks should appear
-first and be listed unqualified.
+When listing from a subpackage's cwd, that package's tasks should appear first and be listed unqualified.
 
 ## `vtt pipe-stdin -- vt run`
 

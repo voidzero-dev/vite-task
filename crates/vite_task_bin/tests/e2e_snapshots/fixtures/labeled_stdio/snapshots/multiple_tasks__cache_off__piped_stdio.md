@@ -1,7 +1,6 @@
 # multiple_tasks__cache_off__piped_stdio
 
-Under `--log=labeled` with caching off, multiple tasks should each get piped
-stdio and each line should be prefixed with `[pkg#task]`.
+Under `--log=labeled` with caching off, multiple tasks should each get piped stdio and each line should be prefixed with `[pkg#task]`.
 
 ## `vt run --log=labeled -r check-tty`
 

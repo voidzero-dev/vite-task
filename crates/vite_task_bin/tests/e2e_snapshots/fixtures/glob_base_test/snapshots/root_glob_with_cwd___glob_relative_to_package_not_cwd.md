@@ -1,7 +1,6 @@
 # root_glob_with_cwd___glob_relative_to_package_not_cwd
 
-Even when the task declares a custom `cwd`, its glob stays anchored at the
-package root — `src/**` still matches `src/root.ts`.
+Even when the task declares a custom `cwd`, its glob stays anchored at the package root — `src/**` still matches `src/root.ts`.
 
 ## `vt run root-glob-with-cwd`
 

@@ -1,7 +1,6 @@
 # ctrl_c_prevents_future_tasks
 
-Ctrl+C while running sequentially (b depends on a) should terminate a and
-prevent b from being scheduled.
+Ctrl+C while running sequentially (b depends on a) should terminate a and prevent b from being scheduled.
 
 ## `vt run -r --no-cache dev`
 

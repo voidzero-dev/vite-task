@@ -1,7 +1,6 @@
 # single_task__cache_hit__replayed
 
-A cache-hit second run should replay the previously captured output verbatim
-instead of re-executing the task.
+A cache-hit second run should replay the previously captured output verbatim instead of re-executing the task.
 
 ## `vt run check-tty-cached`
 

@@ -1,7 +1,6 @@
 # multiple_tasks__cache_miss__piped_stdio
 
-On a cache miss across multiple tasks, each task's piped output should be
-individually prefixed in labeled mode.
+On a cache miss across multiple tasks, each task's piped output should be individually prefixed in labeled mode.
 
 ## `vt run --log=labeled -r check-tty-cached`
 

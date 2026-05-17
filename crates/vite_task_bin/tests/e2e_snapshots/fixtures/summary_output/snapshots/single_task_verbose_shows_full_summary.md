@@ -1,7 +1,6 @@
 # single_task_verbose_shows_full_summary
 
-`vt run -v` on a single task should emit the full detailed summary, even on
-a first-run cache miss.
+`vt run -v` on a single task should emit the full detailed summary, even on a first-run cache miss.
 
 ## `vt run -v build`
 

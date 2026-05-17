@@ -1,47 +1,41 @@
 [[e2e]]
 name = "partial_match_warns_for_unmatched_filter"
 comment = """
-When some `--filter` flags match and one does not, the run should proceed and
-warn only for the unmatched filter.
+When some `--filter` flags match and one does not, the run should proceed and warn only for the unmatched filter.
 """
 steps = [["vt", "run", "--filter", "@test/app", "--filter", "nonexistent", "build"]]
 
 [[e2e]]
 name = "multiple_unmatched_filters_warn_individually"
 comment = """
-Each unmatched `--filter` should produce its own warning — warnings must not
-be collapsed into a single message.
+Each unmatched `--filter` should produce its own warning — warnings must not be collapsed into a single message.
 """
 steps = [["vt", "run", "--filter", "@test/app", "--filter", "nope1", "--filter", "nope2", "build"]]
 
 [[e2e]]
 name = "whitespace_split_filter_warns_for_unmatched_token"
 comment = """
-A whitespace-split `--filter` argument should warn about each of its individual
-unmatched tokens.
+A whitespace-split `--filter` argument should warn about each of its individual unmatched tokens.
 """
 steps = [["vt", "run", "--filter", "@test/app nope", "build"]]
 
 [[e2e]]
 name = "unmatched_exclusion_filter_does_not_warn"
 comment = """
-An exclusion filter (`!...`) that matches nothing should be silent; only
-unmatched inclusion filters warn.
+An exclusion filter (`!...`) that matches nothing should be silent; only unmatched inclusion filters warn.
 """
 steps = [["vt", "run", "--filter", "@test/app", "--filter", "!nonexistent", "build"]]
 
 [[e2e]]
 name = "unmatched_glob_filter_warns"
 comment = """
-A glob `--filter` that matches no packages should warn like any other
-unmatched inclusion filter.
+A glob `--filter` that matches no packages should warn like any other unmatched inclusion filter.
 """
 steps = [["vt", "run", "--filter", "@test/app", "--filter", "@nope/*", "build"]]
 
 [[e2e]]
 name = "unmatched_directory_filter_warns"
 comment = """
-A directory-style `--filter` (`./packages/...`) that points nowhere should
-warn just like an unmatched name filter.
+A directory-style `--filter` (`./packages/...`) that points nowhere should warn just like an unmatched name filter.
 """
 steps = [["vt", "run", "--filter", "@test/app", "--filter", "./packages/nope", "build"]]

@@ -1,63 +1,55 @@
 [[e2e]]
 name = "single_task__cache_off__inherits_stdio"
 comment = """
-In interleaved mode with caching off, a single task should inherit stdio from
-the parent — all fds should be TTYs.
+In interleaved mode with caching off, a single task should inherit stdio from the parent — all fds should be TTYs.
 """
 steps = [["vt", "run", "check-tty"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_off__inherit_stdio"
 comment = """
-In interleaved mode with caching off, multiple tasks under `-r` should each
-inherit stdio (TTY-preserving behavior applies per task regardless of count).
+In interleaved mode with caching off, multiple tasks under `-r` should each inherit stdio (TTY-preserving behavior applies per task regardless of count).
 """
 steps = [["vt", "run", "-r", "check-tty"]]
 
 [[e2e]]
 name = "single_task__cache_miss__piped_stdio"
 comment = """
-On a cache miss in interleaved mode, stdio must be piped (not a TTY) so that
-output can be captured for future replay.
+On a cache miss in interleaved mode, stdio must be piped (not a TTY) so that output can be captured for future replay.
 """
 steps = [["vt", "run", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_miss__piped_stdio"
 comment = """
-Across multiple tasks on a cache miss, each one should still see piped
-(non-TTY) stdio for output capture.
+Across multiple tasks on a cache miss, each one should still see piped (non-TTY) stdio for output capture.
 """
 steps = [["vt", "run", "-r", "check-tty-cached"]]
 
 [[e2e]]
 name = "single_task__cache_hit__replayed"
 comment = """
-A cache-hit second run should replay the previously captured output verbatim
-instead of re-executing the task.
+A cache-hit second run should replay the previously captured output verbatim instead of re-executing the task.
 """
 steps = [["vt", "run", "check-tty-cached"], ["vt", "run", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_hit__replayed"
 comment = """
-Across multiple tasks, the second run should be all cache hits with each
-task's captured output replayed.
+Across multiple tasks, the second run should be all cache hits with each task's captured output replayed.
 """
 steps = [["vt", "run", "-r", "check-tty-cached"], ["vt", "run", "-r", "check-tty-cached"]]
 
 [[e2e]]
 name = "cache_off_inherits_stdin"
 comment = """
-With caching off, stdin piped into `vp run` should flow through to the task
-process.
+With caching off, stdin piped into `vp run` should flow through to the task process.
 """
 steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "read-stdin"]]
 
 [[e2e]]
 name = "cache_on_gets_null_stdin"
 comment = """
-With caching on, task stdin should be replaced with `/dev/null` — piping data
-in from outside must not reach the task.
+With caching on, task stdin should be replaced with `/dev/null` — piping data in from outside must not reach the task.
 """
 steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "read-stdin-cached"]]

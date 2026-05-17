@@ -1,7 +1,6 @@
 # single_task__cache_miss__piped_stdio
 
-On a cache miss for a single task, labeled mode should still pipe stdio and
-prefix output lines.
+On a cache miss for a single task, labeled mode should still pipe stdio and prefix output lines.
 
 ## `vt run --log=labeled check-tty-cached`
 

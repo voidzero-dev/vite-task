@@ -1,7 +1,6 @@
 # single_task__cache_miss__grouped_output
 
-On a cache miss, grouped mode should still pipe stdio and emit one block for
-the single task.
+On a cache miss, grouped mode should still pipe stdio and emit one block for the single task.
 
 ## `vt run --log=grouped check-tty-cached`
 

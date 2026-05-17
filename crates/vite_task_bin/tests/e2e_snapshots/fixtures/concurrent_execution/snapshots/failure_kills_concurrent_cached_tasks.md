@@ -1,8 +1,6 @@
 # failure_kills_concurrent_cached_tasks
 
-Same failure-cancellation scenario, but with `--cache` so execution goes through
-the piped stdio / fspy path (spawn_with_tracking) instead of the inherited-stdio
-path.
+Same failure-cancellation scenario, but with `--cache` so execution goes through the piped stdio / fspy path (spawn_with_tracking) instead of the inherited-stdio path.
 
 ## `vt run -r --cache test`
 

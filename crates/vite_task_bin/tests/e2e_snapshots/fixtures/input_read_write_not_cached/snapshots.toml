@@ -1,9 +1,7 @@
 [[e2e]]
 name = "single_read_write_task_shows_not_cached_message"
 comment = """
-A single task that reads and writes the same file (fspy sees both ops)
-should be flagged as "not cached because it modified its input" in the
-compact summary.
+A single task that reads and writes the same file (fspy sees both ops) should be flagged as "not cached because it modified its input" in the compact summary.
 """
 cwd = "packages/rw-pkg"
 steps = [["vt", "run", "task"], ["vt", "run", "task"]]
@@ -11,16 +9,14 @@ steps = [["vt", "run", "task"], ["vt", "run", "task"]]
 [[e2e]]
 name = "multi_task_with_read_write_shows_not_cached_in_summary"
 comment = """
-In a multi-task (`-r`) run, tasks with a read-write overlap should appear in
-the compact summary stats alongside an `InputModified` notice.
+In a multi-task (`-r`) run, tasks with a read-write overlap should appear in the compact summary stats alongside an `InputModified` notice.
 """
 steps = [["vt", "run", "-r", "task"], ["vt", "run", "-r", "task"]]
 
 [[e2e]]
 name = "verbose_read_write_task_shows_path_in_full_summary"
 comment = """
-Under `-v`, the full summary should list the exact overlapping path that
-caused the task to skip caching.
+Under `-v`, the full summary should list the exact overlapping path that caused the task to skip caching.
 """
 cwd = "packages/rw-pkg"
 steps = [["vt", "run", "-v", "task"]]
@@ -28,9 +24,7 @@ steps = [["vt", "run", "-v", "task"]]
 [[e2e]]
 name = "single_O_RDWR_open_is_not_cached"
 comment = """
-Opening a single file with `O_RDWR` (e.g. `touch` keeping the file) should
-count as a read-write overlap and prevent caching, just like separate
-read+write syscalls.
+Opening a single file with `O_RDWR` (e.g. `touch` keeping the file) should count as a read-write overlap and prevent caching, just like separate read+write syscalls.
 """
 cwd = "packages/touch-pkg"
 steps = [["vt", "run", "task"], ["vt", "run", "task"]]

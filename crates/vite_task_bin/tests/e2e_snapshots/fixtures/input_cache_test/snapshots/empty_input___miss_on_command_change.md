@@ -1,7 +1,6 @@
 # empty_input___miss_on_command_change
 
-Even with `input: []`, changing the task's command should still invalidate
-the cache.
+Even with `input: []`, changing the task's command should still invalidate the cache.
 
 ## `vt run empty-inputs`
 

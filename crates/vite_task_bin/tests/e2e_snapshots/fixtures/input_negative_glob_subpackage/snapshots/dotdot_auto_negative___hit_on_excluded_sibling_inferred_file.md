@@ -1,7 +1,6 @@
 # dotdot_auto_negative___hit_on_excluded_sibling_inferred_file
 
-A `!../shared/dist/**` negative glob should filter inferred reads that land
-in the sibling package's `dist/` directory.
+A `!../shared/dist/**` negative glob should filter inferred reads that land in the sibling package's `dist/` directory.
 
 ## `vt run sub-pkg#dotdot-auto-negative`
 

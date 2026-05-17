@@ -1,7 +1,6 @@
 # interactive_select_task_from_lib
 
-In the interactive selector launched from `packages/lib`, the first entry
-should be a lib-owned task.
+In the interactive selector launched from `packages/lib`, the first entry should be a lib-owned task.
 
 ## `vt run`
 

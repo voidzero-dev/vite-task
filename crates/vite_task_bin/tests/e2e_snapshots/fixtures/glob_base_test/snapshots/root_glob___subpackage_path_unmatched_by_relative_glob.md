@@ -1,7 +1,6 @@
 # root_glob___subpackage_path_unmatched_by_relative_glob
 
-A relative glob anchored at the root package should not reach into
-`packages/<sub>/src/` — a subpackage file change stays a cache hit.
+A relative glob anchored at the root package should not reach into `packages/<sub>/src/` — a subpackage file change stays a cache hit.
 
 ## `vt run root-glob-test`
 

@@ -1,7 +1,6 @@
 # interactive_search_other_package_task
 
-A search query can match a task that lives only in another package; that
-task should become selectable.
+A search query can match a task that lives only in another package; that task should become selectable.
 
 ## `vt run`
 

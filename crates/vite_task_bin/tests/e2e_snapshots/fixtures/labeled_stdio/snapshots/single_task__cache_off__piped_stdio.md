@@ -1,7 +1,6 @@
 # single_task__cache_off__piped_stdio
 
-Under `--log=labeled` with caching off, a single task's stdio should be piped
-through the line-prefixing writer (not a TTY).
+Under `--log=labeled` with caching off, a single task's stdio should be piped through the line-prefixing writer (not a TTY).
 
 ## `vt run --log=labeled check-tty`
 

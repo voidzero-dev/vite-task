@@ -1,35 +1,27 @@
 [[e2e]]
 name = "independent_tasks_run_concurrently"
 comment = """
-Two packages with no dependency relationship should run concurrently. Both tasks
-participate in a 2-way barrier, so sequential execution would hang forever and
-time out.
+Two packages with no dependency relationship should run concurrently. Both tasks participate in a 2-way barrier, so sequential execution would hang forever and time out.
 """
 steps = [["vt", "run", "-r", "build"]]
 
 [[e2e]]
 name = "failure_kills_concurrent_tasks"
 comment = """
-When one concurrent task fails, the sibling running under inherited stdio must
-be cancelled. Task a exits 1 after the shared barrier, task b hangs after it —
-completing without timeout proves cancellation killed b.
+When one concurrent task fails, the sibling running under inherited stdio must be cancelled. Task a exits 1 after the shared barrier, task b hangs after it — completing without timeout proves cancellation killed b.
 """
 steps = [["vt", "run", "-r", "test"]]
 
 [[e2e]]
 name = "failure_kills_concurrent_cached_tasks"
 comment = """
-Same failure-cancellation scenario, but with `--cache` so execution goes through
-the piped stdio / fspy path (spawn_with_tracking) instead of the inherited-stdio
-path.
+Same failure-cancellation scenario, but with `--cache` so execution goes through the piped stdio / fspy path (spawn_with_tracking) instead of the inherited-stdio path.
 """
 steps = [["vt", "run", "-r", "--cache", "test"]]
 
 [[e2e]]
 name = "failure_kills_daemonized_concurrent_tasks"
 comment = """
-Cancellation must also kill a sibling that has daemonized — closing stdout/stderr
-(EOF on the pipe) while the process itself stays alive. The runner must reach
-the process via the cancellation token + Job Object, not by pipe closure.
+Cancellation must also kill a sibling that has daemonized — closing stdout/stderr (EOF on the pipe) while the process itself stays alive. The runner must reach the process via the cancellation token + Job Object, not by pipe closure.
 """
 steps = [["vt", "run", "-r", "--cache", "daemon"]]

@@ -1,7 +1,6 @@
 # folder_slash_input___hit_on_file_outside_directory
 
-With a trailing-slash input (`src/`), files outside the directory should not
-be part of the fingerprint.
+With a trailing-slash input (`src/`), files outside the directory should not be part of the fingerprint.
 
 ## `vt run folder-slash-input`
 

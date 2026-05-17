@@ -1,7 +1,6 @@
 # subpackage_glob_with_cwd___glob_relative_to_package_not_cwd
 
-A custom `cwd` on a subpackage task should not shift its glob base — `src/**`
-still resolves relative to the subpackage directory.
+A custom `cwd` on a subpackage task should not shift its glob base — `src/**` still resolves relative to the subpackage directory.
 
 ## `vt run sub-pkg#sub-glob-with-cwd`
 

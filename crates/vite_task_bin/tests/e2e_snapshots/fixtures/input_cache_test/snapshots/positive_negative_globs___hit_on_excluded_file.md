@@ -1,7 +1,6 @@
 # positive_negative_globs___hit_on_excluded_file
 
-A file matched by the negative glob should be excluded from fingerprinting
-even if it also matches a positive glob.
+A file matched by the negative glob should be excluded from fingerprinting even if it also matches a positive glob.
 
 ## `vt run positive-negative-globs`
 

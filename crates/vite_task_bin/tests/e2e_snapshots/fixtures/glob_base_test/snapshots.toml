@@ -1,8 +1,7 @@
 [[e2e]]
 name = "root_glob___matches_src_files"
 comment = """
-A root-package glob should match files under the package's own `src/` —
-modifying such a file invalidates the cache.
+A root-package glob should match files under the package's own `src/` — modifying such a file invalidates the cache.
 """
 steps = [
   ["vt", "run", "root-glob-test"],
@@ -15,8 +14,7 @@ steps = [
 [[e2e]]
 name = "root_glob___unmatched_directory"
 comment = """
-Modifying a file outside the glob pattern (e.g. `other/`) should leave the
-cache hit intact.
+Modifying a file outside the glob pattern (e.g. `other/`) should leave the cache hit intact.
 """
 steps = [
   ["vt", "run", "root-glob-test"],
@@ -29,8 +27,7 @@ steps = [
 [[e2e]]
 name = "root_glob___subpackage_path_unmatched_by_relative_glob"
 comment = """
-A relative glob anchored at the root package should not reach into
-`packages/<sub>/src/` — a subpackage file change stays a cache hit.
+A relative glob anchored at the root package should not reach into `packages/<sub>/src/` — a subpackage file change stays a cache hit.
 """
 steps = [
   ["vt", "run", "root-glob-test"],
@@ -43,8 +40,7 @@ steps = [
 [[e2e]]
 name = "root_glob_with_cwd___glob_relative_to_package_not_cwd"
 comment = """
-Even when the task declares a custom `cwd`, its glob stays anchored at the
-package root — `src/**` still matches `src/root.ts`.
+Even when the task declares a custom `cwd`, its glob stays anchored at the package root — `src/**` still matches `src/root.ts`.
 """
 steps = [
   ["vt", "run", "root-glob-with-cwd"],
@@ -70,8 +66,7 @@ steps = [
 [[e2e]]
 name = "subpackage_glob___unmatched_directory_in_subpackage"
 comment = """
-Changes to a sibling directory within the subpackage that the glob does not
-cover (e.g. `other/`) should leave the cache hit intact.
+Changes to a sibling directory within the subpackage that the glob does not cover (e.g. `other/`) should leave the cache hit intact.
 """
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-test"],
@@ -84,8 +79,7 @@ steps = [
 [[e2e]]
 name = "subpackage_glob___root_path_unmatched_by_relative_glob"
 comment = """
-A subpackage-anchored relative glob should not reach up into the root
-package's `src/` — a root-package file change stays a cache hit.
+A subpackage-anchored relative glob should not reach up into the root package's `src/` — a root-package file change stays a cache hit.
 """
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-test"],
@@ -98,8 +92,7 @@ steps = [
 [[e2e]]
 name = "subpackage_glob_with_cwd___glob_relative_to_package_not_cwd"
 comment = """
-A custom `cwd` on a subpackage task should not shift its glob base — `src/**`
-still resolves relative to the subpackage directory.
+A custom `cwd` on a subpackage task should not shift its glob base — `src/**` still resolves relative to the subpackage directory.
 """
 steps = [
   ["vt", "run", "sub-pkg#sub-glob-with-cwd"],

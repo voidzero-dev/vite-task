@@ -1,7 +1,6 @@
 # verbose_read_write_task_shows_path_in_full_summary
 
-Under `-v`, the full summary should list the exact overlapping path that
-caused the task to skip caching.
+Under `-v`, the full summary should list the exact overlapping path that caused the task to skip caching.
 
 ## `vt run -v task`
 

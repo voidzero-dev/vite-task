@@ -1,8 +1,6 @@
 # single_O_RDWR_open_is_not_cached
 
-Opening a single file with `O_RDWR` (e.g. `touch` keeping the file) should
-count as a read-write overlap and prevent caching, just like separate
-read+write syscalls.
+Opening a single file with `O_RDWR` (e.g. `touch` keeping the file) should count as a read-write overlap and prevent caching, just like separate read+write syscalls.
 
 ## `vt run task`
 

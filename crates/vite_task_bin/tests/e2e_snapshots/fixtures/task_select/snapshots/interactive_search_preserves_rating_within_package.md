@@ -1,7 +1,6 @@
 # interactive_search_preserves_rating_within_package
 
-When multiple current-package tasks match, the fuzzy-rating order between
-them should be preserved (not broken by current-package grouping).
+When multiple current-package tasks match, the fuzzy-rating order between them should be preserved (not broken by current-package grouping).
 
 ## `vt run`
 

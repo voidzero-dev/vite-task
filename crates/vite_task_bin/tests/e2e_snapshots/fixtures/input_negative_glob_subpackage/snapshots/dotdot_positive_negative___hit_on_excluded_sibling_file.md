@@ -1,7 +1,6 @@
 # dotdot_positive_negative___hit_on_excluded_sibling_file
 
-A `../`-prefixed negative glob should correctly exclude files in the sibling
-package's `dist/` directory.
+A `../`-prefixed negative glob should correctly exclude files in the sibling package's `dist/` directory.
 
 ## `vt run sub-pkg#dotdot-positive-negative`
 

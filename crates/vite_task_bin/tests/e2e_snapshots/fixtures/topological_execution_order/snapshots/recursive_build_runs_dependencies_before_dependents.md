@@ -1,7 +1,6 @@
 # recursive_build_runs_dependencies_before_dependents
 
-`vt run -r build` across the workspace should execute packages in
-topological order: `@topo/core` before `@topo/lib` before `@topo/app`.
+`vt run -r build` across the workspace should execute packages in topological order: `@topo/core` before `@topo/lib` before `@topo/app`.
 
 ## `vt run -r build`
 

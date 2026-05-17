@@ -1,7 +1,6 @@
 # typo_in_task_script_fails_without_list
 
-A typo inside a task's own script (i.e. a nested `vp run` command) should
-surface the real failure, not launch the task picker.
+A typo inside a task's own script (i.e. a nested `vp run` command) should surface the real failure, not launch the task picker.
 
 ## `vt run run-typo-task`
 

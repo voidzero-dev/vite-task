@@ -1,9 +1,7 @@
 [[e2e]]
 name = "output_globs___files_restored_on_cache_hit"
 comment = """
-With explicit output globs (`dist/**`), the first run writes a file to
-`dist/`. After deleting `dist/`, a second run with no input changes is a
-cache hit and the archived output file is restored.
+With explicit output globs (`dist/**`), the first run writes a file to `dist/`. After deleting `dist/`, a second run with no input changes is a cache hit and the archived output file is restored.
 """
 steps = [
   { argv = [
@@ -37,10 +35,7 @@ steps = [
 [[e2e]]
 name = "output_globs___old_archive_removed_on_rewrite"
 comment = """
-When a cached task re-runs (cache miss because an input changed), it
-writes a new archive and the previous archive file is cleaned up. After
-two cache-missing runs of the same task the cache directory still
-contains only one `.tar.zst` archive.
+When a cached task re-runs (cache miss because an input changed), it writes a new archive and the previous archive file is cleaned up. After two cache-missing runs of the same task the cache directory still contains only one `.tar.zst` archive.
 """
 steps = [
   { argv = [
@@ -78,8 +73,7 @@ steps = [
 [[e2e]]
 name = "output_globs___negative_excludes_files_from_archive"
 comment = """
-A file matched by a negative output glob is not archived, so it is not
-restored on cache hit.
+A file matched by a negative output glob is not archived, so it is not restored on cache hit.
 """
 steps = [
   { argv = [

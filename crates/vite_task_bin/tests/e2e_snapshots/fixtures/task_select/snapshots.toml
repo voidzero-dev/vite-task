@@ -1,40 +1,35 @@
 [[e2e]]
 name = "non_interactive_list_tasks"
 comment = """
-With piped stdin (non-interactive), `vt run` with no task argument should
-list all available tasks instead of launching the picker.
+With piped stdin (non-interactive), `vt run` with no task argument should list all available tasks instead of launching the picker.
 """
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
 
 [[e2e]]
 name = "non_interactive_did_you_mean"
 comment = """
-In non-interactive mode, a typo that has close fuzzy matches should produce
-"did you mean" suggestions.
+In non-interactive mode, a typo that has close fuzzy matches should produce "did you mean" suggestions.
 """
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "buid"]]
 
 [[e2e]]
 name = "non_interactive_no_suggestions"
 comment = """
-In non-interactive mode, a typo with no close fuzzy matches should omit the
-"did you mean" block entirely.
+In non-interactive mode, a typo with no close fuzzy matches should omit the "did you mean" block entirely.
 """
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "zzzzz"]]
 
 [[e2e]]
 name = "non_interactive_recursive_typo_errors"
 comment = """
-A typoed task name combined with `-r` (not cwd-only) should error without
-listing tasks — the `-r` signal rules out the interactive selector fallback.
+A typoed task name combined with `-r` (not cwd-only) should error without listing tasks — the `-r` signal rules out the interactive selector fallback.
 """
 steps = [["vtt", "pipe-stdin", "--", "vt", "run", "-r", "buid"]]
 
 [[e2e]]
 name = "interactive_select_task"
 comment = """
-In interactive mode, navigating down one entry and pressing Enter should
-select the second task.
+In interactive mode, navigating down one entry and pressing Enter should select the second task.
 """
 cwd = "packages/app"
 steps = [
@@ -52,8 +47,7 @@ steps = [
 [[e2e]]
 name = "interactive_select_with_typo"
 comment = """
-When a typoed task name launches the selector, the typo should be pre-filled
-as the initial search query.
+When a typoed task name launches the selector, the typo should be pre-filled as the initial search query.
 """
 cwd = "packages/app"
 steps = [
@@ -70,8 +64,7 @@ steps = [
 [[e2e]]
 name = "interactive_search_then_select"
 comment = """
-Typing characters in the selector should filter the list in real time, then
-Enter should pick the highlighted result.
+Typing characters in the selector should filter the list in real time, then Enter should pick the highlighted result.
 """
 cwd = "packages/app"
 steps = [
@@ -89,8 +82,7 @@ steps = [
 [[e2e]]
 name = "interactive_escape_clears_query"
 comment = """
-Escape in the selector should clear the current query and restore the
-unfiltered list at cursor position 0.
+Escape in the selector should clear the current query and restore the unfiltered list at cursor position 0.
 """
 cwd = "packages/app"
 steps = [
@@ -110,8 +102,7 @@ steps = [
 [[e2e]]
 name = "recursive_without_task_errors"
 comment = """
-`vt run -r` with no task argument is not treated as a bare run — it should
-error instead of opening the selector.
+`vt run -r` with no task argument is not treated as a bare run — it should error instead of opening the selector.
 """
 cwd = "packages/app"
 steps = [["vt", "run", "-r"]]
@@ -119,8 +110,7 @@ steps = [["vt", "run", "-r"]]
 [[e2e]]
 name = "transitive_typo_errors"
 comment = """
-`vt run -t <typo>` is not cwd-only, so a typo should error rather than fall
-back to the interactive selector.
+`vt run -t <typo>` is not cwd-only, so a typo should error rather than fall back to the interactive selector.
 """
 cwd = "packages/app"
 steps = [["vt", "run", "-t", "buid"]]
@@ -128,8 +118,7 @@ steps = [["vt", "run", "-t", "buid"]]
 [[e2e]]
 name = "interactive_scroll_long_list"
 comment = """
-With a list taller than the 8-row page, navigating past the viewport should
-scroll down, and navigating back should scroll the view up to index 0.
+With a list taller than the 8-row page, navigating past the viewport should scroll down, and navigating back should scroll the view up to index 0.
 """
 cwd = "packages/app"
 steps = [
@@ -163,8 +152,7 @@ steps = [
 [[e2e]]
 name = "non_interactive_list_tasks_from_lib"
 comment = """
-When listing from a subpackage's cwd, that package's tasks should appear
-first and be listed unqualified.
+When listing from a subpackage's cwd, that package's tasks should appear first and be listed unqualified.
 """
 cwd = "packages/lib"
 steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
@@ -172,8 +160,7 @@ steps = [["vtt", "pipe-stdin", "--", "vt", "run"]]
 [[e2e]]
 name = "interactive_select_task_from_lib"
 comment = """
-In the interactive selector launched from `packages/lib`, the first entry
-should be a lib-owned task.
+In the interactive selector launched from `packages/lib`, the first entry should be a lib-owned task.
 """
 cwd = "packages/lib"
 steps = [
@@ -189,8 +176,7 @@ steps = [
 [[e2e]]
 name = "interactive_search_other_package_task"
 comment = """
-A search query can match a task that lives only in another package; that
-task should become selectable.
+A search query can match a task that lives only in another package; that task should become selectable.
 """
 cwd = "packages/app"
 steps = [
@@ -208,8 +194,7 @@ steps = [
 [[e2e]]
 name = "interactive_search_with_hash_skips_reorder"
 comment = """
-Including `#` in the query means "target a specific package#task" and should
-disable the current-package reordering in the filtered list.
+Including `#` in the query means "target a specific package#task" and should disable the current-package reordering in the filtered list.
 """
 cwd = "packages/app"
 steps = [
@@ -227,8 +212,7 @@ steps = [
 [[e2e]]
 name = "interactive_search_preserves_rating_within_package"
 comment = """
-When multiple current-package tasks match, the fuzzy-rating order between
-them should be preserved (not broken by current-package grouping).
+When multiple current-package tasks match, the fuzzy-rating order between them should be preserved (not broken by current-package grouping).
 """
 cwd = "packages/lib"
 steps = [
@@ -246,8 +230,7 @@ steps = [
 [[e2e]]
 name = "interactive_enter_with_no_results_does_nothing"
 comment = """
-Pressing Enter while the filtered list is empty should be a no-op — the
-selector should remain open and accept new input.
+Pressing Enter while the filtered list is empty should be a no-op — the selector should remain open and accept new input.
 """
 cwd = "packages/app"
 steps = [
@@ -268,8 +251,7 @@ steps = [
 [[e2e]]
 name = "interactive_select_from_other_package"
 comment = """
-Navigating past the current-package group should expose tasks in other
-packages, which must also be selectable.
+Navigating past the current-package group should expose tasks in other packages, which must also be selectable.
 """
 cwd = "packages/app"
 steps = [
@@ -289,16 +271,14 @@ steps = [
 [[e2e]]
 name = "typo_in_task_script_fails_without_list"
 comment = """
-A typo inside a task's own script (i.e. a nested `vp run` command) should
-surface the real failure, not launch the task picker.
+A typo inside a task's own script (i.e. a nested `vp run` command) should surface the real failure, not launch the task picker.
 """
 steps = [["vt", "run", "run-typo-task"]]
 
 [[e2e]]
 name = "interactive_ctrl_c_cancels"
 comment = """
-Ctrl+C inside the interactive selector should cancel and exit 130 without
-running any task.
+Ctrl+C inside the interactive selector should cancel and exit 130 without running any task.
 """
 cwd = "packages/app"
 steps = [
@@ -314,8 +294,7 @@ steps = [
 [[e2e]]
 name = "verbose_without_task_errors"
 comment = """
-`vt run --verbose` with no task argument is not bare, so it should error
-with "no task specifier provided" rather than opening the selector.
+`vt run --verbose` with no task argument is not bare, so it should error with "no task specifier provided" rather than opening the selector.
 """
 cwd = "packages/app"
 steps = [["vt", "run", "--verbose"]]
@@ -323,8 +302,7 @@ steps = [["vt", "run", "--verbose"]]
 [[e2e]]
 name = "verbose_with_typo_enters_selector"
 comment = """
-`vt run --verbose <typo>` still qualifies as cwd-only, so it should fall
-back to the interactive selector pre-filled with the typo.
+`vt run --verbose <typo>` still qualifies as cwd-only, so it should fall back to the interactive selector pre-filled with the typo.
 """
 cwd = "packages/app"
 steps = [

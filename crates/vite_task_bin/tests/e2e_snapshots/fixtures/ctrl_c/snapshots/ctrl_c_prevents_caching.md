@@ -1,7 +1,6 @@
 # ctrl_c_prevents_caching
 
-A task interrupted by Ctrl+C must not populate the cache, even if it happens to
-exit 0 — the following run should be a cache miss, not a hit.
+A task interrupted by Ctrl+C must not populate the cache, even if it happens to exit 0 — the following run should be a cache miss, not a hit.
 
 ## `vt run @ctrl-c/a#dev`
 

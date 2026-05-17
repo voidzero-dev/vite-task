@@ -1,7 +1,6 @@
 # interactive_select_task
 
-In interactive mode, navigating down one entry and pressing Enter should
-select the second task.
+In interactive mode, navigating down one entry and pressing Enter should select the second task.
 
 ## `vt run`
 

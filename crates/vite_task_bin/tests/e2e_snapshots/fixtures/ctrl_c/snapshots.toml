@@ -34,8 +34,7 @@ steps = [
 [[e2e]]
 name = "ctrl_c_prevents_future_tasks"
 comment = """
-Ctrl+C while running sequentially (b depends on a) should terminate a and
-prevent b from being scheduled.
+Ctrl+C while running sequentially (b depends on a) should terminate a and prevent b from being scheduled.
 """
 steps = [
   { argv = [
@@ -53,8 +52,7 @@ steps = [
 [[e2e]]
 name = "ctrl_c_prevents_caching"
 comment = """
-A task interrupted by Ctrl+C must not populate the cache, even if it happens to
-exit 0 — the following run should be a cache miss, not a hit.
+A task interrupted by Ctrl+C must not populate the cache, even if it happens to exit 0 — the following run should be a cache miss, not a hit.
 """
 steps = [
   { argv = [

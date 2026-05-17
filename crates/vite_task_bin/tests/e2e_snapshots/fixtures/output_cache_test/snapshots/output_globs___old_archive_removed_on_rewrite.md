@@ -1,9 +1,6 @@
 # output_globs___old_archive_removed_on_rewrite
 
-When a cached task re-runs (cache miss because an input changed), it
-writes a new archive and the previous archive file is cleaned up. After
-two cache-missing runs of the same task the cache directory still
-contains only one `.tar.zst` archive.
+When a cached task re-runs (cache miss because an input changed), it writes a new archive and the previous archive file is cleaned up. After two cache-missing runs of the same task the cache directory still contains only one `.tar.zst` archive.
 
 ## `vt run build`
 

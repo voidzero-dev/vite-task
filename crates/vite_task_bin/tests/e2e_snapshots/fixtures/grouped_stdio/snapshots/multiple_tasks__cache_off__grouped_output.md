@@ -1,7 +1,6 @@
 # multiple_tasks__cache_off__grouped_output
 
-Under `--log=grouped` with caching off, each task's output should be emitted
-as its own grouped block (one block per task, never interleaved).
+Under `--log=grouped` with caching off, each task's output should be emitted as its own grouped block (one block per task, never interleaved).
 
 ## `vt run --log=grouped -r check-tty`
 

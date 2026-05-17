@@ -1,7 +1,6 @@
 # output_globs___negative_excludes_files_from_archive
 
-A file matched by a negative output glob is not archived, so it is not
-restored on cache hit.
+A file matched by a negative output glob is not archived, so it is not restored on cache hit.
 
 ## `vt run build-with-negative`
 

@@ -1,7 +1,6 @@
 # root_glob___matches_src_files
 
-A root-package glob should match files under the package's own `src/` —
-modifying such a file invalidates the cache.
+A root-package glob should match files under the package's own `src/` — modifying such a file invalidates the cache.
 
 ## `vt run root-glob-test`
 

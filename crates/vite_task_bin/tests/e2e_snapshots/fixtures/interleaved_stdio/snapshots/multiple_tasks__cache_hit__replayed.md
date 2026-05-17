@@ -1,7 +1,6 @@
 # multiple_tasks__cache_hit__replayed
 
-Across multiple tasks, the second run should be all cache hits with each
-task's captured output replayed.
+Across multiple tasks, the second run should be all cache hits with each task's captured output replayed.
 
 ## `vt run -r check-tty-cached`
 

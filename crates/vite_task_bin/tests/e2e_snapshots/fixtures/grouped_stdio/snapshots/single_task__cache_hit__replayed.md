@@ -1,7 +1,6 @@
 # single_task__cache_hit__replayed
 
-A cache-hit replay of a single task under grouped mode should reproduce the
-original grouped block from cached output.
+A cache-hit replay of a single task under grouped mode should reproduce the original grouped block from cached output.
 
 ## `vt run --log=grouped check-tty-cached`
 

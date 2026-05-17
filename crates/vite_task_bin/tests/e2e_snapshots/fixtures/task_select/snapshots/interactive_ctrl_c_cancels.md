@@ -1,7 +1,6 @@
 # interactive_ctrl_c_cancels
 
-Ctrl+C inside the interactive selector should cancel and exit 130 without
-running any task.
+Ctrl+C inside the interactive selector should cancel and exit 130 without running any task.
 
 ## `vt run`
 

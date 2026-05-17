@@ -1,21 +1,8 @@
 # cached_output_keeps_colors_across_force_color_values
 
-A task that emits ANSI escape sequences is run twice. Each cache entry
-carries the raw coloured bytes — the runner spawns cached tasks with
-`FORCE_COLOR=1` regardless of the parent's value — and the reporter
-strips colours at the writer level only when the user's terminal cannot
-render them.
+A task that emits ANSI escape sequences is run twice. Each cache entry carries the raw coloured bytes — the runner spawns cached tasks with `FORCE_COLOR=1` regardless of the parent's value — and the reporter strips colours at the writer level only when the user's terminal cannot render them.
 
-Plain-text snapshot steps use the default `vt100::Screen::contents()`
-renderer, which flattens any rendered ANSI styling into plain characters
-(so colors don't pollute snapshots). The two `formatted-snapshot = true`
-steps switch to `vt100::Screen::rows_formatted` (joined with newlines),
-which preserves SGR escapes without emitting cursor positioning or other
-rendering state — the latter varies across platforms and would make the
-snapshot flaky. Bytes are then routed through `std::ascii::escape_default`
-so escapes appear as `\xNN`. Those two steps prove that the cached
-bytes contained colour all along — even when the corresponding initial
-run had displayed them in plain text.
+Plain-text snapshot steps use the default `vt100::Screen::contents()` renderer, which flattens any rendered ANSI styling into plain characters (so colors don't pollute snapshots). The two `formatted-snapshot = true` steps switch to `vt100::Screen::rows_formatted` (joined with newlines), which preserves SGR escapes without emitting cursor positioning or other rendering state — the latter varies across platforms and would make the snapshot flaky. Bytes are then routed through `std::ascii::escape_default` so escapes appear as `\xNN`. Those two steps prove that the cached bytes contained colour all along — even when the corresponding initial run had displayed them in plain text.
 
 ## `FORCE_COLOR=1 vt run print-colored-a`
 

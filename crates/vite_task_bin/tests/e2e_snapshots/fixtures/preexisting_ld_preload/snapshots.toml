@@ -6,23 +6,11 @@ name = "preexisting_ld_preload"
 # assumptions don't hold.
 platform = "linux-gnu"
 comment = """
-Reproduces #340 and verifies that fspy tolerates a user-supplied
-`LD_PRELOAD` by appending its shim instead of rejecting the spawn.
-Appending (not prepending) also preserves symbol-interposition order:
-the user's preload runs first, so short-circuited calls remain
-invisible to fspy — what the OS actually executed is what fspy records.
+Reproduces #340 and verifies that fspy tolerates a user-supplied `LD_PRELOAD` by appending its shim instead of rejecting the spawn. Appending (not prepending) also preserves symbol-interposition order: the user's preload runs first, so short-circuited calls remain invisible to fspy — what the OS actually executed is what fspy records.
 
-`preload_test_lib` (built as a cdylib artifact dep) intercepts
-`open`/`openat` and short-circuits any path containing the marker
-`preload_test_short_circuit`, returning `ENOENT` without forwarding.
-Every other path is forwarded via `RTLD_NEXT` so fspy still observes
-the real syscall.
+`preload_test_lib` (built as a cdylib artifact dep) intercepts `open`/`openat` and short-circuits any path containing the marker `preload_test_short_circuit`, returning `ENOENT` without forwarding. Every other path is forwarded via `RTLD_NEXT` so fspy still observes the real syscall.
 
-The `read` task prints two files. `real.txt` goes through the full
-interposer chain and is tracked as an input. `preload_test_short_circuit.txt`
-is short-circuited by the user preload; fspy never sees it and does not
-track it. Modifying the short-circuited file must therefore be a cache
-hit; modifying the real file must be a miss.
+The `read` task prints two files. `real.txt` goes through the full interposer chain and is tracked as an input. `preload_test_short_circuit.txt` is short-circuited by the user preload; fspy never sees it and does not track it. Modifying the short-circuited file must therefore be a cache hit; modifying the real file must be a miss.
 """
 steps = [
   { argv = [

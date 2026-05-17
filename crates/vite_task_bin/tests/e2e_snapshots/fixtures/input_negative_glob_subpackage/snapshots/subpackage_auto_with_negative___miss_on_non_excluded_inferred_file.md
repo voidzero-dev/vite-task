@@ -1,7 +1,6 @@
 # subpackage_auto_with_negative___miss_on_non_excluded_inferred_file
 
-In a subpackage with `auto: true` plus `!dist/**`, changes to inferred inputs
-outside `dist/` should still invalidate the cache.
+In a subpackage with `auto: true` plus `!dist/**`, changes to inferred inputs outside `dist/` should still invalidate the cache.
 
 ## `vt run sub-pkg#auto-with-negative`
 

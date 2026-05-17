@@ -1,8 +1,6 @@
 # cache_hit_then_miss_on_file_change
 
-Test that glob meta characters in package paths are correctly escaped by wax::escape.
-Without escaping, "packages/[lib]/src/**/*.ts" would interpret [lib] as a character
-class matching 'l', 'i', or 'b' instead of the literal directory name.
+Test that glob meta characters in package paths are correctly escaped by wax::escape. Without escaping, "packages/[lib]/src/**/*.ts" would interpret [lib] as a character class matching 'l', 'i', or 'b' instead of the literal directory name.
 
 ## `vt run [lib]#build`
 

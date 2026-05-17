@@ -1,7 +1,6 @@
 # interactive_select_from_other_package
 
-Navigating past the current-package group should expose tasks in other
-packages, which must also be selectable.
+Navigating past the current-package group should expose tasks in other packages, which must also be selectable.
 
 ## `vt run`
 

@@ -1,7 +1,6 @@
 # multiple_tasks__cache_miss__grouped_output
 
-On a cache miss across multiple tasks, grouped mode should emit one block
-per task with piped, non-TTY stdio.
+On a cache miss across multiple tasks, grouped mode should emit one block per task with piped, non-TTY stdio.
 
 ## `vt run --log=grouped -r check-tty-cached`
 

@@ -1,8 +1,6 @@
 # failure_kills_concurrent_tasks
 
-When one concurrent task fails, the sibling running under inherited stdio must
-be cancelled. Task a exits 1 after the shared barrier, task b hangs after it —
-completing without timeout proves cancellation killed b.
+When one concurrent task fails, the sibling running under inherited stdio must be cancelled. Task a exits 1 after the shared barrier, task b hangs after it — completing without timeout proves cancellation killed b.
 
 ## `vt run -r test`
 

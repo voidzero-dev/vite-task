@@ -1,7 +1,6 @@
 # chained_command_with____stops_at_first_failure
 
-In a `&&`-chained command, a non-zero exit from the first sub-command should
-short-circuit and skip the rest.
+In a `&&`-chained command, a non-zero exit from the first sub-command should short-circuit and skip the rest.
 
 ## `vt run pkg-a#chained`
 

@@ -1,7 +1,6 @@
 # dotdot_positive_negative___miss_on_non_excluded_sibling_file
 
-With `../shared/**` plus `!../shared/dist/**`, modifying a sibling file
-outside the exclusion should invalidate the cache.
+With `../shared/**` plus `!../shared/dist/**`, modifying a sibling file outside the exclusion should invalidate the cache.
 
 ## `vt run sub-pkg#dotdot-positive-negative`
 

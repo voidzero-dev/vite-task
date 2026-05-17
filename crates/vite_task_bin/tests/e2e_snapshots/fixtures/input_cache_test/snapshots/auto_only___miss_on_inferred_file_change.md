@@ -1,7 +1,6 @@
 # auto_only___miss_on_inferred_file_change
 
-With `auto: true`, files read by the command (via fspy) should be fingerprinted
-and a change to such a file should invalidate the cache.
+With `auto: true`, files read by the command (via fspy) should be fingerprinted and a change to such a file should invalidate the cache.
 
 ## `vt run auto-only`
 

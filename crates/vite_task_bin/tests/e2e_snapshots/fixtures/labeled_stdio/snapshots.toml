@@ -1,40 +1,35 @@
 [[e2e]]
 name = "single_task__cache_off__piped_stdio"
 comment = """
-Under `--log=labeled` with caching off, a single task's stdio should be piped
-through the line-prefixing writer (not a TTY).
+Under `--log=labeled` with caching off, a single task's stdio should be piped through the line-prefixing writer (not a TTY).
 """
 steps = [["vt", "run", "--log=labeled", "check-tty"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_off__piped_stdio"
 comment = """
-Under `--log=labeled` with caching off, multiple tasks should each get piped
-stdio and each line should be prefixed with `[pkg#task]`.
+Under `--log=labeled` with caching off, multiple tasks should each get piped stdio and each line should be prefixed with `[pkg#task]`.
 """
 steps = [["vt", "run", "--log=labeled", "-r", "check-tty"]]
 
 [[e2e]]
 name = "single_task__cache_miss__piped_stdio"
 comment = """
-On a cache miss for a single task, labeled mode should still pipe stdio and
-prefix output lines.
+On a cache miss for a single task, labeled mode should still pipe stdio and prefix output lines.
 """
 steps = [["vt", "run", "--log=labeled", "check-tty-cached"]]
 
 [[e2e]]
 name = "multiple_tasks__cache_miss__piped_stdio"
 comment = """
-On a cache miss across multiple tasks, each task's piped output should be
-individually prefixed in labeled mode.
+On a cache miss across multiple tasks, each task's piped output should be individually prefixed in labeled mode.
 """
 steps = [["vt", "run", "--log=labeled", "-r", "check-tty-cached"]]
 
 [[e2e]]
 name = "single_task__cache_hit__replayed"
 comment = """
-A cache-hit replay of a single task under labeled mode should reproduce the
-labeled output from cached data.
+A cache-hit replay of a single task under labeled mode should reproduce the labeled output from cached data.
 """
 steps = [
   [
@@ -54,8 +49,7 @@ steps = [
 [[e2e]]
 name = "multiple_tasks__cache_hit__replayed"
 comment = """
-A cache-hit replay across multiple tasks under labeled mode should reproduce
-each task's labeled output.
+A cache-hit replay across multiple tasks under labeled mode should reproduce each task's labeled output.
 """
 steps = [
   [
@@ -77,7 +71,6 @@ steps = [
 [[e2e]]
 name = "stdin_is_always_null"
 comment = """
-In labeled mode, task stdin is always `/dev/null` regardless of the parent's
-stdin — piping data in from outside must not reach the task.
+In labeled mode, task stdin is always `/dev/null` regardless of the parent's stdin — piping data in from outside must not reach the task.
 """
 steps = [["vtt", "pipe-stdin", "from-stdin", "--", "vt", "run", "--log=labeled", "read-stdin"]]

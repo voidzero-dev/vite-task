@@ -1,7 +1,6 @@
 # interactive_search_then_select
 
-Typing characters in the selector should filter the list in real time, then
-Enter should pick the highlighted result.
+Typing characters in the selector should filter the list in real time, then Enter should pick the highlighted result.
 
 ## `vt run`
 

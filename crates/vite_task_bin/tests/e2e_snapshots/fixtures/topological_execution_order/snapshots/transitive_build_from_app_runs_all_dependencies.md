@@ -1,7 +1,6 @@
 # transitive_build_from_app_runs_all_dependencies
 
-`vt run -t build` from the leaf package should include the full transitive
-closure of its dependencies in topological order.
+`vt run -t build` from the leaf package should include the full transitive closure of its dependencies in topological order.
 
 ## `vt run -t build`
 

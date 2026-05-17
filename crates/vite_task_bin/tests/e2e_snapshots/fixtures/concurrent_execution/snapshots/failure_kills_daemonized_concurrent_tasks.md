@@ -1,8 +1,6 @@
 # failure_kills_daemonized_concurrent_tasks
 
-Cancellation must also kill a sibling that has daemonized — closing stdout/stderr
-(EOF on the pipe) while the process itself stays alive. The runner must reach
-the process via the cancellation token + Job Object, not by pipe closure.
+Cancellation must also kill a sibling that has daemonized — closing stdout/stderr (EOF on the pipe) while the process itself stays alive. The runner must reach the process via the cancellation token + Job Object, not by pipe closure.
 
 ## `vt run -r --cache daemon`
 

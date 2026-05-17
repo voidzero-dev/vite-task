@@ -1,18 +1,13 @@
 [[e2e]]
 name = "recursive_build_skips_root_self_reference"
 comment = """
-`vt run -r build` from the workspace root, when root's own `build` script is
-itself `vt run -r build`, should hit the skip rule: the nested expansion is
-the same query, so root's step is skipped and only packages a and b run.
+`vt run -r build` from the workspace root, when root's own `build` script is itself `vt run -r build`, should hit the skip rule: the nested expansion is the same query, so root's step is skipped and only packages a and b run.
 """
 steps = [{ argv = ["vt", "run", "-r", "build"], comment = "only a and b run, root is skipped" }]
 
 [[e2e]]
 name = "build_from_root_prunes_root_from_nested_expansion"
 comment = """
-`vt run build` from root produces a `ContainingPackage` query, while root's
-script (`vt run -r build`) produces an `All` query, so the skip rule does
-not apply. The prune rule should instead remove root from the nested result,
-again leaving only a and b.
+`vt run build` from root produces a `ContainingPackage` query, while root's script (`vt run -r build`) produces an `All` query, so the skip rule does not apply. The prune rule should instead remove root from the nested result, again leaving only a and b.
 """
 steps = [{ argv = ["vt", "run", "build"], comment = "only a and b run under root, root is pruned" }]

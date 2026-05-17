@@ -1,7 +1,6 @@
 # verbose_with_typo_enters_selector
 
-`vt run --verbose <typo>` still qualifies as cwd-only, so it should fall
-back to the interactive selector pre-filled with the typo.
+`vt run --verbose <typo>` still qualifies as cwd-only, so it should fall back to the interactive selector pre-filled with the typo.
 
 ## `vt run --verbose buid`
 

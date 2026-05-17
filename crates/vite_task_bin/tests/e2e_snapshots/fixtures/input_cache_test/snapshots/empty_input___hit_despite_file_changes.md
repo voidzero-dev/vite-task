@@ -1,7 +1,6 @@
 # empty_input___hit_despite_file_changes
 
-With `input: []`, no file changes should ever invalidate the cache — only
-command/env changes can.
+With `input: []`, no file changes should ever invalidate the cache — only command/env changes can.
 
 ## `vt run empty-inputs`
 
