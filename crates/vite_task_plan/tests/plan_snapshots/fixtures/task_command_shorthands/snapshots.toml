@@ -1,0 +1,15 @@
+[[plan]]
+name = "string_shorthand"
+args = ["run", "string_shorthand"]
+
+[[plan]]
+name = "array_shorthand"
+args = ["run", "array_shorthand"]
+
+[[plan]]
+name = "object_array_cache_false"
+args = ["run", "object_array_cache_false"]
+
+[[plan]]
+name = "object_array_depends_on"
+args = ["run", "object_array_depends_on"]

@@ -1,0 +1,84 @@
+// run array_shorthand
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "array_shorthand"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/task-command-shorthands-cache-disabled",
+          "task_name": "array_shorthand",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/task-command-shorthands-cache-disabled",
+                "task_name": "array_shorthand",
+                "package_path": "<workspace>/"
+              },
+              "command": "vtt print-file package.json",
+              "and_item_index": 0,
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null,
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print-file",
+                      "package.json"
+                    ],
+                    "all_envs": {
+                      "NO_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/task-command-shorthands-cache-disabled",
+                "task_name": "array_shorthand",
+                "package_path": "<workspace>/"
+              },
+              "command": "vtt print-file vite-task.json",
+              "and_item_index": 1,
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null,
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print-file",
+                      "vite-task.json"
+                    ],
+                    "all_envs": {
+                      "NO_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

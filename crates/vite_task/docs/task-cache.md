@@ -550,13 +550,13 @@ Ensure commands produce identical outputs for identical inputs:
 
 ```json
 {
-  "scripts": {
-    "build": "tsc && rollup -c && terser dist/bundle.js"
+  "tasks": {
+    "build": ["tsc", "rollup -c", "terser dist/bundle.js"]
   }
 }
 ```
 
-Each `&&` separated command is cached independently. If only terser config changes, TypeScript and rollup will hit cache.
+Each `&&` separated command is cached independently. Task command arrays use the same granular caching semantics. If only terser config changes, TypeScript and rollup will hit cache.
 
 ## Implementation Reference
 

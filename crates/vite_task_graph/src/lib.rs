@@ -303,6 +303,7 @@ impl IndexedTaskGraph {
 
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
+                let task_user_config = task_user_config.into_config();
                 let dependency_specifiers = task_user_config.options.depends_on.clone();
 
                 // Resolve the task configuration from the user config

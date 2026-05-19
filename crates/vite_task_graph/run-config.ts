@@ -20,9 +20,11 @@ export type InputBase = "package" | "workspace";
 
 export type Task = { 
 /**
- * The command to run for the task.
+ * Command string, or command snippets joined with ` && `.
+ *
+ * Arrays are not argv-style and element boundaries are not preserved after joining.
  */
-command: string, 
+command: TaskCommand, 
 /**
  * The working directory for the task, relative to the package root (not workspace root).
  */
@@ -68,6 +70,10 @@ output?: Array<string | GlobWithBase>, } | {
  */
 cache: false, });
 
+export type TaskCommand = string | Array<string>;
+
+export type TaskDefinition = Task | TaskCommand;
+
 export type UserGlobalCacheConfig = boolean | { 
 /**
  * Enable caching for package.json scripts not defined in the `tasks` map.
@@ -98,9 +104,11 @@ export type RunConfig = {
  */
 cache?: UserGlobalCacheConfig, 
 /**
- * Task definitions
+ * Task definitions: full task objects, command strings, or command arrays.
+ *
+ * Arrays are command snippets joined with ` && `, not argv-style arguments.
  */
-tasks?: { [key in string]: Task }, 
+tasks?: { [key in string]: TaskDefinition }, 
 /**
  * Whether to automatically run `preX`/`postX` package.json scripts as
  * lifecycle hooks when script `X` is executed.

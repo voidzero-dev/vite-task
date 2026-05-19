@@ -6,9 +6,9 @@ use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
-    AutoInput, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
+    AutoInput, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig, TaskCommand,
     UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
-    UserRunConfig, UserTaskConfig,
+    UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -380,7 +380,7 @@ impl ResolvedTaskConfig {
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
         Ok(Self {
-            command: Str::from(user_config.command.as_ref()),
+            command: user_config.command.into_command_string(),
             resolved_options: ResolvedTaskOptions::resolve(
                 user_config.options,
                 package_dir,

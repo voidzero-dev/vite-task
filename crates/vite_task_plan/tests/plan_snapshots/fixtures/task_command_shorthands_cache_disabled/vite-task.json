@@ -1,0 +1,9 @@
+{
+  "cache": {
+    "tasks": false
+  },
+  "tasks": {
+    "string_shorthand": "vtt print-file package.json",
+    "array_shorthand": ["vtt print-file package.json", "vtt print-file vite-task.json"]
+  }
+}
