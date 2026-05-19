@@ -4,8 +4,8 @@ use brush_parser::{
     Parser, ParserOptions,
     ast::{
         AndOr, Assignment, AssignmentName, AssignmentValue, Command, CommandPrefix,
-        CommandPrefixOrSuffixItem, CommandSuffix, CompoundListItem, Pipeline, Program,
-        SeparatorOperator, SimpleCommand, SourceLocation, Word,
+        CommandPrefixOrSuffixItem, CommandSuffix, CompoundCommand, CompoundList, CompoundListItem,
+        DoGroupCommand, Pipeline, Program, SeparatorOperator, SimpleCommand, SourceLocation, Word,
     },
     word::{WordPiece, WordPieceWithSource},
 };
@@ -135,43 +135,115 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
     Some((TaskParsedCommand { envs, program: unquote(program)?, args }, range))
 }
 
-fn pipeline_program_is_cd(pipeline: &Pipeline) -> bool {
-    let Pipeline { timed: None, bang: false, seq } = pipeline else {
-        return false;
-    };
-    let [Command::Simple(simple_command)] = seq.as_slice() else {
-        return false;
-    };
-    let SimpleCommand { word_or_name: Some(program), .. } = simple_command else {
-        return false;
-    };
-    unquote(program).is_some_and(|program| program.as_str() == "cd")
+fn command_name_may_change_cwd(command_name: &str) -> bool {
+    matches!(command_name, "cd" | "chdir" | "." | "source" | "eval")
 }
 
-#[must_use]
-pub fn contains_cd_command(cmd: &str) -> bool {
-    let mut parser = Parser::new(cmd.as_bytes(), &PARSER_OPTIONS);
-    let Ok(Program { complete_commands }) = parser.parse_program() else {
+fn wrapper_command_may_change_cwd(suffix: Option<&CommandSuffix>) -> bool {
+    let Some(CommandSuffix(suffix_items)) = suffix else {
         return false;
     };
 
-    for compound_list in &complete_commands {
-        for CompoundListItem(and_or_list, _) in &compound_list.0 {
-            if pipeline_program_is_cd(&and_or_list.first) {
-                return true;
-            }
-            for and_or in &and_or_list.additional {
-                let pipeline = match and_or {
-                    AndOr::And(pipeline) | AndOr::Or(pipeline) => pipeline,
-                };
-                if pipeline_program_is_cd(pipeline) {
-                    return true;
-                }
-            }
+    for suffix_item in suffix_items {
+        let CommandPrefixOrSuffixItem::Word(word) = suffix_item else {
+            continue;
+        };
+        let Some(arg) = unquote(word) else {
+            return true;
+        };
+        if arg == "--" || arg.starts_with('-') {
+            continue;
         }
+        return command_name_may_change_cwd(arg.as_str());
     }
 
     false
+}
+
+fn simple_command_may_change_cwd(simple_command: &SimpleCommand) -> bool {
+    let Some(program) = &simple_command.word_or_name else {
+        return false;
+    };
+    let Some(program) = unquote(program) else {
+        return true;
+    };
+
+    match program.as_str() {
+        "command" | "builtin" | "time" => {
+            wrapper_command_may_change_cwd(simple_command.suffix.as_ref())
+        }
+        command_name => command_name_may_change_cwd(command_name),
+    }
+}
+
+fn and_or_list_may_change_cwd(and_or_list: &brush_parser::ast::AndOrList) -> bool {
+    pipeline_may_change_cwd(&and_or_list.first)
+        || and_or_list.additional.iter().any(|and_or| {
+            let pipeline = match and_or {
+                AndOr::And(pipeline) | AndOr::Or(pipeline) => pipeline,
+            };
+            pipeline_may_change_cwd(pipeline)
+        })
+}
+
+fn compound_list_may_change_cwd(compound_list: &CompoundList) -> bool {
+    compound_list
+        .0
+        .iter()
+        .any(|CompoundListItem(and_or_list, _)| and_or_list_may_change_cwd(and_or_list))
+}
+
+fn do_group_may_change_cwd(do_group: &DoGroupCommand) -> bool {
+    compound_list_may_change_cwd(&do_group.list)
+}
+
+fn compound_command_may_change_cwd(compound_command: &CompoundCommand) -> bool {
+    match compound_command {
+        CompoundCommand::Arithmetic(_) | CompoundCommand::Subshell(_) => false,
+        CompoundCommand::ArithmeticForClause(command) => do_group_may_change_cwd(&command.body),
+        CompoundCommand::BraceGroup(command) => compound_list_may_change_cwd(&command.list),
+        CompoundCommand::ForClause(command) => do_group_may_change_cwd(&command.body),
+        CompoundCommand::CaseClause(command) => command
+            .cases
+            .iter()
+            .any(|case| case.cmd.as_ref().is_some_and(compound_list_may_change_cwd)),
+        CompoundCommand::IfClause(command) => {
+            compound_list_may_change_cwd(&command.condition)
+                || compound_list_may_change_cwd(&command.then)
+                || command.elses.as_ref().is_some_and(|elses| {
+                    elses.iter().any(|else_clause| {
+                        else_clause.condition.as_ref().is_some_and(compound_list_may_change_cwd)
+                            || compound_list_may_change_cwd(&else_clause.body)
+                    })
+                })
+        }
+        CompoundCommand::WhileClause(command) | CompoundCommand::UntilClause(command) => {
+            compound_list_may_change_cwd(&command.0) || do_group_may_change_cwd(&command.1)
+        }
+    }
+}
+
+fn command_may_change_cwd(command: &Command) -> bool {
+    match command {
+        Command::Simple(simple_command) => simple_command_may_change_cwd(simple_command),
+        Command::Compound(compound_command, _) => compound_command_may_change_cwd(compound_command),
+        Command::Function(function) => compound_command_may_change_cwd(&function.body.0),
+        Command::ExtendedTest(..) => false,
+    }
+}
+
+fn pipeline_may_change_cwd(pipeline: &Pipeline) -> bool {
+    pipeline.seq.iter().any(command_may_change_cwd)
+}
+
+#[must_use]
+pub fn shell_command_may_change_cwd(cmd: &str) -> bool {
+    let mut parser = Parser::new(cmd.as_bytes(), &PARSER_OPTIONS);
+    let Ok(Program { complete_commands }) = parser.parse_program() else {
+        return true;
+    };
+
+    complete_commands.iter().any(compound_list_may_change_cwd)
 }
 
 #[must_use]
@@ -202,16 +274,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_contains_cd_command_with_unresolved_arg() {
-        assert!(contains_cd_command(r#"cd "$APP_DIR""#));
-        assert!(contains_cd_command(r#"echo ok && cd "$APP_DIR""#));
-        assert!(contains_cd_command(r#"FOO=bar 'cd' "$APP_DIR""#));
+    fn test_shell_command_may_change_cwd_with_unresolved_arg() {
+        assert!(shell_command_may_change_cwd(r#"cd "$APP_DIR""#));
+        assert!(shell_command_may_change_cwd(r#"echo ok && cd "$APP_DIR""#));
+        assert!(shell_command_may_change_cwd(r#"FOO=bar 'cd' "$APP_DIR""#));
     }
 
     #[test]
-    fn test_contains_cd_command_ignores_cd_argument_text() {
-        assert!(!contains_cd_command(r#"echo "cd $APP_DIR""#));
-        assert!(!contains_cd_command("cdtool $APP_DIR"));
+    fn test_shell_command_may_change_cwd_in_compound_commands() {
+        assert!(shell_command_may_change_cwd("if true; then cd snapshots; fi"));
+        assert!(shell_command_may_change_cwd("{ cd snapshots; }"));
+        assert!(shell_command_may_change_cwd("f(){ cd snapshots; }; f"));
+        assert!(shell_command_may_change_cwd("command cd snapshots"));
+        assert!(shell_command_may_change_cwd("time cd snapshots"));
+    }
+
+    #[test]
+    fn test_shell_command_may_change_cwd_ignores_non_current_shell_cd() {
+        assert!(!shell_command_may_change_cwd(r#"echo "cd $APP_DIR""#));
+        assert!(!shell_command_may_change_cwd("cdtool $APP_DIR"));
+        assert!(!shell_command_may_change_cwd("(cd snapshots)"));
     }
 
     #[test]

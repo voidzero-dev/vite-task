@@ -16,7 +16,7 @@ use futures_util::FutureExt;
 use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::InvalidPathDataError};
-use vite_shell::{TaskParsedCommand, contains_cd_command, try_parse_as_and_list};
+use vite_shell::{TaskParsedCommand, shell_command_may_change_cwd, try_parse_as_and_list};
 use vite_str::Str;
 use vite_task_graph::{
     TaskNodeIndex, TaskSource,
@@ -116,11 +116,13 @@ fn planned_commands(command: &TaskCommand) -> Result<Vec<PlannedCommand>, Error>
                 });
             }
         } else {
+            // A shell fallback runs in a child shell, so any cwd change inside it cannot be
+            // reflected in the planner's cwd for following array entries.
             if array_len.is_some_and(|len| snippet_index + 1 < len)
-                && contains_cd_command(snippet.as_str())
+                && shell_command_may_change_cwd(snippet.as_str())
             {
                 return Err(Error::InvalidTaskCommand(
-                    "command array entries that change directory in a shell must be the final entry"
+                    "command array entries that may change directory in a shell must be the final entry"
                         .into(),
                 ));
             }
