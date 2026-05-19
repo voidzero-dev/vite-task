@@ -445,6 +445,11 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "RUNNER_*",
     // Windows specific
     "APPDATA",
+    // Node's compile cache uses LOCALAPPDATA to pick its cache directory
+    // on Windows. Without it the cache lands inside the workspace and
+    // breaks every cached task that opts into the compile cache. See
+    // the `node_compile_cache_outside_workspace` e2e fixture.
+    "LOCALAPPDATA",
     "PROGRAMDATA",
     "SYSTEMROOT",
     "SYSTEMDRIVE",

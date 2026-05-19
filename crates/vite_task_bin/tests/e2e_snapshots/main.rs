@@ -392,6 +392,30 @@ fn run_case(
             // On Windows, ensure common executable extensions are included in PATHEXT for command resolution in subprocesses.
             if cfg!(windows) {
                 cmd.env("PATHEXT", ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC");
+                // Forward the Windows env vars Node needs to find a real
+                // temp directory. Without these, Node's compile cache and
+                // similar helpers fall back to a workspace-relative path
+                // and break cached runs. Values come from cargo-test's
+                // own env when present.
+                for name in [
+                    "TMP",
+                    "TEMP",
+                    "APPDATA",
+                    "LOCALAPPDATA",
+                    "PROGRAMDATA",
+                    "USERPROFILE",
+                    "HOMEDRIVE",
+                    "HOMEPATH",
+                    "WINDIR",
+                    "SYSTEMROOT",
+                    "SYSTEMDRIVE",
+                    "ProgramFiles",
+                    "ProgramFiles(x86)",
+                ] {
+                    if let Some(value) = env::var_os(name) {
+                        cmd.env(name, value);
+                    }
+                }
             }
             for (k, v) in step.envs() {
                 let resolved = resolve_env_placeholder(v.as_str());
