@@ -20,9 +20,7 @@ export type InputBase = "package" | "workspace";
 
 export type Task = { 
 /**
- * Command string, or command snippets joined with ` && `.
- *
- * Arrays are not argv-style and element boundaries are not preserved after joining.
+ * Command string or sequence of command strings to run for the task.
  */
 command: TaskCommand, 
 /**
@@ -104,9 +102,7 @@ export type RunConfig = {
  */
 cache?: UserGlobalCacheConfig, 
 /**
- * Task definitions: full task objects, command strings, or command arrays.
- *
- * Arrays are command snippets joined with ` && `, not argv-style arguments.
+ * Task definitions: full task objects, command strings, or command string arrays.
  */
 tasks?: { [key in string]: TaskDefinition }, 
 /**

@@ -2,6 +2,8 @@
   "tasks": {
     "string_shorthand": "vtt print-file package.json",
     "array_shorthand": ["vtt print-file package.json", "vtt print-file vite-task.json", "vtt print-file package.json"],
+    "array_with_and": ["vtt print-file package.json", "vtt print-file vite-task.json && vtt print-file package.json"],
+    "nested_vt_array": ["vtt print-file package.json", "vt run string_shorthand"],
     "object_array_cache_false": {
       "command": ["vtt print-file package.json", "vtt print-file vite-task.json", "vtt print-file package.json"],
       "cache": false
@@ -9,6 +11,8 @@
     "object_array_depends_on": {
       "command": ["vtt print-file package.json", "vtt print-file vite-task.json", "vtt print-file package.json"],
       "dependsOn": ["string_shorthand"]
-    }
+    },
+    "empty_array": [],
+    "empty_item": ["vtt print-file package.json", ""]
   }
 }

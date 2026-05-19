@@ -28,10 +28,10 @@ use crate::config::user::UserTaskOptions;
 /// `depends_on` is not included here because it's represented by the edges of the task graph.
 #[derive(Debug, Serialize)]
 pub struct ResolvedTaskConfig {
-    /// The command to run for this task, as a raw string.
+    /// The command or commands to run for this task.
     ///
-    /// The command may contain environment variables that need to be expanded later.
-    pub command: Str,
+    /// Commands may contain environment variables that need to be expanded later.
+    pub command: TaskCommand,
 
     pub resolved_options: ResolvedTaskOptions,
 }
@@ -360,7 +360,7 @@ impl ResolvedTaskConfig {
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
         Ok(Self {
-            command: package_json_script.into(),
+            command: TaskCommand::String(package_json_script.into()),
             resolved_options: ResolvedTaskOptions::resolve(
                 UserTaskOptions::default(),
                 package_dir,
@@ -380,7 +380,7 @@ impl ResolvedTaskConfig {
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
         Ok(Self {
-            command: user_config.command.into_command_string(),
+            command: user_config.command,
             resolved_options: ResolvedTaskOptions::resolve(
                 user_config.options,
                 package_dir,

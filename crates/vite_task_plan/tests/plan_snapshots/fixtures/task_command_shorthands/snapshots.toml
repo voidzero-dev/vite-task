@@ -7,9 +7,25 @@ name = "array_shorthand"
 args = ["run", "array_shorthand"]
 
 [[plan]]
+name = "array_with_and"
+args = ["run", "array_with_and"]
+
+[[plan]]
+name = "nested_vt_array"
+args = ["run", "nested_vt_array"]
+
+[[plan]]
 name = "object_array_cache_false"
 args = ["run", "object_array_cache_false"]
 
 [[plan]]
 name = "object_array_depends_on"
 args = ["run", "object_array_depends_on"]
+
+[[plan]]
+name = "empty_array_error"
+args = ["run", "empty_array"]
+
+[[plan]]
+name = "empty_item_error"
+args = ["run", "empty_item"]

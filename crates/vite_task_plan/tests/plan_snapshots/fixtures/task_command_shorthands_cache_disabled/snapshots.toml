@@ -1,7 +1,0 @@
-[[plan]]
-name = "string_shorthand_cache_disabled"
-args = ["run", "string_shorthand"]
-
-[[plan]]
-name = "array_shorthand_cache_disabled"
-args = ["run", "array_shorthand"]

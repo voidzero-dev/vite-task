@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use monostate::MustBe;
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Deserializer, de::Error as _};
+use serde::{Deserialize, Serialize};
 #[cfg(all(test, not(clippy)))]
 use ts_rs::TS;
 use vite_path::RelativePathBuf;
@@ -193,44 +193,16 @@ impl Default for UserTaskOptions {
     }
 }
 
-/// Task command: a string, or command snippets joined with ` && `.
-///
-/// Arrays are not argv-style and element boundaries are not preserved after joining.
-#[derive(Debug, PartialEq, Eq)]
+/// Task command: a command string or a sequence of command strings.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(type = "string | Array<string>"))]
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(untagged)]
 pub enum TaskCommand {
-    /// A raw command string.
+    /// A single command string.
     String(Str),
-    /// Command snippets to join with ` && `.
+    /// Command strings to run in order.
     Array(Vec<Str>),
-}
-
-impl<'de> Deserialize<'de> for TaskCommand {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum TaskCommandInput {
-            String(Str),
-            Array(Vec<Str>),
-        }
-
-        match TaskCommandInput::deserialize(deserializer)? {
-            TaskCommandInput::String(command) => Ok(Self::String(command)),
-            TaskCommandInput::Array(commands) => {
-                if commands.is_empty() {
-                    return Err(D::Error::custom("command array must not be empty"));
-                }
-                if commands.iter().any(|command| command.as_str().trim().is_empty()) {
-                    return Err(D::Error::custom("command array entries must not be empty"));
-                }
-                Ok(Self::Array(commands))
-            }
-        }
-    }
 }
 
 impl From<&str> for TaskCommand {
@@ -245,33 +217,13 @@ impl From<Str> for TaskCommand {
     }
 }
 
-impl TaskCommand {
-    #[must_use]
-    pub fn into_command_string(self) -> Str {
-        match self {
-            Self::String(command) => command,
-            Self::Array(commands) => {
-                let mut commands = commands.into_iter();
-                let mut command = commands.next().expect("command arrays are non-empty");
-                for item in commands {
-                    command.push_str(" && ");
-                    command.push_str(item.as_str());
-                }
-                command
-            }
-        }
-    }
-}
-
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "Task"))]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskConfig {
-    /// Command string, or command snippets joined with ` && `.
-    ///
-    /// Arrays are not argv-style and element boundaries are not preserved after joining.
+    /// Command string or sequence of command strings to run for the task.
     pub command: TaskCommand,
 
     /// Fields other than the command
@@ -289,18 +241,6 @@ pub enum UserTaskDefinition {
     Config(UserTaskConfig),
     /// Command-only shorthand form using default task options.
     Command(TaskCommand),
-}
-
-impl UserTaskDefinition {
-    #[must_use]
-    pub fn into_config(self) -> UserTaskConfig {
-        match self {
-            Self::Config(config) => config,
-            Self::Command(command) => {
-                UserTaskConfig { command, options: UserTaskOptions::default() }
-            }
-        }
-    }
 }
 
 /// Root-level cache configuration.
@@ -377,9 +317,7 @@ pub struct UserRunConfig {
     /// Setting it in a package's config will result in an error.
     pub cache: Option<UserGlobalCacheConfig>,
 
-    /// Task definitions: full task objects, command strings, or command arrays.
-    ///
-    /// Arrays are command snippets joined with ` && `, not argv-style arguments.
+    /// Task definitions: full task objects, command strings, or command string arrays.
     pub tasks: Option<FxHashMap<Str, UserTaskDefinition>>,
 
     /// Whether to automatically run `preX`/`postX` package.json scripts as
@@ -521,32 +459,11 @@ mod tests {
             "command": ["echo one", "echo two", "echo three"]
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(user_config.command.into_command_string(), "echo one && echo two && echo three");
+        assert_eq!(
+            user_config.command,
+            TaskCommand::Array(vec!["echo one".into(), "echo two".into(), "echo three".into()])
+        );
         assert_eq!(user_config.options, UserTaskOptions::default());
-    }
-
-    #[test]
-    fn test_command_array_empty_item_error() {
-        let user_config_json = json!({
-            "command": ["", "echo done"]
-        });
-        assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
-    }
-
-    #[test]
-    fn test_command_array_whitespace_item_error() {
-        let user_config_json = json!({
-            "command": ["echo done", "  "]
-        });
-        assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
-    }
-
-    #[test]
-    fn test_command_array_empty_error() {
-        let user_config_json = json!({
-            "command": []
-        });
-        assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
     }
 
     #[test]
@@ -557,9 +474,8 @@ mod tests {
             }
         });
         let mut user_config: UserRunConfig = serde_json::from_value(user_config_json).unwrap();
-        let task = user_config.tasks.as_mut().unwrap().remove("build").unwrap().into_config();
-        assert_eq!(task.command.into_command_string(), "echo build");
-        assert_eq!(task.options, UserTaskOptions::default());
+        let task = user_config.tasks.as_mut().unwrap().remove("build").unwrap();
+        assert_eq!(task, UserTaskDefinition::Command(TaskCommand::String("echo build".into())));
     }
 
     #[test]
@@ -570,19 +486,15 @@ mod tests {
             }
         });
         let mut user_config: UserRunConfig = serde_json::from_value(user_config_json).unwrap();
-        let task = user_config.tasks.as_mut().unwrap().remove("build").unwrap().into_config();
-        assert_eq!(task.command.into_command_string(), "echo one && echo two && echo three");
-        assert_eq!(task.options, UserTaskOptions::default());
-    }
-
-    #[test]
-    fn test_task_array_shorthand_empty_error() {
-        let user_config_json = json!({
-            "tasks": {
-                "build": []
-            }
-        });
-        assert!(serde_json::from_value::<UserRunConfig>(user_config_json).is_err());
+        let task = user_config.tasks.as_mut().unwrap().remove("build").unwrap();
+        assert_eq!(
+            task,
+            UserTaskDefinition::Command(TaskCommand::Array(vec![
+                "echo one".into(),
+                "echo two".into(),
+                "echo three".into()
+            ]))
+        );
     }
 
     #[test]
@@ -594,7 +506,10 @@ mod tests {
             "cache": false
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(user_config.command.into_command_string(), "echo one && echo two");
+        assert_eq!(
+            user_config.command,
+            TaskCommand::Array(vec!["echo one".into(), "echo two".into()])
+        );
         assert_eq!(user_config.options.cwd_relative_to_package.as_ref().unwrap().as_str(), "src");
         assert_eq!(user_config.options.depends_on.as_ref().unwrap().as_ref(), [Str::from("build")]);
         assert_eq!(

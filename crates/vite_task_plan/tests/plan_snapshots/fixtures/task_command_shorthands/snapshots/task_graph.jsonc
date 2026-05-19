@@ -12,7 +12,176 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file package.json && vtt print-file vite-task.json && vtt print-file package.json",
+        "command": [
+          "vtt print-file package.json",
+          "vtt print-file vite-task.json",
+          "vtt print-file package.json"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": false,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "TaskConfig"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "array_with_and"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/task-command-shorthands",
+        "task_name": "array_with_and",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": [
+          "vtt print-file package.json",
+          "vtt print-file vite-task.json && vtt print-file package.json"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": false,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "TaskConfig"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "empty_array"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/task-command-shorthands",
+        "task_name": "empty_array",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": [],
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": false,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "TaskConfig"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "empty_item"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/task-command-shorthands",
+        "task_name": "empty_item",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": [
+          "vtt print-file package.json",
+          ""
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": false,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "TaskConfig"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "nested_vt_array"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/task-command-shorthands",
+        "task_name": "nested_vt_array",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "command": [
+          "vtt print-file package.json",
+          "vt run string_shorthand"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +220,11 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file package.json && vtt print-file vite-task.json && vtt print-file package.json",
+        "command": [
+          "vtt print-file package.json",
+          "vtt print-file vite-task.json",
+          "vtt print-file package.json"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": null
@@ -73,7 +246,11 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file package.json && vtt print-file vite-task.json && vtt print-file package.json",
+        "command": [
+          "vtt print-file package.json",
+          "vtt print-file vite-task.json",
+          "vtt print-file package.json"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

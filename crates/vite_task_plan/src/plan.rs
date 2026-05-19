@@ -8,6 +8,7 @@ use std::{
     collections::BTreeMap,
     env::home_dir,
     ffi::OsStr,
+    ops::Range,
     sync::{Arc, LazyLock},
 };
 
@@ -15,13 +16,13 @@ use futures_util::FutureExt;
 use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::InvalidPathDataError};
-use vite_shell::try_parse_as_and_list;
+use vite_shell::{TaskParsedCommand, try_parse_as_and_list};
 use vite_str::Str;
 use vite_task_graph::{
     TaskNodeIndex, TaskSource,
     config::{
         CacheConfig, EnabledCacheConfig, ResolvedGlobConfig, ResolvedGlobalCacheConfig,
-        ResolvedTaskOptions,
+        ResolvedTaskOptions, TaskCommand,
         user::{UserCacheConfig, UserTaskOptions},
     },
     query::TaskQuery,
@@ -80,6 +81,45 @@ fn effective_cache_config(
     if enabled { task_cache_config.cloned() } else { None }
 }
 
+enum PlannedCommand {
+    Parsed { and_item: TaskParsedCommand, display: Str, stack_frame: Range<usize> },
+    Shell(Str),
+}
+
+#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
+fn planned_commands(command: &TaskCommand) -> Result<Vec<PlannedCommand>, Error> {
+    let snippets: Box<dyn Iterator<Item = &Str> + '_> = match command {
+        TaskCommand::String(command) => Box::new(std::iter::once(command)),
+        TaskCommand::Array(commands) => {
+            if commands.is_empty() {
+                return Err(Error::InvalidTaskCommand("command array must not be empty".into()));
+            }
+            if commands.iter().any(|command| command.as_str().trim().is_empty()) {
+                return Err(Error::InvalidTaskCommand(
+                    "command array entries must not be empty".into(),
+                ));
+            }
+            Box::new(commands.iter())
+        }
+    };
+
+    let mut planned = Vec::new();
+    for snippet in snippets {
+        if let Some(parsed) = try_parse_as_and_list(snippet.as_str()) {
+            for (and_item, range) in parsed {
+                planned.push(PlannedCommand::Parsed {
+                    display: Str::from(&snippet.as_str()[range.clone()]),
+                    and_item,
+                    stack_frame: range,
+                });
+            }
+        } else {
+            planned.push(PlannedCommand::Shell(snippet.clone()));
+        }
+    }
+    Ok(planned)
+}
+
 /// - `with_hooks`: whether to look up `preX`/`postX` lifecycle hooks for this task.
 ///   `false` when the task itself is being executed as a hook, so that hooks are
 ///   never expanded more than one level deep (matching npm behavior).
@@ -93,7 +133,6 @@ async fn plan_task_as_execution_node(
     context.check_recursion(task_node_index)?;
 
     let task_node = &context.indexed_task_graph().task_graph()[task_node_index];
-    let command_str = task_node.resolved_config.command.as_str();
 
     let package_path = context.indexed_task_graph().get_package_path_for_task(task_node_index);
     // Prepend {package_path}/node_modules/.bin to PATH
@@ -128,264 +167,271 @@ async fn plan_task_as_execution_node(
     let mut cwd = Arc::clone(&task_node.resolved_config.resolved_options.cwd);
 
     // TODO: variable expansion (https://crates.io/crates/shellexpand) BEFORE parsing
-    // Try to parse the command string as a list of subcommands separated by `&&`
-    if let Some(parsed_subcommands) = try_parse_as_and_list(command_str) {
-        let and_item_count = parsed_subcommands.len();
-        for (index, (and_item, add_item_span)) in parsed_subcommands.into_iter().enumerate() {
-            // Duplicate the context before modifying it for each and_item
-            let mut context = context.duplicate();
-            context.push_stack_frame(task_node_index, add_item_span.clone());
+    let planned_commands = planned_commands(&task_node.resolved_config.command)?;
+    let and_item_count = planned_commands.len();
+    for (index, planned_command) in planned_commands.into_iter().enumerate() {
+        match planned_command {
+            PlannedCommand::Parsed { and_item, display, stack_frame } => {
+                // Duplicate the context before modifying it for each and_item
+                let mut context = context.duplicate();
+                context.push_stack_frame(task_node_index, stack_frame);
 
-            let mut args = and_item.args;
-            let extra_args = if index == and_item_count - 1 {
-                // For the last and_item, append extra args from the plan context
-                Arc::clone(context.extra_args())
-            } else {
-                Arc::new([])
-            };
-            args.extend(extra_args.iter().cloned());
-
-            // Handle `cd` builtin command
-            if and_item.program == "cd" {
-                #[expect(
-                    clippy::disallowed_types,
-                    reason = "Path is needed for std::env::home_dir return type and AbsolutePath::join"
-                )]
-                let cd_target: Cow<'_, Path> = match args.as_slice() {
-                    // No args, go to home directory
-                    [] => {
-                        home_dir().ok_or(Error::CdCommand(CdCommandError::NoHomeDirectory))?.into()
-                    }
-                    [dir] => Path::new(dir.as_str()).into(),
-                    _ => {
-                        return Err(Error::CdCommand(CdCommandError::TooManyArgs));
-                    }
+                let mut args = and_item.args;
+                let extra_args = if index == and_item_count - 1 {
+                    // For the last and_item, append extra args from the plan context
+                    Arc::clone(context.extra_args())
+                } else {
+                    Arc::new([])
                 };
-                cwd = cwd.join(cd_target.as_ref()).into();
-                continue;
-            }
+                args.extend(extra_args.iter().cloned());
 
-            // Build execution display
-            let execution_item_display = ExecutionItemDisplay {
-                command: {
-                    let mut command = Str::from(&command_str[add_item_span.clone()]);
-                    for arg in extra_args.iter() {
-                        command.push(' ');
-                        command.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
-                    }
-                    command
-                },
-                and_item_index: if and_item_count > 1 { Some(index) } else { None },
-                cwd: Arc::clone(&cwd),
-                task_display: task_node.task_display.clone(),
-            };
+                // Handle `cd` builtin command
+                if and_item.program == "cd" {
+                    #[expect(
+                        clippy::disallowed_types,
+                        reason = "Path is needed for std::env::home_dir return type and AbsolutePath::join"
+                    )]
+                    let cd_target: Cow<'_, Path> = match args.as_slice() {
+                        // No args, go to home directory
+                        [] => home_dir()
+                            .ok_or(Error::CdCommand(CdCommandError::NoHomeDirectory))?
+                            .into(),
+                        [dir] => Path::new(dir.as_str()).into(),
+                        _ => {
+                            return Err(Error::CdCommand(CdCommandError::TooManyArgs));
+                        }
+                    };
+                    cwd = cwd.join(cd_target.as_ref()).into();
+                    continue;
+                }
 
-            // Check for builtin commands like `echo ...`
-            if let Some(builtin_execution) =
-                InProcessExecution::get_builtin_execution(&and_item.program, args.iter(), &cwd)
-            {
-                items.push(ExecutionItem {
-                    execution_item_display,
-                    kind: ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(builtin_execution)),
-                });
-                continue;
-            }
-
-            // Create execution cache key for this and_item
-            let task_execution_cache_key = ExecutionCacheKey::UserTask {
-                task_name: task_node.task_display.task_name.clone(),
-                and_item_index: index,
-                extra_args: Arc::clone(&extra_args),
-                package_path: strip_prefix_for_cache(package_path, context.workspace_path())
-                    .map_err(|kind| PathFingerprintError {
-                        kind,
-                        path_type: PathType::PackagePath,
-                    })?,
-            };
-
-            // Try to parse the args of an and_item to a plan request like `run -r build`
-            let envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>> = context.envs().clone().into();
-            let mut script_command = ScriptCommand {
-                program: and_item.program.clone(),
-                args: args.into(),
-                envs,
-                cwd: Arc::clone(&cwd),
-            };
-            let plan_request =
-                context.callbacks().get_plan_request(&mut script_command).await.map_err(
-                    |error| Error::ParsePlanRequest {
-                        program: script_command.program.clone(),
-                        args: Arc::clone(&script_command.args),
-                        cwd: Arc::clone(&script_command.cwd),
-                        error,
+                // Build execution display
+                let execution_item_display = ExecutionItemDisplay {
+                    command: {
+                        let mut command = display.clone();
+                        for arg in extra_args.iter() {
+                            command.push(' ');
+                            command.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
+                        }
+                        command
                     },
-                )?;
+                    and_item_index: if and_item_count > 1 { Some(index) } else { None },
+                    cwd: Arc::clone(&cwd),
+                    task_display: task_node.task_display.clone(),
+                };
 
-            let execution_item_kind: ExecutionItemKind = match plan_request {
-                // Expand task query like `vp run -r build`
-                Some(PlanRequest::Query(query_plan_request)) => {
-                    // Skip rule: skip if this nested query is the same as the parent expansion.
-                    // This handles workspace root tasks like `"build": "vp run -r build"` —
-                    // re-entering the same query would just re-expand the same tasks.
-                    //
-                    // The comparison is on TaskQuery only (package_query + task_name +
-                    // include_explicit_deps). Extra args live in PlanOptions, so
-                    // `vp run -r build extra_arg` still matches `vp run -r build`.
-                    // Conversely, `cd packages/a && vp run build` does NOT match a
-                    // parent `vp run build` from root because `cd` changes the cwd,
-                    // producing a different ContainingPackage in the PackageQuery.
-                    if query_plan_request.query == *context.parent_query() {
-                        continue;
-                    }
+                // Check for builtin commands like `echo ...`
+                if let Some(builtin_execution) =
+                    InProcessExecution::get_builtin_execution(&and_item.program, args.iter(), &cwd)
+                {
+                    items.push(ExecutionItem {
+                        execution_item_display,
+                        kind: ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(
+                            builtin_execution,
+                        )),
+                    });
+                    continue;
+                }
 
-                    // Save task name before consuming the request
-                    let task_name = query_plan_request.query.task_name.clone();
-                    // Add prefix envs to the context
-                    context.add_envs(and_item.envs.iter());
-                    let QueryPlanRequest { query, plan_options } = query_plan_request;
-                    let query = Arc::new(query);
-                    let execution_graph =
-                        plan_query_request(Arc::clone(&query), plan_options, context)
-                            .await
-                            .map_err(|error| Error::NestPlan {
+                // Create execution cache key for this and_item
+                let task_execution_cache_key = ExecutionCacheKey::UserTask {
+                    task_name: task_node.task_display.task_name.clone(),
+                    and_item_index: index,
+                    extra_args: Arc::clone(&extra_args),
+                    package_path: strip_prefix_for_cache(package_path, context.workspace_path())
+                        .map_err(|kind| PathFingerprintError {
+                            kind,
+                            path_type: PathType::PackagePath,
+                        })?,
+                };
+
+                // Try to parse the args of an and_item to a plan request like `run -r build`
+                let envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>> = context.envs().clone().into();
+                let mut script_command = ScriptCommand {
+                    program: and_item.program.clone(),
+                    args: args.into(),
+                    envs,
+                    cwd: Arc::clone(&cwd),
+                };
+                let plan_request =
+                    context.callbacks().get_plan_request(&mut script_command).await.map_err(
+                        |error| Error::ParsePlanRequest {
+                            program: script_command.program.clone(),
+                            args: Arc::clone(&script_command.args),
+                            cwd: Arc::clone(&script_command.cwd),
+                            error,
+                        },
+                    )?;
+
+                let execution_item_kind: ExecutionItemKind = match plan_request {
+                    // Expand task query like `vp run -r build`
+                    Some(PlanRequest::Query(query_plan_request)) => {
+                        // Skip rule: skip if this nested query is the same as the parent expansion.
+                        if query_plan_request.query == *context.parent_query() {
+                            continue;
+                        }
+
+                        let task_name = query_plan_request.query.task_name.clone();
+                        context.add_envs(and_item.envs.iter());
+                        let QueryPlanRequest { query, plan_options } = query_plan_request;
+                        let query = Arc::new(query);
+                        let execution_graph =
+                            plan_query_request(Arc::clone(&query), plan_options, context)
+                                .await
+                                .map_err(|error| Error::NestPlan {
+                                    task_display: task_node.task_display.clone(),
+                                    command: display.clone(),
+                                    error: Box::new(error),
+                                })?;
+                        if execution_graph.graph.node_count() == 0 {
+                            return Err(Error::NestPlan {
                                 task_display: task_node.task_display.clone(),
-                                command: Str::from(&command_str[add_item_span.clone()]),
-                                error: Box::new(error),
-                            })?;
-                    // An empty execution graph means no tasks matched the query.
-                    // At the top level the session shows the task selector UI,
-                    // but in a nested context there is no UI — propagate as an error.
-                    if execution_graph.graph.node_count() == 0 {
-                        return Err(Error::NestPlan {
-                            task_display: task_node.task_display.clone(),
-                            command: Str::from(&command_str[add_item_span]),
-                            error: Box::new(Error::NoTasksMatched(task_name)),
-                        });
+                                command: display,
+                                error: Box::new(Error::NoTasksMatched(task_name)),
+                            });
+                        }
+                        ExecutionItemKind::Expanded(execution_graph)
                     }
-                    ExecutionItemKind::Expanded(execution_graph)
-                }
-                // Synthetic task (from CommandHandler)
-                Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
-                    let task_effective_cache = effective_cache_config(
-                        task_node.resolved_config.resolved_options.cache_config.as_ref(),
-                        task_node.source,
-                        *context.resolved_global_cache(),
-                    );
-                    let parent_cache_config = task_effective_cache
-                        .as_ref()
-                        .map_or(ParentCacheConfig::Disabled, |config| {
-                            ParentCacheConfig::Inherited(config.clone())
-                        });
-                    let spawn_execution = plan_synthetic_request(
-                        context.workspace_path(),
-                        &and_item.envs,
-                        synthetic_plan_request,
-                        Some(task_execution_cache_key),
-                        &cwd,
-                        package_path,
-                        parent_cache_config,
-                    )?;
-                    ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
-                }
-                // Normal 3rd party tool command (like `tsc --noEmit`), using potentially mutated script_command
-                None => {
-                    let program_path = which(
-                        &OsStr::new(&script_command.program).into(),
-                        &script_command.envs,
-                        &script_command.cwd,
-                    )?;
-                    let (program_path, spawn_args) = crate::ps1_shim::rewrite_cmd_shim_with_args(
-                        program_path,
-                        script_command.args,
-                        &task_node.resolved_config.resolved_options.cwd,
-                        context.workspace_path(),
-                    );
-                    let resolved_options = ResolvedTaskOptions {
-                        cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
-                        cache_config: effective_cache_config(
+                    // Synthetic task (from CommandHandler)
+                    Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
+                        let task_effective_cache = effective_cache_config(
                             task_node.resolved_config.resolved_options.cache_config.as_ref(),
                             task_node.source,
                             *context.resolved_global_cache(),
-                        ),
-                    };
-                    let spawn_execution = plan_spawn_execution(
-                        context.workspace_path(),
-                        Some(task_execution_cache_key),
-                        &and_item.envs,
-                        &resolved_options,
-                        &script_command.envs,
-                        program_path,
-                        spawn_args,
-                    )?;
-                    ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
-                }
-            };
-            items.push(ExecutionItem { execution_item_display, kind: execution_item_kind });
-        }
-    } else {
-        #[expect(clippy::disallowed_types, reason = "PathBuf needed for which fallback path")]
-        static SHELL_PROGRAM_PATH: LazyLock<Arc<AbsolutePath>> =
-            LazyLock::new(|| {
-                if cfg!(target_os = "windows") {
-                    AbsolutePathBuf::new(which::which("cmd.exe").unwrap_or_else(|_| {
-                        std::path::PathBuf::from("C:\\Windows\\System32\\cmd.exe")
-                    }))
-                    .unwrap()
-                    .into()
+                        );
+                        let parent_cache_config = task_effective_cache
+                            .as_ref()
+                            .map_or(ParentCacheConfig::Disabled, |config| {
+                                ParentCacheConfig::Inherited(config.clone())
+                            });
+                        let spawn_execution = plan_synthetic_request(
+                            context.workspace_path(),
+                            &and_item.envs,
+                            synthetic_plan_request,
+                            Some(task_execution_cache_key),
+                            &cwd,
+                            package_path,
+                            parent_cache_config,
+                        )?;
+                        ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
+                    }
+                    // Normal 3rd party tool command (like `tsc --noEmit`), using potentially mutated script_command
+                    None => {
+                        let program_path = which(
+                            &OsStr::new(&script_command.program).into(),
+                            &script_command.envs,
+                            &script_command.cwd,
+                        )?;
+                        let (program_path, spawn_args) =
+                            crate::ps1_shim::rewrite_cmd_shim_with_args(
+                                program_path,
+                                script_command.args,
+                                &task_node.resolved_config.resolved_options.cwd,
+                                context.workspace_path(),
+                            );
+                        let resolved_options = ResolvedTaskOptions {
+                            cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
+                            cache_config: effective_cache_config(
+                                task_node.resolved_config.resolved_options.cache_config.as_ref(),
+                                task_node.source,
+                                *context.resolved_global_cache(),
+                            ),
+                        };
+                        let spawn_execution = plan_spawn_execution(
+                            context.workspace_path(),
+                            Some(task_execution_cache_key),
+                            &and_item.envs,
+                            &resolved_options,
+                            &script_command.envs,
+                            program_path,
+                            spawn_args,
+                        )?;
+                        ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
+                    }
+                };
+                items.push(ExecutionItem { execution_item_display, kind: execution_item_kind });
+            }
+            PlannedCommand::Shell(script) => {
+                #[expect(
+                    clippy::disallowed_types,
+                    reason = "PathBuf needed for which fallback path"
+                )]
+                static SHELL_PROGRAM_PATH: LazyLock<Arc<AbsolutePath>> = LazyLock::new(|| {
+                    if cfg!(target_os = "windows") {
+                        AbsolutePathBuf::new(which::which("cmd.exe").unwrap_or_else(|_| {
+                            std::path::PathBuf::from("C:\\Windows\\System32\\cmd.exe")
+                        }))
+                        .unwrap()
+                        .into()
+                    } else {
+                        AbsolutePath::new("/bin/sh").unwrap().into()
+                    }
+                });
+
+                static SHELL_ARGS: &[&str] =
+                    if cfg!(target_os = "windows") { &["/d", "/s", "/c"] } else { &["-c"] };
+
+                let mut context = context.duplicate();
+                context.push_stack_frame(task_node_index, 0..script.len());
+
+                let extra_args = if index == and_item_count - 1 {
+                    Arc::clone(context.extra_args())
                 } else {
-                    AbsolutePath::new("/bin/sh").unwrap().into()
+                    Arc::new([])
+                };
+
+                let execution_item_display = ExecutionItemDisplay {
+                    command: script.clone(),
+                    and_item_index: if and_item_count > 1 { Some(index) } else { None },
+                    cwd: Arc::clone(&cwd),
+                    task_display: task_node.task_display.clone(),
+                };
+
+                let mut script_with_args = script;
+                for arg in extra_args.iter() {
+                    script_with_args.push(' ');
+                    script_with_args.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
                 }
-            });
 
-        static SHELL_ARGS: &[&str] =
-            if cfg!(target_os = "windows") { &["/d", "/s", "/c"] } else { &["-c"] };
-
-        let mut context = context.duplicate();
-        context.push_stack_frame(task_node_index, 0..command_str.len());
-
-        let execution_item_display = ExecutionItemDisplay {
-            command: command_str.into(),
-            and_item_index: None,
-            cwd,
-            task_display: task_node.task_display.clone(),
-        };
-
-        let mut script = Str::from(command_str);
-        for arg in context.extra_args().iter() {
-            script.push(' ');
-            script.push_str(shell_escape::escape(arg.as_str().into()).as_ref());
+                let resolved_options = ResolvedTaskOptions {
+                    cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
+                    cache_config: effective_cache_config(
+                        task_node.resolved_config.resolved_options.cache_config.as_ref(),
+                        task_node.source,
+                        *context.resolved_global_cache(),
+                    ),
+                };
+                let spawn_execution = plan_spawn_execution(
+                    context.workspace_path(),
+                    Some(ExecutionCacheKey::UserTask {
+                        task_name: task_node.task_display.task_name.clone(),
+                        and_item_index: index,
+                        extra_args: Arc::clone(&extra_args),
+                        package_path: strip_prefix_for_cache(
+                            package_path,
+                            context.workspace_path(),
+                        )
+                        .map_err(|kind| PathFingerprintError {
+                            kind,
+                            path_type: PathType::PackagePath,
+                        })?,
+                    }),
+                    &BTreeMap::new(),
+                    &resolved_options,
+                    context.envs(),
+                    Arc::clone(&*SHELL_PROGRAM_PATH),
+                    SHELL_ARGS
+                        .iter()
+                        .map(|s| Str::from(*s))
+                        .chain(std::iter::once(script_with_args))
+                        .collect(),
+                )?;
+                items.push(ExecutionItem {
+                    execution_item_display,
+                    kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
+                });
+            }
         }
-
-        let resolved_options = ResolvedTaskOptions {
-            cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
-            cache_config: effective_cache_config(
-                task_node.resolved_config.resolved_options.cache_config.as_ref(),
-                task_node.source,
-                *context.resolved_global_cache(),
-            ),
-        };
-        let spawn_execution = plan_spawn_execution(
-            context.workspace_path(),
-            Some(ExecutionCacheKey::UserTask {
-                task_name: task_node.task_display.task_name.clone(),
-                and_item_index: 0,
-                extra_args: Arc::clone(context.extra_args()),
-                package_path: strip_prefix_for_cache(package_path, context.workspace_path())
-                    .map_err(|kind| PathFingerprintError {
-                        kind,
-                        path_type: PathType::PackagePath,
-                    })?,
-            }),
-            &BTreeMap::new(),
-            &resolved_options,
-            context.envs(),
-            Arc::clone(&*SHELL_PROGRAM_PATH),
-            SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
-        )?;
-        items.push(ExecutionItem {
-            execution_item_display,
-            kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
-        });
     }
 
     // Expand post-hook (`postX`) for package.json scripts.
