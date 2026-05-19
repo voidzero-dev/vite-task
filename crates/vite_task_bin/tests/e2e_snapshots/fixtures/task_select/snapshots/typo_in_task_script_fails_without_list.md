@@ -7,8 +7,6 @@ A typo inside a task's own script (i.e. a nested `vp run` command) should surfac
 **Exit code:** 1
 
 ```
-Error: Failed to plan tasks from `vt run nonexistent-xyz` in task task-select-test#run-typo-task
-
-Caused by:
-    Task "nonexistent-xyz" not found
+error: Failed to plan tasks from `vt run nonexistent-xyz` in task task-select-test#run-typo-task
+* Task "nonexistent-xyz" not found
 ```
