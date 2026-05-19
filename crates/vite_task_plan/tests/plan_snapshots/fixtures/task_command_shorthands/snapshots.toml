@@ -15,6 +15,14 @@ name = "nested_vt_array"
 args = ["run", "nested_vt_array"]
 
 [[plan]]
+name = "array_cd_spawn"
+args = ["run", "array_cd_spawn"]
+
+[[plan]]
+name = "array_cd_shell"
+args = ["run", "array_cd_shell"]
+
+[[plan]]
 name = "object_array_cache_false"
 args = ["run", "object_array_cache_false"]
 

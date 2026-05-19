@@ -1,0 +1,90 @@
+// run array_cd_shell
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "array_cd_shell"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/task-command-shorthands",
+          "task_name": "array_cd_shell",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/task-command-shorthands",
+                "task_name": "array_cd_shell",
+                "package_path": "<workspace>/"
+              },
+              "command": "echo $PWD",
+              "and_item_index": 1,
+              "cwd": "<workspace>/snapshots"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "snapshots",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "<os_shell_name>"
+                        }
+                      },
+                      "args": [
+                        "<os_shell_args>",
+                        "echo $PWD"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "array_cd_shell",
+                        "and_item_index": 1,
+                        "extra_args": [],
+                        "package_path": ""
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    },
+                    "output_config": {
+                      "includes_auto": false,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<os_shell_path>",
+                    "args": [
+                      "<os_shell_args>",
+                      "echo $PWD"
+                    ],
+                    "all_envs": {
+                      "FORCE_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/snapshots"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

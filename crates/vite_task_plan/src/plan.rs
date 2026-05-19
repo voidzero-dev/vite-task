@@ -326,11 +326,11 @@ async fn plan_task_as_execution_node(
                             crate::ps1_shim::rewrite_cmd_shim_with_args(
                                 program_path,
                                 script_command.args,
-                                &task_node.resolved_config.resolved_options.cwd,
+                                &script_command.cwd,
                                 context.workspace_path(),
                             );
                         let resolved_options = ResolvedTaskOptions {
-                            cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
+                            cwd: Arc::clone(&script_command.cwd),
                             cache_config: effective_cache_config(
                                 task_node.resolved_config.resolved_options.cache_config.as_ref(),
                                 task_node.source,
@@ -394,7 +394,7 @@ async fn plan_task_as_execution_node(
                 }
 
                 let resolved_options = ResolvedTaskOptions {
-                    cwd: Arc::clone(&task_node.resolved_config.resolved_options.cwd),
+                    cwd: Arc::clone(&cwd),
                     cache_config: effective_cache_config(
                         task_node.resolved_config.resolved_options.cache_config.as_ref(),
                         task_node.source,

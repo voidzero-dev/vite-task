@@ -4,6 +4,8 @@
     "array_shorthand": ["vtt print-file package.json", "vtt print-file vite-task.json", "vtt print-file package.json"],
     "array_with_and": ["vtt print-file package.json", "vtt print-file vite-task.json && vtt print-file package.json"],
     "nested_vt_array": ["vtt print-file package.json", "vt run string_shorthand"],
+    "array_cd_spawn": ["cd snapshots", "vtt print-file package.json"],
+    "array_cd_shell": ["cd snapshots", "echo $PWD"],
     "object_array_cache_false": {
       "command": ["vtt print-file package.json", "vtt print-file vite-task.json", "vtt print-file package.json"],
       "cache": false
