@@ -1,0 +1,5 @@
+{
+  "name": "node-compile-cache-outside-workspace-fixture",
+  "private": true,
+  "type": "module"
+}
