@@ -813,8 +813,7 @@ pub fn print_error(error: &anyhow::Error) {
 
     use owo_colors::{OwoColorize as _, Stream, Style};
 
-    let prefix =
-        "error:".if_supports_color(Stream::Stderr, |s| s.style(Style::new().red().bold()));
+    let prefix = "error:".if_supports_color(Stream::Stderr, |s| s.style(Style::new().red().bold()));
     let mut stderr = std::io::stderr().lock();
     let _ = write!(stderr, "{prefix} {error}");
     for source in error.chain().skip(1) {
