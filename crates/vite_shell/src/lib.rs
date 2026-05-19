@@ -135,8 +135,30 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
     Some((TaskParsedCommand { envs, program: unquote(program)?, args }, range))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CwdChangingCommand {
+    Cd,
+    Chdir,
+    Dot,
+    Source,
+    Eval,
+}
+
+impl CwdChangingCommand {
+    fn from_name(command_name: &str) -> Option<Self> {
+        Some(match command_name {
+            "cd" => Self::Cd,
+            "chdir" => Self::Chdir,
+            "." => Self::Dot,
+            "source" => Self::Source,
+            "eval" => Self::Eval,
+            _ => return None,
+        })
+    }
+}
+
 fn command_name_may_change_cwd(command_name: &str) -> bool {
-    matches!(command_name, "cd" | "chdir" | "." | "source" | "eval")
+    CwdChangingCommand::from_name(command_name).is_some()
 }
 
 fn wrapper_command_may_change_cwd(suffix: Option<&CommandSuffix>) -> bool {
