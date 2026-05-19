@@ -23,6 +23,10 @@ name = "array_cd_shell"
 args = ["run", "array_cd_shell"]
 
 [[plan]]
+name = "array_shell_cd_before_next_error"
+args = ["run", "array_shell_cd_before_next"]
+
+[[plan]]
 name = "object_array_cache_false"
 args = ["run", "object_array_cache_false"]
 

@@ -135,6 +135,45 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
     Some((TaskParsedCommand { envs, program: unquote(program)?, args }, range))
 }
 
+fn pipeline_program_is_cd(pipeline: &Pipeline) -> bool {
+    let Pipeline { timed: None, bang: false, seq } = pipeline else {
+        return false;
+    };
+    let [Command::Simple(simple_command)] = seq.as_slice() else {
+        return false;
+    };
+    let SimpleCommand { word_or_name: Some(program), .. } = simple_command else {
+        return false;
+    };
+    unquote(program).is_some_and(|program| program.as_str() == "cd")
+}
+
+#[must_use]
+pub fn contains_cd_command(cmd: &str) -> bool {
+    let mut parser = Parser::new(cmd.as_bytes(), &PARSER_OPTIONS);
+    let Ok(Program { complete_commands }) = parser.parse_program() else {
+        return false;
+    };
+
+    for compound_list in &complete_commands {
+        for CompoundListItem(and_or_list, _) in &compound_list.0 {
+            if pipeline_program_is_cd(&and_or_list.first) {
+                return true;
+            }
+            for and_or in &and_or_list.additional {
+                let pipeline = match and_or {
+                    AndOr::And(pipeline) | AndOr::Or(pipeline) => pipeline,
+                };
+                if pipeline_program_is_cd(pipeline) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
 #[must_use]
 pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<usize>)>> {
     let mut parser = Parser::new(cmd.as_bytes(), &PARSER_OPTIONS);
@@ -161,6 +200,19 @@ pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_contains_cd_command_with_unresolved_arg() {
+        assert!(contains_cd_command(r#"cd "$APP_DIR""#));
+        assert!(contains_cd_command(r#"echo ok && cd "$APP_DIR""#));
+        assert!(contains_cd_command(r#"FOO=bar 'cd' "$APP_DIR""#));
+    }
+
+    #[test]
+    fn test_contains_cd_command_ignores_cd_argument_text() {
+        assert!(!contains_cd_command(r#"echo "cd $APP_DIR""#));
+        assert!(!contains_cd_command("cdtool $APP_DIR"));
+    }
 
     #[test]
     fn test_parse_single_command() {
