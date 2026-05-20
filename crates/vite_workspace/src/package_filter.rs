@@ -245,6 +245,7 @@ pub enum PackageQueryError {
 /// Use `#[clap(flatten)]` to embed these in a parent clap struct.
 /// Call [`into_package_query`](Self::into_package_query) to convert into an opaque [`PackageQuery`].
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
+#[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
 pub struct PackageQueryArgs {
     /// Select all packages in the workspace.
     #[clap(default_value = "false", short, long)]
@@ -275,6 +276,14 @@ Match packages by name, directory, or glob pattern.
   --filter !<pattern>       Exclude packages matching the pattern"
     )]
     filters: Vec<Str>,
+
+    /// Exit with a non-zero status if a `--filter` expression matches no packages.
+    ///
+    /// Without this flag, an unmatched filter (a typo, an empty glob, or a
+    /// traversal like `{.}^...` that collapses to zero on a leaf package) only
+    /// produces a warning and the command exits successfully.
+    #[clap(long = "fail-if-no-match", default_value = "false")]
+    pub fail_if_no_match: bool,
 }
 
 impl PackageQueryArgs {
@@ -297,7 +306,9 @@ impl PackageQueryArgs {
         package_name: Option<Str>,
         cwd: &Arc<AbsolutePath>,
     ) -> Result<(PackageQuery, bool), PackageQueryError> {
-        let Self { recursive, transitive, workspace_root, filters } = self;
+        // `fail_if_no_match` is read directly from the field before this
+        // method consumes `self`; it does not affect query construction.
+        let Self { recursive, transitive, workspace_root, filters, fail_if_no_match: _ } = self;
 
         // Collect filter tokens from all `--filter` arguments, splitting on whitespace.
         let mut filter_tokens = Vec::<Str>::with_capacity(filters.len());
@@ -1118,6 +1129,7 @@ mod tests {
             transitive: false,
             workspace_root: true,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1144,6 +1156,7 @@ mod tests {
             transitive: false,
             workspace_root: true,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         assert!(
@@ -1162,6 +1175,7 @@ mod tests {
             transitive: true,
             workspace_root: true,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1187,6 +1201,7 @@ mod tests {
             transitive: false,
             workspace_root: true,
             filters: vec![Str::from("foo")],
+            fail_if_no_match: false,
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1211,6 +1226,7 @@ mod tests {
             transitive: false,
             workspace_root: true,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         assert!(matches!(
             args.into_package_query(Some(Str::from("app")), &cwd),
@@ -1235,6 +1251,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: vec![Str::from("a b")],
+            fail_if_no_match: false,
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1255,6 +1272,7 @@ mod tests {
             transitive: false,
             workspace_root: true,
             filters: vec![Str::from("foo")],
+            fail_if_no_match: false,
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1275,6 +1293,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (query, _) = args.into_package_query(None, &cwd).unwrap();
         match &query.0 {
@@ -1296,6 +1315,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: vec![Str::from("")],
+            fail_if_no_match: false,
         };
         assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
     }
@@ -1308,6 +1328,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: vec![Str::from("   ")],
+            fail_if_no_match: false,
         };
         assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
     }
@@ -1320,6 +1341,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: vec![Str::from("foo"), Str::from("")],
+            fail_if_no_match: false,
         };
         assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
     }
@@ -1332,6 +1354,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: vec![Str::from(""), Str::from("foo")],
+            fail_if_no_match: false,
         };
         assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
     }
@@ -1344,6 +1367,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: vec![Str::from("foo"), Str::from("  \t  ")],
+            fail_if_no_match: false,
         };
         assert!(matches!(args.into_package_query(None, &cwd), Err(PackageQueryError::EmptyFilter)));
     }
@@ -1358,6 +1382,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
         assert!(is_cwd_only);
@@ -1371,6 +1396,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (_, is_cwd_only) = args.into_package_query(Some(Str::from("app")), &cwd).unwrap();
         assert!(!is_cwd_only);
@@ -1384,6 +1410,7 @@ mod tests {
             transitive: true,
             workspace_root: false,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
         assert!(!is_cwd_only);
@@ -1397,6 +1424,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
         assert!(!is_cwd_only);
@@ -1410,6 +1438,7 @@ mod tests {
             transitive: false,
             workspace_root: false,
             filters: vec![Str::from("foo")],
+            fail_if_no_match: false,
         };
         let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
         assert!(!is_cwd_only);
@@ -1423,6 +1452,7 @@ mod tests {
             transitive: false,
             workspace_root: true,
             filters: Vec::new(),
+            fail_if_no_match: false,
         };
         let (_, is_cwd_only) = args.into_package_query(None, &cwd).unwrap();
         assert!(!is_cwd_only);

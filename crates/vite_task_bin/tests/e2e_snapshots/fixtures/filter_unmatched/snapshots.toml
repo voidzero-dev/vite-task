@@ -39,3 +39,50 @@ comment = """
 A directory-style `--filter` (`./packages/...`) that points nowhere should warn just like an unmatched name filter.
 """
 steps = [["vt", "run", "--filter", "@test/app", "--filter", "./packages/nope", "build"]]
+
+[[e2e]]
+name = "filter_with_zero_results_exits_zero_by_default"
+comment = """
+A `--filter` whose entire result is empty (typo, glob with no match, …) prints the warning and exits 0 — pnpm's default. Previously this errored with `Task "build" not found`.
+"""
+steps = [["vt", "run", "--filter", "nonexistent", "build"]]
+
+[[e2e]]
+name = "traversal_collapsed_to_empty_exits_zero_by_default"
+comment = """
+`{.}^...` selects the dependencies of the current package, excluding itself. On a leaf with no workspace deps the expression collapses to zero matches — a legitimate no-op rather than a typo — so the run warns and exits 0.
+"""
+cwd = "packages/lib"
+steps = [["vt", "run", "--filter", "{.}^...", "build"]]
+
+[[e2e]]
+name = "fail_if_no_match_errors_on_unmatched_filter"
+comment = """
+With `--fail-if-no-match`, an unmatched `--filter` aborts the run with a non-zero exit code instead of warning. Mirrors pnpm's `--fail-if-no-match`.
+"""
+steps = [["vt", "run", "--filter", "nonexistent", "--fail-if-no-match", "build"]]
+
+[[e2e]]
+name = "fail_if_no_match_errors_even_when_other_filters_match"
+comment = """
+Strict mode errors on **any** unmatched filter, even when other filters did match packages — this catches typos in CI scripts that combine an exact name with a glob.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "--filter",
+    "@test/app",
+    "--filter",
+    "nonexistent",
+    "--fail-if-no-match",
+    "build",
+  ],
+]
+
+[[e2e]]
+name = "fail_if_no_match_succeeds_when_all_filters_match"
+comment = """
+With `--fail-if-no-match` and only matching filters, the run proceeds normally — strict mode does not change the success path.
+"""
+steps = [["vt", "run", "--filter", "@test/app", "--fail-if-no-match", "build"]]

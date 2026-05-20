@@ -100,7 +100,9 @@ pub struct FilterResolution {
     /// stage (construction time), keeping all downstream code edge-type-agnostic.
     pub package_subgraph: DiGraphMap<PackageNodeIndex, ()>,
 
-    /// Original `--filter` strings for inclusion selectors that matched no packages.
+    /// Original `--filter` strings for inclusion filters that contributed no packages
+    /// to the final selected set (either the core selector matched nothing, or the
+    /// selector matched but the graph traversal — e.g. `^...` — collapsed it to empty).
     ///
     /// Omits synthetic filters (implicit cwd, `-w`) since the user didn't type them.
     /// Empty when `PackageQuery::All` is used.
@@ -263,12 +265,16 @@ impl IndexedPackageGraph {
         // Apply inclusions: union each filter's resolved set into `selected`.
         for filter in &inclusions {
             let matched = self.resolve_selector_entries(&filter.selector)?;
-            if matched.is_empty()
+            let expanded = self.expand_traversal(matched, filter.traversal.as_ref());
+            // Track filters that contribute nothing (typo, no-match glob, or a
+            // traversal like `^...` that collapsed an otherwise-matching seed
+            // down to zero). Synthetic filters (implicit cwd, `-w`) have no
+            // user-typed source and are skipped — they aren't typos.
+            if expanded.is_empty()
                 && let Some(source) = &filter.source
             {
                 unmatched_selectors.push(source.clone());
             }
-            let expanded = self.expand_traversal(matched, filter.traversal.as_ref());
             selected.extend(expanded);
         }
 

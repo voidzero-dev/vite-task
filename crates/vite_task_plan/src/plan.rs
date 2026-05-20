@@ -244,25 +244,29 @@ async fn plan_task_as_execution_node(
                     context.add_envs(and_item.envs.iter());
                     let QueryPlanRequest { query, plan_options } = query_plan_request;
                     let query = Arc::new(query);
-                    let execution_graph =
-                        plan_query_request(Arc::clone(&query), plan_options, context)
-                            .await
-                            .map_err(|error| Error::NestPlan {
-                                task_display: task_node.task_display.clone(),
-                                command: Str::from(&command_str[add_item_span.clone()]),
-                                error: Box::new(error),
-                            })?;
-                    // An empty execution graph means no tasks matched the query.
-                    // At the top level the session shows the task selector UI,
-                    // but in a nested context there is no UI — propagate as an error.
-                    if execution_graph.graph.node_count() == 0 {
+                    let nested_plan = plan_query_request(Arc::clone(&query), plan_options, context)
+                        .await
+                        .map_err(|error| Error::NestPlan {
+                            task_display: task_node.task_display.clone(),
+                            command: Str::from(&command_str[add_item_span.clone()]),
+                            error: Box::new(error),
+                        })?;
+                    // Two empty-graph cases:
+                    //   1. The nested filter selected no packages (`no_packages_matched`):
+                    //      treat as a no-op so a script's `vp run --filter X build` does
+                    //      not break when X happens to match nothing. The planner has
+                    //      already printed any per-filter warnings.
+                    //   2. Packages were selected but none have the task: there is no
+                    //      task selector in a nested context, so surface NoTasksMatched.
+                    if nested_plan.graph.graph.node_count() == 0 && !nested_plan.no_packages_matched
+                    {
                         return Err(Error::NestPlan {
                             task_display: task_node.task_display.clone(),
                             command: Str::from(&command_str[add_item_span]),
                             error: Box::new(Error::NoTasksMatched(task_name)),
                         });
                     }
-                    ExecutionItemKind::Expanded(execution_graph)
+                    ExecutionItemKind::Expanded(nested_plan.graph)
                 }
                 // Synthetic task (from CommandHandler)
                 Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
@@ -685,7 +689,7 @@ pub async fn plan_query_request(
     query: Arc<TaskQuery>,
     plan_options: PlanOptions,
     mut context: PlanContext<'_>,
-) -> Result<ExecutionGraph, Error> {
+) -> Result<crate::PlanResult, Error> {
     // Apply cache override from `--cache` / `--no-cache` flags on this request.
     //
     // When `None`, we skip the update so the context keeps whatever the parent
@@ -736,15 +740,25 @@ pub async fn plan_query_request(
     context.set_parent_query(Arc::clone(&query));
 
     // Query matching tasks from the task graph.
-    // An empty graph means no tasks matched; the caller (session) handles
-    // empty graphs by showing the task selector.
+    // An empty graph means either no packages matched the filter (caller
+    // should succeed silently) or no selected package has the task (caller
+    // should error or show the task selector). `selected_package_count`
+    // tells the caller which case applies.
     let task_query_result = context.indexed_task_graph().query_tasks(&query)?;
+
+    // Strict mode (`--fail-if-no-match`): any user-provided `--filter` that
+    // contributed zero packages is an error. Skip the per-filter warnings
+    // below since the error already names every unmatched source.
+    if plan_options.fail_if_no_match && !task_query_result.unmatched_selectors.is_empty() {
+        return Err(Error::NoPackagesMatched { sources: task_query_result.unmatched_selectors });
+    }
 
     #[expect(clippy::print_stderr, reason = "user-facing warning for typos in --filter")]
     for selector in &task_query_result.unmatched_selectors {
         eprintln!("No packages matched the filter: {selector}");
     }
 
+    let no_packages_matched = task_query_result.selected_package_count == 0;
     let task_node_index_graph = task_query_result.execution_graph;
 
     // Prune rule: if the expanding task appears in the expansion, prune it.
@@ -824,28 +838,31 @@ pub async fn plan_query_request(
     // Validate the graph is acyclic.
     // `try_from_graph` performs a DFS; if a cycle is found, it returns
     // `CycleError` containing the full cycle path as node indices.
-    ExecutionGraph::try_from_graph(inner_graph, effective_concurrency).map_err(|cycle| {
-        // Map each execution node index in the cycle path to its human-readable TaskDisplay.
-        // Every node in the cycle was added via `inner_graph.add_node()` above,
-        // with a corresponding entry in `execution_node_indices_by_task_index`.
-        let displays = cycle
-            .cycle_path()
-            .iter()
-            .map(|&exec_idx| {
-                execution_node_indices_by_task_index
-                    .iter()
-                    .find_map(|(task_idx, &mapped_exec_idx)| {
-                        if mapped_exec_idx == exec_idx {
-                            Some(context.indexed_task_graph().display_task(*task_idx))
-                        } else {
-                            None
-                        }
-                    })
-                    .expect("cycle node must exist in execution_node_indices_by_task_index")
-            })
-            .collect();
-        Error::CycleDependencyDetected(displays)
-    })
+    let graph =
+        ExecutionGraph::try_from_graph(inner_graph, effective_concurrency).map_err(|cycle| {
+            // Map each execution node index in the cycle path to its human-readable TaskDisplay.
+            // Every node in the cycle was added via `inner_graph.add_node()` above,
+            // with a corresponding entry in `execution_node_indices_by_task_index`.
+            let displays = cycle
+                .cycle_path()
+                .iter()
+                .map(|&exec_idx| {
+                    execution_node_indices_by_task_index
+                        .iter()
+                        .find_map(|(task_idx, &mapped_exec_idx)| {
+                            if mapped_exec_idx == exec_idx {
+                                Some(context.indexed_task_graph().display_task(*task_idx))
+                            } else {
+                                None
+                            }
+                        })
+                        .expect("cycle node must exist in execution_node_indices_by_task_index")
+                })
+                .collect();
+            Error::CycleDependencyDetected(displays)
+        })?;
+
+    Ok(crate::PlanResult { graph, no_packages_matched })
 }
 
 /// Parse `VP_RUN_CONCURRENCY_LIMIT` from the environment variables.

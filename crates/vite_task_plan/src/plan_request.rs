@@ -56,6 +56,10 @@ pub struct PlanOptions {
     /// running all tasks as independent. If `concurrency` is also `None`,
     /// this sets the effective concurrency to `usize::MAX`.
     pub parallel: bool,
+    /// When `true`, an unmatched `--filter` expression turns the warning into
+    /// an [`crate::Error::NoPackagesMatched`] error and the run exits non-zero.
+    /// Mirrors pnpm's `--fail-if-no-match`.
+    pub fail_if_no_match: bool,
 }
 
 #[derive(Debug)]

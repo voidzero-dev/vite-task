@@ -217,6 +217,8 @@ impl ResolvedRunCommand {
         let include_explicit_deps = !self.flags.ignore_depends_on;
         let concurrency_limit = self.flags.concurrency_limit.map(|n| n.max(1));
         let parallel = self.flags.parallel;
+        // Read before `into_package_query` consumes the args.
+        let fail_if_no_match = self.flags.package_query.fail_if_no_match;
 
         let (package_query, is_cwd_only) =
             self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;
@@ -233,6 +235,7 @@ impl ResolvedRunCommand {
                     cache_override,
                     concurrency_limit,
                     parallel,
+                    fail_if_no_match,
                 },
             },
             is_cwd_only,
