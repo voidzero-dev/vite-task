@@ -7,5 +7,5 @@ A typoed task name combined with `-r` (not cwd-only) should error without listin
 **Exit code:** 1
 
 ```
-Error: Task "buid" not found
+error: Task "buid" not found
 ```

@@ -244,15 +244,19 @@ impl<'a> Session<'a> {
 
     /// Primary entry point for CLI usage. Plans and executes the given command.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if planning or execution fails.
+    /// Any error encountered during planning or execution is printed to stderr
+    /// with a bold red `error:` prefix, with each level of the error chain on
+    /// its own `* `-prefixed line. Returns the exit status — callers exit the
+    /// process with it.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn main(mut self, command: Command) -> anyhow::Result<ExitStatus> {
+    pub async fn main(mut self, command: Command) -> ExitStatus {
         match self.main_inner(command).await {
-            Ok(()) => Ok(ExitStatus::SUCCESS),
-            Err(SessionError::EarlyExit(status)) => Ok(status),
-            Err(SessionError::Anyhow(err)) => Err(err),
+            Ok(()) => ExitStatus::SUCCESS,
+            Err(SessionError::EarlyExit(status)) => status,
+            Err(SessionError::Anyhow(err)) => {
+                print_error(&err);
+                ExitStatus::FAILURE
+            }
         }
     }
 
@@ -793,6 +797,29 @@ impl<'a> Session<'a> {
         )
         .await
     }
+}
+
+/// Print `error` to stderr formatted as the `vp` CLI does:
+///
+/// ```text
+/// error: <top-level message>
+/// * <source>
+/// * <source.source()>
+/// ```
+///
+/// The `error:` prefix is bold red when stderr supports ANSI colors.
+pub fn print_error(error: &anyhow::Error) {
+    use std::io::Write as _;
+
+    use owo_colors::{OwoColorize as _, Stream, Style};
+
+    let prefix = "error:".if_supports_color(Stream::Stderr, |s| s.style(Style::new().red().bold()));
+    let mut stderr = std::io::stderr().lock();
+    let _ = write!(stderr, "{prefix} {error}");
+    for source in error.chain().skip(1) {
+        let _ = write!(stderr, "\n* {source}");
+    }
+    let _ = writeln!(stderr);
 }
 
 /// Whether stdout supports ANSI color output for the current process. Honors

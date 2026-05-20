@@ -3,24 +3,21 @@ use vite_task::{Command, ExitStatus, Session};
 use vite_task_bin::OwnedSessionConfig;
 
 fn main() -> ! {
-    let exit_code: i32 =
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            match run().await {
-                Ok(status) => i32::from(status.0),
-                #[expect(clippy::print_stderr, reason = "top-level error reporting")]
-                Err(err) => {
-                    eprintln!("Error: {err:?}");
-                    1
-                }
-            }
-        });
+    let status: ExitStatus =
+        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(run());
 
-    std::process::exit(exit_code);
+    std::process::exit(i32::from(status.0));
 }
 
-async fn run() -> anyhow::Result<ExitStatus> {
+async fn run() -> ExitStatus {
     let args = Command::parse();
     let mut owned_config = OwnedSessionConfig::default();
-    let session = Session::init(owned_config.as_config())?;
+    let session = match Session::init(owned_config.as_config()) {
+        Ok(session) => session,
+        Err(err) => {
+            vite_task::print_error(&err);
+            return ExitStatus::FAILURE;
+        }
+    };
     session.main(args).await
 }

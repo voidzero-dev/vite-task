@@ -7,5 +7,5 @@
 **Exit code:** 1
 
 ```
-Error: No task specifier provided for 'run' command
+error: No task specifier provided for 'run' command
 ```
