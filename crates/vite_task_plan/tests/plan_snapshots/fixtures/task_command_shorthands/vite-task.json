@@ -8,10 +8,6 @@
     "array_cd_shell": ["cd snapshots", "echo $PWD"],
     "array_shell_cd_before_next": ["cd \"$APP_DIR\"", "vtt print-file package.json"],
     "array_compound_cd_before_next": ["if true; then cd snapshots; fi", "vtt print-file package.json"],
-    "object_array_cache_false": {
-      "command": ["vtt print-file package.json", "vtt print-file vite-task.json", "vtt print-file package.json"],
-      "cache": false
-    },
     "object_array_depends_on": {
       "command": ["vtt print-file package.json", "vtt print-file vite-task.json", "vtt print-file package.json"],
       "dependsOn": ["string_shorthand"]

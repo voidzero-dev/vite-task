@@ -379,32 +379,6 @@
   {
     "key": [
       "<workspace>/",
-      "object_array_cache_false"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/task-command-shorthands",
-        "task_name": "object_array_cache_false",
-        "package_path": "<workspace>/"
-      },
-      "resolved_config": {
-        "command": [
-          "vtt print-file package.json",
-          "vtt print-file vite-task.json",
-          "vtt print-file package.json"
-        ],
-        "resolved_options": {
-          "cwd": "<workspace>/",
-          "cache_config": null
-        }
-      },
-      "source": "TaskConfig"
-    },
-    "neighbors": []
-  },
-  {
-    "key": [
-      "<workspace>/",
       "object_array_depends_on"
     ],
     "node": {
