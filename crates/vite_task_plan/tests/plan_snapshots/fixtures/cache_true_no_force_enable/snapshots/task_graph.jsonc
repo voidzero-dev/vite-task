@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file package.json",
+        "commands": [
+          "vtt print-file package.json"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": null
@@ -34,7 +36,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file package.json",
+        "commands": [
+          "vtt print-file package.json"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -73,7 +77,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file package.json",
+        "commands": [
+          "vtt print-file package.json"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

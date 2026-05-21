@@ -6,7 +6,7 @@ use serde::Serialize;
 use vite_path::AbsolutePath;
 use vite_str::Str;
 
-use crate::{IndexedTaskGraph, TaskNodeIndex, config::TaskCommand};
+use crate::{IndexedTaskGraph, TaskNodeIndex};
 
 /// struct for printing a task in a human-readable way.
 #[derive(Debug, Clone, Serialize)]
@@ -50,7 +50,7 @@ impl IndexedTaskGraph {
                 let node = &self.task_graph()[idx];
                 TaskListEntry {
                     task_display: node.task_display.clone(),
-                    command: format_command_for_task_list(&node.resolved_config.command),
+                    command: format_command_for_task_list(&node.resolved_config.commands),
                 }
             })
             .collect()
@@ -58,19 +58,18 @@ impl IndexedTaskGraph {
 }
 
 // Display-only formatting for task list/selector descriptions. Execution planning keeps
-// `TaskCommand` structured and must not depend on this joined string.
-fn format_command_for_task_list(command: &TaskCommand) -> Str {
-    match command {
-        TaskCommand::String(command) => command.clone(),
-        TaskCommand::Array(commands) => {
-            let mut display = Str::default();
-            for (index, command) in commands.iter().enumerate() {
-                if index > 0 {
-                    display.push_str(" && ");
-                }
-                display.push_str(command.as_str());
+// command arrays structured and must not depend on this joined string.
+fn format_command_for_task_list(commands: &Arc<[Str]>) -> Str {
+    if commands.len() == 1 {
+        commands[0].clone()
+    } else {
+        let mut display = Str::default();
+        for (index, command) in commands.iter().enumerate() {
+            if index > 0 {
+                display.push_str(" && ");
             }
-            display
+            display.push_str(command.as_str());
         }
+        display
     }
 }

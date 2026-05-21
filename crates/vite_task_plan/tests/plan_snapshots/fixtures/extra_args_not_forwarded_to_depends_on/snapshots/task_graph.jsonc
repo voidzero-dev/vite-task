@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print build",
+        "commands": [
+          "vt tool print build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print test",
+        "commands": [
+          "vt tool print test"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

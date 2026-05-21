@@ -48,6 +48,7 @@
                     "execution_cache_key": {
                       "UserTask": {
                         "task_name": "check",
+                        "command_item_index": 0,
                         "and_item_index": 0,
                         "extra_args": [],
                         "package_path": ""

@@ -22,7 +22,7 @@ use vite_task_graph::{
     TaskNodeIndex, TaskSource,
     config::{
         CacheConfig, EnabledCacheConfig, ResolvedGlobConfig, ResolvedGlobalCacheConfig,
-        ResolvedTaskOptions, TaskCommand,
+        ResolvedTaskOptions,
         user::{UserCacheConfig, UserTaskOptions},
     },
     query::TaskQuery,
@@ -82,51 +82,47 @@ fn effective_cache_config(
 }
 
 enum PlannedCommand {
-    Parsed { and_item: TaskParsedCommand, display: Str, stack_frame: Range<usize> },
-    Shell(Str),
+    Parsed {
+        command_item_index: usize,
+        and_item_index: usize,
+        and_item: TaskParsedCommand,
+        display: Str,
+        stack_frame: Range<usize>,
+    },
+    Shell {
+        command_item_index: usize,
+        script: Str,
+    },
 }
 
 #[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
-fn command_source(command: &TaskCommand) -> Result<Str, Error> {
-    match command {
-        TaskCommand::String(command) => Ok(command.clone()),
-        TaskCommand::Array(commands) => {
-            if commands.is_empty() {
-                return Err(Error::InvalidTaskCommand("command array must not be empty".into()));
-            }
-            if commands.iter().any(|command| command.as_str().trim().is_empty()) {
-                return Err(Error::InvalidTaskCommand(
-                    "command array entries must not be empty".into(),
-                ));
-            }
+fn planned_commands(commands: &Arc<[Str]>) -> Result<Vec<PlannedCommand>, Error> {
+    if commands.is_empty() {
+        return Err(Error::InvalidTaskCommand("command array must not be empty".into()));
+    }
+    if commands.len() > 1 && commands.iter().any(|command| command.as_str().trim().is_empty()) {
+        return Err(Error::InvalidTaskCommand("command array entries must not be empty".into()));
+    }
 
-            let mut source = Str::default();
-            for (index, command) in commands.iter().enumerate() {
-                if index > 0 {
-                    source.push_str(" && ");
-                }
-                source.push_str(command.as_str());
-            }
-            Ok(source)
+    let mut planned = Vec::new();
+
+    for (command_item_index, command) in commands.iter().enumerate() {
+        if let Some(parsed) = try_parse_as_and_list(command.as_str()) {
+            planned.extend(parsed.into_iter().enumerate().map(
+                |(and_item_index, (and_item, range))| PlannedCommand::Parsed {
+                    command_item_index,
+                    and_item_index,
+                    and_item,
+                    display: Str::from(&command.as_str()[range.clone()]),
+                    stack_frame: range,
+                },
+            ));
+        } else {
+            planned.push(PlannedCommand::Shell { command_item_index, script: command.clone() });
         }
     }
-}
 
-#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
-fn planned_commands(command: &TaskCommand) -> Result<Vec<PlannedCommand>, Error> {
-    let source = command_source(command)?;
-    if let Some(parsed) = try_parse_as_and_list(source.as_str()) {
-        Ok(parsed
-            .into_iter()
-            .map(|(and_item, range)| PlannedCommand::Parsed {
-                display: Str::from(&source.as_str()[range.clone()]),
-                and_item,
-                stack_frame: range,
-            })
-            .collect())
-    } else {
-        Ok(vec![PlannedCommand::Shell(source)])
-    }
+    Ok(planned)
 }
 
 /// - `with_hooks`: whether to look up `preX`/`postX` lifecycle hooks for this task.
@@ -176,11 +172,17 @@ async fn plan_task_as_execution_node(
     let mut cwd = Arc::clone(&task_node.resolved_config.resolved_options.cwd);
 
     // TODO: variable expansion (https://crates.io/crates/shellexpand) BEFORE parsing
-    let planned_commands = planned_commands(&task_node.resolved_config.command)?;
+    let planned_commands = planned_commands(&task_node.resolved_config.commands)?;
     let and_item_count = planned_commands.len();
     for (index, planned_command) in planned_commands.into_iter().enumerate() {
         match planned_command {
-            PlannedCommand::Parsed { and_item, display, stack_frame } => {
+            PlannedCommand::Parsed {
+                command_item_index,
+                and_item_index,
+                and_item,
+                display,
+                stack_frame,
+            } => {
                 // Duplicate the context before modifying it for each and_item
                 let mut context = context.duplicate();
                 context.push_stack_frame(task_node_index, stack_frame);
@@ -244,7 +246,8 @@ async fn plan_task_as_execution_node(
                 // Create execution cache key for this and_item
                 let task_execution_cache_key = ExecutionCacheKey::UserTask {
                     task_name: task_node.task_display.task_name.clone(),
-                    and_item_index: index,
+                    command_item_index,
+                    and_item_index,
                     extra_args: Arc::clone(&extra_args),
                     package_path: strip_prefix_for_cache(package_path, context.workspace_path())
                         .map_err(|kind| PathFingerprintError {
@@ -359,7 +362,7 @@ async fn plan_task_as_execution_node(
                 };
                 items.push(ExecutionItem { execution_item_display, kind: execution_item_kind });
             }
-            PlannedCommand::Shell(script) => {
+            PlannedCommand::Shell { command_item_index, script } => {
                 #[expect(
                     clippy::disallowed_types,
                     reason = "PathBuf needed for which fallback path"
@@ -412,7 +415,8 @@ async fn plan_task_as_execution_node(
                     context.workspace_path(),
                     Some(ExecutionCacheKey::UserTask {
                         task_name: task_node.task_display.task_name.clone(),
-                        and_item_index: index,
+                        command_item_index,
+                        and_item_index: 0,
                         extra_args: Arc::clone(&extra_args),
                         package_path: strip_prefix_for_cache(
                             package_path,

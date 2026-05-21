@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vtt print-file package.json",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -49,6 +48,7 @@
                     "execution_cache_key": {
                       "UserTask": {
                         "task_name": "string_shorthand",
+                        "command_item_index": 0,
                         "and_item_index": 0,
                         "extra_args": [],
                         "package_path": ""

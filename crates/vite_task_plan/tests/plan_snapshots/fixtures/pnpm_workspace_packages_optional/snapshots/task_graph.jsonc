@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo hello",
+        "commands": [
+          "echo hello"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

@@ -12,7 +12,9 @@
         "package_path": "<workspace>/packages/app"
       },
       "resolved_config": {
-        "command": "echo build",
+        "commands": [
+          "echo build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/app",
           "cache_config": {

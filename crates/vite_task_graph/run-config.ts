@@ -20,9 +20,57 @@ export type InputBase = "package" | "workspace";
 
 export type Task = { 
 /**
- * Command string or sequence of command strings to run for the task.
+ * Command string to run for the task.
  */
-command: TaskCommand, 
+command: string, 
+/**
+ * The working directory for the task, relative to the package root (not workspace root).
+ */
+cwd?: string, 
+/**
+ * Dependencies of this task. Use `package-name#task-name` to refer to tasks in other packages.
+ */
+dependsOn?: Array<string>, } & ({ 
+/**
+ * Whether to cache the task
+ */
+cache?: true, 
+/**
+ * Environment variable names to be fingerprinted and passed to the task.
+ */
+env?: Array<string>, 
+/**
+ * Environment variable names to be passed to the task without fingerprinting.
+ */
+untrackedEnv?: Array<string>, 
+/**
+ * Files to include in the cache fingerprint.
+ *
+ * - Omitted: automatically tracks which files the task reads
+ * - `[]` (empty): disables file tracking entirely
+ * - Glob patterns (e.g. `"src/**"`) select specific files, relative to the package directory
+ * - `{pattern: "...", base: "workspace" | "package"}` specifies a glob with an explicit base directory
+ * - `{auto: true}` enables automatic file tracking
+ * - Negative patterns (e.g. `"!dist/**"`) exclude matched files
+ */
+input?: Array<string | GlobWithBase | AutoInput>, 
+/**
+ * Output files to archive after a successful run and restore on cache hit.
+ *
+ * - Omitted or `[]` (empty): no output archiving (default)
+ * - Glob patterns (e.g. `"dist/**"`) select specific output files, relative to the package directory
+ * - `{pattern: "...", base: "workspace" | "package"}` specifies a glob with an explicit base directory
+ * - Negative patterns (e.g. `"!dist/cache/**"`) exclude matched files
+ */
+output?: Array<string | GlobWithBase>, } | { 
+/**
+ * Whether to cache the task
+ */
+cache: false, }) | { 
+/**
+ * Command strings to run for the task.
+ */
+command: Array<string>, 
 /**
  * The working directory for the task, relative to the package root (not workspace root).
  */
@@ -68,9 +116,7 @@ output?: Array<string | GlobWithBase>, } | {
  */
 cache: false, });
 
-export type TaskCommand = string | Array<string>;
-
-export type TaskDefinition = Task | TaskCommand;
+export type TaskDefinition = Task | string | Array<string>;
 
 export type UserGlobalCacheConfig = boolean | { 
 /**

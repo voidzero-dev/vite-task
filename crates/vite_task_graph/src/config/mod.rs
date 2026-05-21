@@ -6,7 +6,7 @@ use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
-    AutoInput, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig, TaskCommand,
+    AutoInput, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
     UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
     UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
@@ -31,7 +31,7 @@ pub struct ResolvedTaskConfig {
     /// The command or commands to run for this task.
     ///
     /// Commands may contain environment variables that need to be expanded later.
-    pub command: TaskCommand,
+    pub commands: Arc<[Str]>,
 
     pub resolved_options: ResolvedTaskOptions,
 }
@@ -360,7 +360,7 @@ impl ResolvedTaskConfig {
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
         Ok(Self {
-            command: TaskCommand::String(package_json_script.into()),
+            commands: vec![package_json_script.into()].into(),
             resolved_options: ResolvedTaskOptions::resolve(
                 UserTaskOptions::default(),
                 package_dir,
@@ -379,13 +379,10 @@ impl ResolvedTaskConfig {
         package_dir: &Arc<AbsolutePath>,
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
+        let (commands, options) = user_config.into_parts();
         Ok(Self {
-            command: user_config.command,
-            resolved_options: ResolvedTaskOptions::resolve(
-                user_config.options,
-                package_dir,
-                workspace_root,
-            )?,
+            commands,
+            resolved_options: ResolvedTaskOptions::resolve(options, package_dir, workspace_root)?,
         })
     }
 }

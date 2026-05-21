@@ -12,7 +12,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "cd snapshots",
           "echo $PWD"
         ],
@@ -54,7 +54,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "cd snapshots",
           "vtt print-file package.json"
         ],
@@ -96,7 +96,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "if true; then cd snapshots; fi",
           "vtt print-file package.json"
         ],
@@ -138,7 +138,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "cd \"$APP_DIR\"",
           "vtt print-file package.json"
         ],
@@ -180,10 +180,52 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "vtt print-file package.json",
           "vtt print-file vite-task.json",
           "vtt print-file package.json"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": false,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "TaskConfig"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/",
+      "array_unbalanced_quotes"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/task-command-shorthands",
+        "task_name": "array_unbalanced_quotes",
+        "package_path": "<workspace>/"
+      },
+      "resolved_config": {
+        "commands": [
+          "foo '",
+          "' bar"
         ],
         "resolved_options": {
           "cwd": "<workspace>/",
@@ -223,7 +265,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "vtt print-file package.json",
           "vtt print-file vite-task.json && vtt print-file package.json"
         ],
@@ -265,7 +307,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [],
+        "commands": [],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -304,7 +346,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "vtt print-file package.json",
           ""
         ],
@@ -346,7 +388,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "vtt print-file package.json",
           "vt run string_shorthand"
         ],
@@ -388,7 +430,7 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": [
+        "commands": [
           "vtt print-file package.json",
           "vtt print-file vite-task.json",
           "vtt print-file package.json"
@@ -436,7 +478,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file package.json",
+        "commands": [
+          "vtt print-file package.json"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

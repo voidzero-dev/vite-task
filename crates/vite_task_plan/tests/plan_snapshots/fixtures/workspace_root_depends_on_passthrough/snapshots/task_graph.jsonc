@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt run -r build",
+        "commands": [
+          "vt run -r build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -56,7 +58,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo linting",
+        "commands": [
+          "echo linting"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -95,7 +99,9 @@
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "echo building-a",
+        "commands": [
+          "echo building-a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {
@@ -134,7 +140,9 @@
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "echo linting-a",
+        "commands": [
+          "echo linting-a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {

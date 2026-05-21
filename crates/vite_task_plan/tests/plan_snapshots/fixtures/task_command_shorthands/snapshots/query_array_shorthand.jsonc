@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vtt print-file package.json",
-              "and_item_index": 0,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -49,6 +48,7 @@
                     "execution_cache_key": {
                       "UserTask": {
                         "task_name": "array_shorthand",
+                        "command_item_index": 0,
                         "and_item_index": 0,
                         "extra_args": [],
                         "package_path": ""
@@ -89,7 +89,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vtt print-file vite-task.json",
-              "and_item_index": 1,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -117,7 +116,8 @@
                     "execution_cache_key": {
                       "UserTask": {
                         "task_name": "array_shorthand",
-                        "and_item_index": 1,
+                        "command_item_index": 1,
+                        "and_item_index": 0,
                         "extra_args": [],
                         "package_path": ""
                       }
@@ -157,7 +157,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vtt print-file package.json",
-              "and_item_index": 2,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -185,7 +184,8 @@
                     "execution_cache_key": {
                       "UserTask": {
                         "task_name": "array_shorthand",
-                        "and_item_index": 2,
+                        "command_item_index": 2,
+                        "and_item_index": 0,
                         "extra_args": [],
                         "package_path": ""
                       }

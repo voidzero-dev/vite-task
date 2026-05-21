@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file package.json",
+        "commands": [
+          "vtt print-file package.json"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "cd src && vt run build",
+        "commands": [
+          "cd src && vt run build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -90,7 +94,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "cd src && vt tool print lint",
+        "commands": [
+          "cd src && vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

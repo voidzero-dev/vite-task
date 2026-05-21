@@ -12,7 +12,9 @@
         "package_path": "<workspace>/packages/app"
       },
       "resolved_config": {
-        "command": "echo 'Building @test/app'",
+        "commands": [
+          "echo 'Building @test/app'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/app",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/packages/app"
       },
       "resolved_config": {
-        "command": "deploy-script --prod",
+        "commands": [
+          "deploy-script --prod"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/app",
           "cache_config": null
@@ -86,7 +90,9 @@
         "package_path": "<workspace>/packages/app"
       },
       "resolved_config": {
-        "command": "echo 'Starting @test/app'",
+        "commands": [
+          "echo 'Starting @test/app'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/app",
           "cache_config": {
@@ -125,7 +131,9 @@
         "package_path": "<workspace>/packages/app"
       },
       "resolved_config": {
-        "command": "echo 'Testing @test/app'",
+        "commands": [
+          "echo 'Testing @test/app'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/app",
           "cache_config": {
@@ -164,7 +172,9 @@
         "package_path": "<workspace>/packages/core"
       },
       "resolved_config": {
-        "command": "echo 'Building @test/core'",
+        "commands": [
+          "echo 'Building @test/core'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/core",
           "cache_config": {
@@ -203,7 +213,9 @@
         "package_path": "<workspace>/packages/core"
       },
       "resolved_config": {
-        "command": "echo 'Cleaning @test/core'",
+        "commands": [
+          "echo 'Cleaning @test/core'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/core",
           "cache_config": {
@@ -242,7 +254,9 @@
         "package_path": "<workspace>/packages/core"
       },
       "resolved_config": {
-        "command": "eslint src",
+        "commands": [
+          "eslint src"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/core",
           "cache_config": {
@@ -286,7 +300,9 @@
         "package_path": "<workspace>/packages/core"
       },
       "resolved_config": {
-        "command": "echo 'Testing @test/core'",
+        "commands": [
+          "echo 'Testing @test/core'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/core",
           "cache_config": {
@@ -325,7 +341,9 @@
         "package_path": "<workspace>/packages/utils"
       },
       "resolved_config": {
-        "command": "echo 'Building @test/utils'",
+        "commands": [
+          "echo 'Building @test/utils'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/utils",
           "cache_config": {
@@ -364,7 +382,9 @@
         "package_path": "<workspace>/packages/utils"
       },
       "resolved_config": {
-        "command": "eslint src",
+        "commands": [
+          "eslint src"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/utils",
           "cache_config": {
@@ -412,7 +432,9 @@
         "package_path": "<workspace>/packages/utils"
       },
       "resolved_config": {
-        "command": "echo 'Testing @test/utils'",
+        "commands": [
+          "echo 'Testing @test/utils'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/utils",
           "cache_config": {

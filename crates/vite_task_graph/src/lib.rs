@@ -308,11 +308,14 @@ impl IndexedTaskGraph {
 
                 let task_user_config = match task_user_config {
                     UserTaskDefinition::Config(config) => config,
-                    UserTaskDefinition::Command(command) => {
-                        UserTaskConfig { command, options: UserTaskOptions::default() }
+                    UserTaskDefinition::CommandString(command) => {
+                        UserTaskConfig::String { command, options: UserTaskOptions::default() }
+                    }
+                    UserTaskDefinition::CommandArray(command) => {
+                        UserTaskConfig::Array { command, options: UserTaskOptions::default() }
                     }
                 };
-                let dependency_specifiers = task_user_config.options.depends_on.clone();
+                let dependency_specifiers = task_user_config.options().depends_on.clone();
 
                 // Resolve the task configuration from the user config
                 let resolved_config = ResolvedTaskConfig::resolve(

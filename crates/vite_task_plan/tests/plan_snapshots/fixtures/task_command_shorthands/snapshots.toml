@@ -31,6 +31,10 @@ name = "array_compound_cd_before_next"
 args = ["run", "array_compound_cd_before_next"]
 
 [[plan]]
+name = "array_unbalanced_quotes"
+args = ["run", "array_unbalanced_quotes"]
+
+[[plan]]
 name = "object_array_depends_on"
 args = ["run", "object_array_depends_on"]
 

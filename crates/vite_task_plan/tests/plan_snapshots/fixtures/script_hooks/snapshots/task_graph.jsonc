@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo build",
+        "commands": [
+          "echo build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo posttest",
+        "commands": [
+          "echo posttest"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -90,7 +94,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo prebuild",
+        "commands": [
+          "echo prebuild"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -129,7 +135,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo prepretest",
+        "commands": [
+          "echo prepretest"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -168,7 +176,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo pretest",
+        "commands": [
+          "echo pretest"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -207,7 +217,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo test",
+        "commands": [
+          "echo test"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

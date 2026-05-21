@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vtt print-file package.json",
-              "and_item_index": 1,
               "cwd": "<workspace>/snapshots"
             },
             "kind": {
@@ -49,7 +48,8 @@
                     "execution_cache_key": {
                       "UserTask": {
                         "task_name": "array_cd_spawn",
-                        "and_item_index": 1,
+                        "command_item_index": 1,
+                        "and_item_index": 0,
                         "extra_args": [],
                         "package_path": ""
                       }

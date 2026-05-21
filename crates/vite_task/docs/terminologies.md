@@ -7,8 +7,8 @@
 {
   "name": "app",
   "scripts": {
-    "build": "echo build1 && echo build2"
-  }
+    "build": "echo build1 && echo build2",
+  },
 }
 ```
 
@@ -17,8 +17,8 @@
 {
   "tasks": {
     "lint": "echo lint",
-    "check": ["eslint .", "tsc --noEmit", "prettier --check ."]
-  }
+    "check": ["eslint .", "tsc --noEmit", "prettier --check ."],
+  },
 }
 ```
 
