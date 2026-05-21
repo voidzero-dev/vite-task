@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vt run build",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -47,7 +46,6 @@
                               "package_path": "<workspace>/"
                             },
                             "command": "vt tool print lint",
-                            "and_item_index": null,
                             "cwd": "<workspace>/"
                           },
                           "kind": {

@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo hello | node -e \"process.stdin.pipe(process.stdout)\"",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

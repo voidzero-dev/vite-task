@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vt cache clean",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

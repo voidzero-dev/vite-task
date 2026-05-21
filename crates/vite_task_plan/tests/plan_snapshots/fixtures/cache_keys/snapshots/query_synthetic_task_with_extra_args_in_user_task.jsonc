@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vt tool print lint --fix",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

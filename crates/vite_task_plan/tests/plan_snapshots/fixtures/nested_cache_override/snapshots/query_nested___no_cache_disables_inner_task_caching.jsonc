@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vt run --no-cache inner",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -47,7 +46,6 @@
                               "package_path": "<workspace>/"
                             },
                             "command": "vtt print-file package.json",
-                            "and_item_index": null,
                             "cwd": "<workspace>/"
                           },
                           "kind": {

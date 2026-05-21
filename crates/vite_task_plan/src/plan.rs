@@ -224,7 +224,6 @@ async fn plan_task_as_execution_node(
                         }
                         command
                     },
-                    and_item_index: if and_item_count > 1 { Some(index) } else { None },
                     cwd: Arc::clone(&cwd),
                     task_display: task_node.task_display.clone(),
                 };
@@ -391,7 +390,6 @@ async fn plan_task_as_execution_node(
 
                 let execution_item_display = ExecutionItemDisplay {
                     command: script.clone(),
-                    and_item_index: if and_item_count > 1 { Some(index) } else { None },
                     cwd: Arc::clone(&cwd),
                     task_display: task_node.task_display.clone(),
                 };

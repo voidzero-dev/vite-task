@@ -36,7 +36,6 @@
                 "package_path": "<workspace>/packages/a"
               },
               "command": "echo building a",
-              "and_item_index": null,
               "cwd": "<workspace>/packages/a"
             },
             "kind": {
@@ -84,7 +83,6 @@
                 "package_path": "<workspace>/packages/b"
               },
               "command": "echo building b",
-              "and_item_index": null,
               "cwd": "<workspace>/packages/b"
             },
             "kind": {
@@ -132,7 +130,6 @@
                 "package_path": "<workspace>/packages/c"
               },
               "command": "echo building c",
-              "and_item_index": null,
               "cwd": "<workspace>/packages/c"
             },
             "kind": {
