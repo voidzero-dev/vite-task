@@ -100,7 +100,7 @@ fn planned_commands(commands: &Arc<[Str]>) -> Result<Vec<PlannedCommand>, Error>
     if commands.is_empty() {
         return Err(Error::InvalidTaskCommand("command array must not be empty".into()));
     }
-    if commands.len() > 1 && commands.iter().any(|command| command.as_str().trim().is_empty()) {
+    if commands.iter().any(|command| command.as_str().trim().is_empty()) {
         return Err(Error::InvalidTaskCommand("command array entries must not be empty".into()));
     }
 
