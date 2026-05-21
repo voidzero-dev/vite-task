@@ -1,15 +1,15 @@
-// run array_cd_shell
+// run array_shell_cd_before_next
 {
   "graph": [
     {
       "key": [
         "<workspace>/",
-        "array_cd_shell"
+        "array_shell_cd_before_next"
       ],
       "node": {
         "task_display": {
           "package_name": "@test/task-command-shorthands",
-          "task_name": "array_cd_shell",
+          "task_name": "array_shell_cd_before_next",
           "package_path": "<workspace>/"
         },
         "items": [
@@ -17,10 +17,10 @@
             "execution_item_display": {
               "task_display": {
                 "package_name": "@test/task-command-shorthands",
-                "task_name": "array_cd_shell",
+                "task_name": "array_shell_cd_before_next",
                 "package_path": "<workspace>/"
               },
-              "command": "cd snapshots && echo $PWD",
+              "command": "cd \"$APP_DIR\" && vtt print-file package.json",
               "and_item_index": null,
               "cwd": "<workspace>/"
             },
@@ -37,7 +37,7 @@
                       },
                       "args": [
                         "<os_shell_args>",
-                        "cd snapshots && echo $PWD"
+                        "cd \"$APP_DIR\" && vtt print-file package.json"
                       ],
                       "env_fingerprints": {
                         "fingerprinted_envs": {},
@@ -48,7 +48,7 @@
                     },
                     "execution_cache_key": {
                       "UserTask": {
-                        "task_name": "array_cd_shell",
+                        "task_name": "array_shell_cd_before_next",
                         "and_item_index": 0,
                         "extra_args": [],
                         "package_path": ""
@@ -69,7 +69,7 @@
                     "program_path": "<os_shell_path>",
                     "args": [
                       "<os_shell_args>",
-                      "cd snapshots && echo $PWD"
+                      "cd \"$APP_DIR\" && vtt print-file package.json"
                     ],
                     "all_envs": {
                       "FORCE_COLOR": "1",

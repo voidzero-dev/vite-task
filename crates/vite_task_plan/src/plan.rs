@@ -16,7 +16,7 @@ use futures_util::FutureExt;
 use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::InvalidPathDataError};
-use vite_shell::{TaskParsedCommand, shell_command_may_change_cwd, try_parse_as_and_list};
+use vite_shell::{TaskParsedCommand, try_parse_as_and_list};
 use vite_str::Str;
 use vite_task_graph::{
     TaskNodeIndex, TaskSource,
@@ -87,10 +87,9 @@ enum PlannedCommand {
 }
 
 #[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
-fn planned_commands(command: &TaskCommand) -> Result<Vec<PlannedCommand>, Error> {
-    let mut array_len = None;
-    let snippets: Box<dyn Iterator<Item = &Str> + '_> = match command {
-        TaskCommand::String(command) => Box::new(std::iter::once(command)),
+fn command_source(command: &TaskCommand) -> Result<Str, Error> {
+    match command {
+        TaskCommand::String(command) => Ok(command.clone()),
         TaskCommand::Array(commands) => {
             if commands.is_empty() {
                 return Err(Error::InvalidTaskCommand("command array must not be empty".into()));
@@ -100,36 +99,34 @@ fn planned_commands(command: &TaskCommand) -> Result<Vec<PlannedCommand>, Error>
                     "command array entries must not be empty".into(),
                 ));
             }
-            array_len = Some(commands.len());
-            Box::new(commands.iter())
-        }
-    };
 
-    let mut planned = Vec::new();
-    for (snippet_index, snippet) in snippets.enumerate() {
-        if let Some(parsed) = try_parse_as_and_list(snippet.as_str()) {
-            for (and_item, range) in parsed {
-                planned.push(PlannedCommand::Parsed {
-                    display: Str::from(&snippet.as_str()[range.clone()]),
-                    and_item,
-                    stack_frame: range,
-                });
+            let mut source = Str::default();
+            for (index, command) in commands.iter().enumerate() {
+                if index > 0 {
+                    source.push_str(" && ");
+                }
+                source.push_str(command.as_str());
             }
-        } else {
-            // A shell fallback runs in a child shell, so any cwd change inside it cannot be
-            // reflected in the planner's cwd for following array entries.
-            if array_len.is_some_and(|len| snippet_index + 1 < len)
-                && shell_command_may_change_cwd(snippet.as_str())
-            {
-                return Err(Error::InvalidTaskCommand(
-                    "command array entries that may change directory in a shell must be the final entry"
-                        .into(),
-                ));
-            }
-            planned.push(PlannedCommand::Shell(snippet.clone()));
+            Ok(source)
         }
     }
-    Ok(planned)
+}
+
+#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
+fn planned_commands(command: &TaskCommand) -> Result<Vec<PlannedCommand>, Error> {
+    let source = command_source(command)?;
+    if let Some(parsed) = try_parse_as_and_list(source.as_str()) {
+        Ok(parsed
+            .into_iter()
+            .map(|(and_item, range)| PlannedCommand::Parsed {
+                display: Str::from(&source.as_str()[range.clone()]),
+                and_item,
+                stack_frame: range,
+            })
+            .collect())
+    } else {
+        Ok(vec![PlannedCommand::Shell(source)])
+    }
 }
 
 /// - `with_hooks`: whether to look up `preX`/`postX` lifecycle hooks for this task.
