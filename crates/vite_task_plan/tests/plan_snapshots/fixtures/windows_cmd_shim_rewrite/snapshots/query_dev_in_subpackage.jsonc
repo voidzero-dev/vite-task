@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/packages/foo"
               },
               "command": "vite --port 3000",
-              "and_item_index": null,
               "cwd": "<workspace>/packages/foo"
             },
             "kind": {

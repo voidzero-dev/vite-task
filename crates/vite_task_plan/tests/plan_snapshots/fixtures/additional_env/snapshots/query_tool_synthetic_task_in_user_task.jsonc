@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "TEST_VAR=hello_world vt tool print-env TEST_VAR",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

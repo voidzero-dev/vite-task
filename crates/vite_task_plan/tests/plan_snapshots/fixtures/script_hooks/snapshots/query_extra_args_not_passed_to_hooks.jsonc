@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo pretest",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -47,7 +46,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo test --coverage",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -74,7 +72,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo posttest",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

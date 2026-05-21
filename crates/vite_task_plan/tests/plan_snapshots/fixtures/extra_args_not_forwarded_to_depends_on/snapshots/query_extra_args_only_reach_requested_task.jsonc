@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vt tool print build",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -105,7 +104,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vt tool print test some-filter",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

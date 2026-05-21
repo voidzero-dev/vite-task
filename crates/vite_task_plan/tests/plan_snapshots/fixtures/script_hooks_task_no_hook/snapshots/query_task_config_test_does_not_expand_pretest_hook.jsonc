@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo test-task",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

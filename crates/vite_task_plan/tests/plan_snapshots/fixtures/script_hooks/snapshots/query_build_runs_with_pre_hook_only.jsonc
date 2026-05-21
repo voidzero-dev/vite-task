@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo prebuild",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -47,7 +46,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo build",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

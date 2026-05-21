@@ -103,10 +103,6 @@ pub struct ExecutionItemDisplay {
     /// `SpawnExecution` contains the actual args for execution.
     pub command: Str,
 
-    /// The index of this execution item among all items in the task's command split by `&&`.
-    /// If the task's command doesn't have `&&`, this will be `None`.
-    pub and_item_index: Option<usize>,
-
     /// The cwd when this execution item is planned.
     /// This is for displaying purpose only.
     ///
