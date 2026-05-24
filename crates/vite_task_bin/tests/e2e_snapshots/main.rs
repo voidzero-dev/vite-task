@@ -658,12 +658,15 @@ fn main() {
         .collect();
 
     let tests = match shard {
-        Some((index, total)) => tests
-            .into_iter()
-            .enumerate()
-            .filter(|(i, _)| i % total + 1 == index)
-            .map(|(_, t)| t)
-            .collect(),
+        Some((index, total)) => {
+            let count = tests.len();
+            tests
+                .into_iter()
+                .enumerate()
+                .filter(|(i, _)| i * total / count + 1 == index)
+                .map(|(_, t)| t)
+                .collect()
+        }
         None => tests,
     };
 
