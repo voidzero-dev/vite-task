@@ -192,48 +192,30 @@ impl Default for UserTaskOptions {
         }
     }
 }
+/// The command to run for a task: a single string or a sequence of strings.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(untagged)]
+pub enum Command {
+    /// A single command string.
+    Single(Str),
+    /// A sequence of command strings, run in order.
+    Array(Arc<[Str]>),
+}
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "Task"))]
-#[serde(untagged, rename_all = "camelCase")]
-pub enum UserTaskConfig {
-    /// Task object form with a single command string.
-    String {
-        /// Command string to run for the task.
-        command: Str,
+#[serde(rename_all = "camelCase")]
+pub struct UserTaskConfig {
+    /// Command to run, or an array of commands to run in order.
+    pub command: Command,
 
-        /// Fields other than the command
-        #[serde(flatten)]
-        options: UserTaskOptions,
-    },
-    /// Task object form with a sequence of command strings.
-    Array {
-        /// Command strings to run for the task.
-        command: Arc<[Str]>,
-
-        /// Fields other than the command
-        #[serde(flatten)]
-        options: UserTaskOptions,
-    },
-}
-
-impl UserTaskConfig {
-    #[must_use]
-    pub const fn options(&self) -> &UserTaskOptions {
-        match self {
-            Self::String { options, .. } | Self::Array { options, .. } => options,
-        }
-    }
-
-    #[must_use]
-    pub fn into_parts(self) -> (Arc<[Str]>, UserTaskOptions) {
-        match self {
-            Self::String { command, options } => (vec![command].into(), options),
-            Self::Array { command, options } => (command, options),
-        }
-    }
+    /// Fields other than the command.
+    #[serde(flatten)]
+    pub options: UserTaskOptions,
 }
 
 /// User-defined task configuration or command-only shorthand in `vite.config.*`.
@@ -456,8 +438,8 @@ mod tests {
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
         assert_eq!(
             user_config,
-            UserTaskConfig::String {
-                command: "echo hello".into(),
+            UserTaskConfig {
+                command: Command::Single("echo hello".into()),
                 options: UserTaskOptions::default()
             }
         );
@@ -469,12 +451,11 @@ mod tests {
             "command": ["echo one", "echo two", "echo three"]
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        let (commands, options) = user_config.into_parts();
         assert_eq!(
-            commands,
-            Arc::from(["echo one".into(), "echo two".into(), "echo three".into()])
+            user_config.command,
+            Command::Array(Arc::from(["echo one".into(), "echo two".into(), "echo three".into()]))
         );
-        assert_eq!(options, UserTaskOptions::default());
+        assert_eq!(user_config.options, UserTaskOptions::default());
     }
 
     #[test]
@@ -517,8 +498,11 @@ mod tests {
             "cache": false
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        let (commands, options) = user_config.into_parts();
-        assert_eq!(commands, Arc::from(["echo one".into(), "echo two".into()]));
+        assert_eq!(
+            user_config.command,
+            Command::Array(Arc::from(["echo one".into(), "echo two".into()]))
+        );
+        let options = user_config.options;
         assert_eq!(options.cwd_relative_to_package.as_ref().unwrap().as_str(), "src");
         assert_eq!(options.depends_on.as_ref().unwrap().as_ref(), [Str::from("build")]);
         assert_eq!(options.cache_config, UserCacheConfig::Disabled { cache: MustBe!(false) });
@@ -549,7 +533,7 @@ mod tests {
             "cwd": "src"
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(user_config.options().cwd_relative_to_package.as_ref().unwrap().as_str(), "src");
+        assert_eq!(user_config.options.cwd_relative_to_package.as_ref().unwrap().as_str(), "src");
     }
 
     #[test]
@@ -560,7 +544,7 @@ mod tests {
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
         assert_eq!(
-            user_config.options().cache_config,
+            user_config.options.cache_config,
             UserCacheConfig::Disabled { cache: MustBe!(false) }
         );
     }

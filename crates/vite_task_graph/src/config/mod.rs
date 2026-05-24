@@ -6,7 +6,7 @@ use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
-    AutoInput, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
+    AutoInput, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
     UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
     UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
@@ -379,7 +379,11 @@ impl ResolvedTaskConfig {
         package_dir: &Arc<AbsolutePath>,
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
-        let (commands, options) = user_config.into_parts();
+        let UserTaskConfig { command, options } = user_config;
+        let commands = match command {
+            Command::Single(command) => Arc::from([command]),
+            Command::Array(commands) => commands,
+        };
         Ok(Self {
             commands,
             resolved_options: ResolvedTaskOptions::resolve(options, package_dir, workspace_root)?,
