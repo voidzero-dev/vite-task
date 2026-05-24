@@ -1,0 +1,226 @@
+// run array_with_and
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "array_with_and"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/task-command-shorthands",
+          "task_name": "array_with_and",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/task-command-shorthands",
+                "task_name": "array_with_and",
+                "package_path": "<workspace>/"
+              },
+              "command": "vtt print-file package.json",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "vtt"
+                        }
+                      },
+                      "args": [
+                        "print-file",
+                        "package.json"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "array_with_and",
+                        "command_item_index": 0,
+                        "and_item_index": 0,
+                        "extra_args": [],
+                        "package_path": ""
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    },
+                    "output_config": {
+                      "includes_auto": false,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print-file",
+                      "package.json"
+                    ],
+                    "all_envs": {
+                      "FORCE_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/task-command-shorthands",
+                "task_name": "array_with_and",
+                "package_path": "<workspace>/"
+              },
+              "command": "vtt print-file vite-task.json",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "vtt"
+                        }
+                      },
+                      "args": [
+                        "print-file",
+                        "vite-task.json"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "array_with_and",
+                        "command_item_index": 1,
+                        "and_item_index": 0,
+                        "extra_args": [],
+                        "package_path": ""
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    },
+                    "output_config": {
+                      "includes_auto": false,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print-file",
+                      "vite-task.json"
+                    ],
+                    "all_envs": {
+                      "FORCE_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/task-command-shorthands",
+                "task_name": "array_with_and",
+                "package_path": "<workspace>/"
+              },
+              "command": "vtt print-file package.json",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "vtt"
+                        }
+                      },
+                      "args": [
+                        "print-file",
+                        "package.json"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "array_with_and",
+                        "command_item_index": 1,
+                        "and_item_index": 1,
+                        "extra_args": [],
+                        "package_path": ""
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    },
+                    "output_config": {
+                      "includes_auto": false,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print-file",
+                      "package.json"
+                    ],
+                    "all_envs": {
+                      "FORCE_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

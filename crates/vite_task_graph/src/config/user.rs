@@ -192,6 +192,17 @@ impl Default for UserTaskOptions {
         }
     }
 }
+/// The command to run for a task: a single string or a sequence of strings.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(untagged)]
+pub enum Command {
+    /// A single command string.
+    Single(Str),
+    /// A sequence of command strings, run in order.
+    Array(Arc<[Str]>),
+}
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -199,12 +210,24 @@ impl Default for UserTaskOptions {
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "Task"))]
 #[serde(rename_all = "camelCase")]
 pub struct UserTaskConfig {
-    /// The command to run for the task.
-    pub command: Box<str>,
+    /// Command to run, or an array of commands to run in order.
+    pub command: Command,
 
-    /// Fields other than the command
+    /// Fields other than the command.
     #[serde(flatten)]
     pub options: UserTaskOptions,
+}
+
+/// User-defined task configuration or command-only shorthand in `vite.config.*`.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "TaskDefinition"))]
+#[serde(untagged)]
+pub enum UserTaskDefinition {
+    /// Full task object form.
+    Object(UserTaskConfig),
+    /// Command-only shorthand form using default task options.
+    CommandShorthand(Command),
 }
 
 /// Root-level cache configuration.
@@ -281,8 +304,8 @@ pub struct UserRunConfig {
     /// Setting it in a package's config will result in an error.
     pub cache: Option<UserGlobalCacheConfig>,
 
-    /// Task definitions
-    pub tasks: Option<FxHashMap<Str, UserTaskConfig>>,
+    /// Task definitions: full task objects, command strings, or command string arrays.
+    pub tasks: Option<FxHashMap<Str, UserTaskDefinition>>,
 
     /// Whether to automatically run `preX`/`postX` package.json scripts as
     /// lifecycle hooks when script `X` is executed.
@@ -413,8 +436,95 @@ mod tests {
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
         assert_eq!(
             user_config,
-            UserTaskConfig { command: "echo hello".into(), options: UserTaskOptions::default() }
+            UserTaskConfig {
+                command: Command::Single("echo hello".into()),
+                options: UserTaskOptions::default()
+            }
         );
+    }
+
+    #[test]
+    fn test_command_array() {
+        let user_config_json = json!({
+            "command": ["echo one", "echo two", "echo three"]
+        });
+        let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            user_config.command,
+            Command::Array(Arc::from(["echo one".into(), "echo two".into(), "echo three".into()]))
+        );
+        assert_eq!(user_config.options, UserTaskOptions::default());
+    }
+
+    #[test]
+    fn test_task_string_shorthand() {
+        let user_config_json = json!({
+            "tasks": {
+                "build": "echo build"
+            }
+        });
+        let mut user_config: UserRunConfig = serde_json::from_value(user_config_json).unwrap();
+        let task = user_config.tasks.as_mut().unwrap().remove("build").unwrap();
+        assert_eq!(
+            task,
+            UserTaskDefinition::CommandShorthand(Command::Single("echo build".into()))
+        );
+    }
+
+    #[test]
+    fn test_task_array_shorthand() {
+        let user_config_json = json!({
+            "tasks": {
+                "build": ["echo one", "echo two", "echo three"]
+            }
+        });
+        let mut user_config: UserRunConfig = serde_json::from_value(user_config_json).unwrap();
+        let task = user_config.tasks.as_mut().unwrap().remove("build").unwrap();
+        assert_eq!(
+            task,
+            UserTaskDefinition::CommandShorthand(Command::Array(Arc::from([
+                "echo one".into(),
+                "echo two".into(),
+                "echo three".into()
+            ])))
+        );
+    }
+
+    #[test]
+    fn test_command_array_with_options() {
+        let user_config_json = json!({
+            "command": ["echo one", "echo two"],
+            "cwd": "src",
+            "dependsOn": ["build"],
+            "cache": false
+        });
+        let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            user_config.command,
+            Command::Array(Arc::from(["echo one".into(), "echo two".into()]))
+        );
+        let options = user_config.options;
+        assert_eq!(options.cwd_relative_to_package.as_ref().unwrap().as_str(), "src");
+        assert_eq!(options.depends_on.as_ref().unwrap().as_ref(), [Str::from("build")]);
+        assert_eq!(options.cache_config, UserCacheConfig::Disabled { cache: MustBe!(false) });
+    }
+
+    #[test]
+    fn test_task_invalid_shorthand_error() {
+        let user_config_json = json!({
+            "tasks": {
+                "build": 123
+            }
+        });
+        assert!(serde_json::from_value::<UserRunConfig>(user_config_json).is_err());
+    }
+
+    #[test]
+    fn test_command_array_invalid_item_error() {
+        let user_config_json = json!({
+            "command": ["echo one", 123]
+        });
+        assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
     }
 
     #[test]

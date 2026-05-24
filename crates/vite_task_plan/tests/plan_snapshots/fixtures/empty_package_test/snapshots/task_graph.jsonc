@@ -12,7 +12,9 @@
         "package_path": "<workspace>/packages/another-empty"
       },
       "resolved_config": {
-        "command": "echo 'Building another-empty package'",
+        "commands": [
+          "echo 'Building another-empty package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/another-empty",
           "cache_config": {
@@ -60,7 +62,9 @@
         "package_path": "<workspace>/packages/another-empty"
       },
       "resolved_config": {
-        "command": "echo 'Deploying another-empty package'",
+        "commands": [
+          "echo 'Deploying another-empty package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/another-empty",
           "cache_config": null
@@ -91,7 +95,9 @@
         "package_path": "<workspace>/packages/another-empty"
       },
       "resolved_config": {
-        "command": "echo 'Linting another-empty package'",
+        "commands": [
+          "echo 'Linting another-empty package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/another-empty",
           "cache_config": {
@@ -130,7 +136,9 @@
         "package_path": "<workspace>/packages/another-empty"
       },
       "resolved_config": {
-        "command": "echo 'Testing another-empty package'",
+        "commands": [
+          "echo 'Testing another-empty package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/another-empty",
           "cache_config": {
@@ -169,7 +177,9 @@
         "package_path": "<workspace>/packages/empty-name"
       },
       "resolved_config": {
-        "command": "echo 'Building empty-name package'",
+        "commands": [
+          "echo 'Building empty-name package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/empty-name",
           "cache_config": {
@@ -213,7 +223,9 @@
         "package_path": "<workspace>/packages/empty-name"
       },
       "resolved_config": {
-        "command": "echo 'Linting empty-name package'",
+        "commands": [
+          "echo 'Linting empty-name package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/empty-name",
           "cache_config": {
@@ -252,7 +264,9 @@
         "package_path": "<workspace>/packages/empty-name"
       },
       "resolved_config": {
-        "command": "echo 'Testing empty-name package'",
+        "commands": [
+          "echo 'Testing empty-name package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/empty-name",
           "cache_config": {
@@ -291,7 +305,9 @@
         "package_path": "<workspace>/packages/normal-package"
       },
       "resolved_config": {
-        "command": "echo 'Building normal-package'",
+        "commands": [
+          "echo 'Building normal-package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/normal-package",
           "cache_config": {
@@ -330,7 +346,9 @@
         "package_path": "<workspace>/packages/normal-package"
       },
       "resolved_config": {
-        "command": "echo 'Testing normal-package'",
+        "commands": [
+          "echo 'Testing normal-package'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/normal-package",
           "cache_config": {

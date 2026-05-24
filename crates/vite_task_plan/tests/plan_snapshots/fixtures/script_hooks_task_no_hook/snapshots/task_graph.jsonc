@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo pretest-script",
+        "commands": [
+          "echo pretest-script"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo test-task",
+        "commands": [
+          "echo test-task"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

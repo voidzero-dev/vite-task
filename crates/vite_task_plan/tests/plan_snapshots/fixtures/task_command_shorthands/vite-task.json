@@ -1,0 +1,29 @@
+{
+  "tasks": {
+    "string_shorthand": "vtt print-file package.json",
+    "array_shorthand": [
+      "vtt print-file package.json",
+      "vtt print-file vite-task.json",
+      "vtt print-file package.json"
+    ],
+    "array_with_and": [
+      "vtt print-file package.json",
+      "vtt print-file vite-task.json && vtt print-file package.json"
+    ],
+    "nested_vt_array": ["vtt print-file package.json", "vt run string_shorthand"],
+    "array_cd": [
+      "vtt print before_cd",
+      "cd snapshots && vtt print after_cd",
+      "vtt print after_cd2"
+    ],
+    "array_unbalanced_quotes": ["foo '", "' bar"],
+    "object_array_depends_on": {
+      "command": [
+        "vtt print-file package.json",
+        "vtt print-file vite-task.json",
+        "vtt print-file package.json"
+      ],
+      "dependsOn": ["string_shorthand"]
+    }
+  }
+}

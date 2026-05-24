@@ -465,7 +465,6 @@ pub mod test_fixtures {
         ExecutionItemDisplay {
             task_display: test_task_display(name),
             command: name.into(),
-            and_item_index: None,
             cwd: test_path(),
         }
     }

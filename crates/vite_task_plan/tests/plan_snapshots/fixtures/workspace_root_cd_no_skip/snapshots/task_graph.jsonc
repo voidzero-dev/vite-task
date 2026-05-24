@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "cd packages/a && vt run deploy",
+        "commands": [
+          "cd packages/a && vt run deploy"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "echo deploying-a",
+        "commands": [
+          "echo deploying-a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {

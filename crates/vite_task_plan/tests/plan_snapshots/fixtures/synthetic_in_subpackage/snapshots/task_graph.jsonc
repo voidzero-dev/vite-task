@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt run a#lint",
+        "commands": [
+          "vt run a#lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "vt tool print lint",
+        "commands": [
+          "vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {

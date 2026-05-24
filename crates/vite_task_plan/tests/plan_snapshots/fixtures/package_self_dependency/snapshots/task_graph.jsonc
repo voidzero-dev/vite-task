@@ -12,7 +12,9 @@
         "package_path": "<workspace>/packages/self-dep"
       },
       "resolved_config": {
-        "command": "echo building",
+        "commands": [
+          "echo building"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/self-dep",
           "cache_config": {

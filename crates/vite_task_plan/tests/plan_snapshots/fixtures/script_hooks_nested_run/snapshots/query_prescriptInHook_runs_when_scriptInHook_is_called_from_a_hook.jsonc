@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vt run scriptInHook",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -47,7 +46,6 @@
                               "package_path": "<workspace>/"
                             },
                             "command": "echo prescriptInHook",
-                            "and_item_index": null,
                             "cwd": "<workspace>/"
                           },
                           "kind": {
@@ -73,7 +71,6 @@
                               "package_path": "<workspace>/"
                             },
                             "command": "echo scriptInHook",
-                            "and_item_index": null,
                             "cwd": "<workspace>/"
                           },
                           "kind": {
@@ -108,7 +105,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo test",
-              "and_item_index": null,
               "cwd": "<workspace>/"
             },
             "kind": {

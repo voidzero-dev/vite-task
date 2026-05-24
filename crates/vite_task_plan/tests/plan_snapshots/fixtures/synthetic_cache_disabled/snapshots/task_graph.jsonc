@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print lint",
+        "commands": [
+          "vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print lint",
+        "commands": [
+          "vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -90,7 +94,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print lint",
+        "commands": [
+          "vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": null
@@ -112,7 +118,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print lint",
+        "commands": [
+          "vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -151,7 +159,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print lint",
+        "commands": [
+          "vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -191,7 +201,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt run build",
+        "commands": [
+          "vt run build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -230,7 +242,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt run build",
+        "commands": [
+          "vt run build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": null

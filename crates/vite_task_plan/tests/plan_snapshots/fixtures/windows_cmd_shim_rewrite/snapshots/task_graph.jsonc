@@ -12,7 +12,9 @@
         "package_path": "<workspace>/packages/foo"
       },
       "resolved_config": {
-        "command": "vite --port 3000",
+        "commands": [
+          "vite --port 3000"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/foo",
           "cache_config": {

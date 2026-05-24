@@ -1,0 +1,158 @@
+// run array_unbalanced_quotes
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "array_unbalanced_quotes"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/task-command-shorthands",
+          "task_name": "array_unbalanced_quotes",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/task-command-shorthands",
+                "task_name": "array_unbalanced_quotes",
+                "package_path": "<workspace>/"
+              },
+              "command": "foo '",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "<os_shell_name>"
+                        }
+                      },
+                      "args": [
+                        "<os_shell_args>",
+                        "foo '"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "array_unbalanced_quotes",
+                        "command_item_index": 0,
+                        "and_item_index": 0,
+                        "extra_args": [],
+                        "package_path": ""
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    },
+                    "output_config": {
+                      "includes_auto": false,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<os_shell_path>",
+                    "args": [
+                      "<os_shell_args>",
+                      "foo '"
+                    ],
+                    "all_envs": {
+                      "FORCE_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/task-command-shorthands",
+                "task_name": "array_unbalanced_quotes",
+                "package_path": "<workspace>/"
+              },
+              "command": "' bar",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "<os_shell_name>"
+                        }
+                      },
+                      "args": [
+                        "<os_shell_args>",
+                        "' bar"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "array_unbalanced_quotes",
+                        "command_item_index": 1,
+                        "and_item_index": 0,
+                        "extra_args": [],
+                        "package_path": ""
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    },
+                    "output_config": {
+                      "includes_auto": false,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<os_shell_path>",
+                    "args": [
+                      "<os_shell_args>",
+                      "' bar"
+                    ],
+                    "all_envs": {
+                      "FORCE_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

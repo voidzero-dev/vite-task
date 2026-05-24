@@ -1,0 +1,27 @@
+[[plan]]
+name = "string_shorthand"
+args = ["run", "string_shorthand"]
+
+[[plan]]
+name = "array_shorthand"
+args = ["run", "array_shorthand"]
+
+[[plan]]
+name = "array_with_and"
+args = ["run", "array_with_and"]
+
+[[plan]]
+name = "nested_vt_array"
+args = ["run", "nested_vt_array"]
+
+[[plan]]
+name = "array_cd"
+args = ["run", "array_cd"]
+
+[[plan]]
+name = "array_unbalanced_quotes"
+args = ["run", "array_unbalanced_quotes"]
+
+[[plan]]
+name = "object_array_depends_on"
+args = ["run", "object_array_depends_on"]

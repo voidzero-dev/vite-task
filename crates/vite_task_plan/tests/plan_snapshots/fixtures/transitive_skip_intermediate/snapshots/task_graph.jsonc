@@ -12,7 +12,9 @@
         "package_path": "<workspace>/packages/bottom"
       },
       "resolved_config": {
-        "command": "echo 'Building @test/bottom'",
+        "commands": [
+          "echo 'Building @test/bottom'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/bottom",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/packages/middle"
       },
       "resolved_config": {
-        "command": "echo 'Linting @test/middle'",
+        "commands": [
+          "echo 'Linting @test/middle'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/middle",
           "cache_config": {
@@ -90,7 +94,9 @@
         "package_path": "<workspace>/packages/top"
       },
       "resolved_config": {
-        "command": "echo 'Building @test/top'",
+        "commands": [
+          "echo 'Building @test/top'"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/top",
           "cache_config": {

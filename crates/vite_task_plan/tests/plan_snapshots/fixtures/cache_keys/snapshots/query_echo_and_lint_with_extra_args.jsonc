@@ -21,7 +21,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "echo Linting",
-              "and_item_index": 0,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -47,7 +46,6 @@
                 "package_path": "<workspace>/"
               },
               "command": "vt tool print lint --fix",
-              "and_item_index": 1,
               "cwd": "<workspace>/"
             },
             "kind": {
@@ -76,6 +74,7 @@
                     "execution_cache_key": {
                       "UserTask": {
                         "task_name": "echo-and-lint",
+                        "command_item_index": 0,
                         "and_item_index": 1,
                         "extra_args": [
                           "--fix"

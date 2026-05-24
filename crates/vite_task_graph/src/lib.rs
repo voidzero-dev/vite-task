@@ -6,7 +6,10 @@ mod specifier;
 
 use std::{convert::Infallible, sync::Arc};
 
-use config::{ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig};
+use config::{
+    ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
+    UserTaskDefinition,
+};
 use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::Serialize;
@@ -15,7 +18,7 @@ use vite_path::AbsolutePath;
 use vite_str::Str;
 use vite_workspace::{PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph};
 
-use crate::display::TaskDisplay;
+use crate::{config::user::UserTaskOptions, display::TaskDisplay};
 
 /// The type of a task dependency edge in the task graph.
 ///
@@ -303,6 +306,12 @@ impl IndexedTaskGraph {
 
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
+                let task_user_config = match task_user_config {
+                    UserTaskDefinition::Object(config) => config,
+                    UserTaskDefinition::CommandShorthand(command) => {
+                        UserTaskConfig { command, options: UserTaskOptions::default() }
+                    }
+                };
                 let dependency_specifiers = task_user_config.options.depends_on.clone();
 
                 // Resolve the task configuration from the user config
