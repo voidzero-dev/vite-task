@@ -26,8 +26,6 @@
         "vtt print-file package.json"
       ],
       "dependsOn": ["string_shorthand"]
-    },
-    "empty_array": [],
-    "empty_item": ["vtt print-file package.json", ""]
+    }
   }
 }

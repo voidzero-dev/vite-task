@@ -119,9 +119,6 @@ pub enum Error {
     #[error(transparent)]
     TaskRecursionDetected(#[from] TaskRecursionError),
 
-    #[error("Invalid task command: {0}")]
-    InvalidTaskCommand(Str),
-
     #[error("Invalid vite task command: {program} with args {args:?} under cwd {cwd:?}")]
     ParsePlanRequest {
         program: Str,

@@ -37,11 +37,3 @@ args = ["run", "array_unbalanced_quotes"]
 [[plan]]
 name = "object_array_depends_on"
 args = ["run", "object_array_depends_on"]
-
-[[plan]]
-name = "empty_array_error"
-args = ["run", "empty_array"]
-
-[[plan]]
-name = "empty_item_error"
-args = ["run", "empty_item"]
