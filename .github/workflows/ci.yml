@@ -95,46 +95,45 @@ jobs:
             scope: ''
             run_env: ''
           # Windows e2e fixtures dominate wall-clock (60s per PTY step vs 20s on
-          # Unix). Sharded 5 ways at the trial level by the e2e harness via
-          # VT_SHARD_INDEX/VT_SHARD_TOTAL. Coverage is partitioned by scope:
-          # the e2e shards select only `-p vite_task_bin --test e2e_snapshots`,
-          # and the non-e2e shard runs `--workspace --exclude vite_task_bin`.
-          # vite_task_bin's Cargo.toml disables lib/doc/bin tests so the only
-          # test in the excluded crate is e2e_snapshots itself.
+          # Unix). Coverage is partitioned by crate: the e2e shards run
+          # `-p vite_task_bin` and the non-e2e shard runs
+          # `--workspace --exclude vite_task_bin`; the union is the workspace
+          # by construction. The e2e_snapshots harness self-shards via
+          # VT_SHARD_INDEX/VT_SHARD_TOTAL across the 5 e2e jobs.
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             cargo_cmd: cargo
             build_target: x86_64-pc-windows-msvc
             shard: windows-e2e-1
-            scope: '-p vite_task_bin --test e2e_snapshots'
+            scope: '-p vite_task_bin'
             run_env: 'VT_SHARD_INDEX=1 VT_SHARD_TOTAL=5'
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             cargo_cmd: cargo
             build_target: x86_64-pc-windows-msvc
             shard: windows-e2e-2
-            scope: '-p vite_task_bin --test e2e_snapshots'
+            scope: '-p vite_task_bin'
             run_env: 'VT_SHARD_INDEX=2 VT_SHARD_TOTAL=5'
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             cargo_cmd: cargo
             build_target: x86_64-pc-windows-msvc
             shard: windows-e2e-3
-            scope: '-p vite_task_bin --test e2e_snapshots'
+            scope: '-p vite_task_bin'
             run_env: 'VT_SHARD_INDEX=3 VT_SHARD_TOTAL=5'
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             cargo_cmd: cargo
             build_target: x86_64-pc-windows-msvc
             shard: windows-e2e-4
-            scope: '-p vite_task_bin --test e2e_snapshots'
+            scope: '-p vite_task_bin'
             run_env: 'VT_SHARD_INDEX=4 VT_SHARD_TOTAL=5'
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             cargo_cmd: cargo
             build_target: x86_64-pc-windows-msvc
             shard: windows-e2e-5
-            scope: '-p vite_task_bin --test e2e_snapshots'
+            scope: '-p vite_task_bin'
             run_env: 'VT_SHARD_INDEX=5 VT_SHARD_TOTAL=5'
           - os: windows-latest
             target: x86_64-pc-windows-msvc
