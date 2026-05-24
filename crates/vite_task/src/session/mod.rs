@@ -274,14 +274,22 @@ impl<'a> Session<'a> {
                 let graph = if let Some(ref task_specifier) = run_command.task_specifier {
                     // Task specifier provided — plan it.
                     let cwd = Arc::clone(&self.cwd);
-                    let (graph, is_cwd_only) =
+                    let (plan_result, is_cwd_only) =
                         self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?;
 
-                    if graph.graph.node_count() == 0 {
-                        // No tasks matched. Show the interactive selector only when
-                        // the command has no scope flags and no execution flags
-                        // (concurrency-limit, parallel) — otherwise the user intended
-                        // a specific execution mode and a typo should be an error.
+                    if plan_result.graph.graph.node_count() == 0 {
+                        // Three empty-graph outcomes, in order of precedence:
+                        //   1. `--filter` selected zero packages — the planner has
+                        //      already warned per filter; exit 0 silently. This is the
+                        //      pnpm-compatible default; `--fail-if-no-match` opts in
+                        //      to strict behaviour and is raised inside the planner.
+                        //   2. Bare `vp run` (cwd-only, no execution flags) — fall
+                        //      through to the interactive task selector.
+                        //   3. Otherwise (e.g. typoed task, `-r` with no matching
+                        //      package) — surface NoTasksMatched.
+                        if plan_result.no_packages_matched {
+                            return Ok(());
+                        }
                         let has_execution_flags = run_command.flags.concurrency_limit.is_some()
                             || run_command.flags.parallel;
                         if is_cwd_only && !has_execution_flags {
@@ -294,7 +302,7 @@ impl<'a> Session<'a> {
                             .into());
                         }
                     } else {
-                        graph
+                        plan_result.graph
                     }
                 } else {
                     // No task specifier (e.g. `vp run` or `vp run --verbose`).
@@ -563,6 +571,9 @@ impl<'a> Session<'a> {
                 cache_override: run_command.flags.cache_override(),
                 concurrency_limit: None,
                 parallel: false,
+                // The selector path runs whatever the user picked interactively;
+                // there is no `--filter` in play, so strict-mode does not apply.
+                fail_if_no_match: false,
             },
         })
     }
@@ -741,8 +752,9 @@ impl<'a> Session<'a> {
         cwd: Arc<AbsolutePath>,
         command: RunCommand,
     ) -> Result<ExecutionGraph, vite_task_plan::Error> {
-        let (graph, _) = self.plan_from_cli_run_resolved(cwd, command.into_resolved()).await?;
-        Ok(graph)
+        let (plan_result, _) =
+            self.plan_from_cli_run_resolved(cwd, command.into_resolved()).await?;
+        Ok(plan_result.graph)
     }
 
     /// Internal: plans execution from a resolved run command.
@@ -751,7 +763,7 @@ impl<'a> Session<'a> {
         &mut self,
         cwd: Arc<AbsolutePath>,
         command: crate::cli::ResolvedRunCommand,
-    ) -> Result<(ExecutionGraph, bool), vite_task_plan::Error> {
+    ) -> Result<(vite_task_plan::PlanResult, bool), vite_task_plan::Error> {
         let (query_plan_request, is_cwd_only) = match command.into_query_plan_request(&cwd) {
             Ok(result) => result,
             Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
@@ -766,7 +778,7 @@ impl<'a> Session<'a> {
                 });
             }
         };
-        let graph = vite_task_plan::plan_query(
+        let plan_result = vite_task_plan::plan_query(
             query_plan_request,
             &self.workspace_path,
             &cwd,
@@ -775,7 +787,7 @@ impl<'a> Session<'a> {
             &mut self.lazy_task_graph,
         )
         .await?;
-        Ok((graph, is_cwd_only))
+        Ok((plan_result, is_cwd_only))
     }
 
     /// Plan execution from a pre-built [`QueryPlanRequest`].
@@ -787,7 +799,7 @@ impl<'a> Session<'a> {
         request: QueryPlanRequest,
     ) -> Result<ExecutionGraph, vite_task_plan::Error> {
         let cwd = Arc::clone(&self.cwd);
-        vite_task_plan::plan_query(
+        let plan_result = vite_task_plan::plan_query(
             request,
             &self.workspace_path,
             &cwd,
@@ -795,7 +807,8 @@ impl<'a> Session<'a> {
             &mut self.plan_request_parser,
             &mut self.lazy_task_graph,
         )
-        .await
+        .await?;
+        Ok(plan_result.graph)
     }
 }
 

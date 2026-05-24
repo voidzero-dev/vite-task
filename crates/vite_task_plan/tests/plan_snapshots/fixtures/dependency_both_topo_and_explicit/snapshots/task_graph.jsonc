@@ -12,7 +12,9 @@
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "build a",
+        "commands": [
+          "build a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {
@@ -56,7 +58,9 @@
         "package_path": "<workspace>/packages/b"
       },
       "resolved_config": {
-        "command": "build b",
+        "commands": [
+          "build b"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/b",
           "cache_config": {

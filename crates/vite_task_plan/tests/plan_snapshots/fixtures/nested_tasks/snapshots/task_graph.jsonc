@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo hello",
+        "commands": [
+          "echo hello"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt run script1",
+        "commands": [
+          "vt run script1"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

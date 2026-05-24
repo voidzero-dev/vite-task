@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo a",
+        "commands": [
+          "echo a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo a && echo b",
+        "commands": [
+          "echo a && echo b"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -90,7 +94,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo a && echo b && echo c",
+        "commands": [
+          "echo a && echo b && echo c"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

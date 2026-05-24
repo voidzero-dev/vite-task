@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vpr build",
+        "commands": [
+          "vpr build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo building",
+        "commands": [
+          "echo building"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

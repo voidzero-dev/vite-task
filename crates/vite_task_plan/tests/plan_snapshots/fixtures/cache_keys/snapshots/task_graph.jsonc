@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo Linting && vt tool print lint",
+        "commands": [
+          "echo Linting && vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vtt print-file",
+        "commands": [
+          "vtt print-file"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -90,7 +94,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print lint",
+        "commands": [
+          "vt tool print lint"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -129,7 +135,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt tool print lint && echo",
+        "commands": [
+          "vt tool print lint && echo"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {

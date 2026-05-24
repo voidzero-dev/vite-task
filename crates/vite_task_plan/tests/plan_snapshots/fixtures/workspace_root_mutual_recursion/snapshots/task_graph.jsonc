@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt run -r test",
+        "commands": [
+          "vt run -r test"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "vt run -r build",
+        "commands": [
+          "vt run -r build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -90,7 +94,9 @@
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "echo building-a",
+        "commands": [
+          "echo building-a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {
@@ -129,7 +135,9 @@
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "echo testing-a",
+        "commands": [
+          "echo testing-a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {

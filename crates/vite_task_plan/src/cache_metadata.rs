@@ -15,7 +15,9 @@ pub enum ExecutionCacheKey {
     UserTask {
         /// The name of the user-defined task.
         task_name: Str,
-        /// The index of the execution item in the task's command split by `&&`.
+        /// The index of the command item in the task's command array.
+        command_item_index: usize,
+        /// The index of the execution item within the command item split by `&&`.
         /// This is to distinguish multiple execution items from the same task.
         and_item_index: usize,
         /// Extra args provided when invoking the user-defined task (`vp [task_name] [extra_args...]`).

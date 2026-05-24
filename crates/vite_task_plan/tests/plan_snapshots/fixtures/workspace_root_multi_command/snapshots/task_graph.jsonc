@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo pre && vt run -r build",
+        "commands": [
+          "echo pre && vt run -r build"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/packages/a"
       },
       "resolved_config": {
-        "command": "echo building-a",
+        "commands": [
+          "echo building-a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/a",
           "cache_config": {

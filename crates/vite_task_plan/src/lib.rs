@@ -176,6 +176,20 @@ pub trait TaskGraphLoader {
     ) -> Result<&vite_task_graph::IndexedTaskGraph, TaskGraphLoadError>;
 }
 
+/// Output of [`plan_query`] (and the internal `plan_query_request`).
+///
+/// Wraps the [`ExecutionGraph`] together with a diagnostic flag that lets the
+/// CLI distinguish a Stage-1 zero-package result (a `--filter` that selected
+/// nothing — succeed silently) from a Stage-2 zero-task result (packages were
+/// selected but none have the requested task — surface `NoTasksMatched`).
+#[derive(Debug)]
+pub struct PlanResult {
+    pub graph: ExecutionGraph,
+    /// `true` when the package filter selected zero packages (Stage 1 was
+    /// empty). The warnings printed inside the planner already explain why.
+    pub no_packages_matched: bool,
+}
+
 /// Plan a query execution: load the task graph, query it, and build the execution graph.
 ///
 /// # Errors
@@ -189,7 +203,7 @@ pub async fn plan_query(
     envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
     plan_request_parser: &mut (dyn PlanRequestParser + '_),
     task_graph_loader: &mut (dyn TaskGraphLoader + '_),
-) -> Result<ExecutionGraph, Error> {
+) -> Result<PlanResult, Error> {
     let indexed_task_graph = task_graph_loader.load_task_graph().await?;
 
     let resolved_global_cache = resolve_cache_with_override(

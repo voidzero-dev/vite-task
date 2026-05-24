@@ -6,9 +6,9 @@ use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
-    AutoInput, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
+    AutoInput, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
     UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
-    UserRunConfig, UserTaskConfig,
+    UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -28,10 +28,10 @@ use crate::config::user::UserTaskOptions;
 /// `depends_on` is not included here because it's represented by the edges of the task graph.
 #[derive(Debug, Serialize)]
 pub struct ResolvedTaskConfig {
-    /// The command to run for this task, as a raw string.
+    /// The command or commands to run for this task.
     ///
-    /// The command may contain environment variables that need to be expanded later.
-    pub command: Str,
+    /// Commands may contain environment variables that need to be expanded later.
+    pub commands: Arc<[Str]>,
 
     pub resolved_options: ResolvedTaskOptions,
 }
@@ -360,7 +360,7 @@ impl ResolvedTaskConfig {
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
         Ok(Self {
-            command: package_json_script.into(),
+            commands: vec![package_json_script.into()].into(),
             resolved_options: ResolvedTaskOptions::resolve(
                 UserTaskOptions::default(),
                 package_dir,
@@ -379,13 +379,14 @@ impl ResolvedTaskConfig {
         package_dir: &Arc<AbsolutePath>,
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
+        let UserTaskConfig { command, options } = user_config;
+        let commands = match command {
+            Command::Single(command) => Arc::from([command]),
+            Command::Array(commands) => commands,
+        };
         Ok(Self {
-            command: Str::from(user_config.command.as_ref()),
-            resolved_options: ResolvedTaskOptions::resolve(
-                user_config.options,
-                package_dir,
-                workspace_root,
-            )?,
+            commands,
+            resolved_options: ResolvedTaskOptions::resolve(options, package_dir, workspace_root)?,
         })
     }
 }

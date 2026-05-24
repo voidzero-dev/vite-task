@@ -12,7 +12,9 @@
         "package_path": "<workspace>/"
       },
       "resolved_config": {
-        "command": "echo deploying workspace",
+        "commands": [
+          "echo deploying workspace"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/",
           "cache_config": {
@@ -51,7 +53,9 @@
         "package_path": "<workspace>/packages/pkg-a"
       },
       "resolved_config": {
-        "command": "echo building pkg-a",
+        "commands": [
+          "echo building pkg-a"
+        ],
         "resolved_options": {
           "cwd": "<workspace>/packages/pkg-a",
           "cache_config": {

@@ -79,15 +79,26 @@ pub struct TaskQueryResult {
     /// The final execution graph for the selected tasks.
     ///
     /// May be empty if no selected packages have the requested task, or if no
-    /// packages matched the filters. The caller uses `node_count() == 0` to
-    /// decide whether to show task-not-found UI.
+    /// packages matched the filters. The caller distinguishes the two cases
+    /// with [`Self::selected_package_count`].
     pub execution_graph: TaskExecutionGraph,
 
-    /// Original `--filter` strings for inclusion selectors that matched no packages.
+    /// Original `--filter` strings for inclusion filters that contributed no
+    /// packages to the final selected set — either the core selector matched
+    /// nothing, or the traversal (e.g. `^...`) collapsed an otherwise-matching
+    /// seed down to zero.
     ///
     /// Omits synthetic filters (implicit cwd, `-w`) since the user didn't type them.
     /// Always empty when `PackageQuery::All` was used.
     pub unmatched_selectors: Vec<Str>,
+
+    /// Number of packages in the resolved package subgraph (Stage 1 result),
+    /// before any task mapping.
+    ///
+    /// `0` means the filter expression(s) selected no packages at all — this
+    /// is what tells the caller "no packages matched the filter" rather than
+    /// "packages were selected but none have the requested task".
+    pub selected_package_count: usize,
 }
 
 impl IndexedTaskGraph {
@@ -116,6 +127,7 @@ impl IndexedTaskGraph {
 
         // Stage 1: resolve package selection.
         let resolution = self.indexed_package_graph.resolve_query(&query.package_query)?;
+        let selected_package_count = resolution.package_subgraph.node_count();
 
         // Stage 2: map each selected package to its task node (with reconnection).
         self.map_subgraph_to_tasks(
@@ -129,7 +141,11 @@ impl IndexedTaskGraph {
             self.add_dependencies(&mut execution_graph, |_| TaskDependencyType::is_explicit());
         }
 
-        Ok(TaskQueryResult { execution_graph, unmatched_selectors: resolution.unmatched_selectors })
+        Ok(TaskQueryResult {
+            execution_graph,
+            unmatched_selectors: resolution.unmatched_selectors,
+            selected_package_count,
+        })
     }
 
     /// Map a package subgraph to a task execution graph.

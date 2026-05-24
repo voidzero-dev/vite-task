@@ -154,6 +154,17 @@ pub enum Error {
     #[error("Task \"{0}\" not found")]
     NoTasksMatched(Str),
 
+    /// One or more `--filter` expressions matched no packages and the user
+    /// opted into strict mode with `--fail-if-no-match`. The message echoes
+    /// the warning phrasing ("No packages matched the filter: ...") and joins
+    /// multiple unmatched sources with `, ` so the chain renderer keeps it on
+    /// a single line.
+    #[error(
+        "No packages matched the filter: {}",
+        sources.iter().map(vite_str::Str::as_str).collect::<Vec<_>>().join(", ")
+    )]
+    NoPackagesMatched { sources: Vec<Str> },
+
     #[error("Invalid value for VP_RUN_CONCURRENCY_LIMIT: {0:?}")]
     InvalidConcurrencyLimitEnv(Arc<OsStr>),
 
