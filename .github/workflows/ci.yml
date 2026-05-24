@@ -96,8 +96,8 @@ jobs:
             run_env: ''
           # Windows e2e fixtures dominate wall-clock (60s per PTY step vs 20s on
           # Unix). Sharded 5 ways at the trial level by the e2e harness via
-          # VT_SHARD_INDEX/VT_SHARD_TOTAL; the non-e2e shard self-skips the e2e
-          # binary via VT_SKIP_E2E and runs everything else.
+          # VT_SHARD_INDEX/VT_SHARD_TOTAL; the non-e2e shard excludes the
+          # vite_task_bin crate (which has no lib tests) and runs everything else.
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             cargo_cmd: cargo
@@ -138,8 +138,8 @@ jobs:
             cargo_cmd: cargo
             build_target: x86_64-pc-windows-msvc
             shard: windows-non-e2e
-            scope: ''
-            run_env: 'VT_SKIP_E2E=1'
+            scope: '--workspace --exclude vite_task_bin'
+            run_env: ''
     runs-on: ${{ matrix.os }}
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
