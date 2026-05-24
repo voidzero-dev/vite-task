@@ -70,7 +70,7 @@ output?: Array<string | GlobWithBase>, } | {
  */
 cache: false, });
 
-export type TaskDefinition = Task | string | Array<string>;
+export type TaskDefinition = Task | Command;
 
 export type UserGlobalCacheConfig = boolean | { 
 /**

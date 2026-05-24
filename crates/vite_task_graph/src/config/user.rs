@@ -225,11 +225,9 @@ pub struct UserTaskConfig {
 #[serde(untagged)]
 pub enum UserTaskDefinition {
     /// Full task object form.
-    Config(UserTaskConfig),
+    Object(UserTaskConfig),
     /// Command-only shorthand form using default task options.
-    CommandString(Str),
-    /// Command sequence shorthand form using default task options.
-    CommandArray(Arc<[Str]>),
+    CommandShorthand(Command),
 }
 
 /// Root-level cache configuration.
@@ -467,7 +465,10 @@ mod tests {
         });
         let mut user_config: UserRunConfig = serde_json::from_value(user_config_json).unwrap();
         let task = user_config.tasks.as_mut().unwrap().remove("build").unwrap();
-        assert_eq!(task, UserTaskDefinition::CommandString("echo build".into()));
+        assert_eq!(
+            task,
+            UserTaskDefinition::CommandShorthand(Command::Single("echo build".into()))
+        );
     }
 
     #[test]
@@ -481,11 +482,11 @@ mod tests {
         let task = user_config.tasks.as_mut().unwrap().remove("build").unwrap();
         assert_eq!(
             task,
-            UserTaskDefinition::CommandArray(Arc::from([
+            UserTaskDefinition::CommandShorthand(Command::Array(Arc::from([
                 "echo one".into(),
                 "echo two".into(),
                 "echo three".into()
-            ]))
+            ])))
         );
     }
 

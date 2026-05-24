@@ -7,7 +7,7 @@ mod specifier;
 use std::{convert::Infallible, sync::Arc};
 
 use config::{
-    Command, ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
+    ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
     UserTaskDefinition,
 };
 use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
@@ -307,15 +307,10 @@ impl IndexedTaskGraph {
                 let task_id = TaskId { task_name: task_name.clone(), package_index };
 
                 let task_user_config = match task_user_config {
-                    UserTaskDefinition::Config(config) => config,
-                    UserTaskDefinition::CommandString(command) => UserTaskConfig {
-                        command: Command::Single(command),
-                        options: UserTaskOptions::default(),
-                    },
-                    UserTaskDefinition::CommandArray(command) => UserTaskConfig {
-                        command: Command::Array(command),
-                        options: UserTaskOptions::default(),
-                    },
+                    UserTaskDefinition::Object(config) => config,
+                    UserTaskDefinition::CommandShorthand(command) => {
+                        UserTaskConfig { command, options: UserTaskOptions::default() }
+                    }
                 };
                 let dependency_specifiers = task_user_config.options.depends_on.clone();
 
