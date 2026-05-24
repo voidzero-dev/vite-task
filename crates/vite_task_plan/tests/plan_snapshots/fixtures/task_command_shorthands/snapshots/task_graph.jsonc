@@ -3,144 +3,19 @@
   {
     "key": [
       "<workspace>/",
-      "array_cd_shell"
+      "array_cd"
     ],
     "node": {
       "task_display": {
         "package_name": "@test/task-command-shorthands",
-        "task_name": "array_cd_shell",
+        "task_name": "array_cd",
         "package_path": "<workspace>/"
       },
       "resolved_config": {
         "commands": [
-          "cd snapshots",
-          "echo $PWD"
-        ],
-        "resolved_options": {
-          "cwd": "<workspace>/",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "untracked_env": [
-                "<default untracked envs>"
-              ]
-            },
-            "input_config": {
-              "includes_auto": true,
-              "positive_globs": [],
-              "negative_globs": []
-            },
-            "output_config": {
-              "includes_auto": false,
-              "positive_globs": [],
-              "negative_globs": []
-            }
-          }
-        }
-      },
-      "source": "TaskConfig"
-    },
-    "neighbors": []
-  },
-  {
-    "key": [
-      "<workspace>/",
-      "array_cd_spawn"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/task-command-shorthands",
-        "task_name": "array_cd_spawn",
-        "package_path": "<workspace>/"
-      },
-      "resolved_config": {
-        "commands": [
-          "cd snapshots",
-          "vtt print-file package.json"
-        ],
-        "resolved_options": {
-          "cwd": "<workspace>/",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "untracked_env": [
-                "<default untracked envs>"
-              ]
-            },
-            "input_config": {
-              "includes_auto": true,
-              "positive_globs": [],
-              "negative_globs": []
-            },
-            "output_config": {
-              "includes_auto": false,
-              "positive_globs": [],
-              "negative_globs": []
-            }
-          }
-        }
-      },
-      "source": "TaskConfig"
-    },
-    "neighbors": []
-  },
-  {
-    "key": [
-      "<workspace>/",
-      "array_compound_cd_before_next"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/task-command-shorthands",
-        "task_name": "array_compound_cd_before_next",
-        "package_path": "<workspace>/"
-      },
-      "resolved_config": {
-        "commands": [
-          "if true; then cd snapshots; fi",
-          "vtt print-file package.json"
-        ],
-        "resolved_options": {
-          "cwd": "<workspace>/",
-          "cache_config": {
-            "env_config": {
-              "fingerprinted_envs": [],
-              "untracked_env": [
-                "<default untracked envs>"
-              ]
-            },
-            "input_config": {
-              "includes_auto": true,
-              "positive_globs": [],
-              "negative_globs": []
-            },
-            "output_config": {
-              "includes_auto": false,
-              "positive_globs": [],
-              "negative_globs": []
-            }
-          }
-        }
-      },
-      "source": "TaskConfig"
-    },
-    "neighbors": []
-  },
-  {
-    "key": [
-      "<workspace>/",
-      "array_shell_cd_before_next"
-    ],
-    "node": {
-      "task_display": {
-        "package_name": "@test/task-command-shorthands",
-        "task_name": "array_shell_cd_before_next",
-        "package_path": "<workspace>/"
-      },
-      "resolved_config": {
-        "commands": [
-          "cd \"$APP_DIR\"",
-          "vtt print-file package.json"
+          "vtt print before_cd",
+          "cd snapshots && vtt print after_cd",
+          "vtt print after_cd2"
         ],
         "resolved_options": {
           "cwd": "<workspace>/",

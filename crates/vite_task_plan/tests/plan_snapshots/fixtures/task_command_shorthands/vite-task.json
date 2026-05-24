@@ -11,12 +11,10 @@
       "vtt print-file vite-task.json && vtt print-file package.json"
     ],
     "nested_vt_array": ["vtt print-file package.json", "vt run string_shorthand"],
-    "array_cd_spawn": ["cd snapshots", "vtt print-file package.json"],
-    "array_cd_shell": ["cd snapshots", "echo $PWD"],
-    "array_shell_cd_before_next": ["cd \"$APP_DIR\"", "vtt print-file package.json"],
-    "array_compound_cd_before_next": [
-      "if true; then cd snapshots; fi",
-      "vtt print-file package.json"
+    "array_cd": [
+      "vtt print before_cd",
+      "cd snapshots && vtt print after_cd",
+      "vtt print after_cd2"
     ],
     "array_unbalanced_quotes": ["foo '", "' bar"],
     "object_array_depends_on": {
