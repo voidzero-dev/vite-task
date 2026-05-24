@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, ops::Range};
 
 use brush_parser::{
-    Parser, ParserOptions,
+    Parser, ParserImpl, ParserOptions,
     ast::{
         AndOr, Assignment, AssignmentName, AssignmentValue, Command, CommandPrefix,
         CommandPrefixOrSuffixItem, CommandSuffix, CompoundListItem, Pipeline, Program,
@@ -47,7 +47,9 @@ const PARSER_OPTIONS: ParserOptions = ParserOptions {
     enable_extended_globbing: false,
     posix_mode: true,
     sh_mode: true,
-    tilde_expansion: false,
+    tilde_expansion_at_word_start: false,
+    tilde_expansion_after_colon: false,
+    parser_impl: ParserImpl::Peg,
 };
 
 /// Remove shell quoting from a word value, respecting quoting context.
