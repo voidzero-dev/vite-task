@@ -1,3 +1,13 @@
 {
-  "cache": true
+  "cache": true,
+  "tasks": {
+    "filter-nonexistent": {
+      "command": "vt run --filter nonexistent build",
+      "cache": false
+    },
+    "filter-nonexistent-strict": {
+      "command": "vt run --filter nonexistent --fail-if-no-match build",
+      "cache": false
+    }
+  }
 }

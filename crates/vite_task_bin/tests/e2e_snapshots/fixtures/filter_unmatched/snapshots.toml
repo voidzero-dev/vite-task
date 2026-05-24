@@ -86,3 +86,17 @@ comment = """
 With `--fail-if-no-match` and only matching filters, the run proceeds normally — strict mode does not change the success path.
 """
 steps = [["vt", "run", "--filter", "@test/app", "--fail-if-no-match", "build"]]
+
+[[e2e]]
+name = "nested_filter_no_match_succeeds_by_default"
+comment = """
+The default-success rule must apply to nested `vt run --filter ...` invocations too: a task whose command is `vt run --filter nonexistent build` should exit 0 with the warning, not fail the outer task. Guards the script wrapping that pnpm users typically write.
+"""
+steps = [["vt", "run", "filter-nonexistent"]]
+
+[[e2e]]
+name = "nested_filter_no_match_with_fail_if_no_match_errors"
+comment = """
+Strict mode also propagates through nesting: a task command that adds `--fail-if-no-match` aborts the outer task when the nested filter selects nothing. The error chain identifies both the nested command and the unmatched filter source.
+"""
+steps = [["vt", "run", "filter-nonexistent-strict"]]
