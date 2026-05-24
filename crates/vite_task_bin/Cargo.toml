@@ -10,10 +10,15 @@ rust-version.workspace = true
 [[bin]]
 name = "vt"
 path = "src/main.rs"
+# This crate is excluded from CI's non-e2e Windows shard via
+# `cargo test --workspace --exclude vite_task_bin`, so any unit tests
+# here would be silently dropped. Keep them out.
+test = false
 
 [[bin]]
 name = "vtt"
 path = "src/vtt/main.rs"
+test = false
 
 [dependencies]
 anyhow = { workspace = true }
@@ -58,6 +63,10 @@ ignored = ["preload_test_lib"]
 [lints]
 workspace = true
 
+# Only one [[test]] should live in this crate. CI shards the e2e
+# binary across 5 Windows jobs and runs `--workspace --exclude
+# vite_task_bin` everywhere else, so any additional [[test]] here
+# would be silently dropped from non-Windows-e2e jobs.
 [[test]]
 name = "e2e_snapshots"
 harness = false

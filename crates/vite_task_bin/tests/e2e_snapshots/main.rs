@@ -571,13 +571,6 @@ fn parse_shard_env() -> Option<(usize, usize)> {
 
 #[expect(clippy::disallowed_types, reason = "Path required for CARGO_MANIFEST_DIR path traversal")]
 fn main() {
-    // Bypass for the non-e2e Windows shard: cargo still launches this binary
-    // as part of `cargo test --workspace`, but the e2e cases are sharded by
-    // the windows-e2e-* jobs, so we exit immediately.
-    if std::env::var_os("VT_SKIP_E2E").is_some() {
-        return;
-    }
-
     let tmp_dir = tempfile::tempdir().unwrap();
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
