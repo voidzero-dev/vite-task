@@ -243,7 +243,7 @@ fn resize_terminal() {
         stdout().flush().unwrap();
     }));
 
-    let Terminal { mut pty_reader, mut pty_writer, child_handle: _, .. } =
+    let Terminal { mut pty_reader, mut pty_writer, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for initial size line (synchronize before resizing)
@@ -349,7 +349,7 @@ fn send_ctrl_c_interrupts_process() {
         }
     }));
 
-    let Terminal { mut pty_reader, mut pty_writer, child_handle: _, .. } =
+    let Terminal { mut pty_reader, mut pty_writer, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
 
     // Wait for process to be ready

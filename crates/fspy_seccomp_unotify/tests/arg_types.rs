@@ -110,7 +110,7 @@ async fn fd_and_path() -> Result<(), Box<dyn Error>> {
 
 #[tokio::test]
 async fn path_long() -> Result<(), Box<dyn Error>> {
-    let long_path = [b'a'].repeat(30000);
+    let long_path = b"a".repeat(30000);
     let long_path_cstr = CString::new(long_path.as_slice()).unwrap();
     let syscalls = run_in_pre_exec(move || {
         let _ = openat(AT_FDCWD, long_path_cstr.as_c_str(), OFlag::O_RDONLY, Mode::empty());
@@ -129,7 +129,7 @@ async fn path_long() -> Result<(), Box<dyn Error>> {
 
 #[tokio::test]
 async fn path_overflow() -> Result<(), Box<dyn Error>> {
-    let long_path = [b'a'].repeat(40000);
+    let long_path = b"a".repeat(40000);
     let long_path_cstr = CString::new(long_path.as_slice()).unwrap();
     let syscalls = run_in_pre_exec(move || {
         let _ = openat(AT_FDCWD, long_path_cstr.as_c_str(), OFlag::O_RDONLY, Mode::empty());

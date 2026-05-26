@@ -84,7 +84,7 @@ pub unsafe extern "C" fn open(path: *const c_char, flags: c_int, mut args: ...) 
     if has_mode_arg(flags) {
         // SAFETY: `O_CREAT`/`O_TMPFILE` guarantees a `mode_t` follows per
         // the `open(2)` contract.
-        let mode: libc::mode_t = unsafe { args.arg() };
+        let mode: libc::mode_t = unsafe { args.next_arg() };
         // SAFETY: forwarding the caller's arguments unchanged.
         unsafe { next_open()(path, flags, mode) }
     } else {
@@ -103,7 +103,7 @@ pub unsafe extern "C" fn open64(path: *const c_char, flags: c_int, mut args: ...
     if has_mode_arg(flags) {
         // SAFETY: `O_CREAT`/`O_TMPFILE` guarantees a `mode_t` follows per
         // the `open64(2)` contract.
-        let mode: libc::mode_t = unsafe { args.arg() };
+        let mode: libc::mode_t = unsafe { args.next_arg() };
         // SAFETY: forwarding the caller's arguments unchanged.
         unsafe { next_open64()(path, flags, mode) }
     } else {
@@ -127,7 +127,7 @@ pub unsafe extern "C" fn openat(
     if has_mode_arg(flags) {
         // SAFETY: `O_CREAT`/`O_TMPFILE` guarantees a `mode_t` follows per
         // the `openat(2)` contract.
-        let mode: libc::mode_t = unsafe { args.arg() };
+        let mode: libc::mode_t = unsafe { args.next_arg() };
         // SAFETY: forwarding the caller's arguments unchanged.
         unsafe { next_openat()(dirfd, path, flags, mode) }
     } else {
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn openat64(
     if has_mode_arg(flags) {
         // SAFETY: `O_CREAT`/`O_TMPFILE` guarantees a `mode_t` follows per
         // the `openat64(2)` contract.
-        let mode: libc::mode_t = unsafe { args.arg() };
+        let mode: libc::mode_t = unsafe { args.next_arg() };
         // SAFETY: forwarding the caller's arguments unchanged.
         unsafe { next_openat64()(dirfd, path, flags, mode) }
     } else {

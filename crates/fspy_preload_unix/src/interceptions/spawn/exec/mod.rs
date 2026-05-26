@@ -111,7 +111,7 @@ unsafe extern "C" fn execle(path: *const c_char, arg0: *const c_char, valist: ..
     // SAFETY: valist and arg0 are valid variadic arguments forwarded from the interposed execle function
     unsafe {
         with_argv(valist, arg0, |args, mut remaining| {
-            let envp = remaining.arg::<*const *const c_char>();
+            let envp = remaining.next_arg::<*const *const c_char>();
             handle_exec(ExecResolveConfig::search_path_disabled(), path, args.as_ptr(), envp)
         })
     }

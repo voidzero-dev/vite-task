@@ -1,5 +1,4 @@
 #![cfg_attr(target_os = "windows", feature(windows_process_extensions_main_thread_handle))]
-#![feature(once_cell_try)]
 
 pub mod error;
 

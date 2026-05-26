@@ -300,7 +300,7 @@ impl ExecutionCache {
             } else if old_input_config != cache_metadata.input_config {
                 FingerprintMismatch::InputConfig
             } else {
-                debug_assert!(old_output_config != cache_metadata.output_config);
+                debug_assert_ne!(old_output_config, cache_metadata.output_config);
                 FingerprintMismatch::OutputConfig
             };
             return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));

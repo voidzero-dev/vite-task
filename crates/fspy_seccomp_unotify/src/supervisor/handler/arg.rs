@@ -155,7 +155,6 @@ impl Fd {
 }
 
 impl FromSyscallArg for Fd {
-    #[expect(clippy::cast_possible_truncation, reason = "syscall arg represents a file descriptor")]
     fn from_syscall_arg(arg: u64) -> io::Result<Self> {
         Ok(Self { fd: arg as RawFd })
     }
