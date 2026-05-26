@@ -17,7 +17,7 @@ pub unsafe fn with_argv(
     let argc = 1 + {
         let mut va = va.clone();
         // Safety: argv is guaranteed to be NULL-terminated
-        core::iter::from_fn(|| Some(unsafe { va.arg::<*const c_char>() }))
+        core::iter::from_fn(|| Some(unsafe { va.next_arg::<*const c_char>() }))
             .position(|s| {
                 // Find the NULL terminator
                 s.is_null()
@@ -47,11 +47,11 @@ pub unsafe fn with_argv(
 
     for item in out.iter_mut().take(argc).skip(1) {
         // SAFETY: extracting the next *const c_char argument from the va_list; the count was pre-validated
-        item.write(unsafe { va.arg::<*const c_char>() });
+        item.write(unsafe { va.next_arg::<*const c_char>() });
     }
     out[argc].write(core::ptr::null());
     // SAFETY: consuming the NULL terminator from the va_list to advance past it
-    unsafe { va.arg::<*const c_char>() };
+    unsafe { va.next_arg::<*const c_char>() };
 
     // Safety: MaybeUninit<*const c_char> has the same layout as *const c_char,
     // and all elements have been initialized via write() above.

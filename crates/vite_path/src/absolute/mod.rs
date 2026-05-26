@@ -233,7 +233,7 @@ impl Display for StripPrefixError<'_> {
         f.write_fmt(format_args!(
             "{}: {}",
             self.stripped_path.display(),
-            &self.invalid_path_data_error
+            self.invalid_path_data_error
         ))
     }
 }

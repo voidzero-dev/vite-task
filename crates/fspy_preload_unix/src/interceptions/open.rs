@@ -31,7 +31,7 @@ unsafe extern "C" fn open(path: *const c_char, flags: c_int, mut args: ...) -> c
     unsafe { handle_open(path, OpenFlags(flags)) };
     if has_mode_arg(flags) {
         // SAFETY: when O_CREAT or O_TMPFILE is set, a mode_t argument is required by the open() contract
-        let mode: Mode = unsafe { args.arg() };
+        let mode: Mode = unsafe { args.next_arg() };
         // SAFETY: calling the original libc open() with the same arguments forwarded from the interposed function
         unsafe { open::original()(path, flags, mode) }
     } else {
@@ -53,7 +53,7 @@ unsafe extern "C" fn openat(
     if has_mode_arg(flags) {
         // https://github.com/tailhook/openat/issues/21#issuecomment-535914957
         // SAFETY: when O_CREAT or O_TMPFILE is set, a mode_t argument is required by the openat() contract
-        let mode: Mode = unsafe { args.arg() };
+        let mode: Mode = unsafe { args.next_arg() };
         // SAFETY: calling the original libc openat() with the same arguments forwarded from the interposed function
         unsafe { openat::original()(dirfd, path, flags, mode) }
     } else {
