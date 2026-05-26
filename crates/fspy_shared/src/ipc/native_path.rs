@@ -7,7 +7,7 @@ use std::{
     path::{Path, StripPrefixError},
 };
 
-use allocator_api2::alloc::Allocator;
+use bumpalo::Bump;
 use bytemuck::TransparentWrapper;
 use native_str::NativeStr;
 use wincode::{
@@ -61,11 +61,8 @@ impl NativePath {
         Self::wrap_ref(NativeStr::from_wide(wide))
     }
 
-    pub fn clone_in<'new_alloc, A>(&self, alloc: &'new_alloc A) -> &'new_alloc Self
-    where
-        &'new_alloc A: Allocator,
-    {
-        Self::wrap_ref(self.inner.clone_in(alloc))
+    pub fn clone_in<'bump>(&self, bump: &'bump Bump) -> &'bump Self {
+        Self::wrap_ref(self.inner.clone_in(bump))
     }
 
     pub fn strip_path_prefix<P: AsRef<Path>, R, F: FnOnce(Result<&Path, StripPrefixError>) -> R>(

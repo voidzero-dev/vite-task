@@ -1,5 +1,4 @@
-use allocator_api2::vec::Vec;
-use bumpalo::Bump;
+use bumpalo::{Bump, collections::Vec};
 
 use crate::PathAccess;
 
@@ -10,7 +9,7 @@ pub struct PathAccessArena {
     #[borrows(bump)]
     #[covariant]
     // TODO(pref): use linked list to avoid realloc & copy. We don't need random access.
-    pub accesses: Vec<PathAccess<'this>, &'this Bump>,
+    pub accesses: Vec<'this, PathAccess<'this>>,
 }
 
 impl Default for PathAccessArena {

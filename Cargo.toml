@@ -39,7 +39,6 @@ multiple_crate_versions = "allow"
 future_not_send = "allow"
 
 [workspace.dependencies]
-allocator-api2 = { version = "0.2.21", default-features = false, features = ["alloc", "std"] }
 anstream = "1.0.0"
 anyhow = "1.0.98"
 assert2 = "0.4.0"
@@ -51,7 +50,7 @@ bindgen = "0.72.1"
 bitflags = "2.10.0"
 brush-parser = "0.4.0"
 bstr = { version = "1.12.0", default-features = false, features = ["alloc", "std"] }
-bumpalo = { version = "3.17.0", features = ["allocator-api2"] }
+bumpalo = { version = "3.17.0", features = ["collections"] }
 bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
 cc = "1.2.39"
 clap = "4.5.53"

@@ -6,9 +6,9 @@ license.workspace = true
 publish = false
 
 [dependencies]
-allocator-api2 = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 bitflags = { workspace = true }
+bumpalo = { workspace = true }
 bstr = { workspace = true }
 bytemuck = { workspace = true, features = ["must_cast", "derive"] }
 native_str = { workspace = true }

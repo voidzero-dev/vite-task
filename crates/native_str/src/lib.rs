@@ -8,7 +8,7 @@ use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::ffi::OsStringExt as _;
 use std::{borrow::Cow, ffi::OsStr, fmt::Debug, mem::MaybeUninit};
 
-use allocator_api2::alloc::Allocator;
+use bumpalo::Bump;
 #[cfg(windows)]
 use bytemuck::must_cast_slice;
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc};
@@ -87,15 +87,8 @@ impl NativeStr {
         return Cow::Borrowed(self.as_os_str());
     }
 
-    pub fn clone_in<'new_alloc, A>(&self, alloc: &'new_alloc A) -> &'new_alloc Self
-    where
-        &'new_alloc A: Allocator,
-    {
-        use allocator_api2::vec::Vec;
-        let mut data = Vec::<u8, _>::with_capacity_in(self.data.len(), alloc);
-        data.extend_from_slice(&self.data);
-        let data = data.leak::<'new_alloc>();
-        Self::wrap_ref(data)
+    pub fn clone_in<'bump>(&self, bump: &'bump Bump) -> &'bump Self {
+        Self::wrap_ref(bump.alloc_slice_copy(&self.data))
     }
 }
 

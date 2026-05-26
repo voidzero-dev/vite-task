@@ -6,7 +6,6 @@ license.workspace = true
 publish = false
 
 [dependencies]
-allocator-api2 = { workspace = true, features = ["alloc"] }
 wincode = { workspace = true }
 bstr = { workspace = true, default-features = false }
 bumpalo = { workspace = true }

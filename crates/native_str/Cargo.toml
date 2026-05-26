@@ -7,7 +7,7 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-allocator-api2 = { workspace = true }
+bumpalo = { workspace = true }
 bytemuck = { workspace = true, features = ["must_cast", "derive"] }
 wincode = { workspace = true }
 

@@ -350,9 +350,6 @@ name = "bumpalo"
 version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
-dependencies = [
- "allocator-api2",
-]
 
 [[package]]
 name = "bytemuck"
@@ -1232,7 +1229,6 @@ dependencies = [
 name = "fspy"
 version = "0.1.0"
 dependencies = [
- "allocator-api2",
  "anyhow",
  "bstr",
  "bumpalo",
@@ -1342,10 +1338,10 @@ dependencies = [
 name = "fspy_shared"
 version = "0.0.0"
 dependencies = [
- "allocator-api2",
  "assert2",
  "bitflags 2.10.0",
  "bstr",
+ "bumpalo",
  "bytemuck",
  "ctor",
  "native_str",
@@ -2040,7 +2036,7 @@ dependencies = [
 name = "native_str"
 version = "0.0.0"
 dependencies = [
- "allocator-api2",
+ "bumpalo",
  "bytemuck",
  "wincode",
 ]
