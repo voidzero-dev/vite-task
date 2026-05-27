@@ -215,16 +215,16 @@ impl ExecutionCache {
                         "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
                         (),
                     )?;
-                    conn.execute("PRAGMA user_version = 12", ())?;
+                    conn.execute("PRAGMA user_version = 13", ())?;
                 }
-                1..=11 => {
+                1..=12 => {
                     // old internal db version. reset
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
                     conn.execute("VACUUM", ())?;
                     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
                 }
-                12 => break, // current version
-                13.. => {
+                13 => break, // current version
+                14.. => {
                     return Err(anyhow::anyhow!(
                         "Unrecognized database version: {user_version}. \
                          The cache may have been created by a newer version of Vite Task. \

@@ -1,5 +1,6 @@
 # Changelog
 
+- **Changed** `vp run --filter <expr>` now exits 0 with a warning when the filter matches no packages, matching pnpm. Use `--fail-if-no-match` to restore the previous strict behavior ([#393](https://github.com/voidzero-dev/vite-task/pull/393))
 - **Added** task command shorthands for defining tasks as command strings or command string arrays ([#391](https://github.com/voidzero-dev/vite-task/pull/391))
 - **Changed** Cached logs are stored with colors intact (`FORCE_COLOR=1` is auto-injected into spawned tasks). Colors are then stripped at display time when the terminal does not support them. Other color-related env vars (`NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`) are no longer passed through by default. Opt in via a task's `env`/`untrackedEnv` ([#378](https://github.com/voidzero-dev/vite-task/pull/378))
 - **Added** `output` field for cached tasks: archives matching files after a successful run and restores them on cache hit ([#375](https://github.com/voidzero-dev/vite-task/pull/375))
