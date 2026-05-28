@@ -6,5 +6,5 @@ When auto-inference is disabled (explicit globs only), the task process should n
 
 ```
 $ vtt print-env FSPY
-(undefined)
+1
 ```

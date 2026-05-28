@@ -220,6 +220,14 @@ pub struct StopAccepting {
 }
 
 impl StopAccepting {
+    /// A no-op `StopAccepting` not bound to any running server. Signalling it
+    /// is a no-op. Useful for placeholder paths where the runner hasn't wired
+    /// the server in yet but still needs a value of this type.
+    #[must_use]
+    pub fn noop() -> Self {
+        Self { token: CancellationToken::new() }
+    }
+
     pub fn signal(&self) {
         self.token.cancel();
     }

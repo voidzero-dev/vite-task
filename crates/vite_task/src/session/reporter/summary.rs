@@ -107,6 +107,12 @@ pub enum SpawnOutcome {
         /// Task ran successfully but cache was not updated.
         #[serde(default)]
         fspy_unsupported: bool,
+        /// Rendered message of the IPC server error that caused the cache to
+        /// be skipped, if any.
+        ipc_server_error: Option<Str>,
+        /// Set when a runner-aware tool called `disableCache()`, skipping
+        /// cache update.
+        tool_disabled_cache: bool,
     },
 
     /// Process exited with non-zero status.
@@ -129,6 +135,11 @@ pub enum SavedCacheMissReason {
     ConfigChanged,
     /// An input file or folder changed.
     InputChanged { kind: InputChangeKind, path: Str },
+    /// A runner-aware tool reported a tracked env var that changed between runs.
+    TrackedEnvChanged { name: Str, old: Option<Str>, new: Option<Str> },
+    /// A runner-aware tool reported a tracked env glob whose match-set changed
+    /// between runs.
+    TrackedEnvGlobChanged { pattern: Str, diff: crate::session::execute::fingerprint::EnvGlobDiff },
 }
 
 /// An execution error, serializable for persistence.
@@ -141,6 +152,7 @@ pub enum SavedExecutionError {
     Cache { kind: SavedCacheErrorKind, message: Str },
     Spawn { message: Str },
     PostRunFingerprint { message: Str },
+    IpcServerBind { message: Str },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,6 +240,9 @@ impl SavedExecutionError {
             ExecutionError::PostRunFingerprint(source) => {
                 Self::PostRunFingerprint { message: vite_str::format!("{source:#}") }
             }
+            ExecutionError::IpcServerBind(source) => {
+                Self::IpcServerBind { message: vite_str::format!("{source:#}") }
+            }
         }
     }
 
@@ -247,6 +262,7 @@ impl SavedExecutionError {
             Self::PostRunFingerprint { message } => {
                 vite_str::format!("Failed to create post-run fingerprint: {message}")
             }
+            Self::IpcServerBind { .. } => Str::from("Failed to start runner IPC server"),
         }
     }
 }
@@ -264,6 +280,16 @@ impl SavedCacheMissReason {
                 }
                 FingerprintMismatch::InputChanged { kind, path } => {
                     Self::InputChanged { kind: *kind, path: Str::from(path.as_str()) }
+                }
+                FingerprintMismatch::TrackedEnvChanged { name, old, new } => {
+                    Self::TrackedEnvChanged {
+                        name: name.clone(),
+                        old: old.clone(),
+                        new: new.clone(),
+                    }
+                }
+                FingerprintMismatch::TrackedEnvGlobChanged { pattern, diff } => {
+                    Self::TrackedEnvGlobChanged { pattern: pattern.clone(), diff: diff.clone() }
                 }
             },
         }
@@ -293,6 +319,16 @@ impl TaskResult {
             cache_update_status,
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported)
         );
+        let ipc_server_error = match cache_update_status {
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(err)) => {
+                Some(vite_str::format!("{err}"))
+            }
+            _ => None,
+        };
+        let tool_disabled_cache = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested)
+        );
 
         match cache_status {
             CacheStatus::Hit { replayed_duration } => {
@@ -306,6 +342,8 @@ impl TaskResult {
                     saved_error,
                     input_modified_path,
                     fspy_unsupported,
+                    ipc_server_error,
+                    tool_disabled_cache,
                 ),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
@@ -317,6 +355,8 @@ impl TaskResult {
                     saved_error,
                     input_modified_path,
                     fspy_unsupported,
+                    ipc_server_error,
+                    tool_disabled_cache,
                 ),
             },
         }
@@ -329,6 +369,8 @@ fn spawn_outcome_from_execution(
     saved_error: Option<&SavedExecutionError>,
     input_modified_path: Option<Str>,
     fspy_unsupported: bool,
+    ipc_server_error: Option<Str>,
+    tool_disabled_cache: bool,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
@@ -338,6 +380,8 @@ fn spawn_outcome_from_execution(
             infra_error: saved_error.cloned(),
             input_modified_path,
             fspy_unsupported,
+            ipc_server_error,
+            tool_disabled_cache,
         },
         // Process exited with non-zero code
         (Some(status), _) => {
@@ -356,6 +400,8 @@ fn spawn_outcome_from_execution(
             infra_error: None,
             input_modified_path: None,
             fspy_unsupported: false,
+            ipc_server_error: None,
+            tool_disabled_cache: false,
         },
     }
 }
@@ -467,7 +513,26 @@ impl TaskResult {
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
     fn format_cache_detail(&self) -> Str {
-        // Check for input modification first — it overrides the cache miss reason
+        // Check for IPC server error first — short-circuits before any cache
+        // computation in `execute_spawn`, so it takes priority.
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { ipc_server_error: Some(err), .. },
+            ..
+        } = self
+        {
+            return vite_str::format!("→ Not cached: IPC server error: {err}");
+        }
+
+        // Tool-reported cache disable — the tool said it shouldn't be cached.
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { tool_disabled_cache: true, .. },
+            ..
+        } = self
+        {
+            return Str::from("→ Not cached: tool requested disableCache");
+        }
+
+        // Check for input modification next — it overrides the cache miss reason
         if let Self::Spawned {
             outcome: SpawnOutcome::Success { input_modified_path: Some(path), .. },
             ..
@@ -514,6 +579,12 @@ impl TaskResult {
                     SavedCacheMissReason::InputChanged { kind, path } => {
                         let desc = format_input_change_str(*kind, path.as_str());
                         vite_str::format!("→ Cache miss: {desc}")
+                    }
+                    SavedCacheMissReason::TrackedEnvChanged { name, .. } => {
+                        vite_str::format!("→ Cache miss: tracked env '{name}' changed")
+                    }
+                    SavedCacheMissReason::TrackedEnvGlobChanged { pattern, .. } => {
+                        vite_str::format!("→ Cache miss: tracked env glob '{pattern}' changed")
                     }
                 },
             },

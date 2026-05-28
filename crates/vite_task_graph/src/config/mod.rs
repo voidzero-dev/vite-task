@@ -7,8 +7,8 @@ use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
     AutoInput, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
-    UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
-    UserRunConfig, UserTaskConfig, UserTaskDefinition,
+    UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserRunConfig,
+    UserTaskConfig, UserTaskDefinition,
 };
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -75,7 +75,7 @@ impl ResolvedTaskOptions {
                     workspace_root,
                 )?;
 
-                let output_config = ResolvedGlobConfig::from_user_output_config(
+                let output_config = ResolvedGlobConfig::from_user_config(
                     enabled_cache_config.output.as_ref(),
                     dir,
                     workspace_root,
@@ -194,61 +194,6 @@ impl ResolvedGlobConfig {
         }
 
         Ok(Self { includes_auto, positive_globs, negative_globs })
-    }
-
-    /// Resolve from user output configuration, making glob patterns workspace-root-relative.
-    ///
-    /// Unlike [`Self::from_user_config`], `None` and `Some([])` both produce an empty config
-    /// with `includes_auto = false` (no output archiving).
-    ///
-    /// TODO: remove this method once auto output inference lands; at that point
-    /// `output` becomes a `UserInputsConfig` and routes through
-    /// [`Self::from_user_config`] like inputs.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ResolveTaskConfigError`] if a glob pattern is invalid or resolves
-    /// outside the workspace root.
-    pub fn from_user_output_config(
-        user_outputs: Option<&Vec<UserOutputEntry>>,
-        package_dir: &AbsolutePath,
-        workspace_root: &AbsolutePath,
-    ) -> Result<Self, ResolveTaskConfigError> {
-        let mut positive_globs = BTreeSet::new();
-        let mut negative_globs = BTreeSet::new();
-
-        let Some(entries) = user_outputs else {
-            return Ok(Self { includes_auto: false, positive_globs, negative_globs });
-        };
-
-        for entry in entries {
-            match entry {
-                UserOutputEntry::Glob(pattern) => {
-                    Self::insert_glob(
-                        pattern.as_str(),
-                        package_dir,
-                        workspace_root,
-                        &mut positive_globs,
-                        &mut negative_globs,
-                    )?;
-                }
-                UserOutputEntry::GlobWithBase(GlobWithBase { pattern, base }) => {
-                    let base_dir = match base {
-                        InputBase::Package => package_dir,
-                        InputBase::Workspace => workspace_root,
-                    };
-                    Self::insert_glob(
-                        pattern.as_str(),
-                        base_dir,
-                        workspace_root,
-                        &mut positive_globs,
-                        &mut negative_globs,
-                    )?;
-                }
-            }
-        }
-
-        Ok(Self { includes_auto: false, positive_globs, negative_globs })
     }
 
     /// Insert a glob pattern into the appropriate set (positive or negative),

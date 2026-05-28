@@ -158,6 +158,17 @@ pub enum FingerprintMismatch {
         kind: InputChangeKind,
         path: RelativePathBuf,
     },
+    /// A tool-tracked env var changed between runs.
+    TrackedEnvChanged {
+        name: Str,
+        old: Option<Str>,
+        new: Option<Str>,
+    },
+    /// A tool-tracked env glob's match-set changed between runs.
+    TrackedEnvGlobChanged {
+        pattern: Str,
+        diff: crate::session::execute::fingerprint::EnvGlobDiff,
+    },
 }
 
 impl Display for FingerprintMismatch {
@@ -174,6 +185,42 @@ impl Display for FingerprintMismatch {
             }
             Self::InputChanged { kind, path } => {
                 write!(f, "{}", display::format_input_change_str(*kind, path.as_str()))
+            }
+            Self::TrackedEnvChanged { name, old, new } => {
+                write!(f, "tracked env {name}: ")?;
+                match old {
+                    Some(value) => write!(f, "{:?}", value.as_str())?,
+                    None => write!(f, "(unset)")?,
+                }
+                write!(f, " → ")?;
+                match new {
+                    Some(value) => write!(f, "{:?}", value.as_str()),
+                    None => write!(f, "(unset)"),
+                }
+            }
+            Self::TrackedEnvGlobChanged { pattern, diff } => {
+                write!(f, "tracked env glob {:?}:", pattern.as_str())?;
+                let mut first = true;
+                for (name, value) in &diff.added {
+                    write!(f, "{} +{}={:?}", if first { "" } else { "," }, name, value.as_str())?;
+                    first = false;
+                }
+                for (name, value) in &diff.removed {
+                    write!(f, "{} -{}={:?}", if first { "" } else { "," }, name, value.as_str())?;
+                    first = false;
+                }
+                for (name, (old, new)) in &diff.changed {
+                    write!(
+                        f,
+                        "{} {}: {:?} → {:?}",
+                        if first { "" } else { "," },
+                        name,
+                        old.as_str(),
+                        new.as_str()
+                    )?;
+                    first = false;
+                }
+                Ok(())
             }
         }
     }
@@ -266,11 +313,24 @@ impl ExecutionCache {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
             }
 
-            // Validate post-run fingerprint (inferred inputs from fspy)
-            if let Some((kind, path)) = cache_value.post_run_fingerprint.validate(workspace_root)? {
-                return Ok(Err(CacheMiss::FingerprintMismatch(
-                    FingerprintMismatch::InputChanged { kind, path },
-                )));
+            // Validate post-run fingerprint (inferred inputs + tracked envs)
+            if let Some(mismatch) = cache_value.post_run_fingerprint.validate(workspace_root)? {
+                let fingerprint_mismatch = match mismatch {
+                    crate::session::execute::fingerprint::PostRunMismatch::InputChanged {
+                        kind,
+                        path,
+                    } => FingerprintMismatch::InputChanged { kind, path },
+                    crate::session::execute::fingerprint::PostRunMismatch::TrackedEnvChanged {
+                        name,
+                        old,
+                        new,
+                    } => FingerprintMismatch::TrackedEnvChanged { name, old, new },
+                    crate::session::execute::fingerprint::PostRunMismatch::TrackedEnvGlobChanged {
+                        pattern,
+                        diff,
+                    } => FingerprintMismatch::TrackedEnvGlobChanged { pattern, diff },
+                };
+                return Ok(Err(CacheMiss::FingerprintMismatch(fingerprint_mismatch)));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed

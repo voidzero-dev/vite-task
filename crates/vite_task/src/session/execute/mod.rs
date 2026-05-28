@@ -8,11 +8,18 @@ pub mod tracked_accesses;
 #[cfg(windows)]
 mod win_job;
 
-use std::{cell::RefCell, collections::BTreeMap, io::Write as _, sync::Arc, time::Instant};
+use std::{
+    cell::RefCell,
+    collections::BTreeMap,
+    ffi::{OsStr, OsString},
+    io::Write as _,
+    sync::Arc,
+    time::Instant,
+};
 
 use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
 use petgraph::Direction;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, RelativePathBuf};
@@ -21,6 +28,8 @@ use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnExecution,
     cache_metadata::CacheMetadata, execution_graph::ExecutionNodeIndex,
 };
+use vite_task_server::{Recorder, Reports, StopAccepting};
+use wax::Program as _;
 
 #[cfg(fspy)]
 use self::tracked_accesses::TrackedPathAccesses;
@@ -233,10 +242,6 @@ impl ExecutionContext<'_> {
                 false
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
-                #[expect(
-                    clippy::large_futures,
-                    reason = "spawn execution with cache management creates large futures"
-                )]
                 let outcome = execute_spawn(
                     leaf_reporter,
                     spawn_execution,
@@ -295,18 +300,31 @@ struct CacheState<'a> {
     /// Captured stdout/stderr for cache replay. Written in place during drain;
     /// always present (possibly empty) once we reach the cache-update phase.
     std_outputs: Vec<StdOutput>,
-    /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
-    /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
-    /// tracked accesses. `None` means fspy tracking is off for this task.
-    fspy_negatives: Option<Vec<wax::Glob<'static>>>,
+    /// `Some` iff auto-input or auto-output tracking is on (`includes_auto` +
+    /// successful IPC bind). Bundles fspy's input negative globs with the
+    /// per-task IPC server that runner-aware tools talk to. Parts are borrowed
+    /// in place during the wait/join; the struct is never moved out.
+    tracking: Option<Tracking>,
+}
+
+/// Per-task tracking: fspy input-negative globs + IPC server handle.
+/// Lifetime-tied to a single `execute_spawn` call.
+struct Tracking {
+    input_negative_globs: Vec<wax::Glob<'static>>,
+    ipc_envs: Vec<(&'static OsStr, OsString)>,
+    ipc_server_fut: LocalBoxFuture<'static, Result<Recorder, vite_task_server::Error>>,
+    stop_accepting: StopAccepting,
 }
 
 /// Post-execution summary of what fspy observed for a single task. Used in the
 /// cache-update step. Fields are cfg-agnostic so the downstream match logic
 /// doesn't need `cfg(fspy)` — the value is only ever `Some` when tracking
-/// happened (see the `let tracking = ...` fork in `execute_spawn`).
+/// happened (see the `let fspy_outcome = ...` fork in `execute_spawn`).
 struct TrackingOutcome {
     path_reads: HashMap<RelativePathBuf, PathRead>,
+    /// All paths the task wrote to. Consumed by `collect_and_archive_outputs`
+    /// when `output_config.includes_auto` is set.
+    path_writes: FxHashSet<RelativePathBuf>,
     /// First path that was both read and written during execution, if any.
     /// A non-empty value means caching this task is unsound.
     read_write_overlap: Option<RelativePathBuf>,
@@ -459,37 +477,53 @@ pub async fn execute_spawn(
     // ─────────────────────────────────────────────────────────────────────
     let mut mode: ExecutionMode<'_> = match cache_metadata {
         Some(metadata) => {
-            let fspy = if metadata.input_config.includes_auto {
-                // Resolve negative globs for fspy path filtering
-                // (already workspace-root-relative).
-                match metadata
-                    .input_config
-                    .negative_globs
-                    .iter()
-                    .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
-                    .collect::<anyhow::Result<Vec<_>>>()
-                {
-                    Ok(negs) => Some(negs),
-                    Err(err) => {
-                        leaf_reporter.finish(
-                            None,
-                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                            Some(ExecutionError::PostRunFingerprint(err)),
-                        );
-                        return SpawnOutcome::Failed;
-                    }
-                }
-            } else {
-                None
-            };
+            let tracking =
+                if metadata.input_config.includes_auto || metadata.output_config.includes_auto {
+                    // Resolve input negative globs for fspy path filtering
+                    // (already workspace-root-relative). Output negatives are
+                    // applied later in `collect_and_archive_outputs`.
+                    let negatives = match metadata
+                        .input_config
+                        .negative_globs
+                        .iter()
+                        .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
+                        .collect::<anyhow::Result<Vec<_>>>()
+                    {
+                        Ok(negs) => negs,
+                        Err(err) => {
+                            leaf_reporter.finish(
+                                None,
+                                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                                Some(ExecutionError::PostRunFingerprint(err)),
+                            );
+                            return SpawnOutcome::Failed;
+                        }
+                    };
+                    // PLACEHOLDER: the IPC server isn't wired up yet on this
+                    // branch. We construct an empty `Recorder` whose `Reports`
+                    // never get any IPC traffic, and a `StopAccepting::noop`
+                    // since no real server was bound. A follow-up will swap
+                    // these out for `vite_task_server::serve(...)`.
+                    let env_map: FxHashMap<Arc<OsStr>, Arc<OsStr>> = std::env::vars_os()
+                        .map(|(k, v)| {
+                            (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str()))
+                        })
+                        .collect();
+                    let recorder = Recorder::new(env_map);
+                    let driver: LocalBoxFuture<'static, Result<Recorder, vite_task_server::Error>> =
+                        Box::pin(std::future::ready(Ok(recorder)));
+                    Some(Tracking {
+                        input_negative_globs: negatives,
+                        ipc_envs: Vec::new(),
+                        ipc_server_fut: driver,
+                        stop_accepting: StopAccepting::noop(),
+                    })
+                } else {
+                    None
+                };
             ExecutionMode::Cached {
                 pipe_writers: stdio_config.writers,
-                state: CacheState {
-                    metadata,
-                    globbed_inputs,
-                    std_outputs: Vec::new(),
-                    fspy_negatives: fspy,
-                },
+                state: CacheState { metadata, globbed_inputs, std_outputs: Vec::new(), tracking },
             }
         }
         None => ExecutionMode::Uncached {
@@ -500,9 +534,19 @@ pub async fn execute_spawn(
 
     // 5. Derive the arguments for `spawn()` from the mode without consuming it.
     let (spawn_stdio, fspy_enabled) = match &mode {
-        ExecutionMode::Cached { state, .. } => (SpawnStdio::Piped, state.fspy_negatives.is_some()),
+        ExecutionMode::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.is_some()),
         ExecutionMode::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
         ExecutionMode::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
+    };
+
+    // Build the extra envs to inject: IPC connection info + (eventually)
+    // napi addon path. Empty when tracking is off. The napi path is added
+    // in a follow-up that wires up the real server.
+    let extra_envs: Vec<(&OsStr, &OsStr)> = match &mode {
+        ExecutionMode::Cached { state: CacheState { tracking: Some(t), .. }, .. } => {
+            t.ipc_envs.iter().map(|(k, v)| (*k as &OsStr, v.as_os_str())).collect()
+        }
+        _ => Vec::new(),
     };
 
     // Measure end-to-end duration here — spawn() no longer tracks time.
@@ -515,6 +559,7 @@ pub async fn execute_spawn(
         fspy_enabled,
         spawn_stdio,
         fast_fail_token.clone(),
+        extra_envs,
     )
     .await
     {
@@ -529,124 +574,271 @@ pub async fn execute_spawn(
         }
     };
 
-    // 7. Build `PipeSinks` by borrowing into `mode`. The drain fills
-    //    `state.std_outputs` in place (via the borrow inside `capture`), so no
-    //    post-drain transfer is needed. `sinks` is `None` only in the
-    //    inherited-uncached case, where there are no pipes to drain.
-    let sinks: Option<PipeSinks<'_>> = match &mut mode {
-        ExecutionMode::Cached { pipe_writers, state } => Some(PipeSinks {
-            stdout_writer: &mut pipe_writers.stdout_writer,
-            stderr_writer: &mut pipe_writers.stderr_writer,
-            capture: Some(&mut state.std_outputs),
-        }),
-        ExecutionMode::Uncached { pipe_writers: Some(pipe_writers) } => Some(PipeSinks {
-            stdout_writer: &mut pipe_writers.stdout_writer,
-            stderr_writer: &mut pipe_writers.stderr_writer,
-            capture: None,
-        }),
-        ExecutionMode::Uncached { pipe_writers: None } => None,
+    // 7. Extract all mode-scoped borrows in one pass:
+    //    - `sinks`: pipe writers + stdout capture slot (writes in place).
+    //    - `stop_accepting` / `driver`: the IPC server's handles, if tracking
+    //      is on. Disjoint field borrows inside the same match arm.
+    let (sinks, stop_accepting, ipc_server_fut) = match &mut mode {
+        ExecutionMode::Cached { pipe_writers, state } => {
+            let sinks = Some(PipeSinks {
+                stdout_writer: &mut pipe_writers.stdout_writer,
+                stderr_writer: &mut pipe_writers.stderr_writer,
+                capture: Some(&mut state.std_outputs),
+            });
+            let (stop_accepting, ipc_server_fut) = match &mut state.tracking {
+                Some(t) => (Some(&t.stop_accepting), Some(&mut t.ipc_server_fut)),
+                None => (None, None),
+            };
+            (sinks, stop_accepting, ipc_server_fut)
+        }
+        ExecutionMode::Uncached { pipe_writers: Some(pipe_writers) } => (
+            Some(PipeSinks {
+                stdout_writer: &mut pipe_writers.stdout_writer,
+                stderr_writer: &mut pipe_writers.stderr_writer,
+                capture: None,
+            }),
+            None,
+            None,
+        ),
+        ExecutionMode::Uncached { pipe_writers: None } => (None, None, None),
     };
 
-    if let Some(sinks) = sinks {
-        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        #[expect(
-            clippy::large_futures,
-            reason = "pipe_stdio streams child I/O and creates a large future"
-        )]
-        let pipe_result = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        if let Err(err) = pipe_result {
-            // Cancel so `child.wait` kills the child instead of orphaning it.
-            fast_fail_token.cancel();
-            let _ = child.wait.await;
-            leaf_reporter.finish(
-                None,
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Spawn(err.into())),
-            );
-            return SpawnOutcome::Failed;
-        }
-    }
+    // 8. Drive pipe_stdio + child.wait concurrently with the IPC driver.
+    //    The driver must be polled during pipe drain — otherwise a tool doing
+    //    a blocking `getEnv` can deadlock: child stalls on IPC, stdout stays
+    //    open, pipe_stdio waits for EOF, driver never runs. `stop_accepting`
+    //    fires after child.wait so the driver drains any in-flight clients.
+    let child_fast_fail = fast_fail_token.clone();
+    let child_work = async move {
+        let pipe_result: anyhow::Result<()> = if let Some(sinks) = sinks {
+            let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+            let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+            #[expect(
+                clippy::large_futures,
+                reason = "pipe_stdio streams child I/O and creates a large future"
+            )]
+            let r = pipe_stdio(stdout, stderr, sinks, child_fast_fail.clone()).await;
+            r.map_err(anyhow::Error::from)
+        } else {
+            Ok(())
+        };
 
-    // 8. Wait for exit (handles cancellation internally).
-    let outcome = match child.wait.await {
+        let wait_result = match pipe_result {
+            Ok(()) => child.wait.await.map_err(anyhow::Error::from),
+            Err(err) => {
+                // Pipe failed — cancel so `child.wait` kills the child
+                // instead of orphaning it. Still signal the server so it
+                // can drain.
+                child_fast_fail.cancel();
+                let _ = child.wait.await;
+                Err(err)
+            }
+        };
+
+        if let Some(s) = stop_accepting {
+            s.signal();
+        }
+        wait_result
+    };
+
+    // Box::pin to keep the child-and-pipe stack off the enclosing future:
+    // pipe_stdio alone makes the combined future large enough to trip
+    // clippy::large_futures on the non-driver branch.
+    let child_work = Box::pin(child_work);
+    // `None` iff tracking was off. Otherwise carries either the collected
+    // reports (Ok) or the IPC server's error (Err). Consumed below: Ok drops
+    // unused for step 5 (step 6 will use the reports); Err short-circuits
+    // cache update to `IpcServerError`.
+    let mut ipc_server_result: Option<Result<Reports, vite_task_server::Error>> = None;
+    let wait_result = match ipc_server_fut {
+        Some(ipc_server_fut) => {
+            let (wait_result, join_result) = tokio::join!(child_work, ipc_server_fut);
+            if let Err(e) = &join_result {
+                tracing::warn!(?e, "IPC server failed; cache will not be updated");
+            }
+            ipc_server_result = Some(join_result.map(Recorder::into_reports));
+            wait_result
+        }
+        None => child_work.await,
+    };
+
+    let outcome = match wait_result {
         Ok(outcome) => outcome,
         Err(err) => {
             leaf_reporter.finish(
                 None,
                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Spawn(err.into())),
+                Some(ExecutionError::Spawn(err)),
             );
             return SpawnOutcome::Failed;
+        }
+    };
+    // Extract reports, or short-circuit when the IPC server failed. An Err
+    // here means reports may be incomplete: caching this run would risk
+    // stale inputs/outputs, so skip all cache-related computation entirely.
+    let reports: Option<Reports> = match ipc_server_result {
+        Some(Ok(r)) => {
+            tracing::debug!(?r, "runner-aware tools reported");
+            Some(r)
+        }
+        None => None,
+        Some(Err(err)) => {
+            leaf_reporter.finish(
+                Some(outcome.exit_status),
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(err)),
+                None,
+            );
+            return SpawnOutcome::Spawned(outcome.exit_status);
         }
     };
     let duration = start.elapsed();
 
     // 9. Cache update (only when we were in `Cached` mode). Errors during cache
     //    update are reported but do not affect the exit status we return.
-    let (cache_update_status, cache_error) = if let ExecutionMode::Cached { state, .. } = mode {
-        let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
+    let (cache_update_status, cache_error) = 'cache_update: {
+        if let ExecutionMode::Cached { state, .. } = mode {
+            let CacheState { metadata, globbed_inputs, std_outputs, tracking } = state;
+            let input_negative_globs = tracking.as_ref().map(|t| t.input_negative_globs.as_slice());
 
-        // Post-execution summary of what fspy observed. `Some` iff tracking was
-        // both requested (`fspy_negatives.is_some()`) and compiled in (`cfg(fspy)`).
-        // On a `cfg(not(fspy))` build this is always `None`, and the match below
-        // short-circuits to `FspyUnsupported` when tracking was needed.
-        let tracking: Option<TrackingOutcome> = {
-            #[cfg(fspy)]
+            // Runner-aware tools can short-circuit caching entirely via
+            // `disableCache()` (e.g. a dev server with no deterministic output).
+            if let Some(r) = reports.as_ref()
+                && r.cache_disabled
             {
-                outcome.path_accesses.as_ref().zip(fspy_negatives.as_deref()).map(|(raw, negs)| {
-                    let tracked = TrackedPathAccesses::from_raw(raw, cache_base_path, negs);
-                    let read_write_overlap = tracked
-                        .path_reads
-                        .keys()
-                        .find(|p| tracked.path_writes.contains(*p))
-                        .cloned();
-                    TrackingOutcome { path_reads: tracked.path_reads, read_write_overlap }
-                })
-            }
-            #[cfg(not(fspy))]
-            {
-                None
-            }
-        };
-
-        let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
-        if cancelled {
-            // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
-            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None)
-        } else if outcome.exit_status.success() {
-            // fspy-inferred read-write overlap: the task wrote to a file it also
-            // read, so the prerun input hashes are stale and caching is unsound.
-            // (We only check fspy-inferred reads, not globbed_inputs. A task that
-            // writes to a glob-matched file without reading it produces perpetual
-            // cache misses but not a correctness bug.)
-            if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &tracking {
-                (
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
-                        path: path.clone(),
-                    }),
+                break 'cache_update (
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested),
                     None,
-                )
-            } else if tracking.is_none() && fspy_negatives.is_some() {
-                // Task requested fspy auto-inference but this binary was built
-                // without `cfg(fspy)`. Task ran, but we can't compute a valid
-                // cache entry without tracked path accesses.
-                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None)
-            } else {
-                // Paths already in globbed_inputs are skipped: the overlap check
-                // above guarantees no input modification, so the prerun hash is
-                // the correct post-exec hash.
-                let empty_path_reads = HashMap::default();
-                let path_reads = tracking.as_ref().map_or(&empty_path_reads, |t| &t.path_reads);
-                match PostRunFingerprint::create(path_reads, cache_base_path, &globbed_inputs) {
-                    Ok(post_run_fingerprint) => {
-                        // Collect output files and create archive
-                        let output_archive =
-                            match collect_and_archive_outputs(metadata, cache_base_path, cache_dir)
+                );
+            }
+
+            // Tool-reported paths to exclude from auto-tracking. Absolute paths
+            // are normalized to workspace-relative; anything outside is dropped.
+            let ignored_input_rels: FxHashSet<RelativePathBuf> = reports
+                .as_ref()
+                .map(|r| normalize_ignored_paths(&r.ignored_inputs, cache_base_path))
+                .unwrap_or_default();
+            let ignored_output_rels: FxHashSet<RelativePathBuf> = reports
+                .as_ref()
+                .map(|r| normalize_ignored_paths(&r.ignored_outputs, cache_base_path))
+                .unwrap_or_default();
+
+            // Post-execution summary of what fspy observed. `Some` iff fspy was
+            // both requested (`tracking.is_some()` => input or output auto) and
+            // compiled in (`cfg(fspy)`). On a `cfg(not(fspy))` build this is
+            // always `None`, and the match below short-circuits to
+            // `FspyUnsupported` when tracking was needed.
+            //
+            // `path_reads` is gated on `input_config.includes_auto`, filtered
+            // by user-configured input negatives, and by tool-reported
+            // `ignoreInput` paths. When input auto is disabled (even if fspy is
+            // enabled for output tracking) no reads contribute to the
+            // fingerprint or the read-write overlap check. `path_writes` is NOT
+            // filtered here — output negatives and `ignoreOutput` are applied
+            // later inside `collect_and_archive_outputs`. Keeping the two sides
+            // separate avoids `input: ["!dist/**"]` accidentally dropping
+            // writes to `dist/**`, which would break archive restoration.
+            let fspy_outcome: Option<TrackingOutcome> = {
+                #[cfg(fspy)]
+                {
+                    outcome.path_accesses.as_ref().map(|raw| {
+                        let tracked = TrackedPathAccesses::from_raw(raw, cache_base_path);
+                        let path_reads: HashMap<RelativePathBuf, PathRead> =
+                            if metadata.input_config.includes_auto
+                                && let Some(negatives) = input_negative_globs
                             {
+                                tracked
+                                    .path_reads
+                                    .iter()
+                                    .filter(|(path, _)| {
+                                        !negatives.iter().any(|neg| neg.is_match(path.as_str()))
+                                            && !is_ignored(path, &ignored_input_rels)
+                                    })
+                                    .map(|(path, read)| (path.clone(), *read))
+                                    .collect()
+                            } else {
+                                HashMap::default()
+                            };
+                        let read_write_overlap = path_reads
+                            .keys()
+                            .find(|p| {
+                                tracked.path_writes.contains(*p)
+                                    && !is_ignored(p, &ignored_output_rels)
+                            })
+                            .cloned();
+                        TrackingOutcome {
+                            path_reads,
+                            path_writes: tracked.path_writes,
+                            read_write_overlap,
+                        }
+                    })
+                }
+                #[cfg(not(fspy))]
+                {
+                    None
+                }
+            };
+
+            let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
+            if cancelled {
+                // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
+                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None)
+            } else if outcome.exit_status.success() {
+                // fspy-inferred read-write overlap: the task wrote to a file it
+                // also read (as an inferred input), so the prerun input hashes
+                // are stale and caching is unsound. Reads excluded by input
+                // negatives or by `ignoreInput` don't count — `path_reads` is
+                // already filtered. Writes excluded by `ignoreOutput` were
+                // discounted from the overlap check too.
+                if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome
+                {
+                    (
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
+                            path: path.clone(),
+                        }),
+                        None,
+                    )
+                } else if fspy_outcome.is_none() && tracking.is_some() {
+                    // Task requested fspy auto-inference but this binary was built
+                    // without `cfg(fspy)`. Task ran, but we can't compute a valid
+                    // cache entry without tracked path accesses.
+                    (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None)
+                } else {
+                    // Collect tool-reported tracked envs for the post-run
+                    // fingerprint. User-declared `env` wins — skip names that
+                    // are already in the spawn fingerprint.
+                    let tracked_envs = reports
+                        .as_ref()
+                        .map(|r| collect_tracked_envs(r, metadata))
+                        .unwrap_or_default();
+                    let tracked_env_globs =
+                        reports.as_ref().map(collect_tracked_env_globs).unwrap_or_default();
+
+                    // Paths already in globbed_inputs are skipped: the overlap check
+                    // above guarantees no input modification, so the prerun hash is
+                    // the correct post-exec hash.
+                    let empty_path_reads = HashMap::default();
+                    let path_reads =
+                        fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
+                    match PostRunFingerprint::create(
+                        path_reads,
+                        cache_base_path,
+                        &globbed_inputs,
+                        tracked_envs,
+                        tracked_env_globs,
+                    ) {
+                        Ok(post_run_fingerprint) => {
+                            // Collect output files and create archive. Tool-reported
+                            // `ignoreOutput` paths are excluded from archiving too.
+                            let output_archive = match collect_and_archive_outputs(
+                                metadata,
+                                fspy_outcome.as_ref(),
+                                &ignored_output_rels,
+                                cache_base_path,
+                                cache_dir,
+                            ) {
                                 Ok(archive) => archive,
                                 Err(err) => {
-                                    let result = (
+                                    break 'cache_update (
                                         CacheUpdateStatus::NotUpdated(
                                             CacheNotUpdatedReason::CacheDisabled,
                                         ),
@@ -655,46 +847,43 @@ pub async fn execute_spawn(
                                             source: err,
                                         }),
                                     );
-                                    leaf_reporter.finish(
-                                        Some(outcome.exit_status),
-                                        result.0,
-                                        result.1,
-                                    );
-                                    return SpawnOutcome::Spawned(outcome.exit_status);
                                 }
                             };
 
-                        let new_cache_value = CacheEntryValue {
-                            post_run_fingerprint,
-                            std_outputs: std_outputs.into(),
-                            duration,
-                            globbed_inputs,
-                            output_archive,
-                        };
-                        match cache.update(metadata, new_cache_value, cache_dir).await {
-                            Ok(()) => (CacheUpdateStatus::Updated, None),
-                            Err(err) => (
-                                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                                Some(ExecutionError::Cache {
-                                    kind: CacheErrorKind::Update,
-                                    source: err,
-                                }),
-                            ),
+                            let new_cache_value = CacheEntryValue {
+                                post_run_fingerprint,
+                                std_outputs: std_outputs.into(),
+                                duration,
+                                globbed_inputs,
+                                output_archive,
+                            };
+                            match cache.update(metadata, new_cache_value, cache_dir).await {
+                                Ok(()) => (CacheUpdateStatus::Updated, None),
+                                Err(err) => (
+                                    CacheUpdateStatus::NotUpdated(
+                                        CacheNotUpdatedReason::CacheDisabled,
+                                    ),
+                                    Some(ExecutionError::Cache {
+                                        kind: CacheErrorKind::Update,
+                                        source: err,
+                                    }),
+                                ),
+                            }
                         }
+                        Err(err) => (
+                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                            Some(ExecutionError::PostRunFingerprint(err)),
+                        ),
                     }
-                    Err(err) => (
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::PostRunFingerprint(err)),
-                    ),
                 }
+            } else {
+                // Execution failed with non-zero exit status — don't update cache
+                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None)
             }
         } else {
-            // Execution failed with non-zero exit status — don't update cache
-            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None)
+            // Caching was disabled for this task
+            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
         }
-    } else {
-        // Caching was disabled for this task
-        (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
     };
 
     // 7. Finish the leaf execution with the result and optional cache error.
@@ -705,36 +894,193 @@ pub async fn execute_spawn(
     SpawnOutcome::Spawned(outcome.exit_status)
 }
 
-/// Collect output files matching the configured globs and create a tar.zst
-/// archive in the cache directory.
+/// Normalize tool-reported absolute paths to workspace-relative. Paths outside
+/// the workspace are dropped — they can't contribute to inputs or outputs.
+fn normalize_ignored_paths(
+    paths: &FxHashSet<Arc<AbsolutePath>>,
+    workspace_root: &AbsolutePath,
+) -> FxHashSet<RelativePathBuf> {
+    // On Windows, `workspace_root` may carry a `\\?\` extended-path prefix
+    // (it does when the runner derived it from `std::fs::canonicalize`)
+    // while a tool's `current_dir()`-based ignoreInput/ignoreOutput path
+    // doesn't. `Path::strip_prefix` is a byte-exact comparison so the
+    // prefix mismatch silently drops every tool-reported path. Pre-build
+    // an alternate workspace root with the `\\?\` / `\\.\` / `\??\`
+    // prefix dropped and try it as a fallback. `fspy_shared::NativePath::
+    // strip_path_prefix` does the inverse (strips `\\?\` from incoming
+    // fspy paths) so each side stays agnostic to how the other side
+    // canonicalised.
+    #[cfg(windows)]
+    let workspace_root_stripped: Option<vite_path::AbsolutePathBuf> =
+        windows_strip_verbatim_prefix(workspace_root.as_path().as_os_str());
+
+    paths
+        .iter()
+        .filter_map(|p| {
+            if let Some(rel) = p.strip_prefix(workspace_root).ok().flatten() {
+                return Some(rel);
+            }
+            #[cfg(windows)]
+            if let Some(alt_root) = workspace_root_stripped.as_ref() {
+                if let Some(rel) = p.strip_prefix(alt_root).ok().flatten() {
+                    return Some(rel);
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+/// Build an alternate workspace-root path by dropping a `\\?\`, `\\.\`,
+/// or `\??\` prefix if present. Returns `None` when the input is already
+/// in plain `C:\...` form (no fallback needed). Mirrors
+/// `fspy_shared::NativePath::strip_path_prefix`'s helper so the inputs of
+/// `strip_prefix` can match across `current_dir`-derived and
+/// `canonicalize`-derived paths.
+#[cfg(windows)]
+#[expect(
+    clippy::disallowed_types,
+    reason = "OsStr-level prefix matching for Windows extended-path normalization"
+)]
+fn windows_strip_verbatim_prefix(p: &std::ffi::OsStr) -> Option<vite_path::AbsolutePathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let wide: Vec<u16> = p.encode_wide().collect();
+    for prefix in [r"\\?\", r"\\.\", r"\??\"] {
+        let prefix_wide: Vec<u16> = prefix.encode_utf16().collect();
+        if wide.starts_with(prefix_wide.as_slice()) {
+            let stripped = std::ffi::OsString::from_wide(&wide[prefix_wide.len()..]);
+            return vite_path::AbsolutePathBuf::new(std::path::PathBuf::from(stripped));
+        }
+    }
+    None
+}
+
+/// Whether `path` is covered by any `ignored` entry. An ignored entry matches
+/// itself (exact file) and everything under it (directory subtree).
+fn is_ignored(path: &RelativePathBuf, ignored: &FxHashSet<RelativePathBuf>) -> bool {
+    if ignored.is_empty() {
+        return false;
+    }
+    if ignored.contains(path) {
+        return true;
+    }
+    ignored.iter().any(|ig| path.strip_prefix(ig).is_some())
+}
+
+/// Select tool-reported env records to embed in the post-run fingerprint.
+/// Only `tracked: true` records are included, and names that the user already
+/// declared as fingerprinted are skipped (their value is already in the cache
+/// key via the spawn fingerprint).
+fn collect_tracked_envs(reports: &Reports, metadata: &CacheMetadata) -> BTreeMap<Str, Option<Str>> {
+    let fingerprinted = &metadata.spawn_fingerprint.env_fingerprints().fingerprinted_envs;
+    reports
+        .env_records
+        .iter()
+        .filter(|(_, record)| record.tracked)
+        .filter_map(|(name, record)| {
+            let name_str = name.to_str()?;
+            if fingerprinted.contains_key(name_str) {
+                return None;
+            }
+            let value = record.value.as_ref().and_then(|v| v.to_str().map(Str::from));
+            Some((Str::from(name_str), value))
+        })
+        .collect()
+}
+
+/// Select tool-reported env-glob records to embed in the post-run
+/// fingerprint. Only `tracked: true` records are included, and the full
+/// match-set is stored as-is.
 ///
-/// Returns `Some(archive_filename)` if files were archived, `None` if the
-/// output config has no positive globs or no files matched.
+/// Unlike [`collect_tracked_envs`], names already covered by the user's
+/// declared `env` are *not* filtered out: lookup-time validation re-expands
+/// the glob over the whole parent env (see [`PostRunFingerprint::validate`]),
+/// so a filtered match-set would always diff as having `added` entries and
+/// miss the cache deterministically. Storing user-declared names here is
+/// harmless — a change to their value already shifts the spawn fingerprint,
+/// invalidating the cache key before the post-run fingerprint is consulted.
+fn collect_tracked_env_globs(reports: &Reports) -> BTreeMap<Str, BTreeMap<Str, Str>> {
+    reports
+        .env_glob_records
+        .iter()
+        .filter(|(_, record)| record.tracked)
+        .map(|(pattern, record)| {
+            let matches: BTreeMap<Str, Str> = record
+                .matches
+                .iter()
+                .filter_map(|(name, value)| {
+                    let name_str = name.to_str()?;
+                    let value_str = value.to_str()?;
+                    Some((Str::from(name_str), Str::from(value_str)))
+                })
+                .collect();
+            (Str::from(pattern.as_ref()), matches)
+        })
+        .collect()
+}
+
+/// Collect output files and create a tar.zst archive in the cache directory.
+///
+/// Output files are determined by:
+/// - fspy-tracked writes (when `output_config.includes_auto` is true)
+/// - Positive output globs (always, if configured)
+/// - Filtered by negative output globs
+/// - Filtered by tool-reported `ignoreOutput` paths (auto writes only)
+///
+/// Returns `Some(archive_filename)` if files were archived, `None` if no output files.
 fn collect_and_archive_outputs(
-    cache_metadata: &CacheMetadata,
+    cache_metadata: &vite_task_plan::cache_metadata::CacheMetadata,
+    tracking: Option<&TrackingOutcome>,
+    ignored_output_rels: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
     cache_dir: &AbsolutePath,
 ) -> anyhow::Result<Option<Str>> {
     let output_config = &cache_metadata.output_config;
 
-    if output_config.positive_globs.is_empty() {
-        return Ok(None);
+    // Collect output files from auto-detection (fspy writes), excluding
+    // anything the tool reported via `ignoreOutput`.
+    let mut output_files: FxHashSet<RelativePathBuf> = FxHashSet::default();
+
+    if output_config.includes_auto
+        && let Some(t) = tracking
+    {
+        output_files
+            .extend(t.path_writes.iter().filter(|p| !is_ignored(p, ignored_output_rels)).cloned());
     }
 
-    let output_files = glob::collect_glob_paths(
-        workspace_root,
-        &output_config.positive_globs,
-        &output_config.negative_globs,
-    )?;
+    // Collect output files from positive globs
+    if !output_config.positive_globs.is_empty() {
+        let glob_paths = glob::collect_glob_paths(
+            workspace_root,
+            &output_config.positive_globs,
+            &output_config.negative_globs,
+        )?;
+        output_files.extend(glob_paths);
+    }
+
+    // Apply negative globs to auto-detected files
+    if output_config.includes_auto && !output_config.negative_globs.is_empty() {
+        let negatives: Vec<wax::Glob<'static>> = output_config
+            .negative_globs
+            .iter()
+            .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
+            .collect::<anyhow::Result<_>>()?;
+        output_files.retain(|path| !negatives.iter().any(|neg| neg.is_match(path.as_str())));
+    }
 
     if output_files.is_empty() {
         return Ok(None);
     }
 
+    // Sort for deterministic archive content
+    let mut sorted_files: Vec<RelativePathBuf> = output_files.into_iter().collect();
+    sorted_files.sort();
+
+    // Create archive with UUID filename
     let archive_name: Str = vite_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
     let archive_path = cache_dir.join(archive_name.as_str());
 
-    archive::create_output_archive(workspace_root, &output_files, &archive_path)?;
+    archive::create_output_archive(workspace_root, &sorted_files, &archive_path)?;
 
     Ok(Some(archive_name))
 }

@@ -1,4 +1,8 @@
 //! Normalize raw fspy path accesses into workspace-relative, filtered form.
+//!
+//! User-configured negative globs are NOT applied here. They are applied later,
+//! separately for reads (input config) and writes (output config), since those
+//! two configs are independent.
 #![cfg(fspy)]
 
 use std::collections::hash_map::Entry;
@@ -21,22 +25,19 @@ pub struct TrackedPathAccesses {
 }
 
 impl TrackedPathAccesses {
-    /// Build from fspy's raw iterable by stripping the workspace prefix,
-    /// normalizing `..` components, and filtering against the negative globs.
-    pub fn from_raw(
-        raw: &PathAccessIterable,
-        workspace_root: &AbsolutePath,
-        resolved_negatives: &[wax::Glob<'static>],
-    ) -> Self {
+    /// Build from fspy's raw iterable by stripping the workspace prefix and
+    /// normalizing `..` components. `.git/*` paths are skipped. User-configured
+    /// negatives are applied by the caller (see module docs).
+    pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
         let mut accesses = Self::default();
         for access in raw.iter() {
-            // Strip workspace root, clean `..` components, and filter in one pass.
+            // Strip workspace root and clean `..` components in one pass.
             // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
             let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {
                 let Ok(stripped_path) = strip_result else {
                     return None;
                 };
-                normalize_tracked_workspace_path(stripped_path, resolved_negatives)
+                normalize_tracked_workspace_path(stripped_path)
             });
 
             let Some(relative_path) = relative_path else {
@@ -71,10 +72,7 @@ impl TrackedPathAccesses {
     clippy::disallowed_types,
     reason = "fspy strip_path_prefix exposes std::path::Path; convert to RelativePathBuf immediately"
 )]
-fn normalize_tracked_workspace_path(
-    stripped_path: &std::path::Path,
-    resolved_negatives: &[wax::Glob<'static>],
-) -> Option<RelativePathBuf> {
+fn normalize_tracked_workspace_path(stripped_path: &std::path::Path) -> Option<RelativePathBuf> {
     // On Windows, paths are possible to be still absolute after stripping the workspace root.
     // For example: c:\workspace\subdir\c:\workspace\subdir
     // Just ignore those accesses.
@@ -87,12 +85,6 @@ fn normalize_tracked_workspace_path(
 
     // Skip .git directory accesses (workaround for tools like oxlint)
     if relative.as_path().strip_prefix(".git").is_ok() {
-        return None;
-    }
-
-    if !resolved_negatives.is_empty()
-        && resolved_negatives.iter().any(|neg| wax::Program::is_match(neg, relative.as_str()))
-    {
         return None;
     }
 
@@ -111,8 +103,7 @@ mod tests {
             clippy::disallowed_types,
             reason = "normalize_tracked_workspace_path requires std::path::Path for fspy strip_path_prefix output"
         )]
-        let relative_path =
-            normalize_tracked_workspace_path(std::path::Path::new(r"foo\C:\bar"), &[]);
+        let relative_path = normalize_tracked_workspace_path(std::path::Path::new(r"foo\C:\bar"));
         assert!(relative_path.is_none());
     }
 }

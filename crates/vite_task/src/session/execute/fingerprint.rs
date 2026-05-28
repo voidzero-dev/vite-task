@@ -31,6 +31,53 @@ pub struct PostRunFingerprint {
     /// Paths inferred from fspy during execution with their content fingerprints.
     /// Only populated when `input_config.includes_auto` is true.
     pub inferred_inputs: HashMap<RelativePathBuf, PathFingerprint>,
+
+    /// Env vars observed via runner-aware IPC `getEnv` with `tracked: true`.
+    /// Key is the env name; value is the env value at execution time (or
+    /// `None` if unset). Validated at cache lookup by comparing against the
+    /// current parent env.
+    pub tracked_envs: BTreeMap<Str, Option<Str>>,
+
+    /// Glob-pattern env queries (`getEnvs`) made with `tracked: true`.
+    /// Outer key is the glob pattern, inner map is the match-set at
+    /// execution time (name → value). Validated at cache lookup by
+    /// re-matching against the current parent env and comparing the
+    /// resulting set.
+    pub tracked_env_globs: BTreeMap<Str, BTreeMap<Str, Str>>,
+}
+
+/// A mismatch between the stored post-run fingerprint and the current state.
+#[expect(
+    clippy::enum_variant_names,
+    reason = "all three variants describe different kinds of post-run changes; \
+              dropping the `Changed` suffix on any one of them would be misleading"
+)]
+#[derive(Debug, Clone)]
+pub enum PostRunMismatch {
+    /// An inferred input file or directory changed.
+    InputChanged { kind: InputChangeKind, path: RelativePathBuf },
+    /// A tool-tracked env var changed value (or was added/removed).
+    TrackedEnvChanged { name: Str, old: Option<Str>, new: Option<Str> },
+    /// A tool-tracked env glob's match-set changed between runs. The glob
+    /// still matches the same pattern, but added/removed/mutated entries.
+    TrackedEnvGlobChanged { pattern: Str, diff: EnvGlobDiff },
+}
+
+/// Per-pattern diff between stored and current match-set. Each map is a
+/// subset of the symmetric difference keyed by env name. `changed` holds
+/// names present in both with differing values; `added` / `removed` are
+/// exclusive to one side.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EnvGlobDiff {
+    pub added: BTreeMap<Str, Str>,
+    pub removed: BTreeMap<Str, Str>,
+    pub changed: BTreeMap<Str, (Str, Str)>,
+}
+
+impl EnvGlobDiff {
+    fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty() && self.changed.is_empty()
+    }
 }
 
 /// Fingerprint for a single path (file or directory)
@@ -69,11 +116,15 @@ impl PostRunFingerprint {
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
     /// * `base_dir` - Workspace root for resolving relative paths
     /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
+    /// * `tracked_envs` - Tool-requested env vars (name → value), validated on lookup
+    /// * `tracked_env_globs` - Tool-requested env globs (pattern → matches), validated on lookup
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        tracked_envs: BTreeMap<Str, Option<Str>>,
+        tracked_env_globs: BTreeMap<Str, BTreeMap<Str, Str>>,
     ) -> anyhow::Result<Self> {
         let inferred_inputs = inferred_path_reads
             .par_iter()
@@ -85,16 +136,13 @@ impl PostRunFingerprint {
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
-        Ok(Self { inferred_inputs })
+        Ok(Self { inferred_inputs, tracked_envs, tracked_env_globs })
     }
 
-    /// Validates the fingerprint against current filesystem state.
-    /// Returns `Some((kind, path))` if an input changed, `None` if all valid.
+    /// Validates the fingerprint against current filesystem and env state.
+    /// Returns `Some(mismatch)` on the first divergence, `None` if all valid.
     #[tracing::instrument(level = "debug", skip_all, name = "validate_post_run_fingerprint")]
-    pub fn validate(
-        &self,
-        base_dir: &AbsolutePath,
-    ) -> anyhow::Result<Option<(InputChangeKind, RelativePathBuf)>> {
+    pub fn validate(&self, base_dir: &AbsolutePath) -> anyhow::Result<Option<PostRunMismatch>> {
         let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
             |(input_relative_path, path_fingerprint)| {
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
@@ -120,12 +168,83 @@ impl PostRunFingerprint {
                     } else {
                         input_relative_path.clone()
                     };
-                    Some(Ok((kind, path)))
+                    Some(Ok(PostRunMismatch::InputChanged { kind, path }))
                 }
             },
         );
-        input_mismatch.transpose()
+        if let Some(result) = input_mismatch {
+            return result.map(Some);
+        }
+
+        // Validate tracked envs against the current parent env.
+        for (name, stored_value) in &self.tracked_envs {
+            let current_value =
+                std::env::var_os(name.as_str()).and_then(|v| v.to_str().map(Str::from));
+            if current_value.as_ref() != stored_value.as_ref() {
+                return Ok(Some(PostRunMismatch::TrackedEnvChanged {
+                    name: name.clone(),
+                    old: stored_value.clone(),
+                    new: current_value,
+                }));
+            }
+        }
+
+        // Validate tracked env globs: re-enumerate parent env for each
+        // pattern and diff against the stored match-set.
+        for (pattern, stored_matches) in &self.tracked_env_globs {
+            let current_matches = match_env_glob(pattern.as_str())?;
+            let diff = diff_env_glob(stored_matches, &current_matches);
+            if !diff.is_empty() {
+                return Ok(Some(PostRunMismatch::TrackedEnvGlobChanged {
+                    pattern: pattern.clone(),
+                    diff,
+                }));
+            }
+        }
+
+        Ok(None)
     }
+}
+
+/// Build the current match-set for `pattern` by enumerating
+/// `std::env::vars_os()` and keeping UTF-8 names whose representation matches
+/// the glob. Mirrors the server-side match (see
+/// `vite_task_server::Recorder::get_envs`).
+fn match_env_glob(pattern: &str) -> anyhow::Result<BTreeMap<Str, Str>> {
+    let set = vite_glob::GlobPatternSet::new(std::iter::once(pattern))?;
+    Ok(std::env::vars_os()
+        .filter_map(|(name, value)| {
+            let name_str = name.to_str()?.to_owned();
+            let value_str = value.to_str()?.to_owned();
+            if set.is_match(&name_str) {
+                Some((Str::from(name_str.as_str()), Str::from(value_str.as_str())))
+            } else {
+                None
+            }
+        })
+        .collect())
+}
+
+/// Compute the diff of two match-sets for the same glob pattern.
+fn diff_env_glob(stored: &BTreeMap<Str, Str>, current: &BTreeMap<Str, Str>) -> EnvGlobDiff {
+    let mut diff = EnvGlobDiff::default();
+    for (name, stored_value) in stored {
+        match current.get(name) {
+            None => {
+                diff.removed.insert(name.clone(), stored_value.clone());
+            }
+            Some(current_value) if current_value != stored_value => {
+                diff.changed.insert(name.clone(), (stored_value.clone(), current_value.clone()));
+            }
+            Some(_) => {}
+        }
+    }
+    for (name, current_value) in current {
+        if !stored.contains_key(name) {
+            diff.added.insert(name.clone(), current_value.clone());
+        }
+    }
+    diff
 }
 
 /// Determine the kind of change between two differing path fingerprints.

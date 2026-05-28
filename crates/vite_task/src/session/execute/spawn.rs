@@ -5,7 +5,7 @@
 //! job; normalizing fspy path accesses is [`super::tracked_accesses`]'s (only
 //! compiled when `cfg(fspy)` is on).
 
-use std::{io, process::Stdio};
+use std::{ffi::OsStr, io, process::Stdio};
 
 #[cfg(fspy)]
 use fspy::PathAccessIterable;
@@ -48,21 +48,31 @@ pub struct ChildOutcome {
 
 /// Spawn a command with the requested fspy and stdio configuration.
 ///
+/// `extra_envs` are applied **after** `cmd.all_envs`, so runtime-injected
+/// entries (e.g. the runner's IPC name + napi addon path) override any
+/// same-named key from the plan.
+///
 /// Cancellation is unified: whether fspy is enabled or not, the returned `wait`
 /// future observes `cancellation_token` and kills the child before resolving.
 ///
 /// On builds without `cfg(fspy)`, the `fspy` argument is ignored and the tokio
 /// path is always taken.
 #[tracing::instrument(level = "debug", skip_all)]
-pub async fn spawn(
+pub async fn spawn<E, K, V>(
     cmd: &SpawnCommand,
     fspy: bool,
     stdio: SpawnStdio,
     cancellation_token: CancellationToken,
-) -> anyhow::Result<ChildHandle> {
+    extra_envs: E,
+) -> anyhow::Result<ChildHandle>
+where
+    E: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
     #[cfg(fspy)]
     if fspy {
-        return spawn_fspy(cmd, stdio, cancellation_token).await;
+        return spawn_fspy(cmd, stdio, cancellation_token, extra_envs).await;
     }
     #[cfg(not(fspy))]
     let _ = fspy;
@@ -71,20 +81,28 @@ pub async fn spawn(
     tokio_cmd.args(cmd.args.iter().map(vite_str::Str::as_str));
     tokio_cmd.env_clear();
     tokio_cmd.envs(cmd.all_envs.iter());
+    tokio_cmd.envs(extra_envs);
     tokio_cmd.current_dir(&*cmd.cwd);
     apply_stdio(&mut tokio_cmd, stdio);
     spawn_tokio(tokio_cmd, cancellation_token)
 }
 
 #[cfg(fspy)]
-async fn spawn_fspy(
+async fn spawn_fspy<E, K, V>(
     cmd: &SpawnCommand,
     stdio: SpawnStdio,
     cancellation_token: CancellationToken,
-) -> anyhow::Result<ChildHandle> {
+    extra_envs: E,
+) -> anyhow::Result<ChildHandle>
+where
+    E: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
     let mut fspy_cmd = fspy::Command::new(cmd.program_path.as_path());
     fspy_cmd.args(cmd.args.iter().map(vite_str::Str::as_str));
     fspy_cmd.envs(cmd.all_envs.iter());
+    fspy_cmd.envs(extra_envs);
     fspy_cmd.current_dir(&*cmd.cwd);
 
     match stdio {

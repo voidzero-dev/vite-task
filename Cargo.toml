@@ -177,10 +177,6 @@ ignored = [
   "fspy_preload_unix",
   "fspy_preload_windows",
   "vite_task_client_napi",
-  # Registered in the workspace dependency table so downstream PRs in the
-  # runner-aware-tools stack can pick it up via `workspace = true` without
-  # touching this file. No in-tree consumer in this PR.
-  "vite_task_server",
 ]
 
 [profile.dev]
