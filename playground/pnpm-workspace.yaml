@@ -1,2 +1,8 @@
 packages:
   - packages/*
+
+catalog:
+  # Track the vitejs/vite main build (where the vite-task-client integration
+  # merged in vitejs/vite#22453) until it ships in a tagged vite release. Bump
+  # the pinned sha to move this forward.
+  vite: https://pkg.pr.new/vite@1298951ebc5e5a94164c21f142fe748ca37eea68

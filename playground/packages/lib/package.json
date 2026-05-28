@@ -1,11 +1,12 @@
 {
-  "name": "@playground/lib",
+  "name": "lib",
   "version": "0.0.0",
   "private": true,
+  "main": "./src/index.ts",
   "scripts": {
     "dev": "node dev.mjs"
   },
   "dependencies": {
-    "@playground/utils": "workspace:*"
+    "utils": "workspace:*"
   }
 }

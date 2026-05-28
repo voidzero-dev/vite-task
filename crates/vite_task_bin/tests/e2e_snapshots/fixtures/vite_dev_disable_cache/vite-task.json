@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "dev": {
+      "command": "node dev.mjs",
+      "cache": true
+    }
+  }
+}

@@ -1,5 +1,6 @@
 {
-  "name": "@playground/utils",
+  "name": "utils",
   "version": "0.0.0",
-  "private": true
+  "private": true,
+  "main": "./src/index.ts"
 }

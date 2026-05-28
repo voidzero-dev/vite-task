@@ -1,0 +1,5 @@
+{
+  "name": "vite-dev-disable-cache-fixture",
+  "private": true,
+  "type": "module"
+}

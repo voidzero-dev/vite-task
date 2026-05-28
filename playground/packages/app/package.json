@@ -1,11 +1,13 @@
 {
-  "name": "@playground/app",
+  "name": "app",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "node dev.mjs"
   },
   "dependencies": {
-    "@playground/lib": "workspace:*"
+    "lib": "workspace:*",
+    "vite": "catalog:"
   }
 }

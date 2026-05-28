@@ -6,6 +6,7 @@
     "cross-env": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "oxlint-tsgolint": "catalog:"
+    "oxlint-tsgolint": "catalog:",
+    "vite": "catalog:"
   }
 }

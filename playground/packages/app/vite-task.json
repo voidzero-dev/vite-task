@@ -1,7 +1,8 @@
 {
   "tasks": {
     "build": {
-      "command": "node build.mjs"
+      "command": "vite build",
+      "cache": true
     },
     "test": {
       "command": "node test.mjs"

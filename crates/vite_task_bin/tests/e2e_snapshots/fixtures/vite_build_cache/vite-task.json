@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vite build",
+      // No `"env": [...]` — vite's patched `loadEnv` asks the runner for
+      // every `VITE_*` env via `getEnvs`, so the glob + match-set are
+      // fingerprinted automatically.
+      "cache": true
+    }
+  }
+}
