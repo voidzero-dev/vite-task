@@ -1,0 +1,35 @@
+{
+  "name": "@voidzero-dev/vite-task-client",
+  "version": "0.1.0",
+  "description": "Hand the Vite+ task runner (vp run) precise cache-correctness information from inside your tool.",
+  "keywords": [
+    "cache",
+    "caching",
+    "monorepo",
+    "runner",
+    "task",
+    "vite",
+    "vite-plus",
+    "vp"
+  ],
+  "homepage": "https://github.com/voidzero-dev/vite-task/tree/main/packages/vite-task-client#readme",
+  "bugs": "https://github.com/voidzero-dev/vite-task/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voidzero-dev/vite-task.git",
+    "directory": "packages/vite-task-client"
+  },
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

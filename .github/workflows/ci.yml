@@ -275,6 +275,11 @@ jobs:
       - name: Deduplicate dependencies
         run: pnpm dedupe --check
 
+      - name: Check vite-task-client types are not stale
+        run: |
+          pnpm build-vite-task-client-types
+          git diff --exit-code packages/vite-task-client/src/index.d.ts
+
   done:
     runs-on: namespace-profile-linux-x64-default
     if: always()

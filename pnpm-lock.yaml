@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@tsconfig/strictest':
+      specifier: ^2.0.8
+      version: 2.0.8
     '@types/node':
       specifier: 25.0.3
       version: 25.0.3
@@ -24,11 +27,17 @@ catalogs:
     oxlint-tsgolint:
       specifier: ^0.18.0
       version: 0.18.1
+    typescript:
+      specifier: ^6.0.3
+      version: 6.0.3
 
 importers:
 
   .:
     devDependencies:
+      '@tsconfig/strictest':
+        specifier: 'catalog:'
+        version: 2.0.8
       '@types/node':
         specifier: 'catalog:'
         version: 25.0.3
@@ -47,6 +56,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.18.1
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
 
   packages/tools:
     dependencies:
@@ -62,6 +74,8 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.18.1
+
+  packages/vite-task-client: {}
 
 packages:
 
@@ -342,6 +356,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@tsconfig/strictest@2.0.8':
+    resolution: {integrity: sha512-XnQ7vNz5HRN0r88GYf1J9JJjqtZPiHt2woGJOo2dYqyHGGcd6OLGqSlBB6p1j9mpzja6Oe5BoPqWmeDx6X9rLw==}
+
   '@types/node@25.0.3':
     resolution: {integrity: sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA==}
 
@@ -499,6 +516,11 @@ packages:
     resolution: {integrity: sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
+  typescript@6.0.3:
+    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   undici-types@7.16.0:
     resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
 
@@ -655,6 +677,8 @@ snapshots:
 
   '@oxlint/binding-win32-x64-msvc@1.55.0':
     optional: true
+
+  '@tsconfig/strictest@2.0.8': {}
 
   '@types/node@25.0.3':
     dependencies:
@@ -840,6 +864,8 @@ snapshots:
   tinyexec@1.1.2: {}
 
   tinypool@2.1.0: {}
+
+  typescript@6.0.3: {}
 
   undici-types@7.16.0: {}
 
