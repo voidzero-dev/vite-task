@@ -158,7 +158,6 @@ fn register_preload_cdylib() -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    println!("cargo:rerun-if-changed=build.rs");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     fetch_macos_binaries(&out_dir).context("Failed to fetch macOS binaries")?;
     register_preload_cdylib().context("Failed to register preload cdylib")?;

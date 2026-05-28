@@ -48,7 +48,6 @@ pub enum ExecutionError {
     /// The runner-aware IPC server failed to bind for this task. Reported
     /// instead of silently degrading so that `{ auto: true }` inputs stay
     /// observable end-to-end.
-    #[expect(dead_code, reason = "placeholder; constructed once the real `serve()` lands")]
     #[error("Failed to start runner IPC server")]
     IpcServerBind(#[source] std::io::Error),
 }

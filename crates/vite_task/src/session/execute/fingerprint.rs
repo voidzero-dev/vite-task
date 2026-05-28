@@ -211,12 +211,12 @@ impl PostRunFingerprint {
 /// the glob. Mirrors the server-side match (see
 /// `vite_task_server::Recorder::get_envs`).
 fn match_env_glob(pattern: &str) -> anyhow::Result<BTreeMap<Str, Str>> {
-    let set = vite_glob::GlobPatternSet::new(std::iter::once(pattern))?;
+    let glob = vite_glob::env::EnvGlob::new(pattern)?;
     Ok(std::env::vars_os()
         .filter_map(|(name, value)| {
             let name_str = name.to_str()?.to_owned();
             let value_str = value.to_str()?.to_owned();
-            if set.is_match(&name_str) {
+            if glob.is_match(name_str.as_str()) {
                 Some((Str::from(name_str.as_str()), Str::from(value_str.as_str())))
             } else {
                 None

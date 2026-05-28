@@ -24,11 +24,12 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
+use vite_task_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
 use vite_task_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnExecution,
     cache_metadata::CacheMetadata, execution_graph::ExecutionNodeIndex,
 };
-use vite_task_server::{Recorder, Reports, StopAccepting};
+use vite_task_server::{Recorder, Reports, ServerHandle, StopAccepting, serve};
 use wax::Program as _;
 
 #[cfg(fspy)]
@@ -499,25 +500,35 @@ pub async fn execute_spawn(
                             return SpawnOutcome::Failed;
                         }
                     };
-                    // PLACEHOLDER: the IPC server isn't wired up yet on this
-                    // branch. We construct an empty `Recorder` whose `Reports`
-                    // never get any IPC traffic, and a `StopAccepting::noop`
-                    // since no real server was bound. A follow-up will swap
-                    // these out for `vite_task_server::serve(...)`.
+                    // fspy + IPC are bundled. If binding the IPC server fails
+                    // we abort the execution — tools that rely on IPC would
+                    // otherwise silently diverge from the cache.
+                    //
+                    // The IPC `getEnv` endpoint serves values from the runner's
+                    // own parent env (not the task's filtered `all_envs`), so a
+                    // tool can ask for vars the user never declared and have
+                    // them fingerprinted via the tool's `tracked: true` flag.
                     let env_map: FxHashMap<Arc<OsStr>, Arc<OsStr>> = std::env::vars_os()
                         .map(|(k, v)| {
                             (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str()))
                         })
                         .collect();
-                    let recorder = Recorder::new(env_map);
-                    let driver: LocalBoxFuture<'static, Result<Recorder, vite_task_server::Error>> =
-                        Box::pin(std::future::ready(Ok(recorder)));
-                    Some(Tracking {
-                        input_negative_globs: negatives,
-                        ipc_envs: Vec::new(),
-                        ipc_server_fut: driver,
-                        stop_accepting: StopAccepting::noop(),
-                    })
+                    match serve(Recorder::new(env_map)) {
+                        Ok((envs, ServerHandle { driver, stop_accepting })) => Some(Tracking {
+                            input_negative_globs: negatives,
+                            ipc_envs: envs.collect(),
+                            ipc_server_fut: driver,
+                            stop_accepting,
+                        }),
+                        Err(err) => {
+                            leaf_reporter.finish(
+                                None,
+                                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                                Some(ExecutionError::IpcServerBind(err)),
+                            );
+                            return SpawnOutcome::Failed;
+                        }
+                    }
                 } else {
                     None
                 };
@@ -539,12 +550,17 @@ pub async fn execute_spawn(
         ExecutionMode::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
     };
 
-    // Build the extra envs to inject: IPC connection info + (eventually)
-    // napi addon path. Empty when tracking is off. The napi path is added
-    // in a follow-up that wires up the real server.
+    // Build the extra envs to inject: IPC connection info + napi addon path.
+    // Empty when tracking is off.
     let extra_envs: Vec<(&OsStr, &OsStr)> = match &mode {
         ExecutionMode::Cached { state: CacheState { tracking: Some(t), .. }, .. } => {
-            t.ipc_envs.iter().map(|(k, v)| (*k as &OsStr, v.as_os_str())).collect()
+            let mut envs: Vec<(&OsStr, &OsStr)> =
+                t.ipc_envs.iter().map(|(k, v)| (*k as &OsStr, v.as_os_str())).collect();
+            envs.push((
+                OsStr::new(NODE_CLIENT_PATH_ENV_NAME),
+                crate::napi_client::napi_client_path().as_path().as_os_str(),
+            ));
+            envs
         }
         _ => Vec::new(),
     };

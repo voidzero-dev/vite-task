@@ -1,0 +1,232 @@
+[[e2e]]
+name = "ignore_input_keeps_cache_valid"
+comment = """
+Exercises `ignoreInput` through `@voidzero-dev/vite-task-client`.
+The runner treats `cache_like/` as non-input, so mutations to it between
+runs do not invalidate the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "ignore-input",
+  ], comment = "populate the cache" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "cache_like/other.txt",
+    "after",
+  ], comment = "mutate the ignored directory — would invalidate if tracked" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-input",
+  ], comment = "cache hit: cache_like/ was ignored via ignoreInput" },
+]
+
+[[e2e]]
+name = "ignore_output_allows_read_write_overlap"
+comment = """
+Exercises `ignoreOutput`. The task reads and writes `sidecar/tmp.txt`;
+without the ignore the runner's read-write overlap check would refuse to
+cache the run ("read and wrote 'sidecar/tmp.txt'").
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "ignore-output",
+  ], comment = "first run populates the cache" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/out.txt",
+  ], comment = "remove the real output so the cache-hit restore is observable" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-output",
+  ], comment = "cache hit: sidecar/ writes were ignored" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "restored from the cache archive" },
+]
+
+[[e2e]]
+name = "disable_cache_forces_reexecution"
+comment = """
+Exercises `disableCache`. The tool asks the runner not to cache this run,
+so the next invocation re-executes instead of hitting a prior entry.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "disable-cache",
+  ], comment = "first run — tool calls disableCache" },
+  { argv = [
+    "vt",
+    "run",
+    "disable-cache",
+  ], comment = "cache miss (NotFound) because nothing was cached" },
+]
+
+[[e2e]]
+name = "fetch_envs_tracks_glob_match_set"
+comment = """
+Exercises `getEnvs(pattern, { tracked: true })`. The glob `PROBE_*` and
+its match-set snapshot enter the post-run fingerprint: later runs diff the
+current match-set against what was stored and miss on add / remove / change,
+but hit when only non-matching envs differ.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "populate: first run captures {PROBE_A, PROBE_B} under the glob" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "the tool observed both matching envs" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "unchanged: same match-set → cache hit" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "changed",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "change: PROBE_A value differs → cache miss (TrackedEnvGlobChanged / changed)" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "changed",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "PROBE_C",
+      "c",
+    ],
+  ], comment = "add: PROBE_C is new under the glob → cache miss (added)" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "PROBE_C",
+      "c",
+    ],
+  ], comment = "remove: PROBE_A dropped from the match-set → cache miss (removed)" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "PROBE_C",
+      "c",
+    ],
+    [
+      "UNRELATED",
+      "noise",
+    ],
+  ], comment = "non-matching noise: UNRELATED doesn't match PROBE_* → cache hit" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "match-set unchanged from the previous successful run" },
+]
+
+[[e2e]]
+name = "fetch_env_tracked_invalidates_on_change"
+comment = """
+Exercises `getEnv(name, { tracked: true })`. The env value becomes part
+of the post-run fingerprint: the same value still hits, a different value
+misses with `tracked env 'PROBE_ENV' changed`.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "first run captures PROBE_ENV=first in the fingerprint" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "cache hit: PROBE_ENV unchanged" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "second",
+    ],
+  ], comment = "cache miss: tracked env changed" },
+]

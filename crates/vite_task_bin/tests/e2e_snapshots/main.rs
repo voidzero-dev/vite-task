@@ -283,6 +283,56 @@ fn render_formatted_screen(bytes: &[u8]) -> String {
     out
 }
 
+/// Copy the `@voidzero-dev/vite-task-client` JS wrapper into the fixture's
+/// staging `node_modules` so Node scripts can resolve it by name. Idempotent —
+/// silently skipped if the source package is not found.
+#[expect(clippy::disallowed_types, reason = "std::path::Path required for filesystem operations")]
+fn populate_vite_task_client_package(stage_path: &AbsolutePath) {
+    let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+    let src = repo_root.join("packages/vite-task-client");
+    if !src.is_dir() {
+        return;
+    }
+    let dst = stage_path.as_path().join("node_modules/@voidzero-dev/vite-task-client");
+    std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    CopyOptions::new().copy_tree(&src, &dst).unwrap();
+}
+
+/// Symlink installed Node packages from the repo's `packages/tools/node_modules`
+/// into the fixture's staging `node_modules` so fixtures can resolve them by
+/// name without a per-fixture pnpm install. Only packages whose staging-side
+/// symlink targets exist are created; missing targets are silently skipped.
+#[expect(clippy::disallowed_types, reason = "std::path::Path required for filesystem operations")]
+fn link_tools_packages(stage_path: &AbsolutePath, names: &[&str]) {
+    let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+    let stage_node_modules = stage_path.as_path().join("node_modules");
+    std::fs::create_dir_all(&stage_node_modules).unwrap();
+
+    for name in names {
+        let src = repo_root.join("packages/tools/node_modules").join(name);
+        // Follow the symlink so the absolute target (pnpm's .pnpm store) is
+        // what we pin into the staging tree. Relative symlinks into pnpm
+        // internals would break outside the repo.
+        let Ok(canonical) = std::fs::canonicalize(&src) else {
+            continue;
+        };
+        let link = stage_node_modules.join(name);
+        let _ = std::fs::remove_file(&link);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&canonical, &link).unwrap();
+        #[cfg(windows)]
+        {
+            if canonical.is_dir() {
+                std::os::windows::fs::symlink_dir(&canonical, &link).unwrap();
+            } else {
+                std::os::windows::fs::symlink_file(&canonical, &link).unwrap();
+            }
+        }
+    }
+}
+
 /// Append a fenced markdown block containing `body`. The opening and closing
 /// fences sit on their own lines, and trailing whitespace inside `body` is
 /// trimmed so the close fence isn't preceded by blank lines.
@@ -319,6 +369,19 @@ fn run_case(
     let e2e_stage_path = tmpdir.join(vite_str::format!("{fixture_name}_case_{case_index}"));
     CopyOptions::new().copy_tree(fixture_path, e2e_stage_path.as_path()).unwrap();
 
+    // Make `@voidzero-dev/vite-task-client` importable from any fixture's Node
+    // scripts by copying the wrapper package into the staging dir's
+    // `node_modules`. This mirrors the user-facing flow (`import { ... } from
+    // "@voidzero-dev/vite-task-client"`) without requiring pnpm install.
+    populate_vite_task_client_package(&e2e_stage_path);
+
+    // Fixtures that exercise real Node toolchains (e.g. `vite build`) link
+    // those packages from the repo's `packages/tools/node_modules` so the
+    // tool and its transitive deps (resolved via pnpm) stay reachable.
+    if matches!(fixture_name, "vite_build_cache" | "vite_dev_disable_cache") {
+        link_tools_packages(&e2e_stage_path, &["vite"]);
+    }
+
     let (workspace_root, _cwd) = find_workspace_root(&e2e_stage_path).unwrap();
     assert_eq!(
         &e2e_stage_path, &*workspace_root.path,
@@ -331,8 +394,19 @@ fn run_case(
         let bin = AbsolutePathBuf::new(std::path::PathBuf::from(bin_path)).unwrap();
         Arc::<OsStr>::from(bin.parent().unwrap().as_path().as_os_str())
     });
+
+    // Also expose tool bins installed under packages/tools/node_modules/.bin
+    // (e.g. `vite`) so ignored e2e fixtures can exercise real toolchains.
+    #[expect(clippy::disallowed_types, reason = "PathBuf needed for workspace path arithmetic")]
+    let tools_bin_dir: Option<Arc<OsStr>> = {
+        let manifest_dir = std::path::PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let tools_bin = repo_root.join("packages/tools/node_modules/.bin");
+        tools_bin.is_dir().then(|| Arc::<OsStr>::from(tools_bin.into_os_string()))
+    };
+
     let e2e_env_path = join_paths(
-        bin_dirs.iter().cloned().chain(
+        bin_dirs.iter().cloned().chain(tools_bin_dir.iter().cloned()).chain(
             // the existing PATH
             split_paths(&env::var_os("PATH").unwrap())
                 .map(|path| Arc::<OsStr>::from(path.into_os_string())),

@@ -1,0 +1,24 @@
+{
+  "tasks": {
+    "ignore-input": {
+      "command": "node scripts/ignore_input.mjs",
+      "cache": true
+    },
+    "ignore-output": {
+      "command": "node scripts/ignore_output.mjs",
+      "cache": true
+    },
+    "disable-cache": {
+      "command": "node scripts/disable_cache.mjs",
+      "cache": true
+    },
+    "fetch-env": {
+      "command": "node scripts/fetch_env.mjs",
+      "cache": true
+    },
+    "fetch-envs": {
+      "command": "node scripts/fetch_envs.mjs",
+      "cache": true
+    }
+  }
+}
