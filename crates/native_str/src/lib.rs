@@ -37,7 +37,7 @@ use wincode::{
 /// **Not portable across platforms.** The binary representation is platform-specific.
 /// Deserializing a `NativeStr` serialized on a different platform leads to unspecified
 /// behavior (garbage data), but is not unsafe. Designed for same-platform IPC only.
-#[derive(TransparentWrapper, PartialEq, Eq)]
+#[derive(TransparentWrapper, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct NativeStr {
     // On unix, this is the raw bytes of the OsStr.

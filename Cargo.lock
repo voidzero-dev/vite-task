@@ -4229,6 +4229,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vite_task_client"
+version = "0.0.0"
+dependencies = [
+ "native_str",
+ "rustc-hash",
+ "vite_path",
+ "vite_task_ipc_shared",
+ "winapi",
+ "wincode",
+]
+
+[[package]]
 name = "vite_task_graph"
 version = "0.1.0"
 dependencies = [
@@ -4248,6 +4260,15 @@ dependencies = [
  "vite_str",
  "vite_workspace",
  "wax",
+ "wincode",
+]
+
+[[package]]
+name = "vite_task_ipc_shared"
+version = "0.0.0"
+dependencies = [
+ "native_str",
+ "rustc-hash",
  "wincode",
 ]
 
@@ -4286,6 +4307,26 @@ dependencies = [
  "vite_task_graph",
  "vite_workspace",
  "which",
+ "wincode",
+]
+
+[[package]]
+name = "vite_task_server"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "native_str",
+ "rustc-hash",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "vite_glob",
+ "vite_path",
+ "vite_task_client",
+ "vite_task_ipc_shared",
  "wincode",
 ]
 
