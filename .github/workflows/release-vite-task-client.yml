@@ -1,0 +1,41 @@
+name: Release vite-task-client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/vite-task-client/package.json
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    name: detect version bump
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+      - id: check
+        uses: EndBug/version-check@095362f3cd50f690c8fa0e6afeea81834bd8d320 # v3.0.0
+        with:
+          file-name: packages/vite-task-client/package.json
+          file-url: https://unpkg.com/@voidzero-dev/vite-task-client@latest/package.json
+          static-checking: localIsNew
+
+  publish:
+    name: publish to npm
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+      - uses: oxc-project/setup-node@ab97f03642370d79a7e96dd286bd02a1be40e0ba # v1.3.0
+      - run: pnpm build-vite-task-client-types
+      - run: pnpm publish --provenance --access public
+        working-directory: packages/vite-task-client
