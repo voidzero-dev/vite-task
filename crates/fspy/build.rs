@@ -70,10 +70,10 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "aarch64",
         &[
-            // https://github.com/branchseer/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
+            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
             BinaryDownload {
                 name: "oils_for_unix",
-                url: "https://github.com/branchseer/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-arm64.tar.gz",
+                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-arm64.tar.gz",
                 path_in_targz: "oils-for-unix",
                 expected_sha256: "ce4bb80b15f0a0371af08b19b65bfa5ea17d30429ebb911f487de3d2bcc7a07d",
             },
@@ -89,10 +89,10 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "x86_64",
         &[
-            // https://github.com/branchseer/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
+            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
             BinaryDownload {
                 name: "oils_for_unix",
-                url: "https://github.com/branchseer/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-x86_64.tar.gz",
+                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-x86_64.tar.gz",
                 path_in_targz: "oils-for-unix",
                 expected_sha256: "cf1a95993127770e2a5fff277cd256a2bb28cf97d7f83ae42fdccc172cdb540d",
             },
