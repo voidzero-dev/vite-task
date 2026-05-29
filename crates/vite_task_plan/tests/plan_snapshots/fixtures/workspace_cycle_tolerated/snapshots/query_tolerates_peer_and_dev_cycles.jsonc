@@ -1,0 +1,7 @@
+// run -r build
+{
+  "packages/app#build": [],
+  "packages/builder#build": [],
+  "packages/lib#build": [],
+  "packages/web#build": []
+}

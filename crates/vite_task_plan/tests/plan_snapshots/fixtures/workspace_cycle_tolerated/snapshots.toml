@@ -1,0 +1,13 @@
+# Regression (vite-plus#1610 / vite-task#411): workspace package-ordering cycles
+# from peer/dev back-edges between siblings must be tolerated (run together),
+# not rejected as a cycle. Mirrors pnpm, which collapses cyclic workspace
+# packages into a single chunk. Explicit `dependsOn` cycles still error — see the
+# `cycle_dependency` fixture.
+#
+# app <-> builder via a peerDependencies back-edge; web <-> lib via a
+# devDependencies back-edge. Both pairs plan cleanly with no ordering between the
+# cyclic siblings instead of failing with "Cycle dependency detected".
+[[plan]]
+compact = true
+name = "tolerates_peer_and_dev_cycles"
+args = ["run", "-r", "build"]
