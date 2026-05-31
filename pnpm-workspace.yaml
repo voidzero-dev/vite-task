@@ -9,9 +9,9 @@ catalog:
   husky: ^9.1.7
   lint-staged: ^17.0.0
   typescript: ^6.0.3
-  vite: npm:@voidzero-dev/vite-plus-core@latest
-  vitest: npm:@voidzero-dev/vite-plus-test@latest
-  vite-plus: latest
+  vite: npm:@voidzero-dev/vite-plus-core@^0.1.23
+  vitest: npm:@voidzero-dev/vite-plus-test@^0.1.23
+  vite-plus: ^0.1.23
 
 catalogMode: prefer
 overrides:
