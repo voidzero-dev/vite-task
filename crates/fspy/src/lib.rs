@@ -15,10 +15,12 @@ mod os_impl;
 
 #[cfg(unix)]
 mod arena;
+mod callback;
 mod command;
 
 use std::{env::temp_dir, fs::create_dir, io, process::ExitStatus, sync::LazyLock};
 
+pub use callback::{BorrowedFile, FileEvent, FileEventKind, FileEventPath};
 pub use command::Command;
 pub use fspy_shared::ipc::{AccessMode, PathAccess};
 use futures_util::future::BoxFuture;

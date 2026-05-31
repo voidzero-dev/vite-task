@@ -61,6 +61,20 @@ impl NativePath {
         Self::wrap_ref(NativeStr::from_wide(wide))
     }
 
+    /// The raw path as an [`OsStr`] (Unix only — on Windows the data is wide
+    /// and cannot be borrowed as an `OsStr`; use [`to_cow_os_str`](Self::to_cow_os_str)).
+    #[cfg(unix)]
+    #[must_use]
+    pub fn as_os_str(&self) -> &OsStr {
+        self.inner.as_os_str()
+    }
+
+    /// The raw path as an [`OsStr`], borrowed on Unix and owned on Windows.
+    #[must_use]
+    pub fn to_cow_os_str(&self) -> std::borrow::Cow<'_, OsStr> {
+        self.inner.to_cow_os_str()
+    }
+
     pub fn clone_in<'bump>(&self, bump: &'bump Bump) -> &'bump Self {
         Self::wrap_ref(self.inner.clone_in(bump))
     }

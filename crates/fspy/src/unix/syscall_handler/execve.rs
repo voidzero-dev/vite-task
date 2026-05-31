@@ -7,7 +7,9 @@ use super::SyscallHandler;
 impl SyscallHandler {
     fn handle_execve(&mut self, caller: Caller, fd: Fd, path_ptr: CStrPtr) -> io::Result<()> {
         // TODO: parse shebangs to track reading interpreters
-        self.handle_open(caller, fd, path_ptr, libc::O_RDONLY)
+        // `execve` does not return a descriptor, so the blocking callback (and
+        // its `ADDFD` response) must not run for it — only record the access.
+        self.handle_open(caller, fd, path_ptr, libc::O_RDONLY, false)
     }
 
     pub(super) fn execveat(

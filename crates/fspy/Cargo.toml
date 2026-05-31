@@ -18,7 +18,7 @@ ouroboros = { workspace = true }
 rustc-hash = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["net", "process", "io-util", "sync", "rt"] }
+tokio = { workspace = true, features = ["net", "process", "io-util", "sync", "rt", "macros"] }
 tokio-util = { workspace = true }
 which = { workspace = true, features = ["tracing"] }
 
@@ -30,10 +30,17 @@ tokio = { workspace = true, features = ["bytes"] }
 [target.'cfg(unix)'.dependencies]
 fspy_shared_unix = { workspace = true }
 nix = { workspace = true, features = ["fs", "process", "socket", "feature"] }
+passfd = { workspace = true, features = ["async"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 fspy_detours_sys = { workspace = true }
-winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi"] }
+winapi = { workspace = true, features = [
+  "winbase",
+  "securitybaseapi",
+  "handleapi",
+  "processthreadsapi",
+  "winnt",
+] }
 winsafe = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

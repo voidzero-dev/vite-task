@@ -7,12 +7,12 @@ use super::SyscallHandler;
 impl SyscallHandler {
     #[cfg(target_arch = "x86_64")]
     pub(super) fn stat(&mut self, caller: Caller, (path,): (CStrPtr,)) -> io::Result<()> {
-        self.handle_open(caller, Fd::cwd(), path, libc::O_RDONLY)
+        self.handle_open(caller, Fd::cwd(), path, libc::O_RDONLY, false)
     }
 
     #[cfg(target_arch = "x86_64")]
     pub(super) fn lstat(&mut self, caller: Caller, (path,): (CStrPtr,)) -> io::Result<()> {
-        self.handle_open(caller, Fd::cwd(), path, libc::O_RDONLY)
+        self.handle_open(caller, Fd::cwd(), path, libc::O_RDONLY, false)
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -21,7 +21,7 @@ impl SyscallHandler {
         caller: Caller,
         (dir_fd, path_ptr): (Fd, CStrPtr),
     ) -> io::Result<()> {
-        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY)
+        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY, false)
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -30,7 +30,7 @@ impl SyscallHandler {
         caller: Caller,
         (dir_fd, path_ptr): (Fd, CStrPtr),
     ) -> io::Result<()> {
-        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY)
+        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY, false)
     }
 
     /// statx(2) — modern replacement for stat/fstatat used by newer glibc.
@@ -39,13 +39,13 @@ impl SyscallHandler {
         caller: Caller,
         (dir_fd, path_ptr): (Fd, CStrPtr),
     ) -> io::Result<()> {
-        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY)
+        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY, false)
     }
 
     /// access(2) — check file accessibility (e.g. existsSync in Node.js).
     #[cfg(target_arch = "x86_64")]
     pub(super) fn access(&mut self, caller: Caller, (path,): (CStrPtr,)) -> io::Result<()> {
-        self.handle_open(caller, Fd::cwd(), path, libc::O_RDONLY)
+        self.handle_open(caller, Fd::cwd(), path, libc::O_RDONLY, false)
     }
 
     /// faccessat(2) — check file accessibility relative to directory fd.
@@ -54,7 +54,7 @@ impl SyscallHandler {
         caller: Caller,
         (dir_fd, path_ptr): (Fd, CStrPtr),
     ) -> io::Result<()> {
-        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY)
+        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY, false)
     }
 
     /// faccessat2(2) — extended faccessat with flags parameter.
@@ -63,6 +63,6 @@ impl SyscallHandler {
         caller: Caller,
         (dir_fd, path_ptr): (Fd, CStrPtr),
     ) -> io::Result<()> {
-        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY)
+        self.handle_open(caller, dir_fd, path_ptr, libc::O_RDONLY, false)
     }
 }

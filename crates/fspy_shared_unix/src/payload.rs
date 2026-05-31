@@ -3,10 +3,22 @@ use std::os::unix::ffi::OsStringExt;
 use base64::{Engine as _, prelude::BASE64_STANDARD_NO_PAD};
 use bstr::BString;
 #[cfg(not(target_env = "musl"))]
-use fspy_shared::ipc::NativeStr;
-#[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::channel::ChannelConf;
+#[cfg(not(target_env = "musl"))]
+use fspy_shared::ipc::{AccessMode, NativeStr};
 use wincode::{SchemaRead, SchemaWrite};
+
+/// Endpoint and access-mode mask for the optional blocking open/close
+/// callback. Present in the [`Payload`] only when a callback is registered.
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, SchemaWrite, SchemaRead, Clone)]
+pub struct CallbackConf {
+    /// Path of the Unix-domain socket the traced process connects to.
+    pub socket_path: Box<NativeStr>,
+    /// An open/close event fires the callback only if its access mode
+    /// intersects this mask.
+    pub mask: AccessMode,
+}
 
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub struct Payload {
@@ -15,6 +27,10 @@ pub struct Payload {
 
     #[cfg(not(target_env = "musl"))]
     pub preload_path: Box<NativeStr>,
+
+    /// Present only when a blocking open/close callback is registered.
+    #[cfg(not(target_env = "musl"))]
+    pub callback: Option<CallbackConf>,
 
     #[cfg(target_os = "macos")]
     pub artifacts: Artifacts,

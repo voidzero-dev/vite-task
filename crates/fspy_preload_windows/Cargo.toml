@@ -11,9 +11,11 @@ crate-type = ["cdylib"]
 [target.'cfg(target_os = "windows")'.dependencies]
 wincode = { workspace = true }
 constcat = { workspace = true }
+dashmap = { workspace = true }
 fspy_detours_sys = { workspace = true }
 fspy_shared = { workspace = true }
 ntapi = { workspace = true }
+rustc-hash = { workspace = true }
 smallvec = { workspace = true }
 widestring = { workspace = true }
 winapi = { workspace = true, features = [
@@ -21,6 +23,9 @@ winapi = { workspace = true, features = [
   "winbase",
   "namedpipeapi",
   "memoryapi",
+  "fileapi",
+  "handleapi",
+  "errhandlingapi",
   "std",
 ] }
 winsafe = { workspace = true }

@@ -1,6 +1,6 @@
 pub mod arg;
 
-use std::io;
+use std::{io, os::fd::OwnedFd};
 
 use libc::seccomp_notif;
 
@@ -12,6 +12,38 @@ pub trait SeccompNotifyHandler {
     /// # Errors
     /// Returns an error if the handler fails to process the notification.
     fn handle_notify(&mut self, notify: &seccomp_notif) -> io::Result<()>;
+}
+
+/// How the supervisor replies to the kernel for the most recently handled
+/// notification.
+#[derive(Debug, Default)]
+pub enum NotifyResponse {
+    /// Let the kernel run the intercepted syscall in the target unchanged.
+    #[default]
+    Continue,
+    /// Install the given file descriptor into the target and complete the
+    /// syscall with it as its result. Used by the blocking-callback path so
+    /// the supervisor can open a file itself and hand it to the target.
+    ReturnFd {
+        /// The supervisor-owned descriptor to install into the target.
+        fd: OwnedFd,
+        /// Whether the installed descriptor should be close-on-exec.
+        cloexec: bool,
+    },
+}
+
+/// Lets a handler override the supervisor's reply for the last notification.
+///
+/// Kept separate from [`SeccompNotifyHandler`] so the [`impl_handler!`](crate::impl_handler)
+/// macro does not need to know about it: handlers that always continue rely on
+/// the default implementation.
+pub trait HandlerResponse {
+    /// Take the response for the notification just processed by
+    /// [`SeccompNotifyHandler::handle_notify`]. Defaults to
+    /// [`NotifyResponse::Continue`].
+    fn take_response(&mut self) -> NotifyResponse {
+        NotifyResponse::Continue
+    }
 }
 
 #[doc(hidden)] // Re-export for use in the macro

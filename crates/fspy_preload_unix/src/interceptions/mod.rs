@@ -1,4 +1,5 @@
 mod access;
+mod close;
 mod dirent;
 mod open;
 mod spawn;

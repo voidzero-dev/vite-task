@@ -5,7 +5,7 @@ use std::{
     convert::Infallible,
     io::{self},
     os::{
-        fd::{FromRawFd, OwnedFd},
+        fd::{AsFd as _, FromRawFd, OwnedFd},
         unix::ffi::OsStrExt,
     },
 };
@@ -15,6 +15,7 @@ use futures_util::{
     pin_mut,
 };
 pub use handler::SeccompNotifyHandler;
+use handler::{HandlerResponse, NotifyResponse, Sysno};
 use listener::NotifyListener;
 use passfd::tokio::FdPassingExt;
 use seccompiler::{BpfProgram, SeccompAction, SeccompFilter};
@@ -55,21 +56,44 @@ impl<H> Supervisor<H> {
     }
 }
 
-/// Creates a new supervisor that listens for seccomp user notifications.
+/// Creates a new supervisor that listens for seccomp user notifications,
+/// filtering exactly the syscalls reported by `H::syscalls()`.
 ///
 /// # Panics
 /// Panics if the seccomp filter cannot be compiled or the target architecture is unsupported.
 ///
 /// # Errors
 /// Returns an error if the temporary IPC socket cannot be created.
-pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Result<Supervisor<H>>
+pub fn supervise<H>() -> io::Result<Supervisor<H>>
+where
+    H: SeccompNotifyHandler + HandlerResponse + Default + Send + 'static,
+{
+    supervise_with(H::default, H::syscalls())
+}
+
+/// Like [`supervise`], but builds each handler with `init` and filters exactly
+/// the given `syscalls` (which may be a subset or superset of `H::syscalls()`).
+///
+/// This lets a caller inject per-spawn state into the handler and decide at
+/// runtime which syscalls to intercept (for example, only adding `close` to
+/// the filter when a blocking callback is registered).
+///
+/// # Panics
+/// Panics if the seccomp filter cannot be compiled or the target architecture is unsupported.
+///
+/// # Errors
+/// Returns an error if the temporary IPC socket cannot be created.
+pub fn supervise_with<H, F>(init: F, syscalls: &[Sysno]) -> io::Result<Supervisor<H>>
+where
+    H: SeccompNotifyHandler + HandlerResponse + Send + 'static,
+    F: Fn() -> H + Send + 'static,
 {
     let notify_listener = tempfile::Builder::new()
         .prefix("fspy_seccomp_notify")
         .make(|path| UnixListener::bind(path))?;
 
     let seccomp_filter = SeccompFilter::new(
-        H::syscalls().iter().map(|sysno| (sysno.id().into(), vec![])).collect(),
+        syscalls.iter().map(|sysno| (sysno.id().into(), vec![])).collect(),
         SeccompAction::Allow,
         SeccompAction::UserNotif,
         std::env::consts::ARCH.try_into().unwrap(),
@@ -104,7 +128,7 @@ pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Re
             let notify_fd = unsafe { OwnedFd::from_raw_fd(notify_fd) };
             let mut listener = NotifyListener::try_from(notify_fd)?;
 
-            let mut handler = H::default();
+            let mut handler = init();
             let mut resp_buf = alloc_seccomp_notif_resp();
 
             join_set.spawn(async move {
@@ -114,7 +138,14 @@ pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Re
                     // It shouldn't break the syscall handling loop as there might be target processes.
                     let _handle_result = handler.handle_notify(notify);
                     let req_id = notify.id;
-                    listener.send_continue(req_id, &mut resp_buf)?;
+                    match handler.take_response() {
+                        NotifyResponse::Continue => {
+                            listener.send_continue(req_id, &mut resp_buf)?;
+                        }
+                        NotifyResponse::ReturnFd { fd, cloexec } => {
+                            listener.send_addfd_response(req_id, fd.as_fd(), cloexec)?;
+                        }
+                    }
                 }
                 io::Result::Ok(handler)
             });

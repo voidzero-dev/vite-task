@@ -8,7 +8,7 @@ use std::{
 
 use fspy_detours_sys::{DetourCopyPayloadToProcess, DetourUpdateProcessWithDll};
 use fspy_shared::{
-    ipc::{PathAccess, channel::channel},
+    ipc::{AccessMode, PathAccess, channel::channel},
     windows::{PAYLOAD_ID, Payload},
 };
 use futures_util::FutureExt;
@@ -22,6 +22,7 @@ use winsafe::co::{CP, WC};
 
 use crate::{
     ChildTermination, TrackedChild,
+    callback::windows::WindowsCallbackServer,
     command::Command,
     error::SpawnError,
     ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
@@ -38,11 +39,6 @@ impl PathAccessIterable {
         self.ipc_receiver_lock_guard.iter_path_accesses()
     }
 }
-
-// pub struct TracedProcess {
-//     pub child: Child,
-//     pub path_access_stream: PathAccessIter,
-// }
 
 #[derive(Debug, Clone)]
 pub struct SpyImpl {
@@ -73,6 +69,7 @@ impl SpyImpl {
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
         let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
+        let file_callback = command.file_callback.take();
         command.env("FSPY", "1");
         let mut command = command.into_tokio_command();
 
@@ -81,8 +78,18 @@ impl SpyImpl {
         let (channel_conf, receiver) =
             channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
 
+        // Supervisor side of the optional blocking open/close callback.
+        let callback_server = file_callback
+            .as_ref()
+            .map(|callback| WindowsCallbackServer::new(Arc::clone(&callback.callback)))
+            .transpose()
+            .map_err(SpawnError::CallbackChannelCreation)?;
+        let callback_mask =
+            file_callback.as_ref().map_or_else(AccessMode::empty, |callback| callback.mask);
+
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;
+        let callback_server_ref = callback_server.as_ref();
         let mut child = command
             .spawn_with(|std_command| {
                 let std_child = std_command.spawn()?;
@@ -101,6 +108,9 @@ impl SpyImpl {
                 let payload = Payload {
                     channel_conf: channel_conf.clone(),
                     ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
+                    callback_pipe_name: callback_server_ref
+                        .map_or(&[][..], WindowsCallbackServer::pipe_name_bytes),
+                    callback_mask,
                 };
                 let payload_bytes = wincode::serialize(&payload).unwrap();
                 // SAFETY: process_handle is valid, PAYLOAD_ID is a static GUID,
@@ -115,6 +125,18 @@ impl SpyImpl {
                 };
                 if success != TRUE {
                     return Err(io::Error::last_os_error());
+                }
+
+                // Hand the child's process handle to the callback server
+                // before resuming it, so handle duplication works as soon as
+                // the child starts issuing callbacks.
+                if let Some(server) = callback_server_ref {
+                    use std::os::windows::io::BorrowedHandle;
+                    // SAFETY: the child was just spawned; its raw handle is valid here.
+                    let borrowed = unsafe { BorrowedHandle::borrow_raw(std_child.as_raw_handle()) };
+                    if let Ok(owned) = borrowed.try_clone_to_owned() {
+                        server.set_process_handle(owned);
+                    }
                 }
 
                 let main_thread_handle = std_child.main_thread_handle();
@@ -159,6 +181,10 @@ impl SpyImpl {
                         child.wait().await?
                     }
                 };
+                // Drain in-flight blocking callbacks before locking the channel.
+                if let Some(callback_server) = callback_server {
+                    callback_server.shutdown().await;
+                }
                 // Lock the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
                 let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;

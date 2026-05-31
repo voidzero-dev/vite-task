@@ -34,6 +34,12 @@ impl<'a> Caller<'a> {
     pub const fn read_vm(self, starting_addr: usize) -> ProcessVmReader<'a> {
         ProcessVmReader { caller: self, current_addr: starting_addr }
     }
+
+    /// The process id of the syscall caller.
+    #[must_use]
+    pub const fn pid(self) -> pid_t {
+        self.pid
+    }
 }
 
 pub struct ProcessVmReader<'a> {
@@ -151,6 +157,12 @@ impl Fd {
     #[must_use]
     pub const fn cwd() -> Self {
         Self { fd: libc::AT_FDCWD }
+    }
+
+    /// The raw file descriptor number in the caller's process.
+    #[must_use]
+    pub const fn raw(&self) -> RawFd {
+        self.fd
     }
 }
 

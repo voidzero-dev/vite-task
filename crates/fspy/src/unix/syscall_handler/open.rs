@@ -11,7 +11,7 @@ impl SyscallHandler {
         caller: Caller,
         (path, flags): (CStrPtr, c_int),
     ) -> io::Result<()> {
-        self.handle_open(caller, Fd::cwd(), path, flags)
+        self.handle_open(caller, Fd::cwd(), path, flags, true)
     }
 
     pub(super) fn openat(
@@ -19,7 +19,7 @@ impl SyscallHandler {
         caller: Caller,
         (dir_fd, path, flags): (Fd, CStrPtr, c_int),
     ) -> io::Result<()> {
-        self.handle_open(caller, dir_fd, path, flags)
+        self.handle_open(caller, dir_fd, path, flags, true)
     }
 
     pub(super) fn openat2(
@@ -30,6 +30,6 @@ impl SyscallHandler {
     ) -> io::Result<()> {
         // SAFETY: open_how is a valid pointer to struct `open_how` in the target process, which has `flags` as the first field of type `u64`
         let flags = unsafe { open_how.read(caller) }?;
-        self.handle_open(caller, dir_fd, path, c_int::try_from(flags).unwrap_or(libc::O_RDWR))
+        self.handle_open(caller, dir_fd, path, c_int::try_from(flags).unwrap_or(libc::O_RDWR), true)
     }
 }

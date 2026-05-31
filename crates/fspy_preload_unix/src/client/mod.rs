@@ -1,3 +1,4 @@
+pub mod callback;
 pub mod convert;
 pub mod raw_exec;
 
@@ -6,8 +7,12 @@ use std::{
     sync::OnceLock,
 };
 
-use convert::{ToAbsolutePath, ToAccessMode};
-use fspy_shared::ipc::{PathAccess, channel::Sender};
+use callback::CallbackChannel;
+use convert::{Fd, OpenFlags, ToAbsolutePath, ToAccessMode};
+use fspy_shared::{
+    callback::CallbackKind,
+    ipc::{PathAccess, channel::Sender},
+};
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::EncodedPayload,
@@ -16,9 +21,13 @@ use fspy_shared_unix::{
 use raw_exec::RawExec;
 use wincode::Serialize as _;
 
+use crate::libc::c_int;
+
 pub struct Client {
     encoded_payload: EncodedPayload,
     ipc_sender: Option<Sender>,
+    /// Present only when a blocking open/close callback is registered.
+    callback: Option<CallbackChannel>,
 }
 
 // SAFETY: Client fields are only mutated during initialization in the ctor; after that, all access is read-only
@@ -56,7 +65,11 @@ impl Client {
             }
         };
 
-        Self { encoded_payload, ipc_sender }
+        let callback = encoded_payload.payload.callback.as_ref().map(|conf| {
+            CallbackChannel::new(std::path::PathBuf::from(conf.socket_path.as_os_str()), conf.mask)
+        });
+
+        Self { encoded_payload, ipc_sender, callback }
     }
 
     fn send(&self, mode: fspy_shared::ipc::AccessMode, path: &Path) -> anyhow::Result<()> {
@@ -121,6 +134,71 @@ impl Client {
 
         Ok(())
     }
+
+    /// Run the blocking post-open callback round-trip for a freshly opened fd.
+    ///
+    /// SAFETY: `path` and `mode` must contain valid pointers/values as
+    /// provided by the caller of the interposed function.
+    unsafe fn run_open_callback(
+        &self,
+        fd: c_int,
+        path: impl ToAbsolutePath,
+        mode: impl ToAccessMode,
+    ) {
+        let Some(channel) = &self.callback else {
+            return;
+        };
+        // SAFETY: `mode` is a valid value/pointer as provided by the caller.
+        let access_mode = unsafe { mode.to_access_mode() };
+        if !access_mode.intersects(channel.mask()) {
+            return;
+        }
+        // SAFETY: `path` is valid as provided by the caller.
+        let _ = unsafe {
+            path.to_absolute_path(|abs_path| {
+                channel.round_trip(CallbackKind::OPENED, fd, access_mode, abs_path);
+                Ok(())
+            })
+        };
+    }
+
+    /// Run the blocking pre-close callback round-trip for a still-valid fd.
+    fn run_close_callback(&self, fd: c_int) {
+        let Some(channel) = &self.callback else {
+            return;
+        };
+        let Some(access_mode) = fd_access_mode(fd) else {
+            // The fd is not a regular open file descriptor (e.g. EBADF).
+            return;
+        };
+        if !access_mode.intersects(channel.mask()) {
+            return;
+        }
+        // SAFETY: `Fd` only reads the fd's path via `/proc/self/fd` or `F_GETPATH`.
+        let _ = unsafe {
+            Fd(fd).to_absolute_path(|abs_path| {
+                // Only fire for resolvable absolute filesystem paths; sockets,
+                // pipes and anonymous inodes resolve to non-absolute names.
+                if let Some(abs_path) = abs_path
+                    && abs_path.first() == Some(&b'/')
+                {
+                    channel.round_trip(CallbackKind::CLOSING, fd, access_mode, Some(abs_path));
+                }
+                Ok(())
+            })
+        };
+    }
+}
+
+/// Derive an [`fspy_shared::ipc::AccessMode`] from an open fd's status flags.
+fn fd_access_mode(fd: c_int) -> Option<fspy_shared::ipc::AccessMode> {
+    // SAFETY: `F_GETFL` only reads the status flags of the descriptor.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return None;
+    }
+    // SAFETY: `OpenFlags::to_access_mode` performs a pure flag match.
+    Some(unsafe { OpenFlags(flags).to_access_mode() })
 }
 
 static CLIENT: OnceLock<Client> = OnceLock::new();
@@ -134,6 +212,46 @@ pub unsafe fn handle_open(path: impl ToAbsolutePath, mode: impl ToAccessMode) {
         // SAFETY: path and mode contain valid pointers/values forwarded from the interposed function's caller
         unsafe { client.try_handle_open(path, mode) }.unwrap();
     }
+}
+
+/// Run the post-open blocking callback, if one is registered. Called after the
+/// real `open`/`openat`/`fopen` returns, so `fd` is the resulting descriptor
+/// (negative / -1 when the open failed).
+pub unsafe fn handle_open_callback(fd: c_int, path: impl ToAbsolutePath, mode: impl ToAccessMode) {
+    if fd < 0 {
+        return;
+    }
+    // Check `global_client()` before the thread-local reentrancy guard: until
+    // the ctor has run, no callback can be active anyway, and skipping the
+    // thread-local access keeps this path infallible during very early
+    // (libdyld / pre-ctor) opens.
+    let Some(client) = global_client() else {
+        return;
+    };
+    if client.callback.is_none() || callback::is_reentrant() {
+        return;
+    }
+    // SAFETY: path and mode are forwarded valid pointers/values from the caller.
+    unsafe { client.run_open_callback(fd, path, mode) };
+}
+
+/// Run the pre-close blocking callback, if one is registered. Called before
+/// the real `close`/`fclose`, so `fd` is still valid.
+pub fn handle_close(fd: c_int) {
+    if fd < 0 {
+        return;
+    }
+    // Check `global_client()` before the thread-local reentrancy guard: until
+    // the ctor has run, no callback can be active anyway, and skipping the
+    // thread-local access keeps this path infallible during very early
+    // (libdyld / pre-ctor) closes.
+    let Some(client) = global_client() else {
+        return;
+    };
+    if client.callback.is_none() || callback::is_reentrant() {
+        return;
+    }
+    client.run_close_callback(fd);
 }
 
 #[cfg(not(test))]

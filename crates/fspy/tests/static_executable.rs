@@ -120,3 +120,104 @@ async fn execve() {
     let accesses = track_test_bin(&["execve", "/hello"], None).await;
     assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::READ);
 }
+
+/// Reads up to 64 bytes from `file` at offset 0 without moving its (shared)
+/// file offset.
+fn read_at_start(file: &std::fs::File) -> Vec<u8> {
+    use std::os::unix::fs::FileExt as _;
+    let mut buf = vec![0u8; 64];
+    let read = file.read_at(&mut buf, 0).unwrap_or(0);
+    buf.truncate(read);
+    buf
+}
+
+/// The blocking callback fires for a statically-linked (seccomp-traced)
+/// target: the supervisor opens the file, the callback reads it, and the
+/// descriptor is installed into the target via `ADDFD` so its own read works.
+#[test(tokio::test)]
+async fn callback_open_read() {
+    use std::sync::{Arc, Mutex};
+
+    use fspy::{AccessMode, FileEvent, FileEventKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    let file_path = dir.path().join("seccomp_callback_file");
+    let content = b"fspy-seccomp-callback-content";
+    fs::write(&file_path, content).unwrap();
+    let dir_path = dir.path().to_path_buf();
+
+    let opened_bytes: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let kinds: Arc<Mutex<Vec<FileEventKind>>> = Arc::new(Mutex::new(Vec::new()));
+    let callback = {
+        let (dir_path, opened_bytes, kinds) =
+            (dir_path.clone(), Arc::clone(&opened_bytes), Arc::clone(&kinds));
+        move |event: FileEvent<'_>| {
+            let Some(path) = event.path.get() else {
+                return;
+            };
+            if !path.starts_with(&dir_path) {
+                return;
+            }
+            kinds.lock().unwrap().push(event.kind);
+            if event.kind == FileEventKind::Opened {
+                *opened_bytes.lock().unwrap() = Some(read_at_start(&event.fd.as_file()));
+            }
+        }
+    };
+
+    let mut cmd = fspy::Command::new(test_bin_path());
+    cmd.args(["read_verify", file_path.to_str().unwrap()]);
+    cmd.on_file_event(AccessMode::READ, callback);
+    let child = cmd.spawn(tokio_util::sync::CancellationToken::new()).await.unwrap();
+    let termination = child.wait_handle.await.unwrap();
+
+    // A successful exit proves the `ADDFD`-installed descriptor worked.
+    assert!(termination.status.success(), "target failed: ADDFD descriptor did not work");
+    assert_eq!(
+        opened_bytes.lock().unwrap().as_deref(),
+        Some(content.as_slice()),
+        "callback should read the file content through the passed descriptor"
+    );
+    let kinds = kinds.lock().unwrap().clone();
+    assert!(kinds.contains(&FileEventKind::Opened), "expected an Opened event, got {kinds:?}");
+    assert!(kinds.contains(&FileEventKind::Closing), "expected a Closing event, got {kinds:?}");
+}
+
+/// The blocking callback handles concurrent opens from several target threads
+/// without deadlocking.
+#[test(tokio::test)]
+async fn callback_multi_threaded() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use fspy::{AccessMode, FileEvent, FileEventKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    let file_path = dir.path().join("seccomp_threads_file");
+    fs::write(&file_path, b"threaded-callback-content").unwrap();
+    let dir_path = dir.path().to_path_buf();
+
+    let opened = Arc::new(AtomicUsize::new(0));
+    let callback = {
+        let (dir_path, opened) = (dir_path.clone(), Arc::clone(&opened));
+        move |event: FileEvent<'_>| {
+            let Some(path) = event.path.get() else {
+                return;
+            };
+            if path.starts_with(&dir_path) && event.kind == FileEventKind::Opened {
+                opened.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    };
+
+    let mut cmd = fspy::Command::new(test_bin_path());
+    cmd.args(["read_verify_threads", file_path.to_str().unwrap()]);
+    cmd.on_file_event(AccessMode::READ, callback);
+    let child = cmd.spawn(tokio_util::sync::CancellationToken::new()).await.unwrap();
+    let termination = child.wait_handle.await.unwrap();
+
+    assert!(termination.status.success(), "target failed under concurrent callbacks");
+    assert_eq!(opened.load(Ordering::SeqCst), 4, "expected one Opened event per worker thread");
+}

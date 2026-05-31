@@ -894,6 +894,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "deltae"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1249,6 +1263,7 @@ dependencies = [
  "materialized_artifact_build",
  "nix 0.31.2",
  "ouroboros",
+ "passfd",
  "rustc-hash",
  "sha2 0.11.0",
  "subprocess_test",
@@ -1297,6 +1312,7 @@ dependencies = [
  "fspy_shared_unix",
  "libc",
  "nix 0.31.2",
+ "passfd",
  "wincode",
 ]
 
@@ -1305,9 +1321,11 @@ name = "fspy_preload_windows"
 version = "0.1.0"
 dependencies = [
  "constcat",
+ "dashmap",
  "fspy_detours_sys",
  "fspy_shared",
  "ntapi",
+ "rustc-hash",
  "smallvec 2.0.0-alpha.12",
  "tempfile",
  "widestring",
@@ -1528,6 +1546,12 @@ name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
+name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 
 [[package]]
 name = "hashbrown"
@@ -2315,9 +2339,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.3"
+version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "once_cell_polyfill"

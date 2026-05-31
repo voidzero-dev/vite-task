@@ -2,15 +2,21 @@ use std::{
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
 };
 
+use fspy_shared::ipc::AccessMode;
 #[cfg(unix)]
 use fspy_shared_unix::exec::Exec;
 use rustc_hash::FxHashMap;
 use tokio::process::Command as TokioCommand;
 use tokio_util::sync::CancellationToken;
 
-use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
+use crate::{
+    SPY_IMPL, TrackedChild,
+    callback::{FileCallback, FileEvent},
+    error::SpawnError,
+};
 
 #[derive(derive_more::Debug)]
 pub struct Command {
@@ -28,6 +34,9 @@ pub struct Command {
     #[cfg(unix)]
     #[debug("({} pre_exec closures)", pre_exec_closures.len())]
     pre_exec_closures: Vec<Box<dyn FnMut() -> std::io::Result<()> + Send + Sync>>,
+
+    #[debug(skip)]
+    pub(crate) file_callback: Option<FileCallback>,
 }
 
 impl Command {
@@ -47,7 +56,28 @@ impl Command {
             stdin: None,
             #[cfg(unix)]
             pre_exec_closures: Vec::new(),
+            file_callback: None,
         }
+    }
+
+    /// Register a callback invoked in the supervisor process that blocks the
+    /// traced process right after a file is opened and right before a file is
+    /// closed.
+    ///
+    /// The callback receives a [`FileEvent`] whose
+    /// file descriptor / handle is valid and usable inside the supervisor's
+    /// own process (it may `seek`/`read` it). The callback is observe-only:
+    /// the traced process resumes once it returns.
+    ///
+    /// `mask` limits the callback to events whose access mode intersects it
+    /// (for example [`AccessMode`] `WRITE` for write opens/closes only). When
+    /// no callback is registered there is no overhead.
+    pub fn on_file_event<F>(&mut self, mask: AccessMode, callback: F) -> &mut Self
+    where
+        F: Fn(FileEvent<'_>) + Send + Sync + 'static,
+    {
+        self.file_callback = Some(FileCallback { mask, callback: Arc::new(callback) });
+        self
     }
 
     #[cfg(unix)]

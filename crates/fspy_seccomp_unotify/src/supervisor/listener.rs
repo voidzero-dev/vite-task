@@ -32,6 +32,23 @@ impl AsFd for NotifyListener {
 
 const SECCOMP_IOCTL_NOTIF_SEND: libc::Ioctl = 3_222_806_785u64 as libc::Ioctl;
 
+// `SECCOMP_IOCTL_NOTIF_ADDFD` = `_IOW('!', 3, struct seccomp_notif_addfd)`.
+// `struct seccomp_notif_addfd` is 24 bytes; the ioctl number is not exposed by
+// the `libc` crate, so it is hand-encoded the same way as the constant above.
+const SECCOMP_IOCTL_NOTIF_ADDFD: libc::Ioctl = 1_075_323_139u64 as libc::Ioctl;
+// Install the fd and complete the notification atomically (kernel 5.14+).
+const SECCOMP_ADDFD_FLAG_SEND: u32 = 1 << 1;
+
+/// Mirror of the kernel `struct seccomp_notif_addfd` (not in the `libc` crate).
+#[repr(C)]
+struct SeccompNotifAddfd {
+    id: u64,
+    flags: u32,
+    srcfd: u32,
+    newfd: u32,
+    newfd_flags: u32,
+}
+
 impl NotifyListener {
     /// Sends a `SECCOMP_USER_NOTIF_FLAG_CONTINUE` response for the given request ID.
     ///
@@ -54,6 +71,43 @@ impl NotifyListener {
         // `seccomp_notif_resp` buffer, and the fd is a valid seccomp notify fd
         let ret = unsafe {
             libc::ioctl(self.async_fd.as_raw_fd(), SECCOMP_IOCTL_NOTIF_SEND, &raw mut *resp)
+        };
+        if ret < 0 {
+            let err = nix::Error::last();
+            // ignore error if target process's syscall was interrupted
+            if err == nix::Error::ENOENT {
+                return Ok(());
+            }
+            return Err(err.into());
+        }
+        Ok(())
+    }
+
+    /// Installs `src_fd` into the target process and completes the
+    /// notification, so the intercepted syscall returns the freshly installed
+    /// descriptor instead of being re-run by the kernel.
+    ///
+    /// # Errors
+    /// Returns an error if the ioctl call fails, except for `ENOENT` which is
+    /// silently ignored (indicates the target process's syscall was interrupted).
+    pub fn send_addfd_response(
+        &self,
+        req_id: u64,
+        src_fd: BorrowedFd<'_>,
+        cloexec: bool,
+    ) -> io::Result<()> {
+        let addfd = SeccompNotifAddfd {
+            id: req_id,
+            flags: SECCOMP_ADDFD_FLAG_SEND,
+            srcfd: src_fd.as_raw_fd().cast_unsigned(),
+            newfd: 0,
+            newfd_flags: if cloexec { libc::O_CLOEXEC.cast_unsigned() } else { 0 },
+        };
+
+        // SAFETY: `addfd` is a valid, fully-initialized `seccomp_notif_addfd`
+        // buffer, and the fd is a valid seccomp notify fd.
+        let ret = unsafe {
+            libc::ioctl(self.async_fd.as_raw_fd(), SECCOMP_IOCTL_NOTIF_ADDFD, &raw const addfd)
         };
         if ret < 0 {
             let err = nix::Error::last();

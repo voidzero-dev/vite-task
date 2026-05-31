@@ -7,12 +7,14 @@ mod macos_artifacts;
 use std::{io, path::Path};
 
 #[cfg(target_os = "linux")]
-use fspy_seccomp_unotify::supervisor::supervise;
+use fspy_seccomp_unotify::supervisor::{SeccompNotifyHandler, handler::Sysno, supervise_with};
 use fspy_shared::ipc::PathAccess;
 #[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::{NativeStr, channel::channel};
 #[cfg(target_os = "macos")]
 use fspy_shared_unix::payload::Artifacts;
+#[cfg(not(target_env = "musl"))]
+use fspy_shared_unix::payload::CallbackConf;
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{Payload, encode_payload},
@@ -25,8 +27,15 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
+use crate::callback::unix::UnixCallbackServer;
+#[cfg(not(target_env = "musl"))]
 use crate::ipc::{OwnedReceiverLockGuard, SHM_CAPACITY};
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
+
+#[cfg(target_os = "linux")]
+fn syscalls_without(exclude: Sysno) -> Vec<Sysno> {
+    SyscallHandler::syscalls().iter().copied().filter(|syscall| *syscall != exclude).collect()
+}
 
 #[derive(Debug)]
 pub struct SpyImpl {
@@ -69,17 +78,56 @@ impl SpyImpl {
         })
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "spawn orchestrates the supervisor, callback server, payload and child setup"
+    )]
     pub(crate) async fn spawn(
         &self,
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
+        let file_callback = command.file_callback.take();
+
+        // Supervisor side of the optional blocking open/close callback for the
+        // preload backend (Linux glibc + macOS).
+        #[cfg(not(target_env = "musl"))]
+        let callback_server = file_callback
+            .as_ref()
+            .map(|callback| UnixCallbackServer::new(callback.callback.clone()))
+            .transpose()
+            .map_err(SpawnError::CallbackChannelCreation)?;
+
         #[cfg(target_os = "linux")]
-        let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
+        let supervisor = file_callback
+            .clone()
+            .map_or_else(
+                // No callback: keep `close` out of the seccomp filter entirely
+                // so there is no per-close overhead.
+                || supervise_with(SyscallHandler::default, &syscalls_without(Sysno::close)),
+                // A callback also intercepts `close`, and is injected into
+                // each per-process syscall handler.
+                |callback| {
+                    supervise_with(
+                        move || SyscallHandler::with_callback(Some(callback.clone())),
+                        SyscallHandler::syscalls(),
+                    )
+                },
+            )
+            .map_err(SpawnError::Supervisor)?;
 
         #[cfg(not(target_env = "musl"))]
         let (ipc_channel_conf, ipc_receiver) =
             channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+
+        #[cfg(not(target_env = "musl"))]
+        let callback_conf = match (callback_server.as_ref(), file_callback.as_ref()) {
+            (Some(server), Some(callback)) => Some(CallbackConf {
+                socket_path: server.socket_path().as_os_str().into(),
+                mask: callback.mask,
+            }),
+            _ => None,
+        };
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]
@@ -90,6 +138,9 @@ impl SpyImpl {
 
             #[cfg(not(target_env = "musl"))]
             preload_path: self.preload_path.clone(),
+
+            #[cfg(not(target_env = "musl"))]
+            callback: callback_conf,
 
             #[cfg(target_os = "linux")]
             seccomp_payload: supervisor.payload().clone(),
@@ -157,6 +208,12 @@ impl SpyImpl {
                         .map(syscall_handler::SyscallHandler::into_arena),
                 );
                 let arenas = arenas.collect::<Vec<_>>();
+
+                // Drain in-flight blocking callbacks before locking the channel.
+                #[cfg(not(target_env = "musl"))]
+                if let Some(callback_server) = callback_server {
+                    callback_server.shutdown().await;
+                }
 
                 // Lock the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.

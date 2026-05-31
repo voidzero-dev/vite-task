@@ -22,7 +22,11 @@ async fn cancellation_kills_tracked_child() -> anyhow::Result<()> {
     let mut stdout = child.stdout.take().unwrap();
     let mut buf = vec![0u8; 64];
     let n = stdout.read(&mut buf).await?;
-    assert!(std::str::from_utf8(&buf[..n])?.contains("ready"));
+    let content = String::from_utf8_lossy(&buf[..n]);
+    assert!(
+        content.contains("ready"),
+        "expected child stdout to contain 'ready', got {n} bytes: {content:?}"
+    );
 
     // Cancel — fspy background task calls start_kill
     token.cancel();

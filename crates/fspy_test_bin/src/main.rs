@@ -40,6 +40,37 @@ fn main() {
         "stat" => {
             let _ = std::fs::metadata(path);
         }
+        "read_verify" => {
+            // Open and read the file, then drop it (closing it). Used by the
+            // seccomp blocking-callback test: under seccomp the supervisor
+            // opens the file itself and installs the descriptor into this
+            // process via `ADDFD`, so a successful non-empty read proves the
+            // installed descriptor works.
+            use std::io::Read as _;
+            let mut file = File::open(path).expect("read_verify: open failed");
+            let mut content = Vec::new();
+            file.read_to_end(&mut content).expect("read_verify: read failed");
+            assert!(!content.is_empty(), "read_verify: file content was empty");
+        }
+        "read_verify_threads" => {
+            // Like `read_verify`, but from several threads concurrently, so the
+            // seccomp blocking-callback path is exercised under concurrency.
+            use std::io::Read as _;
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    let path = path.to_owned();
+                    std::thread::spawn(move || {
+                        let mut file = File::open(&path).expect("open failed");
+                        let mut content = Vec::new();
+                        file.read_to_end(&mut content).expect("read failed");
+                        assert!(!content.is_empty(), "file content was empty");
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().expect("worker thread panicked");
+            }
+        }
         "execve" => {
             let _ = std::process::Command::new(path).spawn();
         }

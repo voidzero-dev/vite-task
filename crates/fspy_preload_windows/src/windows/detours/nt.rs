@@ -19,6 +19,7 @@ use crate::windows::{
     client::global_client,
     convert::{ToAbsolutePath, ToAccessMode},
     detour::{Detour, DetourAny},
+    winapi_utils::{access_mask_to_mode, get_path_name},
 };
 
 static DETOUR_NT_CREATE_FILE: Detour<
@@ -56,7 +57,7 @@ static DETOUR_NT_CREATE_FILE: Detour<
                 unsafe { handle_open(desired_access, object_attributes) };
 
                 // SAFETY: calling the original NtCreateFile with all original arguments
-                unsafe {
+                let status = unsafe {
                     (DETOUR_NT_CREATE_FILE.real())(
                         file_handle,
                         desired_access,
@@ -70,7 +71,12 @@ static DETOUR_NT_CREATE_FILE: Detour<
                         ea_buffer,
                         ea_length,
                     )
+                };
+                if status >= 0 {
+                    // SAFETY: the open succeeded, so `file_handle` points to a valid handle.
+                    unsafe { handle_open_callback(desired_access, file_handle) };
                 }
+                status
             }
             new_nt_create_file
         })
@@ -103,7 +109,7 @@ static DETOUR_NT_OPEN_FILE: Detour<
                 }
 
                 // SAFETY: calling the original NtOpenFile with all original arguments
-                unsafe {
+                let status = unsafe {
                     (DETOUR_NT_OPEN_FILE.real())(
                         file_handle,
                         desired_access,
@@ -112,7 +118,12 @@ static DETOUR_NT_OPEN_FILE: Detour<
                         share_access,
                         open_options,
                     )
+                };
+                if status >= 0 {
+                    // SAFETY: the open succeeded, so `file_handle` points to a valid handle.
+                    unsafe { handle_open_callback(desired_access, file_handle) };
                 }
+                status
             }
             new_nt_open_file
         })
@@ -379,6 +390,47 @@ static DETOUR_NT_QUERY_DIRECTORY_FILE_EX: Detour<NtQueryDirectoryFileExFn> =
         })
     };
 
+/// Runs the post-open blocking callback, if one is registered, for the handle
+/// produced by a successful `NtCreateFile`/`NtOpenFile`.
+unsafe fn handle_open_callback(desired_access: ACCESS_MASK, file_handle: PHANDLE) {
+    // SAFETY: the global client is initialized during DLL_PROCESS_ATTACH.
+    let Some(callback) = (unsafe { global_client() }).callback() else {
+        return;
+    };
+    // SAFETY: the open succeeded, so `file_handle` points to a valid handle.
+    let handle = unsafe { *file_handle };
+    // SAFETY: `handle` is a valid file handle just produced by the open.
+    let Ok(path) = (unsafe { get_path_name(handle) }) else {
+        return;
+    };
+    callback.run_open_callback(handle, access_mask_to_mode(desired_access), &path);
+}
+
+/// Runs the pre-close blocking callback, if one is registered, for a handle
+/// about to be closed.
+unsafe fn handle_close(handle: HANDLE) {
+    // SAFETY: the global client is initialized during DLL_PROCESS_ATTACH.
+    if let Some(callback) = (unsafe { global_client() }).callback() {
+        callback.run_close_callback(handle);
+    }
+}
+
+type NtCloseFn = unsafe extern "system" fn(handle: HANDLE) -> NTSTATUS;
+
+static DETOUR_NT_CLOSE: Detour<NtCloseFn> =
+    // SAFETY: initializing dynamic Detour for NtClose (resolved at attach time)
+    unsafe {
+        Detour::dynamic(c"NtClose", {
+            unsafe extern "system" fn new_nt_close(handle: HANDLE) -> NTSTATUS {
+                // SAFETY: the pre-close callback runs while `handle` is still valid.
+                unsafe { handle_close(handle) };
+                // SAFETY: calling the original NtClose with the original argument.
+                unsafe { (DETOUR_NT_CLOSE.real())(handle) }
+            }
+            new_nt_close
+        })
+    };
+
 pub const DETOURS: &[DetourAny] = &[
     DETOUR_NT_CREATE_FILE.as_any(),
     DETOUR_NT_OPEN_FILE.as_any(),
@@ -388,4 +440,5 @@ pub const DETOURS: &[DetourAny] = &[
     DETOUR_NT_QUERY_INFORMATION_BY_NAME.as_any(),
     DETOUR_NT_QUERY_DIRECTORY_FILE.as_any(),
     DETOUR_NT_QUERY_DIRECTORY_FILE_EX.as_any(),
+    DETOUR_NT_CLOSE.as_any(),
 ];

@@ -12,7 +12,10 @@ use assertables::assert_contains;
 use fspy_seccomp_unotify::{
     impl_handler,
     supervisor::{
-        handler::arg::{CStrPtr, Caller, Fd},
+        handler::{
+            HandlerResponse,
+            arg::{CStrPtr, Caller, Fd},
+        },
         supervise,
     },
     target::install_target,
@@ -45,6 +48,9 @@ impl SyscallRecorder {
 }
 
 impl_handler!(SyscallRecorder: openat,);
+
+// This recorder always lets the syscall continue.
+impl HandlerResponse for SyscallRecorder {}
 
 async fn run_in_pre_exec(
     mut f: impl FnMut() -> io::Result<()> + Send + Sync + 'static,

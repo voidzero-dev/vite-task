@@ -7,9 +7,13 @@ use fspy_shared::{
 };
 use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
 
+use crate::windows::callback::CallbackChannel;
+
 pub struct Client<'a> {
     payload: Payload<'a>,
     ipc_sender: Option<Sender>,
+    /// Present only when a blocking open/close callback is registered.
+    callback: Option<CallbackChannel>,
 }
 
 impl<'a> Client<'a> {
@@ -33,7 +37,10 @@ impl<'a> Client<'a> {
             }
         };
 
-        Self { payload, ipc_sender }
+        let callback =
+            CallbackChannel::from_payload(payload.callback_pipe_name, payload.callback_mask);
+
+        Self { payload, ipc_sender, callback }
     }
 
     pub fn send(&self, access: PathAccess<'_>) {
@@ -41,6 +48,11 @@ impl<'a> Client<'a> {
             return;
         };
         sender.write_encoded(&access).expect("failed to send path access");
+    }
+
+    /// The blocking open/close callback channel, if one is registered.
+    pub const fn callback(&self) -> Option<&CallbackChannel> {
+        self.callback.as_ref()
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {

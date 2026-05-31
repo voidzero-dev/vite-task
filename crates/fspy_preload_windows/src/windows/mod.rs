@@ -1,3 +1,4 @@
+pub(crate) mod callback;
 pub(crate) mod client;
 mod convert;
 pub(crate) mod detour;
