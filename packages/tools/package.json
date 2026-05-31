@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "cross-env": "^10.1.0"
-  },
-  "devDependencies": {
-    "vite-plus": "catalog:"
+    "cross-env": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:"
   }
 }
