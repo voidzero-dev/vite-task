@@ -2,8 +2,7 @@ import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
   staged: {
-    '*': 'vp fmt --no-error-on-unmatched-pattern',
-    '*.@(js|ts|tsx)': 'vp lint -- --fix',
+    '*': 'vp check --fix',
     '*.rs': 'cargo fmt --',
   },
   lint: {
