@@ -29,7 +29,7 @@ Officially, Vite Task is distributed as part of Vite+ and invoked via `vp run`. 
 
 ```bash
 just ready    # Full quality check: typos, fmt, check, test, lint, doc
-just fmt      # Format code (cargo fmt + cargo shear + oxfmt)
+just fmt      # Format code (cargo fmt + cargo shear + vp fmt)
 just check    # Check compilation with all features
 just test     # Run all tests
 just lint     # Clippy linting

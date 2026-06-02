@@ -27,7 +27,7 @@ fmt:
   cargo autoinherit
   cargo shear --fix
   cargo fmt --all
-  pnpm oxfmt
+  pnpm exec vp fmt
 
 check:
   cargo check --workspace --all-features --all-targets --locked
