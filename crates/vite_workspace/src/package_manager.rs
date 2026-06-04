@@ -100,6 +100,8 @@ pub fn find_package_root(original_cwd: &AbsolutePath) -> Result<PackageRoot<'_>,
 /// - `NonWorkspacePackage` is the package.json file of a non-workspace package.
 #[derive(Debug)]
 pub enum WorkspaceFile {
+    /// The `aube-workspace.yaml` file of an Aube workspace.
+    AubeWorkspaceYaml(FileWithPath),
     /// The pnpm-workspace.yaml file of a pnpm workspace.
     PnpmWorkspaceYaml(FileWithPath),
     /// The package.json file of a yarn/npm workspace.
@@ -147,6 +149,24 @@ pub fn find_workspace_root(
                 WorkspaceRoot {
                     path: Arc::from(cwd),
                     workspace_file: WorkspaceFile::PnpmWorkspaceYaml(file_with_path),
+                },
+                relative_cwd,
+            ));
+        }
+
+        // Check for aube-workspace.yaml for aube workspaces.
+        //
+        // Aube can operate in repositories that still use pnpm's workspace YAML during
+        // migration. We therefore keep pnpm-workspace.yaml as the highest-priority
+        // workspace marker when both are present.
+        let aube_workspace_path: Arc<AbsolutePath> = cwd.join("aube-workspace.yaml").into();
+        if let Some(file_with_path) = FileWithPath::open_if_exists(aube_workspace_path)? {
+            let relative_cwd =
+                original_cwd.strip_prefix(cwd)?.expect("cwd must be within the aube workspace");
+            return Ok((
+                WorkspaceRoot {
+                    path: Arc::from(cwd),
+                    workspace_file: WorkspaceFile::AubeWorkspaceYaml(file_with_path),
                 },
                 relative_cwd,
             ));
@@ -256,6 +276,17 @@ mod tests {
         let file_with_path = FileWithPath::open(Arc::clone(&path)).unwrap();
         assert_eq!(file_with_path.content(), b"packages:\n  - apps/*\n");
         assert_eq!(&**file_with_path.path(), &*path);
+    }
+
+    #[test]
+    fn find_workspace_root_detects_aube_workspace_yaml() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+        fs::write(temp_dir_path.join("aube-workspace.yaml"), b"packages:\n  - apps/*\n").unwrap();
+
+        let (workspace_root, relative) = find_workspace_root(temp_dir_path).unwrap();
+        assert!(relative.as_str().is_empty());
+        assert!(matches!(workspace_root.workspace_file, WorkspaceFile::AubeWorkspaceYaml(_)));
     }
 
     #[test]

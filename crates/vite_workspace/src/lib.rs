@@ -247,7 +247,11 @@ pub fn load_package_graph(
 ) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
     let mut graph_builder = PackageGraphBuilder::default();
     let workspaces = match &workspace_root.workspace_file {
-        WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
+        WorkspaceFile::AubeWorkspaceYaml(file_with_path)
+        | WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
+            // NOTE: `aube-workspace.yaml` is intentionally compatible with pnpm's workspace YAML
+            // format for the fields we currently read (specifically `packages: [...]` glob
+            // patterns). We deserialize both via `PnpmWorkspace` to reuse the same expansion logic.
             let workspace: PnpmWorkspace = serde_norway::from_slice(file_with_path.content())
                 .map_err(|e| Error::SerdeYaml {
                     file_path: Arc::clone(file_with_path.path()),
@@ -373,6 +377,65 @@ mod tests {
   - "packages/*"
 "#;
         fs::write(temp_dir_path.join("pnpm-workspace.yaml"), workspace_yaml).unwrap();
+
+        // Create root package.json
+        let root_package = serde_json::json!({
+            "name": "monorepo-root",
+            "private": true
+        });
+        fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
+
+        // Create packages directory
+        fs::create_dir_all(temp_dir_path.join("packages")).unwrap();
+
+        // Create package A
+        fs::create_dir_all(temp_dir_path.join("packages/pkg-a")).unwrap();
+        let pkg_a = serde_json::json!({
+            "name": "pkg-a",
+            "dependencies": {}
+        });
+        fs::write(temp_dir_path.join("packages/pkg-a/package.json"), pkg_a.to_string()).unwrap();
+
+        // Create package B that depends on A
+        fs::create_dir_all(temp_dir_path.join("packages/pkg-b")).unwrap();
+        let pkg_b = serde_json::json!({
+            "name": "pkg-b",
+            "dependencies": {
+                "pkg-a": "workspace:*"
+            }
+        });
+        fs::write(temp_dir_path.join("packages/pkg-b/package.json"), pkg_b.to_string()).unwrap();
+
+        let graph = discover_package_graph(temp_dir_path).unwrap();
+
+        // Should have 3 nodes: root + pkg-a + pkg-b
+        assert_eq!(graph.node_count(), 3);
+        // Should have 1 edge: pkg-b -> pkg-a
+        assert_eq!(graph.edge_count(), 1);
+
+        // Verify the dependency edge exists
+        let mut found_edge = false;
+        for edge_ref in graph.edge_references() {
+            let source = &graph[edge_ref.source()];
+            let target = &graph[edge_ref.target()];
+            if source.package_json.name == "pkg-b" && target.package_json.name == "pkg-a" {
+                found_edge = true;
+                assert_eq!(*edge_ref.weight(), DependencyType::Normal);
+            }
+        }
+        assert!(found_edge, "Should have found edge from pkg-b to pkg-a");
+    }
+
+    #[test]
+    fn test_get_package_graph_aube_workspace() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        // Create aube-workspace.yaml
+        let workspace_yaml = r#"packages:
+    - "packages/*"
+"#;
+        fs::write(temp_dir_path.join("aube-workspace.yaml"), workspace_yaml).unwrap();
 
         // Create root package.json
         let root_package = serde_json::json!({
