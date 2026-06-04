@@ -1,6 +1,6 @@
 # Changelog
 
-- **Fixed** `vp run` no longer fails to load the package graph when a `package.json` is encoded with a UTF-8 byte order mark (BOM), as written by some editors and tools. The BOM is now stripped before parsing
+- **Fixed** `package.json` files with a UTF-8 BOM no longer fail to parse ([#424](https://github.com/voidzero-dev/vite-task/pull/424))
 - **Changed** `vp run --filter <expr>` now exits 0 with a warning when the filter matches no packages, matching pnpm. Use `--fail-if-no-match` to restore the previous strict behavior ([#393](https://github.com/voidzero-dev/vite-task/pull/393))
 - **Added** task command shorthands for defining tasks as command strings or command string arrays ([#391](https://github.com/voidzero-dev/vite-task/pull/391))
 - **Changed** Cached logs are stored with colors intact (`FORCE_COLOR=1` is auto-injected into spawned tasks). Colors are then stripped at display time when the terminal does not support them. Other color-related env vars (`NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`) are no longer passed through by default. Opt in via a task's `env`/`untrackedEnv` ([#378](https://github.com/voidzero-dev/vite-task/pull/378))
