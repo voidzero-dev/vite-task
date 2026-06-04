@@ -128,8 +128,11 @@ impl vite_task::loader::UserConfigLoader for JsonUserConfigLoader {
             }
             Err(err) => return Err(err.into()),
         };
+        // Strip a leading UTF-8 BOM, which some editors prepend when saving the
+        // config file; the JSONC parser would otherwise reject it.
+        let config_content = config_content.strip_prefix('\u{FEFF}').unwrap_or(&config_content);
         let json_value: Option<serde_json::Value> = jsonc_parser::parse_to_serde_value(
-            &config_content,
+            config_content,
             &jsonc_parser::ParseOptions::default(),
         )?;
         let user_config: vite_task::config::UserRunConfig =
@@ -151,5 +154,28 @@ impl OwnedSessionConfig {
             user_config_loader: &mut self.user_config_loader,
             program_name: Str::from("vt"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+    use vite_task::loader::UserConfigLoader as _;
+
+    use super::*;
+
+    /// A `vite-task.json` saved with a UTF-8 BOM must still load instead of
+    /// failing the JSONC parse.
+    #[tokio::test]
+    async fn json_user_config_loader_handles_bom() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        let config = "\u{FEFF}{ \"tasks\": { \"build\": { \"command\": \"echo hi\" } } }";
+        std::fs::write(temp_dir_path.join("vite-task.json"), config).unwrap();
+
+        let loader = JsonUserConfigLoader::default();
+        let user_config = loader.load_user_config_file(temp_dir_path).await.unwrap();
+        assert!(user_config.is_some(), "config with a BOM should parse");
     }
 }

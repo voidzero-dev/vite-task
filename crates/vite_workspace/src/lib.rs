@@ -258,10 +258,12 @@ pub fn load_package_graph(
     let mut graph_builder = PackageGraphBuilder::default();
     let workspaces = match &workspace_root.workspace_file {
         WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
-            let workspace: PnpmWorkspace = serde_norway::from_slice(file_with_path.content())
-                .map_err(|e| Error::SerdeYaml {
-                    file_path: Arc::clone(file_with_path.path()),
-                    serde_yaml_error: e,
+            let workspace: PnpmWorkspace =
+                serde_norway::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
+                    Error::SerdeYaml {
+                        file_path: Arc::clone(file_with_path.path()),
+                        serde_yaml_error: e,
+                    }
                 })?;
             workspace.packages
         }
@@ -417,6 +419,31 @@ mod tests {
         let graph = discover_package_graph(temp_dir_path).unwrap();
 
         // Both the root and the member package should be present.
+        assert_eq!(graph.node_count(), 2);
+        let names: FxHashSet<_> =
+            graph.node_weights().map(|n| n.package_json.name.as_str()).collect();
+        assert!(names.contains("monorepo-root"));
+        assert!(names.contains("pkg-a"));
+    }
+
+    #[test]
+    fn test_get_package_graph_pnpm_workspace_yaml_with_bom() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        // pnpm-workspace.yaml with a leading BOM.
+        let mut yaml_bytes = b"\xEF\xBB\xBF".to_vec();
+        yaml_bytes.extend_from_slice(b"packages:\n  - \"packages/*\"\n");
+        fs::write(temp_dir_path.join("pnpm-workspace.yaml"), yaml_bytes).unwrap();
+
+        let root_package = serde_json::json!({ "name": "monorepo-root", "private": true });
+        fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
+
+        fs::create_dir_all(temp_dir_path.join("packages/pkg-a")).unwrap();
+        let pkg_a = serde_json::json!({ "name": "pkg-a" });
+        fs::write(temp_dir_path.join("packages/pkg-a/package.json"), pkg_a.to_string()).unwrap();
+
+        let graph = discover_package_graph(temp_dir_path).unwrap();
         assert_eq!(graph.node_count(), 2);
         let names: FxHashSet<_> =
             graph.node_weights().map(|n| n.package_json.name.as_str()).collect();
