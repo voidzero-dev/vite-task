@@ -155,11 +155,13 @@ pub fn find_workspace_root(
         // Check for package.json with workspaces field for npm/yarn workspace
         let package_json_path: Arc<AbsolutePath> = cwd.join("package.json").into();
         if let Some(file_with_path) = FileWithPath::open_if_exists(package_json_path)? {
-            let package_json: serde_json::Value = serde_json::from_slice(file_with_path.content())
-                .map_err(|e| Error::SerdeJson {
-                    file_path: Arc::clone(file_with_path.path()),
-                    serde_json_error: e,
-                })?;
+            let package_json: serde_json::Value = serde_json::from_slice(crate::strip_bom(
+                file_with_path.content(),
+            ))
+            .map_err(|e| Error::SerdeJson {
+                file_path: Arc::clone(file_with_path.path()),
+                serde_json_error: e,
+            })?;
             if package_json.get("workspaces").is_some() {
                 let relative_cwd =
                     original_cwd.strip_prefix(cwd)?.expect("cwd must be within the workspace");

@@ -23,6 +23,16 @@ pub use crate::{
     },
 };
 
+/// Strip a leading UTF-8 byte order mark (BOM) from `bytes`, if present.
+///
+/// Some editors and tools (notably on Windows, e.g. Notepad or PowerShell's
+/// `>` redirection) write `package.json` with a UTF-8 BOM (`EF BB BF`).
+/// `serde_json` does not accept a leading BOM and fails with a parse error, so
+/// we trim it before parsing.
+pub(crate) fn strip_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
+}
+
 /// The workspace configuration for pnpm.
 #[derive(Debug, Deserialize)]
 struct PnpmWorkspace {
@@ -256,19 +266,23 @@ pub fn load_package_graph(
             workspace.packages
         }
         WorkspaceFile::NpmWorkspaceJson(file_with_path) => {
-            let workspace: NpmWorkspace = serde_json::from_slice(file_with_path.content())
-                .map_err(|e| Error::SerdeJson {
-                    file_path: Arc::clone(file_with_path.path()),
-                    serde_json_error: e,
+            let workspace: NpmWorkspace =
+                serde_json::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
+                    Error::SerdeJson {
+                        file_path: Arc::clone(file_with_path.path()),
+                        serde_json_error: e,
+                    }
                 })?;
             workspace.workspaces.into_packages()
         }
         WorkspaceFile::NonWorkspacePackage(file_with_path) => {
             // For non-workspace packages, add the package.json to the graph as a root package
-            let package_json: PackageJson = serde_json::from_slice(file_with_path.content())
-                .map_err(|e| Error::SerdeJson {
-                    file_path: Arc::clone(file_with_path.path()),
-                    serde_json_error: e,
+            let package_json: PackageJson =
+                serde_json::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
+                    Error::SerdeJson {
+                        file_path: Arc::clone(file_with_path.path()),
+                        serde_json_error: e,
+                    }
                 })?;
             graph_builder.add_package(
                 RelativePathBuf::default(),
@@ -285,7 +299,7 @@ pub fn load_package_graph(
     for package_json_path in member_globs.get_package_json_paths(&*workspace_root.path)? {
         let package_json_path: Arc<AbsolutePath> = package_json_path.clone().into();
         let package_json: PackageJson =
-            serde_json::from_slice(&fs::read(&*package_json_path)?).map_err(|e| {
+            serde_json::from_slice(strip_bom(&fs::read(&*package_json_path)?)).map_err(|e| {
                 Error::SerdeJson { file_path: Arc::clone(&package_json_path), serde_json_error: e }
             })?;
         let absolute_path = package_json_path.parent().unwrap();
@@ -305,7 +319,7 @@ pub fn load_package_graph(
         let package_json = match fs::read(&package_json_path) {
             Ok(content) => {
                 let package_json_path: Arc<AbsolutePath> = package_json_path.into();
-                serde_json::from_slice(&content).map_err(|e| Error::SerdeJson {
+                serde_json::from_slice(strip_bom(&content)).map_err(|e| Error::SerdeJson {
                     file_path: package_json_path,
                     serde_json_error: e,
                 })?
@@ -361,6 +375,69 @@ mod tests {
         let node = graph.node_weight(NodeIndex::new(0)).unwrap();
         assert_eq!(node.package_json.name, "my-app");
         assert_eq!(node.path.as_str(), "");
+    }
+
+    #[test]
+    fn test_strip_bom() {
+        // Leading UTF-8 BOM is stripped.
+        assert_eq!(strip_bom(b"\xEF\xBB\xBF{}"), b"{}");
+        // Content without a BOM is returned unchanged.
+        assert_eq!(strip_bom(b"{}"), b"{}");
+        // Only a leading BOM is stripped, not occurrences elsewhere.
+        assert_eq!(strip_bom(b"{}\xEF\xBB\xBF"), b"{}\xEF\xBB\xBF");
+        // Empty input is handled.
+        assert_eq!(strip_bom(b""), b"");
+    }
+
+    /// Regression test for <https://github.com/voidzero-dev/vite-plus/issues/1357>
+    /// follow-up: a `package.json` written with a UTF-8 BOM (e.g. by some
+    /// editors on Windows) must still parse instead of failing the whole graph.
+    #[test]
+    fn test_get_package_graph_package_json_with_bom() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        // pnpm workspace so package.json files are read via `fs::read` + parse.
+        let workspace_yaml = "packages:\n  - \"packages/*\"\n";
+        fs::write(temp_dir_path.join("pnpm-workspace.yaml"), workspace_yaml).unwrap();
+
+        // Root package.json with a BOM.
+        let root_package = serde_json::json!({ "name": "monorepo-root", "private": true });
+        let mut root_bytes = b"\xEF\xBB\xBF".to_vec();
+        root_bytes.extend_from_slice(root_package.to_string().as_bytes());
+        fs::write(temp_dir_path.join("package.json"), root_bytes).unwrap();
+
+        // Member package.json with a BOM.
+        fs::create_dir_all(temp_dir_path.join("packages/pkg-a")).unwrap();
+        let pkg_a = serde_json::json!({ "name": "pkg-a" });
+        let mut pkg_a_bytes = b"\xEF\xBB\xBF".to_vec();
+        pkg_a_bytes.extend_from_slice(pkg_a.to_string().as_bytes());
+        fs::write(temp_dir_path.join("packages/pkg-a/package.json"), pkg_a_bytes).unwrap();
+
+        let graph = discover_package_graph(temp_dir_path).unwrap();
+
+        // Both the root and the member package should be present.
+        assert_eq!(graph.node_count(), 2);
+        let names: FxHashSet<_> =
+            graph.node_weights().map(|n| n.package_json.name.as_str()).collect();
+        assert!(names.contains("monorepo-root"));
+        assert!(names.contains("pkg-a"));
+    }
+
+    #[test]
+    fn test_get_package_graph_single_package_with_bom() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        // Single non-workspace package.json with a BOM (NonWorkspacePackage path).
+        let package_json = serde_json::json!({ "name": "my-app" });
+        let mut bytes = b"\xEF\xBB\xBF".to_vec();
+        bytes.extend_from_slice(package_json.to_string().as_bytes());
+        fs::write(temp_dir_path.join("package.json"), bytes).unwrap();
+
+        let graph = discover_package_graph(temp_dir_path).unwrap();
+        assert_eq!(graph.node_count(), 1);
+        assert_eq!(graph.node_weight(NodeIndex::new(0)).unwrap().package_json.name, "my-app");
     }
 
     #[test]
