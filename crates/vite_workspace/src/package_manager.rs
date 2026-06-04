@@ -100,7 +100,7 @@ pub fn find_package_root(original_cwd: &AbsolutePath) -> Result<PackageRoot<'_>,
 /// - `NonWorkspacePackage` is the package.json file of a non-workspace package.
 #[derive(Debug)]
 pub enum WorkspaceFile {
-    /// The aube-workspace.yaml file of an aube workspace.
+    /// The `aube-workspace.yaml` file of an Aube workspace.
     AubeWorkspaceYaml(FileWithPath),
     /// The pnpm-workspace.yaml file of a pnpm workspace.
     PnpmWorkspaceYaml(FileWithPath),

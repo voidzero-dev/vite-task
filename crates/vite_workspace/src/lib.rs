@@ -249,6 +249,9 @@ pub fn load_package_graph(
     let workspaces = match &workspace_root.workspace_file {
         WorkspaceFile::AubeWorkspaceYaml(file_with_path)
         | WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
+            // NOTE: `aube-workspace.yaml` is intentionally compatible with pnpm's workspace YAML
+            // format for the fields we currently read (specifically `packages: [...]` glob
+            // patterns). We deserialize both via `PnpmWorkspace` to reuse the same expansion logic.
             let workspace: PnpmWorkspace = serde_norway::from_slice(file_with_path.content())
                 .map_err(|e| Error::SerdeYaml {
                     file_path: Arc::clone(file_with_path.path()),
