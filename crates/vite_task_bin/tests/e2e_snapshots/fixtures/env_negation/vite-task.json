@@ -1,0 +1,10 @@
+{
+  "cache": true,
+  "tasks": {
+    "print": {
+      "command": "vtt print-env PROBE_PUBLIC && vtt print-env PROBE_SECRET",
+      "env": ["PROBE_*", "!PROBE_SECRET"],
+      "cache": true
+    }
+  }
+}

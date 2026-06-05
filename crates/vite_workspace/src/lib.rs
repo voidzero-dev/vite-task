@@ -10,7 +10,7 @@ use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::Deserialize;
 use vec1::smallvec_v1::SmallVec1;
-use vite_glob::GlobPatternSet;
+use vite_glob::path::PathGlobSet;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
 use wax::{Glob, walk::Entry as _};
@@ -107,7 +107,7 @@ impl WorkspaceMemberGlobs {
             }
             all.push(pattern);
         }
-        let glob_patterns = if has_negated { Some(GlobPatternSet::new(&all)?) } else { None };
+        let glob_patterns = if has_negated { Some(PathGlobSet::new(&all)?) } else { None };
 
         // TODO: parallelize this
         for inclusion in inclusions {

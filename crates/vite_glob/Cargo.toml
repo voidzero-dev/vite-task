@@ -8,8 +8,8 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
+globset = { workspace = true }
 thiserror = { workspace = true }
-vite_path = { workspace = true }
 wax = { workspace = true }
 
 [dev-dependencies]

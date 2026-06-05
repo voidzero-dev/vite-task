@@ -56,7 +56,7 @@ pub enum Error {
     WaxWalk(#[from] wax::walk::WalkError),
 
     #[error(transparent)]
-    Glob(#[from] vite_glob::Error),
+    Glob(#[from] vite_glob::path::PathGlobError),
 }
 
 impl From<StripPrefixError<'_>> for Error {

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ffi::OsStr, fmt::Write as _, mem::MaybeUninit, 
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use vite_glob::GlobPatternSet;
+use vite_glob::env::EnvGlobSet;
 use vite_str::Str;
 use vite_task_graph::config::EnvConfig;
 use wincode::{
@@ -64,7 +64,7 @@ pub enum ResolveEnvError {
     GlobError {
         #[source]
         #[from]
-        glob_error: vite_glob::Error,
+        glob_error: vite_glob::env::EnvGlobError,
     },
 
     #[error("Env value is not valid unicode: {key} = {value:?}")]
@@ -107,10 +107,8 @@ impl EnvFingerprints {
         // Resolve fingerprinted envs
         let mut fingerprinted_envs = BTreeMap::<Str, Arc<str>>::new();
         if !env_config.fingerprinted_envs.is_empty() {
-            let fingerprinted_env_patterns = GlobPatternSet::new(
-                env_config.fingerprinted_envs.iter().filter(|s| !s.starts_with('!')),
-            )?;
-            let sensitive_patterns = GlobPatternSet::new(SENSITIVE_PATTERNS)?;
+            let fingerprinted_env_patterns = EnvGlobSet::new(env_config.fingerprinted_envs.iter())?;
+            let sensitive_patterns = EnvGlobSet::new(SENSITIVE_PATTERNS.iter())?;
             for (name, value) in all_envs.iter() {
                 let Some(name) = name.to_str() else {
                     continue;
@@ -161,20 +159,8 @@ impl EnvFingerprints {
 fn resolve_envs_with_patterns<'a>(
     env_vars: impl Iterator<Item = (&'a Arc<OsStr>, &'a Arc<OsStr>)>,
     patterns: &[&str],
-) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::Error> {
-    let patterns = GlobPatternSet::new(patterns.iter().filter(|pattern| {
-        if pattern.starts_with('!') {
-            // FIXME: use better way to print warning log
-            // Or parse and validate TaskConfig in command parsing phase
-            tracing::warn!(
-                "env pattern starts with '!' is not supported, will be ignored: {}",
-                pattern
-            );
-            false
-        } else {
-            true
-        }
-    }))?;
+) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::env::EnvGlobError> {
+    let patterns = EnvGlobSet::new(patterns.iter())?;
     let envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> = env_vars
         .filter_map(|(name, value)| {
             let name_str = name.as_ref().to_str()?;

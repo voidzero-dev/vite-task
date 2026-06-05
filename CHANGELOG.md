@@ -1,5 +1,6 @@
 # Changelog
 
+- **Added** A task's `env` and `untrackedEnv` glob patterns now support `!` negation: a `!`-prefixed pattern excludes matching variables (e.g. `["VITE_*", "!VITE_SECRET"]` tracks every `VITE_*` except `VITE_SECRET`) ([#425](https://github.com/voidzero-dev/vite-task/pull/425))
 - **Fixed** `package.json` and `pnpm-workspace.yaml` files with a UTF-8 BOM no longer fail to parse ([#424](https://github.com/voidzero-dev/vite-task/pull/424))
 - **Changed** `vp run --filter <expr>` now exits 0 with a warning when the filter matches no packages, matching pnpm. Use `--fail-if-no-match` to restore the previous strict behavior ([#393](https://github.com/voidzero-dev/vite-task/pull/393))
 - **Added** task command shorthands for defining tasks as command strings or command string arrays ([#391](https://github.com/voidzero-dev/vite-task/pull/391))

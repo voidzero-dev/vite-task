@@ -1,0 +1,19 @@
+[[e2e]]
+name = "env_negation_excludes_matching_var"
+comment = """A `!`-prefixed env pattern excludes matching variables. With `env: ["PROBE_*", "!PROBE_SECRET"]`, the task receives PROBE_PUBLIC but not PROBE_SECRET — the negation filters it out — so print-env reports it undefined."""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "print",
+  ], envs = [
+    [
+      "PROBE_PUBLIC",
+      "public-value",
+    ],
+    [
+      "PROBE_SECRET",
+      "secret-value",
+    ],
+  ], comment = "PROBE_SECRET is filtered out by !PROBE_SECRET" },
+]
