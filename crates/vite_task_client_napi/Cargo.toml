@@ -12,7 +12,7 @@ test = false
 doctest = false
 
 [dependencies]
-napi = { workspace = true, features = ["napi6"] }
+napi = { workspace = true, features = ["napi6", "tracing"] }
 napi-derive = { workspace = true }
 vite_str = { workspace = true }
 vite_task_client = { workspace = true }
