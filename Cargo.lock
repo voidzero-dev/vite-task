@@ -2077,6 +2077,7 @@ dependencies = [
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "tracing",
 ]
 
 [[package]]
