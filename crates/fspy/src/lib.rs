@@ -5,15 +5,19 @@ pub mod error;
 #[cfg(not(target_env = "musl"))]
 mod ipc;
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_env = "ohos")))]
 #[path = "./unix/mod.rs"]
+mod os_impl;
+
+#[cfg(all(unix, target_env = "ohos"))]
+#[path = "./unix/mod_ohos.rs"]
 mod os_impl;
 
 #[cfg(target_os = "windows")]
 #[path = "./windows/mod.rs"]
 mod os_impl;
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_env = "ohos")))]
 mod arena;
 mod command;
 

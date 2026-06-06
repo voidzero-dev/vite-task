@@ -22,13 +22,16 @@ tokio = { workspace = true, features = ["net", "process", "io-util", "sync", "rt
 tokio-util = { workspace = true }
 which = { workspace = true, features = ["tracing"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 fspy_seccomp_unotify = { workspace = true, features = ["supervisor"] }
 nix = { workspace = true, features = ["uio"] }
 tokio = { workspace = true, features = ["bytes"] }
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(all(unix, not(target_env = "ohos")))'.dependencies]
 fspy_shared_unix = { workspace = true }
+nix = { workspace = true, features = ["fs", "process", "socket", "feature"] }
+
+[target.'cfg(target_env = "ohos")'.dependencies]
 nix = { workspace = true, features = ["fs", "process", "socket", "feature"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

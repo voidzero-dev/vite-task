@@ -187,3 +187,8 @@ codegen-units = 1
 strip = "symbols" # set to `false` for debug information
 debug = false # set to `true` for debug information
 panic = "abort" # Let it crash and force ourselves to write safe Rust.
+
+# Patch shared_memory to use nix 0.30+ so it compiles under
+# target_env = "ohos". Upstream PR: https://github.com/elast0ny/shared_memory/pull/118
+[patch.crates-io]
+shared_memory = { git = "https://github.com/social4hyq/shared_memory", branch = "nix-030-ohos" }

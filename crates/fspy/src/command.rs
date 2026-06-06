@@ -4,7 +4,7 @@ use std::{
     process::Stdio,
 };
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_env = "ohos")))]
 use fspy_shared_unix::exec::Exec;
 use rustc_hash::FxHashMap;
 use tokio::process::Command as TokioCommand;
@@ -50,7 +50,7 @@ impl Command {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_env = "ohos")))]
     #[must_use]
     pub(crate) fn get_exec(&self) -> Exec {
         use std::{
@@ -74,7 +74,7 @@ impl Command {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_env = "ohos")))]
     pub(crate) fn set_exec(&mut self, mut exec: Exec) {
         use std::os::unix::ffi::OsStringExt;
 

@@ -9,7 +9,7 @@ macro_rules! intercept {
                 ::core::assert!($crate::macros::symbol_exists(::core::stringify!($name)));
             }
         }
-        #[cfg(not(test))] // Don't interpose on the test binary
+        #[cfg(all(not(test), target_arch = "aarch64"))] // Don't interpose on the test binary
         const _: () = {
             #[unsafe(naked)]
             #[unsafe(export_name = ::core::concat!(::core::stringify!($name), 64))]
@@ -51,7 +51,7 @@ macro_rules! intercept_inner {
         const _: $fn_sig = $name;
         const _: $fn_sig = $crate::libc::$name;
 
-        #[cfg(not(test))] // Don't interpose on the test binary
+        #[cfg(all(not(test), target_arch = "aarch64"))] // Don't interpose on the test binary
         const _: () = {
             #[unsafe(naked)]
             #[unsafe(export_name = ::core::stringify!($name))]

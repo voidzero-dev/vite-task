@@ -176,6 +176,7 @@ mod linux_only {
         let _unused = execvpe::original;
         handle_exec(ExecResolveConfig::search_path_enabled(None), file, argv, envp)
     }
+    #[cfg(not(target_env = "ohos"))]
     intercept!(execveat(64): unsafe extern "C" fn(
         dirfd: c_int,
         prog: *const libc::c_char,
@@ -183,6 +184,7 @@ mod linux_only {
         envp: *const *mut libc::c_char,
         flags: c_int
     ) -> libc::c_int);
+    #[cfg(not(target_env = "ohos"))]
     unsafe extern "C" fn execveat(
         dirfd: c_int,
         pathname: *const libc::c_char,
