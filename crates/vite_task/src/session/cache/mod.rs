@@ -171,6 +171,21 @@ pub enum FingerprintMismatch {
     },
 }
 
+impl From<crate::session::execute::fingerprint::PostRunMismatch> for FingerprintMismatch {
+    fn from(mismatch: crate::session::execute::fingerprint::PostRunMismatch) -> Self {
+        use crate::session::execute::fingerprint::PostRunMismatch;
+        match mismatch {
+            PostRunMismatch::InputChanged { kind, path } => Self::InputChanged { kind, path },
+            PostRunMismatch::TrackedEnvChanged { name, old, new } => {
+                Self::TrackedEnvChanged { name, old, new }
+            }
+            PostRunMismatch::TrackedEnvGlobChanged { pattern, diff } => {
+                Self::TrackedEnvGlobChanged { pattern, diff }
+            }
+        }
+    }
+}
+
 impl Display for FingerprintMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -315,22 +330,7 @@ impl ExecutionCache {
 
             // Validate post-run fingerprint (inferred inputs + tracked envs)
             if let Some(mismatch) = cache_value.post_run_fingerprint.validate(workspace_root)? {
-                let fingerprint_mismatch = match mismatch {
-                    crate::session::execute::fingerprint::PostRunMismatch::InputChanged {
-                        kind,
-                        path,
-                    } => FingerprintMismatch::InputChanged { kind, path },
-                    crate::session::execute::fingerprint::PostRunMismatch::TrackedEnvChanged {
-                        name,
-                        old,
-                        new,
-                    } => FingerprintMismatch::TrackedEnvChanged { name, old, new },
-                    crate::session::execute::fingerprint::PostRunMismatch::TrackedEnvGlobChanged {
-                        pattern,
-                        diff,
-                    } => FingerprintMismatch::TrackedEnvGlobChanged { pattern, diff },
-                };
-                return Ok(Err(CacheMiss::FingerprintMismatch(fingerprint_mismatch)));
+                return Ok(Err(CacheMiss::FingerprintMismatch(mismatch.into())));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
