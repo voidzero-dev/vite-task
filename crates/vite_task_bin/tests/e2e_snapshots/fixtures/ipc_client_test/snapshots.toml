@@ -195,7 +195,7 @@ name = "fetch_env_tracked_invalidates_on_change"
 comment = """
 Exercises `getEnv(name, { tracked: true })`. The env value becomes part
 of the post-run fingerprint: the same value still hits, a different value
-misses with `tracked env 'PROBE_ENV' changed`.
+misses with `envs changed`.
 """
 ignore = true
 steps = [
@@ -228,5 +228,5 @@ steps = [
       "PROBE_ENV",
       "second",
     ],
-  ], comment = "cache miss: tracked env changed" },
+  ], comment = "cache miss: envs changed (PROBE_ENV changed)" },
 ]

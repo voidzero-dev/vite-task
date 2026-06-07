@@ -39,10 +39,10 @@ vt run: cache hit.
 
 ## `VITE_MODE=development vt run --cache build`
 
-cache miss: tracked env glob `VITE_*` — VITE_MODE value changed
+cache miss: envs changed — VITE_MODE value changed
 
 ```
-$ vite build ○ cache miss: tracked env glob 'VITE_*' changed, executing
+$ vite build ○ cache miss: envs changed, executing
 ```
 
 ## `vtt grep-file dist/assets/main.js BUILD_MODE_PROD`

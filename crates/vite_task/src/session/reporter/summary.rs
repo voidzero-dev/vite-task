@@ -414,6 +414,59 @@ fn duration_to_ms(d: Duration) -> u64 {
     d.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
+/// Convert a single runner-reported tracked-env change into a
+/// [`SpawnFingerprintChange`] so it renders identically to a manual `env`
+/// config change (via [`format_spawn_change`]).
+fn tracked_env_to_spawn_change(
+    name: &Str,
+    old: Option<&Str>,
+    new: Option<&Str>,
+) -> SpawnFingerprintChange {
+    match (old, new) {
+        (Some(old_value), Some(new_value)) => SpawnFingerprintChange::EnvValueChanged {
+            key: name.clone(),
+            old_value: old_value.clone(),
+            new_value: new_value.clone(),
+        },
+        (None, Some(value)) => {
+            SpawnFingerprintChange::EnvAdded { key: name.clone(), value: value.clone() }
+        }
+        (Some(value), None) => {
+            SpawnFingerprintChange::EnvRemoved { key: name.clone(), value: value.clone() }
+        }
+        (None, None) => SpawnFingerprintChange::EnvValueChanged {
+            key: name.clone(),
+            old_value: Str::from(""),
+            new_value: Str::from(""),
+        },
+    }
+}
+
+/// Render a runner-reported tracked-env-glob change set the same way a manual
+/// `env` config change set renders.
+fn format_tracked_env_glob_change(diff: &crate::session::execute::fingerprint::EnvGlobDiff) -> Str {
+    let mut changes: Vec<SpawnFingerprintChange> = Vec::new();
+    for (key, (old_value, new_value)) in &diff.changed {
+        changes.push(SpawnFingerprintChange::EnvValueChanged {
+            key: key.clone(),
+            old_value: old_value.clone(),
+            new_value: new_value.clone(),
+        });
+    }
+    for (key, value) in &diff.added {
+        changes.push(SpawnFingerprintChange::EnvAdded { key: key.clone(), value: value.clone() });
+    }
+    for (key, value) in &diff.removed {
+        changes.push(SpawnFingerprintChange::EnvRemoved { key: key.clone(), value: value.clone() });
+    }
+    if changes.is_empty() {
+        return Str::from("→ Cache miss: envs changed");
+    }
+    let formatted: Vec<Str> = changes.iter().map(format_spawn_change).collect();
+    let joined = formatted.iter().map(Str::as_str).collect::<Vec<_>>().join("; ");
+    vite_str::format!("→ Cache miss: {joined}")
+}
+
 fn format_summary_duration(d: Duration) -> Str {
     let formatted = vite_str::format!("{d:.2?}");
 
@@ -580,11 +633,15 @@ impl TaskResult {
                         let desc = format_input_change_str(*kind, path.as_str());
                         vite_str::format!("→ Cache miss: {desc}")
                     }
-                    SavedCacheMissReason::TrackedEnvChanged { name, .. } => {
-                        vite_str::format!("→ Cache miss: tracked env '{name}' changed")
+                    // Env changes reported by a runner-aware tool render the same
+                    // as changes from a manual `env` config — no "tracked"
+                    // wording, just the actual env change(s).
+                    SavedCacheMissReason::TrackedEnvChanged { name, old, new } => {
+                        let change = tracked_env_to_spawn_change(name, old.as_ref(), new.as_ref());
+                        vite_str::format!("→ Cache miss: {}", format_spawn_change(&change))
                     }
-                    SavedCacheMissReason::TrackedEnvGlobChanged { pattern, .. } => {
-                        vite_str::format!("→ Cache miss: tracked env glob '{pattern}' changed")
+                    SavedCacheMissReason::TrackedEnvGlobChanged { diff, .. } => {
+                        format_tracked_env_glob_change(diff)
                     }
                 },
             },

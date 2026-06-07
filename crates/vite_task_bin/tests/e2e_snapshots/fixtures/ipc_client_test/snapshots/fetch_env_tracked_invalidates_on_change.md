@@ -2,7 +2,7 @@
 
 Exercises `getEnv(name, { tracked: true })`. The env value becomes part
 of the post-run fingerprint: the same value still hits, a different value
-misses with `tracked env 'PROBE_ENV' changed`.
+misses with `envs changed`.
 
 ## `PROBE_ENV=first vt run fetch-env`
 
@@ -25,8 +25,8 @@ vt run: cache hit.
 
 ## `PROBE_ENV=second vt run fetch-env`
 
-cache miss: tracked env changed
+cache miss: envs changed (PROBE_ENV changed)
 
 ```
-$ node scripts/fetch_env.mjs ○ cache miss: tracked env 'PROBE_ENV' changed, executing
+$ node scripts/fetch_env.mjs ○ cache miss: envs changed, executing
 ```

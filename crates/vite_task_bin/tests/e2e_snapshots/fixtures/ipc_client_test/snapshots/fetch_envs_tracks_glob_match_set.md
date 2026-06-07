@@ -38,7 +38,7 @@ vt run: cache hit.
 change: PROBE_A value differs → cache miss (TrackedEnvGlobChanged / changed)
 
 ```
-$ node scripts/fetch_envs.mjs ○ cache miss: tracked env glob 'PROBE_*' changed, executing
+$ node scripts/fetch_envs.mjs ○ cache miss: envs changed, executing
 ```
 
 ## `PROBE_A=changed PROBE_B=b PROBE_C=c vt run fetch-envs`
@@ -46,7 +46,7 @@ $ node scripts/fetch_envs.mjs ○ cache miss: tracked env glob 'PROBE_*' changed
 add: PROBE_C is new under the glob → cache miss (added)
 
 ```
-$ node scripts/fetch_envs.mjs ○ cache miss: tracked env glob 'PROBE_*' changed, executing
+$ node scripts/fetch_envs.mjs ○ cache miss: envs changed, executing
 ```
 
 ## `PROBE_B=b PROBE_C=c vt run fetch-envs`
@@ -54,7 +54,7 @@ $ node scripts/fetch_envs.mjs ○ cache miss: tracked env glob 'PROBE_*' changed
 remove: PROBE_A dropped from the match-set → cache miss (removed)
 
 ```
-$ node scripts/fetch_envs.mjs ○ cache miss: tracked env glob 'PROBE_*' changed, executing
+$ node scripts/fetch_envs.mjs ○ cache miss: envs changed, executing
 ```
 
 ## `PROBE_B=b PROBE_C=c UNRELATED=noise vt run fetch-envs`

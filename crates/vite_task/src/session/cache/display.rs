@@ -179,16 +179,11 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                     let desc = format_input_change_str(*kind, path.as_str());
                     return Some(vite_str::format!("○ cache miss: {desc}, executing"));
                 }
-                FingerprintMismatch::TrackedEnvChanged { name, .. } => {
-                    return Some(vite_str::format!(
-                        "○ cache miss: tracked env '{name}' changed, executing"
-                    ));
-                }
-                FingerprintMismatch::TrackedEnvGlobChanged { pattern, .. } => {
-                    return Some(vite_str::format!(
-                        "○ cache miss: tracked env glob '{pattern}' changed, executing"
-                    ));
-                }
+                // Env changes reported by a runner-aware tool render the same as
+                // changes detected from a manual `env` config — the user only
+                // cares that envs changed, not how the change was discovered.
+                FingerprintMismatch::TrackedEnvChanged { .. }
+                | FingerprintMismatch::TrackedEnvGlobChanged { .. } => "envs changed",
             };
             Some(vite_str::format!("○ cache miss: {reason}, executing"))
         }

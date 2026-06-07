@@ -85,7 +85,7 @@ steps = [
       "VITE_MODE",
       "development",
     ],
-  ], comment = "cache miss: tracked env glob `VITE_*` — VITE_MODE value changed" },
+  ], comment = "cache miss: envs changed — VITE_MODE value changed" },
   { argv = [
     "vtt",
     "grep-file",
@@ -103,7 +103,7 @@ steps = [
 [[e2e]]
 name = "vite_node_env_change_invalidates_cache"
 comment = """
-`NODE_ENV` enters the build's cache fingerprint via Vite's `getEnv('NODE_ENV')` call in `resolveConfig`. Same value → cache hit; different value → cache miss with `tracked env 'NODE_ENV' changed`.
+`NODE_ENV` enters the build's cache fingerprint via Vite's `getEnv('NODE_ENV')` call in `resolveConfig`. Same value → cache hit; different value → cache miss with `envs changed`.
 """
 ignore = true
 steps = [
@@ -139,6 +139,6 @@ steps = [
       "NODE_ENV",
       "development",
     ],
-  ], comment = "cache miss: tracked env 'NODE_ENV' changed" },
+  ], comment = "cache miss: envs changed (NODE_ENV changed)" },
 ]
 
