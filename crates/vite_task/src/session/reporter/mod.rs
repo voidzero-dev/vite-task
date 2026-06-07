@@ -310,10 +310,15 @@ fn format_error_message(message: &str) -> Str {
 
 /// Write the trailing output for a leaf execution: optional extra content (e.g., grouped
 /// output block), error message, and a separating newline.
+///
+/// The separating newline pairs with the per-task command line printed in
+/// `start`. Under `--silent` (no command line) it is skipped, so back-to-back
+/// task output isn't padded with blank lines.
 fn write_leaf_trailing_output(
     writer: &std::cell::RefCell<Box<dyn Write>>,
     error: Option<ExecutionError>,
     started: bool,
+    silent: bool,
     extra: &[u8],
 ) {
     let mut buf = Vec::new();
@@ -325,7 +330,7 @@ fn write_leaf_trailing_output(
         buf.extend_from_slice(format_error_message(&message).as_bytes());
     }
 
-    if started {
+    if started && !silent {
         buf.push(b'\n');
     }
 

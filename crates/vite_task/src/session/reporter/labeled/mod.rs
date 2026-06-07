@@ -21,18 +21,24 @@ pub struct LabeledReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl LabeledReporterBuilder {
     /// `writer` is stored unwrapped — the reporter's own writes pick
     /// colour-vs-plain at format time via `ColorizeExt`. Child-process
     /// pipes are stripped per-stream inside `LeafExecutionReporter::start`.
+    ///
+    /// `silent` suppresses the labeled command line / cache indicator emitted
+    /// in `LeafExecutionReporter::start`; task output and error banners are
+    /// unaffected.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,
         color_support: ColorSupport,
+        silent: bool,
     ) -> Self {
-        Self { workspace_path, writer, color_support }
+        Self { workspace_path, writer, color_support, silent }
     }
 }
 
@@ -42,6 +48,7 @@ impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
             writer: Rc::new(RefCell::new(self.writer)),
             workspace_path: self.workspace_path,
             color_support: self.color_support,
+            silent: self.silent,
         })
     }
 }
@@ -50,6 +57,7 @@ struct LabeledGraphReporter {
     writer: Rc<RefCell<Box<dyn Write>>>,
     workspace_path: Arc<AbsolutePath>,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl GraphExecutionReporter for LabeledGraphReporter {
@@ -64,6 +72,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
             workspace_path: Arc::clone(&self.workspace_path),
             started: false,
             color_support: self.color_support,
+            silent: self.silent,
         })
     }
 
@@ -80,20 +89,28 @@ struct LabeledLeafReporter {
     workspace_path: Arc<AbsolutePath>,
     started: bool,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl LeafExecutionReporter for LabeledLeafReporter {
     fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
         let label = format_task_label(&self.display);
-        let line =
-            format_command_with_cache_status(&self.display, &self.workspace_path, &cache_status);
 
         self.started = true;
 
-        let labeled_line = vite_str::format!("{label} {line}");
-        let mut writer = self.writer.borrow_mut();
-        let _ = writer.write_all(labeled_line.as_bytes());
-        let _ = writer.flush();
+        // `--silent` suppresses the labeled command line / cache indicator; the
+        // task's own output still streams through the labeled pipe writers below.
+        if !self.silent {
+            let line = format_command_with_cache_status(
+                &self.display,
+                &self.workspace_path,
+                &cache_status,
+            );
+            let labeled_line = vite_str::format!("{label} {line}");
+            let mut writer = self.writer.borrow_mut();
+            let _ = writer.write_all(labeled_line.as_bytes());
+            let _ = writer.flush();
+        }
 
         let prefix = vite_str::format!("{label} ");
 
@@ -118,7 +135,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
         _cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
     ) {
-        write_leaf_trailing_output(&self.writer, error, self.started, &[]);
+        write_leaf_trailing_output(&self.writer, error, self.started, self.silent, &[]);
     }
 }
 
@@ -151,6 +168,7 @@ mod tests {
             test_path(),
             Box::new(std::io::sink()),
             ColorSupport::uniform(false),
+            false,
         ));
         let mut reporter = builder.build();
         let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));

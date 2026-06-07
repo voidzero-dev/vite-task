@@ -40,6 +40,11 @@ pub struct RunFlags {
     #[clap(default_value = "false", short = 'v', long)]
     pub verbose: bool,
 
+    /// Suppress the runner's own output: the per-task command line, cache-status
+    /// indicators, and the run summary. The tasks' own output is unaffected.
+    #[clap(default_value = "false", short = 's', long, conflicts_with = "verbose")]
+    pub silent: bool,
+
     /// Force caching on for all tasks and scripts.
     #[clap(long, conflicts_with = "no_cache")]
     pub cache: bool,

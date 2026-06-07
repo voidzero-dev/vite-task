@@ -33,6 +33,7 @@ pub struct SummaryReporterBuilder {
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
+    silent: bool,
 }
 
 impl SummaryReporterBuilder {
@@ -40,6 +41,14 @@ impl SummaryReporterBuilder {
     /// owns per-stream stripping of the child-process pipe writers; the
     /// reporter's own summary text picks colour-vs-plain at format time
     /// via `ColorizeExt`, so `writer` is stored unwrapped.
+    ///
+    /// `silent` suppresses the run summary printed at finish. The summary is
+    /// still computed and persisted (so `--last-details` keeps working); only
+    /// the console output is skipped.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the mode reporter builders' constructors; the silent flag is one more knob"
+    )]
     pub fn new(
         inner: Box<dyn GraphExecutionReporterBuilder>,
         workspace_path: Arc<AbsolutePath>,
@@ -48,8 +57,9 @@ impl SummaryReporterBuilder {
         write_summary: Option<WriteSummaryFn>,
         program_name: Str,
         _color_support: ColorSupport,
+        silent: bool,
     ) -> Self {
-        Self { inner, workspace_path, writer, show_details, write_summary, program_name }
+        Self { inner, workspace_path, writer, show_details, write_summary, program_name, silent }
     }
 }
 
@@ -63,6 +73,7 @@ impl GraphExecutionReporterBuilder for SummaryReporterBuilder {
             show_details: self.show_details,
             write_summary: self.write_summary,
             program_name: self.program_name,
+            silent: self.silent,
         })
     }
 }
@@ -75,6 +86,7 @@ struct SummaryGraphReporter {
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
+    silent: bool,
 }
 
 impl GraphExecutionReporter for SummaryGraphReporter {
@@ -131,7 +143,11 @@ impl GraphExecutionReporter for SummaryGraphReporter {
 
         let summary = LastRunSummary { tasks, exit_code };
 
-        let summary_buf = if self.show_details {
+        // `--silent` suppresses the console summary; it is still persisted via
+        // `write_summary` below so `--last-details` continues to work.
+        let summary_buf = if self.silent {
+            Vec::new()
+        } else if self.show_details {
             format_full_summary(&summary)
         } else {
             format_compact_summary(&summary, &self.program_name)

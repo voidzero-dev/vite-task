@@ -16,6 +16,7 @@ pub struct InterleavedReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl InterleavedReporterBuilder {
@@ -24,12 +25,17 @@ impl InterleavedReporterBuilder {
     /// stored unwrapped. `color_support` is forwarded to the pipe writers
     /// in `LeafExecutionReporter::start`, where ANSI emitted by child tasks is stripped
     /// for non-terminal sinks.
+    ///
+    /// `silent` suppresses the per-task command line / cache indicator emitted
+    /// in `LeafExecutionReporter::start`; task output and error banners are
+    /// unaffected.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,
         color_support: ColorSupport,
+        silent: bool,
     ) -> Self {
-        Self { workspace_path, writer, color_support }
+        Self { workspace_path, writer, color_support, silent }
     }
 }
 
@@ -39,6 +45,7 @@ impl GraphExecutionReporterBuilder for InterleavedReporterBuilder {
             writer: Rc::new(RefCell::new(self.writer)),
             workspace_path: self.workspace_path,
             color_support: self.color_support,
+            silent: self.silent,
         })
     }
 }
@@ -47,6 +54,7 @@ struct InterleavedGraphReporter {
     writer: Rc<RefCell<Box<dyn Write>>>,
     workspace_path: Arc<AbsolutePath>,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl GraphExecutionReporter for InterleavedGraphReporter {
@@ -67,6 +75,7 @@ impl GraphExecutionReporter for InterleavedGraphReporter {
             stdio_suggestion,
             started: false,
             color_support: self.color_support,
+            silent: self.silent,
         })
     }
 
@@ -84,18 +93,25 @@ struct InterleavedLeafReporter {
     stdio_suggestion: StdioSuggestion,
     started: bool,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl LeafExecutionReporter for InterleavedLeafReporter {
     fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
-        let line =
-            format_command_with_cache_status(&self.display, &self.workspace_path, &cache_status);
-
         self.started = true;
 
-        let mut writer = self.writer.borrow_mut();
-        let _ = writer.write_all(line.as_bytes());
-        let _ = writer.flush();
+        // `--silent` suppresses the command line / cache indicator; the task's
+        // own output still streams through the pipe writers below.
+        if !self.silent {
+            let line = format_command_with_cache_status(
+                &self.display,
+                &self.workspace_path,
+                &cache_status,
+            );
+            let mut writer = self.writer.borrow_mut();
+            let _ = writer.write_all(line.as_bytes());
+            let _ = writer.flush();
+        }
 
         StdioConfig {
             suggestion: self.stdio_suggestion,
@@ -118,7 +134,7 @@ impl LeafExecutionReporter for InterleavedLeafReporter {
         _cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
     ) {
-        write_leaf_trailing_output(&self.writer, error, self.started, &[]);
+        write_leaf_trailing_output(&self.writer, error, self.started, self.silent, &[]);
     }
 }
 
@@ -150,6 +166,7 @@ mod tests {
             test_path(),
             Box::new(std::io::sink()),
             ColorSupport::uniform(false),
+            false,
         ));
         let mut reporter = builder.build();
         let mut leaf = reporter.new_leaf_execution(display, leaf_kind);
