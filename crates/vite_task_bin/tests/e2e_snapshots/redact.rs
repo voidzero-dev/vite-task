@@ -64,6 +64,20 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
 
     redact_string(&mut output, &redactions);
 
+    // Strip the Windows `.exe` suffix from the runner binaries. clap derives the
+    // program name in usage/error strings from argv[0], so on Windows it emits
+    // `vt.exe`/`vtt.exe` where Unix emits `vt`/`vtt`. Dropping the extension keeps
+    // such snapshots platform-independent. No-op on Unix (no `.exe` to match).
+    {
+        use cow_utils::CowUtils as _;
+        for exe in ["vt.exe", "vtt.exe"] {
+            let stripped = exe.strip_suffix(".exe").unwrap();
+            if let Cow::Owned(replaced) = output.as_str().cow_replace(exe, stripped) {
+                output = replaced;
+            }
+        }
+    }
+
     // Redact UUIDs (e.g. cache archive filenames `<uuid>.tar.zst`) to "<uuid>"
     let uuid_regex =
         regex::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap();

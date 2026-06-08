@@ -263,6 +263,10 @@ impl<'a> Session<'a> {
     /// # Panics
     ///
     /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "single dispatch point that plans the command and wires up the reporter pipeline"
+    )]
     async fn main_inner(&mut self, command: Command) -> Result<(), SessionError> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
@@ -335,6 +339,9 @@ impl<'a> Session<'a> {
                     stderr: stderr_supports_color(),
                 };
 
+                // `--silent` suppresses the per-task command line and summary.
+                let silent = run_command.flags.silent;
+
                 let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match run_command
                     .flags
                     .log
@@ -343,16 +350,19 @@ impl<'a> Session<'a> {
                         Arc::clone(&workspace_path),
                         writer,
                         color_support,
+                        silent,
                     )),
                     crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
                         Arc::clone(&workspace_path),
                         writer,
                         color_support,
+                        silent,
                     )),
                     crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
                         Arc::clone(&workspace_path),
                         writer,
                         color_support,
+                        silent,
                     )),
                 };
 
@@ -364,6 +374,7 @@ impl<'a> Session<'a> {
                     Some(self.make_summary_writer()),
                     self.program_name.clone(),
                     color_support,
+                    silent,
                 ));
                 // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
                 // the signal directly from the terminal driver and handle it

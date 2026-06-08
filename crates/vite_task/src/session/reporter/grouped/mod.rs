@@ -22,6 +22,7 @@ pub struct GroupedReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl GroupedReporterBuilder {
@@ -30,12 +31,18 @@ impl GroupedReporterBuilder {
     /// `LeafExecutionReporter::start`) strip ANSI on the way into the buffer,
     /// so by the time the buffer reaches `writer` it already matches the
     /// terminal's colour capability. `writer` is therefore stored unwrapped.
+    ///
+    /// `silent` suppresses the runner's chrome — the labeled command line /
+    /// cache indicator emitted in `LeafExecutionReporter::start` and the
+    /// `── [pkg#task] ──` block header — leaving just the buffered task output;
+    /// error banners are unaffected.
     pub fn new(
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,
         color_support: ColorSupport,
+        silent: bool,
     ) -> Self {
-        Self { workspace_path, writer, color_support }
+        Self { workspace_path, writer, color_support, silent }
     }
 }
 
@@ -45,6 +52,7 @@ impl GraphExecutionReporterBuilder for GroupedReporterBuilder {
             writer: Rc::new(RefCell::new(self.writer)),
             workspace_path: self.workspace_path,
             color_support: self.color_support,
+            silent: self.silent,
         })
     }
 }
@@ -53,6 +61,7 @@ struct GroupedGraphReporter {
     writer: Rc<RefCell<Box<dyn Write>>>,
     workspace_path: Arc<AbsolutePath>,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl GraphExecutionReporter for GroupedGraphReporter {
@@ -70,6 +79,7 @@ impl GraphExecutionReporter for GroupedGraphReporter {
             started: false,
             grouped_buffer: None,
             color_support: self.color_support,
+            silent: self.silent,
         })
     }
 
@@ -88,20 +98,27 @@ struct GroupedLeafReporter {
     started: bool,
     grouped_buffer: Option<Rc<RefCell<Vec<u8>>>>,
     color_support: ColorSupport,
+    silent: bool,
 }
 
 impl LeafExecutionReporter for GroupedLeafReporter {
     fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
-        let line =
-            format_command_with_cache_status(&self.display, &self.workspace_path, &cache_status);
-
         self.started = true;
 
         // Print labeled command line immediately (before output is buffered).
-        let labeled_line = vite_str::format!("{} {line}", self.label);
-        let mut writer = self.writer.borrow_mut();
-        let _ = writer.write_all(labeled_line.as_bytes());
-        let _ = writer.flush();
+        // `--silent` suppresses it; the buffered task output is still flushed
+        // in `finish`.
+        if !self.silent {
+            let line = format_command_with_cache_status(
+                &self.display,
+                &self.workspace_path,
+                &cache_status,
+            );
+            let labeled_line = vite_str::format!("{} {line}", self.label);
+            let mut writer = self.writer.borrow_mut();
+            let _ = writer.write_all(labeled_line.as_bytes());
+            let _ = writer.flush();
+        }
 
         // Create shared buffer for both stdout and stderr.
         let buffer = Rc::new(RefCell::new(Vec::new()));
@@ -128,23 +145,26 @@ impl LeafExecutionReporter for GroupedLeafReporter {
         _cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
     ) {
-        // Build grouped block: header + buffered output.
+        // Build grouped block: header + buffered output. `--silent` drops the
+        // `── [pkg#task] ──` block header, leaving just the task's own output.
         let mut extra = Vec::new();
         if let Some(ref grouped_buffer) = self.grouped_buffer {
             let content = grouped_buffer.borrow();
             if !content.is_empty() {
-                let header = vite_str::format!(
-                    "{} {} {}\n",
-                    "──".style(Style::new().bright_black()),
-                    self.label,
-                    "──".style(Style::new().bright_black())
-                );
-                extra.extend_from_slice(header.as_bytes());
+                if !self.silent {
+                    let header = vite_str::format!(
+                        "{} {} {}\n",
+                        "──".style(Style::new().bright_black()),
+                        self.label,
+                        "──".style(Style::new().bright_black())
+                    );
+                    extra.extend_from_slice(header.as_bytes());
+                }
                 extra.extend_from_slice(&content);
             }
         }
 
-        write_leaf_trailing_output(&self.writer, error, self.started, &extra);
+        write_leaf_trailing_output(&self.writer, error, self.started, self.silent, &extra);
     }
 }
 
@@ -177,6 +197,7 @@ mod tests {
             test_path(),
             Box::new(std::io::sink()),
             ColorSupport::uniform(false),
+            false,
         ));
         let mut reporter = builder.build();
         let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));

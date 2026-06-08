@@ -132,3 +132,45 @@ steps = [
     "--last-details",
   ], comment = "display saved summary" },
 ]
+
+[[e2e]]
+name = "single_task_silent_suppresses_command_line_and_summary"
+comment = """
+`vt run --silent` on a cache hit should print only the task's own output — no command line, no cache-hit indicator, and no summary.
+"""
+cwd = "packages/a"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "first run, populate cache" },
+  { argv = [
+    "vt",
+    "run",
+    "--silent",
+    "build",
+  ], comment = "second run, cache hit → only task output" },
+]
+
+[[e2e]]
+name = "multi_task_silent_suppresses_command_lines_and_summary"
+comment = """
+`vt run -r --silent` should suppress every per-task command line and the multi-task summary, leaving only the tasks' own output.
+"""
+steps = [["vt", "run", "-r", "--silent", "build"]]
+
+[[e2e]]
+name = "silent_conflicts_with_verbose"
+comment = """
+`--silent` and `--verbose` are mutually exclusive; combining them is a usage error.
+"""
+cwd = "packages/a"
+steps = [["vt", "run", "--silent", "--verbose", "build"]]
+
+[[e2e]]
+name = "multi_task_silent_grouped_suppresses_block_headers"
+comment = """
+`vt run -r --silent --log grouped` should suppress the `── [pkg#task] ──` block headers that grouped mode normally prints, leaving only the tasks' own output.
+"""
+steps = [["vt", "run", "-r", "--silent", "--log", "grouped", "build"]]
