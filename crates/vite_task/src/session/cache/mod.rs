@@ -222,19 +222,17 @@ impl ExecutionCache {
 
         let db_path = path.join("cache.db");
         let conn = Connection::open(db_path.as_path())?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         // The schema version is encoded in the directory name (see
         // `cache_schema_dir_name`), so any database in this directory already has
-        // the current schema. There is nothing to migrate or version-check: just
-        // make sure the tables exist (a fresh database has none, an existing one
-        // keeps its rows).
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS cache_entries (key BLOB PRIMARY KEY, value BLOB);",
-            (),
-        )?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
-            (),
+        // the current schema: there is nothing to migrate or version-check. Set
+        // WAL mode and ensure the tables exist in a single round-trip. On an
+        // existing database the `IF NOT EXISTS` creates are near-free no-ops (a
+        // schema lookup, no write); on a fresh one they create the tables. This
+        // runs once per process (the cache is `OnceCell`-initialized).
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             CREATE TABLE IF NOT EXISTS cache_entries (key BLOB PRIMARY KEY, value BLOB);
+             CREATE TABLE IF NOT EXISTS task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
         )?;
         // Lock is released when lock_file is dropped
         Ok(Self { conn: Mutex::new(conn) })
