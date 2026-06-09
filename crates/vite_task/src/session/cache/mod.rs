@@ -200,7 +200,7 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
 /// its own cache warm across branch switches, and a cache from a different
 /// version is simply ignored (it lives in a directory this build never looks
 /// at) rather than aborting the run. Bumping the version starts a fresh cache.
-pub const CACHE_SCHEMA_VERSION: u32 = 13;
+const CACHE_SCHEMA_VERSION: u32 = 13;
 
 /// Name of the per-version subdirectory (e.g. `v13`) under the task-cache
 /// directory that holds the database and output archives for the current
