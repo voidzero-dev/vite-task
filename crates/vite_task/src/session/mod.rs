@@ -257,8 +257,6 @@ impl<'a> Session<'a> {
     ) -> anyhow::Result<Self> {
         let (workspace_root, _) = find_workspace_root(&cwd)?;
         let cache_base_path = get_cache_path_of_workspace(&workspace_root.path);
-        // Migrate away from the pre-versioned cache layout if present.
-        cleanup_legacy_cache_layout(&cache_base_path);
         // Nest the cache in a per-schema-version subdirectory so builds that pin
         // different schema versions don't share (and corrupt) one database.
         let cache_path = cache_base_path.join(cache::cache_schema_dir_name().as_str());
@@ -630,7 +628,13 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the cache database cannot be loaded or created.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
-        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(&self.cache_path))
+        self.cache.get_or_try_init(|| {
+            // One-time migration away from the pre-versioned cache layout, done
+            // lazily here (rather than on every session startup) so commands
+            // that never open the cache don't pay for it.
+            cleanup_legacy_cache_layout(&self.cache_base_path);
+            ExecutionCache::load_from_path(&self.cache_path)
+        })
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {

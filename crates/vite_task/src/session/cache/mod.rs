@@ -221,31 +221,37 @@ impl ExecutionCache {
         let db_path = path.join("cache.db");
         let conn = Connection::open(db_path.as_path())?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
-        let set_version_sql = vite_str::format!("PRAGMA user_version = {CACHE_SCHEMA_VERSION}");
         loop {
             let user_version: u32 = conn.query_one("PRAGMA user_version", (), |row| row.get(0))?;
-            if user_version == CACHE_SCHEMA_VERSION {
-                break; // current version, ready to use
-            }
-            if user_version == 0 {
-                // fresh new db
-                conn.execute("CREATE TABLE cache_entries (key BLOB PRIMARY KEY, value BLOB);", ())?;
-                conn.execute(
-                    "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
-                    (),
-                )?;
-                conn.execute(set_version_sql.as_str(), ())?;
-            } else {
-                // Any other version (older or newer) is incompatible with this
-                // build, so reset and rebuild from scratch. The per-version
-                // cache directory makes this unreachable in normal use, but if a
-                // database from a different schema version ever lands here we
-                // self-heal rather than aborting the run. The VACUUM clears
-                // `user_version` back to 0, so the next iteration recreates the
-                // tables above.
-                conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
-                conn.execute("VACUUM", ())?;
-                conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
+            match user_version {
+                v if v == CACHE_SCHEMA_VERSION => break, // current version, ready to use
+                0 => {
+                    // fresh new db
+                    conn.execute(
+                        "CREATE TABLE cache_entries (key BLOB PRIMARY KEY, value BLOB);",
+                        (),
+                    )?;
+                    conn.execute(
+                        "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
+                        (),
+                    )?;
+                    conn.execute(
+                        vite_str::format!("PRAGMA user_version = {CACHE_SCHEMA_VERSION}").as_str(),
+                        (),
+                    )?;
+                }
+                _ => {
+                    // Any other version (older or newer) is incompatible with this
+                    // build, so reset and rebuild from scratch. The per-version
+                    // cache directory makes this unreachable in normal use, but if a
+                    // database from a different schema version ever lands here we
+                    // self-heal rather than aborting the run. The VACUUM clears
+                    // `user_version` back to 0, so the next iteration recreates the
+                    // tables above.
+                    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
+                    conn.execute("VACUUM", ())?;
+                    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
+                }
             }
         }
         // Lock is released when lock_file is dropped
