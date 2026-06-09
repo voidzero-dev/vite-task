@@ -1,0 +1,10 @@
+{
+  "name": "@test/a",
+  "scripts": {
+    "build": "echo building a"
+  },
+  "dependencies": {
+    "@test/b": "workspace:*",
+    "@test/base": "workspace:*"
+  }
+}

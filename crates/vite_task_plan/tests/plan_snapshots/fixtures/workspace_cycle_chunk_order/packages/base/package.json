@@ -1,0 +1,6 @@
+{
+  "name": "@test/base",
+  "scripts": {
+    "build": "echo building base"
+  }
+}

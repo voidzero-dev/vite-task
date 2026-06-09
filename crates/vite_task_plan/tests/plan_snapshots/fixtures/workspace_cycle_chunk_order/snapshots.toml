@@ -1,0 +1,14 @@
+# Regression coverage for pnpm chunk semantics around tolerated workspace cycles.
+#
+# Package graph:
+# - a <-> b form a workspace package-ordering cycle
+# - a also depends on base
+# - consumer depends on b
+#
+# pnpm would sequence this as [base], [a, b], [consumer]. If breaking the cycle
+# drops only the a/b internal edges, b can become ready before base and consumer
+# can become ready before a, so this fixture records the graph shape explicitly.
+[[plan]]
+compact = true
+name = "preserves_external_chunk_order"
+args = ["run", "-r", "build"]
