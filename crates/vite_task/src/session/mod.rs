@@ -172,10 +172,10 @@ pub struct Session<'a> {
     /// Per-schema-version cache directory (e.g. `node_modules/.vite/task-cache/v13`)
     /// that holds the database and output archives for this build.
     cache_path: AbsolutePathBuf,
-    /// Base task-cache directory (parent of all `vN` version directories).
+    /// Root task-cache directory (parent of all `vN` version directories).
     /// Used by `cache clean` to remove every version's cache (and any leftover
     /// from a pre-versioned layout) in one shot.
-    cache_base_path: AbsolutePathBuf,
+    cache_root: AbsolutePathBuf,
 }
 
 fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf {
@@ -226,10 +226,10 @@ impl<'a> Session<'a> {
         config: SessionConfig<'a>,
     ) -> anyhow::Result<Self> {
         let (workspace_root, _) = find_workspace_root(&cwd)?;
-        let cache_base_path = get_cache_path_of_workspace(&workspace_root.path);
+        let cache_root = get_cache_path_of_workspace(&workspace_root.path);
         // Nest the cache in a per-schema-version subdirectory so builds that pin
         // different schema versions don't share (and corrupt) one database.
-        let cache_path = cache_base_path.join(cache::cache_schema_dir_name().as_str());
+        let cache_path = cache_root.join(cache::cache_schema_dir_name().as_str());
 
         // Prepend workspace's node_modules/.bin to PATH
         let workspace_node_modules_bin = workspace_root.path.join("node_modules").join(".bin");
@@ -248,7 +248,7 @@ impl<'a> Session<'a> {
             program_name: config.program_name,
             cache: OnceCell::new(),
             cache_path,
-            cache_base_path,
+            cache_root,
         })
     }
 
@@ -415,8 +415,8 @@ impl<'a> Session<'a> {
             CacheSubcommand::Clean => {
                 // Remove the whole task-cache directory (every version), not just
                 // the current build's `vN` subdirectory.
-                if self.cache_base_path.as_path().exists() {
-                    std::fs::remove_dir_all(&self.cache_base_path)?;
+                if self.cache_root.as_path().exists() {
+                    std::fs::remove_dir_all(&self.cache_root)?;
                 }
             }
         }
