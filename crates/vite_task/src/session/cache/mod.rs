@@ -188,9 +188,28 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
     }
 }
 
+/// On-disk schema version of the cache database.
+///
+/// Bump this whenever the database layout (table structure, serialization
+/// format, or fingerprint semantics) changes in an incompatible way.
+///
+/// The database lives in a per-version subdirectory named by
+/// [`cache_schema_dir_name`] (e.g. `v13`). Keying the storage location on this
+/// version means Vite+ builds that pin different schema versions never open
+/// each other's database: each keeps its own cache warm across branch switches,
+/// instead of one build aborting on a database written by another.
+pub const CACHE_SCHEMA_VERSION: u32 = 13;
+
+/// Name of the per-version subdirectory (e.g. `v13`) under the task-cache
+/// directory that holds the database and output archives for the current
+/// [`CACHE_SCHEMA_VERSION`].
+pub fn cache_schema_dir_name() -> Str {
+    vite_str::format!("v{CACHE_SCHEMA_VERSION}")
+}
+
 impl ExecutionCache {
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn load_from_path(path: &AbsolutePath, program_name: &str) -> anyhow::Result<Self> {
+    pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
         tracing::info!("Creating task cache directory at {:?}", path);
         std::fs::create_dir_all(path)?;
 
@@ -202,35 +221,31 @@ impl ExecutionCache {
         let db_path = path.join("cache.db");
         let conn = Connection::open(db_path.as_path())?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        let set_version_sql = vite_str::format!("PRAGMA user_version = {CACHE_SCHEMA_VERSION}");
         loop {
             let user_version: u32 = conn.query_one("PRAGMA user_version", (), |row| row.get(0))?;
-            match user_version {
-                0 => {
-                    // fresh new db
-                    conn.execute(
-                        "CREATE TABLE cache_entries (key BLOB PRIMARY KEY, value BLOB);",
-                        (),
-                    )?;
-                    conn.execute(
-                        "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
-                        (),
-                    )?;
-                    conn.execute("PRAGMA user_version = 13", ())?;
-                }
-                1..=12 => {
-                    // old internal db version. reset
-                    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
-                    conn.execute("VACUUM", ())?;
-                    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
-                }
-                13 => break, // current version
-                14.. => {
-                    return Err(anyhow::anyhow!(
-                        "Unrecognized database version: {user_version}. \
-                         The cache may have been created by a newer version of Vite Task. \
-                         Run `{program_name} cache clean` to remove it."
-                    ));
-                }
+            if user_version == CACHE_SCHEMA_VERSION {
+                break; // current version, ready to use
+            }
+            if user_version == 0 {
+                // fresh new db
+                conn.execute("CREATE TABLE cache_entries (key BLOB PRIMARY KEY, value BLOB);", ())?;
+                conn.execute(
+                    "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
+                    (),
+                )?;
+                conn.execute(set_version_sql.as_str(), ())?;
+            } else {
+                // Any other version (older or newer) is incompatible with this
+                // build, so reset and rebuild from scratch. The per-version
+                // cache directory makes this unreachable in normal use, but if a
+                // database from a different schema version ever lands here we
+                // self-heal rather than aborting the run. The VACUUM clears
+                // `user_version` back to 0, so the next iteration recreates the
+                // tables above.
+                conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
+                conn.execute("VACUUM", ())?;
+                conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
             }
         }
         // Lock is released when lock_file is dropped
@@ -525,5 +540,111 @@ impl ExecutionCache {
         out.write_all(b"------- cache_entries -------\n")?;
         self.list_table::<CacheEntryKey, CacheEntryValue>("cache_entries", &mut out).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+    use tempfile::TempDir;
+    use vite_path::AbsolutePathBuf;
+
+    use super::*;
+
+    fn temp_dir() -> (TempDir, AbsolutePathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let dir = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        (tmp, dir)
+    }
+
+    fn open_raw(db: &AbsolutePath) -> Connection {
+        Connection::open(db.as_path()).unwrap()
+    }
+
+    /// Regression test for vite-plus#1785: a cache database written by a build
+    /// with a *newer* schema version must not crash an older build. The older
+    /// build should reset and rebuild the database instead of failing with
+    /// "Unrecognized database version".
+    #[test]
+    fn opens_future_version_database_by_resetting() {
+        let (_tmp, dir) = temp_dir();
+
+        // Create a current-version cache, then drop it to release the lock.
+        let cache = ExecutionCache::load_from_path(&dir).unwrap();
+        drop(cache);
+
+        // Simulate a newer build having bumped the schema and written an entry.
+        let db_path = dir.join("cache.db");
+        {
+            let conn = open_raw(&db_path);
+            conn.execute("INSERT INTO cache_entries (key, value) VALUES (X'01', X'02')", ())
+                .unwrap();
+            conn.execute(
+                vite_str::format!("PRAGMA user_version = {}", CACHE_SCHEMA_VERSION + 1).as_str(),
+                (),
+            )
+            .unwrap();
+        }
+
+        // Re-opening with the current build must succeed (previously a hard error).
+        let cache = ExecutionCache::load_from_path(&dir).unwrap();
+        drop(cache);
+
+        // The database was reset back to the current version and wiped.
+        let conn = open_raw(&db_path);
+        let version: u32 = conn.query_one("PRAGMA user_version", (), |r| r.get(0)).unwrap();
+        assert_eq!(version, CACHE_SCHEMA_VERSION);
+        let count: u32 =
+            conn.query_one("SELECT COUNT(*) FROM cache_entries", (), |r| r.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    /// An older schema version is likewise reset rather than erroring.
+    #[test]
+    fn opens_older_version_database_by_resetting() {
+        let (_tmp, dir) = temp_dir();
+
+        let cache = ExecutionCache::load_from_path(&dir).unwrap();
+        drop(cache);
+
+        let db_path = dir.join("cache.db");
+        {
+            let conn = open_raw(&db_path);
+            conn.execute("PRAGMA user_version = 1", ()).unwrap();
+        }
+
+        let cache = ExecutionCache::load_from_path(&dir).unwrap();
+        drop(cache);
+
+        let conn = open_raw(&db_path);
+        let version: u32 = conn.query_one("PRAGMA user_version", (), |r| r.get(0)).unwrap();
+        assert_eq!(version, CACHE_SCHEMA_VERSION);
+    }
+
+    /// Two different schema-version directories under the same cache base are
+    /// fully independent, so caches from different vp versions never collide.
+    #[test]
+    fn version_directories_are_isolated() {
+        let (_tmp, base) = temp_dir();
+
+        let dir_a = base.join("v13");
+        let dir_b = base.join("v14");
+
+        drop(ExecutionCache::load_from_path(&dir_a).unwrap());
+        drop(ExecutionCache::load_from_path(&dir_b).unwrap());
+
+        assert!(dir_a.join("cache.db").as_path().exists());
+        assert!(dir_b.join("cache.db").as_path().exists());
+
+        // A row written into A is invisible to B.
+        {
+            let conn = open_raw(&dir_a.join("cache.db"));
+            conn.execute("INSERT INTO cache_entries (key, value) VALUES (X'01', X'02')", ())
+                .unwrap();
+        }
+        let count_b: u32 = open_raw(&dir_b.join("cache.db"))
+            .query_one("SELECT COUNT(*) FROM cache_entries", (), |r| r.get(0))
+            .unwrap();
+        assert_eq!(count_b, 0);
     }
 }
