@@ -1,0 +1,39 @@
+[[e2e]]
+name = "legacy_top_level_cache_is_migrated"
+comment = """
+A cache left by an older Vite+ build in the pre-versioned layout (a top-level `cache.db` and an orphaned output archive) is swept on the first run, and the cache is recreated under a per-schema-version subdirectory (`vN`). This is what lets builds that pin different Vite+ versions coexist instead of aborting on each other's database.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "write-file",
+    "node_modules/.vite/task-cache/cache.db",
+    "legacy-db",
+  ], comment = "plant a legacy top-level cache database" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "node_modules/.vite/task-cache/stale.tar.zst",
+    "legacy-archive",
+  ], comment = "plant an orphaned output archive next to it" },
+  { argv = [
+    "vtt",
+    "list-dir",
+    "node_modules/.vite/task-cache",
+  ], comment = "before: legacy files sit directly in the cache directory" },
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "first run migrates the layout, then executes (cache miss)" },
+  { argv = [
+    "vtt",
+    "list-dir",
+    "node_modules/.vite/task-cache",
+  ], comment = "after: legacy files are gone, replaced by the per-version subdir" },
+  { argv = [
+    "vt",
+    "run",
+    "cached-task",
+  ], comment = "cache hit from the migrated, versioned cache" },
+]
