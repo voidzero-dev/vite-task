@@ -173,7 +173,8 @@ pub struct Session<'a> {
     /// that holds the database and output archives for this build.
     cache_path: AbsolutePathBuf,
     /// Base task-cache directory (parent of all `vN` version directories).
-    /// Used by `cache clean` and legacy-layout cleanup.
+    /// Used by `cache clean` to remove every version's cache (and any leftover
+    /// from a pre-versioned layout) in one shot.
     cache_base_path: AbsolutePathBuf,
 }
 
@@ -184,37 +185,6 @@ fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf
             AbsolutePathBuf::new(env_cache_path.into()).expect("Cache path should be absolute")
         },
     )
-}
-
-/// Remove cache files left behind by the pre-versioned cache layout.
-///
-/// Older builds stored the database and output archives directly in the
-/// task-cache directory (e.g. `task-cache/cache.db`). The current layout nests
-/// them under a per-schema-version subdirectory (e.g. `task-cache/v13/`), so a
-/// top-level `cache.db` is a leftover that will never be read again. When we
-/// detect one, we delete it along with its sidecar files and the now-orphaned
-/// `*.tar.zst` output archives. Best-effort: errors are ignored.
-fn cleanup_legacy_cache_layout(cache_base_path: &AbsolutePath) {
-    // A top-level `cache.db` is the sentinel of the old layout. Without it
-    // there is nothing to migrate, so take the fast path and leave any other
-    // top-level files (e.g. a user's own files) untouched.
-    if !cache_base_path.join("cache.db").as_path().exists() {
-        return;
-    }
-
-    for name in ["cache.db", "cache.db-wal", "cache.db-shm", "db_open.lock", "last-summary.json"] {
-        let _ = std::fs::remove_file(cache_base_path.join(name).as_path());
-    }
-
-    // In the new layout no archive is ever written at the top level, so any
-    // top-level `*.tar.zst` is an orphan from the old layout.
-    if let Ok(entries) = std::fs::read_dir(cache_base_path.as_path()) {
-        for entry in entries.flatten() {
-            if entry.file_name().to_string_lossy().ends_with(".tar.zst") {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
-    }
 }
 
 impl<'a> Session<'a> {
@@ -628,13 +598,7 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the cache database cannot be loaded or created.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
-        self.cache.get_or_try_init(|| {
-            // One-time migration away from the pre-versioned cache layout, done
-            // lazily here (rather than on every session startup) so commands
-            // that never open the cache don't pay for it.
-            cleanup_legacy_cache_layout(&self.cache_base_path);
-            ExecutionCache::load_from_path(&self.cache_path)
-        })
+        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(&self.cache_path))
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {
@@ -897,64 +861,4 @@ fn stderr_supports_color() -> bool {
     use std::sync::OnceLock;
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| supports_color::on(supports_color::Stream::Stderr).is_some())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use tempfile::TempDir;
-
-    use super::*;
-
-    /// When a pre-versioned cache (`task-cache/cache.db` + archives at the top
-    /// level) is present, the legacy files are removed while the new
-    /// per-version directory is left untouched.
-    #[test]
-    fn cleanup_legacy_cache_layout_removes_top_level_artifacts() {
-        let tmp = TempDir::new().unwrap();
-        let base = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
-
-        // Old layout: db + sidecars + an output archive directly in the base dir.
-        fs::write(base.join("cache.db").as_path(), b"db").unwrap();
-        fs::write(base.join("cache.db-wal").as_path(), b"wal").unwrap();
-        fs::write(base.join("cache.db-shm").as_path(), b"shm").unwrap();
-        fs::write(base.join("db_open.lock").as_path(), b"").unwrap();
-        fs::write(base.join("last-summary.json").as_path(), b"{}").unwrap();
-        fs::write(base.join("abc.tar.zst").as_path(), b"archive").unwrap();
-
-        // New layout: a per-version directory that must be preserved.
-        let v_dir = base.join("v13");
-        fs::create_dir_all(v_dir.as_path()).unwrap();
-        fs::write(v_dir.join("cache.db").as_path(), b"keep").unwrap();
-
-        cleanup_legacy_cache_layout(&base);
-
-        assert!(!base.join("cache.db").as_path().exists());
-        assert!(!base.join("cache.db-wal").as_path().exists());
-        assert!(!base.join("cache.db-shm").as_path().exists());
-        assert!(!base.join("db_open.lock").as_path().exists());
-        assert!(!base.join("last-summary.json").as_path().exists());
-        assert!(!base.join("abc.tar.zst").as_path().exists());
-        // The versioned cache is untouched.
-        assert!(v_dir.join("cache.db").as_path().exists());
-    }
-
-    /// Without the legacy `cache.db` sentinel, nothing is touched, so unrelated
-    /// top-level files are never deleted.
-    #[test]
-    fn cleanup_legacy_cache_layout_is_noop_without_sentinel() {
-        let tmp = TempDir::new().unwrap();
-        let base = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
-        let v_dir = base.join("v13");
-        fs::create_dir_all(v_dir.as_path()).unwrap();
-        fs::write(v_dir.join("cache.db").as_path(), b"keep").unwrap();
-        // A stray top-level archive but no legacy `cache.db`: left alone.
-        fs::write(base.join("orphan.tar.zst").as_path(), b"x").unwrap();
-
-        cleanup_legacy_cache_layout(&base);
-
-        assert!(v_dir.join("cache.db").as_path().exists());
-        assert!(base.join("orphan.tar.zst").as_path().exists());
-    }
 }
