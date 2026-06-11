@@ -73,9 +73,9 @@ struct ExecutionContext<'a> {
     reporter: &'a RefCell<Box<dyn GraphExecutionReporter>>,
     /// The execution cache for looking up and storing cached results.
     cache: &'a ExecutionCache,
-    /// Base path for resolving relative paths in cache entries.
-    /// Typically the workspace root.
-    cache_base_path: &'a Arc<AbsolutePath>,
+    /// Workspace root that relative paths in cache entries (inputs, outputs,
+    /// archives) are resolved against.
+    workspace_root: &'a Arc<AbsolutePath>,
     /// Directory where cache files (db, archives) are stored.
     cache_dir: &'a AbsolutePath,
     /// Public-facing program name (e.g. `vp`), used in user-facing error
@@ -241,7 +241,7 @@ impl ExecutionContext<'_> {
                     leaf_reporter,
                     spawn_execution,
                     self.cache,
-                    self.cache_base_path,
+                    self.workspace_root,
                     self.cache_dir,
                     self.program_name,
                     self.fast_fail_token.clone(),
@@ -339,7 +339,7 @@ pub async fn execute_spawn(
     mut leaf_reporter: Box<dyn LeafExecutionReporter>,
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
-    cache_base_path: &Arc<AbsolutePath>,
+    workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
     fast_fail_token: CancellationToken,
@@ -355,7 +355,7 @@ pub async fn execute_spawn(
         // Compute globbed inputs from positive globs at execution time
         // Globs are already workspace-root-relative (resolved at task graph stage)
         let globbed_inputs = match compute_globbed_inputs(
-            cache_base_path,
+            workspace_root,
             &cache_metadata.input_config.positive_globs,
             &cache_metadata.input_config.negative_globs,
         ) {
@@ -370,7 +370,7 @@ pub async fn execute_spawn(
             }
         };
 
-        match cache.try_hit(cache_metadata, &globbed_inputs, cache_base_path).await {
+        match cache.try_hit(cache_metadata, &globbed_inputs, workspace_root).await {
             Ok(Ok(cached)) => (
                 // Cache hit — we can replay the cached outputs
                 CacheStatus::Hit { replayed_duration: cached.duration },
@@ -421,7 +421,7 @@ pub async fn execute_spawn(
         // I/O error so users know to clear the cache.
         if let Some(ref archive_name) = cached.output_archive {
             let archive_path = cache_dir.join(archive_name.as_str());
-            if let Err(err) = archive::extract_output_archive(cache_base_path, &archive_path) {
+            if let Err(err) = archive::extract_output_archive(workspace_root, &archive_path) {
                 let err = err.context(vite_str::format!(
                     "failed to restore cached outputs from {}; the archive may have been deleted \
                      or corrupted. Run `{program_name} cache clean` to clear the cache.",
@@ -595,7 +595,7 @@ pub async fn execute_spawn(
             #[cfg(fspy)]
             {
                 outcome.path_accesses.as_ref().zip(fspy_negatives.as_deref()).map(|(raw, negs)| {
-                    let tracked = TrackedPathAccesses::from_raw(raw, cache_base_path, negs);
+                    let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, negs);
                     let read_write_overlap = tracked
                         .path_reads
                         .keys()
@@ -638,31 +638,29 @@ pub async fn execute_spawn(
                 // the correct post-exec hash.
                 let empty_path_reads = HashMap::default();
                 let path_reads = tracking.as_ref().map_or(&empty_path_reads, |t| &t.path_reads);
-                match PostRunFingerprint::create(path_reads, cache_base_path, &globbed_inputs) {
+                match PostRunFingerprint::create(path_reads, workspace_root, &globbed_inputs) {
                     Ok(post_run_fingerprint) => {
                         // Collect output files and create archive
-                        let output_archive =
-                            match collect_and_archive_outputs(metadata, cache_base_path, cache_dir)
-                            {
-                                Ok(archive) => archive,
-                                Err(err) => {
-                                    let result = (
-                                        CacheUpdateStatus::NotUpdated(
-                                            CacheNotUpdatedReason::CacheDisabled,
-                                        ),
-                                        Some(ExecutionError::Cache {
-                                            kind: CacheErrorKind::Update,
-                                            source: err,
-                                        }),
-                                    );
-                                    leaf_reporter.finish(
-                                        Some(outcome.exit_status),
-                                        result.0,
-                                        result.1,
-                                    );
-                                    return SpawnOutcome::Spawned(outcome.exit_status);
-                                }
-                            };
+                        let output_archive = match collect_and_archive_outputs(
+                            metadata,
+                            workspace_root,
+                            cache_dir,
+                        ) {
+                            Ok(archive) => archive,
+                            Err(err) => {
+                                let result = (
+                                    CacheUpdateStatus::NotUpdated(
+                                        CacheNotUpdatedReason::CacheDisabled,
+                                    ),
+                                    Some(ExecutionError::Cache {
+                                        kind: CacheErrorKind::Update,
+                                        source: err,
+                                    }),
+                                );
+                                leaf_reporter.finish(Some(outcome.exit_status), result.0, result.1);
+                                return SpawnOutcome::Spawned(outcome.exit_status);
+                            }
+                        };
 
                         let new_cache_value = CacheEntryValue {
                             post_run_fingerprint,
@@ -772,7 +770,7 @@ impl Session<'_> {
         let execution_context = ExecutionContext {
             reporter: &reporter,
             cache,
-            cache_base_path: &self.workspace_path,
+            workspace_root: &self.workspace_path,
             cache_dir: &self.cache_path,
             program_name: self.program_name.as_str(),
             fast_fail_token: CancellationToken::new(),

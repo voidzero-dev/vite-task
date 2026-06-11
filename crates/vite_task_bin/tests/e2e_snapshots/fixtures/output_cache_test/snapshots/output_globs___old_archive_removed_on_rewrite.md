@@ -10,7 +10,7 @@ first run — cache miss, writes archive A
 $ vtt write-file dist/output.txt built
 ```
 
-## `vtt list-dir node_modules/.vite/task-cache --ext .tar.zst`
+## `vtt list-dir node_modules/.vite/task-cache --ext .tar.zst --recursive`
 
 exactly one archive on disk
 
@@ -33,7 +33,7 @@ second run — cache miss, writes archive B and removes A
 $ vtt write-file dist/output.txt built ○ cache miss: 'src/main.ts' modified, executing
 ```
 
-## `vtt list-dir node_modules/.vite/task-cache --ext .tar.zst`
+## `vtt list-dir node_modules/.vite/task-cache --ext .tar.zst --recursive`
 
 still exactly one archive — A was cleaned up
 

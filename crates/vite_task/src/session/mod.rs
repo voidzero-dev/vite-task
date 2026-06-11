@@ -169,7 +169,13 @@ pub struct Session<'a> {
     /// Cache is lazily initialized to avoid `SQLite` race conditions when multiple
     /// processes (e.g., parallel `vt lib` commands) start simultaneously.
     cache: OnceCell<ExecutionCache>,
+    /// Per-schema-version cache directory (e.g. `node_modules/.vite/task-cache/v13`)
+    /// that holds the database and output archives for this build.
     cache_path: AbsolutePathBuf,
+    /// Root task-cache directory (parent of all `vN` version directories).
+    /// Used by `cache clean` to remove every version's cache (and any leftover
+    /// from a pre-versioned layout) in one shot.
+    cache_root: AbsolutePathBuf,
 }
 
 fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf {
@@ -220,7 +226,10 @@ impl<'a> Session<'a> {
         config: SessionConfig<'a>,
     ) -> anyhow::Result<Self> {
         let (workspace_root, _) = find_workspace_root(&cwd)?;
-        let cache_path = get_cache_path_of_workspace(&workspace_root.path);
+        let cache_root = get_cache_path_of_workspace(&workspace_root.path);
+        // Nest the cache in a per-schema-version subdirectory so builds that pin
+        // different schema versions don't share (and corrupt) one database.
+        let cache_path = cache_root.join(cache::cache_schema_dir_name().as_str());
 
         // Prepend workspace's node_modules/.bin to PATH
         let workspace_node_modules_bin = workspace_root.path.join("node_modules").join(".bin");
@@ -239,6 +248,7 @@ impl<'a> Session<'a> {
             program_name: config.program_name,
             cache: OnceCell::new(),
             cache_path,
+            cache_root,
         })
     }
 
@@ -403,8 +413,10 @@ impl<'a> Session<'a> {
     fn handle_cache_command(&self, subcmd: &CacheSubcommand) -> Result<(), SessionError> {
         match subcmd {
             CacheSubcommand::Clean => {
-                if self.cache_path.as_path().exists() {
-                    std::fs::remove_dir_all(&self.cache_path)?;
+                // Remove the whole task-cache directory (every version), not just
+                // the current build's `vN` subdirectory.
+                if self.cache_root.as_path().exists() {
+                    std::fs::remove_dir_all(&self.cache_root)?;
                 }
             }
         }
@@ -586,9 +598,7 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the cache database cannot be loaded or created.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
-        self.cache.get_or_try_init(|| {
-            ExecutionCache::load_from_path(&self.cache_path, &self.program_name)
-        })
+        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(&self.cache_path))
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {

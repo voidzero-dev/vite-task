@@ -49,6 +49,7 @@ steps = [
     "node_modules/.vite/task-cache",
     "--ext",
     ".tar.zst",
+    "--recursive",
   ], comment = "exactly one archive on disk" },
   { argv = [
     "vtt",
@@ -67,6 +68,7 @@ steps = [
     "node_modules/.vite/task-cache",
     "--ext",
     ".tar.zst",
+    "--recursive",
   ], comment = "still exactly one archive — A was cleaned up" },
 ]
 

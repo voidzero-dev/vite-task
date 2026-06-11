@@ -11,7 +11,7 @@ pub use display::{
     SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
     format_spawn_change,
 };
-use rusqlite::{Connection, OptionalExtension as _, config::DbConfig};
+use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use vite_path::{AbsolutePath, RelativePathBuf};
@@ -188,9 +188,30 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
     }
 }
 
+/// On-disk schema version of the cache database.
+///
+/// Bump this whenever the database layout (table structure, serialization
+/// format, or fingerprint semantics) changes in an incompatible way.
+///
+/// The version is encoded *only* in the cache directory name (see
+/// [`cache_schema_dir_name`], e.g. `v13`); there is no in-database version
+/// marker. Keying the storage location on this version means Vite+ builds that
+/// pin different schema versions never open each other's database: each keeps
+/// its own cache warm across branch switches, and a cache from a different
+/// version is simply ignored (it lives in a directory this build never looks
+/// at) rather than aborting the run. Bumping the version starts a fresh cache.
+const CACHE_SCHEMA_VERSION: u32 = 13;
+
+/// Name of the per-version subdirectory (e.g. `v13`) under the task-cache
+/// directory that holds the database and output archives for the current
+/// [`CACHE_SCHEMA_VERSION`].
+pub fn cache_schema_dir_name() -> Str {
+    vite_str::format!("v{CACHE_SCHEMA_VERSION}")
+}
+
 impl ExecutionCache {
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn load_from_path(path: &AbsolutePath, program_name: &str) -> anyhow::Result<Self> {
+    pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
         tracing::info!("Creating task cache directory at {:?}", path);
         std::fs::create_dir_all(path)?;
 
@@ -201,38 +222,18 @@ impl ExecutionCache {
 
         let db_path = path.join("cache.db");
         let conn = Connection::open(db_path.as_path())?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
-        loop {
-            let user_version: u32 = conn.query_one("PRAGMA user_version", (), |row| row.get(0))?;
-            match user_version {
-                0 => {
-                    // fresh new db
-                    conn.execute(
-                        "CREATE TABLE cache_entries (key BLOB PRIMARY KEY, value BLOB);",
-                        (),
-                    )?;
-                    conn.execute(
-                        "CREATE TABLE task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
-                        (),
-                    )?;
-                    conn.execute("PRAGMA user_version = 13", ())?;
-                }
-                1..=12 => {
-                    // old internal db version. reset
-                    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, true)?;
-                    conn.execute("VACUUM", ())?;
-                    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_RESET_DATABASE, false)?;
-                }
-                13 => break, // current version
-                14.. => {
-                    return Err(anyhow::anyhow!(
-                        "Unrecognized database version: {user_version}. \
-                         The cache may have been created by a newer version of Vite Task. \
-                         Run `{program_name} cache clean` to remove it."
-                    ));
-                }
-            }
-        }
+        // The schema version is encoded in the directory name (see
+        // `cache_schema_dir_name`), so any database in this directory already has
+        // the current schema: there is nothing to migrate or version-check. Set
+        // WAL mode and ensure the tables exist in a single round-trip. On an
+        // existing database the `IF NOT EXISTS` creates are near-free no-ops (a
+        // schema lookup, no write); on a fresh one they create the tables. This
+        // runs once per process (the cache is `OnceCell`-initialized).
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             CREATE TABLE IF NOT EXISTS cache_entries (key BLOB PRIMARY KEY, value BLOB);
+             CREATE TABLE IF NOT EXISTS task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
+        )?;
         // Lock is released when lock_file is dropped
         Ok(Self { conn: Mutex::new(conn) })
     }
@@ -525,5 +526,75 @@ impl ExecutionCache {
         out.write_all(b"------- cache_entries -------\n")?;
         self.list_table::<CacheEntryKey, CacheEntryValue>("cache_entries", &mut out).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+    use tempfile::TempDir;
+    use vite_path::AbsolutePathBuf;
+
+    use super::*;
+
+    fn temp_dir() -> (TempDir, AbsolutePathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let dir = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        (tmp, dir)
+    }
+
+    fn open_raw(db: &AbsolutePath) -> Connection {
+        Connection::open(db.as_path()).unwrap()
+    }
+
+    /// Reopening the same cache directory keeps existing entries: the tables are
+    /// created with `IF NOT EXISTS`, so a second open never wipes the database.
+    #[test]
+    fn reopening_preserves_existing_entries() {
+        let (_tmp, dir) = temp_dir();
+
+        drop(ExecutionCache::load_from_path(&dir).unwrap());
+        {
+            let conn = open_raw(&dir.join("cache.db"));
+            conn.execute("INSERT INTO cache_entries (key, value) VALUES (X'01', X'02')", ())
+                .unwrap();
+        }
+
+        // Reopening must not recreate or clear the tables.
+        drop(ExecutionCache::load_from_path(&dir).unwrap());
+
+        let count: u32 = open_raw(&dir.join("cache.db"))
+            .query_one("SELECT COUNT(*) FROM cache_entries", (), |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    /// Regression test for vite-plus#1785: two different schema-version
+    /// directories under the same cache base are fully independent, so caches
+    /// from different Vite+ versions never collide (each version reads and
+    /// writes only its own directory).
+    #[test]
+    fn version_directories_are_isolated() {
+        let (_tmp, base) = temp_dir();
+
+        let dir_a = base.join("v13");
+        let dir_b = base.join("v14");
+
+        drop(ExecutionCache::load_from_path(&dir_a).unwrap());
+        drop(ExecutionCache::load_from_path(&dir_b).unwrap());
+
+        assert!(dir_a.join("cache.db").as_path().exists());
+        assert!(dir_b.join("cache.db").as_path().exists());
+
+        // A row written into A is invisible to B.
+        {
+            let conn = open_raw(&dir_a.join("cache.db"));
+            conn.execute("INSERT INTO cache_entries (key, value) VALUES (X'01', X'02')", ())
+                .unwrap();
+        }
+        let count_b: u32 = open_raw(&dir_b.join("cache.db"))
+            .query_one("SELECT COUNT(*) FROM cache_entries", (), |r| r.get(0))
+            .unwrap();
+        assert_eq!(count_b, 0);
     }
 }

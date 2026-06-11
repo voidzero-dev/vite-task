@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** The task cache is now stored in a per-schema-version subdirectory (e.g. `node_modules/.vite/task-cache/v13/`), so switching between branches that pin different Vite+ versions no longer fails with `Unrecognized database version`. Each version keeps its own cache directory; a cache from a different version is ignored rather than aborting the run ([#433](https://github.com/voidzero-dev/vite-task/pull/433))
 - **Added** A task's `env` and `untrackedEnv` glob patterns now support `!` negation: a `!`-prefixed pattern excludes matching variables (e.g. `["VITE_*", "!VITE_SECRET"]` tracks every `VITE_*` except `VITE_SECRET`) ([#425](https://github.com/voidzero-dev/vite-task/pull/425))
 - **Fixed** `package.json` and `pnpm-workspace.yaml` files with a UTF-8 BOM no longer fail to parse ([#424](https://github.com/voidzero-dev/vite-task/pull/424))
 - **Changed** `vp run --filter <expr>` now exits 0 with a warning when the filter matches no packages, matching pnpm. Use `--fail-if-no-match` to restore the previous strict behavior ([#393](https://github.com/voidzero-dev/vite-task/pull/393))
