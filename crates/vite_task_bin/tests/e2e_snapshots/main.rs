@@ -581,28 +581,6 @@ fn run_case(
     Ok(())
 }
 
-/// Parses `VT_SHARD_INDEX` (1..=total) and `VT_SHARD_TOTAL` env vars for CI
-/// sharding. Both unset means "run all trials". Both set selects one shard via
-/// round-robin. Exactly one set is a CI misconfiguration and panics.
-fn parse_shard_env() -> Option<(usize, usize)> {
-    let index = std::env::var("VT_SHARD_INDEX").ok();
-    let total = std::env::var("VT_SHARD_TOTAL").ok();
-    match (index, total) {
-        (None, None) => None,
-        (Some(i), Some(t)) => {
-            let index: usize = i.parse().expect("VT_SHARD_INDEX must be a positive integer");
-            let total: usize = t.parse().expect("VT_SHARD_TOTAL must be a positive integer");
-            assert!(total > 0, "VT_SHARD_TOTAL must be > 0");
-            assert!(
-                (1..=total).contains(&index),
-                "VT_SHARD_INDEX must be in 1..={total}, got {index}"
-            );
-            Some((index, total))
-        }
-        _ => panic!("VT_SHARD_INDEX and VT_SHARD_TOTAL must both be set or both unset"),
-    }
-}
-
 #[expect(clippy::disallowed_types, reason = "Path required for CARGO_MANIFEST_DIR path traversal")]
 fn main() {
     let tmp_dir = tempfile::tempdir().unwrap();
@@ -634,8 +612,6 @@ fn main() {
     if cfg!(target_os = "linux") && args.test_threads.is_none() {
         args.test_threads = Some(1);
     }
-
-    let shard = parse_shard_env();
 
     let tests: Vec<libtest_mimic::Trial> = fixture_paths
         .into_iter()
@@ -686,19 +662,6 @@ fn main() {
             })
         })
         .collect();
-
-    let tests = match shard {
-        Some((index, total)) => {
-            let count = tests.len();
-            tests
-                .into_iter()
-                .enumerate()
-                .filter(|(i, _)| i * total / count + 1 == index)
-                .map(|(_, t)| t)
-                .collect()
-        }
-        None => tests,
-    };
 
     libtest_mimic::run(&args, tests).exit();
 }

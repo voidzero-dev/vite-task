@@ -78,85 +78,22 @@ jobs:
             cargo_cmd: cargo-zigbuild
             build_target: x86_64-unknown-linux-gnu.2.17
             shard: linux-gnu
-            scope: ''
-            run_env: ''
           - os: namespace-profile-mac-default
             target: aarch64-apple-darwin
             cargo_cmd: cargo
             build_target: aarch64-apple-darwin
             shard: macos-arm64
-            scope: ''
-            run_env: ''
           - os: namespace-profile-mac-default
             target: x86_64-apple-darwin
             cargo_cmd: cargo
             build_target: x86_64-apple-darwin
             shard: macos-x64
-            scope: ''
-            run_env: ''
-          # Windows e2e fixtures dominate wall-clock (60s per PTY step vs 20s on
-          # Unix). Coverage is partitioned by crate: the e2e shards run
-          # `-p vite_task_bin` and the non-e2e shard runs
-          # `--workspace --exclude vite_task_bin`; the union is the workspace
-          # by construction. The e2e_snapshots harness self-shards via
-          # VT_SHARD_INDEX/VT_SHARD_TOTAL across the 5 e2e jobs.
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cargo_cmd: cargo
-            build_target: x86_64-pc-windows-msvc
-            shard: windows-e2e-1
-            scope: '-p vite_task_bin'
-            run_env: 'VT_SHARD_INDEX=1 VT_SHARD_TOTAL=5'
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cargo_cmd: cargo
-            build_target: x86_64-pc-windows-msvc
-            shard: windows-e2e-2
-            scope: '-p vite_task_bin'
-            run_env: 'VT_SHARD_INDEX=2 VT_SHARD_TOTAL=5'
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cargo_cmd: cargo
-            build_target: x86_64-pc-windows-msvc
-            shard: windows-e2e-3
-            scope: '-p vite_task_bin'
-            run_env: 'VT_SHARD_INDEX=3 VT_SHARD_TOTAL=5'
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cargo_cmd: cargo
-            build_target: x86_64-pc-windows-msvc
-            shard: windows-e2e-4
-            scope: '-p vite_task_bin'
-            run_env: 'VT_SHARD_INDEX=4 VT_SHARD_TOTAL=5'
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cargo_cmd: cargo
-            build_target: x86_64-pc-windows-msvc
-            shard: windows-e2e-5
-            scope: '-p vite_task_bin'
-            run_env: 'VT_SHARD_INDEX=5 VT_SHARD_TOTAL=5'
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cargo_cmd: cargo
-            build_target: x86_64-pc-windows-msvc
-            shard: windows-non-e2e
-            scope: '--workspace --exclude vite_task_bin'
-            run_env: ''
     runs-on: ${{ matrix.os }}
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
 
       - name: Update submodules
         run: git submodule update --init --recursive
-
-      - name: Setup Dev Drive
-        uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
-        if: runner.os == 'Windows'
-        with:
-          drive-size: 10GB
-          env-mapping: |
-            CARGO_HOME,{{ DEV_DRIVE }}/.cargo
-            RUSTUP_HOME,{{ DEV_DRIVE }}/.rustup
 
       - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
         with:
@@ -177,13 +114,13 @@ jobs:
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
 
       - name: Build tests
-        run: ${{ matrix.cargo_cmd }} test --no-run ${{ matrix.scope }} --target ${{ matrix.build_target }}
+        run: ${{ matrix.cargo_cmd }} test --no-run --target ${{ matrix.build_target }}
 
       # Default `cargo test` runs only tests that need nothing beyond the
       # Rust toolchain; this step verifies that contract before Node.js
       # and pnpm enter the picture.
       - name: Run tests
-        run: ${{ matrix.run_env }} ${{ matrix.cargo_cmd }} test ${{ matrix.scope }} --target ${{ matrix.build_target }}
+        run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }}
 
       # x86_64-apple-darwin runs on arm64 runner under Rosetta; install x64 Node
       # so fspy's x86_64 preload dylib can be injected into spawned node procs.
@@ -192,7 +129,98 @@ jobs:
           architecture: ${{ matrix.target == 'x86_64-apple-darwin' && 'x64' || '' }}
 
       - name: Run ignored tests
-        run: ${{ matrix.run_env }} ${{ matrix.cargo_cmd }} test ${{ matrix.scope }} --target ${{ matrix.build_target }} -- --ignored
+        run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }} -- --ignored
+
+  # Windows tests are cross-compiled on a fast Linux runner with cargo-xwin
+  # (clang-cl + lld-link against the xwin-downloaded MSVC CRT/Windows SDK)
+  # and packed into a portable nextest archive. The test-windows shards then
+  # only download the archive and run it — no Rust toolchain or compilation
+  # on the slow Windows runners. Windows e2e fixtures dominate wall-clock
+  # (60s per PTY step vs 20s on Unix), so the run is split across shards via
+  # nextest's count partitioning, which spreads tests round-robin.
+  build-windows-tests:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code-changed == 'true'
+    name: Build Windows tests
+    runs-on: namespace-profile-linux-x64-default
+    env:
+      XWIN_ACCEPT_LICENSE: '1'
+      # The MSVC STL from xwin's VS17 manifest static-asserts a minimum Clang
+      # version newer than what runner images ship. Microsoft's documented
+      # escape hatch lets Detours (the only C++ in the workspace, and far older
+      # than any STL/clang concern here) compile with the system clang-cl.
+      # cargo-xwin folds a pre-set CXXFLAGS into the env it generates.
+      CXXFLAGS: -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+
+      - name: Update submodules
+        run: git submodule update --init --recursive
+
+      - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
+        with:
+          save-cache: ${{ github.ref_name == 'main' }}
+          cache-key: windows-cross
+
+      - run: rustup target add x86_64-pc-windows-msvc
+
+      - uses: taiki-e/install-action@7a79fe8c3a13344501c80d99cae481c1c9085912 # v2.81.10
+        with:
+          tool: cargo-nextest,cargo-xwin
+
+      - name: Build test archive
+        run: |
+          # cargo-xwin resolves the rustflags configured in .cargo/config.toml,
+          # appends its -Lnative Windows SDK paths, and re-exports the result as
+          # CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS, so the plain cargo
+          # that nextest invokes cross-compiles exactly like `cargo xwin` would.
+          eval "$(cargo xwin env --target x86_64-pc-windows-msvc | grep '^export ')"
+          # `cargo xwin env` renders its intended *removal* of RUSTFLAGS as
+          # `export RUSTFLAGS="";` — actually remove it so it cannot shadow the
+          # target-specific rustflags set above.
+          unset RUSTFLAGS
+          cargo nextest archive --workspace --target x86_64-pc-windows-msvc --archive-file windows-tests.tar.zst
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-test-archive
+          path: windows-tests.tar.zst
+          retention-days: 7
+
+  test-windows:
+    needs: build-windows-tests
+    name: Test (windows-${{ matrix.partition }})
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3, 4, 5, 6]
+    runs-on: windows-latest
+    env:
+      PARTITION: count:${{ matrix.partition }}/6
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-test-archive
+
+      - uses: taiki-e/install-action@7a79fe8c3a13344501c80d99cae481c1c9085912 # v2.81.10
+        with:
+          tool: cargo-nextest
+
+      # The default (non-ignored) test set needs nothing beyond the test
+      # binaries themselves; this step verifies that contract before Node.js
+      # and pnpm enter the picture. `cargo-nextest` is invoked directly so the
+      # job never depends on the runner's Rust toolchain.
+      - name: Run tests
+        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION"
+
+      - uses: oxc-project/setup-node@ab97f03642370d79a7e96dd286bd02a1be40e0ba # v1.3.0
+
+      # --no-tests=pass: a shard's partition of the (much smaller) ignored
+      # test set may legitimately come up empty.
+      - name: Run ignored tests
+        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION" --run-ignored ignored-only --no-tests pass
 
   test-musl:
     needs: detect-changes
@@ -287,6 +315,8 @@ jobs:
       - clippy
       - test
       - test-musl
+      - build-windows-tests
+      - test-windows
       - fmt
     steps:
       - run: exit 1
