@@ -1,47 +1,34 @@
+mod cache_update;
 pub mod fingerprint;
 pub mod glob;
 mod hash;
 pub mod pipe;
+mod scheduler;
 pub mod spawn;
 #[cfg(fspy)]
 pub mod tracked_accesses;
 #[cfg(windows)]
 mod win_job;
 
-use std::{cell::RefCell, collections::BTreeMap, io::Write as _, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
-use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
-use petgraph::Direction;
-use rustc_hash::FxHashMap;
-use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, RelativePathBuf};
-use vite_str::Str;
-use vite_task_plan::{
-    ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, SpawnExecution,
-    cache_metadata::CacheMetadata, execution_graph::ExecutionNodeIndex,
-};
+use vite_task_plan::{SpawnExecution, cache_metadata::CacheMetadata};
 
-#[cfg(fspy)]
-use self::tracked_accesses::TrackedPathAccesses;
 use self::{
-    fingerprint::{PathRead, PostRunFingerprint},
     glob::compute_globbed_inputs,
     pipe::{PipeSinks, StdOutput, pipe_stdio},
-    spawn::{SpawnStdio, spawn},
+    spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
 };
 use super::{
-    cache::{CacheEntryValue, ExecutionCache, archive},
+    cache::{CacheEntryValue, CacheMiss, ExecutionCache, archive},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError,
     },
-    reporter::{
-        ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-        PipeWriters, StdioSuggestion,
-    },
+    reporter::{LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion},
 };
-use crate::{Session, collections::HashMap};
 
 /// Outcome of a spawned execution.
 ///
@@ -57,204 +44,6 @@ pub enum SpawnOutcome {
     /// (cache lookup failure or spawn failure).
     /// Already reported through the leaf reporter.
     Failed,
-}
-
-/// Holds shared references needed during graph execution.
-///
-/// The `reporter` field is wrapped in `RefCell` because concurrent futures
-/// (via `FuturesUnordered`) need shared access to create leaf reporters.
-/// Since all futures run on a single thread (no `tokio::spawn`), `RefCell`
-/// is sufficient for interior mutability.
-///
-/// Cache fields are passed through to [`execute_spawn`] for cache-aware execution.
-struct ExecutionContext<'a> {
-    /// The graph-level reporter, used to create leaf reporters via `new_leaf_execution()`.
-    /// Wrapped in `RefCell` for shared access from concurrent task futures.
-    reporter: &'a RefCell<Box<dyn GraphExecutionReporter>>,
-    /// The execution cache for looking up and storing cached results.
-    cache: &'a ExecutionCache,
-    /// Workspace root that relative paths in cache entries (inputs, outputs,
-    /// archives) are resolved against.
-    workspace_root: &'a Arc<AbsolutePath>,
-    /// Directory where cache files (db, archives) are stored.
-    cache_dir: &'a AbsolutePath,
-    /// Public-facing program name (e.g. `vp`), used in user-facing error
-    /// messages that suggest a CLI command (e.g. `cache clean`).
-    program_name: &'a str,
-    /// Token cancelled when a task fails. Kills in-flight child processes
-    /// (via `start_kill` in spawn.rs), prevents scheduling new tasks, and
-    /// prevents caching results of concurrently-running tasks.
-    fast_fail_token: CancellationToken,
-    /// Token cancelled by Ctrl-C. Unlike `fast_fail_token` (which kills
-    /// children), this only prevents scheduling new tasks and caching
-    /// results — running processes are left to handle SIGINT naturally.
-    interrupt_token: CancellationToken,
-}
-
-impl ExecutionContext<'_> {
-    /// Returns true if execution has been cancelled, either by a task
-    /// failure (fast-fail) or by Ctrl-C (interrupt).
-    fn cancelled(&self) -> bool {
-        self.fast_fail_token.is_cancelled() || self.interrupt_token.is_cancelled()
-    }
-
-    /// Execute all tasks in an execution graph concurrently, respecting dependencies.
-    ///
-    /// Uses a DAG scheduler: tasks whose dependencies have all completed are scheduled
-    /// onto a `FuturesUnordered`, bounded by a per-graph `Semaphore` with
-    /// `concurrency_limit` permits. Each recursive `Expanded` graph creates its own
-    /// semaphore, so nested graphs have independent concurrency limits.
-    ///
-    /// Fast-fail: if any task fails, `execute_leaf` cancels the `fast_fail_token`
-    /// (killing in-flight child processes). Ctrl-C cancels the `interrupt_token`.
-    /// Either cancellation causes this method to close the semaphore, drain
-    /// remaining futures, and return.
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_expanded_graph(&self, graph: &ExecutionGraph) {
-        if graph.graph.node_count() == 0 {
-            return;
-        }
-
-        let semaphore =
-            Arc::new(Semaphore::new(graph.concurrency_limit.min(Semaphore::MAX_PERMITS)));
-
-        // Compute dependency count for each node.
-        // Edge A→B means "A depends on B", so A's dependency count = outgoing edge count.
-        let mut dep_count: FxHashMap<ExecutionNodeIndex, usize> = FxHashMap::default();
-        for node_ix in graph.graph.node_indices() {
-            dep_count.insert(node_ix, graph.graph.neighbors(node_ix).count());
-        }
-
-        let mut futures = FuturesUnordered::new();
-
-        // Schedule initially ready nodes (no dependencies).
-        for (&node_ix, &count) in &dep_count {
-            if count == 0 {
-                futures.push(self.spawn_node(graph, node_ix, &semaphore));
-            }
-        }
-
-        // Process completions and schedule newly ready dependents.
-        // On failure, `execute_leaf` cancels the token — we detect it here, close
-        // the semaphore (so pending acquires fail immediately), and drain.
-        while let Some(completed_ix) = futures.next().await {
-            if self.cancelled() {
-                semaphore.close();
-                while futures.next().await.is_some() {}
-                return;
-            }
-
-            // Find dependents of the completed node (nodes that depend on it).
-            // Edge X→completed means "X depends on completed", so X is a predecessor
-            // in graph direction = neighbor in Incoming direction.
-            for dependent in graph.graph.neighbors_directed(completed_ix, Direction::Incoming) {
-                let count = dep_count.get_mut(&dependent).expect("all nodes are in dep_count");
-                *count -= 1;
-                if *count == 0 {
-                    futures.push(self.spawn_node(graph, dependent, &semaphore));
-                }
-            }
-        }
-    }
-
-    /// Create a future that acquires a semaphore permit, then executes a graph node.
-    ///
-    /// On failure, `execute_node` cancels the `fast_fail_token` — the caller
-    /// detects this after the future completes. On semaphore closure or prior
-    /// cancellation, the node is skipped.
-    fn spawn_node<'a>(
-        &'a self,
-        graph: &'a ExecutionGraph,
-        node_ix: ExecutionNodeIndex,
-        semaphore: &Arc<Semaphore>,
-    ) -> LocalBoxFuture<'a, ExecutionNodeIndex> {
-        let sem = semaphore.clone();
-        async move {
-            if let Ok(_permit) = sem.acquire_owned().await
-                && !self.cancelled()
-            {
-                self.execute_node(graph, node_ix).await;
-            }
-            node_ix
-        }
-        .boxed_local()
-    }
-
-    /// Execute a single node's items sequentially.
-    ///
-    /// A node may have multiple items (from `&&`-split commands). Items are executed
-    /// in order; if any item fails, `execute_leaf` cancels the `fast_fail_token`
-    /// and remaining items are skipped (preserving `&&` semantics).
-    async fn execute_node(&self, graph: &ExecutionGraph, node_ix: ExecutionNodeIndex) {
-        let task_execution = &graph.graph[node_ix];
-
-        for item in &task_execution.items {
-            if self.cancelled() {
-                return;
-            }
-            match &item.kind {
-                ExecutionItemKind::Leaf(leaf_kind) => {
-                    self.execute_leaf(&item.execution_item_display, leaf_kind).boxed_local().await;
-                }
-                ExecutionItemKind::Expanded(nested_graph) => {
-                    self.execute_expanded_graph(nested_graph).boxed_local().await;
-                }
-            }
-        }
-    }
-
-    /// Execute a single leaf item (in-process command or spawned process).
-    ///
-    /// Creates a [`LeafExecutionReporter`] from the graph reporter and delegates
-    /// to the appropriate execution method. On failure (non-zero exit or
-    /// infrastructure error), cancels the `fast_fail_token`.
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_leaf(&self, display: &ExecutionItemDisplay, leaf_kind: &LeafExecutionKind) {
-        // Borrow the reporter briefly to create the leaf reporter, then drop
-        // the RefCell guard before any `.await` point.
-        let mut leaf_reporter = self.reporter.borrow_mut().new_leaf_execution(display, leaf_kind);
-
-        let failed = match leaf_kind {
-            LeafExecutionKind::InProcess(in_process_execution) => {
-                // In-process (built-in) commands: caching is disabled, execute synchronously
-                let mut stdio_config = leaf_reporter
-                    .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
-
-                let execution_output = in_process_execution.execute();
-                // Write output to the stdout writer from StdioConfig
-                let _ = stdio_config.writers.stdout_writer.write_all(&execution_output.stdout);
-                let _ = stdio_config.writers.stdout_writer.flush();
-
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    None,
-                );
-                false
-            }
-            LeafExecutionKind::Spawn(spawn_execution) => {
-                let outcome = execute_spawn(
-                    leaf_reporter,
-                    spawn_execution,
-                    self.cache,
-                    self.workspace_root,
-                    self.cache_dir,
-                    self.program_name,
-                    self.fast_fail_token.clone(),
-                    self.interrupt_token.clone(),
-                )
-                .await;
-                match outcome {
-                    SpawnOutcome::CacheHit => false,
-                    SpawnOutcome::Spawned(status) => !status.success(),
-                    SpawnOutcome::Failed => true,
-                }
-            }
-        };
-        if failed {
-            self.fast_fail_token.cancel();
-        }
-    }
 }
 
 /// All valid runtime configurations for a leaf execution, after the cache-hit
@@ -292,41 +81,163 @@ struct CacheState<'a> {
     /// always present (possibly empty) once we reach the cache-update phase.
     std_outputs: Vec<StdOutput>,
     /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
-    /// negative globs used by [`TrackedPathAccesses::from_raw`] to filter
-    /// tracked accesses. `None` means fspy tracking is off for this task.
+    /// negative globs used to filter tracked accesses. `None` means fspy
+    /// tracking is off for this task.
     fspy_negatives: Option<Vec<wax::Glob<'static>>>,
 }
 
-/// Post-execution summary of what fspy observed for a single task. Used in the
-/// cache-update step. Fields are cfg-agnostic so the downstream match logic
-/// doesn't need `cfg(fspy)` — the value is only ever `Some` when tracking
-/// happened (see the `let fspy_outcome = ...` fork in `execute_spawn`).
-struct TrackingOutcome {
-    path_reads: HashMap<RelativePathBuf, PathRead>,
-    /// First path that was both read and written during execution, if any.
-    /// A non-empty value means caching this task is unsound.
-    read_write_overlap: Option<RelativePathBuf>,
+impl<'a> ExecutionMode<'a> {
+    /// Fold the cache/fspy/stdio decisions and their associated state into a
+    /// single value whose shape encodes the valid combinations. The
+    /// uncached-inherited arm drops `stdio_config`'s writers here so we don't
+    /// hold `std::io::Stdout` while the child writes to the same FD.
+    ///
+    /// ─────────────────────────────────────────────────────────────────────
+    ///  Before adding a new local variable alongside the mode: think twice.
+    ///  Does it make sense for every variant, or only for some?  If it's
+    ///  variant-specific (only for `Cached`, only when fspy is on, etc.) put
+    ///  it inside the variant (or `CacheState`) so the compiler enforces the
+    ///  invariant at construction. Sibling locals drift out of sync with the
+    ///  mode and force re-derivation (`if let Some(_) = _`,
+    ///  `cache_metadata.is_some_and(_)`) at every downstream use site.
+    /// ─────────────────────────────────────────────────────────────────────
+    fn build(
+        cache_metadata: Option<&'a CacheMetadata>,
+        stdio_config: StdioConfig,
+        globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    ) -> Result<Self, ExecutionError> {
+        let Some(metadata) = cache_metadata else {
+            return Ok(Self::Uncached {
+                pipe_writers: (stdio_config.suggestion == StdioSuggestion::Piped)
+                    .then_some(stdio_config.writers),
+            });
+        };
+
+        // Resolve input negative globs for fspy path filtering (already
+        // workspace-root-relative).
+        let fspy_negatives = if metadata.input_config.includes_auto {
+            let negatives = metadata
+                .input_config
+                .negative_globs
+                .iter()
+                .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
+                .collect::<anyhow::Result<Vec<_>>>()
+                .map_err(ExecutionError::PostRunFingerprint)?;
+            Some(negatives)
+        } else {
+            None
+        };
+
+        Ok(Self::Cached {
+            pipe_writers: stdio_config.writers,
+            state: CacheState { metadata, globbed_inputs, std_outputs: Vec::new(), fspy_negatives },
+        })
+    }
+
+    /// The arguments `spawn()` derives from the mode: stdio handling and
+    /// whether fspy tracking is on.
+    const fn spawn_config(&self) -> (SpawnStdio, bool) {
+        match self {
+            Self::Cached { state, .. } => (SpawnStdio::Piped, state.fspy_negatives.is_some()),
+            Self::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
+            Self::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
+        }
+    }
+
+    /// Borrow the pipe writers (and, when caching, the in-place capture slot)
+    /// for the drain. `None` only in the inherited-uncached case, where there
+    /// are no pipes to drain.
+    fn pipe_sinks(&mut self) -> Option<PipeSinks<'_>> {
+        match self {
+            Self::Cached { pipe_writers, state } => Some(PipeSinks {
+                stdout_writer: &mut pipe_writers.stdout_writer,
+                stderr_writer: &mut pipe_writers.stderr_writer,
+                capture: Some(&mut state.std_outputs),
+            }),
+            Self::Uncached { pipe_writers: Some(pipe_writers) } => Some(PipeSinks {
+                stdout_writer: &mut pipe_writers.stdout_writer,
+                stderr_writer: &mut pipe_writers.stderr_writer,
+                capture: None,
+            }),
+            Self::Uncached { pipe_writers: None } => None,
+        }
+    }
+}
+
+/// Everything the pipeline reports through the single
+/// `LeafExecutionReporter::finish()` call at the end of [`execute_spawn`].
+///
+/// Phases construct a `Report` instead of reporting in place, so finishing —
+/// which consumes the boxed reporter — happens in exactly one spot. Each
+/// variant carries exactly the data its outcome can be accompanied by:
+/// a failure always has an error and never an exit status, a cache hit has
+/// neither, and a spawned process always has its exit status. Nonsense
+/// pairings are unrepresentable.
+enum Report {
+    /// An infrastructure error prevented the process from running (or from
+    /// being observed to completion).
+    Failed { cache_update: CacheUpdateStatus, error: ExecutionError },
+    /// Cache hit: captured outputs were replayed, no process ran.
+    CacheHit,
+    /// The process ran to completion; its exit status is reported regardless
+    /// of how the cache update went.
+    Spawned {
+        exit_status: std::process::ExitStatus,
+        cache_update: CacheUpdateStatus,
+        error: Option<ExecutionError>,
+    },
+}
+
+impl Report {
+    /// An infrastructure failure outside any cache-specific context.
+    const fn failed(error: ExecutionError) -> Self {
+        Self::Failed {
+            cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+            error,
+        }
+    }
+
+    /// Perform the pipeline's single `finish()` call and yield the outcome
+    /// [`execute_spawn`] returns to its caller.
+    fn finish(self, reporter: Box<dyn LeafExecutionReporter>) -> SpawnOutcome {
+        match self {
+            Self::Failed { cache_update, error } => {
+                reporter.finish(None, cache_update, Some(error));
+                SpawnOutcome::Failed
+            }
+            Self::CacheHit => {
+                reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
+                    None,
+                );
+                SpawnOutcome::CacheHit
+            }
+            Self::Spawned { exit_status, cache_update, error } => {
+                reporter.finish(Some(exit_status), cache_update, error);
+                SpawnOutcome::Spawned(exit_status)
+            }
+        }
+    }
 }
 
 /// Execute a spawned process with cache-aware lifecycle.
 ///
-/// This is a free function (not tied to `ExecutionContext`) so it can be reused
-/// from both graph-based execution and standalone synthetic execution.
+/// This is a free function (not tied to the scheduler's context) so it can be
+/// reused from both graph-based execution and standalone synthetic execution.
 ///
 /// The full lifecycle is:
 /// 1. Cache lookup (determines cache status)
 /// 2. `leaf_reporter.start(cache_status)` → `StdioConfig`
-/// 3. If cache hit: replay cached outputs via `StdioConfig` writers → finish
-/// 4. Otherwise: `spawn()` with the chosen stdio mode, optionally `pipe_stdio()`
-///    to drain, then `child.wait` → cache update → finish
+/// 3. If cache hit: replay cached outputs via `StdioConfig` writers
+/// 4. Otherwise: `spawn()` with the chosen stdio mode, drain pipes and wait
+///    via [`run_child`], then decide the cache update
+///    ([`cache_update::update_cache`])
 ///
-/// Errors (cache lookup failure, spawn failure, cache update failure) are reported
-/// through `leaf_reporter.finish()` and do not abort the caller.
+/// Every path reports through the single `finish()` below — errors (cache
+/// lookup failure, spawn failure, cache update failure) do not abort the
+/// caller.
 #[tracing::instrument(level = "debug", skip_all)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "sequential cache check, execute, and update steps are clearer in one function"
-)]
 #[expect(
     clippy::too_many_arguments,
     reason = "these are the unavoidable inputs for a free-function cache-aware spawn"
@@ -341,469 +252,235 @@ pub async fn execute_spawn(
     fast_fail_token: CancellationToken,
     interrupt_token: CancellationToken,
 ) -> SpawnOutcome {
+    let pipeline = run(
+        leaf_reporter.as_mut(),
+        spawn_execution,
+        cache,
+        workspace_root,
+        cache_dir,
+        program_name,
+        fast_fail_token,
+        interrupt_token,
+    );
+    let report = match pipeline.await {
+        Ok(report) | Err(report) => report,
+    };
+    report.finish(leaf_reporter)
+}
+
+/// The spawn pipeline.
+///
+/// Both sides of the `Result` carry the same [`Report`] on purpose: `Err` is
+/// the `?`-short-circuit channel for phases that already determined the final
+/// report, `Ok` is the report of a pipeline that ran to the end. The caller
+/// unwraps both into the same single `finish()`, so the distinction is pure
+/// control flow and a value on either side is equally valid.
+#[expect(clippy::too_many_arguments, reason = "forwarded verbatim from `execute_spawn`")]
+async fn run(
+    reporter: &mut dyn LeafExecutionReporter,
+    spawn_execution: &SpawnExecution,
+    cache: &ExecutionCache,
+    workspace_root: &Arc<AbsolutePath>,
+    cache_dir: &AbsolutePath,
+    program_name: &str,
+    fast_fail_token: CancellationToken,
+    interrupt_token: CancellationToken,
+) -> Result<Report, Report> {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
-    // 1. Determine cache status FIRST by trying cache hit.
-    //    We need to know the status before calling start() so the reporter
-    //    can display cache status immediately when execution begins.
-    let (cache_status, cached_value, globbed_inputs) = if let Some(cache_metadata) = cache_metadata
-    {
-        // Compute globbed inputs from positive globs at execution time
-        // Globs are already workspace-root-relative (resolved at task graph stage)
-        let globbed_inputs = match compute_globbed_inputs(
-            workspace_root,
-            &cache_metadata.input_config.positive_globs,
-            &cache_metadata.input_config.negative_globs,
-        ) {
-            Ok(inputs) => inputs,
-            Err(err) => {
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
-                );
-                return SpawnOutcome::Failed;
-            }
-        };
+    // 1. Determine cache status FIRST by trying cache hit, so the reporter can
+    //    display cache status immediately when execution begins. On a lookup
+    //    error, `start()` is never called — there is no valid status to show.
+    let lookup = lookup_cache(cache_metadata, cache, workspace_root).await?;
 
-        match cache.try_hit(cache_metadata, &globbed_inputs, workspace_root).await {
-            Ok(Ok(cached)) => (
-                // Cache hit — we can replay the cached outputs
-                CacheStatus::Hit { replayed_duration: cached.duration },
-                Some(cached),
-                globbed_inputs,
-            ),
-            Ok(Err(cache_miss)) => (
-                // Cache miss — includes detailed reason (NotFound or FingerprintMismatch)
-                CacheStatus::Miss(cache_miss),
-                None,
-                globbed_inputs,
-            ),
-            Err(err) => {
-                // Cache lookup error — report through finish.
-                // Note: start() is NOT called because we don't have a valid cache status.
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
-                );
-                return SpawnOutcome::Failed;
-            }
+    // 2. Report execution start with the looked-up cache status (`start()`
+    //    runs exactly once on every arm) and either replay the hit — no need
+    //    to execute the command — or carry the globbed inputs into the run.
+    let (stdio_config, globbed_inputs) = match lookup {
+        CacheLookup::Hit(cached) => {
+            let mut stdio_config =
+                reporter.start(CacheStatus::Hit { replayed_duration: cached.duration });
+            return Ok(replay_cache_hit(
+                &mut stdio_config,
+                &cached,
+                workspace_root,
+                cache_dir,
+                program_name,
+            ));
         }
-    } else {
-        // No cache metadata provided — caching is disabled for this task
-        (CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata), None, BTreeMap::new())
+        CacheLookup::Miss { miss, globbed_inputs } => {
+            (reporter.start(CacheStatus::Miss(miss)), globbed_inputs)
+        }
+        CacheLookup::Disabled => (
+            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)),
+            BTreeMap::new(),
+        ),
     };
 
-    // 2. Report execution start with the determined cache status.
-    //    Returns StdioConfig with the reporter's suggestion and writers.
-    let mut stdio_config = leaf_reporter.start(cache_status);
+    // 4. Fold the cache/fspy/stdio decisions into the typed mode.
+    let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
+        .map_err(Report::failed)?;
 
-    // 3. If cache hit, replay outputs via the StdioConfig writers and finish early.
-    //    No need to actually execute the command — just replay what was cached.
-    if let Some(cached) = cached_value {
-        for output in cached.std_outputs.iter() {
-            let writer: &mut dyn std::io::Write = match output.kind {
-                pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
-                pipe::OutputKind::StdErr => &mut stdio_config.writers.stderr_writer,
-            };
-            let _ = writer.write_all(&output.content);
-            let _ = writer.flush();
-        }
-        // Restore output files from the cached archive. Failure here means the
-        // archive file is missing, truncated, or otherwise unreadable — the
-        // task can't proceed because the cache promised the outputs would be
-        // restored. Surface a recovery instruction rather than just the raw
-        // I/O error so users know to clear the cache.
-        if let Some(ref archive_name) = cached.output_archive {
-            let archive_path = cache_dir.join(archive_name.as_str());
-            if let Err(err) = archive::extract_output_archive(workspace_root, &archive_path) {
-                let err = err.context(vite_str::format!(
-                    "failed to restore cached outputs from {}; the archive may have been deleted \
-                     or corrupted. Run `{program_name} cache clean` to clear the cache.",
-                    archive_path.as_path().display()
-                ));
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-                    Some(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }),
-                );
-                return SpawnOutcome::Failed;
-            }
-        }
-        leaf_reporter.finish(
-            None,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-            None,
-        );
-        return SpawnOutcome::CacheHit;
-    }
-
-    // 4. Build the execution mode. This folds the cache/fspy/stdio decisions
-    //    and their associated state into a single value whose shape encodes
-    //    the valid combinations. The inherited arm drops `stdio_config` here so
-    //    we don't hold `std::io::Stdout` while the child writes to the same FD.
-    //
-    // ─────────────────────────────────────────────────────────────────────
-    //  Before adding a new local variable alongside `mode`: think twice.
-    //  Does it make sense for every variant, or only for some?  If it's
-    //  variant-specific (only for `Cached`, only when fspy is on, etc.) put
-    //  it inside the variant (or `CacheState`) so the compiler enforces the
-    //  invariant at construction. Sibling locals drift out of sync with the
-    //  mode and force re-derivation (`if let Some(_) = _`,
-    //  `cache_metadata.is_some_and(_)`) at every downstream use site.
-    // ─────────────────────────────────────────────────────────────────────
-    let mut mode: ExecutionMode<'_> = match cache_metadata {
-        Some(metadata) => {
-            let fspy = if metadata.input_config.includes_auto {
-                // Resolve negative globs for fspy path filtering
-                // (already workspace-root-relative).
-                match metadata
-                    .input_config
-                    .negative_globs
-                    .iter()
-                    .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
-                    .collect::<anyhow::Result<Vec<_>>>()
-                {
-                    Ok(negs) => Some(negs),
-                    Err(err) => {
-                        leaf_reporter.finish(
-                            None,
-                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                            Some(ExecutionError::PostRunFingerprint(err)),
-                        );
-                        return SpawnOutcome::Failed;
-                    }
-                }
-            } else {
-                None
-            };
-            ExecutionMode::Cached {
-                pipe_writers: stdio_config.writers,
-                state: CacheState {
-                    metadata,
-                    globbed_inputs,
-                    std_outputs: Vec::new(),
-                    fspy_negatives: fspy,
-                },
-            }
-        }
-        None => ExecutionMode::Uncached {
-            pipe_writers: (stdio_config.suggestion == StdioSuggestion::Piped)
-                .then_some(stdio_config.writers),
-        },
-    };
-
-    // 5. Derive the arguments for `spawn()` from the mode without consuming it.
-    let (spawn_stdio, fspy_enabled) = match &mode {
-        ExecutionMode::Cached { state, .. } => (SpawnStdio::Piped, state.fspy_negatives.is_some()),
-        ExecutionMode::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
-        ExecutionMode::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
-    };
-
-    // Measure end-to-end duration here — spawn() no longer tracks time.
+    // Measure end-to-end duration here — spawn() doesn't track time.
     let start = Instant::now();
 
-    // 6. Spawn. Returns pipes (Piped) or `None` (Inherited) plus a
+    // 5. Spawn. Returns pipes (Piped) or `None` (Inherited) plus a
     //    cancellation-aware wait future.
-    let mut child = match spawn(
-        &spawn_execution.spawn_command,
-        fspy_enabled,
-        spawn_stdio,
-        fast_fail_token.clone(),
-    )
-    .await
-    {
-        Ok(child) => child,
-        Err(err) => {
-            leaf_reporter.finish(
-                None,
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Spawn(err)),
-            );
-            return SpawnOutcome::Failed;
-        }
-    };
+    let (spawn_stdio, fspy_enabled) = mode.spawn_config();
+    let child =
+        spawn(&spawn_execution.spawn_command, fspy_enabled, spawn_stdio, fast_fail_token.clone())
+            .await
+            .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
 
-    // 7. Build `PipeSinks` by borrowing into `mode`. The drain fills
-    //    `state.std_outputs` in place (via the borrow inside `capture`), so no
-    //    post-drain transfer is needed. `sinks` is `None` only in the
-    //    inherited-uncached case, where there are no pipes to drain.
-    let sinks: Option<PipeSinks<'_>> = match &mut mode {
-        ExecutionMode::Cached { pipe_writers, state } => Some(PipeSinks {
-            stdout_writer: &mut pipe_writers.stdout_writer,
-            stderr_writer: &mut pipe_writers.stderr_writer,
-            capture: Some(&mut state.std_outputs),
-        }),
-        ExecutionMode::Uncached { pipe_writers: Some(pipe_writers) } => Some(PipeSinks {
-            stdout_writer: &mut pipe_writers.stdout_writer,
-            stderr_writer: &mut pipe_writers.stderr_writer,
-            capture: None,
-        }),
-        ExecutionMode::Uncached { pipe_writers: None } => None,
-    };
-
-    // 8. Drive pipe_stdio and child.wait inside one future with a single
-    //    error sink: a pipe failure cancels (so `child.wait` kills the child
-    //    instead of orphaning it) and surfaces through the same `wait_result`
-    //    match as a wait failure, so there is exactly one error exit.
-    let child_fast_fail = fast_fail_token.clone();
-    let child_work = async move {
-        let pipe_result: anyhow::Result<()> = if let Some(sinks) = sinks {
-            let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-            let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-            #[expect(
-                clippy::large_futures,
-                reason = "pipe_stdio streams child I/O and creates a large future"
-            )]
-            let r = pipe_stdio(stdout, stderr, sinks, child_fast_fail.clone()).await;
-            r.map_err(anyhow::Error::from)
-        } else {
-            Ok(())
-        };
-
-        match pipe_result {
-            Ok(()) => child.wait.await.map_err(anyhow::Error::from),
-            Err(err) => {
-                // Pipe failed — cancel so `child.wait` kills the child
-                // instead of orphaning it.
-                child_fast_fail.cancel();
-                let _ = child.wait.await;
-                Err(err)
-            }
-        }
-    };
-
-    // Box::pin to keep the child-and-pipe stack off the enclosing future:
-    // pipe_stdio alone makes the combined future large enough to trip
-    // clippy::large_futures in every caller otherwise.
-    let child_work = Box::pin(child_work);
-    let wait_result = child_work.await;
-
-    let outcome = match wait_result {
-        Ok(outcome) => outcome,
-        Err(err) => {
-            leaf_reporter.finish(
-                None,
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Spawn(err)),
-            );
-            return SpawnOutcome::Failed;
-        }
-    };
+    // 6. Drain the pipes and wait for exit. Box::pin keeps the child-and-pipe
+    //    stack off the enclosing future: pipe_stdio alone makes the combined
+    //    future large enough to trip clippy::large_futures in every caller
+    //    otherwise.
+    let outcome = Box::pin(run_child(child, mode.pipe_sinks(), fast_fail_token.clone()))
+        .await
+        .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
     let duration = start.elapsed();
 
-    // 9. Cache update (only when we were in `Cached` mode). Errors during cache
-    //    update are reported but do not affect the exit status we return. The
-    //    labeled block gives the section a single exit: every outcome `break`s
-    //    with a `(status, error)` pair and the one `finish()` below reports it.
-    let (cache_update_status, cache_error) = 'cache_update: {
-        if let ExecutionMode::Cached { state, .. } = mode {
-            let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
-
-            // Post-execution summary of what fspy observed. `Some` iff tracking
-            // was both requested (`fspy_negatives.is_some()`) and compiled in
-            // (`cfg(fspy)`). On a `cfg(not(fspy))` build this is always `None`,
-            // and the match below short-circuits to `FspyUnsupported` when
-            // tracking was needed.
-            let fspy_outcome: Option<TrackingOutcome> = {
-                #[cfg(fspy)]
-                {
-                    outcome.path_accesses.as_ref().zip(fspy_negatives.as_deref()).map(
-                        |(raw, negs)| {
-                            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, negs);
-                            let read_write_overlap = tracked
-                                .path_reads
-                                .keys()
-                                .find(|p| tracked.path_writes.contains(*p))
-                                .cloned();
-                            TrackingOutcome { path_reads: tracked.path_reads, read_write_overlap }
-                        },
-                    )
-                }
-                #[cfg(not(fspy))]
-                {
-                    None
-                }
-            };
-
-            let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
-            if cancelled {
-                // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
-                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None)
-            } else if outcome.exit_status.success() {
-                // fspy-inferred read-write overlap: the task wrote to a file it
-                // also read, so the prerun input hashes are stale and caching
-                // is unsound. (We only check fspy-inferred reads, not
-                // globbed_inputs. A task that writes to a glob-matched file
-                // without reading it produces perpetual cache misses but not a
-                // correctness bug.)
-                if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome
-                {
-                    (
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
-                            path: path.clone(),
-                        }),
-                        None,
-                    )
-                } else if fspy_outcome.is_none() && fspy_negatives.is_some() {
-                    // Task requested fspy auto-inference but this binary was built
-                    // without `cfg(fspy)`. Task ran, but we can't compute a valid
-                    // cache entry without tracked path accesses.
-                    (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None)
-                } else {
-                    // Paths already in globbed_inputs are skipped: the overlap check
-                    // above guarantees no input modification, so the prerun hash is
-                    // the correct post-exec hash.
-                    let empty_path_reads = HashMap::default();
-                    let path_reads =
-                        fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
-                    match PostRunFingerprint::create(path_reads, workspace_root, &globbed_inputs) {
-                        Ok(post_run_fingerprint) => {
-                            // Collect output files and create archive.
-                            let output_archive = match collect_and_archive_outputs(
-                                metadata,
-                                workspace_root,
-                                cache_dir,
-                            ) {
-                                Ok(archive) => archive,
-                                Err(err) => {
-                                    break 'cache_update (
-                                        CacheUpdateStatus::NotUpdated(
-                                            CacheNotUpdatedReason::CacheDisabled,
-                                        ),
-                                        Some(ExecutionError::Cache {
-                                            kind: CacheErrorKind::Update,
-                                            source: err,
-                                        }),
-                                    );
-                                }
-                            };
-
-                            let new_cache_value = CacheEntryValue {
-                                post_run_fingerprint,
-                                std_outputs: std_outputs.into(),
-                                duration,
-                                globbed_inputs,
-                                output_archive,
-                            };
-                            match cache.update(metadata, new_cache_value, cache_dir).await {
-                                Ok(()) => (CacheUpdateStatus::Updated, None),
-                                Err(err) => (
-                                    CacheUpdateStatus::NotUpdated(
-                                        CacheNotUpdatedReason::CacheDisabled,
-                                    ),
-                                    Some(ExecutionError::Cache {
-                                        kind: CacheErrorKind::Update,
-                                        source: err,
-                                    }),
-                                ),
-                            }
-                        }
-                        Err(err) => (
-                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                            Some(ExecutionError::PostRunFingerprint(err)),
-                        ),
-                    }
-                }
-            } else {
-                // Execution failed with non-zero exit status — don't update cache
-                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None)
-            }
-        } else {
-            // Caching was disabled for this task
+    // 7. Decide the cache update (only when we were in `Cached` mode). Cache
+    //    update errors are reported but do not affect the exit status we
+    //    return — the process ran, so we return its actual status.
+    let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
+    let (cache_update, error) = match mode {
+        ExecutionMode::Cached { state, .. } => {
+            cache_update::update_cache(
+                cache,
+                workspace_root,
+                cache_dir,
+                state,
+                &outcome,
+                duration,
+                cancelled,
+            )
+            .await
+        }
+        ExecutionMode::Uncached { .. } => {
+            // Caching was disabled for this task.
             (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
         }
     };
 
-    // 7. Finish the leaf execution with the result and optional cache error.
-    //    Cache update/fingerprint failures are reported but do not affect the outcome —
-    //    the process ran, so we return its actual exit status.
-    leaf_reporter.finish(Some(outcome.exit_status), cache_update_status, cache_error);
-
-    SpawnOutcome::Spawned(outcome.exit_status)
+    Ok(Report::Spawned { exit_status: outcome.exit_status, cache_update, error })
 }
 
-/// Collect output files matching the configured globs and create a tar.zst
-/// archive in the cache directory.
-///
-/// Returns `Some(archive_filename)` if files were archived, `None` if the
-/// output config has no positive globs or no files matched.
-fn collect_and_archive_outputs(
-    cache_metadata: &CacheMetadata,
-    workspace_root: &AbsolutePath,
-    cache_dir: &AbsolutePath,
-) -> anyhow::Result<Option<Str>> {
-    let output_config = &cache_metadata.output_config;
+/// Outcome of the cache-lookup phase. Each variant carries exactly what that
+/// outcome provides: a hit owns the cached entry to replay, a miss keeps the
+/// reason plus the globbed inputs (reused by the cache-update phase after the
+/// run), and disabled has neither.
+enum CacheLookup {
+    /// Cache hit — the cached entry to replay.
+    Hit(CacheEntryValue),
+    /// Cache miss — the detailed reason (`NotFound` or `FingerprintMismatch`).
+    Miss { miss: CacheMiss, globbed_inputs: BTreeMap<RelativePathBuf, u64> },
+    /// Caching is disabled for this task (no cache metadata).
+    Disabled,
+}
 
-    if output_config.positive_globs.is_empty() {
-        return Ok(None);
-    }
+/// Phase 1: compute the globbed inputs and try to hit the cache.
+async fn lookup_cache(
+    cache_metadata: Option<&CacheMetadata>,
+    cache: &ExecutionCache,
+    workspace_root: &Arc<AbsolutePath>,
+) -> Result<CacheLookup, Report> {
+    let Some(cache_metadata) = cache_metadata else {
+        return Ok(CacheLookup::Disabled);
+    };
 
-    let output_files = glob::collect_glob_paths(
+    // Compute globbed inputs from positive globs at execution time.
+    // Globs are already workspace-root-relative (resolved at task graph stage).
+    let globbed_inputs = compute_globbed_inputs(
         workspace_root,
-        &output_config.positive_globs,
-        &output_config.negative_globs,
-    )?;
+        &cache_metadata.input_config.positive_globs,
+        &cache_metadata.input_config.negative_globs,
+    )
+    .map_err(|err| {
+        Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
+    })?;
 
-    if output_files.is_empty() {
-        return Ok(None);
+    match cache.try_hit(cache_metadata, &globbed_inputs, workspace_root).await {
+        Ok(Ok(cached)) => Ok(CacheLookup::Hit(cached)),
+        Ok(Err(miss)) => Ok(CacheLookup::Miss { miss, globbed_inputs }),
+        Err(err) => {
+            Err(Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }))
+        }
     }
-
-    let archive_name: Str = vite_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
-    let archive_path = cache_dir.join(archive_name.as_str());
-
-    archive::create_output_archive(workspace_root, &output_files, &archive_path)?;
-
-    Ok(Some(archive_name))
 }
 
-impl Session<'_> {
-    /// Execute an execution graph, reporting events through the provided reporter builder.
-    ///
-    /// Cache is initialized only if any leaf execution needs it. The reporter is built
-    /// after cache initialization, so cache errors are reported directly to stderr
-    /// without involving the reporter at all.
-    ///
-    /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
-    /// Returns `Ok(())` when all tasks succeeded.
-    #[tracing::instrument(level = "debug", skip_all)]
-    pub(crate) async fn execute_graph(
-        &self,
-        execution_graph: ExecutionGraph,
-        builder: Box<dyn GraphExecutionReporterBuilder>,
-        interrupt_token: CancellationToken,
-    ) -> Result<(), ExitStatus> {
-        // Initialize cache before building the reporter. Cache errors are reported
-        // directly to stderr and cause an early exit, keeping the reporter flow clean
-        // (the reporter's `finish()` no longer accepts graph-level error messages).
-        let cache = match self.cache() {
-            Ok(cache) => cache,
-            #[expect(clippy::print_stderr, reason = "cache init errors bypass the reporter")]
-            Err(err) => {
-                eprintln!("Failed to initialize cache: {err}");
-                return Err(ExitStatus::FAILURE);
-            }
+/// Phase 3 (cache hit): replay the captured stdout/stderr and restore the
+/// output archive.
+fn replay_cache_hit(
+    stdio_config: &mut StdioConfig,
+    cached: &CacheEntryValue,
+    workspace_root: &Arc<AbsolutePath>,
+    cache_dir: &AbsolutePath,
+    program_name: &str,
+) -> Report {
+    for output in cached.std_outputs.iter() {
+        let writer: &mut dyn std::io::Write = match output.kind {
+            pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
+            pipe::OutputKind::StdErr => &mut stdio_config.writers.stderr_writer,
         };
+        let _ = writer.write_all(&output.content);
+        let _ = writer.flush();
+    }
 
-        let reporter = RefCell::new(builder.build());
+    // Restore output files from the cached archive. Failure here means the
+    // archive file is missing, truncated, or otherwise unreadable — the
+    // task can't proceed because the cache promised the outputs would be
+    // restored. Surface a recovery instruction rather than just the raw
+    // I/O error so users know to clear the cache.
+    if let Some(ref archive_name) = cached.output_archive {
+        let archive_path = cache_dir.join(archive_name.as_str());
+        if let Err(err) = archive::extract_output_archive(workspace_root, &archive_path) {
+            let err = err.context(vite_str::format!(
+                "failed to restore cached outputs from {}; the archive may have been deleted \
+                 or corrupted. Run `{program_name} cache clean` to clear the cache.",
+                archive_path.as_path().display()
+            ));
+            return Report::Failed {
+                cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
+                error: ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err },
+            };
+        }
+    }
 
-        let execution_context = ExecutionContext {
-            reporter: &reporter,
-            cache,
-            workspace_root: &self.workspace_path,
-            cache_dir: &self.cache_path,
-            program_name: self.program_name.as_str(),
-            fast_fail_token: CancellationToken::new(),
-            interrupt_token,
-        };
+    Report::CacheHit
+}
 
-        // Execute the graph with fast-fail: if any task fails, remaining tasks
-        // are skipped. Leaf-level errors are reported through the reporter.
-        execution_context.execute_expanded_graph(&execution_graph).await;
+/// Phase 6: drain the child's pipes (if piped) and wait for exit, with a
+/// single error sink — a pipe failure cancels (so the wait kills the child
+/// instead of orphaning it) and surfaces through the same returned result as
+/// a wait failure.
+async fn run_child(
+    mut child: ChildHandle,
+    sinks: Option<PipeSinks<'_>>,
+    fast_fail_token: CancellationToken,
+) -> anyhow::Result<ChildOutcome> {
+    let pipe_result: anyhow::Result<()> = if let Some(sinks) = sinks {
+        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+        #[expect(
+            clippy::large_futures,
+            reason = "pipe_stdio streams child I/O and creates a large future"
+        )]
+        let r = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
+        r.map_err(anyhow::Error::from)
+    } else {
+        Ok(())
+    };
 
-        // Leaf-level errors and non-zero exit statuses are tracked internally
-        // by the reporter.
-        reporter.into_inner().finish()
+    match pipe_result {
+        Ok(()) => child.wait.await.map_err(anyhow::Error::from),
+        Err(err) => {
+            // Pipe failed — cancel so `child.wait` kills the child instead of
+            // orphaning it.
+            fast_fail_token.cancel();
+            let _ = child.wait.await;
+            Err(err)
+        }
     }
 }
