@@ -1,0 +1,36 @@
+[package]
+name = "shared_memory"
+description = "A user friendly crate that allows you to share memory between processes"
+version = "0.12.4"
+authors = ["ElasT0ny <elast0ny00@gmail.com>"]
+license = "MIT OR Apache-2.0"
+edition = "2018"
+publish = false
+
+readme = "README.md"
+documentation = "https://docs.rs/shared_memory"
+repository = "https://github.com/elast0ny/shared_memory-rs"
+keywords = ["shmem", "shared", "memory", "inter-process", "process"]
+categories = [
+    "os::unix-apis",
+    "os::windows-apis",
+    "memory-management",
+    "concurrency",
+    "asynchronous",
+]
+
+[features]
+default = []
+logging = ["log"]
+
+[dependencies]
+cfg-if = "1.0"
+rand = "0.8"
+log = { version = "0.4", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30", default-features = false, features = ["fs", "mman"] }
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+win-sys = "0.3"

@@ -245,6 +245,45 @@ jobs:
       - name: Run ignored tests
         run: cargo test -- --ignored
 
+  check-ohos:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code-changed == 'true'
+    name: Check OHOS (aarch64-unknown-linux-ohos)
+    runs-on: namespace-profile-linux-x64-default
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+
+      - name: Update submodules
+        run: git submodule update --init --recursive
+
+      - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
+        with:
+          save-cache: ${{ github.ref_name == 'main' }}
+          cache-key: check-ohos
+
+      - run: rustup target add aarch64-unknown-linux-ohos
+
+      # Tier-3 target metadata check for the OHOS-cfg-gated surface:
+      #   * vendor shared_memory (nix 0.30 patch — upstream nix 0.23 fails to
+      #     gate ohos-incompatible symbols)
+      #   * fspy_preload_unix (LD_PRELOAD lib; execveat is reached through a
+      #     syscall shim because OHOS musl libc does not export the dynamic
+      #     symbol)
+      #   * fspy_shared / fspy_shared_unix (consumers)
+      # Scoped by package rather than --workspace because vite_task pulls a
+      # build script that downloads host-arch binaries unrelated to the OHOS
+      # cfg surface; expanding scope would only add brittleness without
+      # surfacing OHOS-specific code paths.
+      - name: cargo check OHOS surface
+        run: >-
+          cargo check --locked --target aarch64-unknown-linux-ohos
+          -p shared_memory
+          -p fspy_shared
+          -p fspy_shared_unix
+          -p fspy_preload_unix
+        env:
+          RUSTFLAGS: -D warnings
+
   fmt:
     name: Format and Check Deps
     runs-on: namespace-profile-linux-x64-default
@@ -287,6 +326,7 @@ jobs:
       - clippy
       - test
       - test-musl
+      - check-ohos
       - fmt
     steps:
       - run: exit 1

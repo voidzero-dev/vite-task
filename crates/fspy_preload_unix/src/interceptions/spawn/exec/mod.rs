@@ -206,8 +206,22 @@ mod linux_only {
         };
         let abs_path = match abs_path_result {
             Ok(None) => {
-                // SAFETY: forwarding the original arguments to the real execveat syscall
-                return unsafe { execveat::original()(dirfd, pathname, argv, envp, flags) };
+                // OHOS musl libc does not export execveat, so dlsym(RTLD_NEXT)
+                // returns NULL and execveat::original() would dereference null.
+                // Drop straight to the syscall — see crate::libc::execveat for the
+                // empirical preflight evidence (c1_execveat_sym fail / c2_sys_execveat pass).
+                #[cfg(target_env = "ohos")]
+                {
+                    // SAFETY: forwarding the original execveat arguments through the raw syscall
+                    return unsafe {
+                        crate::libc::execveat(dirfd, pathname, argv, envp, flags)
+                    };
+                }
+                #[cfg(not(target_env = "ohos"))]
+                {
+                    // SAFETY: forwarding the original arguments to the real execveat syscall
+                    return unsafe { execveat::original()(dirfd, pathname, argv, envp, flags) };
+                }
             }
             Ok(Some(path)) => path.as_ptr(),
             Err(errno) => {
