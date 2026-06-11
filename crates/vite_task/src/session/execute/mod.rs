@@ -233,10 +233,6 @@ impl ExecutionContext<'_> {
                 false
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
-                #[expect(
-                    clippy::large_futures,
-                    reason = "spawn execution with cache management creates large futures"
-                )]
                 let outcome = execute_spawn(
                     leaf_reporter,
                     spawn_execution,
@@ -304,7 +300,7 @@ struct CacheState<'a> {
 /// Post-execution summary of what fspy observed for a single task. Used in the
 /// cache-update step. Fields are cfg-agnostic so the downstream match logic
 /// doesn't need `cfg(fspy)` — the value is only ever `Some` when tracking
-/// happened (see the `let tracking = ...` fork in `execute_spawn`).
+/// happened (see the `let fspy_outcome = ...` fork in `execute_spawn`).
 struct TrackingOutcome {
     path_reads: HashMap<RelativePathBuf, PathRead>,
     /// First path that was both read and written during execution, if any.
@@ -547,35 +543,50 @@ pub async fn execute_spawn(
         ExecutionMode::Uncached { pipe_writers: None } => None,
     };
 
-    if let Some(sinks) = sinks {
-        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        #[expect(
-            clippy::large_futures,
-            reason = "pipe_stdio streams child I/O and creates a large future"
-        )]
-        let pipe_result = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        if let Err(err) = pipe_result {
-            // Cancel so `child.wait` kills the child instead of orphaning it.
-            fast_fail_token.cancel();
-            let _ = child.wait.await;
-            leaf_reporter.finish(
-                None,
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Spawn(err.into())),
-            );
-            return SpawnOutcome::Failed;
-        }
-    }
+    // 8. Drive pipe_stdio and child.wait inside one future with a single
+    //    error sink: a pipe failure cancels (so `child.wait` kills the child
+    //    instead of orphaning it) and surfaces through the same `wait_result`
+    //    match as a wait failure, so there is exactly one error exit.
+    let child_fast_fail = fast_fail_token.clone();
+    let child_work = async move {
+        let pipe_result: anyhow::Result<()> = if let Some(sinks) = sinks {
+            let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+            let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+            #[expect(
+                clippy::large_futures,
+                reason = "pipe_stdio streams child I/O and creates a large future"
+            )]
+            let r = pipe_stdio(stdout, stderr, sinks, child_fast_fail.clone()).await;
+            r.map_err(anyhow::Error::from)
+        } else {
+            Ok(())
+        };
 
-    // 8. Wait for exit (handles cancellation internally).
-    let outcome = match child.wait.await {
+        match pipe_result {
+            Ok(()) => child.wait.await.map_err(anyhow::Error::from),
+            Err(err) => {
+                // Pipe failed — cancel so `child.wait` kills the child
+                // instead of orphaning it.
+                child_fast_fail.cancel();
+                let _ = child.wait.await;
+                Err(err)
+            }
+        }
+    };
+
+    // Box::pin to keep the child-and-pipe stack off the enclosing future:
+    // pipe_stdio alone makes the combined future large enough to trip
+    // clippy::large_futures in every caller otherwise.
+    let child_work = Box::pin(child_work);
+    let wait_result = child_work.await;
+
+    let outcome = match wait_result {
         Ok(outcome) => outcome,
         Err(err) => {
             leaf_reporter.finish(
                 None,
                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Spawn(err.into())),
+                Some(ExecutionError::Spawn(err)),
             );
             return SpawnOutcome::Failed;
         }
@@ -583,72 +594,102 @@ pub async fn execute_spawn(
     let duration = start.elapsed();
 
     // 9. Cache update (only when we were in `Cached` mode). Errors during cache
-    //    update are reported but do not affect the exit status we return.
-    let (cache_update_status, cache_error) = if let ExecutionMode::Cached { state, .. } = mode {
-        let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
+    //    update are reported but do not affect the exit status we return. The
+    //    labeled block gives the section a single exit: every outcome `break`s
+    //    with a `(status, error)` pair and the one `finish()` below reports it.
+    let (cache_update_status, cache_error) = 'cache_update: {
+        if let ExecutionMode::Cached { state, .. } = mode {
+            let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
 
-        // Post-execution summary of what fspy observed. `Some` iff tracking was
-        // both requested (`fspy_negatives.is_some()`) and compiled in (`cfg(fspy)`).
-        // On a `cfg(not(fspy))` build this is always `None`, and the match below
-        // short-circuits to `FspyUnsupported` when tracking was needed.
-        let tracking: Option<TrackingOutcome> = {
-            #[cfg(fspy)]
-            {
-                outcome.path_accesses.as_ref().zip(fspy_negatives.as_deref()).map(|(raw, negs)| {
-                    let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, negs);
-                    let read_write_overlap = tracked
-                        .path_reads
-                        .keys()
-                        .find(|p| tracked.path_writes.contains(*p))
-                        .cloned();
-                    TrackingOutcome { path_reads: tracked.path_reads, read_write_overlap }
-                })
-            }
-            #[cfg(not(fspy))]
-            {
-                None
-            }
-        };
+            // Post-execution summary of what fspy observed. `Some` iff tracking
+            // was both requested (`fspy_negatives.is_some()`) and compiled in
+            // (`cfg(fspy)`). On a `cfg(not(fspy))` build this is always `None`,
+            // and the match below short-circuits to `FspyUnsupported` when
+            // tracking was needed.
+            let fspy_outcome: Option<TrackingOutcome> = {
+                #[cfg(fspy)]
+                {
+                    outcome.path_accesses.as_ref().zip(fspy_negatives.as_deref()).map(
+                        |(raw, negs)| {
+                            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, negs);
+                            let read_write_overlap = tracked
+                                .path_reads
+                                .keys()
+                                .find(|p| tracked.path_writes.contains(*p))
+                                .cloned();
+                            TrackingOutcome { path_reads: tracked.path_reads, read_write_overlap }
+                        },
+                    )
+                }
+                #[cfg(not(fspy))]
+                {
+                    None
+                }
+            };
 
-        let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
-        if cancelled {
-            // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
-            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None)
-        } else if outcome.exit_status.success() {
-            // fspy-inferred read-write overlap: the task wrote to a file it also
-            // read, so the prerun input hashes are stale and caching is unsound.
-            // (We only check fspy-inferred reads, not globbed_inputs. A task that
-            // writes to a glob-matched file without reading it produces perpetual
-            // cache misses but not a correctness bug.)
-            if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &tracking {
-                (
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
-                        path: path.clone(),
-                    }),
-                    None,
-                )
-            } else if tracking.is_none() && fspy_negatives.is_some() {
-                // Task requested fspy auto-inference but this binary was built
-                // without `cfg(fspy)`. Task ran, but we can't compute a valid
-                // cache entry without tracked path accesses.
-                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None)
-            } else {
-                // Paths already in globbed_inputs are skipped: the overlap check
-                // above guarantees no input modification, so the prerun hash is
-                // the correct post-exec hash.
-                let empty_path_reads = HashMap::default();
-                let path_reads = tracking.as_ref().map_or(&empty_path_reads, |t| &t.path_reads);
-                match PostRunFingerprint::create(path_reads, workspace_root, &globbed_inputs) {
-                    Ok(post_run_fingerprint) => {
-                        // Collect output files and create archive
-                        let output_archive = match collect_and_archive_outputs(
-                            metadata,
-                            workspace_root,
-                            cache_dir,
-                        ) {
-                            Ok(archive) => archive,
-                            Err(err) => {
-                                let result = (
+            let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
+            if cancelled {
+                // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy
+                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None)
+            } else if outcome.exit_status.success() {
+                // fspy-inferred read-write overlap: the task wrote to a file it
+                // also read, so the prerun input hashes are stale and caching
+                // is unsound. (We only check fspy-inferred reads, not
+                // globbed_inputs. A task that writes to a glob-matched file
+                // without reading it produces perpetual cache misses but not a
+                // correctness bug.)
+                if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome
+                {
+                    (
+                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
+                            path: path.clone(),
+                        }),
+                        None,
+                    )
+                } else if fspy_outcome.is_none() && fspy_negatives.is_some() {
+                    // Task requested fspy auto-inference but this binary was built
+                    // without `cfg(fspy)`. Task ran, but we can't compute a valid
+                    // cache entry without tracked path accesses.
+                    (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None)
+                } else {
+                    // Paths already in globbed_inputs are skipped: the overlap check
+                    // above guarantees no input modification, so the prerun hash is
+                    // the correct post-exec hash.
+                    let empty_path_reads = HashMap::default();
+                    let path_reads =
+                        fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
+                    match PostRunFingerprint::create(path_reads, workspace_root, &globbed_inputs) {
+                        Ok(post_run_fingerprint) => {
+                            // Collect output files and create archive.
+                            let output_archive = match collect_and_archive_outputs(
+                                metadata,
+                                workspace_root,
+                                cache_dir,
+                            ) {
+                                Ok(archive) => archive,
+                                Err(err) => {
+                                    break 'cache_update (
+                                        CacheUpdateStatus::NotUpdated(
+                                            CacheNotUpdatedReason::CacheDisabled,
+                                        ),
+                                        Some(ExecutionError::Cache {
+                                            kind: CacheErrorKind::Update,
+                                            source: err,
+                                        }),
+                                    );
+                                }
+                            };
+
+                            let new_cache_value = CacheEntryValue {
+                                post_run_fingerprint,
+                                std_outputs: std_outputs.into(),
+                                duration,
+                                globbed_inputs,
+                                output_archive,
+                            };
+                            match cache.update(metadata, new_cache_value, cache_dir).await {
+                                Ok(()) => (CacheUpdateStatus::Updated, None),
+                                Err(err) => (
                                     CacheUpdateStatus::NotUpdated(
                                         CacheNotUpdatedReason::CacheDisabled,
                                     ),
@@ -656,43 +697,23 @@ pub async fn execute_spawn(
                                         kind: CacheErrorKind::Update,
                                         source: err,
                                     }),
-                                );
-                                leaf_reporter.finish(Some(outcome.exit_status), result.0, result.1);
-                                return SpawnOutcome::Spawned(outcome.exit_status);
+                                ),
                             }
-                        };
-
-                        let new_cache_value = CacheEntryValue {
-                            post_run_fingerprint,
-                            std_outputs: std_outputs.into(),
-                            duration,
-                            globbed_inputs,
-                            output_archive,
-                        };
-                        match cache.update(metadata, new_cache_value, cache_dir).await {
-                            Ok(()) => (CacheUpdateStatus::Updated, None),
-                            Err(err) => (
-                                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                                Some(ExecutionError::Cache {
-                                    kind: CacheErrorKind::Update,
-                                    source: err,
-                                }),
-                            ),
                         }
+                        Err(err) => (
+                            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                            Some(ExecutionError::PostRunFingerprint(err)),
+                        ),
                     }
-                    Err(err) => (
-                        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                        Some(ExecutionError::PostRunFingerprint(err)),
-                    ),
                 }
+            } else {
+                // Execution failed with non-zero exit status — don't update cache
+                (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None)
             }
         } else {
-            // Execution failed with non-zero exit status — don't update cache
-            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None)
+            // Caching was disabled for this task
+            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
         }
-    } else {
-        // Caching was disabled for this task
-        (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
     };
 
     // 7. Finish the leaf execution with the result and optional cache error.

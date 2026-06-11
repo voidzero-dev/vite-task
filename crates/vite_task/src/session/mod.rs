@@ -695,10 +695,6 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if planning or execution of the synthetic command fails.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(
-        clippy::large_futures,
-        reason = "execution plan future is large but only awaited once"
-    )]
     pub async fn execute_synthetic(
         &self,
         synthetic_plan_request: SyntheticPlanRequest,
