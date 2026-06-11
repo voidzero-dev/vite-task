@@ -28,7 +28,13 @@ pub struct PlanContext<'a> {
     cwd: Arc<AbsolutePath>,
 
     /// The environment variables for the current execution context.
-    envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    ///
+    /// `Arc`-shared with copy-on-write semantics: [`duplicate`](Self::duplicate)
+    /// and downstream consumers (`ScriptCommand::envs`) share the map;
+    /// mutations ([`add_envs`](Self::add_envs),
+    /// [`prepend_path`](Self::prepend_path)) clone only when the map is
+    /// currently shared.
+    envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
 
     /// The callbacks for loading task graphs and parsing commands.
     callbacks: &'a mut (dyn PlanRequestParser + 'a),
@@ -54,7 +60,7 @@ impl<'a> PlanContext<'a> {
     pub fn new(
         workspace_path: &'a Arc<AbsolutePath>,
         cwd: Arc<AbsolutePath>,
-        envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+        envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
         indexed_task_graph: &'a IndexedTaskGraph,
         resolved_global_cache: ResolvedGlobalCacheConfig,
@@ -73,7 +79,7 @@ impl<'a> PlanContext<'a> {
         }
     }
 
-    pub const fn envs(&self) -> &FxHashMap<Arc<OsStr>, Arc<OsStr>> {
+    pub const fn envs(&self) -> &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
         &self.envs
     }
 
@@ -108,15 +114,22 @@ impl<'a> PlanContext<'a> {
     }
 
     pub fn prepend_path(&mut self, path_to_prepend: &AbsolutePath) -> Result<(), JoinPathsError> {
-        prepend_path_env(&mut self.envs, path_to_prepend)
+        prepend_path_env(Arc::make_mut(&mut self.envs), path_to_prepend)
     }
 
     pub fn add_envs(
         &mut self,
         new_envs: impl Iterator<Item = (impl AsRef<OsStr>, impl AsRef<OsStr>)>,
     ) {
+        // Don't touch the Arc for an empty iterator — `make_mut` would clone
+        // the shared map for nothing (most commands have no prefix envs).
+        let mut new_envs = new_envs.peekable();
+        if new_envs.peek().is_none() {
+            return;
+        }
+        let envs = Arc::make_mut(&mut self.envs);
         for (key, value) in new_envs {
-            self.envs.insert(Arc::from(key.as_ref()), Arc::from(value.as_ref()));
+            envs.insert(Arc::from(key.as_ref()), Arc::from(value.as_ref()));
         }
     }
 
@@ -154,7 +167,7 @@ impl<'a> PlanContext<'a> {
         PlanContext {
             workspace_path: self.workspace_path,
             cwd: Arc::clone(&self.cwd),
-            envs: self.envs.clone(),
+            envs: Arc::clone(&self.envs),
             callbacks: self.callbacks,
             task_call_stack: self.task_call_stack.clone(),
             indexed_task_graph: self.indexed_task_graph,

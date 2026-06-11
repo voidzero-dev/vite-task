@@ -200,7 +200,7 @@ pub async fn plan_query(
     query_plan_request: QueryPlanRequest,
     workspace_path: &Arc<AbsolutePath>,
     cwd: &Arc<AbsolutePath>,
-    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
     plan_request_parser: &mut (dyn PlanRequestParser + '_),
     task_graph_loader: &mut (dyn TaskGraphLoader + '_),
 ) -> Result<PlanResult, Error> {
@@ -216,7 +216,7 @@ pub async fn plan_query(
     let context = PlanContext::new(
         workspace_path,
         Arc::clone(cwd),
-        envs.clone(),
+        Arc::clone(envs),
         plan_request_parser,
         indexed_task_graph,
         resolved_global_cache,

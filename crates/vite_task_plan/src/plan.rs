@@ -211,7 +211,7 @@ async fn plan_task_as_execution_node(
                 };
 
                 // Try to parse the args of an and_item to a plan request like `run -r build`
-                let envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>> = context.envs().clone().into();
+                let envs = Arc::clone(context.envs());
                 let mut script_command = ScriptCommand {
                     program: and_item.program.clone(),
                     args: args.into(),
@@ -597,12 +597,14 @@ fn plan_spawn_execution(
     execution_cache_key: Option<ExecutionCacheKey>,
     prefix_envs: &BTreeMap<Str, Str>,
     resolved_task_options: &ResolvedTaskOptions,
-    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
     program_path: Arc<AbsolutePath>,
     args: Arc<[Str]>,
 ) -> Result<SpawnExecution, Error> {
-    // all envs available in the current context
-    let mut all_envs = envs.clone();
+    // The child env starts from the full context and is filtered in place by
+    // `EnvFingerprints::resolve` below — this clone is the one place the map's
+    // contents are actually copied per spawn.
+    let mut all_envs = (**envs).clone();
     let cwd = Arc::clone(&resolved_task_options.cwd);
 
     let mut resolved_cache_metadata = None;
