@@ -173,6 +173,16 @@ jobs:
         with:
           tool: cargo-nextest,cargo-xwin
 
+      # Downloading and unpacking the MSVC CRT/Windows SDK dominates this
+      # job's wall time (~10 minutes); the unpacked result is immutable for a
+      # given manifest version, so cache it. Bump the key when bumping the
+      # xwin version.
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        id: xwin-cache
+        with:
+          path: ~/.cache/cargo-xwin
+          key: cargo-xwin-msvc-17
+
       - name: Build test archive
         run: |
           # cargo-xwin resolves the rustflags configured in .cargo/config.toml,
@@ -191,6 +201,12 @@ jobs:
           name: windows-test-archive
           path: windows-tests.tar.zst
           retention-days: 7
+
+      - uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        if: steps.xwin-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/cargo-xwin
+          key: cargo-xwin-msvc-17
 
   test-windows:
     needs: build-windows-tests
