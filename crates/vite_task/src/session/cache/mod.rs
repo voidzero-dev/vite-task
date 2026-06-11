@@ -155,6 +155,18 @@ pub enum EnvMismatch {
     Changed { name: Str, old_value: Str, new_value: Str },
 }
 
+impl EnvMismatch {
+    /// The name of the env var that diverged.
+    #[must_use]
+    pub const fn name(&self) -> &Str {
+        match self {
+            Self::Added { name, .. } | Self::Removed { name, .. } | Self::Changed { name, .. } => {
+                name
+            }
+        }
+    }
+}
+
 impl Display for EnvMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

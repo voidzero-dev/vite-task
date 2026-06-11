@@ -16,6 +16,6 @@ initial content
 cache miss: env removed
 
 ```
-$ vtt print-file test.txt ○ cache miss: envs changed, executing
+$ vtt print-file test.txt ○ cache miss: env 'MY_ENV' changed, executing
 initial content
 ```

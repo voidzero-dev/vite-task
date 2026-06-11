@@ -16,7 +16,7 @@ $ vtt print-env FOO
 cache miss, different env
 
 ```
-$ vtt print-env FOO ○ cache miss: envs changed, executing
+$ vtt print-env FOO ○ cache miss: env 'FOO' changed, executing
 2
 ```
 

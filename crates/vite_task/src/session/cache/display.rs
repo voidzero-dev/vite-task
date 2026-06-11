@@ -119,6 +119,34 @@ pub fn detect_spawn_fingerprint_changes(
     changes
 }
 
+/// Names of the env vars involved in a set of spawn-fingerprint changes, in the
+/// order detected. Only env changes are collected; untracked-env and non-env
+/// changes are skipped.
+fn env_change_names(changes: &[SpawnFingerprintChange]) -> Vec<&Str> {
+    changes
+        .iter()
+        .filter_map(|change| match change {
+            SpawnFingerprintChange::Env(mismatch) => Some(mismatch.name()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Inline cache-miss reason naming the env var(s) that changed, e.g.
+/// `env 'NODE_ENV' changed` or `envs 'A', 'B' changed`. Falls back to the
+/// generic `envs changed` when no names are available.
+fn format_env_changed_inline(names: &[&Str]) -> Str {
+    match names {
+        [] => Str::from("envs changed"),
+        [name] => vite_str::format!("env '{name}' changed"),
+        names => {
+            let quoted: Vec<Str> = names.iter().map(|name| vite_str::format!("'{name}'")).collect();
+            let joined = quoted.iter().map(Str::as_str).collect::<Vec<_>>().join(", ");
+            vite_str::format!("envs {joined} changed")
+        }
+    }
+}
+
 /// Format cache status for inline display (during Start event).
 ///
 /// Returns `Some(formatted_string)` for Hit, Miss with reason, and Disabled, None for `NotFound`.
@@ -145,22 +173,27 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                 FingerprintMismatch::SpawnFingerprint { old, new } => {
                     let changes = detect_spawn_fingerprint_changes(old, new);
                     match changes.first() {
-                        Some(SpawnFingerprintChange::Env(_)) => "envs changed",
+                        Some(SpawnFingerprintChange::Env(_)) => {
+                            format_env_changed_inline(&env_change_names(&changes))
+                        }
                         Some(
                             SpawnFingerprintChange::UntrackedEnvAdded { .. }
                             | SpawnFingerprintChange::UntrackedEnvRemoved { .. },
-                        ) => "untracked env config changed",
-                        Some(SpawnFingerprintChange::ProgramChanged) => "program changed",
-                        Some(SpawnFingerprintChange::ArgsChanged) => "args changed",
-                        Some(SpawnFingerprintChange::CwdChanged) => "working directory changed",
-                        None => "configuration changed",
+                        ) => Str::from("untracked env config changed"),
+                        Some(SpawnFingerprintChange::ProgramChanged) => {
+                            Str::from("program changed")
+                        }
+                        Some(SpawnFingerprintChange::ArgsChanged) => Str::from("args changed"),
+                        Some(SpawnFingerprintChange::CwdChanged) => {
+                            Str::from("working directory changed")
+                        }
+                        None => Str::from("configuration changed"),
                     }
                 }
-                FingerprintMismatch::InputConfig => "input configuration changed",
-                FingerprintMismatch::OutputConfig => "output configuration changed",
+                FingerprintMismatch::InputConfig => Str::from("input configuration changed"),
+                FingerprintMismatch::OutputConfig => Str::from("output configuration changed"),
                 FingerprintMismatch::InputChanged { kind, path } => {
-                    let desc = format_input_change_str(*kind, path.as_str());
-                    return Some(vite_str::format!("○ cache miss: {desc}, executing"));
+                    format_input_change_str(*kind, path.as_str())
                 }
             };
             Some(vite_str::format!("○ cache miss: {reason}, executing"))
