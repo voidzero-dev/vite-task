@@ -205,6 +205,12 @@ jobs:
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
 
+      # The Detours submodule is needed at run time: fspy_detours_sys's
+      # bindings test re-generates bindgen bindings against the checked-out
+      # headers.
+      - name: Update submodules
+        run: git submodule update --init --recursive
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-test-archive
