@@ -157,10 +157,15 @@ jobs:
       - name: Update submodules
         run: git submodule update --init --recursive
 
+      # llvm-tools provides llvm-ar in the toolchain's rustlib bin dir;
+      # cargo-xwin symlinks the MSVC-style llvm-lib/llvm-dlltool (used by cc-rs
+      # to archive Detours) and lld-link from there when the runner image has
+      # no system LLVM.
       - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
         with:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: windows-cross
+          components: llvm-tools
 
       - run: rustup target add x86_64-pc-windows-msvc
 
