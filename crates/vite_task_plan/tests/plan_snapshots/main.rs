@@ -193,8 +193,8 @@ fn run_case_inner(
         "folder '{fixture_name}' should be a workspace root"
     );
 
-    let fake_bin_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("tests/plan_snapshots/fake-bin");
+    let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let fake_bin_dir = manifest_dir.join("tests/plan_snapshots/fake-bin");
     let combined_path =
         Arc::<OsStr>::from(std::ffi::OsString::from(fake_bin_dir.to_str().unwrap()));
 

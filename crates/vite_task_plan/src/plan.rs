@@ -141,6 +141,15 @@ async fn plan_task_as_execution_node(
                 let mut context = context.duplicate();
                 context.push_stack_frame(task_node_index, add_item_span.clone());
 
+                // This command's env context: extend the planning context with
+                // the command's prefix envs (`FOO=1 tool ...`). Everything that
+                // interprets the command reads this one context — program
+                // lookup, plan-request callbacks, and nested-run planning. The
+                // per-and-item duplicate above scopes the extension to this
+                // command, matching shell semantics (`FOO=1 a && b` does not
+                // set `FOO` for `b`).
+                context.add_envs(and_item.envs.iter());
+
                 let mut args = and_item.args;
                 let extra_args = if is_last_command && and_item_index == and_item_count - 1 {
                     // For the last and_item of the last command, append extra args from the plan context
@@ -247,8 +256,6 @@ async fn plan_task_as_execution_node(
 
                         // Save task name before consuming the request
                         let task_name = query_plan_request.query.task_name.clone();
-                        // Add prefix envs to the context
-                        context.add_envs(and_item.envs.iter());
                         let QueryPlanRequest { query, plan_options } = query_plan_request;
                         let query = Arc::new(query);
                         let nested_plan =

@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "check": "PATH= vtt"
+  }
+}

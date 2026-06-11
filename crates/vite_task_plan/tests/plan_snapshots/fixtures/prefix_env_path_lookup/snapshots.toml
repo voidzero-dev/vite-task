@@ -1,0 +1,3 @@
+[[plan]]
+name = "prefix_path_hides_tool_binary"
+args = ["run", "check"]

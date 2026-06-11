@@ -105,8 +105,7 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
         .to_owned();
     let mut json_value = serde_json::to_value(value).unwrap();
 
-    // On Windows, paths might use either backslashes or forward slashes
-    // Try both variants for workspace_root, manifest_dir, and tools_dir
+    // On Windows, paths might use either backslashes or forward slashes.
     let workspace_root_forward = workspace_root.cow_replace('\\', "/");
     let manifest_dir_forward = manifest_dir.as_str().cow_replace('\\', "/");
     let tools_dir_forward = tools_dir_str.as_str().cow_replace('\\', "/");

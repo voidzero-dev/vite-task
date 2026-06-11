@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Prefix environment assignments like `PATH=... command` now affect executable lookup during task planning, so tools provided only by the prefixed `PATH` can be resolved correctly ([#440](https://github.com/voidzero-dev/vite-task/pull/440))
 - **Changed** Cache misses caused by a tracked env var now name the env var inline, for example `cache miss: env 'NODE_ENV' changed`, instead of the generic `envs changed` message ([#438](https://github.com/voidzero-dev/vite-task/pull/438))
 - **Fixed** The task cache is now stored in a per-schema-version subdirectory (e.g. `node_modules/.vite/task-cache/v13/`), so switching between branches that pin different Vite+ versions no longer fails with `Unrecognized database version`. Each version keeps its own cache directory; a cache from a different version is ignored rather than aborting the run ([#433](https://github.com/voidzero-dev/vite-task/pull/433))
 - **Added** A task's `env` and `untrackedEnv` glob patterns now support `!` negation: a `!`-prefixed pattern excludes matching variables (e.g. `["VITE_*", "!VITE_SECRET"]` tracks every `VITE_*` except `VITE_SECRET`) ([#425](https://github.com/voidzero-dev/vite-task/pull/425))
