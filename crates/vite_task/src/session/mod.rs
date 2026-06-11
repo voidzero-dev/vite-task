@@ -196,6 +196,10 @@ impl<'a> Session<'a> {
     /// if workspace initialization fails.
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn init(config: SessionConfig<'a>) -> anyhow::Result<Self> {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "Session::init is the only place that bootstraps the session env snapshot"
+        )]
         let envs = std::env::vars_os()
             .map(|(k, v)| (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str())))
             .collect();
