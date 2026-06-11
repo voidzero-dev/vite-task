@@ -139,6 +139,34 @@ pub enum InputChangeKind {
     Removed,
 }
 
+/// A single env var difference between a stored fingerprint and the current
+/// environment.
+///
+/// The canonical shape for an env change wherever one is detected and
+/// reported. The [`Display`] impl is the single source of the user-facing
+/// wording.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EnvMismatch {
+    /// Set now, but absent from the stored fingerprint.
+    Added { name: Str, value: Str },
+    /// In the stored fingerprint, but unset now.
+    Removed { name: Str, value: Str },
+    /// Present on both sides with different values.
+    Changed { name: Str, old_value: Str, new_value: Str },
+}
+
+impl Display for EnvMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Added { name, value } => write!(f, "env {name}={value} added"),
+            Self::Removed { name, value } => write!(f, "env {name}={value} removed"),
+            Self::Changed { name, old_value, new_value } => {
+                write!(f, "env {name} value changed from '{old_value}' to '{new_value}'")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FingerprintMismatch {
     /// Found a previous cache entry key for the same task, but the spawn fingerprint differs.

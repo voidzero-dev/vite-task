@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use vite_str::Str;
 use vite_task_plan::cache_metadata::SpawnFingerprint;
 
-use super::{CacheMiss, FingerprintMismatch, InputChangeKind, split_path};
+use super::{CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, split_path};
 use crate::session::event::CacheStatus;
 
 /// Describes a single atomic change between two spawn fingerprints.
@@ -16,13 +16,8 @@ use crate::session::event::CacheStatus;
 /// Used both for live cache status display and for persisted summary data.
 #[derive(Serialize, Deserialize)]
 pub enum SpawnFingerprintChange {
-    // Environment variable changes
-    /// Environment variable added
-    EnvAdded { key: Str, value: Str },
-    /// Environment variable removed
-    EnvRemoved { key: Str, value: Str },
-    /// Environment variable value changed
-    EnvValueChanged { key: Str, old_value: Str, new_value: Str },
+    /// A fingerprinted env var was added, removed, or changed value.
+    Env(EnvMismatch),
 
     // Untracked env config changes
     /// Untracked env pattern added
@@ -46,15 +41,7 @@ pub enum SpawnFingerprintChange {
 /// Used by both the live cache status display and the persisted summary rendering.
 pub fn format_spawn_change(change: &SpawnFingerprintChange) -> Str {
     match change {
-        SpawnFingerprintChange::EnvAdded { key, value } => {
-            vite_str::format!("env {key}={value} added")
-        }
-        SpawnFingerprintChange::EnvRemoved { key, value } => {
-            vite_str::format!("env {key}={value} removed")
-        }
-        SpawnFingerprintChange::EnvValueChanged { key, old_value, new_value } => {
-            vite_str::format!("env {key} value changed from '{old_value}' to '{new_value}'")
-        }
+        SpawnFingerprintChange::Env(mismatch) => vite_str::format!("{mismatch}"),
         SpawnFingerprintChange::UntrackedEnvAdded { name } => {
             vite_str::format!("untracked env '{name}' added")
         }
@@ -80,27 +67,27 @@ pub fn detect_spawn_fingerprint_changes(
     for (key, old_value) in &old_env.fingerprinted_envs {
         if let Some(new_value) = new_env.fingerprinted_envs.get(key) {
             if old_value != new_value {
-                changes.push(SpawnFingerprintChange::EnvValueChanged {
-                    key: key.clone(),
+                changes.push(SpawnFingerprintChange::Env(EnvMismatch::Changed {
+                    name: key.clone(),
                     old_value: Str::from(old_value.as_ref()),
                     new_value: Str::from(new_value.as_ref()),
-                });
+                }));
             }
         } else {
-            changes.push(SpawnFingerprintChange::EnvRemoved {
-                key: key.clone(),
+            changes.push(SpawnFingerprintChange::Env(EnvMismatch::Removed {
+                name: key.clone(),
                 value: Str::from(old_value.as_ref()),
-            });
+            }));
         }
     }
 
     // Check for added envs
     for (key, new_value) in &new_env.fingerprinted_envs {
         if !old_env.fingerprinted_envs.contains_key(key) {
-            changes.push(SpawnFingerprintChange::EnvAdded {
-                key: key.clone(),
+            changes.push(SpawnFingerprintChange::Env(EnvMismatch::Added {
+                name: key.clone(),
                 value: Str::from(new_value.as_ref()),
-            });
+            }));
         }
     }
 
@@ -158,11 +145,7 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                 FingerprintMismatch::SpawnFingerprint { old, new } => {
                     let changes = detect_spawn_fingerprint_changes(old, new);
                     match changes.first() {
-                        Some(
-                            SpawnFingerprintChange::EnvAdded { .. }
-                            | SpawnFingerprintChange::EnvRemoved { .. }
-                            | SpawnFingerprintChange::EnvValueChanged { .. },
-                        ) => "envs changed",
+                        Some(SpawnFingerprintChange::Env(_)) => "envs changed",
                         Some(
                             SpawnFingerprintChange::UntrackedEnvAdded { .. }
                             | SpawnFingerprintChange::UntrackedEnvRemoved { .. },
