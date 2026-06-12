@@ -1,6 +1,7 @@
 use std::{process::ExitStatus, time::Duration};
 
 use vite_path::RelativePathBuf;
+use vite_task_server::Error as IpcServerError;
 
 use super::cache::CacheMiss;
 
@@ -43,6 +44,12 @@ pub enum ExecutionError {
     /// Creating the post-run fingerprint failed after successful execution.
     #[error("Failed to create post-run fingerprint")]
     PostRunFingerprint(#[source] anyhow::Error),
+
+    /// The runner-aware IPC server failed to bind for this task. Reported
+    /// instead of silently degrading so that `{ auto: true }` inputs stay
+    /// observable end-to-end.
+    #[error("Failed to set up task communication")]
+    IpcServerBind(#[source] std::io::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +83,14 @@ pub enum CacheNotUpdatedReason {
     /// (its `input` config includes auto-inference). Task ran but cannot
     /// be cached without tracked path accesses.
     FspyUnsupported,
+    /// The runner's IPC server failed during execution, so the collected
+    /// reports may be incomplete. Caching such a run would risk stale
+    /// inputs/outputs on the next hit. Carries the underlying error for
+    /// user-facing reporting.
+    IpcServerError(IpcServerError),
+    /// A runner-aware tool explicitly requested that this run not be cached
+    /// (e.g. vite dev-server, a watch task).
+    ToolRequested,
 }
 
 #[derive(Debug)]

@@ -43,15 +43,26 @@ tokio = { workspace = true, features = [
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
+materialized_artifact = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 vite_path = { workspace = true }
 vite_select = { workspace = true }
 vite_str = { workspace = true }
 vite_task_graph = { workspace = true }
+vite_task_ipc_shared = { workspace = true }
 vite_task_plan = { workspace = true }
+vite_task_server = { workspace = true }
 vite_workspace = { workspace = true }
 wax = { workspace = true }
 zstd = { workspace = true }
+
+# Artifact build-deps must be unconditional: cargo's resolver panics when
+# `artifact = "cdylib"` deps live under a `[target.cfg.build-dependencies]`
+# block on cross-compile.
+[build-dependencies]
+anyhow = { workspace = true }
+materialized_artifact_build = { workspace = true }
+vite_task_client_napi = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

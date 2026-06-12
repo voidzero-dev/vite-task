@@ -6,6 +6,7 @@ use std::{sync::Arc, time::Duration};
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use vite_task_plan::cache_metadata::CacheMetadata;
+use vite_task_server::Reports;
 
 use super::{
     CacheState,
@@ -37,16 +38,30 @@ struct TrackingOutcome {
 /// `finish()` call; this function never reports by itself. The guard clauses
 /// run in priority order — each names the reason the run is *not* cached, and
 /// only a run that passes them all is stored.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the run's full context is genuinely needed to decide and store the cache entry"
+)]
 pub(super) async fn update_cache(
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     state: CacheState<'_>,
     outcome: &ChildOutcome,
+    reports: Option<&Reports>,
     duration: Duration,
     cancelled: bool,
 ) -> (CacheUpdateStatus, Option<ExecutionError>) {
-    let CacheState { metadata, globbed_inputs, std_outputs, fspy_negatives } = state;
+    let CacheState { metadata, globbed_inputs, std_outputs, tracking } = state;
+    let fspy_negatives = tracking.as_ref().map(|t| t.input_negative_globs.as_slice());
+
+    if let Some(reports) = reports
+        && reports.cache_disabled
+    {
+        // A runner-aware tool short-circuited caching via `disableCache()`
+        // (e.g. a dev server with no deterministic output).
+        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested), None);
+    }
 
     if cancelled {
         // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy.
@@ -58,7 +73,7 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
     }
 
-    let fspy_outcome = observe_fspy(outcome, fspy_negatives.as_deref(), workspace_root);
+    let fspy_outcome = observe_fspy(outcome, fspy_negatives, workspace_root);
 
     if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome {
         // fspy-inferred read-write overlap: the task wrote to a file it also

@@ -10,11 +10,19 @@ pub mod tracked_accesses;
 #[cfg(windows)]
 mod win_job;
 
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::BTreeMap,
+    ffi::{OsStr, OsString},
+    sync::Arc,
+    time::Instant,
+};
 
+use futures_util::future::LocalBoxFuture;
 use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, RelativePathBuf};
+use vite_task_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
 use vite_task_plan::{SpawnExecution, cache_metadata::CacheMetadata};
+use vite_task_server::{Recorder, Reports, ServerHandle, StopAccepting, serve};
 
 use self::{
     glob::compute_globbed_inputs,
@@ -80,10 +88,47 @@ struct CacheState<'a> {
     /// Captured stdout/stderr for cache replay. Written in place during drain;
     /// always present (possibly empty) once we reach the cache-update phase.
     std_outputs: Vec<StdOutput>,
-    /// `Some` iff fspy is enabled (`includes_auto`). Holds the resolved
-    /// negative globs used to filter tracked accesses. `None` means fspy
-    /// tracking is off for this task.
-    fspy_negatives: Option<Vec<wax::Glob<'static>>>,
+    /// `Some` iff auto-input tracking is on (`input.includes_auto` + successful
+    /// IPC bind). Bundles fspy's input negative globs with the per-task IPC
+    /// server that runner-aware tools talk to. Parts are borrowed in place
+    /// during the wait/join; the struct is never moved out.
+    tracking: Option<Tracking>,
+}
+
+/// The IPC server's driver future: resolves with the recorded reports after
+/// [`StopAccepting::signal`] fires and all in-flight clients drain.
+type IpcDriver = LocalBoxFuture<'static, Result<Recorder, vite_task_server::Error>>;
+
+/// Per-task tracking: fspy input-negative globs + IPC server handle.
+/// Lifetime-tied to a single `execute_spawn` call.
+struct Tracking {
+    input_negative_globs: Vec<wax::Glob<'static>>,
+    ipc_envs: Vec<(&'static OsStr, OsString)>,
+    ipc_server_fut: IpcDriver,
+    stop_accepting: StopAccepting,
+}
+
+/// The IPC server's handles for the run phase. The two halves are
+/// inseparable — whenever the driver is polled, `stop_accepting` must be
+/// signalled after the child exits or the driver never resolves — so they
+/// travel as one value and a driver-without-signal state is unrepresentable.
+struct IpcHandles<'m> {
+    /// Signalled after the child exits so the server stops accepting and
+    /// drains.
+    stop_accepting: &'m StopAccepting,
+    /// The server's driver, polled alongside the child.
+    driver: &'m mut IpcDriver,
+}
+
+/// Mode-scoped borrows for the run phase, extracted in one pass so the pipe
+/// sinks and the IPC handles can be borrowed simultaneously (disjoint fields
+/// of the same mode).
+struct RunHandles<'m> {
+    /// Pipe writers + capture slot. `None` only in the inherited-uncached
+    /// case, where there are no pipes to drain.
+    sinks: Option<PipeSinks<'m>>,
+    /// The IPC server's handles. `None` iff tracking is off.
+    ipc: Option<IpcHandles<'m>>,
 }
 
 impl<'a> ExecutionMode<'a> {
@@ -113,9 +158,9 @@ impl<'a> ExecutionMode<'a> {
             });
         };
 
-        // Resolve input negative globs for fspy path filtering (already
-        // workspace-root-relative).
-        let fspy_negatives = if metadata.input_config.includes_auto {
+        let tracking = if metadata.input_config.includes_auto {
+            // Resolve input negative globs for fspy path filtering (already
+            // workspace-root-relative).
             let negatives = metadata
                 .input_config
                 .negative_globs
@@ -123,43 +168,81 @@ impl<'a> ExecutionMode<'a> {
                 .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
                 .collect::<anyhow::Result<Vec<_>>>()
                 .map_err(ExecutionError::PostRunFingerprint)?;
-            Some(negatives)
+            // fspy + IPC are bundled. If binding the IPC server fails we abort
+            // the execution — tools that rely on IPC would otherwise silently
+            // diverge from the cache.
+            let (envs, ServerHandle { driver, stop_accepting }) =
+                serve(Recorder::new()).map_err(ExecutionError::IpcServerBind)?;
+            Some(Tracking {
+                input_negative_globs: negatives,
+                ipc_envs: envs.collect(),
+                ipc_server_fut: driver,
+                stop_accepting,
+            })
         } else {
             None
         };
 
         Ok(Self::Cached {
             pipe_writers: stdio_config.writers,
-            state: CacheState { metadata, globbed_inputs, std_outputs: Vec::new(), fspy_negatives },
+            state: CacheState { metadata, globbed_inputs, std_outputs: Vec::new(), tracking },
         })
+    }
+
+    /// The extra envs to inject into the child: IPC connection info + the
+    /// napi addon path runner-aware tools `require()`. Empty when tracking
+    /// is off.
+    fn injected_envs(&self) -> Vec<(&OsStr, &OsStr)> {
+        match self {
+            Self::Cached { state: CacheState { tracking: Some(t), .. }, .. } => {
+                let mut envs: Vec<(&OsStr, &OsStr)> =
+                    t.ipc_envs.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
+                envs.push((
+                    OsStr::new(NODE_CLIENT_PATH_ENV_NAME),
+                    crate::napi_client::napi_client_path().as_path().as_os_str(),
+                ));
+                envs
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// The arguments `spawn()` derives from the mode: stdio handling and
     /// whether fspy tracking is on.
     const fn spawn_config(&self) -> (SpawnStdio, bool) {
         match self {
-            Self::Cached { state, .. } => (SpawnStdio::Piped, state.fspy_negatives.is_some()),
+            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.is_some()),
             Self::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
             Self::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
         }
     }
 
-    /// Borrow the pipe writers (and, when caching, the in-place capture slot)
-    /// for the drain. `None` only in the inherited-uncached case, where there
-    /// are no pipes to drain.
-    fn pipe_sinks(&mut self) -> Option<PipeSinks<'_>> {
+    /// Extract all mode-scoped borrows for the run phase in one pass: the
+    /// pipe sinks plus the IPC server's handles (disjoint field borrows
+    /// inside the same match arm).
+    fn run_handles(&mut self) -> RunHandles<'_> {
         match self {
-            Self::Cached { pipe_writers, state } => Some(PipeSinks {
-                stdout_writer: &mut pipe_writers.stdout_writer,
-                stderr_writer: &mut pipe_writers.stderr_writer,
-                capture: Some(&mut state.std_outputs),
-            }),
-            Self::Uncached { pipe_writers: Some(pipe_writers) } => Some(PipeSinks {
-                stdout_writer: &mut pipe_writers.stdout_writer,
-                stderr_writer: &mut pipe_writers.stderr_writer,
-                capture: None,
-            }),
-            Self::Uncached { pipe_writers: None } => None,
+            Self::Cached { pipe_writers, state } => {
+                let sinks = Some(PipeSinks {
+                    stdout_writer: &mut pipe_writers.stdout_writer,
+                    stderr_writer: &mut pipe_writers.stderr_writer,
+                    capture: Some(&mut state.std_outputs),
+                });
+                let ipc = state.tracking.as_mut().map(|t| IpcHandles {
+                    stop_accepting: &t.stop_accepting,
+                    driver: &mut t.ipc_server_fut,
+                });
+                RunHandles { sinks, ipc }
+            }
+            Self::Uncached { pipe_writers: Some(pipe_writers) } => RunHandles {
+                sinks: Some(PipeSinks {
+                    stdout_writer: &mut pipe_writers.stdout_writer,
+                    stderr_writer: &mut pipe_writers.stderr_writer,
+                    capture: None,
+                }),
+                ipc: None,
+            },
+            Self::Uncached { pipe_writers: None } => RunHandles { sinks: None, ipc: None },
         }
     }
 }
@@ -327,19 +410,60 @@ async fn run(
     // 5. Spawn. Returns pipes (Piped) or `None` (Inherited) plus a
     //    cancellation-aware wait future.
     let (spawn_stdio, fspy_enabled) = mode.spawn_config();
-    let child =
-        spawn(&spawn_execution.spawn_command, fspy_enabled, spawn_stdio, fast_fail_token.clone())
-            .await
-            .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
+    let child = spawn(
+        &spawn_execution.spawn_command,
+        fspy_enabled,
+        spawn_stdio,
+        fast_fail_token.clone(),
+        mode.injected_envs(),
+    )
+    .await
+    .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
 
-    // 6. Drain the pipes and wait for exit. Box::pin keeps the child-and-pipe
-    //    stack off the enclosing future: pipe_stdio alone makes the combined
-    //    future large enough to trip clippy::large_futures in every caller
-    //    otherwise.
-    let outcome = Box::pin(run_child(child, mode.pipe_sinks(), fast_fail_token.clone()))
-        .await
-        .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
+    // 6. Drain the pipes and wait for exit, concurrently with the IPC driver.
+    //    The driver must be polled during pipe drain — otherwise a tool doing
+    //    a blocking `getEnv` can deadlock: child stalls on IPC, stdout stays
+    //    open, pipe_stdio waits for EOF, driver never runs. `stop_accepting`
+    //    fires after child.wait so the driver drains any in-flight clients.
+    //    Box::pin keeps the child-and-pipe stack off the enclosing future:
+    //    pipe_stdio alone makes the combined future large enough to trip
+    //    clippy::large_futures in every caller otherwise.
+    let RunHandles { sinks, ipc } = mode.run_handles();
+    let (wait_result, ipc_server_result) = if let Some(IpcHandles { stop_accepting, driver }) = ipc
+    {
+        let child_work =
+            Box::pin(run_child(child, sinks, Some(stop_accepting), fast_fail_token.clone()));
+        let (wait_result, join_result) = tokio::join!(child_work, driver);
+        if let Err(e) = &join_result {
+            tracing::warn!(?e, "IPC server failed; cache will not be updated");
+        }
+        (wait_result, Some(join_result.map(Recorder::into_reports)))
+    } else {
+        let child_work = Box::pin(run_child(child, sinks, None, fast_fail_token.clone()));
+        (child_work.await, None)
+    };
+    let outcome = wait_result.map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
     let duration = start.elapsed();
+
+    // Extract reports, or short-circuit when the IPC server failed. An Err
+    // here means reports may be incomplete: caching this run would risk
+    // stale inputs/outputs, so skip all cache-related computation entirely.
+    let reports: Option<Reports> = match ipc_server_result {
+        Some(Ok(reports)) => {
+            tracing::debug!(?reports, "runner-aware tools reported");
+            Some(reports)
+        }
+        None => None,
+        Some(Err(err)) => {
+            return Err(Report::Spawned {
+                exit_status: outcome.exit_status,
+                cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(
+                    err,
+                )),
+                error: None,
+            });
+        }
+    };
 
     // 7. Decide the cache update (only when we were in `Cached` mode). Cache
     //    update errors are reported but do not affect the exit status we
@@ -353,6 +477,7 @@ async fn run(
                 cache_dir,
                 state,
                 &outcome,
+                reports.as_ref(),
                 duration,
                 cancelled,
             )
@@ -454,10 +579,12 @@ fn replay_cache_hit(
 /// Phase 6: drain the child's pipes (if piped) and wait for exit, with a
 /// single error sink — a pipe failure cancels (so the wait kills the child
 /// instead of orphaning it) and surfaces through the same returned result as
-/// a wait failure.
+/// a wait failure. After the child exits (on every path), `stop_accepting`
+/// is signalled so the IPC server stops accepting and starts draining.
 async fn run_child(
     mut child: ChildHandle,
     sinks: Option<PipeSinks<'_>>,
+    stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
 ) -> anyhow::Result<ChildOutcome> {
     let pipe_result: anyhow::Result<()> = if let Some(sinks) = sinks {
@@ -473,14 +600,19 @@ async fn run_child(
         Ok(())
     };
 
-    match pipe_result {
+    let wait_result = match pipe_result {
         Ok(()) => child.wait.await.map_err(anyhow::Error::from),
         Err(err) => {
             // Pipe failed — cancel so `child.wait` kills the child instead of
-            // orphaning it.
+            // orphaning it. Still signal the server below so it can drain.
             fast_fail_token.cancel();
             let _ = child.wait.await;
             Err(err)
         }
+    };
+
+    if let Some(stop_accepting) = stop_accepting {
+        stop_accepting.signal();
     }
+    wait_result
 }

@@ -86,6 +86,9 @@ libc = "0.2.185"
 libtest-mimic = "0.8.2"
 memmap2 = "0.9.7"
 monostate = "1.0.2"
+napi = "3"
+napi-build = "2"
+napi-derive = "3"
 native_str = { path = "crates/native_str" }
 nix = { version = "0.31.2", features = ["dir", "signal"] }
 ntapi = "0.4.1"
@@ -150,8 +153,12 @@ vite_shell = { path = "crates/vite_shell" }
 vite_str = { path = "crates/vite_str" }
 vite_task = { path = "crates/vite_task" }
 vite_task_bin = { path = "crates/vite_task_bin" }
+vite_task_client = { path = "crates/vite_task_client" }
+vite_task_client_napi = { path = "crates/vite_task_client_napi", artifact = "cdylib", target = "target" }
 vite_task_graph = { path = "crates/vite_task_graph" }
+vite_task_ipc_shared = { path = "crates/vite_task_ipc_shared" }
 vite_task_plan = { path = "crates/vite_task_plan" }
+vite_task_server = { path = "crates/vite_task_server" }
 vite_workspace = { path = "crates/vite_workspace" }
 vt100 = "0.16.2"
 wax = "0.7.0"
@@ -169,6 +176,7 @@ ignored = [
   # These are artifact dependencies. They are not directly `use`d in Rust code.
   "fspy_preload_unix",
   "fspy_preload_windows",
+  "vite_task_client_napi",
 ]
 
 [profile.dev]

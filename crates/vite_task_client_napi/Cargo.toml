@@ -1,0 +1,24 @@
+[package]
+name = "vite_task_client_napi"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+napi = { workspace = true, features = ["napi6", "tracing"] }
+napi-derive = { workspace = true }
+vite_str = { workspace = true }
+vite_task_client = { workspace = true }
+
+[build-dependencies]
+napi-build = { workspace = true }
+
+[lints]
+workspace = true

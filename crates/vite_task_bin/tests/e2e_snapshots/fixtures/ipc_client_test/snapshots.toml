@@ -1,0 +1,24 @@
+[[e2e]]
+name = "disable_cache_forces_reexecution"
+comment = """
+Exercises `disableCache`. The tool asks the runner not to cache this run,
+so the next invocation re-executes instead of hitting a prior entry.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "disable-cache",
+  ], comment = "first run — tool calls disableCache" },
+  { argv = [
+    "vt",
+    "run",
+    "disable-cache",
+  ], comment = "cache miss (NotFound) because nothing was cached" },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "summary names the opt-out as the not-cached reason" },
+]

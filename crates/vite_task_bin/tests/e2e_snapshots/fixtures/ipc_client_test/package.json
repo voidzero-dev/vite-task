@@ -1,0 +1,5 @@
+{
+  "name": "ipc-client-test",
+  "private": true,
+  "type": "module"
+}

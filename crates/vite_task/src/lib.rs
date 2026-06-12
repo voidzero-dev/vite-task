@@ -1,5 +1,6 @@
 mod cli;
 mod collections;
+mod napi_client;
 pub mod session;
 
 // Public exports for vite_task_bin

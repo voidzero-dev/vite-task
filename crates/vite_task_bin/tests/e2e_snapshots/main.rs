@@ -283,6 +283,29 @@ fn render_formatted_screen(bytes: &[u8]) -> String {
     out
 }
 
+/// `packages/tools` is the Node environment for e2e fixtures: link its
+/// pnpm-resolved `node_modules` into the tempdir that holds every staged
+/// fixture workspace, so Node's upward resolution walk lets any fixture import
+/// the packages declared in `packages/tools/package.json` (`vite`,
+/// `@voidzero-dev/vite-task-client`, ...) by bare specifier — the user-facing
+/// flow — without writing a `node_modules` into any staged workspace.
+/// Best-effort: skipped when pnpm install hasn't run; only the ignored Node
+/// e2e fixtures resolve through it.
+#[expect(clippy::disallowed_types, reason = "std::path::Path required for filesystem operations")]
+fn link_tools_node_modules(tmp_dir: &std::path::Path) {
+    let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+    let src = repo_root.join("packages/tools/node_modules");
+    if !src.is_dir() {
+        return;
+    }
+    let link = tmp_dir.join("node_modules");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&src, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&src, &link).unwrap();
+}
+
 /// Append a fenced markdown block containing `body`. The opening and closing
 /// fences sit on their own lines, and trailing whitespace inside `body` is
 /// trimmed so the close fence isn't preceded by blank lines.
@@ -331,8 +354,19 @@ fn run_case(
         let bin = AbsolutePathBuf::new(std::path::PathBuf::from(bin_path)).unwrap();
         Arc::<OsStr>::from(bin.parent().unwrap().as_path().as_os_str())
     });
+
+    // Also expose tool bins installed under packages/tools/node_modules/.bin
+    // (e.g. `vite`) so ignored e2e fixtures can exercise real toolchains.
+    #[expect(clippy::disallowed_types, reason = "PathBuf needed for workspace path arithmetic")]
+    let tools_bin_dir: Option<Arc<OsStr>> = {
+        let manifest_dir = std::path::PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let tools_bin = repo_root.join("packages/tools/node_modules/.bin");
+        tools_bin.is_dir().then(|| Arc::<OsStr>::from(tools_bin.into_os_string()))
+    };
+
     let e2e_env_path = join_paths(
-        bin_dirs.iter().cloned().chain(
+        bin_dirs.iter().cloned().chain(tools_bin_dir.iter().cloned()).chain(
             // the existing PATH
             split_paths(&env::var_os("PATH").unwrap())
                 .map(|path| Arc::<OsStr>::from(path.into_os_string())),
@@ -580,6 +614,9 @@ fn main() {
     // Node.js binary when running task commands.
     let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
     std::fs::copy(repo_root.join(".node-version"), tmp_dir.path().join(".node-version")).unwrap();
+
+    // Shared by all staged fixture workspaces via Node's upward resolution walk.
+    link_tools_node_modules(tmp_dir.path());
 
     let fixtures_dir = manifest_dir.join("tests/e2e_snapshots/fixtures");
 
