@@ -133,11 +133,12 @@ jobs:
 
   # Windows tests are cross-compiled on a fast Linux runner with cargo-xwin
   # (clang-cl + lld-link against the xwin-downloaded MSVC CRT/Windows SDK)
-  # and packed into a portable nextest archive. The test-windows shards then
-  # only download the archive and run it — no Rust toolchain or compilation
-  # on the slow Windows runners. Windows e2e fixtures dominate wall-clock
-  # (60s per PTY step vs 20s on Unix), so the run is split across shards via
-  # nextest's count partitioning, which spreads tests round-robin.
+  # and packed into a portable nextest archive. The Windows runners then only
+  # download the archive and run it: no Rust toolchain or compilation on the
+  # slow runners. Six nextest partitions avoid most repeated setup while keeping
+  # enough parallelism for the Windows-heavy default test workload. The much
+  # smaller Node-backed ignored suite runs once in its own job, avoiding
+  # duplicate Windows Node setup.
   build-windows-tests:
     needs: detect-changes
     if: needs.detect-changes.outputs.code-changed == 'true'
@@ -174,7 +175,7 @@ jobs:
           tool: cargo-nextest,cargo-xwin
 
       # Downloading and unpacking the MSVC CRT/Windows SDK dominates this
-      # job's wall time (~10 minutes); the unpacked result is immutable for a
+      # job's wall time on a cold cache; the unpacked result is immutable for a
       # given manifest version, so cache it. Bump the key when bumping the
       # xwin version.
       - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -210,14 +211,35 @@ jobs:
 
   test-windows:
     needs: build-windows-tests
-    name: Test (windows-${{ matrix.partition }})
+    name: Test (${{ matrix.shard }})
     strategy:
       fail-fast: false
       matrix:
-        partition: [1, 2, 3, 4, 5, 6]
+        include:
+          - shard: windows-1
+            partition: count:1/6
+            mode: default
+          - shard: windows-2
+            partition: count:2/6
+            mode: default
+          - shard: windows-3
+            partition: count:3/6
+            mode: default
+          - shard: windows-4
+            partition: count:4/6
+            mode: default
+          - shard: windows-5
+            partition: count:5/6
+            mode: default
+          - shard: windows-6
+            partition: count:6/6
+            mode: default
+          - shard: windows-ignored
+            partition: ''
+            mode: ignored
     runs-on: windows-latest
     env:
-      PARTITION: count:${{ matrix.partition }}/6
+      PARTITION: ${{ matrix.partition }}
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
 
@@ -240,14 +262,15 @@ jobs:
       # and pnpm enter the picture. `cargo-nextest` is invoked directly so the
       # job never depends on the runner's Rust toolchain.
       - name: Run tests
+        if: matrix.mode == 'default'
         run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION"
 
       - uses: oxc-project/setup-node@ab97f03642370d79a7e96dd286bd02a1be40e0ba # v1.3.0
+        if: matrix.mode == 'ignored'
 
-      # --no-tests=pass: a shard's partition of the (much smaller) ignored
-      # test set may legitimately come up empty.
       - name: Run ignored tests
-        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION" --run-ignored ignored-only --no-tests pass
+        if: matrix.mode == 'ignored'
+        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
 
   test-musl:
     needs: detect-changes

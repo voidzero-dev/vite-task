@@ -8,9 +8,7 @@ use test_log::test;
 /// Get the packages/tools/.bin directory path
 fn tools_bin_dir() -> std::path::PathBuf {
     // Resolve CARGO_MANIFEST_DIR at run time, not via `env!`: a compile-time
-    // path bakes in the build machine's checkout, which breaks when the test
-    // binary is cross-compiled and run on another machine (e.g. built on
-    // Linux with cargo-xwin, run on Windows from a nextest archive).
+    // path can point at a different checkout than the one executing the test.
     let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     manifest_dir
         .parent()
