@@ -48,20 +48,48 @@ steps = [
 ]
 
 [[e2e]]
-name = "fetch_env_reads_declared_env"
+name = "fetch_env_reads_undeclared_env"
 comment = """
-Exercises `getEnv(name)`: the tool asks the runner for a declared env var and prints the served value. This verifies the round-trip IPC behavior before any runner-reported env is added to the cache fingerprint.
+Exercises `getEnv(name)`: the tool asks the runner for an env var that is not declared in the task's `env` list. This verifies runner-served envs resolve from the unfiltered spawn env context while the child process env remains cache-filtered.
 """
 ignore = true
 steps = [
   { argv = [
     "vt",
     "run",
-    "fetch-env-declared",
+    "fetch-env",
   ], envs = [
     [
       "PROBE_ENV",
       "served",
     ],
-  ], comment = "runner serves PROBE_ENV from the spawned task env map" },
+  ], comment = "runner serves undeclared PROBE_ENV from the unfiltered env context" },
+]
+
+[[e2e]]
+name = "fetch_env_sees_command_prefix_env"
+comment = """
+A command-prefixed env (`PREFIXED_ENV=from-command node ...`) is part of the spawn's full env context. `getEnv('PREFIXED_ENV')` and `process.env.PREFIXED_ENV` must both see the command prefix value.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-prefixed-env",
+  ], comment = "tool asks the runner for an env the command prefix sets" },
+]
+
+[[e2e]]
+name = "fetch_env_sees_intermediate_prefix_envs"
+comment = """
+Prefix envs accumulate through nested runs: `outer-prefixed` is `PREFIXED_A=a vt run inner-prefixed`, and `inner-prefixed` is `PREFIXED_B=b node ...`. The inner tool's `getEnv` must see both through the runner's env context, while `process.env` only sees the direct child prefix.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "outer-prefixed",
+  ], comment = "outer prefix env reaches the inner tool via the runner" },
 ]

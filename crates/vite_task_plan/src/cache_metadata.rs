@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::{ffi::OsStr, sync::Arc};
 
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use vite_path::RelativePathBuf;
 use vite_str::{self, Str};
@@ -52,6 +53,16 @@ pub struct CacheMetadata {
     /// Resolved output configuration for cache restoration.
     /// Used at execution time to determine what output files to archive.
     pub output_config: ResolvedGlobConfig,
+
+    /// The unfiltered env context for runner-aware APIs. This is the planning
+    /// context's envs before spawn-env filtering, including command prefix envs
+    /// from this command and enclosing nested `vp run` expansions.
+    ///
+    /// It is not passed to the spawned process; that remains
+    /// `SpawnCommand::spawn_envs`. It is skipped in serialized plans because it
+    /// mirrors the ambient environment and would make snapshots noisy.
+    #[serde(skip)]
+    pub unfiltered_envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
 }
 
 /// Fingerprint for spawn execution that affects caching.

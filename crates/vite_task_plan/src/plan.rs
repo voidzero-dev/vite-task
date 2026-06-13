@@ -143,11 +143,11 @@ async fn plan_task_as_execution_node(
 
                 // This command's env context: extend the planning context with
                 // the command's prefix envs (`FOO=1 tool ...`). Everything that
-                // interprets the command reads this one context — program
-                // lookup, plan-request callbacks, and nested-run planning. The
-                // per-and-item duplicate above scopes the extension to this
-                // command, matching shell semantics (`FOO=1 a && b` does not
-                // set `FOO` for `b`).
+                // interprets the command reads this one context: program
+                // lookup, plan-request callbacks, nested-run planning, and
+                // cached execution metadata. The per-and-item duplicate
+                // above scopes the extension to this command, matching shell
+                // semantics (`FOO=1 a && b` does not set `FOO` for `b`).
                 context.add_envs(and_item.envs.iter());
 
                 let mut args = and_item.args;
@@ -673,6 +673,7 @@ fn plan_spawn_execution(
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
+                unfiltered_envs: Arc::clone(envs),
             });
         }
     }

@@ -18,7 +18,6 @@ use std::{
 };
 
 use futures_util::future::LocalBoxFuture;
-use rustc_hash::FxHashMap;
 use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
@@ -157,7 +156,6 @@ impl<'a> ExecutionMode<'a> {
         cache_metadata: Option<&'a CacheMetadata>,
         stdio_config: StdioConfig,
         globbed_inputs: BTreeMap<RelativePathBuf, u64>,
-        envs: &BTreeMap<Arc<OsStr>, Arc<OsStr>>,
     ) -> Result<Self, ExecutionError> {
         let Some(metadata) = cache_metadata else {
             return Ok(Self::Uncached {
@@ -184,10 +182,9 @@ impl<'a> ExecutionMode<'a> {
         // Bind runner IPC for every cached task. The merged cache-control API
         // (`disableCache`) must work even when a task uses explicit inputs and
         // therefore does not need fspy auto-input inference.
-        let server_envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> =
-            envs.iter().map(|(name, value)| (Arc::clone(name), Arc::clone(value))).collect();
         let (ipc_envs, ServerHandle { driver, stop_accepting }) =
-            serve(Recorder::new(Arc::new(server_envs))).map_err(ExecutionError::IpcServerBind)?;
+            serve(Recorder::new(Arc::clone(&metadata.unfiltered_envs)))
+                .map_err(ExecutionError::IpcServerBind)?;
         let tracking =
             Tracking { fspy, ipc_envs: ipc_envs.collect(), ipc_server_fut: driver, stop_accepting };
 
@@ -409,16 +406,8 @@ async fn run(
     };
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
-    let mut mode = ExecutionMode::build(
-        cache_metadata,
-        stdio_config,
-        globbed_inputs,
-        // TODO(env-track): A later PR in this stack replaces this child env
-        // map with the full planned env context so IPC can serve envs even
-        // when they were not declared in `env` or `untrackedEnv`.
-        &spawn_execution.spawn_command.spawn_envs,
-    )
-    .map_err(Report::failed)?;
+    let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
+        .map_err(Report::failed)?;
 
     // Measure end-to-end duration here — spawn() doesn't track time.
     let start = Instant::now();
