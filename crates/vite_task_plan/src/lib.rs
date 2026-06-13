@@ -46,9 +46,10 @@ pub struct SpawnCommand {
     /// args to be passed to the program
     pub args: Arc<[Str]>,
 
-    /// Environment variables to set for the command, including both fingerprinted and untracked envs.
+    /// Environment variables to set for the spawned process, including both
+    /// fingerprinted and untracked envs.
     #[serde(serialize_with = "serialize_envs")]
-    pub all_envs: Arc<BTreeMap<Arc<OsStr>, Arc<OsStr>>>,
+    pub spawn_envs: Arc<BTreeMap<Arc<OsStr>, Arc<OsStr>>>,
 
     /// Current working directory
     pub cwd: Arc<AbsolutePath>,

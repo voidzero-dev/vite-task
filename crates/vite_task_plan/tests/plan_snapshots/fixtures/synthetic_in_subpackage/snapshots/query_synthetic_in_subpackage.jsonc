@@ -96,7 +96,7 @@
                                     "print",
                                     "lint"
                                   ],
-                                  "all_envs": {
+                                  "spawn_envs": {
                                     "FORCE_COLOR": "1",
                                     "PATH": "<workspace>/packages/a/node_modules/.bin:<workspace>/node_modules/.bin:<tools>"
                                   },

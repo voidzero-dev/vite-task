@@ -416,7 +416,7 @@ async fn run(
         // TODO(env-track): A later PR in this stack replaces this child env
         // map with the full planned env context so IPC can serve envs even
         // when they were not declared in `env` or `untrackedEnv`.
-        &spawn_execution.spawn_command.all_envs,
+        &spawn_execution.spawn_command.spawn_envs,
     )
     .map_err(Report::failed)?;
 

@@ -611,14 +611,14 @@ fn plan_spawn_execution(
     // The child env starts from the full context and is filtered in place by
     // `EnvFingerprints::resolve` below — this clone is the one place the map's
     // contents are actually copied per spawn.
-    let mut all_envs = (**envs).clone();
+    let mut spawn_envs = (**envs).clone();
     let cwd = Arc::clone(&resolved_task_options.cwd);
 
     let mut resolved_cache_metadata = None;
     if let Some(cache_config) = &resolved_task_options.cache_config {
         // Resolve envs according cache configs
         let mut env_fingerprints =
-            EnvFingerprints::resolve(&mut all_envs, &cache_config.env_config)
+            EnvFingerprints::resolve(&mut spawn_envs, &cache_config.env_config)
                 .map_err(Error::ResolveEnv)?;
 
         // Add prefix envs to fingerprinted envs
@@ -677,8 +677,8 @@ fn plan_spawn_execution(
         }
     }
 
-    // Add prefix envs to all envs
-    all_envs.extend(prefix_envs.iter().map(|(name, value)| {
+    // Add prefix envs to spawn envs.
+    spawn_envs.extend(prefix_envs.iter().map(|(name, value)| {
         (OsStr::new(name.as_str()).into(), OsStr::new(value.as_str()).into())
     }));
 
@@ -687,7 +687,7 @@ fn plan_spawn_execution(
             program_path,
             args: Arc::clone(&args),
             cwd,
-            all_envs: Arc::new(all_envs.into_iter().collect()),
+            spawn_envs: Arc::new(spawn_envs.into_iter().collect()),
         },
         cache_metadata: resolved_cache_metadata,
     })

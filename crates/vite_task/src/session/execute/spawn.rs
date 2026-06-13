@@ -48,7 +48,7 @@ pub struct ChildOutcome {
 
 /// Spawn a command with the requested fspy and stdio configuration.
 ///
-/// `extra_envs` are applied **after** `cmd.all_envs`, so runtime-injected
+/// `extra_envs` are applied **after** `cmd.spawn_envs`, so runtime-injected
 /// entries (e.g. the runner's IPC name + napi addon path) override any
 /// same-named key from the plan.
 ///
@@ -80,7 +80,7 @@ where
     let mut tokio_cmd = tokio::process::Command::new(cmd.program_path.as_path());
     tokio_cmd.args(cmd.args.iter().map(vite_str::Str::as_str));
     tokio_cmd.env_clear();
-    tokio_cmd.envs(cmd.all_envs.iter());
+    tokio_cmd.envs(cmd.spawn_envs.iter());
     tokio_cmd.envs(extra_envs);
     tokio_cmd.current_dir(&*cmd.cwd);
     apply_stdio(&mut tokio_cmd, stdio);
@@ -101,7 +101,7 @@ where
 {
     let mut fspy_cmd = fspy::Command::new(cmd.program_path.as_path());
     fspy_cmd.args(cmd.args.iter().map(vite_str::Str::as_str));
-    fspy_cmd.envs(cmd.all_envs.iter());
+    fspy_cmd.envs(cmd.spawn_envs.iter());
     fspy_cmd.envs(extra_envs);
     fspy_cmd.current_dir(&*cmd.cwd);
 

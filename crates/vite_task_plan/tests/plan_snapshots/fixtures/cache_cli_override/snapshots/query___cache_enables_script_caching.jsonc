@@ -71,7 +71,7 @@
                       "print-file",
                       "package.json"
                     ],
-                    "all_envs": {
+                    "spawn_envs": {
                       "FORCE_COLOR": "1",
                       "PATH": "<workspace>/node_modules/.bin:<tools>"
                     },

@@ -480,7 +480,7 @@ pub mod test_fixtures {
                     spawn_command: SpawnCommand {
                         program_path: test_path(),
                         args: Arc::from([]),
-                        all_envs: Arc::new(BTreeMap::new()),
+                        spawn_envs: Arc::new(BTreeMap::new()),
                         cwd: test_path(),
                     },
                 })),

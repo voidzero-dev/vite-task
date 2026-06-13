@@ -83,7 +83,7 @@
                       "--port",
                       "3000"
                     ],
-                    "all_envs": {
+                    "spawn_envs": {
                       "FORCE_COLOR": "1",
                       "PATH": "<workspace>/packages/foo/node_modules/.bin:<workspace>/node_modules/.bin:<tools>"
                     },

@@ -43,7 +43,8 @@ unsafe impl<'de, C: Config> SchemaRead<'de, C> for ArcStrSchema {
 /// Environment variable fingerprints for a task execution.
 ///
 /// Contents of this struct are only for fingerprinting and cache key computation (some of envs may be hashed for security).
-/// The actual environment variables to be passed to the execution are in `LeafExecutionItem.all_envs`.
+/// The actual environment variables to be passed to the execution are in
+/// `SpawnCommand::spawn_envs`.
 #[derive(Debug, SchemaWrite, SchemaRead, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct EnvFingerprints {
     /// Environment variables that should be fingerprinted for this execution.
@@ -73,7 +74,7 @@ pub enum ResolveEnvError {
 impl EnvFingerprints {
     /// Resolves from all available envs and env config.
     ///
-    /// Before the call, `all_envs` is expected to contain all available envs.
+    /// Before the call, `envs` is expected to contain all available envs.
     /// After the call, it will be modified to contain only envs to be passed to the execution (fingerprinted + untracked).
     ///
     /// After pattern filtering, `FORCE_COLOR=1` is inserted as a fallback if
@@ -82,12 +83,12 @@ impl EnvFingerprints {
     /// ANSI for a misbehaving tool) can opt in to passthrough by listing
     /// `FORCE_COLOR` in `env` or `untrackedEnv`.
     pub fn resolve(
-        all_envs: &mut FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+        envs: &mut FxHashMap<Arc<OsStr>, Arc<OsStr>>,
         env_config: &EnvConfig,
     ) -> Result<Self, ResolveEnvError> {
         // Collect all envs matching fingerprinted or untracked envs in env_config
-        *all_envs = resolve_envs_with_patterns(
-            all_envs.iter(),
+        *envs = resolve_envs_with_patterns(
+            envs.iter(),
             &env_config
                 .untracked_env
                 .iter()
@@ -100,8 +101,7 @@ impl EnvFingerprints {
         // opted into passing `FORCE_COLOR` through (via `env` / `untrackedEnv`)
         // and the parent supplied a value — in that case the user's choice
         // wins, even `FORCE_COLOR=0`.
-        all_envs
-            .entry(Arc::<OsStr>::from(OsStr::new("FORCE_COLOR")))
+        envs.entry(Arc::<OsStr>::from(OsStr::new("FORCE_COLOR")))
             .or_insert_with(|| Arc::<OsStr>::from(OsStr::new("1")));
 
         // Resolve fingerprinted envs
@@ -109,7 +109,7 @@ impl EnvFingerprints {
         if !env_config.fingerprinted_envs.is_empty() {
             let fingerprinted_env_patterns = EnvGlobSet::new(env_config.fingerprinted_envs.iter())?;
             let sensitive_patterns = EnvGlobSet::new(SENSITIVE_PATTERNS.iter())?;
-            for (name, value) in all_envs.iter() {
+            for (name, value) in envs.iter() {
                 let Some(name) = name.to_str() else {
                     continue;
                 };
@@ -221,12 +221,12 @@ mod tests {
         // the parent's value is filtered out by the pattern step. The
         // post-resolution fallback then inserts `FORCE_COLOR=1` so cached
         // output is colored.
-        let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin"), ("FORCE_COLOR", "2")]);
+        let mut envs = create_test_envs(vec![("PATH", "/usr/bin"), ("FORCE_COLOR", "2")]);
         let env_config = create_env_config(&[], &["PATH"]);
 
-        let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        let force_color_value = all_envs
+        let force_color_value = envs
             .get(OsStr::new("FORCE_COLOR"))
             .expect("FORCE_COLOR should be present after resolution");
         assert_eq!(force_color_value.to_str().unwrap(), "1");
@@ -236,24 +236,24 @@ mod tests {
     fn test_force_color_defaults_to_one_when_absent_from_parent() {
         // Parent env has no `FORCE_COLOR` at all. The fallback still inserts
         // `FORCE_COLOR=1` so the child emits colored output.
-        let mut all_envs = create_test_envs(vec![("PATH", "/usr/bin")]);
+        let mut envs = create_test_envs(vec![("PATH", "/usr/bin")]);
         let env_config = create_env_config(&[], &["PATH"]);
 
-        let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert_eq!(all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
+        assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
     }
 
     #[test]
     fn test_force_color_passthrough_when_user_opts_in_via_untracked() {
         // If the user lists `FORCE_COLOR` in `untrackedEnv`, the parent's
         // value passes through verbatim and the fallback is skipped.
-        let mut all_envs = create_test_envs(vec![("FORCE_COLOR", "0")]);
+        let mut envs = create_test_envs(vec![("FORCE_COLOR", "0")]);
         let env_config = create_env_config(&[], &["FORCE_COLOR"]);
 
-        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert_eq!(all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "0");
+        assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "0");
         assert!(!result.fingerprinted_envs.contains_key("FORCE_COLOR"));
     }
 
@@ -261,12 +261,12 @@ mod tests {
     fn test_force_color_passthrough_when_user_opts_in_via_fingerprinted() {
         // If the user lists `FORCE_COLOR` in `env` (fingerprinted), the
         // parent's value passes through and is recorded in the cache key.
-        let mut all_envs = create_test_envs(vec![("FORCE_COLOR", "3")]);
+        let mut envs = create_test_envs(vec![("FORCE_COLOR", "3")]);
         let env_config = create_env_config(&["FORCE_COLOR"], &[]);
 
-        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert_eq!(all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "3");
+        assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "3");
         assert_eq!(
             result.fingerprinted_envs.get("FORCE_COLOR").map(std::convert::AsRef::as_ref),
             Some("3")
@@ -279,12 +279,12 @@ mod tests {
         // value. The fallback supplies `1`, and because the fingerprint scan
         // runs after the fallback, `1` is recorded in the cache key — keeping
         // the fingerprint consistent with what the child actually sees.
-        let mut all_envs = create_test_envs(vec![]);
+        let mut envs = create_test_envs(vec![]);
         let env_config = create_env_config(&["FORCE_COLOR"], &[]);
 
-        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert_eq!(all_envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
+        assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
         assert_eq!(
             result.fingerprinted_envs.get("FORCE_COLOR").map(std::convert::AsRef::as_ref),
             Some("1")
@@ -318,34 +318,34 @@ mod tests {
         ];
 
         // Resolve envs multiple times
-        let mut all_envs1 = create_test_envs(mock_envs.clone());
-        let mut all_envs2 = create_test_envs(mock_envs.clone());
-        let mut all_envs3 = create_test_envs(mock_envs.clone());
+        let mut envs1 = create_test_envs(mock_envs.clone());
+        let mut envs2 = create_test_envs(mock_envs.clone());
+        let mut envs3 = create_test_envs(mock_envs.clone());
 
-        let result1 = EnvFingerprints::resolve(&mut all_envs1, &env_config).unwrap();
-        let result2 = EnvFingerprints::resolve(&mut all_envs2, &env_config).unwrap();
-        let result3 = EnvFingerprints::resolve(&mut all_envs3, &env_config).unwrap();
+        let result1 = EnvFingerprints::resolve(&mut envs1, &env_config).unwrap();
+        let result2 = EnvFingerprints::resolve(&mut envs2, &env_config).unwrap();
+        let result3 = EnvFingerprints::resolve(&mut envs3, &env_config).unwrap();
 
         // Convert to vecs for comparison (BTreeMap already maintains stable ordering)
-        let envs1: Vec<_> = result1.fingerprinted_envs.iter().collect();
-        let envs2: Vec<_> = result2.fingerprinted_envs.iter().collect();
-        let envs3: Vec<_> = result3.fingerprinted_envs.iter().collect();
+        let fingerprinted_envs1: Vec<_> = result1.fingerprinted_envs.iter().collect();
+        let fingerprinted_envs2: Vec<_> = result2.fingerprinted_envs.iter().collect();
+        let fingerprinted_envs3: Vec<_> = result3.fingerprinted_envs.iter().collect();
 
         // Verify all resolutions produce the same result
-        assert_eq!(envs1, envs2);
-        assert_eq!(envs2, envs3);
+        assert_eq!(fingerprinted_envs1, fingerprinted_envs2);
+        assert_eq!(fingerprinted_envs2, fingerprinted_envs3);
 
         // Verify all expected variables are present
-        assert_eq!(envs1.len(), 9);
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "ALPHA_VAR"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "BETA_VAR"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "MIDDLE_VAR"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "ZEBRA_VAR"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "APP1_NAME"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "APP2_NAME"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "APP1_PASSWORD"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "APP1_TOKEN"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "APP2_TOKEN"));
+        assert_eq!(fingerprinted_envs1.len(), 9);
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "ALPHA_VAR"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "BETA_VAR"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "MIDDLE_VAR"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "ZEBRA_VAR"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "APP1_NAME"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "APP2_NAME"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "APP1_PASSWORD"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "APP1_TOKEN"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "APP2_TOKEN"));
 
         // APP1_PASSWORD should be hashed
         let password = result1.fingerprinted_envs.get("APP1_PASSWORD").unwrap();
@@ -354,11 +354,11 @@ mod tests {
             "sha256:17f1ef795d5663faa129f6fe3e5335e67ac7a701d1a70533a5f4b1635413a1aa"
         );
 
-        // Verify untracked envs are present in all_envs
-        assert!(all_envs1.contains_key(OsStr::new("VSCODE_VAR")));
-        assert!(all_envs1.contains_key(OsStr::new("PATH")));
-        assert!(all_envs1.contains_key(OsStr::new("HOME")));
-        assert!(all_envs1.contains_key(OsStr::new("OXLINT_TSGOLINT_PATH")));
+        // Verify untracked envs are present in envs
+        assert!(envs1.contains_key(OsStr::new("VSCODE_VAR")));
+        assert!(envs1.contains_key(OsStr::new("PATH")));
+        assert!(envs1.contains_key(OsStr::new("HOME")));
+        assert!(envs1.contains_key(OsStr::new("OXLINT_TSGOLINT_PATH")));
     }
 
     #[test]
@@ -369,13 +369,13 @@ mod tests {
         let env_config = create_env_config(&["TEST_VAR", "test_var", "Test_Var"], &[]);
 
         // Create mock environment variables with different cases
-        let mut all_envs = create_test_envs(vec![
+        let mut envs = create_test_envs(vec![
             ("TEST_VAR", "uppercase"),
             ("test_var", "lowercase"),
             ("Test_Var", "mixed"),
         ]);
 
-        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
         let fingerprinted_envs = &result.fingerprinted_envs;
 
         // On Unix, all three should be treated as separate variables
@@ -418,35 +418,32 @@ mod tests {
             ("Path", "C:\\Windows\\System32"),
         ];
 
-        let mut all_envs1 = create_test_envs(mock_envs.clone());
-        let mut all_envs2 = create_test_envs(mock_envs.clone());
-        let mut all_envs3 = create_test_envs(mock_envs.clone());
+        let mut envs1 = create_test_envs(mock_envs.clone());
+        let mut envs2 = create_test_envs(mock_envs.clone());
+        let mut envs3 = create_test_envs(mock_envs.clone());
 
-        let result1 = EnvFingerprints::resolve(&mut all_envs1, &env_config).unwrap();
-        let result2 = EnvFingerprints::resolve(&mut all_envs2, &env_config).unwrap();
-        let result3 = EnvFingerprints::resolve(&mut all_envs3, &env_config).unwrap();
+        let result1 = EnvFingerprints::resolve(&mut envs1, &env_config).unwrap();
+        let result2 = EnvFingerprints::resolve(&mut envs2, &env_config).unwrap();
+        let result3 = EnvFingerprints::resolve(&mut envs3, &env_config).unwrap();
 
-        let envs1: Vec<_> = result1.fingerprinted_envs.iter().collect();
-        let envs2: Vec<_> = result2.fingerprinted_envs.iter().collect();
-        let envs3: Vec<_> = result3.fingerprinted_envs.iter().collect();
+        let fingerprinted_envs1: Vec<_> = result1.fingerprinted_envs.iter().collect();
+        let fingerprinted_envs2: Vec<_> = result2.fingerprinted_envs.iter().collect();
+        let fingerprinted_envs3: Vec<_> = result3.fingerprinted_envs.iter().collect();
 
-        assert_eq!(envs1, envs2);
-        assert_eq!(envs2, envs3);
+        assert_eq!(fingerprinted_envs1, fingerprinted_envs2);
+        assert_eq!(fingerprinted_envs2, fingerprinted_envs3);
 
-        assert_eq!(envs1.len(), 6);
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "ALPHA_VAR"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "BETA_VAR"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "MIDDLE_VAR"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "ZEBRA_VAR"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "app1_name"));
-        assert!(envs1.iter().any(|(k, _)| k.as_str() == "app2_name"));
+        assert_eq!(fingerprinted_envs1.len(), 6);
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "ALPHA_VAR"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "BETA_VAR"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "MIDDLE_VAR"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "ZEBRA_VAR"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "app1_name"));
+        assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "app2_name"));
 
         // Verify untracked envs are present
-        assert!(all_envs1.contains_key(OsStr::new("VSCODE_VAR")));
-        assert!(
-            all_envs1.contains_key(OsStr::new("Path"))
-                || all_envs1.contains_key(OsStr::new("PATH"))
-        );
+        assert!(envs1.contains_key(OsStr::new("VSCODE_VAR")));
+        assert!(envs1.contains_key(OsStr::new("Path")) || envs1.contains_key(OsStr::new("PATH")));
     }
 
     // ============================================
@@ -459,13 +456,13 @@ mod tests {
         let env_config = create_env_config(&["AAA", "ZZZ", "MMM", "BBB"], &[]);
 
         // Create envs in different orders
-        let mut all_envs1 =
+        let mut envs1 =
             create_test_envs(vec![("AAA", "a"), ("ZZZ", "z"), ("MMM", "m"), ("BBB", "b")]);
-        let mut all_envs2 =
+        let mut envs2 =
             create_test_envs(vec![("ZZZ", "z"), ("BBB", "b"), ("AAA", "a"), ("MMM", "m")]);
 
-        let result1 = EnvFingerprints::resolve(&mut all_envs1, &env_config).unwrap();
-        let result2 = EnvFingerprints::resolve(&mut all_envs2, &env_config).unwrap();
+        let result1 = EnvFingerprints::resolve(&mut envs1, &env_config).unwrap();
+        let result2 = EnvFingerprints::resolve(&mut envs2, &env_config).unwrap();
 
         // Both should produce identical iteration order due to BTreeMap
         let keys1: Vec<_> = result1.fingerprinted_envs.keys().collect();
@@ -480,14 +477,14 @@ mod tests {
     fn test_untracked_env_names_stored() {
         let env_config = create_env_config(&["BUILD_MODE"], &["PATH", "HOME", "CI"]);
 
-        let mut all_envs = create_test_envs(vec![
+        let mut envs = create_test_envs(vec![
             ("BUILD_MODE", "production"),
             ("PATH", "/usr/bin"),
             ("HOME", "/home/user"),
             ("CI", "true"),
         ]);
 
-        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
         // Verify untracked_env names are stored
         assert_eq!(result.untracked_env_config.len(), 3);
@@ -497,24 +494,24 @@ mod tests {
     }
 
     #[test]
-    fn test_all_envs_mutated_after_resolve() {
+    fn test_envs_mutated_after_resolve() {
         // Include some envs that should be filtered out
         let env_config = create_env_config(&["KEEP_THIS"], &["PASS_THROUGH"]);
 
-        let mut all_envs = create_test_envs(vec![
+        let mut envs = create_test_envs(vec![
             ("KEEP_THIS", "kept"),
             ("PASS_THROUGH", "passed"),
             ("FILTER_OUT", "filtered"),
             ("ANOTHER_FILTERED", "also filtered"),
         ]);
 
-        let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        // all_envs should only contain fingerprinted + untracked envs (plus auto-added ones)
-        assert!(all_envs.contains_key(OsStr::new("KEEP_THIS")));
-        assert!(all_envs.contains_key(OsStr::new("PASS_THROUGH")));
-        assert!(!all_envs.contains_key(OsStr::new("FILTER_OUT")));
-        assert!(!all_envs.contains_key(OsStr::new("ANOTHER_FILTERED")));
+        // envs should only contain fingerprinted + untracked envs (plus auto-added ones)
+        assert!(envs.contains_key(OsStr::new("KEEP_THIS")));
+        assert!(envs.contains_key(OsStr::new("PASS_THROUGH")));
+        assert!(!envs.contains_key(OsStr::new("FILTER_OUT")));
+        assert!(!envs.contains_key(OsStr::new("ANOTHER_FILTERED")));
     }
 
     #[test]
@@ -526,11 +523,11 @@ mod tests {
 
         // Create invalid UTF-8 sequence
         let invalid_utf8 = OsStr::from_bytes(&[0xff, 0xfe]);
-        let mut all_envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> =
+        let mut envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> =
             std::iter::once((Arc::from(OsStr::new("INVALID_UTF8")), Arc::from(invalid_utf8)))
                 .collect();
 
-        let result = EnvFingerprints::resolve(&mut all_envs, &env_config);
+        let result = EnvFingerprints::resolve(&mut envs, &env_config);
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -551,7 +548,7 @@ mod tests {
             &[],
         );
 
-        let mut all_envs = create_test_envs(vec![
+        let mut envs = create_test_envs(vec![
             ("API_KEY", "secret_key_123"),
             ("MY_SECRET", "secret_value"),
             ("AUTH_TOKEN", "token_abc"),
@@ -559,7 +556,7 @@ mod tests {
             ("NORMAL_VAR", "normal_value"),
         ]);
 
-        let result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
         // Sensitive envs should be hashed
         assert!(result.fingerprinted_envs.get("API_KEY").unwrap().starts_with("sha256:"));
@@ -576,20 +573,20 @@ mod tests {
         // Verify PLAYWRIGHT_* pattern matches Playwright environment variables
         let env_config = create_env_config(&[], &["PLAYWRIGHT_*"]);
 
-        let mut all_envs = create_test_envs(vec![
+        let mut envs = create_test_envs(vec![
             ("PLAYWRIGHT_BROWSERS_PATH", "/custom/browsers"),
             ("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1"),
             ("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "/path/to/chromium"),
             ("OTHER_VAR", "should_be_filtered"),
         ]);
 
-        let _result = EnvFingerprints::resolve(&mut all_envs, &env_config).unwrap();
+        let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
         // PLAYWRIGHT_* envs should be passed through
-        assert!(all_envs.contains_key(OsStr::new("PLAYWRIGHT_BROWSERS_PATH")));
-        assert!(all_envs.contains_key(OsStr::new("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD")));
-        assert!(all_envs.contains_key(OsStr::new("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")));
+        assert!(envs.contains_key(OsStr::new("PLAYWRIGHT_BROWSERS_PATH")));
+        assert!(envs.contains_key(OsStr::new("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD")));
+        assert!(envs.contains_key(OsStr::new("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")));
         // Non-matching env should be filtered out
-        assert!(!all_envs.contains_key(OsStr::new("OTHER_VAR")));
+        assert!(!envs.contains_key(OsStr::new("OTHER_VAR")));
     }
 }

@@ -33,7 +33,7 @@
                       "cache",
                       "clean"
                     ],
-                    "all_envs": {
+                    "spawn_envs": {
                       "NO_COLOR": "1",
                       "PATH": "<workspace>/node_modules/.bin:<tools>"
                     },

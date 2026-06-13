@@ -71,7 +71,7 @@
                       "print",
                       "before_cd"
                     ],
-                    "all_envs": {
+                    "spawn_envs": {
                       "FORCE_COLOR": "1",
                       "PATH": "<workspace>/node_modules/.bin:<tools>"
                     },
@@ -139,7 +139,7 @@
                       "print",
                       "after_cd"
                     ],
-                    "all_envs": {
+                    "spawn_envs": {
                       "FORCE_COLOR": "1",
                       "PATH": "<workspace>/node_modules/.bin:<tools>"
                     },
@@ -207,7 +207,7 @@
                       "print",
                       "after_cd2"
                     ],
-                    "all_envs": {
+                    "spawn_envs": {
                       "FORCE_COLOR": "1",
                       "PATH": "<workspace>/node_modules/.bin:<tools>"
                     },
