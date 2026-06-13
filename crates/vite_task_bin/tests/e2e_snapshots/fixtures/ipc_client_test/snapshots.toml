@@ -46,3 +46,22 @@ steps = [
     "--last-details",
   ], comment = "summary names the opt-out as the not-cached reason" },
 ]
+
+[[e2e]]
+name = "fetch_env_reads_declared_env"
+comment = """
+Exercises `getEnv(name)`: the tool asks the runner for a declared env var and prints the served value. This verifies the round-trip IPC behavior before any runner-reported env is added to the cache fingerprint.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-declared",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "served",
+    ],
+  ], comment = "runner serves PROBE_ENV from the spawned task env map" },
+]

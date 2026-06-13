@@ -2,15 +2,19 @@ use std::{
     cell::RefCell,
     ffi::{OsStr, OsString},
     io,
+    sync::Arc,
 };
 
 use futures::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
-use tokio::io::AsyncReadExt;
+use rustc_hash::FxHashMap;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
-use vite_task_ipc_shared::{IPC_ENV_NAME, Request};
+use vite_task_ipc_shared::{GetEnvResponse, IPC_ENV_NAME, Request};
+use wincode::{SchemaWrite, config::DefaultConfig};
 
 pub trait Handler {
     fn disable_cache(&mut self);
+    fn get_env(&mut self, name: &OsStr) -> Option<Arc<OsStr>>;
 }
 
 /// A protocol-level failure observed while servicing a client.
@@ -24,14 +28,21 @@ pub enum Error {
 
     #[error("invalid message from the task")]
     InvalidRequest(#[source] wincode::ReadError),
+
+    #[error("failed to send response to the task")]
+    WriteResponse(#[source] io::Error),
 }
 
-/// A [`Handler`] that records every report.
+/// A [`Handler`] that records every report and resolves `get_env` against
+/// provided envs.
 ///
 /// Call [`Recorder::into_reports`] after the driver future completes to
 /// recover the collected [`Reports`].
 pub struct Recorder {
     cache_disabled: bool,
+    /// The envs `get_env` resolves against. The runner supplies these for the
+    /// spawned task; the server never re-reads the live process env.
+    envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
 }
 
 /// The data collected by a [`Recorder`] over the server's lifetime.
@@ -42,25 +53,23 @@ pub struct Reports {
 
 impl Recorder {
     #[must_use]
-    pub const fn new() -> Self {
-        Self { cache_disabled: false }
+    pub const fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
+        Self { cache_disabled: false, envs }
     }
 
     #[must_use]
-    pub const fn into_reports(self) -> Reports {
+    pub fn into_reports(self) -> Reports {
         Reports { cache_disabled: self.cache_disabled }
-    }
-}
-
-impl Default for Recorder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
 impl Handler for Recorder {
     fn disable_cache(&mut self) {
         self.cache_disabled = true;
+    }
+
+    fn get_env(&mut self, name: &OsStr) -> Option<Arc<OsStr>> {
+        self.envs.get(name).cloned()
     }
 }
 
@@ -274,15 +283,21 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
             Err(err) => return Err(Error::ReadFrame(err)),
         }
 
-        let request: Request = wincode::deserialize_exact(&buf).map_err(Error::InvalidRequest)?;
+        let request: Request<'_> =
+            wincode::deserialize_exact(&buf).map_err(Error::InvalidRequest)?;
 
-        // `DisableCache` is fire-and-forget and intentionally gets no
+        // The fire-and-forget branch (`DisableCache`) intentionally writes no
         // response. Nothing in the runner observes individual IPC events
         // live; the recorded set is collected after this driver drains. See
         // `Request` in `vite_task_ipc_shared` for the rationale.
         match request {
             Request::DisableCache => {
                 handler.borrow_mut().disable_cache();
+            }
+            Request::GetEnv { name } => {
+                let value = handler.borrow_mut().get_env(name.to_cow_os_str().as_ref());
+                let response = GetEnvResponse { env_value: value.as_deref().map(Into::into) };
+                write_response(&mut stream, &response).await.map_err(Error::WriteResponse)?;
             }
         }
     }
@@ -295,5 +310,19 @@ async fn read_frame(stream: &mut Stream, buf: &mut Vec<u8>) -> io::Result<()> {
     buf.clear();
     buf.resize(len, 0);
     stream.read_exact(buf).await?;
+    Ok(())
+}
+
+async fn write_response<T>(stream: &mut Stream, response: &T) -> io::Result<()>
+where
+    T: SchemaWrite<DefaultConfig, Src = T> + ?Sized,
+{
+    let bytes = wincode::serialize(response)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let len = u32::try_from(bytes.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "response too large"))?;
+    stream.write_all(&len.to_le_bytes()).await?;
+    stream.write_all(&bytes).await?;
+    stream.flush().await?;
     Ok(())
 }

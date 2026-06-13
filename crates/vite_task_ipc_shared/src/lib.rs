@@ -1,3 +1,4 @@
+use native_str::NativeStr;
 use wincode::{SchemaRead, SchemaWrite};
 
 pub const IPC_ENV_NAME: &str = "VP_RUN_IPC_NAME";
@@ -15,7 +16,8 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 /// IPC request frame sent by tools to the runner.
 ///
 /// `DisableCache` is fire-and-forget: the runner processes it when it
-/// arrives and never writes a response.
+/// arrives and never writes a response. `GetEnv` is a round-trip and pairs
+/// with [`GetEnvResponse`].
 ///
 /// Fire-and-forget is safe because nothing in the runner observes individual
 /// IPC events live — the recorded set is only consumed *after* the per-task
@@ -23,6 +25,14 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 /// process exits. So a tool can `flush + exit` and the server's drain phase
 /// will still consume every buffered frame.
 #[derive(Debug, SchemaWrite, SchemaRead)]
-pub enum Request {
+pub enum Request<'a> {
+    // TODO(env-track): A later PR in this stack adds a tracked flag once the
+    // runner records served env reads into the post-run cache fingerprint.
+    GetEnv { name: &'a NativeStr },
     DisableCache,
+}
+
+#[derive(Debug, SchemaWrite, SchemaRead)]
+pub struct GetEnvResponse {
+    pub env_value: Option<Box<NativeStr>>,
 }

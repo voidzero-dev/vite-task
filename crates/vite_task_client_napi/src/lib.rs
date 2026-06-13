@@ -37,7 +37,7 @@
     reason = "no-op stubs keep the signature of the real implementations that replace them"
 )]
 
-use std::collections::HashMap;
+use std::{collections::HashMap, ffi::OsStr};
 
 use napi::{Error, Result};
 use napi_derive::napi;
@@ -92,16 +92,17 @@ impl RunnerClient {
         self.client.disable_cache().map_err(|err| err_string(vite_str::format!("{err}")))
     }
 
-    /// No-op for now: always returns `None`, so callers fall back to their
-    /// own process env. Becomes a real request once env tracking can
-    /// fingerprint the served values.
     #[napi]
-    pub fn get_env(
-        &self,
-        _name: String,
-        _options: Option<GetEnvOptions>,
-    ) -> Result<Option<String>> {
-        Ok(None)
+    pub fn get_env(&self, name: String, _options: Option<GetEnvOptions>) -> Result<Option<String>> {
+        let value = self
+            .client
+            .get_env(OsStr::new(&name))
+            .map_err(|err| err_string(vite_str::format!("{err}")))?;
+        value.map_or(Ok(None), |value| {
+            value.to_str().map(|s| Some(s.to_owned())).ok_or_else(|| {
+                err_string(vite_str::format!("env value for {name} is not valid UTF-8"))
+            })
+        })
     }
 
     /// No-op for now: always returns an empty match-set — see

@@ -8,6 +8,12 @@
       "command": "node scripts/disable_cache.mjs",
       "input": [],
       "cache": true
+    },
+    "fetch-env-declared": {
+      "command": "node scripts/fetch_env.mjs",
+      // TODO(env-track): Remove this explicit env declaration down the stack and update the e2e name once runner-tracked env reads cover it.
+      "env": ["PROBE_ENV"],
+      "cache": true
     }
   }
 }

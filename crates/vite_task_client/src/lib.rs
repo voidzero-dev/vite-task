@@ -1,10 +1,13 @@
 use std::{
     cell::RefCell,
     ffi::OsStr,
-    io::{self, Write},
+    io::{self, Read, Write},
+    sync::Arc,
 };
 
-use vite_task_ipc_shared::{IPC_ENV_NAME, Request};
+use native_str::NativeStr;
+use vite_task_ipc_shared::{GetEnvResponse, IPC_ENV_NAME, Request};
+use wincode::{SchemaRead, config::DefaultConfig};
 
 #[cfg(unix)]
 type Stream = std::os::unix::net::UnixStream;
@@ -13,6 +16,7 @@ type Stream = std::fs::File;
 
 pub struct Client {
     stream: RefCell<Stream>,
+    scratch: RefCell<Vec<u8>>,
 }
 
 impl Client {
@@ -38,7 +42,7 @@ impl Client {
     }
 
     const fn from_stream(stream: Stream) -> Self {
-        Self { stream: RefCell::new(stream) }
+        Self { stream: RefCell::new(stream), scratch: RefCell::new(Vec::new()) }
     }
 
     /// Fire-and-forget: the call returns once the request is flushed to the
@@ -53,7 +57,25 @@ impl Client {
         self.send(&Request::DisableCache)
     }
 
-    fn send(&self, request: &Request) -> io::Result<()> {
+    /// Requests an env value from the runner. Returns `None` if the runner
+    /// reports the env is not available.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request or response fails.
+    // TODO(env-track): A later PR in this stack adds a tracked flag so env
+    // reads can participate in cache fingerprints instead of being IPC-only.
+    pub fn get_env(&self, name: &OsStr) -> io::Result<Option<Arc<OsStr>>> {
+        let name = Box::<NativeStr>::from(name);
+
+        self.send(&Request::GetEnv { name: &name })?;
+        let response: GetEnvResponse = self.recv()?;
+        Ok(response
+            .env_value
+            .map(|env_value| Arc::<OsStr>::from(env_value.to_cow_os_str().as_ref())))
+    }
+
+    fn send(&self, request: &Request<'_>) -> io::Result<()> {
         let bytes = wincode::serialize(request)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         let len = u32::try_from(bytes.len())
@@ -63,6 +85,22 @@ impl Client {
         stream.write_all(&bytes)?;
         stream.flush()?;
         Ok(())
+    }
+
+    fn recv<T>(&self) -> io::Result<T>
+    where
+        for<'de> T: SchemaRead<'de, DefaultConfig, Dst = T>,
+    {
+        let mut stream = self.stream.borrow_mut();
+        let mut scratch = self.scratch.borrow_mut();
+        let mut len_bytes = [0u8; 4];
+        stream.read_exact(&mut len_bytes)?;
+        let len = u32::from_le_bytes(len_bytes) as usize;
+        scratch.clear();
+        scratch.resize(len, 0);
+        stream.read_exact(&mut scratch)?;
+        wincode::deserialize_exact(&scratch)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
 }
 

@@ -1,21 +1,33 @@
 use std::{
     ffi::{OsStr, OsString},
-    sync::mpsc,
+    sync::Arc,
     thread,
 };
 
+use rustc_hash::FxHashMap;
 use tokio::runtime::Builder;
 use vite_task_client::Client;
-use vite_task_server::{Error, Handler, Recorder, ServerHandle, serve};
+use vite_task_server::{Error, Recorder, Reports, ServerHandle, serve};
 
-fn run_with_server<H, F>(handler: H, client_work: F) -> Result<H, Error>
+fn env_map(pairs: &[(&str, &str)]) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
+    pairs
+        .iter()
+        .map(|(k, v)| (Arc::<OsStr>::from(OsStr::new(k)), Arc::<OsStr>::from(OsStr::new(v))))
+        .collect()
+}
+
+fn run_with_server<F>(
+    envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    client_work: F,
+) -> Result<Reports, Error>
 where
-    H: Handler + 'static,
     F: FnOnce(Vec<(&'static OsStr, OsString)>) + Send + 'static,
 {
+    let recorder = Recorder::new(Arc::new(envs));
+
     let rt = Builder::new_current_thread().enable_all().build().unwrap();
     rt.block_on(async move {
-        let (envs, ServerHandle { driver, stop_accepting }) = serve(handler).expect("bind server");
+        let (envs, ServerHandle { driver, stop_accepting }) = serve(recorder).expect("bind server");
         let envs: Vec<_> = envs.collect();
 
         let client = async move {
@@ -26,7 +38,7 @@ where
         };
 
         let (result, ()) = tokio::join!(driver, client);
-        result
+        result.map(Recorder::into_reports)
     })
 }
 
@@ -36,62 +48,58 @@ fn connect(envs: &[(&'static OsStr, OsString)]) -> Client {
         .expect("serve should yield an IPC env")
 }
 
-/// Wraps [`Recorder`] and reports every handled `disableCache` on a channel.
-///
-/// The protocol is fire-and-forget only, so there is no round-trip request a
-/// test could use to flush the connection. Without the notification, a client
-/// that sends and returns immediately could let the test signal stop-accepting
-/// before the server has even accepted the connection, dropping the frame.
-struct NotifyingRecorder {
-    inner: Recorder,
-    handled: mpsc::Sender<()>,
-}
-
-impl Handler for NotifyingRecorder {
-    fn disable_cache(&mut self) {
-        self.inner.disable_cache();
-        let _ = self.handled.send(());
-    }
+/// Force a round-trip so the server has definitely processed every prior
+/// fire-and-forget frame on this connection: frames on a single stream are
+/// read sequentially, so once the server answers a `get_env` everything
+/// before it must already have been dispatched to the handler.
+fn flush(client: &Client) {
+    let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__")).unwrap();
 }
 
 #[test]
 fn single_client_fire_and_forget() {
-    let (tx, rx) = mpsc::channel();
-    let handler =
-        run_with_server(NotifyingRecorder { inner: Recorder::new(), handled: tx }, move |envs| {
-            let client = connect(&envs);
-            client.disable_cache().unwrap();
-            // Hold the stop-accepting signal until the server has processed
-            // the frame.
-            rx.recv().unwrap();
-        })
-        .expect("driver returned error");
+    let reports = run_with_server(env_map(&[]), |envs| {
+        let client = connect(&envs);
+        client.disable_cache().unwrap();
+        flush(&client);
+    })
+    .expect("driver returned error");
 
-    assert!(handler.inner.into_reports().cache_disabled);
+    assert!(reports.cache_disabled);
+}
+
+#[test]
+fn get_env_found_and_not_found() {
+    let reports = run_with_server(env_map(&[("NODE_ENV", "production")]), |envs| {
+        let client = connect(&envs);
+        let present = client.get_env(OsStr::new("NODE_ENV")).unwrap();
+        assert_eq!(present.as_deref(), Some(OsStr::new("production")));
+        let missing = client.get_env(OsStr::new("MISSING")).unwrap();
+        assert!(missing.is_none());
+    })
+    .expect("driver returned error");
+
+    assert!(!reports.cache_disabled);
 }
 
 #[test]
 fn concurrent_clients() {
-    let (tx, rx) = mpsc::channel();
-    let handler =
-        run_with_server(NotifyingRecorder { inner: Recorder::new(), handled: tx }, move |envs| {
-            let threads: Vec<_> = (0..4)
-                .map(|_| {
-                    let envs = envs.clone();
-                    thread::spawn(move || {
-                        let client = connect(&envs);
-                        client.disable_cache().unwrap();
-                    })
+    let reports = run_with_server(env_map(&[("SHARED", "value")]), move |envs| {
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let envs = envs.clone();
+                thread::spawn(move || {
+                    let client = connect(&envs);
+                    let value = client.get_env(OsStr::new("SHARED")).unwrap();
+                    assert_eq!(value.as_deref(), Some(OsStr::new("value")));
                 })
-                .collect();
-            for t in threads {
-                t.join().unwrap();
-            }
-            for _ in 0..4 {
-                rx.recv().unwrap();
-            }
-        })
-        .expect("driver returned error");
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+    })
+    .expect("driver returned error");
 
-    assert!(handler.inner.into_reports().cache_disabled);
+    assert!(!reports.cache_disabled);
 }
