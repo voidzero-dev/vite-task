@@ -1,0 +1,108 @@
+[[e2e]]
+name = "vite_prefix_env_change_invalidates_cache"
+comment = """
+`VITE_MODE` is picked up by Vite's patched `loadEnv`, which asks the runner for every `VITE_*` env via `getEnvs(pattern, { tracked: true })`. Flipping its value between runs must invalidate the cache AND change the build output — Vite's `define` plugin substitutes `import.meta.env.VITE_MODE` at build time, so dead-code elimination leaves only the branch matching the value.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], envs = [
+    [
+      "VITE_MODE",
+      "production",
+    ],
+  ], comment = "first run: production build" },
+  { argv = [
+    "vtt",
+    "grep-file",
+    "dist/assets/main.js",
+    "BUILD_MODE_PROD",
+  ], comment = "production build: PROD marker survived DCE" },
+  { argv = [
+    "vtt",
+    "grep-file",
+    "dist/assets/main.js",
+    "BUILD_MODE_DEV",
+  ], comment = "dev branch is gone" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], envs = [
+    [
+      "VITE_MODE",
+      "production",
+    ],
+  ], comment = "cache hit: VITE_MODE unchanged" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], envs = [
+    [
+      "VITE_MODE",
+      "development",
+    ],
+  ], comment = "cache miss: envs changed — VITE_MODE value changed" },
+  { argv = [
+    "vtt",
+    "grep-file",
+    "dist/assets/main.js",
+    "BUILD_MODE_PROD",
+  ], comment = "PROD marker gone after the dev rebuild" },
+  { argv = [
+    "vtt",
+    "grep-file",
+    "dist/assets/main.js",
+    "BUILD_MODE_DEV",
+  ], comment = "DEV marker now in the bundle" },
+]
+
+[[e2e]]
+name = "vite_node_env_change_invalidates_cache"
+comment = """
+`NODE_ENV` enters the build's cache fingerprint via Vite's `getEnv('NODE_ENV')` call in `resolveConfig`. Same value → cache hit; different value → cache miss with `envs changed`.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], envs = [
+    [
+      "NODE_ENV",
+      "production",
+    ],
+  ], comment = "first run: NODE_ENV=production" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], envs = [
+    [
+      "NODE_ENV",
+      "production",
+    ],
+  ], comment = "cache hit: NODE_ENV unchanged" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], envs = [
+    [
+      "NODE_ENV",
+      "development",
+    ],
+  ], comment = "cache miss: envs changed (NODE_ENV changed)" },
+]
+
