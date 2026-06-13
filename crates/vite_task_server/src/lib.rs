@@ -14,7 +14,7 @@ use wincode::{SchemaWrite, config::DefaultConfig};
 
 pub trait Handler {
     fn disable_cache(&mut self);
-    fn get_env(&mut self, name: &OsStr) -> Option<Arc<OsStr>>;
+    fn get_env(&mut self, name: &OsStr, tracked: bool) -> Option<Arc<OsStr>>;
 }
 
 /// A protocol-level failure observed while servicing a client.
@@ -40,26 +40,38 @@ pub enum Error {
 /// recover the collected [`Reports`].
 pub struct Recorder {
     cache_disabled: bool,
+    env_records: FxHashMap<Arc<OsStr>, EnvRecord>,
     /// The envs `get_env` resolves against. The runner supplies these for the
     /// spawned task; the server never re-reads the live process env.
     envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+}
+
+/// A record of an env value requested via `get_env`.
+///
+/// `tracked` is the monotonic OR of every `tracked` flag sent for this name:
+/// once true, it stays true.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvRecord {
+    pub tracked: bool,
+    pub value: Option<Arc<OsStr>>,
 }
 
 /// The data collected by a [`Recorder`] over the server's lifetime.
 #[derive(Debug, Default)]
 pub struct Reports {
     pub cache_disabled: bool,
+    pub env_records: FxHashMap<Arc<OsStr>, EnvRecord>,
 }
 
 impl Recorder {
     #[must_use]
-    pub const fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
-        Self { cache_disabled: false, envs }
+    pub fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
+        Self { cache_disabled: false, env_records: FxHashMap::default(), envs }
     }
 
     #[must_use]
     pub fn into_reports(self) -> Reports {
-        Reports { cache_disabled: self.cache_disabled }
+        Reports { cache_disabled: self.cache_disabled, env_records: self.env_records }
     }
 }
 
@@ -68,8 +80,14 @@ impl Handler for Recorder {
         self.cache_disabled = true;
     }
 
-    fn get_env(&mut self, name: &OsStr) -> Option<Arc<OsStr>> {
-        self.envs.get(name).cloned()
+    fn get_env(&mut self, name: &OsStr, tracked: bool) -> Option<Arc<OsStr>> {
+        if let Some(existing) = self.env_records.get_mut(name) {
+            existing.tracked |= tracked;
+            return existing.value.clone();
+        }
+        let value = self.envs.get(name).cloned();
+        self.env_records.insert(name.into(), EnvRecord { tracked, value: value.clone() });
+        value
     }
 }
 
@@ -294,8 +312,8 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
             Request::DisableCache => {
                 handler.borrow_mut().disable_cache();
             }
-            Request::GetEnv { name } => {
-                let value = handler.borrow_mut().get_env(name.to_cow_os_str().as_ref());
+            Request::GetEnv { name, tracked } => {
+                let value = handler.borrow_mut().get_env(name.to_cow_os_str().as_ref(), tracked);
                 let response = GetEnvResponse { env_value: value.as_deref().map(Into::into) };
                 write_response(&mut stream, &response).await.map_err(Error::WriteResponse)?;
             }

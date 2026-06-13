@@ -3,7 +3,9 @@
 pub mod archive;
 pub mod display;
 
-use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap, ffi::OsStr, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration,
+};
 
 // Re-export display functions for convenience
 pub use display::format_cache_status_inline;
@@ -12,6 +14,7 @@ pub use display::{
     format_spawn_change,
 };
 use rusqlite::{Connection, OptionalExtension as _};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use vite_path::{AbsolutePath, RelativePathBuf};
@@ -165,6 +168,23 @@ impl EnvMismatch {
             }
         }
     }
+
+    /// Compare a stored env value against the current one, returning the
+    /// mismatch if they differ. `None` on either side means the env is unset
+    /// there; two unset or two equal values are not a mismatch.
+    #[must_use]
+    pub fn compare(name: &Str, stored: Option<&Str>, current: Option<&Str>) -> Option<Self> {
+        match (stored, current) {
+            (None, Some(value)) => Some(Self::Added { name: name.clone(), value: value.clone() }),
+            (Some(value), None) => Some(Self::Removed { name: name.clone(), value: value.clone() }),
+            (Some(old_value), Some(new_value)) if old_value != new_value => Some(Self::Changed {
+                name: name.clone(),
+                old_value: old_value.clone(),
+                new_value: new_value.clone(),
+            }),
+            _ => None,
+        }
+    }
 }
 
 impl Display for EnvMismatch {
@@ -198,23 +218,16 @@ pub enum FingerprintMismatch {
         kind: InputChangeKind,
         path: RelativePathBuf,
     },
+    /// A runner-aware tool-tracked env var changed between runs.
+    TrackedEnvChanged(EnvMismatch),
 }
 
-impl Display for FingerprintMismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SpawnFingerprint { old, new } => {
-                write!(f, "Spawn fingerprint changed: old={old:?}, new={new:?}")
-            }
-            Self::InputConfig => {
-                write!(f, "input configuration changed")
-            }
-            Self::OutputConfig => {
-                write!(f, "output configuration changed")
-            }
-            Self::InputChanged { kind, path } => {
-                write!(f, "{}", display::format_input_change_str(*kind, path.as_str()))
-            }
+impl From<crate::session::execute::fingerprint::PostRunMismatch> for FingerprintMismatch {
+    fn from(mismatch: crate::session::execute::fingerprint::PostRunMismatch) -> Self {
+        use crate::session::execute::fingerprint::PostRunMismatch;
+        match mismatch {
+            PostRunMismatch::InputChanged { kind, path } => Self::InputChanged { kind, path },
+            PostRunMismatch::TrackedEnvChanged(mismatch) => Self::TrackedEnvChanged(mismatch),
         }
     }
 }
@@ -240,7 +253,7 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
 /// its own cache warm across branch switches, and a cache from a different
 /// version is simply ignored (it lives in a directory this build never looks
 /// at) rather than aborting the run. Bumping the version starts a fresh cache.
-const CACHE_SCHEMA_VERSION: u32 = 13;
+const CACHE_SCHEMA_VERSION: u32 = 14;
 
 /// Name of the per-version subdirectory (e.g. `v13`) under the task-cache
 /// directory that holds the database and output archives for the current
@@ -292,6 +305,7 @@ impl ExecutionCache {
         cache_metadata: &CacheMetadata,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
+        envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
         let execution_cache_key = &cache_metadata.execution_cache_key;
@@ -307,11 +321,11 @@ impl ExecutionCache {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
             }
 
-            // Validate post-run fingerprint (inferred inputs from fspy)
-            if let Some((kind, path)) = cache_value.post_run_fingerprint.validate(workspace_root)? {
-                return Ok(Err(CacheMiss::FingerprintMismatch(
-                    FingerprintMismatch::InputChanged { kind, path },
-                )));
+            // Validate post-run fingerprint (inferred inputs + tracked envs)
+            if let Some(mismatch) =
+                cache_value.post_run_fingerprint.validate(workspace_root, envs)?
+            {
+                return Ok(Err(CacheMiss::FingerprintMismatch(mismatch.into())));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed

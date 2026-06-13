@@ -195,6 +195,9 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                 FingerprintMismatch::InputChanged { kind, path } => {
                     format_input_change_str(*kind, path.as_str())
                 }
+                FingerprintMismatch::TrackedEnvChanged(mismatch) => {
+                    format_env_changed_inline(&[mismatch.name()])
+                }
             };
             Some(vite_str::format!("○ cache miss: {reason}, executing"))
         }

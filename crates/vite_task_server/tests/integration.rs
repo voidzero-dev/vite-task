@@ -53,7 +53,7 @@ fn connect(envs: &[(&'static OsStr, OsString)]) -> Client {
 /// read sequentially, so once the server answers a `get_env` everything
 /// before it must already have been dispatched to the handler.
 fn flush(client: &Client) {
-    let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__")).unwrap();
+    let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__"), false).unwrap();
 }
 
 #[test]
@@ -72,14 +72,38 @@ fn single_client_fire_and_forget() {
 fn get_env_found_and_not_found() {
     let reports = run_with_server(env_map(&[("NODE_ENV", "production")]), |envs| {
         let client = connect(&envs);
-        let present = client.get_env(OsStr::new("NODE_ENV")).unwrap();
+        let present = client.get_env(OsStr::new("NODE_ENV"), true).unwrap();
         assert_eq!(present.as_deref(), Some(OsStr::new("production")));
-        let missing = client.get_env(OsStr::new("MISSING")).unwrap();
+        let missing = client.get_env(OsStr::new("MISSING"), false).unwrap();
         assert!(missing.is_none());
     })
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
+    let node = reports.env_records.get(OsStr::new("NODE_ENV")).expect("NODE_ENV recorded");
+    assert!(node.tracked);
+    assert_eq!(node.value.as_deref(), Some(OsStr::new("production")));
+
+    let missing = reports.env_records.get(OsStr::new("MISSING")).expect("MISSING recorded");
+    assert!(!missing.tracked);
+    assert!(missing.value.is_none());
+}
+
+#[test]
+fn get_env_tracked_upgrade_is_monotonic() {
+    let reports = run_with_server(env_map(&[("NODE_ENV", "production")]), |envs| {
+        let client = connect(&envs);
+        let a = client.get_env(OsStr::new("NODE_ENV"), false).unwrap();
+        let b = client.get_env(OsStr::new("NODE_ENV"), true).unwrap();
+        let c = client.get_env(OsStr::new("NODE_ENV"), false).unwrap();
+        for v in [a, b, c] {
+            assert_eq!(v.as_deref(), Some(OsStr::new("production")));
+        }
+    })
+    .expect("driver returned error");
+
+    let node = reports.env_records.get(OsStr::new("NODE_ENV")).expect("recorded");
+    assert!(node.tracked, "tracked must remain true once set");
 }
 
 #[test]
@@ -90,7 +114,7 @@ fn concurrent_clients() {
                 let envs = envs.clone();
                 thread::spawn(move || {
                     let client = connect(&envs);
-                    let value = client.get_env(OsStr::new("SHARED")).unwrap();
+                    let value = client.get_env(OsStr::new("SHARED"), true).unwrap();
                     assert_eq!(value.as_deref(), Some(OsStr::new("value")));
                 })
             })
@@ -102,4 +126,7 @@ fn concurrent_clients() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
+    let shared = reports.env_records.get(OsStr::new("SHARED")).expect("recorded");
+    assert!(shared.tracked);
+    assert_eq!(shared.value.as_deref(), Some(OsStr::new("value")));
 }

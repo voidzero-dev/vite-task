@@ -13,6 +13,11 @@
       "command": "node scripts/fetch_env.mjs PROBE_ENV",
       "cache": true
     },
+    "fetch-env-explicit-input": {
+      "command": "node scripts/fetch_env.mjs PROBE_ENV",
+      "input": [],
+      "cache": true
+    },
     "fetch-prefixed-env": {
       "command": "PREFIXED_ENV=from-command node scripts/fetch_env.mjs PREFIXED_ENV",
       "cache": true

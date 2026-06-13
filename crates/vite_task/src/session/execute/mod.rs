@@ -531,7 +531,10 @@ async fn lookup_cache(
         Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
     })?;
 
-    match cache.try_hit(cache_metadata, &globbed_inputs, workspace_root).await {
+    match cache
+        .try_hit(cache_metadata, &globbed_inputs, workspace_root, &cache_metadata.unfiltered_envs)
+        .await
+    {
         Ok(Ok(cached)) => Ok(CacheLookup::Hit(cached)),
         Ok(Err(miss)) => Ok(CacheLookup::Miss { miss, globbed_inputs }),
         Err(err) => {
