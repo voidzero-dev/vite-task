@@ -4267,6 +4267,7 @@ dependencies = [
  "tracing",
  "twox-hash",
  "uuid",
+ "vite_glob",
  "vite_path",
  "vite_select",
  "vite_str",

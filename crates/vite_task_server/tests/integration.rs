@@ -134,6 +134,8 @@ fn get_envs_returns_matching_entries() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
+    let glob = reports.env_glob_records.get("PROBE_*").expect("glob recorded");
+    assert_eq!(glob.matches.len(), 2);
 }
 
 #[test]
@@ -146,6 +148,8 @@ fn get_envs_empty_match_set_is_returned() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
+    let glob = reports.env_glob_records.get("PROBE_*").expect("glob recorded");
+    assert!(glob.matches.is_empty());
 }
 
 #[test]

@@ -198,3 +198,104 @@ steps = [
     ],
   ], comment = "runner serves only envs matching PROBE_*" },
 ]
+
+[[e2e]]
+name = "fetch_envs_tracks_glob_match_set"
+comment = """
+Exercises `getEnvs(pattern, { tracked: true })`. The glob `PROBE_*` and its match-set snapshot enter the post-run fingerprint: later runs miss on changed, added, or removed matching envs, but hit when only non-matching envs differ.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "populate: first run captures {PROBE_A, PROBE_B} under the glob" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "unchanged: same match-set -> cache hit" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "changed",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "change: PROBE_A value differs -> cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "changed",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "PROBE_C",
+      "c",
+    ],
+  ], comment = "add: PROBE_C is new under the glob -> cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "PROBE_C",
+      "c",
+    ],
+  ], comment = "remove: PROBE_A dropped from the match-set -> cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "PROBE_C",
+      "c",
+    ],
+    [
+      "UNRELATED",
+      "noise",
+    ],
+  ], comment = "non-matching noise: UNRELATED does not match PROBE_* -> cache hit" },
+]

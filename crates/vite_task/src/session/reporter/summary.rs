@@ -137,6 +137,9 @@ pub enum SavedCacheMissReason {
     InputChanged { kind: InputChangeKind, path: Str },
     /// A runner-aware tool reported a tracked env var that changed between runs.
     TrackedEnvChanged(EnvMismatch),
+    /// A runner-aware tool reported a tracked env glob whose match-set changed
+    /// between runs. Carries the first differing entry.
+    TrackedEnvGlobChanged { pattern: Str, mismatch: EnvMismatch },
 }
 
 /// An execution error, serializable for persistence.
@@ -282,6 +285,12 @@ impl SavedCacheMissReason {
                 }
                 FingerprintMismatch::TrackedEnvChanged(mismatch) => {
                     Self::TrackedEnvChanged(mismatch.clone())
+                }
+                FingerprintMismatch::TrackedEnvGlobChanged { pattern, mismatch } => {
+                    Self::TrackedEnvGlobChanged {
+                        pattern: pattern.clone(),
+                        mismatch: mismatch.clone(),
+                    }
                 }
             },
         }
@@ -572,7 +581,8 @@ impl TaskResult {
                         let desc = format_input_change_str(*kind, path.as_str());
                         vite_str::format!("→ Cache miss: {desc}")
                     }
-                    SavedCacheMissReason::TrackedEnvChanged(mismatch) => {
+                    SavedCacheMissReason::TrackedEnvChanged(mismatch)
+                    | SavedCacheMissReason::TrackedEnvGlobChanged { mismatch, .. } => {
                         vite_str::format!("→ Cache miss: {mismatch}")
                     }
                 },

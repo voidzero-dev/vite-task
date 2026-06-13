@@ -45,6 +45,7 @@ tracing = { workspace = true }
 twox-hash = { workspace = true }
 materialized_artifact = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+vite_glob = { workspace = true }
 vite_path = { workspace = true }
 vite_select = { workspace = true }
 vite_str = { workspace = true }

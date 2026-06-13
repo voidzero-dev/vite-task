@@ -211,14 +211,22 @@ pub enum FingerprintMismatch {
     },
     /// A runner-aware tool-tracked env var changed between runs.
     TrackedEnvChanged(EnvMismatch),
+    /// A runner-aware tool-tracked env glob's match-set changed between runs.
+    TrackedEnvGlobChanged {
+        pattern: Str,
+        mismatch: EnvMismatch,
+    },
 }
 
 impl From<crate::session::execute::fingerprint::PostRunMismatch> for FingerprintMismatch {
     fn from(mismatch: crate::session::execute::fingerprint::PostRunMismatch) -> Self {
         use crate::session::execute::fingerprint::PostRunMismatch;
         match mismatch {
-            PostRunMismatch::InputChanged { kind, path } => Self::InputChanged { kind, path },
-            PostRunMismatch::TrackedEnvChanged(mismatch) => Self::TrackedEnvChanged(mismatch),
+            PostRunMismatch::Input { kind, path } => Self::InputChanged { kind, path },
+            PostRunMismatch::TrackedEnv(mismatch) => Self::TrackedEnvChanged(mismatch),
+            PostRunMismatch::TrackedEnvGlob { pattern, mismatch } => {
+                Self::TrackedEnvGlobChanged { pattern, mismatch }
+            }
         }
     }
 }

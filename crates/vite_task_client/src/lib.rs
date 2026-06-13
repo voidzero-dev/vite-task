@@ -81,8 +81,6 @@ impl Client {
     ///
     /// Returns an error if the request or response fails, or if the server
     /// rejects the pattern as an invalid glob.
-    // TODO(env-track): A later PR in this stack adds a tracked flag so matched
-    // env sets can participate in cache fingerprints instead of being IPC-only.
     pub fn get_envs(&self, pattern: &str) -> io::Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
         self.send(&Request::GetEnvs { pattern })?;
         let response: GetEnvsResponse = self.recv()?;

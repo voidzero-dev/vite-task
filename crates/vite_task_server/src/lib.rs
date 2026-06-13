@@ -60,9 +60,19 @@ pub struct InvalidGlob {
 pub struct Recorder {
     cache_disabled: bool,
     env_records: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
+    env_glob_records: FxHashMap<Arc<str>, EnvGlobRecord>,
     /// The envs `get_env` resolves against. The runner supplies these for the
     /// spawned task; the server never re-reads the live process env.
     envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+}
+
+/// A record of a glob-pattern env query made via `get_envs`.
+///
+/// `matches` is captured on the first call and reused on repeat queries; the server's
+/// env map is immutable for a task's lifetime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvGlobRecord {
+    pub matches: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
 }
 
 /// The data collected by a [`Recorder`] over the server's lifetime.
@@ -70,17 +80,27 @@ pub struct Recorder {
 pub struct Reports {
     pub cache_disabled: bool,
     pub env_records: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
+    pub env_glob_records: FxHashMap<Arc<str>, EnvGlobRecord>,
 }
 
 impl Recorder {
     #[must_use]
     pub fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
-        Self { cache_disabled: false, env_records: FxHashMap::default(), envs }
+        Self {
+            cache_disabled: false,
+            env_records: FxHashMap::default(),
+            env_glob_records: FxHashMap::default(),
+            envs,
+        }
     }
 
     #[must_use]
     pub fn into_reports(self) -> Reports {
-        Reports { cache_disabled: self.cache_disabled, env_records: self.env_records }
+        Reports {
+            cache_disabled: self.cache_disabled,
+            env_records: self.env_records,
+            env_glob_records: self.env_glob_records,
+        }
     }
 }
 
@@ -104,8 +124,11 @@ impl Handler for Recorder {
         &mut self,
         pattern: &str,
     ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::env::EnvGlobError> {
+        if let Some(existing) = self.env_glob_records.get(pattern) {
+            return Ok(existing.matches.clone());
+        }
         let glob = vite_glob::env::EnvGlob::new(pattern)?;
-        Ok(self
+        let matches: FxHashMap<Arc<OsStr>, Arc<OsStr>> = self
             .envs
             .iter()
             .filter_map(|(name, value)| {
@@ -116,7 +139,10 @@ impl Handler for Recorder {
                     None
                 }
             })
-            .collect())
+            .collect();
+        self.env_glob_records
+            .insert(Arc::from(pattern), EnvGlobRecord { matches: matches.clone() });
+        Ok(matches)
     }
 }
 
