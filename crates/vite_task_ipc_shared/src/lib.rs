@@ -1,4 +1,5 @@
 use native_str::NativeStr;
+use rustc_hash::FxHashMap;
 use wincode::{SchemaRead, SchemaWrite};
 
 pub const IPC_ENV_NAME: &str = "VP_RUN_IPC_NAME";
@@ -16,8 +17,8 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 /// IPC request frame sent by tools to the runner.
 ///
 /// `DisableCache` is fire-and-forget: the runner processes it when it
-/// arrives and never writes a response. `GetEnv` is a round-trip and pairs
-/// with [`GetEnvResponse`].
+/// arrives and never writes a response. `GetEnv` and `GetEnvs` are
+/// round-trips and pair with the matching response types below.
 ///
 /// Fire-and-forget is safe because nothing in the runner observes individual
 /// IPC events live — the recorded set is only consumed *after* the per-task
@@ -27,10 +28,18 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub enum Request<'a> {
     GetEnv { name: &'a NativeStr },
+    GetEnvs { pattern: &'a str },
     DisableCache,
 }
 
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub struct GetEnvResponse {
     pub env_value: Option<Box<NativeStr>>,
+}
+
+#[derive(Debug, SchemaWrite, SchemaRead)]
+pub struct GetEnvsResponse {
+    /// Match snapshot for the glob pattern. Keys/values are byte-faithful
+    /// (`NativeStr`) so non-UTF-8 env values are preserved over the wire.
+    pub entries: FxHashMap<Box<NativeStr>, Box<NativeStr>>,
 }

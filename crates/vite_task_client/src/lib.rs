@@ -6,7 +6,8 @@ use std::{
 };
 
 use native_str::NativeStr;
-use vite_task_ipc_shared::{GetEnvResponse, IPC_ENV_NAME, Request};
+use rustc_hash::FxHashMap;
+use vite_task_ipc_shared::{GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request};
 use wincode::{SchemaRead, config::DefaultConfig};
 
 #[cfg(unix)]
@@ -71,6 +72,30 @@ impl Client {
         Ok(response
             .env_value
             .map(|env_value| Arc::<OsStr>::from(env_value.to_cow_os_str().as_ref())))
+    }
+
+    /// Requests every env whose name matches `pattern` from the runner. The
+    /// returned map is keyed by env name with its value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request or response fails, or if the server
+    /// rejects the pattern as an invalid glob.
+    // TODO(env-track): A later PR in this stack adds a tracked flag so matched
+    // env sets can participate in cache fingerprints instead of being IPC-only.
+    pub fn get_envs(&self, pattern: &str) -> io::Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
+        self.send(&Request::GetEnvs { pattern })?;
+        let response: GetEnvsResponse = self.recv()?;
+        Ok(response
+            .entries
+            .into_iter()
+            .map(|(name, value)| {
+                (
+                    Arc::<OsStr>::from(name.to_cow_os_str().as_ref()),
+                    Arc::<OsStr>::from(value.to_cow_os_str().as_ref()),
+                )
+            })
+            .collect())
     }
 
     fn send(&self, request: &Request<'_>) -> io::Result<()> {

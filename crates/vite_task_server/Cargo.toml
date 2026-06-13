@@ -14,6 +14,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "rt", "macros"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+vite_glob = { workspace = true }
 vite_task_ipc_shared = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 

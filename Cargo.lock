@@ -4321,6 +4321,7 @@ name = "vite_task_client"
 version = "0.0.0"
 dependencies = [
  "native_str",
+ "rustc-hash",
  "vite_task_ipc_shared",
  "winapi",
  "wincode",
@@ -4365,6 +4366,7 @@ name = "vite_task_ipc_shared"
 version = "0.0.0"
 dependencies = [
  "native_str",
+ "rustc-hash",
  "wincode",
 ]
 
@@ -4418,6 +4420,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "vite_glob",
  "vite_task_client",
  "vite_task_ipc_shared",
  "wincode",

@@ -1,5 +1,6 @@
 use std::{
     ffi::{OsStr, OsString},
+    io,
     sync::Arc,
     thread,
 };
@@ -109,4 +110,57 @@ fn concurrent_clients() {
     assert!(!reports.cache_disabled);
     let shared = reports.env_records.get(OsStr::new("SHARED")).expect("recorded");
     assert_eq!(shared.as_deref(), Some(OsStr::new("value")));
+}
+
+#[test]
+fn get_envs_returns_matching_entries() {
+    let reports = run_with_server(
+        env_map(&[("PROBE_A", "alpha"), ("PROBE_B", "beta"), ("UNRELATED", "noise")]),
+        |envs| {
+            let client = connect(&envs);
+            let matches = client.get_envs("PROBE_*").unwrap();
+            assert_eq!(matches.len(), 2);
+            assert_eq!(
+                matches.get(OsStr::new("PROBE_A")).map(AsRef::as_ref),
+                Some(OsStr::new("alpha"))
+            );
+            assert_eq!(
+                matches.get(OsStr::new("PROBE_B")).map(AsRef::as_ref),
+                Some(OsStr::new("beta"))
+            );
+            assert!(!matches.contains_key(OsStr::new("UNRELATED")));
+        },
+    )
+    .expect("driver returned error");
+
+    assert!(!reports.cache_disabled);
+}
+
+#[test]
+fn get_envs_empty_match_set_is_returned() {
+    let reports = run_with_server(env_map(&[("FOO", "x"), ("BAR", "y")]), |envs| {
+        let client = connect(&envs);
+        let matches = client.get_envs("PROBE_*").unwrap();
+        assert!(matches.is_empty());
+    })
+    .expect("driver returned error");
+
+    assert!(!reports.cache_disabled);
+}
+
+#[test]
+fn get_envs_invalid_pattern_surfaces_error() {
+    let err = run_with_server(env_map(&[]), |envs| {
+        let client = connect(&envs);
+        let send_err = client.get_envs("{unclosed").expect_err("server should reject");
+        assert_eq!(send_err.kind(), io::ErrorKind::UnexpectedEof);
+    })
+    .expect_err("driver should surface the protocol error");
+
+    match err {
+        Error::InvalidGlob(inner) => {
+            assert_eq!(inner.pattern.as_ref(), "{unclosed");
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
 }

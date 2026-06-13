@@ -9,12 +9,21 @@ use futures::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnord
 use rustc_hash::FxHashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
-use vite_task_ipc_shared::{GetEnvResponse, IPC_ENV_NAME, Request};
+use vite_task_ipc_shared::{GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request};
 use wincode::{SchemaWrite, config::DefaultConfig};
 
 pub trait Handler {
     fn disable_cache(&mut self);
     fn get_env(&mut self, name: &OsStr) -> Option<Arc<OsStr>>;
+    /// Returns the subset of the env map whose names match `pattern` as a glob.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `pattern` fails to parse as a glob.
+    fn get_envs(
+        &mut self,
+        pattern: &str,
+    ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::env::EnvGlobError>;
 }
 
 /// A protocol-level failure observed while servicing a client.
@@ -31,6 +40,16 @@ pub enum Error {
 
     #[error("failed to send response to the task")]
     WriteResponse(#[source] io::Error),
+
+    #[error("invalid glob pattern from the task: {:?}", .0.pattern)]
+    InvalidGlob(Box<InvalidGlob>),
+}
+
+/// Payload for [`Error::InvalidGlob`]. Boxed so the `Error` enum stays small.
+#[derive(Debug)]
+pub struct InvalidGlob {
+    pub pattern: Box<str>,
+    pub source: vite_glob::env::EnvGlobError,
 }
 
 /// A [`Handler`] that records every report and resolves `get_env` against
@@ -79,6 +98,25 @@ impl Handler for Recorder {
                 value
             }
         }
+    }
+
+    fn get_envs(
+        &mut self,
+        pattern: &str,
+    ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::env::EnvGlobError> {
+        let glob = vite_glob::env::EnvGlob::new(pattern)?;
+        Ok(self
+            .envs
+            .iter()
+            .filter_map(|(name, value)| {
+                let name_str = name.to_str()?;
+                if glob.is_match(name_str) {
+                    Some((Arc::clone(name), Arc::clone(value)))
+                } else {
+                    None
+                }
+            })
+            .collect())
     }
 }
 
@@ -306,6 +344,18 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
             Request::GetEnv { name } => {
                 let value = handler.borrow_mut().get_env(name.to_cow_os_str().as_ref());
                 let response = GetEnvResponse { env_value: value.as_deref().map(Into::into) };
+                write_response(&mut stream, &response).await.map_err(Error::WriteResponse)?;
+            }
+            Request::GetEnvs { pattern } => {
+                let matches = handler.borrow_mut().get_envs(pattern).map_err(|source| {
+                    Error::InvalidGlob(Box::new(InvalidGlob {
+                        pattern: Box::<str>::from(pattern),
+                        source,
+                    }))
+                })?;
+                let response = GetEnvsResponse {
+                    entries: matches.iter().map(|(k, v)| ((&**k).into(), (&**v).into())).collect(),
+                };
                 write_response(&mut stream, &response).await.map_err(Error::WriteResponse)?;
             }
         }

@@ -171,3 +171,30 @@ steps = [
     ],
   ], comment = "cache miss: tracked env changed despite input auto-inference being disabled" },
 ]
+
+[[e2e]]
+name = "fetch_envs_reads_match_set"
+comment = """
+Exercises `getEnvs(pattern)`: the tool asks the runner for every env matching `PROBE_*` and prints the served match set. This verifies the bulk env IPC round trip before match sets are added to cache fingerprints.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "UNRELATED",
+      "noise",
+    ],
+  ], comment = "runner serves only envs matching PROBE_*" },
+]

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Changed** Tracked environment values in task cache fingerprints are now stored only as SHA-256 digests, and env-related cache miss details report names without values.
+- **Added** Runner-aware `getEnvs` calls now return env values served by the runner for matching env glob patterns ([#449](https://github.com/voidzero-dev/vite-task/pull/449)).
 - **Fixed** Runner-aware `getEnv` reads now affect task cache fingerprints, so changing a tool-served env value invalidates cached output and names the env var in the miss message ([#454](https://github.com/voidzero-dev/vite-task/pull/454)).
 - **Added** Runner-aware tools can now opt the current task run out of caching through the new IPC channel; Vite dev server integration uses this automatically ([#441](https://github.com/voidzero-dev/vite-task/pull/441))
 - **Fixed** Prefix environment assignments like `PATH=... command` now affect executable lookup during task planning, so tools provided only by the prefixed `PATH` can be resolved correctly ([#440](https://github.com/voidzero-dev/vite-task/pull/440))

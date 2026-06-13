@@ -105,15 +105,27 @@ impl RunnerClient {
         })
     }
 
-    /// No-op for now: always returns an empty match-set — see
-    /// [`Self::get_env`].
     #[napi]
     pub fn get_envs(
         &self,
-        _pattern: String,
+        pattern: String,
         _options: Option<GetEnvOptions>,
     ) -> Result<HashMap<String, String>> {
-        Ok(HashMap::new())
+        let matches =
+            self.client.get_envs(&pattern).map_err(|err| err_string(vite_str::format!("{err}")))?;
+        let mut result = HashMap::with_capacity(matches.len());
+        for (name, value) in matches {
+            let name = name.to_str().ok_or_else(|| {
+                err_string(vite_str::format!(
+                    "env name matched by pattern {pattern} is not valid UTF-8"
+                ))
+            })?;
+            let value = value.to_str().ok_or_else(|| {
+                err_string(vite_str::format!("env value for {name} is not valid UTF-8"))
+            })?;
+            result.insert(name.to_owned(), value.to_owned());
+        }
+        Ok(result)
     }
 }
 
