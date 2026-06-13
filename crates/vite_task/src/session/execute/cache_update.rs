@@ -53,7 +53,8 @@ pub(super) async fn update_cache(
     cancelled: bool,
 ) -> (CacheUpdateStatus, Option<ExecutionError>) {
     let CacheState { metadata, globbed_inputs, std_outputs, tracking } = state;
-    let fspy_negatives = tracking.as_ref().map(|t| t.input_negative_globs.as_slice());
+    let fspy = tracking.fspy.as_ref();
+    let input_negative_globs = fspy.map(|t| t.input_negative_globs.as_slice());
 
     if let Some(reports) = reports
         && reports.cache_disabled
@@ -73,7 +74,7 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
     }
 
-    let fspy_outcome = observe_fspy(outcome, fspy_negatives, workspace_root);
+    let fspy_outcome = observe_fspy(outcome, input_negative_globs, workspace_root);
 
     if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome {
         // fspy-inferred read-write overlap: the task wrote to a file it also
@@ -89,7 +90,7 @@ pub(super) async fn update_cache(
         );
     }
 
-    if fspy_outcome.is_none() && fspy_negatives.is_some() {
+    if fspy_outcome.is_none() && fspy.is_some() {
         // Task requested fspy auto-inference but this binary was built without
         // `cfg(fspy)`. Task ran, but we can't compute a valid cache entry
         // without tracked path accesses.
@@ -139,20 +140,20 @@ pub(super) async fn update_cache(
 }
 
 /// Summarize the run's fspy observations. `Some` iff tracking was both
-/// requested (`fspy_negatives.is_some()`) and compiled in (`cfg(fspy)`). On a
+/// requested (`input_negative_globs.is_some()`) and compiled in (`cfg(fspy)`). On a
 /// `cfg(not(fspy))` build this is always `None`, and [`update_cache`]
 /// short-circuits to `FspyUnsupported` when tracking was needed.
 fn observe_fspy(
     outcome: &ChildOutcome,
-    fspy_negatives: Option<&[wax::Glob<'static>]>,
+    input_negative_globs: Option<&[wax::Glob<'static>]>,
     workspace_root: &AbsolutePath,
 ) -> Option<TrackingOutcome> {
     #[cfg(fspy)]
     {
         use super::tracked_accesses::TrackedPathAccesses;
 
-        outcome.path_accesses.as_ref().zip(fspy_negatives).map(|(raw, negs)| {
-            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, negs);
+        outcome.path_accesses.as_ref().zip(input_negative_globs).map(|(raw, negatives)| {
+            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, negatives);
             let read_write_overlap =
                 tracked.path_reads.keys().find(|p| tracked.path_writes.contains(*p)).cloned();
             TrackingOutcome { path_reads: tracked.path_reads, read_write_overlap }
@@ -160,7 +161,7 @@ fn observe_fspy(
     }
     #[cfg(not(fspy))]
     {
-        let _ = (outcome, fspy_negatives, workspace_root);
+        let _ = (outcome, input_negative_globs, workspace_root);
         None
     }
 }

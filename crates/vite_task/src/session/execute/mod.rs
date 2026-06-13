@@ -88,21 +88,27 @@ struct CacheState<'a> {
     /// Captured stdout/stderr for cache replay. Written in place during drain;
     /// always present (possibly empty) once we reach the cache-update phase.
     std_outputs: Vec<StdOutput>,
-    /// `Some` iff auto-input tracking is on (`input.includes_auto` + successful
-    /// IPC bind). Bundles fspy's input negative globs with the per-task IPC
-    /// server that runner-aware tools talk to. Parts are borrowed in place
-    /// during the wait/join; the struct is never moved out.
-    tracking: Option<Tracking>,
+    /// Runner-aware tracking for cached tasks: an IPC server is always
+    /// available, and fspy path tracing is attached only when auto input
+    /// inference needs it. Parts are borrowed in place during the wait/join;
+    /// the struct is never moved out.
+    tracking: Tracking,
 }
 
 /// The IPC server's driver future: resolves with the recorded reports after
 /// [`StopAccepting::signal`] fires and all in-flight clients drain.
 type IpcDriver = LocalBoxFuture<'static, Result<Recorder, vite_task_server::Error>>;
 
-/// Per-task tracking: fspy input-negative globs + IPC server handle.
+/// fspy path-tracking state, present only when a cached task needs automatic
+/// input inference.
+struct FspyTracking {
+    input_negative_globs: Vec<wax::Glob<'static>>,
+}
+
+/// Per-task runner-aware tracking: IPC server handle plus optional fspy state.
 /// Lifetime-tied to a single `execute_spawn` call.
 struct Tracking {
-    input_negative_globs: Vec<wax::Glob<'static>>,
+    fspy: Option<FspyTracking>,
     ipc_envs: Vec<(&'static OsStr, OsString)>,
     ipc_server_fut: IpcDriver,
     stop_accepting: StopAccepting,
@@ -127,7 +133,7 @@ struct RunHandles<'m> {
     /// Pipe writers + capture slot. `None` only in the inherited-uncached
     /// case, where there are no pipes to drain.
     sinks: Option<PipeSinks<'m>>,
-    /// The IPC server's handles. `None` iff tracking is off.
+    /// The IPC server's handles. `None` iff execution is uncached.
     ipc: Option<IpcHandles<'m>>,
 }
 
@@ -158,7 +164,7 @@ impl<'a> ExecutionMode<'a> {
             });
         };
 
-        let tracking = if metadata.input_config.includes_auto {
+        let fspy = if metadata.input_config.includes_auto {
             // Resolve input negative globs for fspy path filtering (already
             // workspace-root-relative).
             let negatives = metadata
@@ -168,20 +174,18 @@ impl<'a> ExecutionMode<'a> {
                 .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
                 .collect::<anyhow::Result<Vec<_>>>()
                 .map_err(ExecutionError::PostRunFingerprint)?;
-            // fspy + IPC are bundled. If binding the IPC server fails we abort
-            // the execution — tools that rely on IPC would otherwise silently
-            // diverge from the cache.
-            let (envs, ServerHandle { driver, stop_accepting }) =
-                serve(Recorder::new()).map_err(ExecutionError::IpcServerBind)?;
-            Some(Tracking {
-                input_negative_globs: negatives,
-                ipc_envs: envs.collect(),
-                ipc_server_fut: driver,
-                stop_accepting,
-            })
+            Some(FspyTracking { input_negative_globs: negatives })
         } else {
             None
         };
+
+        // Bind runner IPC for every cached task. The merged cache-control API
+        // (`disableCache`) must work even when a task uses explicit inputs and
+        // therefore does not need fspy auto-input inference.
+        let (ipc_envs, ServerHandle { driver, stop_accepting }) =
+            serve(Recorder::new()).map_err(ExecutionError::IpcServerBind)?;
+        let tracking =
+            Tracking { fspy, ipc_envs: ipc_envs.collect(), ipc_server_fut: driver, stop_accepting };
 
         Ok(Self::Cached {
             pipe_writers: stdio_config.writers,
@@ -190,11 +194,11 @@ impl<'a> ExecutionMode<'a> {
     }
 
     /// The extra envs to inject into the child: IPC connection info + the
-    /// napi addon path runner-aware tools `require()`. Empty when tracking
-    /// is off.
+    /// napi addon path runner-aware tools `require()`. Empty when execution
+    /// is uncached.
     fn injected_envs(&self) -> Vec<(&OsStr, &OsStr)> {
         match self {
-            Self::Cached { state: CacheState { tracking: Some(t), .. }, .. } => {
+            Self::Cached { state: CacheState { tracking: t, .. }, .. } => {
                 let mut envs: Vec<(&OsStr, &OsStr)> =
                     t.ipc_envs.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
                 envs.push((
@@ -203,7 +207,7 @@ impl<'a> ExecutionMode<'a> {
                 ));
                 envs
             }
-            _ => Vec::new(),
+            Self::Uncached { .. } => Vec::new(),
         }
     }
 
@@ -211,7 +215,7 @@ impl<'a> ExecutionMode<'a> {
     /// whether fspy tracking is on.
     const fn spawn_config(&self) -> (SpawnStdio, bool) {
         match self {
-            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.is_some()),
+            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.fspy.is_some()),
             Self::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
             Self::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
         }
@@ -228,9 +232,9 @@ impl<'a> ExecutionMode<'a> {
                     stderr_writer: &mut pipe_writers.stderr_writer,
                     capture: Some(&mut state.std_outputs),
                 });
-                let ipc = state.tracking.as_mut().map(|t| IpcHandles {
-                    stop_accepting: &t.stop_accepting,
-                    driver: &mut t.ipc_server_fut,
+                let ipc = Some(IpcHandles {
+                    stop_accepting: &state.tracking.stop_accepting,
+                    driver: &mut state.tracking.ipc_server_fut,
                 });
                 RunHandles { sinks, ipc }
             }

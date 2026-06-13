@@ -22,3 +22,27 @@ steps = [
     "--last-details",
   ], comment = "summary names the opt-out as the not-cached reason" },
 ]
+
+[[e2e]]
+name = "disable_cache_works_with_explicit_inputs"
+comment = """
+Exercises `disableCache` on a cached task with explicit inputs. The runner must still inject IPC even when fspy auto-input inference is disabled, or the tool's cache opt-out becomes a no-op and the second run incorrectly hits.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "disable-cache-explicit-input",
+  ], comment = "first run uses input: [] and asks the runner not to cache" },
+  { argv = [
+    "vt",
+    "run",
+    "disable-cache-explicit-input",
+  ], comment = "re-executes because the first run was not cached" },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "summary names the opt-out as the not-cached reason" },
+]

@@ -3,6 +3,11 @@
     "disable-cache": {
       "command": "node scripts/disable_cache.mjs",
       "cache": true
+    },
+    "disable-cache-explicit-input": {
+      "command": "node scripts/disable_cache.mjs",
+      "input": [],
+      "cache": true
     }
   }
 }
