@@ -24,6 +24,14 @@
       "command": "node scripts/fetch_envs.mjs",
       "cache": true
     },
+    "fetch-env-untracked": {
+      "command": "node scripts/fetch_env.mjs --untracked PROBE_ENV",
+      "cache": true
+    },
+    "fetch-envs-untracked": {
+      "command": "node scripts/fetch_envs.mjs --untracked",
+      "cache": true
+    },
     "fetch-prefixed-env": {
       "command": "PREFIXED_ENV=from-command node scripts/fetch_env.mjs PREFIXED_ENV",
       "cache": true

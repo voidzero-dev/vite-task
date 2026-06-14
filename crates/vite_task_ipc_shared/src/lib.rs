@@ -27,8 +27,8 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 /// will still consume every buffered frame.
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub enum Request<'a> {
-    GetEnv { name: &'a NativeStr },
-    GetEnvs { pattern: &'a str },
+    GetEnv { name: &'a NativeStr, tracked: bool },
+    GetEnvs { pattern: &'a str, tracked: bool },
     DisableCache,
 }
 

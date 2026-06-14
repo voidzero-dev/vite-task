@@ -93,10 +93,11 @@ impl RunnerClient {
     }
 
     #[napi]
-    pub fn get_env(&self, name: String, _options: Option<GetEnvOptions>) -> Result<Option<String>> {
+    pub fn get_env(&self, name: String, options: Option<GetEnvOptions>) -> Result<Option<String>> {
+        let tracked = options.and_then(|o| o.tracked).unwrap_or(true);
         let value = self
             .client
-            .get_env(OsStr::new(&name))
+            .get_env(OsStr::new(&name), tracked)
             .map_err(|err| err_string(vite_str::format!("{err}")))?;
         value.map_or(Ok(None), |value| {
             value.to_str().map(|s| Some(s.to_owned())).ok_or_else(|| {
@@ -109,10 +110,13 @@ impl RunnerClient {
     pub fn get_envs(
         &self,
         pattern: String,
-        _options: Option<GetEnvOptions>,
+        options: Option<GetEnvOptions>,
     ) -> Result<HashMap<String, String>> {
-        let matches =
-            self.client.get_envs(&pattern).map_err(|err| err_string(vite_str::format!("{err}")))?;
+        let tracked = options.and_then(|o| o.tracked).unwrap_or(true);
+        let matches = self
+            .client
+            .get_envs(&pattern, tracked)
+            .map_err(|err| err_string(vite_str::format!("{err}")))?;
         let mut result = HashMap::with_capacity(matches.len());
         for (name, value) in matches {
             let name = name.to_str().ok_or_else(|| {

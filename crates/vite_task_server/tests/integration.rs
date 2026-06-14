@@ -54,7 +54,7 @@ fn connect(envs: &[(&'static OsStr, OsString)]) -> Client {
 /// read sequentially, so once the server answers a `get_env` everything
 /// before it must already have been dispatched to the handler.
 fn flush(client: &Client) {
-    let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__")).unwrap();
+    let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__"), false).unwrap();
 }
 
 #[test]
@@ -73,19 +73,38 @@ fn single_client_fire_and_forget() {
 fn get_env_found_and_not_found() {
     let reports = run_with_server(env_map(&[("NODE_ENV", "production")]), |envs| {
         let client = connect(&envs);
-        let present = client.get_env(OsStr::new("NODE_ENV")).unwrap();
+        let present = client.get_env(OsStr::new("NODE_ENV"), true).unwrap();
         assert_eq!(present.as_deref(), Some(OsStr::new("production")));
-        let missing = client.get_env(OsStr::new("MISSING")).unwrap();
+        let missing = client.get_env(OsStr::new("MISSING"), false).unwrap();
         assert!(missing.is_none());
     })
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
     let node = reports.env_records.get(OsStr::new("NODE_ENV")).expect("NODE_ENV recorded");
-    assert_eq!(node.as_deref(), Some(OsStr::new("production")));
+    assert!(node.tracked);
+    assert_eq!(node.value.as_deref(), Some(OsStr::new("production")));
 
     let missing = reports.env_records.get(OsStr::new("MISSING")).expect("MISSING recorded");
-    assert!(missing.is_none());
+    assert!(!missing.tracked);
+    assert!(missing.value.is_none());
+}
+
+#[test]
+fn get_env_tracked_upgrade_is_monotonic() {
+    let reports = run_with_server(env_map(&[("NODE_ENV", "production")]), |envs| {
+        let client = connect(&envs);
+        let a = client.get_env(OsStr::new("NODE_ENV"), false).unwrap();
+        let b = client.get_env(OsStr::new("NODE_ENV"), true).unwrap();
+        let c = client.get_env(OsStr::new("NODE_ENV"), false).unwrap();
+        for v in [a, b, c] {
+            assert_eq!(v.as_deref(), Some(OsStr::new("production")));
+        }
+    })
+    .expect("driver returned error");
+
+    let node = reports.env_records.get(OsStr::new("NODE_ENV")).expect("recorded");
+    assert!(node.tracked, "tracked must remain true once set");
 }
 
 #[test]
@@ -96,7 +115,7 @@ fn concurrent_clients() {
                 let envs = envs.clone();
                 thread::spawn(move || {
                     let client = connect(&envs);
-                    let value = client.get_env(OsStr::new("SHARED")).unwrap();
+                    let value = client.get_env(OsStr::new("SHARED"), true).unwrap();
                     assert_eq!(value.as_deref(), Some(OsStr::new("value")));
                 })
             })
@@ -109,7 +128,8 @@ fn concurrent_clients() {
 
     assert!(!reports.cache_disabled);
     let shared = reports.env_records.get(OsStr::new("SHARED")).expect("recorded");
-    assert_eq!(shared.as_deref(), Some(OsStr::new("value")));
+    assert!(shared.tracked);
+    assert_eq!(shared.value.as_deref(), Some(OsStr::new("value")));
 }
 
 #[test]
@@ -118,7 +138,7 @@ fn get_envs_returns_matching_entries() {
         env_map(&[("PROBE_A", "alpha"), ("PROBE_B", "beta"), ("UNRELATED", "noise")]),
         |envs| {
             let client = connect(&envs);
-            let matches = client.get_envs("PROBE_*").unwrap();
+            let matches = client.get_envs("PROBE_*", true).unwrap();
             assert_eq!(matches.len(), 2);
             assert_eq!(
                 matches.get(OsStr::new("PROBE_A")).map(AsRef::as_ref),
@@ -135,6 +155,7 @@ fn get_envs_returns_matching_entries() {
 
     assert!(!reports.cache_disabled);
     let glob = reports.env_glob_records.get("PROBE_*").expect("glob recorded");
+    assert!(glob.tracked);
     assert_eq!(glob.matches.len(), 2);
 }
 
@@ -142,21 +163,39 @@ fn get_envs_returns_matching_entries() {
 fn get_envs_empty_match_set_is_returned() {
     let reports = run_with_server(env_map(&[("FOO", "x"), ("BAR", "y")]), |envs| {
         let client = connect(&envs);
-        let matches = client.get_envs("PROBE_*").unwrap();
+        let matches = client.get_envs("PROBE_*", false).unwrap();
         assert!(matches.is_empty());
     })
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
     let glob = reports.env_glob_records.get("PROBE_*").expect("glob recorded");
+    assert!(!glob.tracked);
     assert!(glob.matches.is_empty());
+}
+
+#[test]
+fn get_envs_tracked_upgrade_is_monotonic() {
+    let reports = run_with_server(env_map(&[("PROBE_A", "alpha")]), |envs| {
+        let client = connect(&envs);
+        let first = client.get_envs("PROBE_*", false).unwrap();
+        let second = client.get_envs("PROBE_*", true).unwrap();
+        let third = client.get_envs("PROBE_*", false).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(second, third);
+    })
+    .expect("driver returned error");
+
+    let glob = reports.env_glob_records.get("PROBE_*").expect("glob recorded");
+    assert!(glob.tracked, "tracked must remain true once set");
+    assert_eq!(glob.matches.len(), 1);
 }
 
 #[test]
 fn get_envs_invalid_pattern_surfaces_error() {
     let err = run_with_server(env_map(&[]), |envs| {
         let client = connect(&envs);
-        let send_err = client.get_envs("{unclosed").expect_err("server should reject");
+        let send_err = client.get_envs("{unclosed", true).expect_err("server should reject");
         assert_eq!(send_err.kind(), io::ErrorKind::UnexpectedEof);
     })
     .expect_err("driver should surface the protocol error");

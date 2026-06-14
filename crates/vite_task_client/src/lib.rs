@@ -64,10 +64,10 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error if the request or response fails.
-    pub fn get_env(&self, name: &OsStr) -> io::Result<Option<Arc<OsStr>>> {
+    pub fn get_env(&self, name: &OsStr, tracked: bool) -> io::Result<Option<Arc<OsStr>>> {
         let name = Box::<NativeStr>::from(name);
 
-        self.send(&Request::GetEnv { name: &name })?;
+        self.send(&Request::GetEnv { name: &name, tracked })?;
         let response: GetEnvResponse = self.recv()?;
         Ok(response
             .env_value
@@ -81,8 +81,12 @@ impl Client {
     ///
     /// Returns an error if the request or response fails, or if the server
     /// rejects the pattern as an invalid glob.
-    pub fn get_envs(&self, pattern: &str) -> io::Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
-        self.send(&Request::GetEnvs { pattern })?;
+    pub fn get_envs(
+        &self,
+        pattern: &str,
+        tracked: bool,
+    ) -> io::Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
+        self.send(&Request::GetEnvs { pattern, tracked })?;
         let response: GetEnvsResponse = self.recv()?;
         Ok(response
             .entries

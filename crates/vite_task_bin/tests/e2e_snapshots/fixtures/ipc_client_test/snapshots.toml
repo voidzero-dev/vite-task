@@ -299,3 +299,73 @@ steps = [
     ],
   ], comment = "non-matching noise: UNRELATED does not match PROBE_* -> cache hit" },
 ]
+
+[[e2e]]
+name = "fetch_env_untracked_does_not_invalidate"
+comment = """
+Exercises `getEnv(name, { tracked: false })`. The runner still serves the env value, but the value does not enter the post-run fingerprint, so changing it later replays the cached output.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-untracked",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "first run serves PROBE_ENV without tracking it" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-untracked",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "second",
+    ],
+  ], comment = "cache hit: PROBE_ENV changed but was requested with tracked: false" },
+]
+
+[[e2e]]
+name = "fetch_envs_untracked_does_not_invalidate"
+comment = """
+Exercises `getEnvs(pattern, { tracked: false })`. The runner still serves the matching envs, but the match set does not enter the post-run fingerprint, so changing it later replays the cached output.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-untracked",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "first run serves the PROBE_* match set without tracking it" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-untracked",
+  ], envs = [
+    [
+      "PROBE_A",
+      "changed",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "PROBE_C",
+      "c",
+    ],
+  ], comment = "cache hit: changed match set was requested with tracked: false" },
+]
