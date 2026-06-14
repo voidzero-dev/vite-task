@@ -93,3 +93,81 @@ steps = [
     "outer-prefixed",
   ], comment = "outer prefix env reaches the inner tool via the runner" },
 ]
+
+[[e2e]]
+name = "fetch_env_tracked_invalidates_on_change"
+comment = """
+Exercises `getEnv(name, { tracked: true })`. The env value becomes part of the post-run fingerprint: the same value still hits, and a different value misses with the env var named in the miss message.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "first run captures PROBE_ENV=first in the post-run fingerprint" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "cache hit: PROBE_ENV unchanged" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "second",
+    ],
+  ], comment = "cache miss: tracked PROBE_ENV changed" },
+]
+
+[[e2e]]
+name = "fetch_env_tracks_with_explicit_inputs"
+comment = """
+Runner-aware env tracking must not depend on fspy auto-input inference. This task uses `input: []`, but `getEnv(name, { tracked: true })` still records the served value and later env changes miss.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-explicit-input",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "first run captures PROBE_ENV even though input auto-inference is disabled" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-explicit-input",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "cache hit: explicit inputs are unchanged and PROBE_ENV is unchanged" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-explicit-input",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "second",
+    ],
+  ], comment = "cache miss: tracked env changed despite input auto-inference being disabled" },
+]

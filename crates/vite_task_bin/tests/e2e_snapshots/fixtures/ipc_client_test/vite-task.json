@@ -7,10 +7,17 @@
     "disable-cache-explicit-input": {
       "command": "node scripts/disable_cache.mjs",
       "input": [],
+      "output": [],
       "cache": true
     },
     "fetch-env": {
       "command": "node scripts/fetch_env.mjs PROBE_ENV",
+      "cache": true
+    },
+    "fetch-env-explicit-input": {
+      "command": "node scripts/fetch_env.mjs PROBE_ENV",
+      "input": [],
+      "output": [],
       "cache": true
     },
     "fetch-prefixed-env": {

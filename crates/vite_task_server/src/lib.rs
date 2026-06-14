@@ -40,6 +40,7 @@ pub enum Error {
 /// recover the collected [`Reports`].
 pub struct Recorder {
     cache_disabled: bool,
+    env_records: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
     /// The envs `get_env` resolves against. The runner supplies these for the
     /// spawned task; the server never re-reads the live process env.
     envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
@@ -49,17 +50,18 @@ pub struct Recorder {
 #[derive(Debug, Default)]
 pub struct Reports {
     pub cache_disabled: bool,
+    pub env_records: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
 }
 
 impl Recorder {
     #[must_use]
-    pub const fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
-        Self { cache_disabled: false, envs }
+    pub fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
+        Self { cache_disabled: false, env_records: FxHashMap::default(), envs }
     }
 
     #[must_use]
     pub fn into_reports(self) -> Reports {
-        Reports { cache_disabled: self.cache_disabled }
+        Reports { cache_disabled: self.cache_disabled, env_records: self.env_records }
     }
 }
 
@@ -69,7 +71,14 @@ impl Handler for Recorder {
     }
 
     fn get_env(&mut self, name: &OsStr) -> Option<Arc<OsStr>> {
-        self.envs.get(name).cloned()
+        match self.env_records.entry(name.into()) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let value = self.envs.get(name).cloned();
+                entry.insert(value.clone());
+                value
+            }
+        }
     }
 }
 

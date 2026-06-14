@@ -63,8 +63,6 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error if the request or response fails.
-    // TODO(env-track): A later PR in this stack adds a tracked flag so env
-    // reads can participate in cache fingerprints instead of being IPC-only.
     pub fn get_env(&self, name: &OsStr) -> io::Result<Option<Arc<OsStr>>> {
         let name = Box::<NativeStr>::from(name);
 

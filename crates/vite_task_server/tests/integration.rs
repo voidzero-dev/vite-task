@@ -80,6 +80,11 @@ fn get_env_found_and_not_found() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
+    let node = reports.env_records.get(OsStr::new("NODE_ENV")).expect("NODE_ENV recorded");
+    assert_eq!(node.as_deref(), Some(OsStr::new("production")));
+
+    let missing = reports.env_records.get(OsStr::new("MISSING")).expect("MISSING recorded");
+    assert!(missing.is_none());
 }
 
 #[test]
@@ -102,4 +107,6 @@ fn concurrent_clients() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
+    let shared = reports.env_records.get(OsStr::new("SHARED")).expect("recorded");
+    assert_eq!(shared.as_deref(), Some(OsStr::new("value")));
 }

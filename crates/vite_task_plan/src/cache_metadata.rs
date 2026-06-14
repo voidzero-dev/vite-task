@@ -8,6 +8,7 @@ use vite_task_graph::config::ResolvedGlobConfig;
 use wincode::{SchemaRead, SchemaWrite};
 
 use crate::envs::EnvFingerprints;
+pub use crate::envs::EnvValueHash;
 
 /// Key to identify an execution across sessions.
 #[derive(Debug, SchemaWrite, SchemaRead, Serialize)]

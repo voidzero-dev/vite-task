@@ -5,18 +5,24 @@
 
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
     fs::File,
     io::{self, BufRead},
     sync::Arc,
 };
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
+use vite_task_plan::cache_metadata::EnvValueHash;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::{collections::HashMap, session::cache::InputChangeKind};
+use crate::{
+    collections::HashMap,
+    session::cache::{EnvMismatch, InputChangeKind},
+};
 
 /// Path read access info
 #[derive(Debug, Clone, Copy)]
@@ -26,11 +32,26 @@ pub struct PathRead {
 
 /// Post-run fingerprint capturing file state after execution.
 /// Used to validate whether cached outputs are still valid.
-#[derive(SchemaWrite, SchemaRead, Debug, Serialize)]
+#[derive(SchemaWrite, SchemaRead, Debug, Default, Serialize)]
 pub struct PostRunFingerprint {
     /// Paths inferred from fspy during execution with their content fingerprints.
     /// Only populated when `input_config.includes_auto` is true.
     pub inferred_inputs: HashMap<RelativePathBuf, PathFingerprint>,
+
+    /// Env vars observed via runner-aware IPC `getEnv` with `tracked: true`.
+    /// Key is the env name; value is the env value hash at execution time, or
+    /// `None` if unset. Validated at cache lookup against the same plan env
+    /// context that served the original request.
+    pub tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
+}
+
+/// A mismatch between the stored post-run fingerprint and the current state.
+#[derive(Debug, Clone)]
+pub enum PostRunMismatch {
+    /// An inferred input file or directory changed.
+    InputChanged { kind: InputChangeKind, path: RelativePathBuf },
+    /// A tool-tracked env var changed value, appeared, or disappeared.
+    TrackedEnvChanged(EnvMismatch),
 }
 
 /// Fingerprint for a single path (file or directory)
@@ -69,11 +90,13 @@ impl PostRunFingerprint {
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
     /// * `base_dir` - Workspace root for resolving relative paths
     /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
+    /// * `tracked_envs` - Tool-requested env vars (name -> value hash), validated on lookup
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
     ) -> anyhow::Result<Self> {
         let inferred_inputs = inferred_path_reads
             .par_iter()
@@ -85,16 +108,24 @@ impl PostRunFingerprint {
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
-        Ok(Self { inferred_inputs })
+        Ok(Self { inferred_inputs, tracked_envs })
     }
 
-    /// Validates the fingerprint against current filesystem state.
-    /// Returns `Some((kind, path))` if an input changed, `None` if all valid.
+    /// Validates the fingerprint against current filesystem state and the
+    /// unfiltered env context used by runner-aware IPC. `unfiltered_envs` must
+    /// be the same plan env context that served the original `getEnv` request,
+    /// not the filtered env passed to the spawned process.
+    ///
+    /// Returns `Some(mismatch)` if anything changed, `None` if all valid.
+    /// Returns an error if a tracked env is currently present but cannot be
+    /// represented as UTF-8; treating that value as unset would make cache
+    /// validation unsound.
     #[tracing::instrument(level = "debug", skip_all, name = "validate_post_run_fingerprint")]
     pub fn validate(
         &self,
         base_dir: &AbsolutePath,
-    ) -> anyhow::Result<Option<(InputChangeKind, RelativePathBuf)>> {
+        unfiltered_envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    ) -> anyhow::Result<Option<PostRunMismatch>> {
         let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
             |(input_relative_path, path_fingerprint)| {
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
@@ -120,11 +151,32 @@ impl PostRunFingerprint {
                     } else {
                         input_relative_path.clone()
                     };
-                    Some(Ok((kind, path)))
+                    Some(Ok(PostRunMismatch::InputChanged { kind, path }))
                 }
             },
         );
-        input_mismatch.transpose()
+        if let Some(result) = input_mismatch {
+            return result.map(Some);
+        }
+
+        for (name, stored_value) in &self.tracked_envs {
+            let current_value = unfiltered_envs
+                .get(OsStr::new(name.as_str()))
+                .map(|value| {
+                    let value_str = value.to_str().ok_or_else(|| {
+                        anyhow::anyhow!("tracked env value for {name} is not valid UTF-8")
+                    })?;
+                    Ok::<_, anyhow::Error>(EnvValueHash::new(value_str))
+                })
+                .transpose()?;
+            if let Some(mismatch) =
+                EnvMismatch::compare(name, stored_value.as_ref(), current_value.as_ref())
+            {
+                return Ok(Some(PostRunMismatch::TrackedEnvChanged(mismatch)));
+            }
+        }
+
+        Ok(None)
     }
 }
 
@@ -319,4 +371,45 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
     }
 
     Ok(PathFingerprint::Folder(Some(entries)))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::{OsStr, OsString};
+
+    use super::*;
+
+    #[cfg(unix)]
+    fn non_utf8_os_string() -> OsString {
+        use std::os::unix::ffi::OsStringExt;
+
+        OsString::from_vec(vec![0xFF])
+    }
+
+    #[cfg(windows)]
+    fn non_utf8_os_string() -> OsString {
+        use std::os::windows::ffi::OsStringExt;
+
+        OsString::from_wide(&[0xD800])
+    }
+
+    #[test]
+    fn validate_errors_on_current_non_utf8_tracked_env_value() {
+        let mut tracked_envs = BTreeMap::new();
+        tracked_envs.insert(Str::from("PROBE_ENV"), None);
+        let fingerprint = PostRunFingerprint { tracked_envs, ..PostRunFingerprint::default() };
+
+        let mut unfiltered_envs = FxHashMap::default();
+        unfiltered_envs.insert(
+            Arc::<OsStr>::from(OsStr::new("PROBE_ENV")),
+            Arc::<OsStr>::from(non_utf8_os_string()),
+        );
+
+        let workspace_root = vite_path::current_dir().expect("cwd");
+        let err = fingerprint
+            .validate(&workspace_root, &unfiltered_envs)
+            .expect_err("non-UTF-8 tracked env values must error");
+
+        assert!(err.to_string().contains("tracked env value for PROBE_ENV is not valid UTF-8"));
+    }
 }

@@ -1,11 +1,11 @@
 //! Post-run cache update: decide whether a finished spawn may be cached and,
 //! if so, store its fingerprint, captured output, and output archive.
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
-use vite_task_plan::cache_metadata::CacheMetadata;
+use vite_task_plan::cache_metadata::{CacheMetadata, EnvValueHash};
 use vite_task_server::Reports;
 
 use super::{
@@ -97,13 +97,27 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None);
     }
 
+    // Collect tool-reported tracked envs for the post-run fingerprint. Env
+    // names that the user already declared are skipped because their values
+    // are already part of the spawn fingerprint.
+    let tracked_envs = match collect_tracked_reports(reports, metadata) {
+        Ok(tracked_envs) => tracked_envs,
+        Err(err) => {
+            return (
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                Some(ExecutionError::PostRunFingerprint(err)),
+            );
+        }
+    };
+
     // Paths already in globbed_inputs are skipped: the overlap check above
     // guarantees no input modification, so the prerun hash is the correct
     // post-exec hash.
     let empty_path_reads = HashMap::default();
     let path_reads = fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
     let post_run_fingerprint =
-        match PostRunFingerprint::create(path_reads, workspace_root, &globbed_inputs) {
+        match PostRunFingerprint::create(path_reads, workspace_root, &globbed_inputs, tracked_envs)
+        {
             Ok(fingerprint) => fingerprint,
             Err(err) => {
                 return (
@@ -164,6 +178,44 @@ fn observe_fspy(
         let _ = (outcome, input_negative_globs, workspace_root);
         None
     }
+}
+
+fn collect_tracked_reports(
+    reports: Option<&Reports>,
+    metadata: &CacheMetadata,
+) -> anyhow::Result<BTreeMap<Str, Option<EnvValueHash>>> {
+    reports.map(|r| collect_tracked_envs(r, metadata)).transpose().map(Option::unwrap_or_default)
+}
+
+/// Select tool-reported env records to embed in the post-run fingerprint.
+/// Only `tracked: true` records are included, and names that the user already
+/// declared as fingerprinted are skipped.
+fn collect_tracked_envs(
+    reports: &Reports,
+    metadata: &CacheMetadata,
+) -> anyhow::Result<BTreeMap<Str, Option<EnvValueHash>>> {
+    let fingerprinted = &metadata.spawn_fingerprint.env_fingerprints().fingerprinted_envs;
+    let mut tracked_envs = BTreeMap::new();
+
+    for (name, value) in &reports.env_records {
+        let name_str =
+            name.to_str().ok_or_else(|| anyhow::anyhow!("tracked env name is not valid UTF-8"))?;
+        if fingerprinted.contains_key(name_str) {
+            continue;
+        }
+        let value = value
+            .as_ref()
+            .map(|value| {
+                let value_str = value.to_str().ok_or_else(|| {
+                    anyhow::anyhow!("tracked env value for {name_str} is not valid UTF-8")
+                })?;
+                Ok::<_, anyhow::Error>(EnvValueHash::new(value_str))
+            })
+            .transpose()?;
+        tracked_envs.insert(Str::from(name_str), value);
+    }
+
+    Ok(tracked_envs)
 }
 
 /// Collect output files matching the configured globs and create a tar.zst
