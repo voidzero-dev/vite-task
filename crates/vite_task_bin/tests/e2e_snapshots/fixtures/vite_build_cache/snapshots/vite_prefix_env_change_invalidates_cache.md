@@ -1,34 +1,34 @@
 # vite_prefix_env_change_invalidates_cache
 
-`VITE_MODE` is picked up by Vite's patched `loadEnv`, which asks the runner for every `VITE_*` env via `getEnvs(pattern, { tracked: true })`. Flipping its value between runs must invalidate the cache AND change the build output — Vite's `define` plugin substitutes `import.meta.env.VITE_MODE` at build time, so dead-code elimination leaves only the branch matching the value.
+`VITE_CACHE_LABEL` is picked up by Vite's patched `loadEnv`, which asks the runner for every `VITE_*` env via `getEnvs(pattern, { tracked: true })`. Flipping its value between runs must invalidate the cache AND change the build output because Vite substitutes `import.meta.env.VITE_CACHE_LABEL` at build time.
 
-## `VITE_MODE=production vt run --cache build`
+## `VITE_CACHE_LABEL=cache-alpha vt run --cache build`
 
-first run: production build
+first run: cache-alpha label
 
 ```
 $ vite build
 ```
 
-## `vtt grep-file dist/assets/main.js BUILD_MODE_PROD`
+## `vtt grep-file dist/assets/main.js cache-alpha`
 
-production build: PROD marker survived DCE
-
-```
-dist/assets/main.js: found "BUILD_MODE_PROD"
-```
-
-## `vtt grep-file dist/assets/main.js BUILD_MODE_DEV`
-
-dev branch is gone
+cache-alpha label is in the bundle
 
 ```
-dist/assets/main.js: missing "BUILD_MODE_DEV"
+dist/assets/main.js: found "cache-alpha"
 ```
 
-## `VITE_MODE=production vt run --cache build`
+## `vtt grep-file dist/assets/main.js cache-bravo`
 
-cache hit: VITE_MODE unchanged
+cache-bravo label is not in the bundle yet
+
+```
+dist/assets/main.js: missing "cache-bravo"
+```
+
+## `VITE_CACHE_LABEL=cache-alpha vt run --cache build`
+
+cache hit: VITE_CACHE_LABEL unchanged
 
 ```
 $ vite build ◉ cache hit, replaying
@@ -37,26 +37,26 @@ $ vite build ◉ cache hit, replaying
 vt run: cache hit.
 ```
 
-## `VITE_MODE=development vt run --cache build`
+## `VITE_CACHE_LABEL=cache-bravo vt run --cache build`
 
-cache miss: envs changed — VITE_MODE value changed
-
-```
-$ vite build ○ cache miss: env 'VITE_MODE' changed, executing
-```
-
-## `vtt grep-file dist/assets/main.js BUILD_MODE_PROD`
-
-PROD marker gone after the dev rebuild
+cache miss: envs changed — VITE_CACHE_LABEL value changed
 
 ```
-dist/assets/main.js: missing "BUILD_MODE_PROD"
+$ vite build ○ cache miss: env 'VITE_CACHE_LABEL' changed, executing
 ```
 
-## `vtt grep-file dist/assets/main.js BUILD_MODE_DEV`
+## `vtt grep-file dist/assets/main.js cache-alpha`
 
-DEV marker now in the bundle
+cache-alpha label is gone after the rebuild
 
 ```
-dist/assets/main.js: found "BUILD_MODE_DEV"
+dist/assets/main.js: missing "cache-alpha"
+```
+
+## `vtt grep-file dist/assets/main.js cache-bravo`
+
+cache-bravo label is now in the bundle
+
+```
+dist/assets/main.js: found "cache-bravo"
 ```

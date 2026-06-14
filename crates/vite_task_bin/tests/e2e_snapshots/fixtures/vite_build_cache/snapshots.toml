@@ -1,7 +1,7 @@
 [[e2e]]
 name = "vite_prefix_env_change_invalidates_cache"
 comment = """
-`VITE_MODE` is picked up by Vite's patched `loadEnv`, which asks the runner for every `VITE_*` env via `getEnvs(pattern, { tracked: true })`. Flipping its value between runs must invalidate the cache AND change the build output — Vite's `define` plugin substitutes `import.meta.env.VITE_MODE` at build time, so dead-code elimination leaves only the branch matching the value.
+`VITE_CACHE_LABEL` is picked up by Vite's patched `loadEnv`, which asks the runner for every `VITE_*` env via `getEnvs(pattern, { tracked: true })`. Flipping its value between runs must invalidate the cache AND change the build output because Vite substitutes `import.meta.env.VITE_CACHE_LABEL` at build time.
 """
 ignore = true
 steps = [
@@ -12,22 +12,22 @@ steps = [
     "build",
   ], envs = [
     [
-      "VITE_MODE",
-      "production",
+      "VITE_CACHE_LABEL",
+      "cache-alpha",
     ],
-  ], comment = "first run: production build" },
+  ], comment = "first run: cache-alpha label" },
   { argv = [
     "vtt",
     "grep-file",
     "dist/assets/main.js",
-    "BUILD_MODE_PROD",
-  ], comment = "production build: PROD marker survived DCE" },
+    "cache-alpha",
+  ], comment = "cache-alpha label is in the bundle" },
   { argv = [
     "vtt",
     "grep-file",
     "dist/assets/main.js",
-    "BUILD_MODE_DEV",
-  ], comment = "dev branch is gone" },
+    "cache-bravo",
+  ], comment = "cache-bravo label is not in the bundle yet" },
   { argv = [
     "vt",
     "run",
@@ -35,10 +35,10 @@ steps = [
     "build",
   ], envs = [
     [
-      "VITE_MODE",
-      "production",
+      "VITE_CACHE_LABEL",
+      "cache-alpha",
     ],
-  ], comment = "cache hit: VITE_MODE unchanged" },
+  ], comment = "cache hit: VITE_CACHE_LABEL unchanged" },
   { argv = [
     "vt",
     "run",
@@ -46,22 +46,22 @@ steps = [
     "build",
   ], envs = [
     [
-      "VITE_MODE",
-      "development",
+      "VITE_CACHE_LABEL",
+      "cache-bravo",
     ],
-  ], comment = "cache miss: envs changed — VITE_MODE value changed" },
+  ], comment = "cache miss: envs changed — VITE_CACHE_LABEL value changed" },
   { argv = [
     "vtt",
     "grep-file",
     "dist/assets/main.js",
-    "BUILD_MODE_PROD",
-  ], comment = "PROD marker gone after the dev rebuild" },
+    "cache-alpha",
+  ], comment = "cache-alpha label is gone after the rebuild" },
   { argv = [
     "vtt",
     "grep-file",
     "dist/assets/main.js",
-    "BUILD_MODE_DEV",
-  ], comment = "DEV marker now in the bundle" },
+    "cache-bravo",
+  ], comment = "cache-bravo label is now in the bundle" },
 ]
 
 [[e2e]]
@@ -105,4 +105,3 @@ steps = [
     ],
   ], comment = "cache miss: envs changed (NODE_ENV changed)" },
 ]
-
