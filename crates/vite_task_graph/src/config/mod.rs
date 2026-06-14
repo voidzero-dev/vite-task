@@ -6,7 +6,7 @@ use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
-    AutoInput, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
+    AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
     UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
     UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
@@ -166,8 +166,8 @@ impl ResolvedGlobConfig {
 
         for entry in entries {
             match entry {
-                UserInputEntry::Auto(AutoInput { auto: true }) => includes_auto = true,
-                UserInputEntry::Auto(AutoInput { auto: false }) => {} // Ignore {auto: false}
+                UserInputEntry::Auto(AutoTracking { auto: true }) => includes_auto = true,
+                UserInputEntry::Auto(AutoTracking { auto: false }) => {} // Ignore {auto: false}
                 UserInputEntry::Glob(pattern) => {
                     Self::insert_glob(
                         pattern.as_str(),
@@ -198,12 +198,8 @@ impl ResolvedGlobConfig {
 
     /// Resolve from user output configuration, making glob patterns workspace-root-relative.
     ///
-    /// Unlike [`Self::from_user_config`], `None` and `Some([])` both produce an empty config
-    /// with `includes_auto = false` (no output archiving).
-    ///
-    /// TODO: remove this method once auto output inference lands; at that point
-    /// `output` becomes a `UserInputsConfig` and routes through
-    /// [`Self::from_user_config`] like inputs.
+    /// Unlike [`Self::from_user_config`], `None` and `Some([])` both produce an
+    /// empty config with `includes_auto = false` (no output archiving).
     ///
     /// # Errors
     ///
@@ -216,6 +212,7 @@ impl ResolvedGlobConfig {
     ) -> Result<Self, ResolveTaskConfigError> {
         let mut positive_globs = BTreeSet::new();
         let mut negative_globs = BTreeSet::new();
+        let mut includes_auto = false;
 
         let Some(entries) = user_outputs else {
             return Ok(Self { includes_auto: false, positive_globs, negative_globs });
@@ -245,10 +242,12 @@ impl ResolvedGlobConfig {
                         &mut negative_globs,
                     )?;
                 }
+                UserOutputEntry::Auto(AutoTracking { auto: true }) => includes_auto = true,
+                UserOutputEntry::Auto(AutoTracking { auto: false }) => {}
             }
         }
 
-        Ok(Self { includes_auto: false, positive_globs, negative_globs })
+        Ok(Self { includes_auto, positive_globs, negative_globs })
     }
 
     /// Insert a glob pattern into the appropriate set (positive or negative),
@@ -532,7 +531,7 @@ mod tests {
     #[test]
     fn test_resolved_input_config_auto_only() {
         let (pkg, ws) = test_paths();
-        let user_inputs = vec![UserInputEntry::Auto(AutoInput { auto: true })];
+        let user_inputs = vec![UserInputEntry::Auto(AutoTracking { auto: true })];
         let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert!(config.positive_globs.is_empty());
@@ -542,7 +541,7 @@ mod tests {
     #[test]
     fn test_resolved_input_config_auto_false_ignored() {
         let (pkg, ws) = test_paths();
-        let user_inputs = vec![UserInputEntry::Auto(AutoInput { auto: false })];
+        let user_inputs = vec![UserInputEntry::Auto(AutoTracking { auto: false })];
         let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert!(config.positive_globs.is_empty());
@@ -586,7 +585,7 @@ mod tests {
         let (pkg, ws) = test_paths();
         let user_inputs = vec![
             UserInputEntry::Glob("package.json".into()),
-            UserInputEntry::Auto(AutoInput { auto: true }),
+            UserInputEntry::Auto(AutoTracking { auto: true }),
             UserInputEntry::Glob("!node_modules/**".into()),
         ];
         let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
@@ -603,7 +602,7 @@ mod tests {
         // Globs with auto keeps inference enabled
         let user_inputs = vec![
             UserInputEntry::Glob("src/**/*.ts".into()),
-            UserInputEntry::Auto(AutoInput { auto: true }),
+            UserInputEntry::Auto(AutoTracking { auto: true }),
         ];
         let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
@@ -691,7 +690,7 @@ mod tests {
                 pattern: "configs/**".into(),
                 base: InputBase::Workspace,
             }),
-            UserInputEntry::Auto(AutoInput { auto: true }),
+            UserInputEntry::Auto(AutoTracking { auto: true }),
             UserInputEntry::GlobWithBase(GlobWithBase {
                 pattern: "!dist/**".into(),
                 base: InputBase::Workspace,

@@ -32,12 +32,12 @@ pub struct GlobWithBase {
     pub base: InputBase,
 }
 
-/// Auto-inference directive for input tracking.
+/// Automatic file-tracking directive for input fingerprinting or output archiving.
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 #[cfg_attr(all(test, not(clippy)), derive(TS))]
 #[serde(deny_unknown_fields)]
-pub struct AutoInput {
-    /// Automatically track which files the task reads
+pub struct AutoTracking {
+    /// Enable automatic file tracking for this input or output list.
     pub auto: bool,
 }
 
@@ -46,7 +46,7 @@ pub struct AutoInput {
 /// Inputs can be:
 /// - Glob patterns as strings (resolved relative to the package directory)
 /// - Object form with explicit base: `{ "pattern": "...", "base": "workspace" | "package" }`
-/// - Auto-inference directives: `{ "auto": true }`
+/// - Automatic tracking directives: `{ "auto": true }`
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS))]
@@ -56,8 +56,8 @@ pub enum UserInputEntry {
     Glob(Str),
     /// Glob pattern with explicit base directory
     GlobWithBase(GlobWithBase),
-    /// Auto-inference directive
-    Auto(AutoInput),
+    /// Automatic tracking directive
+    Auto(AutoTracking),
 }
 
 /// The inputs configuration for cache fingerprinting.
@@ -70,6 +70,7 @@ pub type UserInputsConfig = Vec<UserInputEntry>;
 /// Outputs can be:
 /// - Glob patterns as strings (resolved relative to the package directory)
 /// - Object form with explicit base: `{ "pattern": "...", "base": "workspace" | "package" }`
+/// - Automatic tracking directive: `{ "auto": true }`
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS))]
@@ -79,6 +80,8 @@ pub enum UserOutputEntry {
     Glob(Str),
     /// Glob pattern with explicit base directory
     GlobWithBase(GlobWithBase),
+    /// Automatic tracking directive
+    Auto(AutoTracking),
 }
 
 /// Cache-related fields of a task defined by user in `vite.config.*`
@@ -147,6 +150,7 @@ pub struct EnabledCacheConfig {
     /// - Omitted or `[]` (empty): no output archiving (default)
     /// - Glob patterns (e.g. `"dist/**"`) select specific output files, relative to the package directory
     /// - `{pattern: "...", base: "workspace" | "package"}` specifies a glob with an explicit base directory
+    /// - `{auto: true}` enables automatic output tracking
     /// - Negative patterns (e.g. `"!dist/cache/**"`) exclude matched files
     #[serde(default)]
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
@@ -375,7 +379,7 @@ impl UserRunConfig {
         types.push_str("\n\nexport ");
         types.push_str(&Self::decl(&ts_rs::Config::default()));
 
-        types
+        types.lines().map(str::trim_end).collect::<Vec<_>>().join("\n") + "\n"
     }
 }
 
@@ -586,7 +590,7 @@ mod tests {
             "input": [{ "auto": true }]
         });
         let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(config.input, Some(vec![UserInputEntry::Auto(AutoInput { auto: true })]));
+        assert_eq!(config.input, Some(vec![UserInputEntry::Auto(AutoTracking { auto: true })]));
     }
 
     #[test]
@@ -595,7 +599,7 @@ mod tests {
             "input": [{ "auto": false }]
         });
         let config: EnabledCacheConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(config.input, Some(vec![UserInputEntry::Auto(AutoInput { auto: false })]));
+        assert_eq!(config.input, Some(vec![UserInputEntry::Auto(AutoTracking { auto: false })]));
     }
 
     #[test]
@@ -638,7 +642,7 @@ mod tests {
             config.input,
             Some(vec![
                 UserInputEntry::Glob("package.json".into()),
-                UserInputEntry::Auto(AutoInput { auto: true }),
+                UserInputEntry::Auto(AutoTracking { auto: true }),
                 UserInputEntry::Glob("!node_modules/**".into()),
             ])
         );
@@ -737,7 +741,7 @@ mod tests {
                     pattern: "configs/**".into(),
                     base: InputBase::Workspace,
                 }),
-                UserInputEntry::Auto(AutoInput { auto: true }),
+                UserInputEntry::Auto(AutoTracking { auto: true }),
                 UserInputEntry::Glob("!node_modules/**".into()),
             ])
         );

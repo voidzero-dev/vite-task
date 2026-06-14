@@ -1037,7 +1037,9 @@ mod tests {
                 untracked_env: None,
                 input: Some(vec![
                     UserInputEntry::Glob("config/**".into()),
-                    UserInputEntry::Auto(vite_task_graph::config::user::AutoInput { auto: true }),
+                    UserInputEntry::Auto(vite_task_graph::config::user::AutoTracking {
+                        auto: true,
+                    }),
                 ]),
                 output: None,
             }),

@@ -1,6 +1,3 @@
 {
-  "name": "@test/normal-pkg",
-  "scripts": {
-    "task": "vtt print hello"
-  }
+  "name": "@test/normal-pkg"
 }

@@ -1,6 +1,6 @@
 # ignore_output_allows_read_write_overlap
 
-Exercises `ignoreOutput`. The task reads and writes `sidecar/tmp.txt`; without the ignore the runner's read-write overlap check would refuse to cache the run. The task also writes `dist/out.txt`, but output caching is disabled here so a cache hit must not restore it.
+Exercises `ignoreOutput` with auto output tracking. The task reads and writes `sidecar/tmp.txt`; without the ignore the runner's read-write overlap check would refuse to cache the run. The task also writes `dist/out.txt`, which should be auto-archived and restored on a cache hit.
 
 ## `vt run ignore-output`
 
@@ -12,7 +12,7 @@ $ node scripts/ignore_output.mjs
 
 ## `vtt rm dist/out.txt`
 
-remove the untracked output so a cache-hit restore would be visible
+remove the auto output so restoration is observable
 
 ```
 ```
@@ -30,8 +30,8 @@ vt run: cache hit.
 
 ## `vtt print-file dist/out.txt`
 
-not restored because this task has output: []
+restored from the auto output archive
 
 ```
-dist/out.txt: not found
+ok
 ```

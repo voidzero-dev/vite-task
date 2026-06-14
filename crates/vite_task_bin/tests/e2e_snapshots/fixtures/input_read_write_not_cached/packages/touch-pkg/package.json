@@ -1,8 +1,5 @@
 {
   "name": "@test/touch-pkg",
-  "scripts": {
-    "task": "vtt touch-file src/data.txt"
-  },
   "dependencies": {
     "@test/normal-pkg": "workspace:*"
   }

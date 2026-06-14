@@ -18,7 +18,25 @@
     },
     "ignore-output": {
       "command": "node scripts/ignore_output.mjs",
-      "output": [],
+      "output": [{ "auto": true }],
+      "cache": true
+    },
+    "auto-output-explicit": {
+      "command": "vtt write-file dist/auto.txt ok",
+      "input": [],
+      "output": [{ "auto": true }],
+      "cache": true
+    },
+    "auto-output-negative": {
+      "command": "node scripts/auto_output_negative.mjs",
+      "input": [],
+      "output": [{ "auto": true }, "!dist/skip.txt"],
+      "cache": true
+    },
+    "auto-output-negative-overlap": {
+      "command": "node scripts/auto_output_negative_overlap.mjs",
+      "input": [{ "auto": true }],
+      "output": [{ "auto": true }, "!scratch/**"],
       "cache": true
     },
     "disable-cache": {

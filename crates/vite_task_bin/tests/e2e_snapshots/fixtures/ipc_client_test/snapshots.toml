@@ -76,7 +76,7 @@ steps = [
 [[e2e]]
 name = "ignore_output_allows_read_write_overlap"
 comment = """
-Exercises `ignoreOutput`. The task reads and writes `sidecar/tmp.txt`; without the ignore the runner's read-write overlap check would refuse to cache the run. The task also writes `dist/out.txt`, but output caching is disabled here so a cache hit must not restore it.
+Exercises `ignoreOutput` with auto output tracking. The task reads and writes `sidecar/tmp.txt`; without the ignore the runner's read-write overlap check would refuse to cache the run. The task also writes `dist/out.txt`, which should be auto-archived and restored on a cache hit.
 """
 ignore = true
 steps = [
@@ -89,7 +89,7 @@ steps = [
     "vtt",
     "rm",
     "dist/out.txt",
-  ], comment = "remove the untracked output so a cache-hit restore would be visible" },
+  ], comment = "remove the auto output so restoration is observable" },
   { argv = [
     "vt",
     "run",
@@ -99,7 +99,100 @@ steps = [
     "vtt",
     "print-file",
     "dist/out.txt",
-  ], comment = "not restored because this task has output: []" },
+  ], comment = "restored from the auto output archive" },
+]
+
+[[e2e]]
+name = "explicit_auto_output_restores_written_files"
+comment = """
+Exercises `output: [{ auto: true }]` with explicit inputs disabled. The runner attaches fspy for output tracking, archives the written file, and restores it on cache hit.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-explicit",
+  ], comment = "first run writes dist/auto.txt and archives fspy-tracked outputs" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/auto.txt",
+  ], comment = "remove the output so restoration is observable" },
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-explicit",
+  ], comment = "cache hit: fspy-tracked output is restored" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/auto.txt",
+  ], comment = "restored from the auto output archive" },
+]
+
+[[e2e]]
+name = "explicit_auto_output_respects_negative_globs"
+comment = """
+Exercises `output: [{ auto: true }, "!dist/skip.txt"]`. The runner archives auto-tracked writes except those excluded by output negative globs, so cache hits restore `dist/keep.txt` but not `dist/skip.txt`.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-negative",
+  ], comment = "first run writes keep and skip files, but skip is excluded by a negative output glob" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/keep.txt",
+    "dist/skip.txt",
+  ], comment = "remove both writes so restoration proves the negative glob was honored" },
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-negative",
+  ], comment = "cache hit: only non-excluded auto output is restored" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/keep.txt",
+  ], comment = "restored from the auto output archive" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/skip.txt",
+  ], comment = "not restored because the negative output glob excluded it" },
+]
+
+[[e2e]]
+name = "output_negative_glob_prevents_read_write_overlap"
+comment = """
+Exercises `output: [{ auto: true }, "!scratch/**"]` on a task that reads and writes `scratch/overlap.txt`. Because the write is excluded from the auto-output set, it should not count as a read-write overlap, while non-excluded outputs are still archived and restored.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-negative-overlap",
+  ], comment = "first run reads and writes an output-negative path" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/negative-overlap.txt",
+  ], comment = "remove the non-excluded output so restoration is observable" },
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-negative-overlap",
+  ], comment = "cache hit: the output-negative write did not block caching" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/negative-overlap.txt",
+  ], comment = "restored from the auto output archive" },
 ]
 
 [[e2e]]

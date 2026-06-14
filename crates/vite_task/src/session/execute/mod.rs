@@ -89,9 +89,9 @@ struct CacheState<'a> {
     /// always present (possibly empty) once we reach the cache-update phase.
     std_outputs: Vec<StdOutput>,
     /// Runner-aware tracking for cached tasks: an IPC server is always
-    /// available, and fspy path tracing is attached only when auto input
-    /// inference needs it. Parts are borrowed in place during the wait/join;
-    /// the struct is never moved out.
+    /// available, and fspy path tracing is attached only when auto input or
+    /// output inference needs it. Parts are borrowed in place during the
+    /// wait/join; the struct is never moved out.
     tracking: Tracking,
 }
 
@@ -100,9 +100,10 @@ struct CacheState<'a> {
 type IpcDriver = LocalBoxFuture<'static, Result<Recorder, vite_task_server::Error>>;
 
 /// fspy path-tracking state, present only when a cached task needs automatic
-/// input inference.
+/// input or output inference.
 struct FspyTracking {
     input_negative_globs: Vec<wax::Glob<'static>>,
+    output_negative_globs: Vec<wax::Glob<'static>>,
 }
 
 /// Per-task runner-aware tracking: IPC server handle plus optional fspy state.
@@ -164,17 +165,24 @@ impl<'a> ExecutionMode<'a> {
             });
         };
 
-        let fspy = if metadata.input_config.includes_auto {
-            // Resolve input negative globs for fspy path filtering (already
+        let fspy = if metadata.input_config.includes_auto || metadata.output_config.includes_auto {
+            // Resolve negative globs for fspy path filtering (already
             // workspace-root-relative).
-            let negatives = metadata
+            let input_negative_globs = metadata
                 .input_config
                 .negative_globs
                 .iter()
                 .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
                 .collect::<anyhow::Result<Vec<_>>>()
                 .map_err(ExecutionError::PostRunFingerprint)?;
-            Some(FspyTracking { input_negative_globs: negatives })
+            let output_negative_globs = metadata
+                .output_config
+                .negative_globs
+                .iter()
+                .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
+                .collect::<anyhow::Result<Vec<_>>>()
+                .map_err(ExecutionError::PostRunFingerprint)?;
+            Some(FspyTracking { input_negative_globs, output_negative_globs })
         } else {
             None
         };

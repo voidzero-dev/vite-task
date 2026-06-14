@@ -28,6 +28,9 @@ use crate::{
 /// value is only ever `Some` when tracking happened (see [`observe_fspy`]).
 struct TrackingOutcome {
     path_reads: HashMap<RelativePathBuf, PathRead>,
+    /// Auto-output writes after output exclusions are applied. Empty when
+    /// `output_config.includes_auto` is false.
+    path_writes: FxHashSet<RelativePathBuf>,
     /// First path that was both read and written during execution, if any.
     /// A non-empty value means caching this task is unsound.
     read_write_overlap: Option<RelativePathBuf>,
@@ -58,7 +61,6 @@ pub(super) async fn update_cache(
 ) -> (CacheUpdateStatus, Option<ExecutionError>) {
     let CacheState { metadata, globbed_inputs, std_outputs, tracking } = state;
     let fspy = tracking.fspy.as_ref();
-    let input_negative_globs = fspy.map(|t| t.input_negative_globs.as_slice());
 
     if let Some(reports) = reports
         && reports.cache_disabled
@@ -89,7 +91,8 @@ pub(super) async fn update_cache(
 
     let fspy_outcome = observe_fspy(
         outcome,
-        input_negative_globs,
+        metadata,
+        fspy,
         &ignored_input_rels,
         &ignored_output_rels,
         workspace_root,
@@ -150,7 +153,12 @@ pub(super) async fn update_cache(
         }
     };
 
-    let output_archive = match collect_and_archive_outputs(metadata, workspace_root, cache_dir) {
+    let output_archive = match collect_and_archive_outputs(
+        metadata,
+        fspy_outcome.as_ref(),
+        workspace_root,
+        cache_dir,
+    ) {
         Ok(archive) => archive,
         Err(err) => {
             return (
@@ -177,12 +185,18 @@ pub(super) async fn update_cache(
 }
 
 /// Summarize the run's fspy observations. `Some` iff tracking was both
-/// requested (`input_negative_globs.is_some()`) and compiled in (`cfg(fspy)`). On a
+/// requested (`tracking.fspy.is_some()`) and compiled in (`cfg(fspy)`). On a
 /// `cfg(not(fspy))` build this is always `None`, and [`update_cache`]
 /// short-circuits to `FspyUnsupported` when tracking was needed.
+///
+/// `path_reads` is gated on `input_config.includes_auto`, filtered by
+/// user-configured input negatives, and by tool-reported `ignoreInput` paths.
+/// `path_writes` is filtered by user-configured output negatives and
+/// tool-reported `ignoreOutput` paths before read-write overlap detection.
 fn observe_fspy(
     outcome: &ChildOutcome,
-    input_negative_globs: Option<&[wax::Glob<'static>]>,
+    metadata: &CacheMetadata,
+    fspy: Option<&super::FspyTracking>,
     ignored_input_rels: &FxHashSet<RelativePathBuf>,
     ignored_output_rels: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
@@ -191,31 +205,56 @@ fn observe_fspy(
     {
         use super::tracked_accesses::TrackedPathAccesses;
 
-        outcome.path_accesses.as_ref().zip(input_negative_globs).map(|(raw, negatives)| {
-            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, negatives);
-            let path_reads: HashMap<RelativePathBuf, PathRead> = tracked
-                .path_reads
-                .into_iter()
-                .filter(|(path, _)| !is_ignored(path, ignored_input_rels))
-                .collect();
-            let path_writes: FxHashSet<RelativePathBuf> = tracked
-                .path_writes
-                .into_iter()
-                .filter(|path| !is_ignored(path, ignored_output_rels))
-                .collect();
-            let read_write_overlap = path_reads.keys().find(|p| path_writes.contains(*p)).cloned();
-            TrackingOutcome { path_reads, read_write_overlap }
+        outcome.path_accesses.as_ref().map(|raw| {
+            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root);
+            let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
+                // fspy can be attached for auto-output-only tasks. In that
+                // mode reads must not become inferred inputs.
+                if metadata.input_config.includes_auto
+                    && let Some(fspy) = fspy
+                {
+                    tracked
+                        .path_reads
+                        .iter()
+                        .filter(|(path, _)| {
+                            !matches_any_glob(path, &fspy.input_negative_globs)
+                                && !is_ignored(path, ignored_input_rels)
+                        })
+                        .map(|(path, read)| (path.clone(), *read))
+                        .collect()
+                } else {
+                    HashMap::default()
+                };
+            let filtered_path_writes: FxHashSet<RelativePathBuf> =
+                // fspy can also be attached for auto-input-only tasks. In that
+                // mode writes must not become auto outputs or overlap candidates.
+                if metadata.output_config.includes_auto
+                    && let Some(fspy) = fspy
+                {
+                    tracked
+                        .path_writes
+                        .iter()
+                        .filter(|path| {
+                            !matches_any_glob(path, &fspy.output_negative_globs)
+                                && !is_ignored(path, ignored_output_rels)
+                        })
+                        .cloned()
+                        .collect()
+                } else {
+                    FxHashSet::default()
+                };
+            let read_write_overlap =
+                filtered_path_reads.keys().find(|p| filtered_path_writes.contains(*p)).cloned();
+            TrackingOutcome {
+                path_reads: filtered_path_reads,
+                path_writes: filtered_path_writes,
+                read_write_overlap,
+            }
         })
     }
     #[cfg(not(fspy))]
     {
-        let _ = (
-            outcome,
-            input_negative_globs,
-            ignored_input_rels,
-            ignored_output_rels,
-            workspace_root,
-        );
+        let _ = (outcome, metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root);
         None
     }
 }
@@ -254,6 +293,12 @@ fn is_ignored(path: &RelativePathBuf, ignored: &FxHashSet<RelativePathBuf>) -> b
         return false;
     }
     ignored.contains(path) || ignored.iter().any(|ig| path.strip_prefix(ig).is_some())
+}
+
+fn matches_any_glob(path: &RelativePathBuf, globs: &[wax::Glob<'static>]) -> bool {
+    use wax::Program as _;
+
+    globs.iter().any(|glob| glob.is_match(path.as_str()))
 }
 
 /// Select tool-reported env records to embed in the post-run fingerprint.
@@ -309,36 +354,49 @@ fn collect_tracked_env_globs(reports: &Reports) -> anyhow::Result<TrackedEnvGlob
     Ok(tracked_env_globs)
 }
 
-/// Collect output files matching the configured globs and create a tar.zst
-/// archive in the cache directory.
+/// Collect output files and create a tar.zst archive in the cache directory.
 ///
-/// Returns `Some(archive_filename)` if files were archived, `None` if the
-/// output config has no positive globs or no files matched.
+/// Output files are determined by:
+/// - fspy-tracked writes (already empty when `output_config.includes_auto` is false)
+/// - Positive output globs (always, if configured)
+/// - Negative output globs and tool-reported `ignoreOutput` paths filter
+///   fspy-tracked writes before this function receives them
+///
+/// Returns `Some(archive_filename)` if files were archived, `None` if no output files.
 fn collect_and_archive_outputs(
     cache_metadata: &CacheMetadata,
+    tracking: Option<&TrackingOutcome>,
     workspace_root: &AbsolutePath,
     cache_dir: &AbsolutePath,
 ) -> anyhow::Result<Option<Str>> {
     let output_config = &cache_metadata.output_config;
 
-    if output_config.positive_globs.is_empty() {
-        return Ok(None);
+    let mut output_files: FxHashSet<RelativePathBuf> = FxHashSet::default();
+
+    if let Some(t) = tracking {
+        output_files.extend(t.path_writes.iter().cloned());
     }
 
-    let output_files = glob::collect_glob_paths(
-        workspace_root,
-        &output_config.positive_globs,
-        &output_config.negative_globs,
-    )?;
+    if !output_config.positive_globs.is_empty() {
+        let glob_paths = glob::collect_glob_paths(
+            workspace_root,
+            &output_config.positive_globs,
+            &output_config.negative_globs,
+        )?;
+        output_files.extend(glob_paths);
+    }
 
     if output_files.is_empty() {
         return Ok(None);
     }
 
+    let mut sorted_files: Vec<RelativePathBuf> = output_files.into_iter().collect();
+    sorted_files.sort();
+
     let archive_name: Str = vite_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
     let archive_path = cache_dir.join(archive_name.as_str());
 
-    archive::create_output_archive(workspace_root, &output_files, &archive_path)?;
+    archive::create_output_archive(workspace_root, &sorted_files, &archive_path)?;
 
     Ok(Some(archive_name))
 }
