@@ -188,7 +188,15 @@ impl PostRunFingerprint {
         }
 
         for (pattern, stored_matches) in &self.tracked_env_globs {
-            let current_matches = match_env_glob(pattern.as_str(), unfiltered_envs)?;
+            let current_matches = match match_env_glob(pattern.as_str(), unfiltered_envs)? {
+                EnvGlobValidation::Matches(matches) => matches,
+                EnvGlobValidation::NonUtf8Value(mismatch) => {
+                    return Ok(Some(PostRunMismatch::TrackedEnvGlob {
+                        pattern: pattern.clone(),
+                        mismatch,
+                    }));
+                }
+            };
             if let Some(mismatch) = first_env_glob_mismatch(stored_matches, &current_matches) {
                 return Ok(Some(PostRunMismatch::TrackedEnvGlob {
                     pattern: pattern.clone(),
@@ -202,24 +210,35 @@ impl PostRunFingerprint {
 }
 
 /// Build the current match-set for `pattern` by enumerating the given env
-/// snapshot and keeping UTF-8 names whose representation matches the glob.
+/// snapshot and keeping UTF-8 names whose representation matches the glob. If
+/// a matching env has a non-UTF-8 value, return a changed mismatch so the stale
+/// cache entry is not replayed.
 fn match_env_glob(
     pattern: &str,
     envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
-) -> anyhow::Result<BTreeMap<Str, EnvValueHash>> {
+) -> anyhow::Result<EnvGlobValidation> {
     let glob = vite_glob::env::EnvGlob::new(pattern)?;
-    Ok(envs
-        .iter()
-        .filter_map(|(name, value)| {
-            let name_str = name.to_str()?;
-            let value_str = value.to_str()?;
-            if glob.is_match(name_str) {
-                Some((Str::from(name_str), EnvValueHash::new(value_str)))
-            } else {
-                None
-            }
-        })
-        .collect())
+    let mut matches = BTreeMap::new();
+    for (name, value) in envs {
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        if !glob.is_match(name_str) {
+            continue;
+        }
+        let Some(value_str) = value.to_str() else {
+            return Ok(EnvGlobValidation::NonUtf8Value(EnvMismatch::Changed {
+                name: Str::from(name_str),
+            }));
+        };
+        matches.insert(Str::from(name_str), EnvValueHash::new(value_str));
+    }
+    Ok(EnvGlobValidation::Matches(matches))
+}
+
+enum EnvGlobValidation {
+    Matches(BTreeMap<Str, EnvValueHash>),
+    NonUtf8Value(EnvMismatch),
 }
 
 /// Find the first deterministic difference between stored and current env
@@ -486,5 +505,33 @@ mod tests {
             .expect_err("non-UTF-8 tracked env values must error");
 
         assert!(err.to_string().contains("tracked env value for PROBE_ENV is not valid UTF-8"));
+    }
+
+    #[test]
+    fn validate_reports_current_non_utf8_tracked_env_glob_value_as_changed() {
+        let mut tracked_env_globs = BTreeMap::new();
+        tracked_env_globs.insert(Str::from("PROBE_*"), BTreeMap::new());
+        let fingerprint = PostRunFingerprint { tracked_env_globs, ..PostRunFingerprint::default() };
+
+        let mut unfiltered_envs = FxHashMap::default();
+        unfiltered_envs.insert(
+            Arc::<OsStr>::from(OsStr::new("PROBE_BAD")),
+            Arc::<OsStr>::from(non_utf8_os_string()),
+        );
+
+        let workspace_root = vite_path::current_dir().expect("cwd");
+        let mismatch =
+            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+
+        match mismatch {
+            Some(PostRunMismatch::TrackedEnvGlob {
+                pattern,
+                mismatch: EnvMismatch::Changed { name },
+            }) => {
+                assert_eq!(pattern.as_str(), "PROBE_*");
+                assert_eq!(name.as_str(), "PROBE_BAD");
+            }
+            other => panic!("expected changed tracked env glob mismatch, got {other:?}"),
+        }
     }
 }
