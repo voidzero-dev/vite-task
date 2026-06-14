@@ -16,10 +16,10 @@ shared_memory = { workspace = true, features = ["logging"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+vite_path = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 bytemuck = { workspace = true }
-os_str_bytes = { workspace = true }
 winapi = { workspace = true, features = ["std"] }
 
 [dev-dependencies]

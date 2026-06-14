@@ -148,6 +148,11 @@ impl AbsolutePath {
 
     /// Returns a path that, when joined onto base, yields self.
     ///
+    /// On Windows, path namespace prefixes (`\\?\`, `\\.\`, and `\??\`) are
+    /// ignored before matching. In that case the returned path round-trips
+    /// against the prefix-normalized paths rather than necessarily preserving
+    /// the original namespace prefix.
+    ///
     /// If `base` is not a prefix of `self`, returns [`None`].
     ///
     /// If the stripped path is not a valid `RelativePath`. Returns an error with the reason and the stripped path.
@@ -160,7 +165,9 @@ impl AbsolutePath {
         base: P,
     ) -> Result<Option<RelativePathBuf>, StripPrefixError<'_>> {
         let base = base.as_ref();
-        let Ok(stripped_path) = self.0.strip_prefix(&base.0) else {
+        let Ok(stripped_path) =
+            crate::strip_path_prefix(self.as_path().as_os_str(), base.as_path().as_os_str())
+        else {
             return Ok(None);
         };
         match RelativePathBuf::new(stripped_path) {
@@ -395,6 +402,17 @@ mod tests {
 
         let rel_path = abs_path.strip_prefix(prefix).unwrap();
         assert!(rel_path.is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strip_prefix_ignores_windows_namespace_prefixes() {
+        let abs_path = AbsolutePath::new(Path::new(r"\\?\C:\Users\foo\bar")).unwrap();
+        let prefix = AbsolutePath::new(Path::new(r"C:\Users")).unwrap();
+
+        let rel_path = abs_path.strip_prefix(prefix).unwrap().unwrap();
+
+        assert_eq!(rel_path.as_str(), "foo/bar");
     }
 
     #[cfg(unix)]

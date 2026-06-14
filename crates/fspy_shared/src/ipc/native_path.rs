@@ -1,7 +1,8 @@
 #[cfg(unix)]
+use std::ffi::OsStr;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt as _;
 use std::{
-    ffi::OsStr,
     fmt::Debug,
     mem::MaybeUninit,
     path::{Path, StripPrefixError},
@@ -70,41 +71,8 @@ impl NativePath {
         base: P,
         f: F,
     ) -> R {
-        /// Strip the `\\?\`, `\\.\`, `\??\` prefix from a Windows path, if present.
-        /// Does nothing on non-Windows platforms.
-        ///
-        /// \\?\ and \\.\ are used to enable long paths and access to device paths.
-        /// \??\ is used in Nt* calls.
-        /// The resulting path is not necessarily valid or points to the same location,
-        /// but it's good enough for sanitizing paths in `NativePath::strip_path_prefix`.
-        #[cfg_attr(
-            not(windows),
-            expect(
-                clippy::missing_const_for_fn,
-                reason = "uses non-const for loop and strip_prefix on Windows"
-            )
-        )]
-        fn strip_windows_path_prefix(p: &OsStr) -> &OsStr {
-            #[cfg(windows)]
-            {
-                use os_str_bytes::OsStrBytesExt as _;
-                for prefix in [r"\\?\", r"\\.\", r"\??\"] {
-                    if let Some(stripped) = p.strip_prefix(prefix) {
-                        return stripped;
-                    }
-                }
-                p
-            }
-            #[cfg(not(windows))]
-            {
-                p
-            }
-        }
-
         let me = self.inner.to_cow_os_str();
-        let me = strip_windows_path_prefix(&me);
-        let base = strip_windows_path_prefix(base.as_ref().as_os_str());
-        f(Path::new(me).strip_prefix(base))
+        f(vite_path::strip_path_prefix(&me, base.as_ref().as_os_str()))
     }
 }
 

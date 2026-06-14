@@ -1354,13 +1354,13 @@ dependencies = [
  "bytemuck",
  "ctor",
  "native_str",
- "os_str_bytes",
  "rustc-hash",
  "shared_memory",
  "subprocess_test",
  "thiserror 2.0.18",
  "tracing",
  "uuid",
+ "vite_path",
  "winapi",
  "wincode",
 ]
@@ -4182,6 +4182,7 @@ version = "0.1.0"
 dependencies = [
  "assert2",
  "diff-struct",
+ "os_str_bytes",
  "path-clean",
  "ref-cast",
  "serde",
