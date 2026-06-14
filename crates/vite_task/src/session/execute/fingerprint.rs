@@ -48,6 +48,13 @@ pub struct PostRunFingerprint {
     /// Outer key is the glob pattern, inner map is the match-set at execution
     /// time (name -> value hash). Validated at cache lookup by re-matching
     /// against the current env context and comparing the resulting set.
+    ///
+    /// Non-UTF-8 env names are never matched, saved, or treated as errors:
+    /// they are not returned to the client, so their existence cannot affect
+    /// task behavior. Values are stricter. A matched env must have a UTF-8
+    /// value; the JS client errors when querying a matched non-UTF-8 value,
+    /// and cache-hit validation treats a currently matched non-UTF-8 value as
+    /// a changed mismatch so stale cached output is not replayed.
     pub tracked_env_globs: BTreeMap<Str, BTreeMap<Str, EnvValueHash>>,
 }
 
@@ -533,5 +540,24 @@ mod tests {
             }
             other => panic!("expected changed tracked env glob mismatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn validate_ignores_non_utf8_tracked_env_glob_names() {
+        let mut tracked_env_globs = BTreeMap::new();
+        tracked_env_globs.insert(Str::from("PROBE_*"), BTreeMap::new());
+        let fingerprint = PostRunFingerprint { tracked_env_globs, ..PostRunFingerprint::default() };
+
+        let mut unfiltered_envs = FxHashMap::default();
+        unfiltered_envs.insert(
+            Arc::<OsStr>::from(non_utf8_os_string()),
+            Arc::<OsStr>::from(OsStr::new("value")),
+        );
+
+        let workspace_root = vite_path::current_dir().expect("cwd");
+        let mismatch =
+            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+
+        assert!(mismatch.is_none());
     }
 }
