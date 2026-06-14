@@ -81,17 +81,17 @@ fn get_env_found_and_not_found() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
-    let node = reports.env_records.get(OsStr::new("NODE_ENV")).expect("NODE_ENV recorded");
-    assert!(node.tracked);
-    assert_eq!(node.value.as_deref(), Some(OsStr::new("production")));
+    let node = reports.tracked_get_env.get(OsStr::new("NODE_ENV")).expect("NODE_ENV recorded");
+    assert_eq!(node.as_deref(), Some(OsStr::new("production")));
 
-    let missing = reports.env_records.get(OsStr::new("MISSING")).expect("MISSING recorded");
-    assert!(!missing.tracked);
-    assert!(missing.value.is_none());
+    assert!(
+        !reports.tracked_get_env.contains_key(OsStr::new("MISSING")),
+        "untracked getEnv calls are not recorded"
+    );
 }
 
 #[test]
-fn get_env_tracked_upgrade_is_monotonic() {
+fn get_env_untracked_then_tracked_records_once() {
     let reports = run_with_server(env_map(&[("NODE_ENV", "production")]), |envs| {
         let client = connect(&envs);
         let a = client.get_env(OsStr::new("NODE_ENV"), false).unwrap();
@@ -103,8 +103,8 @@ fn get_env_tracked_upgrade_is_monotonic() {
     })
     .expect("driver returned error");
 
-    let node = reports.env_records.get(OsStr::new("NODE_ENV")).expect("recorded");
-    assert!(node.tracked, "tracked must remain true once set");
+    let node = reports.tracked_get_env.get(OsStr::new("NODE_ENV")).expect("recorded");
+    assert_eq!(node.as_deref(), Some(OsStr::new("production")));
 }
 
 #[test]
@@ -127,9 +127,8 @@ fn concurrent_clients() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
-    let shared = reports.env_records.get(OsStr::new("SHARED")).expect("recorded");
-    assert!(shared.tracked);
-    assert_eq!(shared.value.as_deref(), Some(OsStr::new("value")));
+    let shared = reports.tracked_get_env.get(OsStr::new("SHARED")).expect("recorded");
+    assert_eq!(shared.as_deref(), Some(OsStr::new("value")));
 }
 
 #[test]
@@ -154,8 +153,7 @@ fn get_envs_returns_matching_entries() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
-    let glob = reports.env_glob_records.get("PROBE_*").expect("glob recorded");
-    assert!(glob.tracked);
+    let glob = reports.tracked_get_envs.get("PROBE_*").expect("glob recorded");
     assert_eq!(glob.matches.len(), 2);
 }
 
@@ -169,13 +167,14 @@ fn get_envs_empty_match_set_is_returned() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
-    let glob = reports.env_glob_records.get("PROBE_*").expect("glob recorded");
-    assert!(!glob.tracked);
-    assert!(glob.matches.is_empty());
+    assert!(
+        !reports.tracked_get_envs.contains_key("PROBE_*"),
+        "untracked getEnvs calls are not recorded"
+    );
 }
 
 #[test]
-fn get_envs_tracked_upgrade_is_monotonic() {
+fn get_envs_untracked_then_tracked_records_once() {
     let reports = run_with_server(env_map(&[("PROBE_A", "alpha")]), |envs| {
         let client = connect(&envs);
         let first = client.get_envs("PROBE_*", false).unwrap();
@@ -186,8 +185,7 @@ fn get_envs_tracked_upgrade_is_monotonic() {
     })
     .expect("driver returned error");
 
-    let glob = reports.env_glob_records.get("PROBE_*").expect("glob recorded");
-    assert!(glob.tracked, "tracked must remain true once set");
+    let glob = reports.tracked_get_envs.get("PROBE_*").expect("glob recorded");
     assert_eq!(glob.matches.len(), 1);
 }
 

@@ -53,38 +53,26 @@ pub struct InvalidGlob {
     pub source: vite_glob::env::EnvGlobError,
 }
 
-/// A [`Handler`] that records every report and resolves `get_env` against
-/// provided envs.
+/// A [`Handler`] that records cache-relevant reports and resolves env requests
+/// against provided envs.
 ///
 /// Call [`Recorder::into_reports`] after the driver future completes to
 /// recover the collected [`Reports`].
 pub struct Recorder {
     cache_disabled: bool,
-    env_records: FxHashMap<Arc<OsStr>, EnvRecord>,
-    env_glob_records: FxHashMap<Arc<str>, EnvGlobRecord>,
+    tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
+    tracked_get_envs: FxHashMap<Arc<str>, EnvGlobRecord>,
     /// The envs `get_env` resolves against. The runner supplies these for the
     /// spawned task; the server never re-reads the live process env.
     envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
 }
 
-/// A record of an env value requested via `get_env`.
-///
-/// `tracked` is the monotonic OR of every `tracked` flag sent for this name:
-/// once true, it stays true.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnvRecord {
-    pub tracked: bool,
-    pub value: Option<Arc<OsStr>>,
-}
-
-/// A record of a glob-pattern env query made via `get_envs`.
+/// A record of a tracked glob-pattern env query made via `get_envs`.
 ///
 /// `matches` is captured on the first call and reused on repeat queries; the
-/// server's env map is immutable for a task's lifetime. `tracked` is the
-/// monotonic OR of every `tracked` flag sent for this pattern.
+/// server's env map is immutable for a task's lifetime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvGlobRecord {
-    pub tracked: bool,
     pub matches: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
 }
 
@@ -92,8 +80,8 @@ pub struct EnvGlobRecord {
 #[derive(Debug, Default)]
 pub struct Reports {
     pub cache_disabled: bool,
-    pub env_records: FxHashMap<Arc<OsStr>, EnvRecord>,
-    pub env_glob_records: FxHashMap<Arc<str>, EnvGlobRecord>,
+    pub tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
+    pub tracked_get_envs: FxHashMap<Arc<str>, EnvGlobRecord>,
 }
 
 impl Recorder {
@@ -101,8 +89,8 @@ impl Recorder {
     pub fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
         Self {
             cache_disabled: false,
-            env_records: FxHashMap::default(),
-            env_glob_records: FxHashMap::default(),
+            tracked_get_env: FxHashMap::default(),
+            tracked_get_envs: FxHashMap::default(),
             envs,
         }
     }
@@ -111,8 +99,8 @@ impl Recorder {
     pub fn into_reports(self) -> Reports {
         Reports {
             cache_disabled: self.cache_disabled,
-            env_records: self.env_records,
-            env_glob_records: self.env_glob_records,
+            tracked_get_env: self.tracked_get_env,
+            tracked_get_envs: self.tracked_get_envs,
         }
     }
 }
@@ -123,18 +111,11 @@ impl Handler for Recorder {
     }
 
     fn get_env(&mut self, name: &OsStr, tracked: bool) -> Option<Arc<OsStr>> {
-        match self.env_records.entry(name.into()) {
-            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                let record = entry.get_mut();
-                record.tracked |= tracked;
-                record.value.clone()
-            }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                let value = self.envs.get(name).cloned();
-                entry.insert(EnvRecord { tracked, value: value.clone() });
-                value
-            }
+        let value = self.envs.get(name).cloned();
+        if tracked {
+            self.tracked_get_env.entry(name.into()).or_insert_with(|| value.clone());
         }
+        value
     }
 
     fn get_envs(
@@ -142,8 +123,7 @@ impl Handler for Recorder {
         pattern: &str,
         tracked: bool,
     ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::env::EnvGlobError> {
-        if let Some(existing) = self.env_glob_records.get_mut(pattern) {
-            existing.tracked |= tracked;
+        if let Some(existing) = self.tracked_get_envs.get(pattern) {
             return Ok(existing.matches.clone());
         }
         let glob = vite_glob::env::EnvGlob::new(pattern)?;
@@ -159,8 +139,10 @@ impl Handler for Recorder {
                 }
             })
             .collect();
-        self.env_glob_records
-            .insert(Arc::from(pattern), EnvGlobRecord { tracked, matches: matches.clone() });
+        if tracked {
+            self.tracked_get_envs
+                .insert(Arc::from(pattern), EnvGlobRecord { matches: matches.clone() });
+        }
         Ok(matches)
     }
 }
