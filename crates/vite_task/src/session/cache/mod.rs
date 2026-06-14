@@ -119,7 +119,7 @@ pub struct ExecutionCache {
     conn: Mutex<Connection>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[expect(
     clippy::large_enum_variant,
     reason = "FingerprintMismatch contains SpawnFingerprint which is intentionally large; boxing would add unnecessary indirection for a short-lived enum"
@@ -148,11 +148,11 @@ pub enum InputChangeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EnvMismatch {
     /// Set now, but absent from the stored fingerprint.
-    Added { name: Str, value: Str },
+    Added { name: Str },
     /// In the stored fingerprint, but unset now.
-    Removed { name: Str, value: Str },
+    Removed { name: Str },
     /// Present on both sides with different values.
-    Changed { name: Str, old_value: Str, new_value: Str },
+    Changed { name: Str },
 }
 
 impl EnvMismatch {
@@ -160,9 +160,7 @@ impl EnvMismatch {
     #[must_use]
     pub const fn name(&self) -> &Str {
         match self {
-            Self::Added { name, .. } | Self::Removed { name, .. } | Self::Changed { name, .. } => {
-                name
-            }
+            Self::Added { name } | Self::Removed { name } | Self::Changed { name } => name,
         }
     }
 }
@@ -170,16 +168,14 @@ impl EnvMismatch {
 impl Display for EnvMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Added { name, value } => write!(f, "env {name}={value} added"),
-            Self::Removed { name, value } => write!(f, "env {name}={value} removed"),
-            Self::Changed { name, old_value, new_value } => {
-                write!(f, "env {name} value changed from '{old_value}' to '{new_value}'")
-            }
+            Self::Added { name } => write!(f, "env '{name}' added"),
+            Self::Removed { name } => write!(f, "env '{name}' removed"),
+            Self::Changed { name } => write!(f, "env '{name}' changed"),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub enum FingerprintMismatch {
     /// Found a previous cache entry key for the same task, but the spawn fingerprint differs.
     /// This happens when the command itself or an env changes.
@@ -234,15 +230,15 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
 /// format, or fingerprint semantics) changes in an incompatible way.
 ///
 /// The version is encoded *only* in the cache directory name (see
-/// [`cache_schema_dir_name`], e.g. `v13`); there is no in-database version
+/// [`cache_schema_dir_name`], e.g. `v14`); there is no in-database version
 /// marker. Keying the storage location on this version means Vite+ builds that
 /// pin different schema versions never open each other's database: each keeps
 /// its own cache warm across branch switches, and a cache from a different
 /// version is simply ignored (it lives in a directory this build never looks
 /// at) rather than aborting the run. Bumping the version starts a fresh cache.
-const CACHE_SCHEMA_VERSION: u32 = 13;
+const CACHE_SCHEMA_VERSION: u32 = 14;
 
-/// Name of the per-version subdirectory (e.g. `v13`) under the task-cache
+/// Name of the per-version subdirectory (e.g. `v14`) under the task-cache
 /// directory that holds the database and output archives for the current
 /// [`CACHE_SCHEMA_VERSION`].
 pub fn cache_schema_dir_name() -> Str {

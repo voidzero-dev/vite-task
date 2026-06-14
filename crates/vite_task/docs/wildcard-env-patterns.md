@@ -105,7 +105,7 @@ The implementation must ensure:
 1. Environment variables are sorted alphabetically before inclusion in fingerprint
 2. The same wildcard pattern always produces the same set of variables (for the same environment)
 3. Cache keys remain stable across runs
-4. **Sensitive values are hashed, never stored in plaintext**
+4. **Fingerprint values are hashed, never stored in plaintext**
 
 **Security-First Fingerprint Implementation:**
 
@@ -114,22 +114,13 @@ use sha2::{Sha256, Digest};
 
 impl TaskEnvs {
     /// Create a secure fingerprint for environment variables
-    pub fn create_fingerprint(&self) -> HashMap<Str, Str> {
+    pub fn create_fingerprint(&self) -> HashMap<Str, [u8; 32]> {
         let mut fingerprint = HashMap::new();
 
         for (name, value) in &self.envs_without_pass_through {
-            let fingerprint_value = if is_sensitive_env_name(name) {
-                // Hash sensitive values - never store them in plaintext
-                let mut hasher = Sha256::new();
-                hasher.update(value.as_bytes());
-                format!("sha256:{:x}", hasher.finalize())
-            } else {
-                // Non-sensitive values can optionally be hashed too for consistency
-                // Or stored as-is if needed for debugging
-                value.clone()
-            };
-
-            fingerprint.insert(name.clone(), fingerprint_value);
+            let mut hasher = Sha256::new();
+            hasher.update(value.as_bytes());
+            fingerprint.insert(name.clone(), hasher.finalize().into());
         }
 
         fingerprint
@@ -141,17 +132,17 @@ impl TaskEnvs {
 pub struct CommandFingerprint {
     pub cwd: Str,
     pub command: TaskCommand,
-    /// Environment variable fingerprints (names + hashed values for sensitive vars)
-    /// NEVER contains actual sensitive values
-    pub envs_fingerprint: HashMap<Str, Str>,
+    /// Environment variable fingerprints (names + hashed values).
+    /// NEVER contains actual env values.
+    pub envs_fingerprint: HashMap<Str, [u8; 32]>,
 }
 ```
 
 **Key Security Principles:**
 
-- Sensitive environment values are ALWAYS hashed before storage
+- Fingerprinted environment values are ALWAYS hashed before storage
 - Use cryptographic hash (SHA-256) for one-way transformation
-- Hash includes a prefix (e.g., "sha256:") to identify the method
+- Persist fixed-size digests in the cache key; use a `sha256:` prefix only in human-readable output
 - Cache entries never contain plaintext secrets
 - Fingerprint comparison still works (same value = same hash)
 
@@ -287,7 +278,7 @@ fn display_env_value(name: &str, value: &str) -> String {
 
 **Principles for Secure Cache Storage:**
 
-1. **Never Store Sensitive Values in Cache**:
+1. **Never Store Env Values in Cache**:
 
    ```rust
    // BAD - Never do this
@@ -298,9 +289,9 @@ fn display_env_value(name: &str, value: &str) -> String {
    ```
 
 2. **Use One-Way Hashing**:
-   - SHA-256 for sensitive values (irreversible)
+   - SHA-256 for every fingerprinted env value (irreversible)
    - Consistent hashing ensures cache hits work correctly
-   - Different secrets produce different hashes
+   - Different values produce different hashes
 
 3. **Cache File Protection**:
    - Store cache files with restricted permissions (0600)
@@ -312,7 +303,7 @@ fn display_env_value(name: &str, value: &str) -> String {
    {
      "task_id": "build_abc123",
      "env_fingerprint": {
-       "NODE_ENV": "production",
+       "NODE_ENV": "sha256:ab8e18ef4ebebeddc0b3152ce9c9006e14fc05242e3fc9ce32246ea6a9543074",
        "API_KEY": "sha256:a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3",
        "DATABASE_URL": "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
      },

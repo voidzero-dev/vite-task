@@ -67,27 +67,18 @@ pub fn detect_spawn_fingerprint_changes(
     for (key, old_value) in &old_env.fingerprinted_envs {
         if let Some(new_value) = new_env.fingerprinted_envs.get(key) {
             if old_value != new_value {
-                changes.push(SpawnFingerprintChange::Env(EnvMismatch::Changed {
-                    name: key.clone(),
-                    old_value: Str::from(old_value.as_ref()),
-                    new_value: Str::from(new_value.as_ref()),
-                }));
+                changes
+                    .push(SpawnFingerprintChange::Env(EnvMismatch::Changed { name: key.clone() }));
             }
         } else {
-            changes.push(SpawnFingerprintChange::Env(EnvMismatch::Removed {
-                name: key.clone(),
-                value: Str::from(old_value.as_ref()),
-            }));
+            changes.push(SpawnFingerprintChange::Env(EnvMismatch::Removed { name: key.clone() }));
         }
     }
 
     // Check for added envs
-    for (key, new_value) in &new_env.fingerprinted_envs {
+    for key in new_env.fingerprinted_envs.keys() {
         if !old_env.fingerprinted_envs.contains_key(key) {
-            changes.push(SpawnFingerprintChange::Env(EnvMismatch::Added {
-                name: key.clone(),
-                value: Str::from(new_value.as_ref()),
-            }));
+            changes.push(SpawnFingerprintChange::Env(EnvMismatch::Added { name: key.clone() }));
         }
     }
 
@@ -220,5 +211,34 @@ pub fn format_input_change_str(kind: InputChangeKind, path: &str) -> Str {
                 |dir| vite_str::format!("'{filename}' removed from '{dir}'"),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_spawn_changes_report_names_only() {
+        let added = SpawnFingerprintChange::Env(EnvMismatch::Added { name: Str::from("MY_ENV") });
+        let removed =
+            SpawnFingerprintChange::Env(EnvMismatch::Removed { name: Str::from("MY_ENV") });
+        let changed =
+            SpawnFingerprintChange::Env(EnvMismatch::Changed { name: Str::from("MY_ENV") });
+
+        assert_eq!(format_spawn_change(&added).as_str(), "env 'MY_ENV' added");
+        assert_eq!(format_spawn_change(&removed).as_str(), "env 'MY_ENV' removed");
+        assert_eq!(format_spawn_change(&changed).as_str(), "env 'MY_ENV' changed");
+    }
+
+    #[test]
+    fn inline_env_change_reason_reports_names_only() {
+        let first = Str::from("API_KEY");
+        let second = Str::from("NODE_ENV");
+
+        assert_eq!(
+            format_env_changed_inline(&[&first, &second]).as_str(),
+            "envs 'API_KEY', 'NODE_ENV' changed"
+        );
     }
 }

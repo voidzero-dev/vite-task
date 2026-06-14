@@ -31,7 +31,7 @@ use crate::{
     ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, PlanContext,
     SpawnCommand, SpawnExecution, TaskExecution,
     cache_metadata::{CacheMetadata, ExecutionCacheKey, ProgramFingerprint, SpawnFingerprint},
-    envs::EnvFingerprints,
+    envs::{EnvFingerprints, EnvValueHash},
     error::{CdCommandError, Error, PathFingerprintError, PathFingerprintErrorKind, PathType},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex, InnerExecutionGraph},
     in_process::InProcessExecution,
@@ -622,9 +622,11 @@ fn plan_spawn_execution(
                 .map_err(Error::ResolveEnv)?;
 
         // Add prefix envs to fingerprinted envs
-        env_fingerprints
-            .fingerprinted_envs
-            .extend(prefix_envs.iter().map(|(name, value)| (name.clone(), value.as_str().into())));
+        env_fingerprints.fingerprinted_envs.extend(
+            prefix_envs
+                .iter()
+                .map(|(name, value)| (name.clone(), EnvValueHash::new(value.as_str()))),
+        );
 
         let program_fingerprint = match strip_prefix_for_cache(&program_path, workspace_path) {
             Ok(relative_program_path) => {

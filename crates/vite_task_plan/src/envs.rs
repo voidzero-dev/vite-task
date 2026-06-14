@@ -1,57 +1,72 @@
-use std::{collections::BTreeMap, ffi::OsStr, fmt::Write as _, mem::MaybeUninit, sync::Arc};
+use std::{collections::BTreeMap, ffi::OsStr, fmt, sync::Arc};
 
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 use vite_glob::env::EnvGlobSet;
 use vite_str::Str;
 use vite_task_graph::config::EnvConfig;
-use wincode::{
-    SchemaRead, SchemaWrite,
-    config::Config,
-    error::{ReadResult, WriteResult},
-    io::{Reader, Writer},
-};
+use wincode::{SchemaRead, SchemaWrite};
 
-/// wincode schema adapter for `Arc<str>`, which is a foreign type with unsized inner.
-struct ArcStrSchema;
+const SHA256_DIGEST_LEN: usize = 32;
+const SHA256_PREFIX: &str = "sha256:";
 
-// SAFETY: Delegates to `str`'s SchemaWrite impl, preserving its size/write invariants.
-unsafe impl<C: Config> SchemaWrite<C> for ArcStrSchema {
-    type Src = Arc<str>;
+/// SHA-256 digest of a fingerprinted environment variable value.
+#[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Clone, Copy)]
+pub struct EnvValueHash([u8; SHA256_DIGEST_LEN]);
 
-    fn size_of(src: &Self::Src) -> WriteResult<usize> {
-        <str as SchemaWrite<C>>::size_of(src)
-    }
-
-    fn write(writer: impl Writer, src: &Self::Src) -> WriteResult<()> {
-        <str as SchemaWrite<C>>::write(writer, src)
+impl EnvValueHash {
+    #[must_use]
+    pub fn new(value: &str) -> Self {
+        let digest = Sha256::digest(value.as_bytes());
+        let mut bytes = [0; SHA256_DIGEST_LEN];
+        bytes.copy_from_slice(&digest);
+        Self(bytes)
     }
 }
 
-// SAFETY: Delegates to `&str`'s SchemaRead impl; dst is initialized on Ok.
-unsafe impl<'de, C: Config> SchemaRead<'de, C> for ArcStrSchema {
-    type Dst = Arc<str>;
-
-    fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
-        let s: &str = <&str as SchemaRead<'de, C>>::get(&mut reader)?;
-        dst.write(Arc::from(s));
+impl fmt::LowerHex for EnvValueHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.0 {
+            write!(f, "{byte:02x}")?;
+        }
         Ok(())
+    }
+}
+
+impl fmt::Display for EnvValueHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{SHA256_PREFIX}{self:x}")
+    }
+}
+
+impl fmt::Debug for EnvValueHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+// Serialization is only for plan snapshot testing; cache storage uses wincode.
+impl Serialize for EnvValueHash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(&format_args!("{SHA256_PREFIX}{self:x}"))
     }
 }
 
 /// Environment variable fingerprints for a task execution.
 ///
-/// Contents of this struct are only for fingerprinting and cache key computation (some of envs may be hashed for security).
+/// Contents of this struct are only for fingerprinting and cache key computation.
 /// The actual environment variables to be passed to the execution are in
 /// `SpawnCommand::spawn_envs`.
-#[derive(Debug, SchemaWrite, SchemaRead, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, SchemaWrite, SchemaRead, Serialize, PartialEq, Eq, Clone)]
 pub struct EnvFingerprints {
     /// Environment variables that should be fingerprinted for this execution.
     ///
     /// Use `BTreeMap` to ensure stable order.
-    #[wincode(with = "BTreeMap<Str, ArcStrSchema>")]
-    pub fingerprinted_envs: BTreeMap<Str, Arc<str>>,
+    pub fingerprinted_envs: BTreeMap<Str, EnvValueHash>,
 
     /// Environment variable names that should be passed through without values being fingerprinted.
     ///
@@ -105,10 +120,9 @@ impl EnvFingerprints {
             .or_insert_with(|| Arc::<OsStr>::from(OsStr::new("1")));
 
         // Resolve fingerprinted envs
-        let mut fingerprinted_envs = BTreeMap::<Str, Arc<str>>::new();
+        let mut fingerprinted_envs = BTreeMap::<Str, EnvValueHash>::new();
         if !env_config.fingerprinted_envs.is_empty() {
             let fingerprinted_env_patterns = EnvGlobSet::new(env_config.fingerprinted_envs.iter())?;
-            let sensitive_patterns = EnvGlobSet::new(SENSITIVE_PATTERNS.iter())?;
             for (name, value) in envs.iter() {
                 let Some(name) = name.to_str() else {
                     continue;
@@ -122,25 +136,7 @@ impl EnvFingerprints {
                         value: Arc::clone(value),
                     });
                 };
-                // Hash sensitive env values
-                let value: Arc<str> = if sensitive_patterns.is_match(name) {
-                    let mut hasher = Sha256::new();
-                    hasher.update(value.as_bytes());
-                    let digest = hasher.finalize();
-                    #[expect(
-                        clippy::disallowed_types,
-                        reason = "result is converted to Arc<str>, not Str"
-                    )]
-                    let mut hex = std::string::String::with_capacity(7 + digest.len() * 2);
-                    hex.push_str("sha256:");
-                    for b in digest {
-                        write!(&mut hex, "{b:02x}").unwrap();
-                    }
-                    hex.into()
-                } else {
-                    value.into()
-                };
-                fingerprinted_envs.insert(name.into(), value);
+                fingerprinted_envs.insert(name.into(), EnvValueHash::new(value));
             }
         }
 
@@ -174,29 +170,6 @@ fn resolve_envs_with_patterns<'a>(
     Ok(envs)
 }
 
-const SENSITIVE_PATTERNS: &[&str] = &[
-    "*_KEY",
-    "*_SECRET",
-    "*_TOKEN",
-    "*_PASSWORD",
-    "*_PASS",
-    "*_PWD",
-    "*_CREDENTIAL*",
-    "*_API_KEY",
-    "*_PRIVATE_*",
-    "AWS_*",
-    "GITHUB_*",
-    "NPM_*TOKEN",
-    "DATABASE_URL",
-    "MONGODB_URI",
-    "REDIS_URL",
-    "*_CERT*",
-    // Exact matches for known sensitive names
-    "PASSWORD",
-    "SECRET",
-    "TOKEN",
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +186,10 @@ mod tests {
             fingerprinted_envs: fingerprinted.iter().map(|s| Str::from(*s)).collect(),
             untracked_env: untracked.iter().map(|s| Str::from(*s)).collect(),
         }
+    }
+
+    fn hash(value: &str) -> EnvValueHash {
+        EnvValueHash::new(value)
     }
 
     #[test]
@@ -267,10 +244,7 @@ mod tests {
         let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
         assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "3");
-        assert_eq!(
-            result.fingerprinted_envs.get("FORCE_COLOR").map(std::convert::AsRef::as_ref),
-            Some("3")
-        );
+        assert_eq!(result.fingerprinted_envs.get("FORCE_COLOR").copied(), Some(hash("3")));
     }
 
     #[test]
@@ -285,10 +259,7 @@ mod tests {
         let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
         assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
-        assert_eq!(
-            result.fingerprinted_envs.get("FORCE_COLOR").map(std::convert::AsRef::as_ref),
-            Some("1")
-        );
+        assert_eq!(result.fingerprinted_envs.get("FORCE_COLOR").copied(), Some(hash("1")));
     }
 
     #[test]
@@ -347,12 +318,11 @@ mod tests {
         assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "APP1_TOKEN"));
         assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "APP2_TOKEN"));
 
-        // APP1_PASSWORD should be hashed
+        // All fingerprinted env values should be hashed.
         let password = result1.fingerprinted_envs.get("APP1_PASSWORD").unwrap();
-        assert_eq!(
-            password.as_ref(),
-            "sha256:17f1ef795d5663faa129f6fe3e5335e67ac7a701d1a70533a5f4b1635413a1aa"
-        );
+        assert_eq!(*password, hash("app1_password"));
+        let app_name = result1.fingerprinted_envs.get("APP1_NAME").unwrap();
+        assert_eq!(*app_name, hash("app1_value"));
 
         // Verify untracked envs are present in envs
         assert!(envs1.contains_key(OsStr::new("VSCODE_VAR")));
@@ -385,18 +355,9 @@ mod tests {
             "Unix should treat different cases as different variables"
         );
 
-        assert_eq!(
-            fingerprinted_envs.get("TEST_VAR").map(std::convert::AsRef::as_ref),
-            Some("uppercase")
-        );
-        assert_eq!(
-            fingerprinted_envs.get("test_var").map(std::convert::AsRef::as_ref),
-            Some("lowercase")
-        );
-        assert_eq!(
-            fingerprinted_envs.get("Test_Var").map(std::convert::AsRef::as_ref),
-            Some("mixed")
-        );
+        assert_eq!(fingerprinted_envs.get("TEST_VAR").copied(), Some(hash("uppercase")));
+        assert_eq!(fingerprinted_envs.get("test_var").copied(), Some(hash("lowercase")));
+        assert_eq!(fingerprinted_envs.get("Test_Var").copied(), Some(hash("mixed")));
     }
 
     #[test]
@@ -541,8 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sensitive_env_hashing() {
-        // Test various sensitive patterns
+    fn test_all_fingerprinted_envs_are_hashed() {
         let env_config = create_env_config(
             &["API_KEY", "MY_SECRET", "AUTH_TOKEN", "DB_PASSWORD", "NORMAL_VAR"],
             &[],
@@ -558,14 +518,17 @@ mod tests {
 
         let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        // Sensitive envs should be hashed
-        assert!(result.fingerprinted_envs.get("API_KEY").unwrap().starts_with("sha256:"));
-        assert!(result.fingerprinted_envs.get("MY_SECRET").unwrap().starts_with("sha256:"));
-        assert!(result.fingerprinted_envs.get("AUTH_TOKEN").unwrap().starts_with("sha256:"));
-        assert!(result.fingerprinted_envs.get("DB_PASSWORD").unwrap().starts_with("sha256:"));
-
-        // Non-sensitive env should NOT be hashed
-        assert_eq!(result.fingerprinted_envs.get("NORMAL_VAR").unwrap().as_ref(), "normal_value");
+        assert_eq!(result.fingerprinted_envs.get("API_KEY").copied(), Some(hash("secret_key_123")));
+        assert_eq!(result.fingerprinted_envs.get("MY_SECRET").copied(), Some(hash("secret_value")));
+        assert_eq!(result.fingerprinted_envs.get("AUTH_TOKEN").copied(), Some(hash("token_abc")));
+        assert_eq!(
+            result.fingerprinted_envs.get("DB_PASSWORD").copied(),
+            Some(hash("password123"))
+        );
+        assert_eq!(
+            result.fingerprinted_envs.get("NORMAL_VAR").copied(),
+            Some(hash("normal_value"))
+        );
     }
 
     #[test]

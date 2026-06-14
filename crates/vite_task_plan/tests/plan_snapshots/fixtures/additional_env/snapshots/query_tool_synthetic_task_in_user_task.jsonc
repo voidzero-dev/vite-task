@@ -40,7 +40,7 @@
                       ],
                       "env_fingerprints": {
                         "fingerprinted_envs": {
-                          "TEST_VAR": "hello_world"
+                          "TEST_VAR": "sha256:35072c1ae546350e0bfa7ab11d49dc6f129e72ccd57ec7eb671225bbd197c8f1"
                         },
                         "untracked_env_config": [
                           "<default untracked envs>"

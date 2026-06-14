@@ -109,9 +109,11 @@ pub struct SpawnFingerprint {
 }
 
 pub struct EnvFingerprints {
-    pub fingerprinted_envs: BTreeMap<Str, Arc<str>>,
+    pub fingerprinted_envs: BTreeMap<Str, EnvValueHash>,
     pub untracked_env_config: Arc<[Str]>,
 }
+
+pub struct EnvValueHash([u8; 32]);
 
 enum ProgramFingerprint {
     OutsideWorkspace { program_name: Str },
@@ -132,7 +134,7 @@ The `fingerprinted_envs` field in `EnvFingerprints` is crucial for cache correct
 
 - Only includes env vars explicitly declared in the task's `env` array
 - Does NOT include untracked envs (PATH, CI, etc.)
-- These env vars become part of the cache key
+- These env var names and SHA-256 value hashes become part of the cache key
 
 When a task runs:
 

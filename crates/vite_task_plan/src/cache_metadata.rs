@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, sync::Arc};
 
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use vite_path::RelativePathBuf;
 use vite_str::{self, Str};
 use vite_task_graph::config::ResolvedGlobConfig;
@@ -84,7 +84,7 @@ pub struct CacheMetadata {
 /// - The resolver provides envs which become part of the fingerprint
 /// - If resolver provides different envs between runs, cache breaks
 /// - Each built-in task type must have unique task name to avoid cache collision
-#[derive(SchemaWrite, SchemaRead, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(SchemaWrite, SchemaRead, Debug, Serialize, PartialEq, Eq, Clone)]
 pub struct SpawnFingerprint {
     pub(crate) cwd: RelativePathBuf,
     pub(crate) program_fingerprint: ProgramFingerprint,
@@ -119,7 +119,7 @@ impl SpawnFingerprint {
 }
 
 /// The program fingerprint used in `SpawnFingerprint`
-#[derive(SchemaWrite, SchemaRead, Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(SchemaWrite, SchemaRead, Debug, Serialize, PartialEq, Eq, Clone)]
 pub(crate) enum ProgramFingerprint {
     /// If the program is outside the workspace, fingerprint by its name only (like `node`, `npm`, etc)
     OutsideWorkspace { program_name: Str },
