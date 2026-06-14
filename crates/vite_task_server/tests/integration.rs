@@ -1,13 +1,20 @@
 use std::{
     ffi::{OsStr, OsString},
-    io,
+    io::{self, Read, Write},
     sync::Arc,
     thread,
 };
 
+use native_str::NativeStr;
+
+#[cfg(unix)]
+type RawStream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type RawStream = std::fs::File;
 use rustc_hash::FxHashMap;
 use tokio::runtime::Builder;
 use vite_task_client::Client;
+use vite_task_ipc_shared::Request;
 use vite_task_server::{Error, Recorder, Reports, ServerHandle, serve};
 
 fn env_map(pairs: &[(&str, &str)]) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
@@ -57,15 +64,41 @@ fn flush(client: &Client) {
     let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__"), false).unwrap();
 }
 
+#[cfg(unix)]
+fn connect_raw(name: &OsStr) -> RawStream {
+    std::os::unix::net::UnixStream::connect(name).expect("connect raw")
+}
+
+#[cfg(windows)]
+fn connect_raw(name: &OsStr) -> RawStream {
+    std::fs::OpenOptions::new().read(true).write(true).open(name).expect("connect raw")
+}
+
+fn send_frame(stream: &mut RawStream, request: &Request<'_>) {
+    let bytes = wincode::serialize(request).expect("serialize");
+    let len = u32::try_from(bytes.len()).expect("frame length fits u32");
+    stream.write_all(&len.to_le_bytes()).expect("write len");
+    stream.write_all(&bytes).expect("write body");
+    stream.flush().expect("flush");
+}
+
 #[test]
 fn single_client_fire_and_forget() {
+    #[cfg(unix)]
+    let in_path = "/tmp/in.txt";
+    #[cfg(windows)]
+    let in_path = r"C:\tmp\in.txt";
+
     let reports = run_with_server(env_map(&[]), |envs| {
         let client = connect(&envs);
+        client.ignore_input(OsStr::new(in_path)).unwrap();
         client.disable_cache().unwrap();
         flush(&client);
     })
     .expect("driver returned error");
 
+    let inputs: Vec<_> = reports.ignored_inputs.iter().map(|p| p.as_path().as_os_str()).collect();
+    assert_eq!(inputs, vec![OsStr::new(in_path)]);
     assert!(reports.cache_disabled);
 }
 
@@ -109,12 +142,20 @@ fn get_env_untracked_then_tracked_records_once() {
 
 #[test]
 fn concurrent_clients() {
+    #[cfg(unix)]
+    let paths = ["/tmp/worker_0", "/tmp/worker_1", "/tmp/worker_2", "/tmp/worker_3"];
+    #[cfg(windows)]
+    let paths = [r"C:\tmp\worker_0", r"C:\tmp\worker_1", r"C:\tmp\worker_2", r"C:\tmp\worker_3"];
+
     let reports = run_with_server(env_map(&[("SHARED", "value")]), move |envs| {
-        let threads: Vec<_> = (0..4)
-            .map(|_| {
+        let threads: Vec<_> = paths
+            .iter()
+            .map(|path| {
                 let envs = envs.clone();
+                let path = *path;
                 thread::spawn(move || {
                     let client = connect(&envs);
+                    client.ignore_input(OsStr::new(path)).unwrap();
                     let value = client.get_env(OsStr::new("SHARED"), true).unwrap();
                     assert_eq!(value.as_deref(), Some(OsStr::new("value")));
                 })
@@ -127,8 +168,48 @@ fn concurrent_clients() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
+    assert_eq!(reports.ignored_inputs.len(), 4);
     let shared = reports.tracked_get_env.get(OsStr::new("SHARED")).expect("recorded");
     assert_eq!(shared.as_deref(), Some(OsStr::new("value")));
+}
+
+#[test]
+fn relative_input_joined_with_cwd() {
+    let cwd = vite_path::current_dir().expect("cwd");
+    let expected = cwd.as_path().join("sub/file.txt");
+
+    let reports = run_with_server(env_map(&[]), |envs| {
+        let client = connect(&envs);
+        client.ignore_input(OsStr::new("sub/file.txt")).unwrap();
+        flush(&client);
+    })
+    .expect("driver returned error");
+
+    let inputs: Vec<_> = reports.ignored_inputs.iter().map(|p| p.as_path().as_os_str()).collect();
+    assert_eq!(inputs, vec![expected.as_os_str()]);
+}
+
+#[test]
+fn server_returns_error_on_non_absolute_path() {
+    let err = run_with_server(env_map(&[]), |envs| {
+        let name = &envs[0].1;
+        let mut stream = connect_raw(name);
+
+        let ns: Box<NativeStr> = OsStr::new("relative/path").into();
+        send_frame(&mut stream, &Request::IgnoreInput(&ns));
+
+        let mut buf = [0u8; 1];
+        let read_err = stream.read_exact(&mut buf).expect_err("server should close connection");
+        assert_eq!(read_err.kind(), io::ErrorKind::UnexpectedEof);
+    })
+    .expect_err("driver should surface the protocol error");
+
+    match err {
+        Error::NonAbsolutePath { path } => {
+            assert_eq!(path, OsStr::new("relative/path"));
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
 }
 
 #[test]

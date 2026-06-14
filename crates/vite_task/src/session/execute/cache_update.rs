@@ -3,6 +3,7 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use rustc_hash::FxHashSet;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use vite_task_plan::cache_metadata::{CacheMetadata, EnvValueHash};
@@ -67,6 +68,12 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested), None);
     }
 
+    // Tool-reported paths to exclude from auto input tracking. Absolute paths
+    // are normalized to workspace-relative; anything outside is dropped.
+    let ignored_input_rels: FxHashSet<RelativePathBuf> = reports
+        .map(|r| normalize_ignored_paths(&r.ignored_inputs, workspace_root))
+        .unwrap_or_default();
+
     if cancelled {
         // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy.
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None);
@@ -77,7 +84,8 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
     }
 
-    let fspy_outcome = observe_fspy(outcome, input_negative_globs, workspace_root);
+    let fspy_outcome =
+        observe_fspy(outcome, input_negative_globs, &ignored_input_rels, workspace_root);
 
     if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome {
         // fspy-inferred read-write overlap: the task wrote to a file it also
@@ -167,6 +175,7 @@ pub(super) async fn update_cache(
 fn observe_fspy(
     outcome: &ChildOutcome,
     input_negative_globs: Option<&[wax::Glob<'static>]>,
+    ignored_input_rels: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
 ) -> Option<TrackingOutcome> {
     #[cfg(fspy)]
@@ -175,14 +184,19 @@ fn observe_fspy(
 
         outcome.path_accesses.as_ref().zip(input_negative_globs).map(|(raw, negatives)| {
             let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, negatives);
+            let path_reads: HashMap<RelativePathBuf, PathRead> = tracked
+                .path_reads
+                .into_iter()
+                .filter(|(path, _)| !is_ignored(path, ignored_input_rels))
+                .collect();
             let read_write_overlap =
-                tracked.path_reads.keys().find(|p| tracked.path_writes.contains(*p)).cloned();
-            TrackingOutcome { path_reads: tracked.path_reads, read_write_overlap }
+                path_reads.keys().find(|p| tracked.path_writes.contains(*p)).cloned();
+            TrackingOutcome { path_reads, read_write_overlap }
         })
     }
     #[cfg(not(fspy))]
     {
-        let _ = (outcome, input_negative_globs, workspace_root);
+        let _ = (outcome, input_negative_globs, ignored_input_rels, workspace_root);
         None
     }
 }
@@ -199,6 +213,27 @@ fn collect_tracked_reports(
         })
         .transpose()
         .map(Option::unwrap_or_default)
+}
+
+/// Normalize tool-reported absolute paths to cleaned workspace-relative paths.
+/// Paths outside the workspace are dropped — they can't contribute to inputs.
+fn normalize_ignored_paths(
+    paths: &FxHashSet<Arc<AbsolutePath>>,
+    workspace_root: &AbsolutePath,
+) -> FxHashSet<RelativePathBuf> {
+    paths
+        .iter()
+        .filter_map(|p| p.strip_prefix(workspace_root).ok().flatten()?.clean().ok())
+        .collect()
+}
+
+/// Whether `path` is covered by any `ignored` entry. An ignored entry matches
+/// itself (exact file) and everything under it (directory subtree).
+fn is_ignored(path: &RelativePathBuf, ignored: &FxHashSet<RelativePathBuf>) -> bool {
+    if ignored.is_empty() {
+        return false;
+    }
+    ignored.contains(path) || ignored.iter().any(|ig| path.strip_prefix(ig).is_some())
 }
 
 /// Select tool-reported env records to embed in the post-run fingerprint.
@@ -286,4 +321,29 @@ fn collect_and_archive_outputs(
     archive::create_output_archive(workspace_root, &output_files, &archive_path)?;
 
     Ok(Some(archive_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use rustc_hash::FxHashSet;
+    use vite_path::{AbsolutePath, RelativePathBuf};
+
+    use super::normalize_ignored_paths;
+
+    #[test]
+    fn normalize_ignored_paths_cleans_relative_components() {
+        let workspace_root =
+            AbsolutePath::new(if cfg!(windows) { r"C:\repo" } else { "/repo" }).unwrap();
+        let ignored =
+            workspace_root.join(if cfg!(windows) { r"pkg\..\cache" } else { "pkg/../cache" });
+        let mut ignored_paths = FxHashSet::default();
+        ignored_paths.insert(Arc::<AbsolutePath>::from(ignored));
+
+        let normalized = normalize_ignored_paths(&ignored_paths, workspace_root);
+
+        let expected = RelativePathBuf::new("cache").unwrap();
+        assert!(normalized.contains(&expected));
+    }
 }

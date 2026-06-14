@@ -7,6 +7,7 @@ use std::{
 
 use native_str::NativeStr;
 use rustc_hash::FxHashMap;
+use vite_path::{self, AbsolutePath};
 use vite_task_ipc_shared::{GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request};
 use wincode::{SchemaRead, config::DefaultConfig};
 
@@ -46,10 +47,25 @@ impl Client {
         Self { stream: RefCell::new(stream), scratch: RefCell::new(Vec::new()) }
     }
 
+    /// `path` can be a file or a directory; for a directory, all files inside
+    /// it are ignored. Relative paths are resolved against the current working
+    /// directory before being sent to the runner.
+    ///
     /// Fire-and-forget: the call returns once the request is flushed to the
     /// kernel pipe buffer; the runner processes it during its drain phase
     /// after this process exits. See the `Request` type in the IPC protocol
     /// crate for why this is safe.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails to send, or if a relative `path`
+    /// cannot be resolved against the current working directory.
+    pub fn ignore_input(&self, path: &OsStr) -> io::Result<()> {
+        let ns = resolve_path(path)?;
+        self.send(&Request::IgnoreInput(&ns))
+    }
+
+    /// Fire-and-forget — see [`Self::ignore_input`].
     ///
     /// # Errors
     ///
@@ -127,6 +143,16 @@ impl Client {
         wincode::deserialize_exact(&scratch)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
+}
+
+fn resolve_path(path: &OsStr) -> io::Result<Box<NativeStr>> {
+    if let Some(abs) = AbsolutePath::new(path) {
+        return Ok(Box::<NativeStr>::from(abs.as_path().as_os_str()));
+    }
+
+    let mut absolute = vite_path::current_dir()?;
+    absolute.push(path);
+    Ok(Box::<NativeStr>::from(absolute.as_absolute_path().as_path().as_os_str()))
 }
 
 #[cfg(unix)]

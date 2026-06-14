@@ -1,4 +1,79 @@
 [[e2e]]
+name = "ignore_input_keeps_cache_valid"
+comment = """
+Exercises `ignoreInput` through `@voidzero-dev/vite-task-client`. The runner treats `cache_like/` as non-input for auto-inferred reads, but declared inputs under that path stay in the configured cache key.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vtt",
+    "write-file",
+    "cache_like/input.txt",
+    "before",
+  ], comment = "seed the file the task will read and ignore" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-input",
+  ], comment = "populate the cache" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "cache_like/input.txt",
+    "after",
+  ], comment = "mutate the ignored input — would invalidate if tracked" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-input",
+  ], comment = "cache hit: cache_like/ was ignored via ignoreInput" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "cache_like/input.txt",
+    "manual-before",
+  ], comment = "seed the declared input for input: [cache_like/input.txt]" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-input-manual-input",
+  ], comment = "populate the cache with the manual-only input fingerprint" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "cache_like/input.txt",
+    "manual-after",
+  ], comment = "mutate the declared input for input: [cache_like/input.txt]" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-input-manual-input",
+  ], comment = "cache miss: manual input config wins over ignoreInput" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "cache_like/input.txt",
+    "auto-manual-before",
+  ], comment = "seed the declared input for input: [{ auto: true }, cache_like/input.txt]" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-input-auto-manual-input",
+  ], comment = "populate the cache with the auto-plus-manual input fingerprint" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "cache_like/input.txt",
+    "auto-manual-after",
+  ], comment = "mutate the declared input for input: [{ auto: true }, cache_like/input.txt]" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-input-auto-manual-input",
+  ], comment = "cache miss: explicit input still wins when auto inference is also enabled" },
+]
+
+[[e2e]]
 name = "disable_cache_forces_reexecution"
 comment = """
 Exercises `disableCache`. The tool asks the runner not to cache this run,

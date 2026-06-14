@@ -74,11 +74,11 @@ pub struct RunnerClient {
 
 #[napi]
 impl RunnerClient {
-    /// No-op for now: the runner cannot apply ignore reports yet. Becomes a
-    /// real request once auto output tracking can consume them.
     #[napi]
-    pub fn ignore_input(&self, _path: String) -> Result<()> {
-        Ok(())
+    pub fn ignore_input(&self, path: String) -> Result<()> {
+        self.client
+            .ignore_input(OsStr::new(&path))
+            .map_err(|err| err_string(vite_str::format!("{err}")))
     }
 
     /// No-op for now — see [`Self::ignore_input`].

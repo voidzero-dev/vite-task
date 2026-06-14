@@ -16,9 +16,9 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 
 /// IPC request frame sent by tools to the runner.
 ///
-/// `DisableCache` is fire-and-forget: the runner processes it when it
-/// arrives and never writes a response. `GetEnv` and `GetEnvs` are
-/// round-trips and pair with the matching response types below.
+/// `IgnoreInput` and `DisableCache` are fire-and-forget: the runner processes
+/// them when they arrive and never writes a response. `GetEnv` and `GetEnvs`
+/// are round-trips and pair with the matching response types below.
 ///
 /// Fire-and-forget is safe because nothing in the runner observes individual
 /// IPC events live — the recorded set is only consumed *after* the per-task
@@ -27,6 +27,7 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 /// will still consume every buffered frame.
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub enum Request<'a> {
+    IgnoreInput(&'a NativeStr),
     GetEnv { name: &'a NativeStr, tracked: bool },
     GetEnvs { pattern: &'a str, tracked: bool },
     DisableCache,

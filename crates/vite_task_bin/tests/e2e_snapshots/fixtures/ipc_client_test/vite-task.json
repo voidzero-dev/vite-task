@@ -1,5 +1,21 @@
 {
   "tasks": {
+    "ignore-input": {
+      "command": "node scripts/ignore_input.mjs",
+      "cache": true
+    },
+    "ignore-input-manual-input": {
+      "command": "node scripts/ignore_input.mjs",
+      "input": ["cache_like/input.txt"],
+      "output": [],
+      "cache": true
+    },
+    "ignore-input-auto-manual-input": {
+      "command": "node scripts/ignore_input.mjs",
+      "input": [{ "auto": true }, "cache_like/input.txt"],
+      "output": [],
+      "cache": true
+    },
     "disable-cache": {
       "command": "node scripts/disable_cache.mjs",
       "cache": true

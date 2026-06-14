@@ -4324,6 +4324,7 @@ version = "0.0.0"
 dependencies = [
  "native_str",
  "rustc-hash",
+ "vite_path",
  "vite_task_ipc_shared",
  "winapi",
  "wincode",
@@ -4415,6 +4416,7 @@ name = "vite_task_server"
 version = "0.0.0"
 dependencies = [
  "futures",
+ "native_str",
  "rustc-hash",
  "tempfile",
  "thiserror 2.0.18",
@@ -4423,6 +4425,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vite_glob",
+ "vite_path",
  "vite_task_client",
  "vite_task_ipc_shared",
  "wincode",

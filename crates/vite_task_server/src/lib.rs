@@ -6,13 +6,16 @@ use std::{
 };
 
 use futures::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
-use rustc_hash::FxHashMap;
+use native_str::NativeStr;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
+use vite_path::AbsolutePath;
 use vite_task_ipc_shared::{GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request};
 use wincode::{SchemaWrite, config::DefaultConfig};
 
 pub trait Handler {
+    fn ignore_input(&mut self, path: &Arc<AbsolutePath>);
     fn disable_cache(&mut self);
     fn get_env(&mut self, name: &OsStr, tracked: bool) -> Option<Arc<OsStr>>;
     /// Returns the subset of the env map whose names match `pattern` as a glob.
@@ -39,11 +42,14 @@ pub enum Error {
     #[error("invalid message from the task")]
     InvalidRequest(#[source] wincode::ReadError),
 
-    #[error("failed to send response to the task")]
-    WriteResponse(#[source] io::Error),
+    #[error("non-absolute path from the task: {path:?}")]
+    NonAbsolutePath { path: OsString },
 
     #[error("invalid glob pattern from the task: {:?}", .0.pattern)]
     InvalidGlob(Box<InvalidGlob>),
+
+    #[error("failed to send response to the task")]
+    WriteResponse(#[source] io::Error),
 }
 
 /// Payload for [`Error::InvalidGlob`]. Boxed so the `Error` enum stays small.
@@ -59,6 +65,7 @@ pub struct InvalidGlob {
 /// Call [`Recorder::into_reports`] after the driver future completes to
 /// recover the collected [`Reports`].
 pub struct Recorder {
+    ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
     cache_disabled: bool,
     tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
     tracked_get_envs: FxHashMap<Arc<str>, EnvGlobRecord>,
@@ -79,6 +86,7 @@ pub struct EnvGlobRecord {
 /// The data collected by a [`Recorder`] over the server's lifetime.
 #[derive(Debug, Default)]
 pub struct Reports {
+    pub ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
     pub cache_disabled: bool,
     pub tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
     pub tracked_get_envs: FxHashMap<Arc<str>, EnvGlobRecord>,
@@ -88,6 +96,7 @@ impl Recorder {
     #[must_use]
     pub fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
         Self {
+            ignored_inputs: FxHashSet::default(),
             cache_disabled: false,
             tracked_get_env: FxHashMap::default(),
             tracked_get_envs: FxHashMap::default(),
@@ -98,6 +107,7 @@ impl Recorder {
     #[must_use]
     pub fn into_reports(self) -> Reports {
         Reports {
+            ignored_inputs: self.ignored_inputs,
             cache_disabled: self.cache_disabled,
             tracked_get_env: self.tracked_get_env,
             tracked_get_envs: self.tracked_get_envs,
@@ -106,6 +116,10 @@ impl Recorder {
 }
 
 impl Handler for Recorder {
+    fn ignore_input(&mut self, path: &Arc<AbsolutePath>) {
+        self.ignored_inputs.insert(Arc::clone(path));
+    }
+
     fn disable_cache(&mut self) {
         self.cache_disabled = true;
     }
@@ -360,11 +374,16 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
         let request: Request<'_> =
             wincode::deserialize_exact(&buf).map_err(Error::InvalidRequest)?;
 
-        // The fire-and-forget branch (`DisableCache`) intentionally writes no
-        // response. Nothing in the runner observes individual IPC events
-        // live; the recorded set is collected after this driver drains. See
-        // `Request` in `vite_task_ipc_shared` for the rationale.
+        // Fire-and-forget branches (`IgnoreInput`, `DisableCache`)
+        // intentionally write no response. Nothing in the runner observes
+        // individual IPC events live; the recorded set is collected after
+        // this driver drains. See `Request` in `vite_task_ipc_shared` for
+        // the rationale.
         match request {
+            Request::IgnoreInput(ns) => {
+                let path = native_str_to_abs_path(ns)?;
+                handler.borrow_mut().ignore_input(&path);
+            }
             Request::DisableCache => {
                 handler.borrow_mut().disable_cache();
             }
@@ -388,6 +407,13 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
             }
         }
     }
+}
+
+fn native_str_to_abs_path(ns: &NativeStr) -> Result<Arc<AbsolutePath>, Error> {
+    let os_str = ns.to_cow_os_str();
+    AbsolutePath::new(&*os_str)
+        .map(Arc::from)
+        .ok_or_else(|| Error::NonAbsolutePath { path: os_str.into_owned() })
 }
 
 async fn read_frame(stream: &mut Stream, buf: &mut Vec<u8>) -> io::Result<()> {
