@@ -93,11 +93,10 @@ impl RunnerClient {
     }
 
     #[napi]
-    pub fn get_env(&self, name: String, options: Option<GetEnvOptions>) -> Result<Option<String>> {
-        let tracked = options.and_then(|o| o.tracked).unwrap_or(true);
+    pub fn get_env(&self, name: String, _options: Option<GetEnvOptions>) -> Result<Option<String>> {
         let value = self
             .client
-            .get_env(OsStr::new(&name), tracked)
+            .get_env(OsStr::new(&name))
             .map_err(|err| err_string(vite_str::format!("{err}")))?;
         value.map_or(Ok(None), |value| {
             value.to_str().map(|s| Some(s.to_owned())).ok_or_else(|| {

@@ -17,7 +17,7 @@ use vite_str::Str;
 use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
 use crate::session::{
     cache::{
-        CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, SpawnFingerprintChange,
+        CacheMiss, FingerprintMismatch, InputChangeKind, SpawnFingerprintChange,
         detect_spawn_fingerprint_changes, format_input_change_str, format_spawn_change,
     },
     event::{
@@ -135,8 +135,6 @@ pub enum SavedCacheMissReason {
     ConfigChanged,
     /// An input file or folder changed.
     InputChanged { kind: InputChangeKind, path: Str },
-    /// A runner-aware tool reported a tracked env var that changed between runs.
-    TrackedEnvChanged(EnvMismatch),
 }
 
 /// An execution error, serializable for persistence.
@@ -279,9 +277,6 @@ impl SavedCacheMissReason {
                 }
                 FingerprintMismatch::InputChanged { kind, path } => {
                     Self::InputChanged { kind: *kind, path: Str::from(path.as_str()) }
-                }
-                FingerprintMismatch::TrackedEnvChanged(mismatch) => {
-                    Self::TrackedEnvChanged(mismatch.clone())
                 }
             },
         }
@@ -571,9 +566,6 @@ impl TaskResult {
                     SavedCacheMissReason::InputChanged { kind, path } => {
                         let desc = format_input_change_str(*kind, path.as_str());
                         vite_str::format!("→ Cache miss: {desc}")
-                    }
-                    SavedCacheMissReason::TrackedEnvChanged(mismatch) => {
-                        vite_str::format!("→ Cache miss: {mismatch}")
                     }
                 },
             },

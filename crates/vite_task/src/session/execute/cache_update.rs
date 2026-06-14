@@ -1,7 +1,7 @@
 //! Post-run cache update: decide whether a finished spawn may be cached and,
 //! if so, store its fingerprint, captured output, and output archive.
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
@@ -97,19 +97,13 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None);
     }
 
-    // Collect tool-reported tracked envs for the post-run fingerprint. Env
-    // names that the user already declared are skipped because their values
-    // are already part of the spawn fingerprint.
-    let tracked_envs = reports.map(|r| collect_tracked_envs(r, metadata)).unwrap_or_default();
-
     // Paths already in globbed_inputs are skipped: the overlap check above
     // guarantees no input modification, so the prerun hash is the correct
     // post-exec hash.
     let empty_path_reads = HashMap::default();
     let path_reads = fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
     let post_run_fingerprint =
-        match PostRunFingerprint::create(path_reads, workspace_root, &globbed_inputs, tracked_envs)
-        {
+        match PostRunFingerprint::create(path_reads, workspace_root, &globbed_inputs) {
             Ok(fingerprint) => fingerprint,
             Err(err) => {
                 return (
@@ -170,26 +164,6 @@ fn observe_fspy(
         let _ = (outcome, input_negative_globs, workspace_root);
         None
     }
-}
-
-/// Select tool-reported env records to embed in the post-run fingerprint.
-/// Only `tracked: true` records are included, and names that the user already
-/// declared as fingerprinted are skipped.
-fn collect_tracked_envs(reports: &Reports, metadata: &CacheMetadata) -> BTreeMap<Str, Option<Str>> {
-    let fingerprinted = &metadata.spawn_fingerprint.env_fingerprints().fingerprinted_envs;
-    reports
-        .env_records
-        .iter()
-        .filter(|(_, record)| record.tracked)
-        .filter_map(|(name, record)| {
-            let name_str = name.to_str()?;
-            if fingerprinted.contains_key(name_str) {
-                return None;
-            }
-            let value = record.value.as_ref().and_then(|value| value.to_str().map(Str::from));
-            Some((Str::from(name_str), value))
-        })
-        .collect()
 }
 
 /// Collect output files matching the configured globs and create a tar.zst

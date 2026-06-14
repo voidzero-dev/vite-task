@@ -5,23 +5,18 @@
 
 use std::{
     collections::BTreeMap,
-    ffi::OsStr,
     fs::File,
     io::{self, BufRead},
     sync::Arc,
 };
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::{
-    collections::HashMap,
-    session::cache::{EnvMismatch, InputChangeKind},
-};
+use crate::{collections::HashMap, session::cache::InputChangeKind};
 
 /// Path read access info
 #[derive(Debug, Clone, Copy)]
@@ -36,21 +31,6 @@ pub struct PostRunFingerprint {
     /// Paths inferred from fspy during execution with their content fingerprints.
     /// Only populated when `input_config.includes_auto` is true.
     pub inferred_inputs: HashMap<RelativePathBuf, PathFingerprint>,
-
-    /// Env vars observed via runner-aware IPC `getEnv` with `tracked: true`.
-    /// Key is the env name; value is the env value at execution time, or
-    /// `None` if unset. Validated at cache lookup against the same plan env
-    /// context that served the original request.
-    pub tracked_envs: BTreeMap<Str, Option<Str>>,
-}
-
-/// A mismatch between the stored post-run fingerprint and the current state.
-#[derive(Debug, Clone)]
-pub enum PostRunMismatch {
-    /// An inferred input file or directory changed.
-    InputChanged { kind: InputChangeKind, path: RelativePathBuf },
-    /// A tool-tracked env var changed value, appeared, or disappeared.
-    TrackedEnvChanged(EnvMismatch),
 }
 
 /// Fingerprint for a single path (file or directory)
@@ -89,13 +69,11 @@ impl PostRunFingerprint {
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
     /// * `base_dir` - Workspace root for resolving relative paths
     /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
-    /// * `tracked_envs` - Tool-requested env vars (name -> value), validated on lookup
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        tracked_envs: BTreeMap<Str, Option<Str>>,
     ) -> anyhow::Result<Self> {
         let inferred_inputs = inferred_path_reads
             .par_iter()
@@ -107,17 +85,16 @@ impl PostRunFingerprint {
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
-        Ok(Self { inferred_inputs, tracked_envs })
+        Ok(Self { inferred_inputs })
     }
 
-    /// Validates the fingerprint against current filesystem state and env
-    /// context. Returns `Some(mismatch)` if anything changed, `None` if all valid.
+    /// Validates the fingerprint against current filesystem state.
+    /// Returns `Some((kind, path))` if an input changed, `None` if all valid.
     #[tracing::instrument(level = "debug", skip_all, name = "validate_post_run_fingerprint")]
     pub fn validate(
         &self,
         base_dir: &AbsolutePath,
-        envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
-    ) -> anyhow::Result<Option<PostRunMismatch>> {
+    ) -> anyhow::Result<Option<(InputChangeKind, RelativePathBuf)>> {
         let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
             |(input_relative_path, path_fingerprint)| {
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
@@ -143,25 +120,11 @@ impl PostRunFingerprint {
                     } else {
                         input_relative_path.clone()
                     };
-                    Some(Ok(PostRunMismatch::InputChanged { kind, path }))
+                    Some(Ok((kind, path)))
                 }
             },
         );
-        if let Some(result) = input_mismatch {
-            return result.map(Some);
-        }
-
-        for (name, stored_value) in &self.tracked_envs {
-            let current_value =
-                envs.get(OsStr::new(name.as_str())).and_then(|value| value.to_str().map(Str::from));
-            if let Some(mismatch) =
-                EnvMismatch::compare(name, stored_value.as_ref(), current_value.as_ref())
-            {
-                return Ok(Some(PostRunMismatch::TrackedEnvChanged(mismatch)));
-            }
-        }
-
-        Ok(None)
+        input_mismatch.transpose()
     }
 }
 
