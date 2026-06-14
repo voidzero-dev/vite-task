@@ -40,6 +40,8 @@ If `gt` (Graphite CLI) is available in PATH, use it instead of `gh` to create pu
 
 PR titles must use [Conventional Commits](https://www.conventionalcommits.org) format: `type(scope): summary` (scope is optional), e.g. `feat(cache): add LRU eviction`, `fix: handle symlink loops`, `test(e2e): add ctrl-c propagation test`.
 
+PR descriptions must include a `Motivation` section. If the motivation is not clear from the request or surrounding context, ask the user before creating the PR. Do not add `Validation`, `Test plan`, or similar testing/verification sections.
+
 ## Tests
 
 ```bash
