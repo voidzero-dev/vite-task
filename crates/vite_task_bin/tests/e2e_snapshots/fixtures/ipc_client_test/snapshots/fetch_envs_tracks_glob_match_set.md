@@ -40,7 +40,7 @@ PROBE_B=b
 add: PROBE_C is new under the glob -> cache miss
 
 ```
-$ node scripts/fetch_envs.mjs ○ cache miss: env 'PROBE_C' changed, executing
+$ node scripts/fetch_envs.mjs ○ cache miss: env 'PROBE_C' added, executing
 PROBE_A=changed
 PROBE_B=b
 PROBE_C=c
@@ -51,7 +51,7 @@ PROBE_C=c
 remove: PROBE_A dropped from the match-set -> cache miss
 
 ```
-$ node scripts/fetch_envs.mjs ○ cache miss: env 'PROBE_A' changed, executing
+$ node scripts/fetch_envs.mjs ○ cache miss: env 'PROBE_A' removed, executing
 PROBE_B=b
 PROBE_C=c
 ```
