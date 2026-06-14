@@ -196,6 +196,35 @@ steps = [
 ]
 
 [[e2e]]
+name = "default_auto_output_restores_written_files"
+comment = """
+Exercises the default output behavior. When `output` is omitted, the runner automatically tracks writes, archives the generated file, and restores it on cache hit.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-default",
+  ], comment = "first run writes dist/default.txt and archives fspy-tracked outputs" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/default.txt",
+  ], comment = "remove the output so restoration is observable" },
+  { argv = [
+    "vt",
+    "run",
+    "auto-output-default",
+  ], comment = "cache hit: default auto output is restored" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/default.txt",
+  ], comment = "restored from the default auto output archive" },
+]
+
+[[e2e]]
 name = "disable_cache_forces_reexecution"
 comment = """
 Exercises `disableCache`. The tool asks the runner not to cache this run,

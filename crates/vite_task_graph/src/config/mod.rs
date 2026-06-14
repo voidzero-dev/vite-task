@@ -198,8 +198,8 @@ impl ResolvedGlobConfig {
 
     /// Resolve from user output configuration, making glob patterns workspace-root-relative.
     ///
-    /// Unlike [`Self::from_user_config`], `None` and `Some([])` both produce an
-    /// empty config with `includes_auto = false` (no output archiving).
+    /// Unlike [`Self::from_user_config`], `None` defaults to automatic output
+    /// tracking while `Some([])` disables output archiving.
     ///
     /// # Errors
     ///
@@ -215,7 +215,7 @@ impl ResolvedGlobConfig {
         let mut includes_auto = false;
 
         let Some(entries) = user_outputs else {
-            return Ok(Self { includes_auto: false, positive_globs, negative_globs });
+            return Ok(Self::default_auto());
         };
 
         for entry in entries {

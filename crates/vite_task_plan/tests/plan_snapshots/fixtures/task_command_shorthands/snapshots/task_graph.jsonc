@@ -32,7 +32,7 @@
               "negative_globs": []
             },
             "output_config": {
-              "includes_auto": false,
+              "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
             }
@@ -75,7 +75,7 @@
               "negative_globs": []
             },
             "output_config": {
-              "includes_auto": false,
+              "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
             }
@@ -117,7 +117,7 @@
               "negative_globs": []
             },
             "output_config": {
-              "includes_auto": false,
+              "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
             }
@@ -159,7 +159,7 @@
               "negative_globs": []
             },
             "output_config": {
-              "includes_auto": false,
+              "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
             }
@@ -201,7 +201,7 @@
               "negative_globs": []
             },
             "output_config": {
-              "includes_auto": false,
+              "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
             }
@@ -244,7 +244,7 @@
               "negative_globs": []
             },
             "output_config": {
-              "includes_auto": false,
+              "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
             }
@@ -290,7 +290,7 @@
               "negative_globs": []
             },
             "output_config": {
-              "includes_auto": false,
+              "includes_auto": true,
               "positive_globs": [],
               "negative_globs": []
             }

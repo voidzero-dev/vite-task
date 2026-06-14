@@ -62,6 +62,7 @@
     "check-fspy-env-without-auto": {
       "command": "vtt print-env FSPY",
       "input": ["src/**/*.ts"],
+      "output": [],
       "cache": true
     },
     "folder-input": {

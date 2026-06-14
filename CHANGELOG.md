@@ -3,6 +3,7 @@
 - **Added** Runner-aware tools can now call `ignoreInput(path)` to exclude non-semantic reads from auto-inferred task cache inputs.
 - **Added** Runner-aware tools can now call `ignoreOutput(path)` to exclude non-semantic writes from read/write overlap checks.
 - **Added** Cached tasks can opt into automatic output restoration with `output: [{ auto: true }]`.
+- **Changed** Cached tasks now automatically restore written output files when `output` is omitted; use `output: []` to disable output restoration.
 - **Changed** Tracked environment values in task cache fingerprints are now stored only as SHA-256 digests, and env-related cache miss details report names without values.
 - **Added** Runner-aware `getEnvs` match sets can now participate in task cache fingerprints, so changing, adding, or removing a matching env var invalidates the cache ([#450](https://github.com/voidzero-dev/vite-task/pull/450)).
 - **Added** Runner-aware `getEnvs` calls now return env values served by the runner for matching env glob patterns ([#449](https://github.com/voidzero-dev/vite-task/pull/449)).

@@ -1,8 +1,7 @@
 {
   "tasks": {
     "task": {
-      "command": "vtt replace-file-content src/data.txt i !",
-      "output": [{ "auto": true }]
+      "command": "vtt replace-file-content src/data.txt i !"
     }
   }
 }

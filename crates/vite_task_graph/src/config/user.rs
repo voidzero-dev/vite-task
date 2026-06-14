@@ -145,9 +145,10 @@ pub struct EnabledCacheConfig {
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
     pub input: Option<UserInputsConfig>,
 
-    /// Output files to archive after a successful run and restore on cache hit.
+    /// Output files to archive and restore on cache hit.
     ///
-    /// - Omitted or `[]` (empty): no output archiving (default)
+    /// - Omitted: automatically tracks which files the task writes
+    /// - `[]` (empty): disables output restoration entirely
     /// - Glob patterns (e.g. `"dist/**"`) select specific output files, relative to the package directory
     /// - `{pattern: "...", base: "workspace" | "package"}` specifies a glob with an explicit base directory
     /// - `{auto: true}` enables automatic output tracking

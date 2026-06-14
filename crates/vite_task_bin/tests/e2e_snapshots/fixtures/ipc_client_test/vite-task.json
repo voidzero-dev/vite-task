@@ -39,6 +39,11 @@
       "output": [{ "auto": true }, "!scratch/**"],
       "cache": true
     },
+    "auto-output-default": {
+      "command": "vtt write-file dist/default.txt ok",
+      "input": [],
+      "cache": true
+    },
     "disable-cache": {
       "command": "node scripts/disable_cache.mjs",
       "cache": true
