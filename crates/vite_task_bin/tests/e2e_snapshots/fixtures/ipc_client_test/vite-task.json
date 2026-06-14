@@ -16,6 +16,11 @@
       "output": [],
       "cache": true
     },
+    "ignore-output": {
+      "command": "node scripts/ignore_output.mjs",
+      "output": [],
+      "cache": true
+    },
     "disable-cache": {
       "command": "node scripts/disable_cache.mjs",
       "cache": true

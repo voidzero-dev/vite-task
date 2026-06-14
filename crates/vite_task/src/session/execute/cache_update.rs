@@ -73,6 +73,9 @@ pub(super) async fn update_cache(
     let ignored_input_rels: FxHashSet<RelativePathBuf> = reports
         .map(|r| normalize_ignored_paths(&r.ignored_inputs, workspace_root))
         .unwrap_or_default();
+    let ignored_output_rels: FxHashSet<RelativePathBuf> = reports
+        .map(|r| normalize_ignored_paths(&r.ignored_outputs, workspace_root))
+        .unwrap_or_default();
 
     if cancelled {
         // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy.
@@ -84,8 +87,13 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
     }
 
-    let fspy_outcome =
-        observe_fspy(outcome, input_negative_globs, &ignored_input_rels, workspace_root);
+    let fspy_outcome = observe_fspy(
+        outcome,
+        input_negative_globs,
+        &ignored_input_rels,
+        &ignored_output_rels,
+        workspace_root,
+    );
 
     if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome {
         // fspy-inferred read-write overlap: the task wrote to a file it also
@@ -176,6 +184,7 @@ fn observe_fspy(
     outcome: &ChildOutcome,
     input_negative_globs: Option<&[wax::Glob<'static>]>,
     ignored_input_rels: &FxHashSet<RelativePathBuf>,
+    ignored_output_rels: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
 ) -> Option<TrackingOutcome> {
     #[cfg(fspy)]
@@ -189,14 +198,24 @@ fn observe_fspy(
                 .into_iter()
                 .filter(|(path, _)| !is_ignored(path, ignored_input_rels))
                 .collect();
-            let read_write_overlap =
-                path_reads.keys().find(|p| tracked.path_writes.contains(*p)).cloned();
+            let path_writes: FxHashSet<RelativePathBuf> = tracked
+                .path_writes
+                .into_iter()
+                .filter(|path| !is_ignored(path, ignored_output_rels))
+                .collect();
+            let read_write_overlap = path_reads.keys().find(|p| path_writes.contains(*p)).cloned();
             TrackingOutcome { path_reads, read_write_overlap }
         })
     }
     #[cfg(not(fspy))]
     {
-        let _ = (outcome, input_negative_globs, ignored_input_rels, workspace_root);
+        let _ = (
+            outcome,
+            input_negative_globs,
+            ignored_input_rels,
+            ignored_output_rels,
+            workspace_root,
+        );
         None
     }
 }
@@ -216,7 +235,8 @@ fn collect_tracked_reports(
 }
 
 /// Normalize tool-reported absolute paths to cleaned workspace-relative paths.
-/// Paths outside the workspace are dropped — they can't contribute to inputs.
+/// Paths outside the workspace are dropped — they can't contribute to inputs
+/// or outputs.
 fn normalize_ignored_paths(
     paths: &FxHashSet<Arc<AbsolutePath>>,
     workspace_root: &AbsolutePath,

@@ -74,6 +74,35 @@ steps = [
 ]
 
 [[e2e]]
+name = "ignore_output_allows_read_write_overlap"
+comment = """
+Exercises `ignoreOutput`. The task reads and writes `sidecar/tmp.txt`; without the ignore the runner's read-write overlap check would refuse to cache the run. The task also writes `dist/out.txt`, but output caching is disabled here so a cache hit must not restore it.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "ignore-output",
+  ], comment = "first run populates the cache" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/out.txt",
+  ], comment = "remove the untracked output so a cache-hit restore would be visible" },
+  { argv = [
+    "vt",
+    "run",
+    "ignore-output",
+  ], comment = "cache hit: sidecar/ writes were ignored" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "not restored because this task has output: []" },
+]
+
+[[e2e]]
 name = "disable_cache_forces_reexecution"
 comment = """
 Exercises `disableCache`. The tool asks the runner not to cache this run,

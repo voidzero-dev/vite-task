@@ -16,6 +16,7 @@ use wincode::{SchemaWrite, config::DefaultConfig};
 
 pub trait Handler {
     fn ignore_input(&mut self, path: &Arc<AbsolutePath>);
+    fn ignore_output(&mut self, path: &Arc<AbsolutePath>);
     fn disable_cache(&mut self);
     fn get_env(&mut self, name: &OsStr, tracked: bool) -> Option<Arc<OsStr>>;
     /// Returns the subset of the env map whose names match `pattern` as a glob.
@@ -66,6 +67,7 @@ pub struct InvalidGlob {
 /// recover the collected [`Reports`].
 pub struct Recorder {
     ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
+    ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     cache_disabled: bool,
     tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
     tracked_get_envs: FxHashMap<Arc<str>, EnvGlobRecord>,
@@ -87,6 +89,7 @@ pub struct EnvGlobRecord {
 #[derive(Debug, Default)]
 pub struct Reports {
     pub ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
+    pub ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     pub cache_disabled: bool,
     pub tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
     pub tracked_get_envs: FxHashMap<Arc<str>, EnvGlobRecord>,
@@ -97,6 +100,7 @@ impl Recorder {
     pub fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
         Self {
             ignored_inputs: FxHashSet::default(),
+            ignored_outputs: FxHashSet::default(),
             cache_disabled: false,
             tracked_get_env: FxHashMap::default(),
             tracked_get_envs: FxHashMap::default(),
@@ -108,6 +112,7 @@ impl Recorder {
     pub fn into_reports(self) -> Reports {
         Reports {
             ignored_inputs: self.ignored_inputs,
+            ignored_outputs: self.ignored_outputs,
             cache_disabled: self.cache_disabled,
             tracked_get_env: self.tracked_get_env,
             tracked_get_envs: self.tracked_get_envs,
@@ -118,6 +123,10 @@ impl Recorder {
 impl Handler for Recorder {
     fn ignore_input(&mut self, path: &Arc<AbsolutePath>) {
         self.ignored_inputs.insert(Arc::clone(path));
+    }
+
+    fn ignore_output(&mut self, path: &Arc<AbsolutePath>) {
+        self.ignored_outputs.insert(Arc::clone(path));
     }
 
     fn disable_cache(&mut self) {
@@ -374,7 +383,7 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
         let request: Request<'_> =
             wincode::deserialize_exact(&buf).map_err(Error::InvalidRequest)?;
 
-        // Fire-and-forget branches (`IgnoreInput`, `DisableCache`)
+        // Fire-and-forget branches (`IgnoreInput`, `IgnoreOutput`, `DisableCache`)
         // intentionally write no response. Nothing in the runner observes
         // individual IPC events live; the recorded set is collected after
         // this driver drains. See `Request` in `vite_task_ipc_shared` for
@@ -383,6 +392,10 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
             Request::IgnoreInput(ns) => {
                 let path = native_str_to_abs_path(ns)?;
                 handler.borrow_mut().ignore_input(&path);
+            }
+            Request::IgnoreOutput(ns) => {
+                let path = native_str_to_abs_path(ns)?;
+                handler.borrow_mut().ignore_output(&path);
             }
             Request::DisableCache => {
                 handler.borrow_mut().disable_cache();

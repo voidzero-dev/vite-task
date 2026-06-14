@@ -28,15 +28,6 @@
     clippy::needless_pass_by_value,
     reason = "napi bindings require owned std String + std::format! at the JS boundary"
 )]
-// The no-op methods must keep the exact signature of the real implementations
-// that replace them (instance method, fallible return), so the JS-visible API
-// shape never changes.
-#![expect(
-    clippy::unused_self,
-    clippy::unnecessary_wraps,
-    reason = "no-op stubs keep the signature of the real implementations that replace them"
-)]
-
 use std::{collections::HashMap, ffi::OsStr};
 
 use napi::{Error, Result};
@@ -62,11 +53,6 @@ pub struct GetEnvOptions {
 
 /// Handle returned by [`load`]. Holds the IPC connection and exposes the
 /// runner-side operations as instance methods.
-///
-/// The full client surface exists from the start because the npm-published
-/// JS wrapper calls these methods unconditionally — they must exist in
-/// every runner version. Verbs the runner cannot consume yet are no-ops
-/// here and become real requests in the follow-up that consumes them.
 #[napi]
 pub struct RunnerClient {
     client: Client,
@@ -81,10 +67,11 @@ impl RunnerClient {
             .map_err(|err| err_string(vite_str::format!("{err}")))
     }
 
-    /// No-op for now — see [`Self::ignore_input`].
     #[napi]
-    pub fn ignore_output(&self, _path: String) -> Result<()> {
-        Ok(())
+    pub fn ignore_output(&self, path: String) -> Result<()> {
+        self.client
+            .ignore_output(OsStr::new(&path))
+            .map_err(|err| err_string(vite_str::format!("{err}")))
     }
 
     #[napi]

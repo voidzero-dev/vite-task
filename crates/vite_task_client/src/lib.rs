@@ -69,6 +69,17 @@ impl Client {
     ///
     /// # Errors
     ///
+    /// Returns an error if the request fails to send, or if a relative `path`
+    /// cannot be resolved against the current working directory.
+    pub fn ignore_output(&self, path: &OsStr) -> io::Result<()> {
+        let ns = resolve_path(path)?;
+        self.send(&Request::IgnoreOutput(&ns))
+    }
+
+    /// Fire-and-forget — see [`Self::ignore_input`].
+    ///
+    /// # Errors
+    ///
     /// Returns an error if the request fails to send.
     pub fn disable_cache(&self) -> io::Result<()> {
         self.send(&Request::DisableCache)

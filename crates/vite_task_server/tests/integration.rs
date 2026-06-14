@@ -85,20 +85,23 @@ fn send_frame(stream: &mut RawStream, request: &Request<'_>) {
 #[test]
 fn single_client_fire_and_forget() {
     #[cfg(unix)]
-    let in_path = "/tmp/in.txt";
+    let (in_path, out_path) = ("/tmp/in.txt", "/tmp/out.txt");
     #[cfg(windows)]
-    let in_path = r"C:\tmp\in.txt";
+    let (in_path, out_path) = (r"C:\tmp\in.txt", r"C:\tmp\out.txt");
 
     let reports = run_with_server(env_map(&[]), |envs| {
         let client = connect(&envs);
         client.ignore_input(OsStr::new(in_path)).unwrap();
+        client.ignore_output(OsStr::new(out_path)).unwrap();
         client.disable_cache().unwrap();
         flush(&client);
     })
     .expect("driver returned error");
 
     let inputs: Vec<_> = reports.ignored_inputs.iter().map(|p| p.as_path().as_os_str()).collect();
+    let outputs: Vec<_> = reports.ignored_outputs.iter().map(|p| p.as_path().as_os_str()).collect();
     assert_eq!(inputs, vec![OsStr::new(in_path)]);
+    assert_eq!(outputs, vec![OsStr::new(out_path)]);
     assert!(reports.cache_disabled);
 }
 
