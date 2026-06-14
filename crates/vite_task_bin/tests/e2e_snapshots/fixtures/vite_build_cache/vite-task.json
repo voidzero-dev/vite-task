@@ -5,15 +5,6 @@
       // No `"env": [...]` — vite's patched `loadEnv` asks the runner for
       // every `VITE_*` env via `getEnvs`, so the glob + match-set are
       // fingerprinted automatically.
-      //
-      // TODO(env-track): A later PR in this stack removes these manual
-      // exclusions once output tracking stops Vite's own writes from becoming
-      // inferred inputs.
-      //
-      // Excluding Vite's build output and config-timestamp temp files from
-      // auto input inference keeps this env-focused fixture cacheable without
-      // turning reads of files Vite just wrote into inferred inputs.
-      "input": ["!dist/**", "!node_modules/.vite-temp/**", { "auto": true }],
       "cache": true
     }
   }

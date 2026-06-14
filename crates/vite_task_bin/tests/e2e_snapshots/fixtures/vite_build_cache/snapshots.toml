@@ -1,4 +1,40 @@
 [[e2e]]
+name = "vite_build_caches_and_restores_outputs"
+comment = """
+`vt run --cache build` must produce a cache hit on the second run without any manual input/output configuration. Vite reports non-semantic reads and writes through `@voidzero-dev/vite-task-client`, so fspy can infer real inputs and outputs while the cache restores `dist/` on hit.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "first run: cache miss, emits dist/" },
+  { argv = [
+    "vtt",
+    "stat-file",
+    "dist/assets/main.js",
+  ], comment = "existence check — content can drift across Vite versions" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/assets/main.js",
+  ], comment = "remove the artefact so the cache-hit restore is observable" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "cache hit: outputs restored without manual config" },
+  { argv = [
+    "vtt",
+    "stat-file",
+    "dist/assets/main.js",
+  ], comment = "restored from the cache archive" },
+]
+
+[[e2e]]
 name = "vite_prefix_env_change_invalidates_cache"
 comment = """
 `VITE_CACHE_LABEL` is picked up by Vite's patched `loadEnv`, which asks the runner for every `VITE_*` env via `getEnvs(pattern, { tracked: true })`. Flipping its value between runs must invalidate the cache AND change the build output because Vite substitutes `import.meta.env.VITE_CACHE_LABEL` at build time.
