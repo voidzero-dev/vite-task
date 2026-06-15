@@ -1,0 +1,4 @@
+// run --ignore-depends-on test_union
+{
+  "packages/app#test_union": []
+}

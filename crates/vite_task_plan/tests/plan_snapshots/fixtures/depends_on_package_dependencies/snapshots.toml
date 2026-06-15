@@ -1,0 +1,48 @@
+# Object-form dependsOn selects direct package.json dependency fields.
+
+[[plan]]
+compact = true
+name = "dependencies_from"
+args = ["run", "test_dependencies"]
+cwd = "packages/app"
+
+[[plan]]
+compact = true
+name = "dev_dependencies_from"
+args = ["run", "test_dev"]
+cwd = "packages/app"
+
+[[plan]]
+compact = true
+name = "peer_dependencies_from"
+args = ["run", "test_peer"]
+cwd = "packages/app"
+
+[[plan]]
+compact = true
+name = "multiple_from_fields"
+args = ["run", "test_union"]
+cwd = "packages/app"
+
+[[plan]]
+compact = true
+name = "recursive_through_dependency_task"
+args = ["run", "test_recursive"]
+cwd = "packages/app"
+
+[[plan]]
+compact = true
+name = "direct_dependency_task_does_not_expand"
+args = ["run", "@test/dev-a#build"]
+
+[[plan]]
+compact = true
+name = "ignore_depends_on_omits_object"
+args = ["run", "--ignore-depends-on", "test_union"]
+cwd = "packages/app"
+
+[[plan]]
+compact = true
+name = "extra_args_only_reach_requested_object_task"
+args = ["run", "test_union", "extra"]
+cwd = "packages/app"

@@ -1,0 +1,8 @@
+{
+  "name": "@test/dev-b",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vtt build dev-b",
+    "build_recursive": "vtt build recursive dev-b"
+  }
+}

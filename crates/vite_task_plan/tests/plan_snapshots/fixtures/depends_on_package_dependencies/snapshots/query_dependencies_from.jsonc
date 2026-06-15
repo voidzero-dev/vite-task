@@ -1,0 +1,7 @@
+// run test_dependencies
+{
+  "packages/app#test_dependencies": [
+    "packages/prod-a#build"
+  ],
+  "packages/prod-a#build": []
+}

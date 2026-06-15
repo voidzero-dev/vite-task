@@ -1,0 +1,11 @@
+{
+  "name": "@test/dev-a",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vtt build dev-a"
+  },
+  "devDependencies": {
+    "@test/dev-b": "workspace:*",
+    "@test/shared": "workspace:*"
+  }
+}

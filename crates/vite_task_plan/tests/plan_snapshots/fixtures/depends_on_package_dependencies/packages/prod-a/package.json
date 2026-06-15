@@ -1,0 +1,11 @@
+{
+  "name": "@test/prod-a",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vtt build prod-a"
+  },
+  "dependencies": {
+    "@test/prod-b": "workspace:*",
+    "@test/shared": "workspace:*"
+  }
+}

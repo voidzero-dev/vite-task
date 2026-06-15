@@ -9,7 +9,7 @@ This document describes how boolean flags work in `vp` commands.
 - `--recursive` / `-r` — Run task in all packages in the workspace
 - `--transitive` / `-t` — Run task in the current package and its transitive dependencies
 - `--workspace-root` / `-w` — Run task in the workspace root package
-- `--ignore-depends-on` — Skip explicit `dependsOn` dependencies
+- `--ignore-depends-on` — Skip `dependsOn` dependencies
 - `--verbose` / `-v` — Show full detailed summary after execution
 - `--cache` / `--no-cache` — Force caching on or off for all tasks and scripts
 
@@ -39,7 +39,7 @@ vp run build -t
 # Run in workspace root
 vp run build -w
 
-# Skip explicit dependsOn edges
+# Skip dependsOn dependencies
 vp run build --ignore-depends-on
 
 # Verbose output

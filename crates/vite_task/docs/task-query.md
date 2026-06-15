@@ -7,16 +7,17 @@ How `vp run` decides which tasks to run and in what order.
 When `vp` starts, it builds two data structures from the workspace:
 
 1. **Package graph** — which packages depend on which. Built from `package.json` dependency fields.
-2. **Task graph** — which tasks exist and their explicit `dependsOn` relationships. Built from `vite-task.json` and `package.json` scripts.
+2. **Task graph** — which tasks exist and their string-form `dependsOn` relationships. Built from `vite.config.*` and `package.json` scripts.
 
 Both are built once and reused for every query, including nested `vp run` calls inside task scripts.
 
 ### What goes into the task graph
 
-The task graph contains a node for every task in every package, and edges only for explicit `dependsOn` declarations:
+The task graph contains a node for every task in every package. String-form
+`dependsOn` declarations become edges in this graph:
 
 ```jsonc
-// packages/app/vite-task.json
+// packages/app/vite.config.*
 {
   "tasks": {
     "build": {
@@ -37,6 +38,8 @@ Task graph:
 ```
 
 Package dependency ordering (app depends on lib) is NOT stored as edges in the task graph. Why not is explained below.
+Object-form `dependsOn` entries are also not stored as global task graph edges;
+they are kept on the declaring task and expanded for each query.
 
 ## What happens when you run a query
 
@@ -74,7 +77,7 @@ Given the package subgraph and a task name, we build the execution plan:
 1. Find which selected packages have the requested task.
 2. For packages that don't have it, reconnect their predecessors to their successors (skip-intermediate, explained below).
 3. Map the remaining package nodes to task nodes — this gives us topological ordering.
-4. Follow explicit `dependsOn` edges outward from these tasks (may pull in tasks from outside the selected packages).
+4. Expand `dependsOn` from these tasks (may pull in tasks from outside the selected packages).
 
 The result is the execution plan: which tasks to run and in what order.
 
@@ -169,12 +172,14 @@ The package subgraph is already a lightweight `DiGraphMap<PackageNodeIndex, ()>`
 
 So we clone the `DiGraphMap` once and mutate the clone. We iterate the original (stable node order) while modifying the clone.
 
-## Explicit dependency expansion
+## `dependsOn` expansion
 
-After mapping the package subgraph to tasks, we follow explicit `dependsOn` edges from the task graph. This can pull in tasks from packages outside the selected set.
+After mapping the package subgraph to tasks, we expand `dependsOn` entries.
+String-form entries follow task graph edges and can pull in tasks from packages
+outside the selected set.
 
 ```jsonc
-// packages/app/vite-task.json
+// packages/app/vite.config.*
 {
   "tasks": {
     "build": {
@@ -188,7 +193,31 @@ If you run `vp run --filter app build`, the package subgraph contains only `app`
 
 This is intentional — `dependsOn` is an explicit declaration that a task can't run without its dependency. Ignoring it would break the build. (Users can skip this with `--ignore-depends-on`.)
 
-The expansion only follows explicit edges, not topological ones. Topological ordering comes from the package subgraph — it's already baked into the task execution graph by Stage 2.
+Object-form entries select direct package dependencies from the declaring task:
+
+```jsonc
+// packages/app/vite.config.*
+{
+  "tasks": {
+    "test": {
+      "command": "vitest run",
+      "dependsOn": [{ "task": "build", "from": ["dependencies", "devDependencies"] }],
+    },
+  },
+}
+```
+
+For `app#test`, this runs `build` in direct workspace dependency packages selected
+by the listed package.json fields. Packages without `build` are skipped. Supported
+fields are `dependencies`, `devDependencies`, and `peerDependencies`.
+
+Recursive expansion comes from dependency tasks declaring their own `dependsOn`
+entries. For example, if `ui#build` also has `{ "task": "build", "from": "dependencies" }`,
+then `tokens#build` is selected while expanding `ui#build`.
+
+The expansion follows `dependsOn` entries, not every topological edge.
+Topological ordering comes from the package subgraph — it's already baked into
+the task execution graph by Stage 2.
 
 ## Nested `vp run`
 
@@ -213,7 +242,7 @@ The nested query produces its own execution subgraph, which gets embedded inside
 ```
 Startup (once):
   workspace files ──> package graph ──> task graph
-                      (dependencies)    (tasks + dependsOn edges)
+                      (dependencies)    (tasks + string dependsOn edges)
 
 Per query:
   CLI flags ──> PackageQuery
@@ -225,7 +254,7 @@ Per query:
   task graph ────> task execution graph
                    (map packages to tasks,
                     skip-intermediate reconnection,
-                    explicit dep expansion)
+                    dependsOn expansion)
                     │
                     ▼
                    execution plan

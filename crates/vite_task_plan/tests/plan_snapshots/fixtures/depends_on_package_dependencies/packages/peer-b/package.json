@@ -1,0 +1,7 @@
+{
+  "name": "@test/peer-b",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vtt build peer-b"
+  }
+}

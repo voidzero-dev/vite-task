@@ -16,9 +16,16 @@ use serde::Serialize;
 pub use specifier::TaskSpecifier;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_workspace::{PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph};
+use vite_workspace::{
+    DependencyType, PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph,
+};
 
-use crate::{config::user::UserTaskOptions, display::TaskDisplay};
+use crate::{
+    config::user::{
+        UserDependencyType, UserDependsOnEntry, UserPackageDependency, UserTaskOptions,
+    },
+    display::TaskDisplay,
+};
 
 /// The type of a task dependency edge in the task graph.
 ///
@@ -177,6 +184,38 @@ unsafe impl IndexType for TaskIx {
 pub type TaskNodeIndex = NodeIndex<TaskIx>;
 pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 
+/// A `dependsOn` entry that selects direct package dependencies from a source task.
+#[derive(Debug, Clone)]
+pub(crate) struct PackageDependencyEntry {
+    pub task_name: Str,
+    pub dependency_types: Arc<[DependencyType]>,
+}
+
+impl PackageDependencyEntry {
+    fn from_user_config(entry: &UserPackageDependency) -> Self {
+        Self {
+            task_name: entry.task.clone(),
+            dependency_types: entry
+                .from
+                .as_slice()
+                .iter()
+                .copied()
+                .map(DependencyType::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<UserDependencyType> for DependencyType {
+    fn from(value: UserDependencyType) -> Self {
+        match value {
+            UserDependencyType::Dependencies => Self::Normal,
+            UserDependencyType::DevDependencies => Self::Dev,
+            UserDependencyType::PeerDependencies => Self::Peer,
+        }
+    }
+}
+
 /// Full task graph of a workspace, with necessary hash maps for quick task lookup
 ///
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
@@ -195,6 +234,14 @@ pub struct IndexedTaskGraph {
 
     /// Reverse map: task node index → task id (for hook lookup)
     task_ids_by_node_index: FxHashMap<TaskNodeIndex, TaskId>,
+
+    /// Object-form `dependsOn` entries keyed by the task that declared them.
+    ///
+    /// These stay anchored to their source task and are expanded only for a
+    /// concrete query. Keeping them out of `task_graph` avoids leaking package
+    /// dependency selection into direct runs of dependency tasks.
+    pub(crate) package_dependency_entries_by_node_index:
+        FxHashMap<TaskNodeIndex, Arc<[PackageDependencyEntry]>>,
 
     /// Global cache configuration resolved from the workspace root config.
     resolved_global_cache: ResolvedGlobalCacheConfig,
@@ -226,8 +273,10 @@ impl IndexedTaskGraph {
 
         let package_graph = vite_workspace::load_package_graph(workspace_root)?;
 
-        // Record dependency specifiers for each task node to add explicit dependencies later
-        let mut task_ids_with_dependency_specifiers: Vec<(TaskId, Option<Arc<[Str]>>)> = Vec::new();
+        // Record `dependsOn` entries for each task node to add dependencies after all
+        // tasks are indexed.
+        let mut task_ids_with_depends_on_entries: Vec<(TaskId, Option<Arc<[UserDependsOnEntry]>>)> =
+            Vec::new();
 
         // index tasks by ids
         let mut node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex> =
@@ -312,7 +361,7 @@ impl IndexedTaskGraph {
                         UserTaskConfig { command, options: UserTaskOptions::default() }
                     }
                 };
-                let dependency_specifiers = task_user_config.options.depends_on.clone();
+                let depends_on_entries = task_user_config.options.depends_on.clone();
 
                 // Resolve the task configuration from the user config
                 let resolved_config = ResolvedTaskConfig::resolve(
@@ -340,7 +389,7 @@ impl IndexedTaskGraph {
                 };
 
                 let node_index = task_graph.add_node(task_node);
-                task_ids_with_dependency_specifiers.push((task_id.clone(), dependency_specifiers));
+                task_ids_with_depends_on_entries.push((task_id.clone(), depends_on_entries));
                 task_ids_by_node_index.insert(node_index, task_id.clone());
                 node_indices_by_task_id.insert(task_id, node_index);
             }
@@ -381,25 +430,46 @@ impl IndexedTaskGraph {
             indexed_package_graph: IndexedPackageGraph::index(package_graph),
             node_indices_by_task_id,
             task_ids_by_node_index,
+            package_dependency_entries_by_node_index: FxHashMap::default(),
             resolved_global_cache,
             pre_post_scripts_enabled: root_pre_post_scripts_enabled.unwrap_or(true),
         };
 
-        // Add explicit dependencies
-        for (from_task_id, dependency_specifiers) in task_ids_with_dependency_specifiers {
+        // Add string-form dependencies as explicit task graph edges, and keep
+        // object-form package dependency entries anchored to their source task.
+        for (from_task_id, depends_on_entries) in task_ids_with_depends_on_entries {
             let from_node_index = me.node_indices_by_task_id[&from_task_id];
-            for specifier in dependency_specifiers.iter().flat_map(|s| s.iter()).cloned() {
-                let to_node_index = me
-                    .get_task_index_by_specifier::<Infallible>(
-                        TaskSpecifier::parse_raw(&specifier),
-                        || Ok(from_task_id.package_index),
-                    )
-                    .map_err(|error| TaskGraphLoadError::DependencySpecifierLookupError {
-                        error,
-                        specifier,
-                        task_display: me.display_task(from_node_index),
-                    })?;
-                me.task_graph.update_edge(from_node_index, to_node_index, TaskDependencyType);
+            let mut package_dependency_entries = Vec::<PackageDependencyEntry>::new();
+            for entry in depends_on_entries.iter().flat_map(|entries| entries.iter()) {
+                match entry {
+                    UserDependsOnEntry::Task(specifier) => {
+                        let to_node_index = me
+                            .get_task_index_by_specifier::<Infallible>(
+                                TaskSpecifier::parse_raw(specifier),
+                                || Ok(from_task_id.package_index),
+                            )
+                            .map_err(|error| {
+                                TaskGraphLoadError::DependencySpecifierLookupError {
+                                    error,
+                                    specifier: specifier.clone(),
+                                    task_display: me.display_task(from_node_index),
+                                }
+                            })?;
+                        me.task_graph.update_edge(
+                            from_node_index,
+                            to_node_index,
+                            TaskDependencyType,
+                        );
+                    }
+                    UserDependsOnEntry::Package(entry) => {
+                        package_dependency_entries
+                            .push(PackageDependencyEntry::from_user_config(entry));
+                    }
+                }
+            }
+            if !package_dependency_entries.is_empty() {
+                me.package_dependency_entries_by_node_index
+                    .insert(from_node_index, Arc::from(package_dependency_entries));
             }
         }
 

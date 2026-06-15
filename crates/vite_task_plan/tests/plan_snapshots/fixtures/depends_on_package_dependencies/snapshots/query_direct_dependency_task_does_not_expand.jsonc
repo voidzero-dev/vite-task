@@ -1,0 +1,4 @@
+// run @test/dev-a#build
+{
+  "packages/dev-a#build": []
+}

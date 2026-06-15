@@ -1,0 +1,10 @@
+{
+  "name": "@test/peer-a",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vtt build peer-a"
+  },
+  "peerDependencies": {
+    "@test/peer-b": "workspace:*"
+  }
+}

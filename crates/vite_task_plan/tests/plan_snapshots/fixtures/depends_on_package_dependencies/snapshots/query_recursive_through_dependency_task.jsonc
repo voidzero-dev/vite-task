@@ -1,0 +1,12 @@
+// run test_recursive
+{
+  "packages/app#test_recursive": [
+    "packages/dev-a#build_recursive"
+  ],
+  "packages/dev-a#build_recursive": [
+    "packages/dev-b#build_recursive",
+    "packages/shared#build_recursive"
+  ],
+  "packages/dev-b#build_recursive": [],
+  "packages/shared#build_recursive": []
+}

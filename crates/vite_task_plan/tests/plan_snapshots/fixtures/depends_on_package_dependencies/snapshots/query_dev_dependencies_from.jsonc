@@ -1,0 +1,7 @@
+// run test_dev
+{
+  "packages/app#test_dev": [
+    "packages/dev-a#build"
+  ],
+  "packages/dev-a#build": []
+}

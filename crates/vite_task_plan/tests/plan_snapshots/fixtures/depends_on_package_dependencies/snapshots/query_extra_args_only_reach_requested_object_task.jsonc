@@ -1,0 +1,9 @@
+// run test_union extra
+{
+  "packages/app#test_union": [
+    "packages/dev-a#build",
+    "packages/prod-a#build"
+  ],
+  "packages/dev-a#build": [],
+  "packages/prod-a#build": []
+}

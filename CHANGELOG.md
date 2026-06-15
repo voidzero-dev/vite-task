@@ -1,5 +1,6 @@
 # Changelog
 
+- **Added** Object-form `dependsOn` entries can now run a task in direct workspace dependency packages selected by package.json fields, e.g. `{ "task": "build", "from": ["dependencies", "devDependencies"] }`.
 - **Added** First-party support for caching `vite build` with zero cache config, giving Vite projects correct cache hits out of the box ([vitejs/vite#22453](https://github.com/vitejs/vite/pull/22453)).
 - **Added** [`@voidzero-dev/vite-task-client`](https://npmx.dev/package/@voidzero-dev/vite-task-client), allowing tools to report cache information to Vite Task at runtime so users do not need to configure it manually ([#441](https://github.com/voidzero-dev/vite-task/pull/441), [#454](https://github.com/voidzero-dev/vite-task/pull/454), [#449](https://github.com/voidzero-dev/vite-task/pull/449), [#450](https://github.com/voidzero-dev/vite-task/pull/450), [#458](https://github.com/voidzero-dev/vite-task/pull/458), [#431](https://github.com/voidzero-dev/vite-task/pull/431), [#459](https://github.com/voidzero-dev/vite-task/pull/459)).
 - **Changed** Cached tasks now restore automatically tracked output files by default; use `output: []` to disable restoration ([#460](https://github.com/voidzero-dev/vite-task/pull/460), [#461](https://github.com/voidzero-dev/vite-task/pull/461)).

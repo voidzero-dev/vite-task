@@ -7,8 +7,9 @@ use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
     AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
-    UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
-    UserRunConfig, UserTaskConfig, UserTaskDefinition,
+    UserCacheConfig, UserDependencyType, UserDependsOnEntry, UserDependsOnFrom,
+    UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
+    UserPackageDependency, UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
 use vite_path::AbsolutePath;
 use vite_str::Str;
@@ -25,7 +26,8 @@ use crate::config::user::UserTaskOptions;
 /// For example, `cwd` is resolved to absolute ones (no external factor can change it),
 /// but `command` is not parsed into program and args yet because environment variables in it may need to be expanded.
 ///
-/// `depends_on` is not included here because it's represented by the edges of the task graph.
+/// `depends_on` is not included here because string-form entries are represented by task graph
+/// edges, and package dependency entries are stored separately on the indexed task graph.
 #[derive(Debug, Serialize)]
 pub struct ResolvedTaskConfig {
     /// The command or commands to run for this task.
