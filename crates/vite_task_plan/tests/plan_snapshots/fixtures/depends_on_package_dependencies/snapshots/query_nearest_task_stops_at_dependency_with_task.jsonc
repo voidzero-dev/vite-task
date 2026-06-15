@@ -1,0 +1,7 @@
+// run @test/nearest-stop-app#build
+{
+  "packages/nearest-stop-app#build": [
+    "packages/nearest-stop-foo#build"
+  ],
+  "packages/nearest-stop-foo#build": []
+}

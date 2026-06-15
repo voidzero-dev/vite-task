@@ -1,0 +1,7 @@
+{
+  "name": "@test/nearest-through-bar",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vtt build nearest-through-bar"
+  }
+}

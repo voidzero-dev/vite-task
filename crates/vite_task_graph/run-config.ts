@@ -39,7 +39,7 @@ cwd?: string,
  * Dependencies of this task.
  *
  * String entries keep same-package / `package-name#task-name` behavior.
- * Object entries run a bare task name in direct workspace dependency
+ * Object entries run a task name in direct workspace dependency
  * packages selected by package.json dependency fields.
  */
 dependsOn?: Array<DependsOnEntry>, } & ({
@@ -107,7 +107,7 @@ tasks?: boolean, };
 
 export type UserPackageDependency = {
 /**
- * Bare task name to run in dependency packages.
+ * Task name to run in dependency packages.
  */
 task: string,
 /**

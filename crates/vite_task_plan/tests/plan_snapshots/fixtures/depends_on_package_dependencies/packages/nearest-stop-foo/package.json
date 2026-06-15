@@ -1,0 +1,10 @@
+{
+  "name": "@test/nearest-stop-foo",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vtt build nearest-stop-foo"
+  },
+  "dependencies": {
+    "@test/nearest-stop-bar": "workspace:*"
+  }
+}

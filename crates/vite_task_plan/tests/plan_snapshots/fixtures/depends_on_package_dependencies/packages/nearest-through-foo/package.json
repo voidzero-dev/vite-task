@@ -1,0 +1,10 @@
+{
+  "name": "@test/nearest-through-foo",
+  "version": "1.0.0",
+  "scripts": {
+    "lint": "vtt lint nearest-through-foo"
+  },
+  "dependencies": {
+    "@test/nearest-through-bar": "workspace:*"
+  }
+}

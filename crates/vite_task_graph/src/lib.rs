@@ -237,9 +237,10 @@ pub struct IndexedTaskGraph {
 
     /// Object-form `dependsOn` entries keyed by the task that declared them.
     ///
-    /// These stay anchored to their source task and are expanded only for a
-    /// concrete query. Keeping them out of `task_graph` avoids leaking package
-    /// dependency selection into direct runs of dependency tasks.
+    /// These stay anchored to their source task and are materialized when
+    /// `query_tasks` builds a per-query `TaskExecutionGraph`. Keeping them out
+    /// of the global `task_graph` avoids leaking package dependency selection
+    /// into direct runs of dependency tasks.
     pub(crate) package_dependency_entries_by_node_index:
         FxHashMap<TaskNodeIndex, Arc<[PackageDependencyEntry]>>,
 

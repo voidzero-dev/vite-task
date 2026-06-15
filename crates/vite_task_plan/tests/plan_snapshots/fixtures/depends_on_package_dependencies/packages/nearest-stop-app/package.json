@@ -1,0 +1,7 @@
+{
+  "name": "@test/nearest-stop-app",
+  "version": "1.0.0",
+  "dependencies": {
+    "@test/nearest-stop-foo": "workspace:*"
+  }
+}

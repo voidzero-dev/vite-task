@@ -371,6 +371,252 @@
   },
   {
     "key": [
+      "<workspace>/packages/nearest-stop-app",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/nearest-stop-app",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/nearest-stop-app"
+      },
+      "resolved_config": {
+        "commands": [
+          "vtt build nearest-stop-app"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/packages/nearest-stop-app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "TaskConfig"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/nearest-stop-bar",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/nearest-stop-bar",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/nearest-stop-bar"
+      },
+      "resolved_config": {
+        "commands": [
+          "vtt build nearest-stop-bar"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/packages/nearest-stop-bar",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "PackageJsonScript"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/nearest-stop-foo",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/nearest-stop-foo",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/nearest-stop-foo"
+      },
+      "resolved_config": {
+        "commands": [
+          "vtt build nearest-stop-foo"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/packages/nearest-stop-foo",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "PackageJsonScript"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/nearest-through-app",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/nearest-through-app",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/nearest-through-app"
+      },
+      "resolved_config": {
+        "commands": [
+          "vtt build nearest-through-app"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/packages/nearest-through-app",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "TaskConfig"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/nearest-through-bar",
+      "build"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/nearest-through-bar",
+        "task_name": "build",
+        "package_path": "<workspace>/packages/nearest-through-bar"
+      },
+      "resolved_config": {
+        "commands": [
+          "vtt build nearest-through-bar"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/packages/nearest-through-bar",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "PackageJsonScript"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
+      "<workspace>/packages/nearest-through-foo",
+      "lint"
+    ],
+    "node": {
+      "task_display": {
+        "package_name": "@test/nearest-through-foo",
+        "task_name": "lint",
+        "package_path": "<workspace>/packages/nearest-through-foo"
+      },
+      "resolved_config": {
+        "commands": [
+          "vtt lint nearest-through-foo"
+        ],
+        "resolved_options": {
+          "cwd": "<workspace>/packages/nearest-through-foo",
+          "cache_config": {
+            "env_config": {
+              "fingerprinted_envs": [],
+              "untracked_env": [
+                "<default untracked envs>"
+              ]
+            },
+            "input_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            },
+            "output_config": {
+              "includes_auto": true,
+              "positive_globs": [],
+              "negative_globs": []
+            }
+          }
+        }
+      },
+      "source": "PackageJsonScript"
+    },
+    "neighbors": []
+  },
+  {
+    "key": [
       "<workspace>/packages/peer-a",
       "build"
     ],

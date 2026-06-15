@@ -32,6 +32,16 @@ cwd = "packages/app"
 
 [[plan]]
 compact = true
+name = "nearest_task_through_dependency_without_task"
+args = ["run", "@test/nearest-through-app#build"]
+
+[[plan]]
+compact = true
+name = "nearest_task_stops_at_dependency_with_task"
+args = ["run", "@test/nearest-stop-app#build"]
+
+[[plan]]
+compact = true
 name = "direct_dependency_task_does_not_expand"
 args = ["run", "@test/dev-a#build"]
 
