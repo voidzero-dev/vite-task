@@ -40,6 +40,15 @@ compact = true
 name = "nearest_task_stops_at_dependency_with_task"
 args = ["run", "@test/nearest-stop-app#build"]
 
+# A selected package (`nearest-order-direct`) transitively depends on another
+# selected package (`nearest-order-shared`) only through a task-less package
+# (`nearest-order-skip`). No implicit recursion: the two selected `build` tasks
+# stay unordered because there is no direct package edge between them.
+[[plan]]
+compact = true
+name = "nearest_task_no_transitive_ordering"
+args = ["run", "@test/nearest-order-app#build"]
+
 [[plan]]
 compact = true
 name = "direct_dependency_task_does_not_expand"

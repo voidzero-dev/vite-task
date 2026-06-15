@@ -1,0 +1,10 @@
+{
+  "name": "@test/nearest-order-direct",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vtt build nearest-order-direct"
+  },
+  "dependencies": {
+    "@test/nearest-order-skip": "workspace:*"
+  }
+}

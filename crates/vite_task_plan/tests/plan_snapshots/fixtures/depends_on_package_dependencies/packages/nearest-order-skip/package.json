@@ -1,0 +1,10 @@
+{
+  "name": "@test/nearest-order-skip",
+  "version": "1.0.0",
+  "scripts": {
+    "lint": "vtt lint nearest-order-skip"
+  },
+  "dependencies": {
+    "@test/nearest-order-shared": "workspace:*"
+  }
+}

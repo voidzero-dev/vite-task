@@ -1,0 +1,9 @@
+// run @test/nearest-order-app#build
+{
+  "packages/nearest-order-app#build": [
+    "packages/nearest-order-direct#build",
+    "packages/nearest-order-shared#build"
+  ],
+  "packages/nearest-order-direct#build": [],
+  "packages/nearest-order-shared#build": []
+}

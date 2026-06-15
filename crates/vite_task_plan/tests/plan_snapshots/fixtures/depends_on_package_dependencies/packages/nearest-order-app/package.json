@@ -1,0 +1,8 @@
+{
+  "name": "@test/nearest-order-app",
+  "version": "1.0.0",
+  "dependencies": {
+    "@test/nearest-order-direct": "workspace:*",
+    "@test/nearest-order-shared": "workspace:*"
+  }
+}
