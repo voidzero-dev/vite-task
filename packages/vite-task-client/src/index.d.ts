@@ -42,8 +42,10 @@ export function getEnv(name: string, options?: {
     tracked?: boolean;
 }): string | undefined;
 /**
- * Ask the runner for every env whose name matches `pattern` (a glob, e.g.
- * `VITE_*`) and return the match-set as a plain object.
+ * Ask the runner for matching envs and return the match-set as a plain object.
+ *
+ * Pass a glob string (e.g. `VITE_*`) to use glob matching, or pass
+ * `{ prefix: 'VITE_' }` to match env names by literal prefix.
  *
  * With `tracked: true` (the default) the runner records the pattern as a
  * dependency, so adding, removing, or changing a matching env invalidates
@@ -52,10 +54,14 @@ export function getEnv(name: string, options?: {
  * Has no effect on `process.env`; the caller decides what to do with the
  * returned values. Returns an empty object when not running inside a runner.
  *
- * @param {string} pattern
- * @param {{ tracked?: boolean }} [options]
+ * @param {GetEnvsQuery} query
+ * @param {GetEnvOptions} [options]
  * @returns {Record<string, string>}
  */
-export function getEnvs(pattern: string, options?: {
+export function getEnvs(query: GetEnvsQuery, options?: GetEnvOptions): Record<string, string>;
+export type GetEnvOptions = {
     tracked?: boolean;
-}): Record<string, string>;
+};
+export type GetEnvsQuery = string | {
+    prefix: string;
+};

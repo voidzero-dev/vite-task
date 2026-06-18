@@ -68,6 +68,14 @@
       "command": "node scripts/fetch_envs.mjs",
       "cache": true
     },
+    "fetch-envs-prefix": {
+      "command": "node scripts/fetch_envs.mjs --prefix",
+      "cache": true
+    },
+    "fetch-envs-star-prefix": {
+      "command": "node scripts/fetch_envs.mjs --prefix PROBE_*",
+      "cache": true
+    },
     "fetch-env-untracked": {
       "command": "node scripts/fetch_env.mjs --untracked PROBE_ENV",
       "cache": true

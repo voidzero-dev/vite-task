@@ -82,21 +82,7 @@ pub struct Recorder {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EnvQuery {
     Glob(Arc<str>),
-}
-
-impl EnvQuery {
-    #[must_use]
-    pub fn glob(pattern: &str) -> Self {
-        Self::Glob(Arc::from(pattern))
-    }
-}
-
-impl From<&IpcEnvQuery<'_>> for EnvQuery {
-    fn from(query: &IpcEnvQuery<'_>) -> Self {
-        match query {
-            IpcEnvQuery::Glob(pattern) => Self::glob(pattern),
-        }
-    }
+    Prefix(Arc<str>),
 }
 
 /// A record of a tracked env query made via `get_envs`.
@@ -169,29 +155,65 @@ impl Handler for Recorder {
         query: &IpcEnvQuery<'_>,
         tracked: bool,
     ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::env::EnvGlobError> {
-        let key = EnvQuery::from(query);
+        let key = match query {
+            IpcEnvQuery::Glob(pattern) => EnvQuery::Glob(Arc::from(*pattern)),
+            IpcEnvQuery::Prefix(prefix) => EnvQuery::Prefix(Arc::from(*prefix)),
+        };
         if let Some(existing) = self.tracked_get_envs.get(&key) {
             return Ok(existing.matches.clone());
         }
-        let IpcEnvQuery::Glob(pattern) = query;
-        let glob = vite_glob::env::EnvGlob::new(pattern)?;
-        let matches: FxHashMap<Arc<OsStr>, Arc<OsStr>> = self
-            .envs
-            .iter()
-            .filter_map(|(name, value)| {
-                let name_str = name.to_str()?;
-                if glob.is_match(name_str) {
-                    Some((Arc::clone(name), Arc::clone(value)))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let matches: FxHashMap<Arc<OsStr>, Arc<OsStr>> = match query {
+            IpcEnvQuery::Glob(pattern) => {
+                let glob = vite_glob::env::EnvGlob::new(pattern)?;
+                self.envs
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        let name_str = name.to_str()?;
+                        if glob.is_match(name_str) {
+                            Some((Arc::clone(name), Arc::clone(value)))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+            IpcEnvQuery::Prefix(prefix) => self
+                .envs
+                .iter()
+                .filter_map(|(name, value)| {
+                    let name_str = name.to_str()?;
+                    if env_name_starts_with(name_str, prefix) {
+                        Some((Arc::clone(name), Arc::clone(value)))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        };
         if tracked {
             self.tracked_get_envs.insert(key, EnvQueryRecord { matches: matches.clone() });
         }
         Ok(matches)
     }
+}
+
+#[cfg(not(windows))]
+fn env_name_starts_with(name: &str, prefix: &str) -> bool {
+    name.starts_with(prefix)
+}
+
+#[cfg(windows)]
+fn env_name_starts_with(name: &str, prefix: &str) -> bool {
+    let mut name_chars = name.chars();
+    for prefix_char in prefix.chars() {
+        let Some(name_char) = name_chars.next() else {
+            return false;
+        };
+        if !name_char.eq_ignore_ascii_case(&prefix_char) {
+            return false;
+        }
+    }
+    true
 }
 
 /// Handle to a running IPC server.
@@ -431,7 +453,10 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
             }
             Request::GetEnvs { query, tracked } => {
                 let matches = handler.borrow_mut().get_envs(&query, tracked).map_err(|source| {
-                    let IpcEnvQuery::Glob(pattern) = query;
+                    let pattern = match query {
+                        IpcEnvQuery::Glob(pattern) => pattern,
+                        IpcEnvQuery::Prefix(prefix) => prefix,
+                    };
                     Error::InvalidGlob(Box::new(InvalidGlob {
                         pattern: Box::<str>::from(pattern),
                         source,

@@ -30,9 +30,9 @@
 )]
 use std::{collections::HashMap, ffi::OsStr};
 
-use napi::{Error, Result};
+use napi::{Either, Error, Result};
 use napi_derive::napi;
-use vite_task_client::Client;
+use vite_task_client::{Client, GetEnvsQuery};
 
 /// Options for [`RunnerClient::get_env`] and [`RunnerClient::get_envs`].
 ///
@@ -49,6 +49,11 @@ pub struct GetEnvOptions {
     /// Whether the runner should record this env as a cache-key dependency.
     /// Defaults to `true`.
     pub tracked: Option<bool>,
+}
+
+#[napi(object)]
+pub struct GetEnvsPrefixQuery {
+    pub prefix: String,
 }
 
 /// Handle returned by [`load`]. Holds the IPC connection and exposes the
@@ -96,20 +101,23 @@ impl RunnerClient {
     #[napi]
     pub fn get_envs(
         &self,
-        pattern: String,
+        query: Either<String, GetEnvsPrefixQuery>,
         options: Option<GetEnvOptions>,
     ) -> Result<HashMap<String, String>> {
         let tracked = options.and_then(|o| o.tracked).unwrap_or(true);
-        let matches = self
-            .client
-            .get_envs(pattern.as_str(), tracked)
-            .map_err(|err| err_string(vite_str::format!("{err}")))?;
+        let matches = match &query {
+            Either::A(pattern) => {
+                self.client.get_envs(GetEnvsQuery::Glob(pattern.as_str()), tracked)
+            }
+            Either::B(prefix) => {
+                self.client.get_envs(GetEnvsQuery::Prefix(&prefix.prefix), tracked)
+            }
+        }
+        .map_err(|err| err_string(vite_str::format!("{err}")))?;
         let mut result = HashMap::with_capacity(matches.len());
         for (name, value) in matches {
             let name = name.to_str().ok_or_else(|| {
-                err_string(vite_str::format!(
-                    "env name matched by pattern {pattern} is not valid UTF-8"
-                ))
+                err_static("env name matched by getEnvs query is not valid UTF-8")
             })?;
             let value = value.to_str().ok_or_else(|| {
                 err_string(vite_str::format!("env value for {name} is not valid UTF-8"))

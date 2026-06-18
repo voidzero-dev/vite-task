@@ -13,7 +13,7 @@ type RawStream = std::os::unix::net::UnixStream;
 type RawStream = std::fs::File;
 use rustc_hash::FxHashMap;
 use tokio::runtime::Builder;
-use vite_task_client::Client;
+use vite_task_client::{Client, GetEnvsQuery};
 use vite_task_ipc_shared::Request;
 use vite_task_server::{EnvQuery, Error, Recorder, Reports, ServerHandle, serve};
 
@@ -221,7 +221,7 @@ fn get_envs_returns_matching_entries() {
         env_map(&[("PROBE_A", "alpha"), ("PROBE_B", "beta"), ("UNRELATED", "noise")]),
         |envs| {
             let client = connect(&envs);
-            let matches = client.get_envs("PROBE_*", true).unwrap();
+            let matches = client.get_envs(GetEnvsQuery::Glob("PROBE_*"), true).unwrap();
             assert_eq!(matches.len(), 2);
             assert_eq!(
                 matches.get(OsStr::new("PROBE_A")).map(AsRef::as_ref),
@@ -237,22 +237,50 @@ fn get_envs_returns_matching_entries() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
-    let glob = reports.tracked_get_envs.get(&EnvQuery::glob("PROBE_*")).expect("glob recorded");
+    let glob =
+        reports.tracked_get_envs.get(&EnvQuery::Glob(Arc::from("PROBE_*"))).expect("glob recorded");
     assert_eq!(glob.matches.len(), 2);
+}
+
+#[test]
+fn get_envs_prefix_treats_star_literally() {
+    let reports = run_with_server(
+        env_map(&[
+            ("PROBE_*A", "literal"),
+            ("PROBE_XA", "wildcard if interpreted as glob"),
+            ("PROBE_A", "also wildcard if interpreted as glob"),
+        ]),
+        |envs| {
+            let client = connect(&envs);
+            let matches = client.get_envs(GetEnvsQuery::Prefix("PROBE_*"), true).unwrap();
+            assert_eq!(matches.len(), 1);
+            assert_eq!(
+                matches.get(OsStr::new("PROBE_*A")).map(AsRef::as_ref),
+                Some(OsStr::new("literal"))
+            );
+        },
+    )
+    .expect("driver returned error");
+
+    let prefix = reports
+        .tracked_get_envs
+        .get(&EnvQuery::Prefix(Arc::from("PROBE_*")))
+        .expect("prefix query recorded");
+    assert_eq!(prefix.matches.len(), 1);
 }
 
 #[test]
 fn get_envs_empty_match_set_is_returned() {
     let reports = run_with_server(env_map(&[("FOO", "x"), ("BAR", "y")]), |envs| {
         let client = connect(&envs);
-        let matches = client.get_envs("PROBE_*", false).unwrap();
+        let matches = client.get_envs(GetEnvsQuery::Glob("PROBE_*"), false).unwrap();
         assert!(matches.is_empty());
     })
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
     assert!(
-        !reports.tracked_get_envs.contains_key(&EnvQuery::glob("PROBE_*")),
+        !reports.tracked_get_envs.contains_key(&EnvQuery::Glob(Arc::from("PROBE_*"))),
         "untracked getEnvs calls are not recorded"
     );
 }
@@ -261,15 +289,16 @@ fn get_envs_empty_match_set_is_returned() {
 fn get_envs_untracked_then_tracked_records_once() {
     let reports = run_with_server(env_map(&[("PROBE_A", "alpha")]), |envs| {
         let client = connect(&envs);
-        let first = client.get_envs("PROBE_*", false).unwrap();
-        let second = client.get_envs("PROBE_*", true).unwrap();
-        let third = client.get_envs("PROBE_*", false).unwrap();
+        let first = client.get_envs(GetEnvsQuery::Glob("PROBE_*"), false).unwrap();
+        let second = client.get_envs(GetEnvsQuery::Glob("PROBE_*"), true).unwrap();
+        let third = client.get_envs(GetEnvsQuery::Glob("PROBE_*"), false).unwrap();
         assert_eq!(first, second);
         assert_eq!(second, third);
     })
     .expect("driver returned error");
 
-    let glob = reports.tracked_get_envs.get(&EnvQuery::glob("PROBE_*")).expect("glob recorded");
+    let glob =
+        reports.tracked_get_envs.get(&EnvQuery::Glob(Arc::from("PROBE_*"))).expect("glob recorded");
     assert_eq!(glob.matches.len(), 1);
 }
 
@@ -277,7 +306,9 @@ fn get_envs_untracked_then_tracked_records_once() {
 fn get_envs_invalid_pattern_surfaces_error() {
     let err = run_with_server(env_map(&[]), |envs| {
         let client = connect(&envs);
-        let send_err = client.get_envs("{unclosed", true).expect_err("server should reject");
+        let send_err = client
+            .get_envs(GetEnvsQuery::Glob("{unclosed"), true)
+            .expect_err("server should reject");
         assert_eq!(send_err.kind(), io::ErrorKind::UnexpectedEof);
     })
     .expect_err("driver should surface the protocol error");

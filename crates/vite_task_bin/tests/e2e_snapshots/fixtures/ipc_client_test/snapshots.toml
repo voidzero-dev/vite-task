@@ -426,6 +426,64 @@ steps = [
 ]
 
 [[e2e]]
+name = "fetch_envs_prefix_reads_match_set"
+comment = """
+Exercises `getEnvs({ prefix: "PROBE_" })`: the tool asks the runner for every env whose name starts with `PROBE_` and prints the served match set.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-prefix",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+    [
+      "PROBEX",
+      "not-a-prefix-match",
+    ],
+    [
+      "UNRELATED",
+      "noise",
+    ],
+  ], comment = "runner serves only envs with the literal PROBE_ prefix" },
+]
+
+[[e2e]]
+name = "fetch_envs_prefix_treats_star_literally"
+comment = """
+Exercises `getEnvs({ prefix: "PROBE_*" })`: `*` is part of the prefix string, not a glob wildcard.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-star-prefix",
+  ], envs = [
+    [
+      "PROBE_*A",
+      "literal",
+    ],
+    [
+      "PROBE_XA",
+      "wildcard-if-glob",
+    ],
+    [
+      "PROBE_A",
+      "also-wildcard-if-glob",
+    ],
+  ], comment = "runner serves only envs whose name starts with literal PROBE_*" },
+]
+
+[[e2e]]
 name = "fetch_envs_tracks_glob_match_set"
 comment = """
 Exercises `getEnvs(pattern, { tracked: true })`. The glob `PROBE_*` and its match-set snapshot enter the post-run fingerprint: later runs miss on changed, added, or removed matching envs, but hit when only non-matching envs differ.

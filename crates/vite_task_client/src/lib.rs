@@ -26,19 +26,7 @@ pub struct Client {
 #[derive(Debug, Clone, Copy)]
 pub enum GetEnvsQuery<'a> {
     Glob(&'a str),
-}
-
-impl<'a> GetEnvsQuery<'a> {
-    #[must_use]
-    pub const fn glob(pattern: &'a str) -> Self {
-        Self::Glob(pattern)
-    }
-}
-
-impl<'a> From<&'a str> for GetEnvsQuery<'a> {
-    fn from(pattern: &'a str) -> Self {
-        Self::Glob(pattern)
-    }
+    Prefix(&'a str),
 }
 
 impl Client {
@@ -128,14 +116,14 @@ impl Client {
     ///
     /// Returns an error if the request or response fails, or if the server
     /// rejects a glob query as an invalid glob.
-    pub fn get_envs<'a>(
+    pub fn get_envs(
         &self,
-        query: impl Into<GetEnvsQuery<'a>>,
+        query: GetEnvsQuery<'_>,
         tracked: bool,
     ) -> io::Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
-        let query = query.into();
         let query = match query {
             GetEnvsQuery::Glob(pattern) => IpcEnvQuery::Glob(pattern),
+            GetEnvsQuery::Prefix(prefix) => IpcEnvQuery::Prefix(prefix),
         };
         self.send(&Request::GetEnvs { query, tracked })?;
         let response: GetEnvsResponse = self.recv()?;

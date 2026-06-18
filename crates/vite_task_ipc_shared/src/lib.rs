@@ -38,6 +38,7 @@ pub enum Request<'a> {
 #[derive(Debug, Clone, Copy, SchemaWrite, SchemaRead)]
 pub enum EnvQuery<'a> {
     Glob(&'a str),
+    Prefix(&'a str),
 }
 
 #[derive(Debug, SchemaWrite, SchemaRead)]

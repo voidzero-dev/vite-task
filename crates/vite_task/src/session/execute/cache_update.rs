@@ -352,6 +352,9 @@ fn collect_tracked_env_queries(reports: &Reports) -> anyhow::Result<TrackedEnvQu
             vite_task_server::EnvQuery::Glob(pattern) => {
                 TrackedEnvQuery::Glob(Str::from(pattern.as_ref()))
             }
+            vite_task_server::EnvQuery::Prefix(prefix) => {
+                TrackedEnvQuery::Prefix(Str::from(prefix.as_ref()))
+            }
         };
         tracked_env_queries.insert(query, matches);
     }
