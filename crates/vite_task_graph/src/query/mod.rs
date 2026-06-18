@@ -21,8 +21,8 @@
 use petgraph::{Direction, prelude::DiGraphMap, visit::EdgeRef};
 use rustc_hash::{FxHashMap, FxHashSet};
 use vite_str::Str;
+use vite_workspace::PackageNodeIndex;
 pub use vite_workspace::package_graph::{PackageQuery, PackageQueryResolveError};
-use vite_workspace::{DependencyType, PackageNodeIndex};
 
 use crate::{IndexedTaskGraph, PackageDependencyEntry, TaskDependencyType, TaskId, TaskNodeIndex};
 
@@ -166,47 +166,6 @@ impl IndexedTaskGraph {
             .collect()
     }
 
-    /// Resolve each package to the nearest reachable `task_name` task node.
-    ///
-    /// Traversal starts from `packages`, follows package dependency edges whose
-    /// type is in `dependency_types`, and stops at a package once it defines the
-    /// requested task. This lets object-form `dependsOn` skip through direct
-    /// dependencies that lack the task without pulling in dependencies behind a
-    /// package that already has it.
-    fn resolve_nearest_packages_to_tasks(
-        &self,
-        packages: impl Iterator<Item = PackageNodeIndex>,
-        dependency_types: &[DependencyType],
-        task_name: &Str,
-    ) -> FxHashMap<PackageNodeIndex, TaskNodeIndex> {
-        let package_graph = self.indexed_package_graph.package_graph();
-        let mut pkg_to_task = FxHashMap::default();
-        let mut seen = FxHashSet::default();
-        let mut frontier: Vec<_> = packages.collect();
-
-        while let Some(pkg) = frontier.pop() {
-            if !seen.insert(pkg) {
-                continue;
-            }
-            if let Some(&task_idx) = self
-                .node_indices_by_task_id
-                .get(&TaskId { package_index: pkg, task_name: task_name.clone() })
-            {
-                pkg_to_task.insert(pkg, task_idx);
-                continue;
-            }
-
-            frontier.extend(
-                package_graph
-                    .edges(pkg)
-                    .filter(|edge| dependency_types.contains(edge.weight()))
-                    .map(|edge| edge.target()),
-            );
-        }
-
-        pkg_to_task
-    }
-
     /// Map a package subgraph to a task execution graph.
     ///
     /// For packages **with** the task: add the corresponding `TaskNodeIndex`.
@@ -327,15 +286,13 @@ impl IndexedTaskGraph {
         let origin_package = from_task_id.package_index;
         let package_graph = self.indexed_package_graph.package_graph();
 
-        // Select nearest dependency packages with `task_name`, starting from the
-        // origin's direct dependency packages whose edge matches one of the
-        // requested dependency fields.
-        let pkg_to_task = self.resolve_nearest_packages_to_tasks(
+        // Select the origin's direct dependency packages whose edge matches one of
+        // the requested dependency fields, mapped to their `task_name` task nodes.
+        let pkg_to_task = self.resolve_packages_to_tasks(
             package_graph
                 .edges(origin_package)
                 .filter(|edge| entry.dependency_types.contains(edge.weight()))
                 .map(|edge| edge.target()),
-            &entry.dependency_types,
             &entry.task_name,
         );
 

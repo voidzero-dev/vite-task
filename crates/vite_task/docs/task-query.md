@@ -208,10 +208,8 @@ Object-form entries select direct package dependencies from the declaring task:
 ```
 
 For `app#test`, this runs `build` in direct workspace dependency packages selected
-by the listed package.json fields. If a selected package lacks `build`, expansion
-walks through its matching dependency edges until it finds the nearest packages
-with `build`; it stops at packages that already have `build`. Supported fields
-are `dependencies`, `devDependencies`, and `peerDependencies`.
+by the listed package.json fields. Packages without `build` are skipped. Supported
+fields are `dependencies`, `devDependencies`, and `peerDependencies`.
 
 Recursive expansion comes from dependency tasks declaring their own `dependsOn`
 entries. For example, if `ui#build` also has `{ "task": "build", "from": "dependencies" }`,

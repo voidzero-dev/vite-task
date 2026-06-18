@@ -32,12 +32,12 @@ cwd = "packages/app"
 
 [[plan]]
 compact = true
-name = "nearest_task_through_dependency_without_task"
+name = "direct_dependency_without_task_is_skipped"
 args = ["run", "@test/nearest-through-app#build"]
 
 [[plan]]
 compact = true
-name = "nearest_task_stops_at_dependency_with_task"
+name = "direct_dependency_with_task_is_selected"
 args = ["run", "@test/nearest-stop-app#build"]
 
 # A selected package (`nearest-order-direct`) transitively depends on another
@@ -46,7 +46,7 @@ args = ["run", "@test/nearest-stop-app#build"]
 # stay unordered because there is no direct package edge between them.
 [[plan]]
 compact = true
-name = "nearest_task_no_transitive_ordering"
+name = "direct_dependency_tasks_are_not_transitively_ordered"
 args = ["run", "@test/nearest-order-app#build"]
 
 [[plan]]

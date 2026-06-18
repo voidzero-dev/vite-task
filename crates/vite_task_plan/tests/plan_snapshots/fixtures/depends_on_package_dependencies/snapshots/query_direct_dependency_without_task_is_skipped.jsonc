@@ -1,0 +1,4 @@
+// run @test/nearest-through-app#build
+{
+  "packages/nearest-through-app#build": []
+}

@@ -70,8 +70,6 @@ running `app#test` means:
 1. Start at package `app`.
 2. Select its direct workspace dependencies declared in `dependencies`.
 3. In each selected package, run `build` if that package has a `build` task.
-4. If a selected package lacks `build`, walk through its matching dependencies
-   until the nearest package or packages with `build` are found.
 
 The source package itself is not selected by the object entry.
 
@@ -99,11 +97,9 @@ In this example:
 - `tokens#build` is not selected by this entry because `@tokens` is not a direct dependency of `@app`.
 - `app#test` does not imply `app#build`; same-package dependencies use string form.
 
-## Nearest Task Selection
+## Not Recursive
 
-An object entry is not recursive past packages that define the requested task.
-It starts from direct dependency packages and stops at the nearest matching task
-on each dependency path.
+An object entry is not recursive. It selects only direct dependency packages.
 
 In the graph above, `tokens#build` is not selected by `app#test` because `@tokens` is a dependency of `@ui`, not `@app`.
 
@@ -125,13 +121,9 @@ flowchart LR
   uiTask --> tokensTask["tokens#build"]
 ```
 
-If `@ui` did not define `build`, then `tokens#build` could be selected directly
-from `app#test` by skipping through `@ui`.
-
 ## `from`
 
-`from` names the package.json dependency fields used to select direct dependency packages
-and to walk through packages that lack the requested task.
+`from` names the package.json dependency fields used to select direct dependency packages.
 
 ```jsonc
 { "task": "build", "from": "dependencies" }
