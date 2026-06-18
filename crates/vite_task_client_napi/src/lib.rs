@@ -102,7 +102,7 @@ impl RunnerClient {
         let tracked = options.and_then(|o| o.tracked).unwrap_or(true);
         let matches = self
             .client
-            .get_envs(&pattern, tracked)
+            .get_envs(pattern.as_str(), tracked)
             .map_err(|err| err_string(vite_str::format!("{err}")))?;
         let mut result = HashMap::with_capacity(matches.len());
         for (name, value) in matches {

@@ -15,7 +15,7 @@ use rustc_hash::FxHashMap;
 use tokio::runtime::Builder;
 use vite_task_client::Client;
 use vite_task_ipc_shared::Request;
-use vite_task_server::{Error, Recorder, Reports, ServerHandle, serve};
+use vite_task_server::{EnvQuery, Error, Recorder, Reports, ServerHandle, serve};
 
 fn env_map(pairs: &[(&str, &str)]) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
     pairs
@@ -237,7 +237,7 @@ fn get_envs_returns_matching_entries() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
-    let glob = reports.tracked_get_envs.get("PROBE_*").expect("glob recorded");
+    let glob = reports.tracked_get_envs.get(&EnvQuery::glob("PROBE_*")).expect("glob recorded");
     assert_eq!(glob.matches.len(), 2);
 }
 
@@ -252,7 +252,7 @@ fn get_envs_empty_match_set_is_returned() {
 
     assert!(!reports.cache_disabled);
     assert!(
-        !reports.tracked_get_envs.contains_key("PROBE_*"),
+        !reports.tracked_get_envs.contains_key(&EnvQuery::glob("PROBE_*")),
         "untracked getEnvs calls are not recorded"
     );
 }
@@ -269,7 +269,7 @@ fn get_envs_untracked_then_tracked_records_once() {
     })
     .expect("driver returned error");
 
-    let glob = reports.tracked_get_envs.get("PROBE_*").expect("glob recorded");
+    let glob = reports.tracked_get_envs.get(&EnvQuery::glob("PROBE_*")).expect("glob recorded");
     assert_eq!(glob.matches.len(), 1);
 }
 

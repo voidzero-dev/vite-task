@@ -8,7 +8,9 @@ use std::{
 use native_str::NativeStr;
 use rustc_hash::FxHashMap;
 use vite_path::{self, AbsolutePath};
-use vite_task_ipc_shared::{GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request};
+use vite_task_ipc_shared::{
+    EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request,
+};
 use wincode::{SchemaRead, config::DefaultConfig};
 
 #[cfg(unix)]
@@ -19,6 +21,24 @@ type Stream = std::fs::File;
 pub struct Client {
     stream: RefCell<Stream>,
     scratch: RefCell<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum GetEnvsQuery<'a> {
+    Glob(&'a str),
+}
+
+impl<'a> GetEnvsQuery<'a> {
+    #[must_use]
+    pub const fn glob(pattern: &'a str) -> Self {
+        Self::Glob(pattern)
+    }
+}
+
+impl<'a> From<&'a str> for GetEnvsQuery<'a> {
+    fn from(pattern: &'a str) -> Self {
+        Self::Glob(pattern)
+    }
 }
 
 impl Client {
@@ -101,19 +121,23 @@ impl Client {
             .map(|env_value| Arc::<OsStr>::from(env_value.to_cow_os_str().as_ref())))
     }
 
-    /// Requests every env whose name matches `pattern` from the runner. The
+    /// Requests every env whose name matches `query` from the runner. The
     /// returned map is keyed by env name with its value.
     ///
     /// # Errors
     ///
     /// Returns an error if the request or response fails, or if the server
-    /// rejects the pattern as an invalid glob.
-    pub fn get_envs(
+    /// rejects a glob query as an invalid glob.
+    pub fn get_envs<'a>(
         &self,
-        pattern: &str,
+        query: impl Into<GetEnvsQuery<'a>>,
         tracked: bool,
     ) -> io::Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
-        self.send(&Request::GetEnvs { pattern, tracked })?;
+        let query = query.into();
+        let query = match query {
+            GetEnvsQuery::Glob(pattern) => IpcEnvQuery::Glob(pattern),
+        };
+        self.send(&Request::GetEnvs { query, tracked })?;
         let response: GetEnvsResponse = self.recv()?;
         Ok(response
             .entries

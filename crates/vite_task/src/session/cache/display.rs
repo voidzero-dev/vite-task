@@ -187,7 +187,7 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                     format_input_change_str(*kind, path.as_str())
                 }
                 FingerprintMismatch::TrackedEnvChanged(mismatch)
-                | FingerprintMismatch::TrackedEnvGlobChanged { mismatch, .. } => {
+                | FingerprintMismatch::TrackedEnvQueryChanged { mismatch, .. } => {
                     vite_str::format!("{mismatch}")
                 }
             };
@@ -249,8 +249,10 @@ mod tests {
     #[test]
     fn inline_tracked_env_mismatch_preserves_kind() {
         let added = CacheStatus::Miss(CacheMiss::FingerprintMismatch(
-            FingerprintMismatch::TrackedEnvGlobChanged {
-                pattern: Str::from("PROBE_*"),
+            FingerprintMismatch::TrackedEnvQueryChanged {
+                query: crate::session::execute::fingerprint::TrackedEnvQuery::Glob(Str::from(
+                    "PROBE_*",
+                )),
                 mismatch: EnvMismatch::Added { name: Str::from("PROBE_C") },
             },
         ));

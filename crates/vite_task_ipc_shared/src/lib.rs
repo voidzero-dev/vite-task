@@ -31,8 +31,13 @@ pub enum Request<'a> {
     IgnoreInput(&'a NativeStr),
     IgnoreOutput(&'a NativeStr),
     GetEnv { name: &'a NativeStr, tracked: bool },
-    GetEnvs { pattern: &'a str, tracked: bool },
+    GetEnvs { query: EnvQuery<'a>, tracked: bool },
     DisableCache,
+}
+
+#[derive(Debug, Clone, Copy, SchemaWrite, SchemaRead)]
+pub enum EnvQuery<'a> {
+    Glob(&'a str),
 }
 
 #[derive(Debug, SchemaWrite, SchemaRead)]

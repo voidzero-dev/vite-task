@@ -24,6 +24,7 @@ use crate::session::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError,
     },
+    execute::fingerprint::TrackedEnvQuery,
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -137,9 +138,9 @@ pub enum SavedCacheMissReason {
     InputChanged { kind: InputChangeKind, path: Str },
     /// A runner-aware tool reported a tracked env var that changed between runs.
     TrackedEnvChanged(EnvMismatch),
-    /// A runner-aware tool reported a tracked env glob whose match-set changed
+    /// A runner-aware tool reported a tracked bulk env query whose match-set changed
     /// between runs. Carries the first differing entry.
-    TrackedEnvGlobChanged { pattern: Str, mismatch: EnvMismatch },
+    TrackedEnvQueryChanged { query: TrackedEnvQuery, mismatch: EnvMismatch },
 }
 
 /// An execution error, serializable for persistence.
@@ -286,9 +287,9 @@ impl SavedCacheMissReason {
                 FingerprintMismatch::TrackedEnvChanged(mismatch) => {
                     Self::TrackedEnvChanged(mismatch.clone())
                 }
-                FingerprintMismatch::TrackedEnvGlobChanged { pattern, mismatch } => {
-                    Self::TrackedEnvGlobChanged {
-                        pattern: pattern.clone(),
+                FingerprintMismatch::TrackedEnvQueryChanged { query, mismatch } => {
+                    Self::TrackedEnvQueryChanged {
+                        query: query.clone(),
                         mismatch: mismatch.clone(),
                     }
                 }
@@ -582,7 +583,7 @@ impl TaskResult {
                         vite_str::format!("→ Cache miss: {desc}")
                     }
                     SavedCacheMissReason::TrackedEnvChanged(mismatch)
-                    | SavedCacheMissReason::TrackedEnvGlobChanged { mismatch, .. } => {
+                    | SavedCacheMissReason::TrackedEnvQueryChanged { mismatch, .. } => {
                         vite_str::format!("→ Cache miss: {mismatch}")
                     }
                 },

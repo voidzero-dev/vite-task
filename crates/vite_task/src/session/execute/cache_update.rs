@@ -11,7 +11,7 @@ use vite_task_server::Reports;
 
 use super::{
     CacheState,
-    fingerprint::{PathRead, PostRunFingerprint},
+    fingerprint::{PathRead, PostRunFingerprint, TrackedEnvQuery},
     glob,
     spawn::ChildOutcome,
 };
@@ -37,7 +37,7 @@ struct TrackingOutcome {
 }
 
 type TrackedEnvValues = BTreeMap<Str, Option<EnvValueHash>>;
-type TrackedEnvGlobValues = BTreeMap<Str, BTreeMap<Str, EnvValueHash>>;
+type TrackedEnvQueryValues = BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>;
 
 /// Decide whether the finished run may be cached, and store it if so.
 ///
@@ -122,7 +122,7 @@ pub(super) async fn update_cache(
     // Collect tool-reported tracked envs for the post-run fingerprint. Env
     // names that the user already declared are skipped because their values
     // are already part of the spawn fingerprint.
-    let (tracked_envs, tracked_env_globs) = match collect_tracked_reports(reports, metadata) {
+    let (tracked_envs, tracked_env_queries) = match collect_tracked_reports(reports, metadata) {
         Ok(tracked_reports) => tracked_reports,
         Err(err) => {
             return (
@@ -142,7 +142,7 @@ pub(super) async fn update_cache(
         workspace_root,
         &globbed_inputs,
         tracked_envs,
-        tracked_env_globs,
+        tracked_env_queries,
     ) {
         Ok(fingerprint) => fingerprint,
         Err(err) => {
@@ -262,12 +262,12 @@ fn observe_fspy(
 fn collect_tracked_reports(
     reports: Option<&Reports>,
     metadata: &CacheMetadata,
-) -> anyhow::Result<(TrackedEnvValues, TrackedEnvGlobValues)> {
+) -> anyhow::Result<(TrackedEnvValues, TrackedEnvQueryValues)> {
     reports
         .map(|reports| {
             let tracked_envs = collect_tracked_envs(reports, metadata)?;
-            let tracked_env_globs = collect_tracked_env_globs(reports)?;
-            Ok::<_, anyhow::Error>((tracked_envs, tracked_env_globs))
+            let tracked_env_queries = collect_tracked_env_queries(reports)?;
+            Ok::<_, anyhow::Error>((tracked_envs, tracked_env_queries))
         })
         .transpose()
         .map(Option::unwrap_or_default)
@@ -332,12 +332,12 @@ fn collect_tracked_envs(
     Ok(tracked_envs)
 }
 
-/// Select tool-reported env-glob records to embed in the post-run
+/// Select tool-reported bulk env query records to embed in the post-run
 /// fingerprint. The full match-set is stored as value hashes.
-fn collect_tracked_env_globs(reports: &Reports) -> anyhow::Result<TrackedEnvGlobValues> {
-    let mut tracked_env_globs = BTreeMap::new();
+fn collect_tracked_env_queries(reports: &Reports) -> anyhow::Result<TrackedEnvQueryValues> {
+    let mut tracked_env_queries = BTreeMap::new();
 
-    for (pattern, record) in &reports.tracked_get_envs {
+    for (query, record) in &reports.tracked_get_envs {
         let mut matches = BTreeMap::new();
         for (name, value) in &record.matches {
             let name_str = name
@@ -348,10 +348,15 @@ fn collect_tracked_env_globs(reports: &Reports) -> anyhow::Result<TrackedEnvGlob
             })?;
             matches.insert(Str::from(name_str), EnvValueHash::new(value_str));
         }
-        tracked_env_globs.insert(Str::from(pattern.as_ref()), matches);
+        let query = match query {
+            vite_task_server::EnvQuery::Glob(pattern) => {
+                TrackedEnvQuery::Glob(Str::from(pattern.as_ref()))
+            }
+        };
+        tracked_env_queries.insert(query, matches);
     }
 
-    Ok(tracked_env_globs)
+    Ok(tracked_env_queries)
 }
 
 /// Collect output files and create a tar.zst archive in the cache directory.

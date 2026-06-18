@@ -24,6 +24,13 @@ use crate::{
     session::cache::{EnvMismatch, InputChangeKind},
 };
 
+#[derive(
+    SchemaWrite, SchemaRead, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub enum TrackedEnvQuery {
+    Glob(Str),
+}
+
 /// Path read access info
 #[derive(Debug, Clone, Copy)]
 pub struct PathRead {
@@ -44,10 +51,10 @@ pub struct PostRunFingerprint {
     /// context that served the original request.
     pub tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
 
-    /// Glob-pattern env queries (`getEnvs`) made with `tracked: true`.
-    /// Outer key is the glob pattern, inner map is the match-set at execution
-    /// time (name -> value hash). Validated at cache lookup by re-matching
-    /// against the current env context and comparing the resulting set.
+    /// Bulk env queries (`getEnvs`) made with `tracked: true`.
+    /// Outer key is the query, inner map is the match-set at execution time
+    /// (name -> value hash). Validated at cache lookup by re-matching against
+    /// the current env context and comparing the resulting set.
     ///
     /// Non-UTF-8 env names are never matched, saved, or treated as errors:
     /// they are not returned to the client, so their existence cannot affect
@@ -55,7 +62,7 @@ pub struct PostRunFingerprint {
     /// value; the JS client errors when querying a matched non-UTF-8 value,
     /// and cache-hit validation treats a currently matched non-UTF-8 value as
     /// a changed mismatch so stale cached output is not replayed.
-    pub tracked_env_globs: BTreeMap<Str, BTreeMap<Str, EnvValueHash>>,
+    pub tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
 }
 
 /// A mismatch between the stored post-run fingerprint and the current state.
@@ -65,9 +72,9 @@ pub enum PostRunMismatch {
     Input { kind: InputChangeKind, path: RelativePathBuf },
     /// A tool-tracked env var changed value, appeared, or disappeared.
     TrackedEnv(EnvMismatch),
-    /// A tool-tracked env glob's match-set changed between runs. Carries the
-    /// first differing entry in env-name order.
-    TrackedEnvGlob { pattern: Str, mismatch: EnvMismatch },
+    /// A tool-tracked bulk env query's match-set changed between runs. Carries
+    /// the first differing entry in env-name order.
+    TrackedEnvQuery { query: TrackedEnvQuery, mismatch: EnvMismatch },
 }
 
 /// Fingerprint for a single path (file or directory)
@@ -107,14 +114,14 @@ impl PostRunFingerprint {
     /// * `base_dir` - Workspace root for resolving relative paths
     /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
     /// * `tracked_envs` - Tool-requested env vars (name -> value hash), validated on lookup
-    /// * `tracked_env_globs` - Tool-requested env globs (pattern -> match-set hashes)
+    /// * `tracked_env_queries` - Tool-requested bulk env queries (query -> match-set hashes)
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         base_dir: &AbsolutePath,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
-        tracked_env_globs: BTreeMap<Str, BTreeMap<Str, EnvValueHash>>,
+        tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
     ) -> anyhow::Result<Self> {
         let inferred_inputs = inferred_path_reads
             .par_iter()
@@ -126,7 +133,7 @@ impl PostRunFingerprint {
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
-        Ok(Self { inferred_inputs, tracked_envs, tracked_env_globs })
+        Ok(Self { inferred_inputs, tracked_envs, tracked_env_queries })
     }
 
     /// Validates the fingerprint against current filesystem state and the
@@ -194,19 +201,19 @@ impl PostRunFingerprint {
             }
         }
 
-        for (pattern, stored_matches) in &self.tracked_env_globs {
-            let current_matches = match match_env_glob(pattern.as_str(), unfiltered_envs)? {
-                EnvGlobValidation::Matches(matches) => matches,
-                EnvGlobValidation::NonUtf8Value(mismatch) => {
-                    return Ok(Some(PostRunMismatch::TrackedEnvGlob {
-                        pattern: pattern.clone(),
+        for (query, stored_matches) in &self.tracked_env_queries {
+            let current_matches = match match_env_query(query, unfiltered_envs)? {
+                EnvQueryValidation::Matches(matches) => matches,
+                EnvQueryValidation::NonUtf8Value(mismatch) => {
+                    return Ok(Some(PostRunMismatch::TrackedEnvQuery {
+                        query: query.clone(),
                         mismatch,
                     }));
                 }
             };
             if let Some(mismatch) = first_env_glob_mismatch(stored_matches, &current_matches) {
-                return Ok(Some(PostRunMismatch::TrackedEnvGlob {
-                    pattern: pattern.clone(),
+                return Ok(Some(PostRunMismatch::TrackedEnvQuery {
+                    query: query.clone(),
                     mismatch,
                 }));
             }
@@ -216,34 +223,41 @@ impl PostRunFingerprint {
     }
 }
 
-/// Build the current match-set for `pattern` by enumerating the given env
-/// snapshot and keeping UTF-8 names whose representation matches the glob. If
-/// a matching env has a non-UTF-8 value, return a changed mismatch so the stale
-/// cache entry is not replayed.
-fn match_env_glob(
-    pattern: &str,
+/// Build the current match-set for `query` by enumerating the given env
+/// snapshot and keeping matching UTF-8 names. If a matching env has a non-UTF-8
+/// value, return a changed mismatch so the stale cache entry is not replayed.
+fn match_env_query(
+    query: &TrackedEnvQuery,
     envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
-) -> anyhow::Result<EnvGlobValidation> {
-    let glob = vite_glob::env::EnvGlob::new(pattern)?;
+) -> anyhow::Result<EnvQueryValidation> {
+    let TrackedEnvQuery::Glob(pattern) = query;
+    let glob = vite_glob::env::EnvGlob::new(pattern.as_str())?;
+    Ok(collect_matching_envs(envs, |name| glob.is_match(name)))
+}
+
+fn collect_matching_envs(
+    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    is_match: impl Fn(&str) -> bool,
+) -> EnvQueryValidation {
     let mut matches = BTreeMap::new();
     for (name, value) in envs {
         let Some(name_str) = name.to_str() else {
             continue;
         };
-        if !glob.is_match(name_str) {
+        if !is_match(name_str) {
             continue;
         }
         let Some(value_str) = value.to_str() else {
-            return Ok(EnvGlobValidation::NonUtf8Value(EnvMismatch::Changed {
+            return EnvQueryValidation::NonUtf8Value(EnvMismatch::Changed {
                 name: Str::from(name_str),
-            }));
+            });
         };
         matches.insert(Str::from(name_str), EnvValueHash::new(value_str));
     }
-    Ok(EnvGlobValidation::Matches(matches))
+    EnvQueryValidation::Matches(matches)
 }
 
-enum EnvGlobValidation {
+enum EnvQueryValidation {
     Matches(BTreeMap<Str, EnvValueHash>),
     NonUtf8Value(EnvMismatch),
 }
@@ -516,9 +530,10 @@ mod tests {
 
     #[test]
     fn validate_reports_current_non_utf8_tracked_env_glob_value_as_changed() {
-        let mut tracked_env_globs = BTreeMap::new();
-        tracked_env_globs.insert(Str::from("PROBE_*"), BTreeMap::new());
-        let fingerprint = PostRunFingerprint { tracked_env_globs, ..PostRunFingerprint::default() };
+        let mut tracked_env_queries = BTreeMap::new();
+        tracked_env_queries.insert(TrackedEnvQuery::Glob(Str::from("PROBE_*")), BTreeMap::new());
+        let fingerprint =
+            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
 
         let mut unfiltered_envs = FxHashMap::default();
         unfiltered_envs.insert(
@@ -531,22 +546,23 @@ mod tests {
             fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
 
         match mismatch {
-            Some(PostRunMismatch::TrackedEnvGlob {
-                pattern,
+            Some(PostRunMismatch::TrackedEnvQuery {
+                query,
                 mismatch: EnvMismatch::Changed { name },
             }) => {
-                assert_eq!(pattern.as_str(), "PROBE_*");
+                assert_eq!(query, TrackedEnvQuery::Glob(Str::from("PROBE_*")));
                 assert_eq!(name.as_str(), "PROBE_BAD");
             }
-            other => panic!("expected changed tracked env glob mismatch, got {other:?}"),
+            other => panic!("expected changed tracked env query mismatch, got {other:?}"),
         }
     }
 
     #[test]
     fn validate_ignores_non_utf8_tracked_env_glob_names() {
-        let mut tracked_env_globs = BTreeMap::new();
-        tracked_env_globs.insert(Str::from("PROBE_*"), BTreeMap::new());
-        let fingerprint = PostRunFingerprint { tracked_env_globs, ..PostRunFingerprint::default() };
+        let mut tracked_env_queries = BTreeMap::new();
+        tracked_env_queries.insert(TrackedEnvQuery::Glob(Str::from("PROBE_*")), BTreeMap::new());
+        let fingerprint =
+            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
 
         let mut unfiltered_envs = FxHashMap::default();
         unfiltered_envs.insert(

@@ -11,7 +11,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use vite_path::AbsolutePath;
-use vite_task_ipc_shared::{GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request};
+use vite_task_ipc_shared::{
+    EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request,
+};
 use wincode::{SchemaWrite, config::DefaultConfig};
 
 pub trait Handler {
@@ -19,14 +21,14 @@ pub trait Handler {
     fn ignore_output(&mut self, path: &Arc<AbsolutePath>);
     fn disable_cache(&mut self);
     fn get_env(&mut self, name: &OsStr, tracked: bool) -> Option<Arc<OsStr>>;
-    /// Returns the subset of the env map whose names match `pattern` as a glob.
+    /// Returns the subset of the env map whose names match `query`.
     ///
     /// # Errors
     ///
-    /// Returns an error if `pattern` fails to parse as a glob.
+    /// Returns an error if a glob query fails to parse.
     fn get_envs(
         &mut self,
-        pattern: &str,
+        query: &IpcEnvQuery<'_>,
         tracked: bool,
     ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::env::EnvGlobError>;
 }
@@ -70,18 +72,39 @@ pub struct Recorder {
     ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     cache_disabled: bool,
     tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
-    tracked_get_envs: FxHashMap<Arc<str>, EnvGlobRecord>,
+    tracked_get_envs: FxHashMap<EnvQuery, EnvQueryRecord>,
     /// The envs `get_env` resolves against. The runner supplies these for the
     /// spawned task; the server never re-reads the live process env.
     envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
 }
 
-/// A record of a tracked glob-pattern env query made via `get_envs`.
+/// Owned env query key recorded for tracked `get_envs` calls.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EnvQuery {
+    Glob(Arc<str>),
+}
+
+impl EnvQuery {
+    #[must_use]
+    pub fn glob(pattern: &str) -> Self {
+        Self::Glob(Arc::from(pattern))
+    }
+}
+
+impl From<&IpcEnvQuery<'_>> for EnvQuery {
+    fn from(query: &IpcEnvQuery<'_>) -> Self {
+        match query {
+            IpcEnvQuery::Glob(pattern) => Self::glob(pattern),
+        }
+    }
+}
+
+/// A record of a tracked env query made via `get_envs`.
 ///
 /// `matches` is captured on the first call and reused on repeat queries; the
 /// server's env map is immutable for a task's lifetime.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnvGlobRecord {
+pub struct EnvQueryRecord {
     pub matches: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
 }
 
@@ -92,7 +115,7 @@ pub struct Reports {
     pub ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     pub cache_disabled: bool,
     pub tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
-    pub tracked_get_envs: FxHashMap<Arc<str>, EnvGlobRecord>,
+    pub tracked_get_envs: FxHashMap<EnvQuery, EnvQueryRecord>,
 }
 
 impl Recorder {
@@ -143,12 +166,14 @@ impl Handler for Recorder {
 
     fn get_envs(
         &mut self,
-        pattern: &str,
+        query: &IpcEnvQuery<'_>,
         tracked: bool,
     ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vite_glob::env::EnvGlobError> {
-        if let Some(existing) = self.tracked_get_envs.get(pattern) {
+        let key = EnvQuery::from(query);
+        if let Some(existing) = self.tracked_get_envs.get(&key) {
             return Ok(existing.matches.clone());
         }
+        let IpcEnvQuery::Glob(pattern) = query;
         let glob = vite_glob::env::EnvGlob::new(pattern)?;
         let matches: FxHashMap<Arc<OsStr>, Arc<OsStr>> = self
             .envs
@@ -163,8 +188,7 @@ impl Handler for Recorder {
             })
             .collect();
         if tracked {
-            self.tracked_get_envs
-                .insert(Arc::from(pattern), EnvGlobRecord { matches: matches.clone() });
+            self.tracked_get_envs.insert(key, EnvQueryRecord { matches: matches.clone() });
         }
         Ok(matches)
     }
@@ -405,14 +429,14 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
                 let response = GetEnvResponse { env_value: value.as_deref().map(Into::into) };
                 write_response(&mut stream, &response).await.map_err(Error::WriteResponse)?;
             }
-            Request::GetEnvs { pattern, tracked } => {
-                let matches =
-                    handler.borrow_mut().get_envs(pattern, tracked).map_err(|source| {
-                        Error::InvalidGlob(Box::new(InvalidGlob {
-                            pattern: Box::<str>::from(pattern),
-                            source,
-                        }))
-                    })?;
+            Request::GetEnvs { query, tracked } => {
+                let matches = handler.borrow_mut().get_envs(&query, tracked).map_err(|source| {
+                    let IpcEnvQuery::Glob(pattern) = query;
+                    Error::InvalidGlob(Box::new(InvalidGlob {
+                        pattern: Box::<str>::from(pattern),
+                        source,
+                    }))
+                })?;
                 let response = GetEnvsResponse {
                     entries: matches.iter().map(|(k, v)| ((&**k).into(), (&**v).into())).collect(),
                 };
