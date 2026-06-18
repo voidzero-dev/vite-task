@@ -13,14 +13,12 @@ catalog:
   oxlint: ^1.55.0
   oxlint-tsgolint: ^0.18.0
   typescript: ^6.0.3
-  vite: npm:@voidzero-dev/vite-plus-core@^0.1.23
-  vitest: npm:@voidzero-dev/vite-plus-test@^0.1.23
-  vite-plus: ^0.2.0
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.1
+  vite-plus: 0.2.1
 
 catalogMode: prefer
 overrides:
   vite: 'catalog:'
-  vitest: 'catalog:'
   # The e2e harness symlinks packages/tools' `vite` binary into fixtures to
   # exercise the real vite-task-client integration. The global `vite: catalog:`
   # override above routes vite to the Vite+ toolchain fork, which does not carry
@@ -32,7 +30,5 @@ overrides:
 peerDependencyRules:
   allowAny:
     - vite
-    - vitest
   allowedVersions:
     vite: '*'
-    vitest: '*'
