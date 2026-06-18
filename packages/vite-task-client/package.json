@@ -1,6 +1,6 @@
 {
   "name": "@voidzero-dev/vite-task-client",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Hand the Vite+ task runner (vp run) precise cache-correctness information from inside your tool.",
   "keywords": [
     "cache",
