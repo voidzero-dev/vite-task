@@ -4357,7 +4357,6 @@ dependencies = [
  "tracing",
  "ts-rs",
  "vec1",
- "vite_graph_ser",
  "vite_path",
  "vite_str",
  "vite_workspace",

@@ -1,0 +1,46 @@
+# task graph
+
+```mermaid
+flowchart TD
+  task_0["<workspace>/packages/self-dep#build"]
+```
+
+## `<workspace>/packages/self-dep#build`
+
+```json
+{
+  "task_display": {
+    "package_name": "self-dep",
+    "task_name": "build",
+    "package_path": "<workspace>/packages/self-dep"
+  },
+  "resolved_config": {
+    "commands": [
+      "echo building"
+    ],
+    "resolved_options": {
+      "cwd": "<workspace>/packages/self-dep",
+      "cache_config": {
+        "env_config": {
+          "fingerprinted_envs": [],
+          "untracked_env": [
+            "<default untracked envs>"
+          ]
+        },
+        "input_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        },
+        "output_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        }
+      }
+    }
+  },
+  "source": "PackageJsonScript"
+}
+```
+

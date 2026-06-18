@@ -84,15 +84,6 @@ pub struct TaskNode {
     pub source: TaskSource,
 }
 
-impl vite_graph_ser::GetKey for TaskNode {
-    type Key<'a> = (&'a AbsolutePath, &'a str);
-
-    #[expect(clippy::disallowed_types, reason = "trait requires String as error type")]
-    fn key(&self) -> Result<Self::Key<'_>, String> {
-        Ok((&self.task_display.package_path, &self.task_display.task_name))
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum TaskGraphLoadError {
     #[error("Failed to load package graph")]

@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use cow_utils::CowUtils as _;
 use serde::Serialize;
+use vite_path::AbsolutePath;
 use vite_task_graph::config::DEFAULT_UNTRACKED_ENV;
 
 fn visit_json(value: &mut serde_json::Value, f: &mut impl FnMut(&mut serde_json::Value)) {
@@ -217,4 +218,14 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
     });
 
     json_value
+}
+
+#[expect(clippy::disallowed_types, reason = "Snapshot details are emitted as JSON text")]
+pub fn redact_snapshot_pretty_json(
+    value: &impl Serialize,
+    workspace_root: &AbsolutePath,
+) -> String {
+    let workspace_root = workspace_root.as_path().to_str().unwrap();
+    serde_json::to_string_pretty(&redact_snapshot(value, workspace_root))
+        .expect("redacted snapshot must serialize as pretty JSON")
 }

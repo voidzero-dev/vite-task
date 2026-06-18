@@ -19,7 +19,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 vec1 = { workspace = true, features = ["serde"] }
-vite_graph_ser = { workspace = true }
 vite_path = { workspace = true }
 vite_str = { workspace = true }
 vite_workspace = { workspace = true }

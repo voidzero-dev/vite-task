@@ -1,4 +1,5 @@
 mod redact;
+mod task_graph_markdown;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -12,6 +13,7 @@ use cow_utils::CowUtils as _;
 use redact::redact_snapshot;
 use rustc_hash::FxHashMap;
 use serde::Serialize;
+use task_graph_markdown::render_task_graph_markdown;
 use tokio::runtime::Runtime;
 use vite_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vite_str::Str;
@@ -227,11 +229,9 @@ fn run_case_inner(
                 return Ok(());
             }
         };
-        let task_graph_json = redact_snapshot(
-            &vite_graph_ser::SerializeByKey(task_graph.task_graph()),
-            workspace_root_str,
-        );
-        snapshots.check_json_snapshot("task_graph", "task graph", &task_graph_json)?;
+        let task_graph_markdown =
+            render_task_graph_markdown(task_graph.task_graph(), &workspace_root.path);
+        snapshots.check_snapshot("task_graph.md", task_graph_markdown.as_str())?;
 
         for plan in cases_file.plan_cases {
             assert_identifier_like("plan case name", plan.name.as_str());

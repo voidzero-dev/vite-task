@@ -1,0 +1,46 @@
+# task graph
+
+```mermaid
+flowchart TD
+  task_0["<workspace>/packages/foo#dev"]
+```
+
+## `<workspace>/packages/foo#dev`
+
+```json
+{
+  "task_display": {
+    "package_name": "foo",
+    "task_name": "dev",
+    "package_path": "<workspace>/packages/foo"
+  },
+  "resolved_config": {
+    "commands": [
+      "vite --port 3000"
+    ],
+    "resolved_options": {
+      "cwd": "<workspace>/packages/foo",
+      "cache_config": {
+        "env_config": {
+          "fingerprinted_envs": [],
+          "untracked_env": [
+            "<default untracked envs>"
+          ]
+        },
+        "input_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        },
+        "output_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        }
+      }
+    }
+  },
+  "source": "PackageJsonScript"
+}
+```
+

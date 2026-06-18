@@ -1,0 +1,86 @@
+# task graph
+
+```mermaid
+flowchart TD
+  task_0["<workspace>/#lint"]
+  task_1["<workspace>/packages/a#lint"]
+```
+
+## `<workspace>/#lint`
+
+```json
+{
+  "task_display": {
+    "package_name": "",
+    "task_name": "lint",
+    "package_path": "<workspace>/"
+  },
+  "resolved_config": {
+    "commands": [
+      "vt run a#lint"
+    ],
+    "resolved_options": {
+      "cwd": "<workspace>/",
+      "cache_config": {
+        "env_config": {
+          "fingerprinted_envs": [],
+          "untracked_env": [
+            "<default untracked envs>"
+          ]
+        },
+        "input_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        },
+        "output_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        }
+      }
+    }
+  },
+  "source": "PackageJsonScript"
+}
+```
+
+## `<workspace>/packages/a#lint`
+
+```json
+{
+  "task_display": {
+    "package_name": "a",
+    "task_name": "lint",
+    "package_path": "<workspace>/packages/a"
+  },
+  "resolved_config": {
+    "commands": [
+      "vt tool print lint"
+    ],
+    "resolved_options": {
+      "cwd": "<workspace>/packages/a",
+      "cache_config": {
+        "env_config": {
+          "fingerprinted_envs": [],
+          "untracked_env": [
+            "<default untracked envs>"
+          ]
+        },
+        "input_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        },
+        "output_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        }
+      }
+    }
+  },
+  "source": "PackageJsonScript"
+}
+```
+
