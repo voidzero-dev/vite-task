@@ -10,21 +10,32 @@ use config::{
     ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
     UserTaskDefinition,
 };
-use petgraph::graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex};
+use petgraph::{
+    graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
+    visit::EdgeRef as _,
+};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::Serialize;
 pub use specifier::TaskSpecifier;
 use vite_path::AbsolutePath;
 use vite_str::Str;
-use vite_workspace::{PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph};
+use vite_workspace::{
+    DependencyType, PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph,
+};
 
-use crate::{config::user::UserTaskOptions, display::TaskDisplay};
+use crate::{
+    config::user::{
+        UserDependencyType, UserDependsOnEntry, UserPackageDependency, UserTaskOptions,
+    },
+    display::TaskDisplay,
+};
 
 /// The type of a task dependency edge in the task graph.
 ///
-/// Currently only `Explicit` is produced (from `dependsOn` in the task config).
-/// Topological ordering is handled at query time via the package subgraph rather
-/// than by pre-computing edges in the task graph.
+/// All edges are produced from `dependsOn` in task config, including string-form
+/// task specifiers and object-form package dependency selections. Topological
+/// ordering is handled at query time via the package subgraph rather than by
+/// pre-computing package edges in the task graph.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct TaskDependencyType;
 
@@ -168,6 +179,37 @@ unsafe impl IndexType for TaskIx {
 pub type TaskNodeIndex = NodeIndex<TaskIx>;
 pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
 
+/// A `dependsOn` entry that selects direct package dependencies from a source task.
+struct PackageDependencyEntry {
+    task_name: Str,
+    dependency_types: Box<[DependencyType]>,
+}
+
+impl PackageDependencyEntry {
+    fn from_user_config(entry: &UserPackageDependency) -> Self {
+        Self {
+            task_name: entry.task.clone(),
+            dependency_types: entry
+                .from
+                .as_slice()
+                .iter()
+                .copied()
+                .map(DependencyType::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<UserDependencyType> for DependencyType {
+    fn from(value: UserDependencyType) -> Self {
+        match value {
+            UserDependencyType::Dependencies => Self::Normal,
+            UserDependencyType::DevDependencies => Self::Dev,
+            UserDependencyType::PeerDependencies => Self::Peer,
+        }
+    }
+}
+
 /// Full task graph of a workspace, with necessary hash maps for quick task lookup
 ///
 /// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
@@ -217,8 +259,9 @@ impl IndexedTaskGraph {
 
         let package_graph = vite_workspace::load_package_graph(workspace_root)?;
 
-        // Record dependency specifiers for each task node to add explicit dependencies later
-        let mut task_ids_with_dependency_specifiers: Vec<(TaskId, Option<Arc<[Str]>>)> = Vec::new();
+        // Record dependency declarations for each task node to add explicit dependencies later.
+        let mut task_ids_with_depends_on_entries: Vec<(TaskId, Option<Arc<[UserDependsOnEntry]>>)> =
+            Vec::new();
 
         // index tasks by ids
         let mut node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex> =
@@ -303,7 +346,7 @@ impl IndexedTaskGraph {
                         UserTaskConfig { command, options: UserTaskOptions::default() }
                     }
                 };
-                let dependency_specifiers = task_user_config.options.depends_on.clone();
+                let depends_on_entries = task_user_config.options.depends_on.clone();
 
                 // Resolve the task configuration from the user config
                 let resolved_config = ResolvedTaskConfig::resolve(
@@ -331,7 +374,7 @@ impl IndexedTaskGraph {
                 };
 
                 let node_index = task_graph.add_node(task_node);
-                task_ids_with_dependency_specifiers.push((task_id.clone(), dependency_specifiers));
+                task_ids_with_depends_on_entries.push((task_id.clone(), depends_on_entries));
                 task_ids_by_node_index.insert(node_index, task_id.clone());
                 node_indices_by_task_id.insert(task_id, node_index);
             }
@@ -376,21 +419,37 @@ impl IndexedTaskGraph {
             pre_post_scripts_enabled: root_pre_post_scripts_enabled.unwrap_or(true),
         };
 
-        // Add explicit dependencies
-        for (from_task_id, dependency_specifiers) in task_ids_with_dependency_specifiers {
+        // Add explicit dependencies. String-form entries resolve to fixed task
+        // specifier edges. Object-form entries select direct package dependency
+        // tasks and materialize those selections as global task graph edges.
+        for (from_task_id, depends_on_entries) in task_ids_with_depends_on_entries {
             let from_node_index = me.node_indices_by_task_id[&from_task_id];
-            for specifier in dependency_specifiers.iter().flat_map(|s| s.iter()).cloned() {
-                let to_node_index = me
-                    .get_task_index_by_specifier::<Infallible>(
-                        TaskSpecifier::parse_raw(&specifier),
-                        || Ok(from_task_id.package_index),
-                    )
-                    .map_err(|error| TaskGraphLoadError::DependencySpecifierLookupError {
-                        error,
-                        specifier,
-                        task_display: me.display_task(from_node_index),
-                    })?;
-                me.task_graph.update_edge(from_node_index, to_node_index, TaskDependencyType);
+            for entry in depends_on_entries.iter().flat_map(|entries| entries.iter()) {
+                match entry {
+                    UserDependsOnEntry::Task(specifier) => {
+                        let to_node_index = me
+                            .get_task_index_by_specifier::<Infallible>(
+                                TaskSpecifier::parse_raw(specifier),
+                                || Ok(from_task_id.package_index),
+                            )
+                            .map_err(|error| {
+                                TaskGraphLoadError::DependencySpecifierLookupError {
+                                    error,
+                                    specifier: specifier.clone(),
+                                    task_display: me.display_task(from_node_index),
+                                }
+                            })?;
+                        me.task_graph.update_edge(
+                            from_node_index,
+                            to_node_index,
+                            TaskDependencyType,
+                        );
+                    }
+                    UserDependsOnEntry::Package(entry) => {
+                        let entry = PackageDependencyEntry::from_user_config(entry);
+                        me.add_package_dependency_edges(from_node_index, &from_task_id, &entry);
+                    }
+                }
             }
         }
 
@@ -449,6 +508,45 @@ impl IndexedTaskGraph {
             });
         };
         Ok(*node_index)
+    }
+
+    /// Materialize one object-form `dependsOn` entry as ordinary task graph edges.
+    ///
+    /// Object entries such as `{ "task": "build", "from": "dependencies" }`
+    /// are anchored to the package that declares the source task. During graph
+    /// loading we resolve the selected direct package dependencies and add
+    /// `source_task -> dependency_package#task` edges, so later query planning
+    /// can treat them exactly like string-form `dependsOn` edges.
+    fn add_package_dependency_edges(
+        &mut self,
+        from_node_index: TaskNodeIndex,
+        from_task_id: &TaskId,
+        entry: &PackageDependencyEntry,
+    ) {
+        let package_graph = self.indexed_package_graph.package_graph();
+        let dependency_tasks = package_graph
+            .edges(from_task_id.package_index)
+            // Only use package.json dependency fields requested by `from`.
+            .filter(|edge| entry.dependency_types.contains(edge.weight()))
+            // Missing tasks are intentionally ignored: selecting
+            // `{ task: "build", from: "dependencies" }` means "run build in
+            // direct dependency packages that define build", not "require every
+            // selected package to define build".
+            .filter_map(|edge| {
+                self.node_indices_by_task_id
+                    .get(&TaskId {
+                        package_index: edge.target(),
+                        task_name: entry.task_name.clone(),
+                    })
+                    .copied()
+            })
+            .collect::<Vec<_>>();
+
+        // Keep discovery separate from insertion so the package-graph walk and
+        // task-id lookups finish before we take a mutable borrow of task_graph.
+        for to_node_index in dependency_tasks {
+            self.task_graph.update_edge(from_node_index, to_node_index, TaskDependencyType);
+        }
     }
 
     #[must_use]

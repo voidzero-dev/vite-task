@@ -1,0 +1,7 @@
+{
+  "name": "@test/shared",
+  "version": "1.0.0",
+  "scripts": {
+    "build_recursive": "vtt build recursive shared"
+  }
+}

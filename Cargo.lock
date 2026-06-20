@@ -4356,6 +4356,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "ts-rs",
+ "vec1",
  "vite_path",
  "vite_str",
  "vite_workspace",

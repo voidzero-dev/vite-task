@@ -1,0 +1,7 @@
+{
+  "name": "@test/object-depends-on-global-graph",
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/*"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@test/app",
+  "version": "1.0.0",
+  "dependencies": {
+    "@test/prod-a": "workspace:*",
+    "@test/prod-missing-task": "workspace:*"
+  },
+  "devDependencies": {
+    "@test/dev-a": "workspace:*"
+  },
+  "peerDependencies": {
+    "@test/peer-a": "workspace:*"
+  }
+}

@@ -7,6 +7,7 @@ use rustc_hash::FxHashMap;
 use serde::Deserialize;
 #[cfg(all(test, not(clippy)))]
 use ts_rs::TS;
+use vec1::Vec1;
 use vite_path::RelativePathBuf;
 use vite_str::Str;
 
@@ -64,6 +65,70 @@ pub enum UserInputEntry {
 ///
 /// Default (when field omitted): `[{auto: true}]` - infer from file accesses.
 pub type UserInputsConfig = Vec<UserInputEntry>;
+
+/// A supported package.json dependency field for package dependency selection.
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "DependencyType"))]
+#[serde(rename_all = "camelCase")]
+pub enum UserDependencyType {
+    /// Traverse dependencies declared in the package.json `dependencies` field.
+    Dependencies,
+    /// Traverse dependencies declared in the package.json `devDependencies` field.
+    DevDependencies,
+    /// Traverse dependencies declared in the package.json `peerDependencies` field.
+    PeerDependencies,
+}
+
+/// The `from` selector for object-form `dependsOn` entries.
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "DependsOnFrom"))]
+#[serde(untagged)]
+pub enum UserDependsOnFrom {
+    /// Select one package.json dependency field.
+    Single(UserDependencyType),
+    /// Select the union of multiple package.json dependency fields.
+    Multiple(
+        #[cfg_attr(all(test, not(clippy)), ts(as = "Vec<UserDependencyType>"))]
+        Vec1<UserDependencyType>,
+    ),
+}
+
+impl UserDependsOnFrom {
+    #[must_use]
+    pub fn as_slice(&self) -> &[UserDependencyType] {
+        match self {
+            Self::Single(dependency_type) => std::slice::from_ref(dependency_type),
+            Self::Multiple(dependency_types) => dependency_types,
+        }
+    }
+}
+
+/// Object form for `dependsOn` entries that select direct workspace package dependencies.
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS))]
+#[serde(deny_unknown_fields)]
+pub struct UserPackageDependency {
+    /// Task name to run in dependency packages.
+    pub task: Str,
+
+    /// Package.json dependency field or fields to use when selecting direct dependency packages.
+    pub from: UserDependsOnFrom,
+}
+
+/// A single `dependsOn` entry.
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "DependsOnEntry"))]
+#[serde(untagged)]
+pub enum UserDependsOnEntry {
+    /// Same-package task or `package#task` specifier.
+    Task(Str),
+    /// Direct package dependency selection entry.
+    Package(UserPackageDependency),
+}
 
 /// A single output entry in the `output` array.
 ///
@@ -168,8 +233,15 @@ pub struct UserTaskOptions {
     #[serde(rename = "cwd")]
     pub cwd_relative_to_package: Option<RelativePathBuf>,
 
-    /// Dependencies of this task. Use `package-name#task-name` to refer to tasks in other packages.
-    pub depends_on: Option<Arc<[Str]>>,
+    /// Tasks that must run before this task.
+    ///
+    /// - A string runs one named task, such as `"build"` in the same package or
+    ///   `"package-name#build"` in another package.
+    /// - An object runs a task in direct workspace dependency packages selected
+    ///   from package.json fields. For example,
+    ///   `{ "task": "build", "from": "dependencies" }` runs `build` in each
+    ///   direct workspace dependency that defines a `build` task.
+    pub depends_on: Option<Arc<[UserDependsOnEntry]>>,
 
     /// Cache-related fields
     #[serde(flatten)]
@@ -510,8 +582,71 @@ mod tests {
         );
         let options = user_config.options;
         assert_eq!(options.cwd_relative_to_package.as_ref().unwrap().as_str(), "src");
-        assert_eq!(options.depends_on.as_ref().unwrap().as_ref(), [Str::from("build")]);
+        assert_eq!(
+            options.depends_on.as_ref().unwrap().as_ref(),
+            [UserDependsOnEntry::Task(Str::from("build"))]
+        );
         assert_eq!(options.cache_config, UserCacheConfig::Disabled { cache: MustBe!(false) });
+    }
+
+    #[test]
+    fn test_depends_on_package_dependency_single_from() {
+        let user_config_json = json!({
+            "command": "echo test",
+            "dependsOn": [{ "task": "build", "from": "dependencies" }]
+        });
+        let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            user_config.options.depends_on.as_ref().unwrap().as_ref(),
+            [UserDependsOnEntry::Package(UserPackageDependency {
+                task: "build".into(),
+                from: UserDependsOnFrom::Single(UserDependencyType::Dependencies),
+            })]
+        );
+    }
+
+    #[test]
+    fn test_depends_on_package_dependency_array_from() {
+        let user_config_json = json!({
+            "command": "echo test",
+            "dependsOn": [{
+                "task": "build",
+                "from": ["dependencies", "devDependencies", "peerDependencies"]
+            }]
+        });
+        let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(
+            user_config.options.depends_on.as_ref().unwrap().as_ref(),
+            [UserDependsOnEntry::Package(UserPackageDependency {
+                task: "build".into(),
+                from: UserDependsOnFrom::Multiple(
+                    Vec1::try_from_vec(vec![
+                        UserDependencyType::Dependencies,
+                        UserDependencyType::DevDependencies,
+                        UserDependencyType::PeerDependencies,
+                    ])
+                    .unwrap()
+                ),
+            })]
+        );
+    }
+
+    #[test]
+    fn test_depends_on_package_dependency_empty_from_error() {
+        let user_config_json = json!({
+            "command": "echo test",
+            "dependsOn": [{ "task": "build", "from": [] }]
+        });
+        assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
+    }
+
+    #[test]
+    fn test_depends_on_package_dependency_unknown_from_error() {
+        let user_config_json = json!({
+            "command": "echo test",
+            "dependsOn": [{ "task": "build", "from": "optionalDependencies" }]
+        });
+        assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
     }
 
     #[test]

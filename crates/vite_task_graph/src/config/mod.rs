@@ -7,8 +7,9 @@ use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
     AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
-    UserCacheConfig, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
-    UserRunConfig, UserTaskConfig, UserTaskDefinition,
+    UserCacheConfig, UserDependencyType, UserDependsOnEntry, UserDependsOnFrom,
+    UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
+    UserPackageDependency, UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
 use vite_path::AbsolutePath;
 use vite_str::Str;

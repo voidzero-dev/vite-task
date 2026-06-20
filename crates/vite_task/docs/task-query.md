@@ -13,7 +13,7 @@ Both are built once and reused for every query, including nested `vp run` calls 
 
 ### What goes into the task graph
 
-The task graph contains a node for every task in every package, and edges only for explicit `dependsOn` declarations:
+The task graph contains a node for every task in every package, and edges only for explicit `dependsOn` declarations.
 
 ```jsonc
 // packages/app/vite.config.*
@@ -37,6 +37,33 @@ Task graph:
 ```
 
 Package dependency ordering (app depends on lib) is NOT stored as edges in the task graph. Why not is explained below.
+
+Object-form `dependsOn` entries are also explicit task dependencies. At startup,
+they are resolved against the declaring package's direct `package.json`
+dependency fields and materialized as task graph edges:
+
+```jsonc
+// packages/app/vite.config.*
+{
+  "tasks": {
+    "test": {
+      "command": "vitest run",
+      "dependsOn": [{ "task": "build", "from": ["dependencies", "devDependencies"] }],
+    },
+  },
+}
+```
+
+If `app` directly depends on `ui` and `shared`, and both packages have `build`,
+the task graph contains:
+
+```
+app#test ──dependsOn──> ui#build
+app#test ──dependsOn──> shared#build
+```
+
+Dependency packages without the requested task are skipped. Recursive expansion
+comes from dependency tasks declaring their own `dependsOn` entries.
 
 ## What happens when you run a query
 
@@ -188,7 +215,7 @@ If you run `vp run --filter app build`, the package subgraph contains only `app`
 
 This is intentional — `dependsOn` is an explicit declaration that a task can't run without its dependency. Ignoring it would break the build. (Users can skip this with `--ignore-depends-on`.)
 
-The expansion only follows explicit edges, not topological ones. Topological ordering comes from the package subgraph — it's already baked into the task execution graph by Stage 2.
+The expansion follows explicit `dependsOn` edges, including edges materialized from object-form entries. It does not follow topological package edges. Topological ordering comes from the package subgraph — it's already baked into the task execution graph by Stage 2.
 
 ## Nested `vp run`
 

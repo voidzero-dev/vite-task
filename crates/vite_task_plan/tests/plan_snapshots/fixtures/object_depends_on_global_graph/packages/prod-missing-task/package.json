@@ -1,0 +1,7 @@
+{
+  "name": "@test/prod-missing-task",
+  "version": "1.0.0",
+  "scripts": {
+    "lint": "vtt lint prod-missing-task"
+  }
+}

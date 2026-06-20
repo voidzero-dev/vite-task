@@ -1,0 +1,11 @@
+# Object-form `dependsOn` selections are materialized as global task graph
+# edges, so the edge structure for every `from` variant (dependencies,
+# devDependencies, unions, recursive chains, and excluded peer/missing-task
+# deps) is asserted by `snapshots/task_graph.md`. The only behavior the static
+# graph cannot express is query-time `--ignore-depends-on` dropping those
+# materialized edges, so that is the one plan case kept here.
+[[plan]]
+compact = true
+name = "ignore_depends_on_omits_object_edges"
+args = ["run", "--ignore-depends-on", "test_union"]
+cwd = "packages/app"
