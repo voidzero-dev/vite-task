@@ -7,7 +7,7 @@ How `vp run` decides which tasks to run and in what order.
 When `vp` starts, it builds two data structures from the workspace:
 
 1. **Package graph** — which packages depend on which. Built from `package.json` dependency fields.
-2. **Task graph** — which tasks exist and their explicit `dependsOn` relationships. Built from `vite-task.json` and `package.json` scripts.
+2. **Task graph** — which tasks exist and their explicit `dependsOn` relationships. Built from `vite.config.*` and `package.json` scripts.
 
 Both are built once and reused for every query, including nested `vp run` calls inside task scripts.
 
@@ -16,7 +16,7 @@ Both are built once and reused for every query, including nested `vp run` calls 
 The task graph contains a node for every task in every package, and edges only for explicit `dependsOn` declarations:
 
 ```jsonc
-// packages/app/vite-task.json
+// packages/app/vite.config.*
 {
   "tasks": {
     "build": {
@@ -174,7 +174,7 @@ So we clone the `DiGraphMap` once and mutate the clone. We iterate the original 
 After mapping the package subgraph to tasks, we follow explicit `dependsOn` edges from the task graph. This can pull in tasks from packages outside the selected set.
 
 ```jsonc
-// packages/app/vite-task.json
+// packages/app/vite.config.*
 {
   "tasks": {
     "build": {
