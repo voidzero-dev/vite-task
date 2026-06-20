@@ -19,6 +19,7 @@ use std::{
 
 use futures_util::future::LocalBoxFuture;
 use tokio_util::sync::CancellationToken;
+use vite_glob::path::PathGlobSet;
 use vite_path::{AbsolutePath, RelativePathBuf};
 use vite_task_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
 use vite_task_plan::{SpawnExecution, cache_metadata::CacheMetadata};
@@ -92,7 +93,7 @@ struct CacheState<'a> {
     /// available, and fspy path tracing is attached only when auto input or
     /// output inference needs it. Parts are borrowed in place during the
     /// wait/join; the struct is never moved out.
-    tracking: Tracking,
+    tracking: Tracking<'a>,
 }
 
 /// The IPC server's driver future: resolves with the recorded reports after
@@ -101,15 +102,15 @@ type IpcDriver = LocalBoxFuture<'static, Result<Recorder, vite_task_server::Erro
 
 /// fspy path-tracking state, present only when a cached task needs automatic
 /// input or output inference.
-struct FspyTracking {
-    input_negative_globs: Vec<wax::Glob<'static>>,
-    output_negative_globs: Vec<wax::Glob<'static>>,
+struct FspyTracking<'a> {
+    input_negative_globs: PathGlobSet<'a>,
+    output_negative_globs: PathGlobSet<'a>,
 }
 
 /// Per-task runner-aware tracking: IPC server handle plus optional fspy state.
 /// Lifetime-tied to a single `execute_spawn` call.
-struct Tracking {
-    fspy: Option<FspyTracking>,
+struct Tracking<'a> {
+    fspy: Option<FspyTracking<'a>>,
     ipc_envs: Vec<(&'static OsStr, OsString)>,
     ipc_server_fut: IpcDriver,
     stop_accepting: StopAccepting,
@@ -168,20 +169,10 @@ impl<'a> ExecutionMode<'a> {
         let fspy = if metadata.input_config.includes_auto || metadata.output_config.includes_auto {
             // Resolve negative globs for fspy path filtering (already
             // workspace-root-relative).
-            let input_negative_globs = metadata
-                .input_config
-                .negative_globs
-                .iter()
-                .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
-                .collect::<anyhow::Result<Vec<_>>>()
-                .map_err(ExecutionError::PostRunFingerprint)?;
-            let output_negative_globs = metadata
-                .output_config
-                .negative_globs
-                .iter()
-                .map(|p| Ok(wax::Glob::new(p.as_str())?.into_owned()))
-                .collect::<anyhow::Result<Vec<_>>>()
-                .map_err(ExecutionError::PostRunFingerprint)?;
+            let input_negative_globs = PathGlobSet::new(&metadata.input_config.negative_globs)
+                .map_err(|err| ExecutionError::PostRunFingerprint(err.into()))?;
+            let output_negative_globs = PathGlobSet::new(&metadata.output_config.negative_globs)
+                .map_err(|err| ExecutionError::PostRunFingerprint(err.into()))?;
             Some(FspyTracking { input_negative_globs, output_negative_globs })
         } else {
             None

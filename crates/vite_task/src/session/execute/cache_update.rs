@@ -196,7 +196,7 @@ pub(super) async fn update_cache(
 fn observe_fspy(
     outcome: &ChildOutcome,
     metadata: &CacheMetadata,
-    fspy: Option<&super::FspyTracking>,
+    fspy: Option<&super::FspyTracking<'_>>,
     ignored_input_rels: &FxHashSet<RelativePathBuf>,
     ignored_output_rels: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
@@ -217,7 +217,7 @@ fn observe_fspy(
                         .path_reads
                         .iter()
                         .filter(|(path, _)| {
-                            !matches_any_glob(path, &fspy.input_negative_globs)
+                            !fspy.input_negative_globs.is_match(path.as_str())
                                 && !is_ignored(path, ignored_input_rels)
                         })
                         .map(|(path, read)| (path.clone(), *read))
@@ -235,7 +235,7 @@ fn observe_fspy(
                         .path_writes
                         .iter()
                         .filter(|path| {
-                            !matches_any_glob(path, &fspy.output_negative_globs)
+                            !fspy.output_negative_globs.is_match(path.as_str())
                                 && !is_ignored(path, ignored_output_rels)
                         })
                         .cloned()
@@ -293,12 +293,6 @@ fn is_ignored(path: &RelativePathBuf, ignored: &FxHashSet<RelativePathBuf>) -> b
         return false;
     }
     ignored.contains(path) || ignored.iter().any(|ig| path.strip_prefix(ig).is_some())
-}
-
-fn matches_any_glob(path: &RelativePathBuf, globs: &[wax::Glob<'static>]) -> bool {
-    use wax::Program as _;
-
-    globs.iter().any(|glob| glob.is_match(path.as_str()))
 }
 
 /// Select tool-reported env records to embed in the post-run fingerprint.
