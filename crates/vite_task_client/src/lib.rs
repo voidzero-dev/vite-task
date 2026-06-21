@@ -84,13 +84,24 @@ impl Client {
         self.send(&Request::IgnoreOutput(&ns))
     }
 
-    /// Fire-and-forget — see [`Self::ignore_input`].
+    /// Temporary no-op.
+    ///
+    /// `disableCache` currently causes too many false opt-outs because tools
+    /// call it during configuration, before they know whether they will start
+    /// an uncached operation such as listening on a port or watching the
+    /// filesystem.
     ///
     /// # Errors
     ///
-    /// Returns an error if the request fails to send.
+    /// This temporary no-op does not currently return errors.
+    #[expect(
+        clippy::missing_const_for_fn,
+        clippy::unnecessary_wraps,
+        clippy::unused_self,
+        reason = "temporary no-op preserves the public API until disableCache semantics are redesigned"
+    )]
     pub fn disable_cache(&self) -> io::Result<()> {
-        self.send(&Request::DisableCache)
+        Ok(())
     }
 
     /// Requests an env value from the runner. Returns `None` if the runner

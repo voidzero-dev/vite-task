@@ -225,10 +225,11 @@ steps = [
 ]
 
 [[e2e]]
-name = "disable_cache_forces_reexecution"
+name = "disable_cache_noop_allows_cache_hit"
 comment = """
-Exercises `disableCache`. The tool asks the runner not to cache this run,
-so the next invocation re-executes instead of hitting a prior entry.
+Exercises the temporary `disableCache` no-op workaround. The tool asks the
+runner not to cache this run, but the client ignores that request, so the next
+invocation hits the cache.
 """
 ignore = true
 steps = [
@@ -236,23 +237,25 @@ steps = [
     "vt",
     "run",
     "disable-cache",
-  ], comment = "first run — tool calls disableCache" },
+  ], comment = "first run — tool calls disableCache, currently ignored by the client" },
   { argv = [
     "vt",
     "run",
     "disable-cache",
-  ], comment = "cache miss (NotFound) because nothing was cached" },
+  ], comment = "cache hit because disableCache is temporarily a no-op" },
   { argv = [
     "vt",
     "run",
     "--last-details",
-  ], comment = "summary names the opt-out as the not-cached reason" },
+  ], comment = "summary reports the replayed cache hit" },
 ]
 
 [[e2e]]
-name = "disable_cache_works_with_explicit_inputs"
+name = "disable_cache_noop_with_explicit_inputs"
 comment = """
-Exercises `disableCache` on a cached task with explicit inputs. The runner must still inject IPC even when fspy auto-input inference is disabled, or the tool's cache opt-out becomes a no-op and the second run incorrectly hits.
+Exercises the temporary `disableCache` no-op workaround on a cached task with
+explicit inputs. The client ignores the opt-out request, so the second run hits
+even when fspy auto-input inference is disabled.
 """
 ignore = true
 steps = [
@@ -260,17 +263,17 @@ steps = [
     "vt",
     "run",
     "disable-cache-explicit-input",
-  ], comment = "first run uses input: [] and asks the runner not to cache" },
+  ], comment = "first run uses input: [] and calls disableCache, currently ignored by the client" },
   { argv = [
     "vt",
     "run",
     "disable-cache-explicit-input",
-  ], comment = "re-executes because the first run was not cached" },
+  ], comment = "cache hit because disableCache is temporarily a no-op" },
   { argv = [
     "vt",
     "run",
     "--last-details",
-  ], comment = "summary names the opt-out as the not-cached reason" },
+  ], comment = "summary reports the replayed cache hit" },
 ]
 
 [[e2e]]

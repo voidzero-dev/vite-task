@@ -1,11 +1,12 @@
-# disable_cache_forces_reexecution
+# disable_cache_noop_allows_cache_hit
 
-Exercises `disableCache`. The tool asks the runner not to cache this run,
-so the next invocation re-executes instead of hitting a prior entry.
+Exercises the temporary `disableCache` no-op workaround. The tool asks the
+runner not to cache this run, but the client ignores that request, so the next
+invocation hits the cache.
 
 ## `vt run disable-cache`
 
-first run — tool calls disableCache
+first run — tool calls disableCache, currently ignored by the client
 
 ```
 $ node scripts/disable_cache.mjs
@@ -13,15 +14,18 @@ $ node scripts/disable_cache.mjs
 
 ## `vt run disable-cache`
 
-cache miss (NotFound) because nothing was cached
+cache hit because disableCache is temporarily a no-op
 
 ```
-$ node scripts/disable_cache.mjs
+$ node scripts/disable_cache.mjs ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vt run --last-details`
 
-summary names the opt-out as the not-cached reason
+summary reports the replayed cache hit
 
 ```
 
@@ -29,12 +33,12 @@ summary names the opt-out as the not-cached reason
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
-Performance:  0% cache hit rate
+Statistics:   1 tasks • 1 cache hits • 0 cache misses
+Performance:  100% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
   [1] ipc-client-test#disable-cache: $ node scripts/disable_cache.mjs ✓
-      → Not cached: the task opted out of caching
+      → Cache hit - output replayed -
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```

@@ -14,7 +14,7 @@ type RawStream = std::fs::File;
 use rustc_hash::FxHashMap;
 use tokio::runtime::Builder;
 use vite_task_client::{Client, GetEnvsQuery};
-use vite_task_ipc_shared::Request;
+use vite_task_ipc_shared::{GetEnvResponse, Request};
 use vite_task_server::{EnvQuery, Error, Recorder, Reports, ServerHandle, serve};
 
 fn env_map(pairs: &[(&str, &str)]) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
@@ -82,6 +82,15 @@ fn send_frame(stream: &mut RawStream, request: &Request<'_>) {
     stream.flush().expect("flush");
 }
 
+fn recv_get_env_response(stream: &mut RawStream) -> GetEnvResponse {
+    let mut len_bytes = [0u8; 4];
+    stream.read_exact(&mut len_bytes).expect("read len");
+    let len = u32::from_le_bytes(len_bytes) as usize;
+    let mut buf = vec![0; len];
+    stream.read_exact(&mut buf).expect("read body");
+    wincode::deserialize_exact(&buf).expect("deserialize response")
+}
+
 #[test]
 fn single_client_fire_and_forget() {
     #[cfg(unix)]
@@ -93,6 +102,9 @@ fn single_client_fire_and_forget() {
         let client = connect(&envs);
         client.ignore_input(OsStr::new(in_path)).unwrap();
         client.ignore_output(OsStr::new(out_path)).unwrap();
+        // Temporary workaround: the client currently ignores disableCache so
+        // tools cannot opt out at configuration time before they perform the
+        // operation that actually makes a task uncacheable.
         client.disable_cache().unwrap();
         flush(&client);
     })
@@ -102,6 +114,21 @@ fn single_client_fire_and_forget() {
     let outputs: Vec<_> = reports.ignored_outputs.iter().map(|p| p.as_path().as_os_str()).collect();
     assert_eq!(inputs, vec![OsStr::new(in_path)]);
     assert_eq!(outputs, vec![OsStr::new(out_path)]);
+    assert!(!reports.cache_disabled);
+}
+
+#[test]
+fn raw_disable_cache_request_disables_cache() {
+    let reports = run_with_server(env_map(&[]), |envs| {
+        let name = &envs[0].1;
+        let mut stream = connect_raw(name);
+        send_frame(&mut stream, &Request::DisableCache);
+        let flush_name: Box<NativeStr> = OsStr::new("__VP_TEST_FLUSH__").into();
+        send_frame(&mut stream, &Request::GetEnv { name: &flush_name, tracked: false });
+        let _ = recv_get_env_response(&mut stream);
+    })
+    .expect("driver returned error");
+
     assert!(reports.cache_disabled);
 }
 

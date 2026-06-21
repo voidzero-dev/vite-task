@@ -1,7 +1,10 @@
 [[e2e]]
-name = "vite_dev_disables_cache"
+name = "vite_dev_disable_cache_noop_allows_cache_hit"
 comment = """
-`vt run --cache dev` brings up a Vite dev server programmatically on an ephemeral port and closes it immediately. Vite's `_createServer` calls `disableCache()` via `@voidzero-dev/vite-task-client`, so this run is never stored — the next invocation re-executes (cache miss / NotFound).
+`vt run --cache dev` brings up a Vite dev server programmatically on an
+ephemeral port and closes it immediately. Vite calls `disableCache()` via
+`@voidzero-dev/vite-task-client`, but the client temporarily ignores that
+request, so the next invocation hits the cache.
 """
 ignore = true
 steps = [
@@ -10,11 +13,11 @@ steps = [
     "run",
     "--cache",
     "dev",
-  ], comment = "first run — Vite dev start calls disableCache" },
+  ], comment = "first run — Vite dev calls disableCache, currently ignored by the client" },
   { argv = [
     "vt",
     "run",
     "--cache",
     "dev",
-  ], comment = "cache miss (NotFound) because the first run was not stored" },
+  ], comment = "cache hit because disableCache is temporarily a no-op" },
 ]
