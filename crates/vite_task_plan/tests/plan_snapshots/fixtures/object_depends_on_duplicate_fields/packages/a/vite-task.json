@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "from_dependencies": {
+      "command": "vtt from dependencies",
+      "dependsOn": [{ "task": "build", "from": "dependencies" }]
+    },
+    "from_dev_dependencies": {
+      "command": "vtt from devDependencies",
+      "dependsOn": [{ "task": "build", "from": "devDependencies" }]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "@test/object-depends-on-duplicate-fields",
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/*"
+  ]
+}
