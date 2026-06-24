@@ -581,42 +581,71 @@ fn replay_cache_hit(
 }
 
 /// Phase 6: drain the child's pipes (if piped) and wait for exit, with a
-/// single error sink — a pipe failure cancels (so the wait kills the child
-/// instead of orphaning it) and surfaces through the same returned result as
-/// a wait failure. After the child exits (on every path), `stop_accepting`
-/// is signalled so the IPC server stops accepting and starts draining.
+/// single error sink. Pipe drain and child wait must be driven together: on
+/// Windows, descendants can inherit stdout/stderr handles and keep the pipe
+/// open after the direct child exits. Polling wait promptly lets the Job
+/// Object cleanup run, which terminates those descendants and lets pipe drain
+/// reach EOF. After the child exits (on every path), `stop_accepting` is
+/// signalled so the IPC server stops accepting and starts draining.
 async fn run_child(
     mut child: ChildHandle,
     sinks: Option<PipeSinks<'_>>,
     stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
 ) -> anyhow::Result<ChildOutcome> {
-    let pipe_result: anyhow::Result<()> = if let Some(sinks) = sinks {
-        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        #[expect(
-            clippy::large_futures,
-            reason = "pipe_stdio streams child I/O and creates a large future"
-        )]
-        let r = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        r.map_err(anyhow::Error::from)
-    } else {
-        Ok(())
-    };
-
-    let wait_result = match pipe_result {
-        Ok(()) => child.wait.await.map_err(anyhow::Error::from),
-        Err(err) => {
-            // Pipe failed — cancel so `child.wait` kills the child instead of
-            // orphaning it. Still signal the server below so it can drain.
-            fast_fail_token.cancel();
-            let _ = child.wait.await;
-            Err(err)
+    let Some(sinks) = sinks else {
+        let wait_result = child.wait.await.map_err(anyhow::Error::from);
+        if let Some(stop_accepting) = stop_accepting {
+            stop_accepting.signal();
         }
+        return wait_result;
     };
 
-    if let Some(stop_accepting) = stop_accepting {
-        stop_accepting.signal();
+    let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+    let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+
+    let mut pipe = Box::pin(pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()));
+    let mut wait = child.wait;
+
+    tokio::select! {
+        pipe_result = &mut pipe => {
+            match pipe_result.map_err(anyhow::Error::from) {
+                Ok(()) => {
+                    let wait_result = wait.await.map_err(anyhow::Error::from);
+                    if let Some(stop_accepting) = stop_accepting {
+                        stop_accepting.signal();
+                    }
+                    wait_result
+                }
+                Err(err) => {
+                    // Pipe failed — cancel so `child.wait` kills the child instead of
+                    // orphaning it. Still signal the server below so it can drain.
+                    fast_fail_token.cancel();
+                    let _ = wait.await;
+                    if let Some(stop_accepting) = stop_accepting {
+                        stop_accepting.signal();
+                    }
+                    Err(err)
+                }
+            }
+        }
+        wait_result = &mut wait => {
+            let wait_result = wait_result.map_err(anyhow::Error::from);
+            if let Some(stop_accepting) = stop_accepting {
+                stop_accepting.signal();
+            }
+
+            match wait_result {
+                Ok(outcome) => {
+                    pipe.await.map_err(anyhow::Error::from)?;
+                    Ok(outcome)
+                }
+                Err(err) => {
+                    fast_fail_token.cancel();
+                    let _ = pipe.await;
+                    Err(err)
+                }
+            }
+        }
     }
-    wait_result
 }
