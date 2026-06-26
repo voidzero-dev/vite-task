@@ -22,11 +22,8 @@ overrides:
   # The e2e harness symlinks packages/tools' `vite` binary into fixtures to
   # exercise the real vite-task-client integration. The global `vite: catalog:`
   # override above routes vite to the Vite+ toolchain fork, which does not carry
-  # the integration — so scope vite-task-tools' `vite` to a real upstream build
-  # (vitejs/vite main, where the integration merged in vitejs/vite#22453). Bump
-  # the pinned sha to track main until the integration ships in a tagged vite
-  # release and this can move to a normal version range.
-  vite-task-tools>vite: https://pkg.pr.new/vite@1298951ebc5e5a94164c21f142fe748ca37eea68
+  # the integration — so scope vite-task-tools' `vite` to a real upstream build.
+  vite-task-tools>vite: ^8.1.0
 peerDependencyRules:
   allowAny:
     - vite
