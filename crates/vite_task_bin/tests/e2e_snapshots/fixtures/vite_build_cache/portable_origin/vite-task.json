@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "build": {
+      // TODO: --configLoader runner works around a Vite config-loader bug that makes this cache non-portable.
+      "command": "vite build --configLoader runner",
+      "cache": true
+    }
+  }
+}

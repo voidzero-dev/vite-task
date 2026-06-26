@@ -38,6 +38,10 @@ enum Step {
 #[serde(deny_unknown_fields)]
 struct StepConfig {
     argv: Vec1<Str>,
+    /// Optional working directory for this step, relative to the staged fixture root.
+    /// Defaults to the case-level `cwd`.
+    #[serde(default)]
+    cwd: Option<RelativePathBuf>,
     /// Appended as `# comment` in the snapshot display line.
     #[serde(default)]
     comment: Option<Str>,
@@ -61,11 +65,11 @@ impl Step {
         }
     }
 
-    /// Shell-escaped command line including any env-var prefix, without the
-    /// comment (e.g. `MY_ENV=1 vt run test`). The comment is surfaced
-    /// separately by [`Self::comment`].
+    /// Shell-escaped command line including any env-var prefix and non-default
+    /// cwd, without the comment (e.g. `cd packages/a && MY_ENV=1 vt run test`).
+    /// The comment is surfaced separately by [`Self::comment`].
     #[expect(clippy::disallowed_types, reason = "String required by join/format")]
-    fn display_command_line(&self) -> String {
+    fn display_command_line(&self, default_cwd: &RelativePathBuf) -> String {
         let argv_str = self
             .argv()
             .iter()
@@ -80,7 +84,7 @@ impl Step {
             .collect::<Vec<_>>()
             .join(" ");
 
-        match self {
+        let command = match self {
             Self::Simple(_) => argv_str,
             Self::Detailed(config) => {
                 let mut parts = String::new();
@@ -90,6 +94,19 @@ impl Step {
                 parts.push_str(&argv_str);
                 parts
             }
+        };
+
+        let cwd = self.cwd().unwrap_or(default_cwd);
+        if cwd == default_cwd {
+            command
+        } else {
+            let cwd = if cwd.as_str().is_empty() { "." } else { cwd.as_str() };
+            let mut display = String::new();
+            display.push_str("cd ");
+            display.push_str(shell_escape::escape(cwd.into()).as_ref());
+            display.push_str(" && ");
+            display.push_str(&command);
+            display
         }
     }
 
@@ -111,6 +128,13 @@ impl Step {
         match self {
             Self::Detailed(config) => &config.envs,
             Self::Simple(_) => &[],
+        }
+    }
+
+    const fn cwd(&self) -> Option<&RelativePathBuf> {
+        match self {
+            Self::Detailed(config) => config.cwd.as_ref(),
+            Self::Simple(_) => None,
         }
     }
 
@@ -247,11 +271,8 @@ enum TerminationState {
 }
 
 /// Substitutes sentinels in step env values with values only known at
-/// test-run time. Currently supports `<PRELOAD_TEST_LIB_PATH>`, which
-/// expands to the path of the `preload_test_lib` cdylib built via the
-/// artifact dependency (Linux only — the sentinel is only used by the
-/// `preload_test_lib`-gated e2e fixture). Keeps the raw sentinel in the
-/// snapshot's displayed command line, so snapshots stay machine-independent.
+/// test-run time. Keeps the raw sentinel in the snapshot's displayed command
+/// line, so snapshots stay machine-independent.
 fn resolve_env_placeholder(raw: &str) -> std::borrow::Cow<'_, OsStr> {
     if raw == "<PRELOAD_TEST_LIB_PATH>" {
         let path = env::var_os("CARGO_CDYLIB_FILE_PRELOAD_TEST_LIB").unwrap_or_else(|| {
@@ -395,7 +416,7 @@ fn run_case(
     }
     {
         for step in &e2e.steps {
-            let step_display = step.display_command_line();
+            let step_display = step.display_command_line(&e2e.cwd);
             let step_comment = step.comment().map(str::to_owned);
 
             let argv = step.argv();
@@ -455,7 +476,8 @@ fn run_case(
                 let resolved = resolve_env_placeholder(v.as_str());
                 cmd.env(k.as_str(), AsRef::<OsStr>::as_ref(&resolved));
             }
-            cmd.cwd(e2e_stage_path.join(&e2e.cwd).as_path());
+            let step_cwd = step.cwd().unwrap_or(&e2e.cwd);
+            cmd.cwd(e2e_stage_path.join(step_cwd).as_path());
 
             let terminal = TestTerminal::spawn(SCREEN_SIZE, cmd).unwrap();
             let mut killer = terminal.child_handle.clone();

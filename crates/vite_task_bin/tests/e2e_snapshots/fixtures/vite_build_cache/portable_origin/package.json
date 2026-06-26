@@ -1,0 +1,5 @@
+{
+  "name": "vite-build-cache-portable-fixture",
+  "private": true,
+  "type": "module"
+}

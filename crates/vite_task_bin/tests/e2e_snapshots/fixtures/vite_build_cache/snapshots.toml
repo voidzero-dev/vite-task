@@ -101,6 +101,44 @@ steps = [
 ]
 
 [[e2e]]
+name = "vite_build_cache_is_portable_across_workspace_roots"
+comment = """
+Two identical plain Vite workspaces run from different absolute roots. The test copies the origin root's default task cache directory into the clone root to simulate uploading and downloading cache data; the clone should hit that copied cache and restore build outputs.
+"""
+ignore = true
+steps = [
+  { cwd = "portable_origin", argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "origin workspace root: cache miss populates its default cache" },
+  { cwd = "portable_origin", argv = [
+    "vtt",
+    "stat-file",
+    "dist/assets/index.js",
+  ], comment = "origin emitted the non-hashed build asset" },
+  { argv = [
+    "vtt",
+    "cp",
+    "-r",
+    "portable_origin/node_modules/.vite/task-cache",
+    "portable_clone/node_modules/.vite/task-cache",
+  ], comment = "copy-paste the cache directory to simulate upload/download" },
+  { cwd = "portable_clone", argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "clone workspace root: cache hit from the origin root" },
+  { cwd = "portable_clone", argv = [
+    "vtt",
+    "stat-file",
+    "dist/assets/index.js",
+  ], comment = "clone restored the non-hashed asset from the portable cache archive" },
+]
+
+[[e2e]]
 name = "vite_node_env_change_invalidates_cache"
 comment = """
 `NODE_ENV` enters the build's cache fingerprint via Vite's `getEnv('NODE_ENV')` call in `resolveConfig`. Same value → cache hit; different value → cache miss with `envs changed`.
