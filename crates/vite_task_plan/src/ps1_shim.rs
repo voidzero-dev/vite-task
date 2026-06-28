@@ -47,11 +47,30 @@ pub fn rewrite_cmd_shim_with_args(
     workspace_root: &AbsolutePath,
 ) -> (Arc<AbsolutePath>, Arc<[Str]>) {
     if let Some(host) = vite_powershell::powershell_host()
-        && let Some(rewritten) = rewrite_with_host(&resolved, &args, cwd, workspace_root, host)
+        && let Some(rewritten) =
+            rewrite_with_host(&resolved, &args, cwd, workspace_root, host, is_stdin_terminal())
     {
         return rewritten;
     }
     (resolved, args)
+}
+
+/// Cached `stdin.is_terminal()`. The `.ps1` wrappers npm/pnpm/yarn emit read
+/// stdin (`$MyInvocation.ExpectingInput` -> `$input | & node ...`) and hang
+/// forever when stdin is a non-TTY pipe or null (CI, scripts, editor tasks):
+/// the wrapper drains stdin to EOF, which never comes, so the process never
+/// exits and holds the runner's stdio pipe open. Without a terminal there is
+/// also no Ctrl+C "Terminate batch job (Y/N)?" prompt to corrupt, so leaving
+/// the `.cmd` in place is strictly safer. stdin's TTY-ness is fixed for the
+/// process lifetime, and execution inherits stdin into the spawned children.
+///
+/// See <https://github.com/voidzero-dev/vite-plus/issues/1489>.
+#[cfg(windows)]
+fn is_stdin_terminal() -> bool {
+    use std::{io::IsTerminal, sync::LazyLock};
+
+    static IS_TTY: LazyLock<bool> = LazyLock::new(|| std::io::stdin().is_terminal());
+    *IS_TTY
 }
 
 #[cfg(not(windows))]
@@ -74,7 +93,14 @@ fn rewrite_with_host(
     cwd: &AbsolutePath,
     workspace_root: &AbsolutePath,
     host: &Arc<AbsolutePath>,
+    is_interactive: bool,
 ) -> Option<(Arc<AbsolutePath>, Arc<[Str]>)> {
+    // Only route through PowerShell when stdin is an interactive terminal. The
+    // `.ps1` wrappers hang on a non-TTY stdin pipe (CI), and without a terminal
+    // there is no Ctrl+C prompt to protect against. See `is_stdin_terminal`.
+    if !is_interactive {
+        return None;
+    }
     if !is_in_workspace_node_modules_bin(resolved, workspace_root) {
         return None;
     }
@@ -162,7 +188,7 @@ mod tests {
         let args: Arc<[Str]> = Arc::from(vec![Str::from("--port"), Str::from("3000")]);
 
         let (program, rewritten_args) =
-            rewrite_with_host(&resolved, &args, &workspace, &workspace, &host)
+            rewrite_with_host(&resolved, &args, &workspace, &workspace, &host, true)
                 .expect("should rewrite");
 
         assert_eq!(program.as_path(), host.as_path());
@@ -179,6 +205,29 @@ mod tests {
                 "--port",
                 "3000",
             ]
+        );
+    }
+
+    /// Regression for the CI hang: the npm/pnpm/yarn `.ps1` wrappers read stdin
+    /// and block forever on a non-TTY pipe, so a structurally-valid shim must
+    /// NOT be rewritten when stdin is not an interactive terminal. The spawn
+    /// then falls back to the `.cmd` directly, which never reads stdin.
+    /// See <https://github.com/voidzero-dev/vite-plus/issues/1489>.
+    #[test]
+    fn skips_rewrite_when_not_interactive() {
+        let dir = tempdir().unwrap();
+        let workspace = abs(dir.path().canonicalize().unwrap());
+        let bin = bin_dir(workspace.as_path());
+        fs::write(bin.join("vite.cmd"), "").unwrap();
+        fs::write(bin.join("vite.ps1"), "").unwrap();
+
+        let host = host_arc(&workspace);
+        let resolved = abs(bin.join("vite.cmd"));
+        let args: Arc<[Str]> = Arc::from(vec![Str::from("build")]);
+
+        assert!(
+            rewrite_with_host(&resolved, &args, &workspace, &workspace, &host, false).is_none(),
+            "non-interactive spawns must not be rewritten through PowerShell"
         );
     }
 
@@ -202,7 +251,7 @@ mod tests {
         let args: Arc<[Str]> = Arc::from(vec![]);
 
         let (_program, rewritten_args) =
-            rewrite_with_host(&resolved, &args, &sub_pkg, &workspace, &host)
+            rewrite_with_host(&resolved, &args, &sub_pkg, &workspace, &host, true)
                 .expect("should rewrite");
 
         assert_eq!(
@@ -222,7 +271,7 @@ mod tests {
         let resolved = abs(bin.join("vite.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![Str::from("build")]);
 
-        assert!(rewrite_with_host(&resolved, &args, &workspace, &workspace, &host).is_none());
+        assert!(rewrite_with_host(&resolved, &args, &workspace, &workspace, &host, true).is_none());
     }
 
     #[test]
@@ -236,7 +285,7 @@ mod tests {
         let resolved = abs(workspace.as_path().join("where.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![]);
 
-        assert!(rewrite_with_host(&resolved, &args, &workspace, &workspace, &host).is_none());
+        assert!(rewrite_with_host(&resolved, &args, &workspace, &workspace, &host, true).is_none());
     }
 
     #[test]
@@ -251,7 +300,7 @@ mod tests {
         let resolved = abs(bin.join("node.exe"));
         let args: Arc<[Str]> = Arc::from(vec![Str::from("--version")]);
 
-        assert!(rewrite_with_host(&resolved, &args, &workspace, &workspace, &host).is_none());
+        assert!(rewrite_with_host(&resolved, &args, &workspace, &workspace, &host, true).is_none());
     }
 
     #[test]
@@ -276,6 +325,6 @@ mod tests {
         let resolved = abs(global_bin.join("vite.cmd"));
         let args: Arc<[Str]> = Arc::from(vec![]);
 
-        assert!(rewrite_with_host(&resolved, &args, &workspace, &workspace, &host).is_none());
+        assert!(rewrite_with_host(&resolved, &args, &workspace, &workspace, &host, true).is_none());
     }
 }
