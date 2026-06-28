@@ -178,7 +178,7 @@ jobs:
       # job's wall time on a cold cache; the unpacked result is immutable for a
       # given manifest version, so cache it. Bump the key when bumping the
       # xwin version.
-      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         id: xwin-cache
         with:
           path: ~/.cache/cargo-xwin
@@ -203,7 +203,7 @@ jobs:
           path: windows-tests.tar.zst
           retention-days: 7
 
-      - uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         if: steps.xwin-cache.outputs.cache-hit != 'true'
         with:
           path: ~/.cache/cargo-xwin
