@@ -1,8 +1,12 @@
-# Windows-only: verifies the `.cmd` → PowerShell rewrite at plan time, and
-# that the resulting cache key stays portable regardless of how the user
-# navigated to the sub-package task. Both plan cases below target the same
-# task; their snapshots should be byte-identical apart from the plan query
-# itself, proving the cache key doesn't depend on invocation style.
+# Windows-only. The `.cmd` → PowerShell rewrite at plan time is gated on an
+# interactive terminal (see `vite_task_plan::ps1_shim::is_stdin_terminal`): the
+# `.ps1` wrappers hang on a non-TTY stdin pipe, as on CI. The test runner has no
+# TTY on stdin, so the rewrite is skipped here and the plan records the
+# `node_modules/.bin` shim directly instead of `powershell -File …vite.ps1`.
+# This still verifies the cache key stays portable regardless of how the user
+# navigated to the sub-package task: both plan cases below target the same task
+# and their snapshots should be byte-identical apart from the plan query itself,
+# proving the cache key doesn't depend on invocation style.
 platform = "windows"
 
 # Direct invocation: user `cd`'d into the sub-package before running.

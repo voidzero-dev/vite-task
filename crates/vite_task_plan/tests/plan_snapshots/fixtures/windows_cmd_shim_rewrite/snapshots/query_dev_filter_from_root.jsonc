@@ -30,17 +30,11 @@
                     "spawn_fingerprint": {
                       "cwd": "packages/foo",
                       "program_fingerprint": {
-                        "OutsideWorkspace": {
-                          "program_name": "<powershell>"
+                        "InsideWorkspace": {
+                          "relative_program_path": "packages/foo/node_modules/.bin/vite.cmd"
                         }
                       },
                       "args": [
-                        "-NoProfile",
-                        "-NoLogo",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                        "node_modules/.bin/vite.ps1",
                         "--port",
                         "3000"
                       ],
@@ -72,14 +66,8 @@
                     }
                   },
                   "spawn_command": {
-                    "program_path": "<powershell>",
+                    "program_path": "<workspace>/packages/foo/node_modules/.bin/vite",
                     "args": [
-                      "-NoProfile",
-                      "-NoLogo",
-                      "-ExecutionPolicy",
-                      "Bypass",
-                      "-File",
-                      "node_modules/.bin/vite.ps1",
                       "--port",
                       "3000"
                     ],
