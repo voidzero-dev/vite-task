@@ -15,6 +15,7 @@ Select a task (↑/↓, Enter to run, type to search):
 
 ```
 Selected task: build
+Run again: vt run build
 $ vtt print-file src/main.ts
 export const main = 'initial';
 ```
@@ -34,6 +35,7 @@ Select a task (↑/↓, Enter to run, type to search):
 
 ```
 Selected task: build
+Run again: vt run build
 $ vtt print-file src/main.ts ◉ cache hit, replaying
 export const main = 'initial';
 

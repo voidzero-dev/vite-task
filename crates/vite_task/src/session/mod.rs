@@ -572,6 +572,13 @@ impl<'a> Session<'a> {
                 "Selected task: ".if_supports_color(Stream::Stdout, |s| s.bold()),
                 selected_label,
             )?;
+            writeln!(
+                stdout,
+                "{}{} run {}",
+                "Run again: ".if_supports_color(Stream::Stdout, |s| s.bold()),
+                self.program_name,
+                selected_label,
+            )?;
         }
 
         let package_query =

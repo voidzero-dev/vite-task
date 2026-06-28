@@ -40,6 +40,7 @@ Select a task (↑/↓, Enter to run, type to search): lin
 
 ```
 Selected task: lint
+Run again: vt run lint
 ~/packages/app$ echo lint app ⊘ cache disabled
 lint app
 ```

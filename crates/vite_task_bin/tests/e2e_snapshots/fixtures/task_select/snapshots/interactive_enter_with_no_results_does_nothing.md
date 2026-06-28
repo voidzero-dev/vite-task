@@ -62,6 +62,7 @@ Select a task (↑/↓, Enter to run, type to search):
 
 ```
 Selected task: build
+Run again: vt run build
 ~/packages/app$ echo build app ⊘ cache disabled
 build app
 ```

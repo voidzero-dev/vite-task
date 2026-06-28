@@ -23,6 +23,7 @@ Select a task (↑/↓, Enter to run, type to search):
 ```
 $ vt run ⊘ cache disabled
 Selected task: hello
+Run again: vt run hello
 $ echo hello from root ⊘ cache disabled
 hello from root
 ```

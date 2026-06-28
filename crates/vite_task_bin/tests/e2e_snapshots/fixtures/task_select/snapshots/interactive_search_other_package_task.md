@@ -39,6 +39,7 @@ Select a task (↑/↓, Enter to run, type to search): typec
 
 ```
 Selected task: lib#typecheck
+Run again: vt run lib#typecheck
 ~/packages/lib$ echo typecheck lib ⊘ cache disabled
 typecheck lib
 ```

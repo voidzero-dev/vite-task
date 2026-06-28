@@ -50,6 +50,7 @@ Select a task (↑/↓, Enter to run, type to search): t
 
 ```
 Selected task: test
+Run again: vt run test
 ~/packages/lib$ echo test lib ⊘ cache disabled
 test lib
 ```

@@ -54,6 +54,7 @@ Select a task (↑/↓, Enter to run, type to search):
 
 ```
 Selected task: lib#build
+Run again: vt run lib#build
 ~/packages/lib$ echo build lib ⊘ cache disabled
 build lib
 ```
