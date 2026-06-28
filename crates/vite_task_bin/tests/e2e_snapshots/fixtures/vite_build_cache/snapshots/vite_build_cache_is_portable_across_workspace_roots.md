@@ -7,7 +7,7 @@ Two identical plain Vite workspaces run from different absolute roots. The test 
 origin workspace root: cache miss populates its default cache
 
 ```
-$ vite build --configLoader runner
+$ vite build
 ```
 
 ## `cd portable_origin && vtt stat-file dist/assets/index.js`
@@ -30,7 +30,7 @@ copy-paste the cache directory to simulate upload/download
 clone workspace root: cache hit from the origin root
 
 ```
-$ vite build --configLoader runner ◉ cache hit, replaying
+$ vite build ◉ cache hit, replaying
 
 ---
 vt run: cache hit.
