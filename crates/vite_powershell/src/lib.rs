@@ -7,8 +7,8 @@
 //! and lets Ctrl+C propagate cleanly.
 //!
 //! This crate carries only the platform-shared primitives (the
-//! `PowerShell` host lookup, the fixed argument prefix, and the
-//! sibling-`.ps1` discovery). Higher-level wrappers in
+//! `PowerShell` host lookup, the fixed argument prefix, the
+//! sibling-`.ps1` discovery, and the stdin-TTY gate). Higher-level wrappers in
 //! `vite_task_plan::ps1_shim` (cwd-relative arg rewrite, scoped to
 //! `node_modules/.bin`) and `vite_command::ps1_shim` (absolute-path
 //! arg rewrite, applied to any `.cmd`) compose these primitives with
@@ -74,6 +74,25 @@ pub fn find_ps1_sibling(resolved: &AbsolutePath) -> Option<AbsolutePathBuf> {
     }
 
     Some(ps1)
+}
+
+/// Cached `stdin.is_terminal()`. The TTY-ness of stdin is fixed for the
+/// process lifetime, so the underlying syscall runs at most once per process.
+///
+/// Gates the `.cmd` -> PowerShell `.ps1` rewrite that both `vite_task_plan`
+/// and `vite_command` perform: the npm/pnpm/yarn `.ps1` wrappers read stdin
+/// (`$MyInvocation.ExpectingInput` -> `$input | & node ...`) and hang forever
+/// on a non-TTY pipe or null, as on CI runners. Without a terminal there is
+/// also no Ctrl+C "Terminate batch job (Y/N)?" prompt to corrupt, so callers
+/// fall back to the `.cmd` (which never reads stdin) when this returns `false`.
+///
+/// See <https://github.com/voidzero-dev/vite-plus/issues/1489>.
+#[must_use]
+pub fn is_stdin_terminal() -> bool {
+    use std::{io::IsTerminal, sync::LazyLock};
+
+    static IS_TTY: LazyLock<bool> = LazyLock::new(|| std::io::stdin().is_terminal());
+    *IS_TTY
 }
 
 #[cfg(test)]
@@ -142,5 +161,13 @@ mod tests {
 
         let resolved = abs(root.as_path().join("node"));
         assert!(find_ps1_sibling(&resolved).is_none());
+    }
+
+    #[test]
+    fn is_stdin_terminal_is_idempotent() {
+        // The value depends on how the test runner wires stdin (non-TTY under
+        // nextest), so assert the cached result is stable rather than a fixed
+        // value.
+        assert_eq!(is_stdin_terminal(), is_stdin_terminal());
     }
 }

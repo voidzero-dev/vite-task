@@ -22,8 +22,8 @@
 //! left alone even if it happens to live under some other `node_modules/.bin`.
 //!
 //! Cross-platform primitives (`POWERSHELL_PREFIX`, `powershell_host`,
-//! `find_ps1_sibling`) live in the `vite_powershell` crate so
-//! `vite_command::ps1_shim` can share them.
+//! `find_ps1_sibling`, `is_stdin_terminal`) live in the `vite_powershell`
+//! crate so `vite_command::ps1_shim` can share them.
 //!
 //! See <https://github.com/voidzero-dev/vite-plus/issues/1176>.
 
@@ -47,30 +47,18 @@ pub fn rewrite_cmd_shim_with_args(
     workspace_root: &AbsolutePath,
 ) -> (Arc<AbsolutePath>, Arc<[Str]>) {
     if let Some(host) = vite_powershell::powershell_host()
-        && let Some(rewritten) =
-            rewrite_with_host(&resolved, &args, cwd, workspace_root, host, is_stdin_terminal())
+        && let Some(rewritten) = rewrite_with_host(
+            &resolved,
+            &args,
+            cwd,
+            workspace_root,
+            host,
+            vite_powershell::is_stdin_terminal(),
+        )
     {
         return rewritten;
     }
     (resolved, args)
-}
-
-/// Cached `stdin.is_terminal()`. The `.ps1` wrappers npm/pnpm/yarn emit read
-/// stdin (`$MyInvocation.ExpectingInput` -> `$input | & node ...`) and hang
-/// forever when stdin is a non-TTY pipe or null (CI, scripts, editor tasks):
-/// the wrapper drains stdin to EOF, which never comes, so the process never
-/// exits and holds the runner's stdio pipe open. Without a terminal there is
-/// also no Ctrl+C "Terminate batch job (Y/N)?" prompt to corrupt, so leaving
-/// the `.cmd` in place is strictly safer. stdin's TTY-ness is fixed for the
-/// process lifetime, and execution inherits stdin into the spawned children.
-///
-/// See <https://github.com/voidzero-dev/vite-plus/issues/1489>.
-#[cfg(windows)]
-fn is_stdin_terminal() -> bool {
-    use std::{io::IsTerminal, sync::LazyLock};
-
-    static IS_TTY: LazyLock<bool> = LazyLock::new(|| std::io::stdin().is_terminal());
-    *IS_TTY
 }
 
 #[cfg(not(windows))]
@@ -97,7 +85,8 @@ fn rewrite_with_host(
 ) -> Option<(Arc<AbsolutePath>, Arc<[Str]>)> {
     // Only route through PowerShell when stdin is an interactive terminal. The
     // `.ps1` wrappers hang on a non-TTY stdin pipe (CI), and without a terminal
-    // there is no Ctrl+C prompt to protect against. See `is_stdin_terminal`.
+    // there is no Ctrl+C prompt to protect against. See
+    // `vite_powershell::is_stdin_terminal`.
     if !is_interactive {
         return None;
     }
