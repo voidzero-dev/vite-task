@@ -411,6 +411,7 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     // CI/CD environments
     "CI",
     // Node.js specific
+    "INIT_CWD",
     "NODE_OPTIONS",
     "COREPACK_*",
     "NPM_CONFIG_STORE_DIR",

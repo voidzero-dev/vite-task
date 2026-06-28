@@ -1,0 +1,7 @@
+{
+  "name": "init-cwd-test",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

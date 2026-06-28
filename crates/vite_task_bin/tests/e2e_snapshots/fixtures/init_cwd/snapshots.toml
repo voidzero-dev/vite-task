@@ -1,0 +1,7 @@
+[[e2e]]
+name = "init_cwd_points_to_invocation_cwd"
+comment = """
+Tasks run from their package directory, but INIT_CWD should point to the directory where vt was invoked.
+"""
+cwd = "packages/app/src"
+steps = [["vt", "run", "print-init-cwd"]]

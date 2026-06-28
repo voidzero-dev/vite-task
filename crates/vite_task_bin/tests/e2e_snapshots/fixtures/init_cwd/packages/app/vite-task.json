@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "print-init-cwd": {
+      "command": "vtt print-env INIT_CWD",
+      "cache": true
+    }
+  }
+}

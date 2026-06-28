@@ -235,6 +235,8 @@ impl<'a> Session<'a> {
         // different schema versions don't share (and corrupt) one database.
         let cache_path = cache_root.join(cache::cache_schema_dir_name().as_str());
 
+        envs.insert(Arc::from(OsStr::new("INIT_CWD")), Arc::from(cwd.as_path().as_os_str()));
+
         // Prepend workspace's node_modules/.bin to PATH
         let workspace_node_modules_bin = workspace_root.path.join("node_modules").join(".bin");
         prepend_path_env(&mut envs, &workspace_node_modules_bin)?;
