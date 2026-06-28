@@ -194,6 +194,23 @@ impl Receiver {
         let reader = ShmReader::new(unsafe { self.shm.as_slice() });
         Ok(ReceiverLockGuard { reader, lock_file: &self.lock_file })
     }
+
+    /// Try to lock the shared memory for unique read access without blocking.
+    ///
+    /// Returns [`io::ErrorKind::WouldBlock`] when one or more senders are still
+    /// alive. This lets callers avoid waiting forever on detached descendants
+    /// that inherited or recreated a sender after the root child exited.
+    #[expect(
+        clippy::missing_errors_doc,
+        reason = "error conditions are self-evident from return type"
+    )]
+    pub fn try_lock(&self) -> io::Result<ReceiverLockGuard<'_>> {
+        self.lock_file.try_lock()?;
+        // SAFETY: The exclusive file lock is held, so no writers can access the shared memory.
+        // The lock ensures all prior writes are visible to this thread.
+        let reader = ShmReader::new(unsafe { self.shm.as_slice() });
+        Ok(ReceiverLockGuard { reader, lock_file: &self.lock_file })
+    }
 }
 
 pub struct ReceiverLockGuard<'a> {

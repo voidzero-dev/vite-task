@@ -34,6 +34,11 @@ pub struct PathAccessIterable {
 }
 
 impl PathAccessIterable {
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        true
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
         self.ipc_receiver_lock_guard.iter_path_accesses()
     }

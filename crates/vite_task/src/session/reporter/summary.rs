@@ -108,6 +108,11 @@ pub enum SpawnOutcome {
         /// Task ran successfully but cache was not updated.
         #[serde(default)]
         fspy_unsupported: bool,
+        /// `true` when fspy tracking started but could not safely be collected
+        /// after the root child exited, usually because a detached descendant
+        /// still owns the IPC sender.
+        #[serde(default)]
+        path_tracking_unavailable: bool,
         /// Rendered message of the IPC server error that caused the cache to
         /// be skipped, if any.
         ipc_server_error: Option<Str>,
@@ -321,6 +326,10 @@ impl TaskResult {
             cache_update_status,
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported)
         );
+        let path_tracking_unavailable = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::PathTrackingUnavailable)
+        );
         let ipc_server_error = match cache_update_status {
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(err)) => {
                 Some(vite_str::format!("{err}"))
@@ -344,6 +353,7 @@ impl TaskResult {
                     saved_error,
                     input_modified_path,
                     fspy_unsupported,
+                    path_tracking_unavailable,
                     ipc_server_error,
                     tool_disabled_cache,
                 ),
@@ -357,6 +367,7 @@ impl TaskResult {
                     saved_error,
                     input_modified_path,
                     fspy_unsupported,
+                    path_tracking_unavailable,
                     ipc_server_error,
                     tool_disabled_cache,
                 ),
@@ -371,6 +382,7 @@ fn spawn_outcome_from_execution(
     saved_error: Option<&SavedExecutionError>,
     input_modified_path: Option<Str>,
     fspy_unsupported: bool,
+    path_tracking_unavailable: bool,
     ipc_server_error: Option<Str>,
     tool_disabled_cache: bool,
 ) -> SpawnOutcome {
@@ -382,6 +394,7 @@ fn spawn_outcome_from_execution(
             infra_error: saved_error.cloned(),
             input_modified_path,
             fspy_unsupported,
+            path_tracking_unavailable,
             ipc_server_error,
             tool_disabled_cache,
         },
@@ -402,6 +415,7 @@ fn spawn_outcome_from_execution(
             infra_error: None,
             input_modified_path: None,
             fspy_unsupported: false,
+            path_tracking_unavailable: false,
             ipc_server_error: None,
             tool_disabled_cache: false,
         },
@@ -549,6 +563,16 @@ impl TaskResult {
         {
             return Str::from(
                 "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
+            );
+        }
+        // fspy started, but a detached descendant kept the IPC sender alive.
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { path_tracking_unavailable: true, .. },
+            ..
+        } = self
+        {
+            return Str::from(
+                "→ Not cached: path tracking could not finish because a child process is still running.",
             );
         }
 

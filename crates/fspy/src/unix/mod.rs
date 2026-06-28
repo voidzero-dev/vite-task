@@ -160,9 +160,14 @@ impl SpyImpl {
 
                 // Lock the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
+                // Detached descendants can keep an IPC sender alive indefinitely; in that
+                // case, skip IPC reads for this run instead of blocking the task runner.
                 #[cfg(not(target_env = "musl"))]
-                let ipc_receiver_lock_guard =
-                    OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
+                let ipc_receiver_lock_guard = match OwnedReceiverLockGuard::try_lock(ipc_receiver) {
+                    Ok(lock) => Some(lock),
+                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => None,
+                    Err(err) => return Err(err),
+                };
                 let path_accesses = PathAccessIterable {
                     arenas,
                     #[cfg(not(target_env = "musl"))]
@@ -180,17 +185,30 @@ impl SpyImpl {
 pub struct PathAccessIterable {
     arenas: Vec<PathAccessArena>,
     #[cfg(not(target_env = "musl"))]
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
+    ipc_receiver_lock_guard: Option<OwnedReceiverLockGuard>,
 }
 
 impl PathAccessIterable {
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        #[cfg(not(target_env = "musl"))]
+        {
+            self.ipc_receiver_lock_guard.is_some()
+        }
+        #[cfg(target_env = "musl")]
+        {
+            true
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
         let accesses_in_arena =
             self.arenas.iter().flat_map(|arena| arena.borrow_accesses().iter()).copied();
 
         #[cfg(not(target_env = "musl"))]
         {
-            let accesses_in_shm = self.ipc_receiver_lock_guard.iter_path_accesses();
+            let accesses_in_shm =
+                self.ipc_receiver_lock_guard.iter().flat_map(|guard| guard.iter_path_accesses());
             accesses_in_shm.chain(accesses_in_arena)
         }
         #[cfg(target_env = "musl")]

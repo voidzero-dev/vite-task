@@ -89,6 +89,16 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
     }
 
+    #[cfg(fspy)]
+    if fspy.is_some()
+        && !outcome.path_accesses.as_ref().is_some_and(fspy::PathAccessIterable::is_complete)
+    {
+        return (
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::PathTrackingUnavailable),
+            None,
+        );
+    }
+
     let fspy_outcome = observe_fspy(
         outcome,
         metadata,

@@ -83,6 +83,10 @@ pub enum CacheNotUpdatedReason {
     /// (its `input` config includes auto-inference). Task ran but cannot
     /// be cached without tracked path accesses.
     FspyUnsupported,
+    /// Path tracking was enabled, but fspy could not safely read the IPC
+    /// buffer after the root child exited because another sender was still
+    /// alive. Task ran successfully, but cache was not updated.
+    PathTrackingUnavailable,
     /// The runner's IPC server failed during execution, so the collected
     /// reports may be incomplete. Caching such a run would risk stale
     /// inputs/outputs on the next hit. Carries the underlying error for

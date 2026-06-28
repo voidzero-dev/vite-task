@@ -4,6 +4,7 @@ use fspy_shared::ipc::{
     PathAccess,
     channel::{Receiver, ReceiverLockGuard},
 };
+#[cfg(windows)]
 use tokio::task::spawn_blocking;
 
 // Shared memory size for storing path accesses.
@@ -22,10 +23,17 @@ pub struct OwnedReceiverLockGuard {
 }
 
 impl OwnedReceiverLockGuard {
+    #[cfg(windows)]
     pub fn lock(receiver: Receiver) -> io::Result<Self> {
         Self::try_new(receiver, fspy_shared::ipc::channel::Receiver::lock)
     }
 
+    #[cfg(unix)]
+    pub fn try_lock(receiver: Receiver) -> io::Result<Self> {
+        Self::try_new(receiver, fspy_shared::ipc::channel::Receiver::try_lock)
+    }
+
+    #[cfg(windows)]
     pub async fn lock_async(receiver: Receiver) -> io::Result<Self> {
         spawn_blocking(move || Self::lock(receiver)).await.expect("lock task panicked")
     }
