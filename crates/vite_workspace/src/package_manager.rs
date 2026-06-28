@@ -119,6 +119,19 @@ pub struct WorkspaceRoot {
     pub workspace_file: WorkspaceFile,
 }
 
+fn has_valid_workspaces_field(package_json: &serde_json::Value) -> bool {
+    match package_json.get("workspaces") {
+        Some(serde_json::Value::Array(workspaces)) => {
+            workspaces.iter().all(serde_json::Value::is_string)
+        }
+        Some(serde_json::Value::Object(workspaces)) => workspaces
+            .get("packages")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|packages| packages.iter().all(serde_json::Value::is_string)),
+        _ => false,
+    }
+}
+
 /// Find the workspace root directory from the current working directory. `original_cwd` must be absolute.
 ///
 /// Returns the workspace root and the relative path from the workspace root to the original cwd.
@@ -162,7 +175,7 @@ pub fn find_workspace_root(
                 file_path: Arc::clone(file_with_path.path()),
                 serde_json_error: e,
             })?;
-            if package_json.get("workspaces").is_some() {
+            if has_valid_workspaces_field(&package_json) {
                 let relative_cwd =
                     original_cwd.strip_prefix(cwd)?.expect("cwd must be within the workspace");
                 return Ok((
@@ -197,6 +210,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    fn write_package_json(path: &AbsolutePath, value: serde_json::Value) {
+        fs::write(path.join("package.json"), value.to_string()).unwrap();
+    }
 
     /// Regression test for <https://github.com/voidzero-dev/vite-plus/issues/1357>:
     /// on Windows, an open handle to `pnpm-workspace.yaml` without
@@ -246,6 +263,103 @@ mod tests {
             "expected no open file descriptor for pnpm-workspace.yaml, got {open_to_target}",
         );
         drop(workspace_root);
+    }
+
+    #[test]
+    fn find_workspace_root_accepts_package_json_workspaces_array() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        write_package_json(
+            temp_dir_path,
+            serde_json::json!({
+                "name": "workspace-root",
+                "workspaces": ["packages/*"]
+            }),
+        );
+        let app_path = temp_dir_path.join("packages/app");
+        fs::create_dir_all(&app_path).unwrap();
+        write_package_json(app_path.as_ref(), serde_json::json!({ "name": "app" }));
+
+        let (workspace_root, relative_cwd) = find_workspace_root(app_path.as_ref()).unwrap();
+
+        assert_eq!(&*workspace_root.path, temp_dir_path);
+        assert_eq!(relative_cwd.as_str(), "packages/app");
+        assert!(matches!(workspace_root.workspace_file, WorkspaceFile::NpmWorkspaceJson(_)));
+    }
+
+    #[test]
+    fn find_workspace_root_accepts_package_json_workspaces_object_packages() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        write_package_json(
+            temp_dir_path,
+            serde_json::json!({
+                "name": "workspace-root",
+                "workspaces": {
+                    "packages": ["packages/*"],
+                    "catalog": {
+                        "react": "^19.0.0"
+                    }
+                }
+            }),
+        );
+        let app_path = temp_dir_path.join("packages/app");
+        fs::create_dir_all(&app_path).unwrap();
+        write_package_json(app_path.as_ref(), serde_json::json!({ "name": "app" }));
+
+        let (workspace_root, relative_cwd) = find_workspace_root(app_path.as_ref()).unwrap();
+
+        assert_eq!(&*workspace_root.path, temp_dir_path);
+        assert_eq!(relative_cwd.as_str(), "packages/app");
+        assert!(matches!(workspace_root.workspace_file, WorkspaceFile::NpmWorkspaceJson(_)));
+    }
+
+    #[test]
+    fn find_workspace_root_ignores_invalid_package_json_workspaces() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        write_package_json(
+            temp_dir_path,
+            serde_json::json!({
+                "name": "invalid-workspace-root",
+                "workspaces": true
+            }),
+        );
+        let app_path = temp_dir_path.join("packages/app");
+        fs::create_dir_all(&app_path).unwrap();
+        write_package_json(app_path.as_ref(), serde_json::json!({ "name": "app" }));
+
+        let (workspace_root, relative_cwd) = find_workspace_root(app_path.as_ref()).unwrap();
+
+        assert_eq!(workspace_root.path.as_path(), app_path.as_path());
+        assert_eq!(relative_cwd.as_str(), "");
+        assert!(matches!(workspace_root.workspace_file, WorkspaceFile::NonWorkspacePackage(_)));
+    }
+
+    #[test]
+    fn find_workspace_root_ignores_partially_invalid_workspace_arrays() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        write_package_json(
+            temp_dir_path,
+            serde_json::json!({
+                "name": "invalid-workspace-root",
+                "workspaces": ["packages/*", false]
+            }),
+        );
+        let app_path = temp_dir_path.join("packages/app");
+        fs::create_dir_all(&app_path).unwrap();
+        write_package_json(app_path.as_ref(), serde_json::json!({ "name": "app" }));
+
+        let (workspace_root, relative_cwd) = find_workspace_root(app_path.as_ref()).unwrap();
+
+        assert_eq!(workspace_root.path.as_path(), app_path.as_path());
+        assert_eq!(relative_cwd.as_str(), "");
+        assert!(matches!(workspace_root.workspace_file, WorkspaceFile::NonWorkspacePackage(_)));
     }
 
     #[test]
