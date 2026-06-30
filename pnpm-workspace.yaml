@@ -23,9 +23,7 @@ overrides:
   # exercise the real vite-task-client integration. The global `vite: catalog:`
   # override above routes vite to the Vite+ toolchain fork, which does not carry
   # the integration — so scope vite-task-tools' `vite` to a real upstream build.
-  vite-task-tools>vite: ^8.1.0
-patchedDependencies:
-  vite@8.1.0: patches/vite@8.1.0.patch
+  vite-task-tools>vite: 8.1.2
 peerDependencyRules:
   allowAny:
     - vite
