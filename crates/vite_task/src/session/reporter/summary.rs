@@ -542,13 +542,13 @@ impl TaskResult {
         {
             return vite_str::format!("→ Not cached: read and wrote '{path}'");
         }
-        // fspy-unsupported-on-this-OS message — same overrides precedence as above
+        // fspy-incomplete message — same overrides precedence as above
         if let Self::Spawned {
             outcome: SpawnOutcome::Success { fspy_unsupported: true, .. }, ..
         } = self
         {
             return Str::from(
-                "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
+                "→ Not cached: `input` auto-inference could not fully track this task. Configure `input` manually to enable caching.",
             );
         }
 

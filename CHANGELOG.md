@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** `vp run` no longer fails Node `spawnSync` calls to statically linked Linux tools such as `tsgolint`; when fspy cannot fully trace that child process, the task now runs successfully and skips writing an unsafe cache entry ([#499](https://github.com/voidzero-dev/vite-task/issues/499)).
 - **Fixed** Windows builds no longer hang on CI when a `node_modules/.bin` `.cmd` shim is routed through PowerShell: the npm/pnpm/yarn `.ps1` wrappers read stdin and block forever on a non-TTY pipe, so the PowerShell rewrite is now skipped when stdin is not an interactive terminal, falling back to the `.cmd` (which never reads stdin) ([#491](https://github.com/voidzero-dev/vite-task/pull/491)).
 - **Added** First-party support for caching `vite build` with zero cache config, giving Vite projects correct cache hits out of the box ([vitejs/vite#22453](https://github.com/vitejs/vite/pull/22453)).
 - **Added** Support for specifying tasks from dependency packages in `dependsOn`, such as `dependsOn: [{ "task": "build", "from": "dependencies" }]` ([#479](https://github.com/voidzero-dev/vite-task/pull/479)).

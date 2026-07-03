@@ -88,6 +88,10 @@ impl Client {
         Ok(())
     }
 
+    pub fn record_untracked_exec(&self, path: &Path) {
+        let _ = self.send(fspy_shared::ipc::AccessMode::UNTRACKED_EXEC, path);
+    }
+
     pub unsafe fn handle_exec<R>(
         &self,
         config: ExecResolveConfig,

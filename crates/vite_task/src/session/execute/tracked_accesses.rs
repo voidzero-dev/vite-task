@@ -17,6 +17,9 @@ use crate::collections::HashMap;
 /// Tracked file accesses from fspy, normalized to workspace-relative paths.
 #[derive(Default, Debug)]
 pub struct TrackedPathAccesses {
+    /// fspy observed a descendant exec that could not be tracked completely.
+    pub incomplete: bool,
+
     /// Tracked path reads
     pub path_reads: HashMap<RelativePathBuf, PathRead>,
 
@@ -31,6 +34,11 @@ impl TrackedPathAccesses {
     pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
         let mut accesses = Self::default();
         for access in raw.iter() {
+            if access.mode.contains(AccessMode::UNTRACKED_EXEC) {
+                accesses.incomplete = true;
+                continue;
+            }
+
             // Strip workspace root and clean `..` components in one pass.
             // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
             let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {

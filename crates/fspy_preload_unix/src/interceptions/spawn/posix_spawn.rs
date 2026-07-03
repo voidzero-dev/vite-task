@@ -1,4 +1,4 @@
-use std::thread;
+use std::{ffi::CStr, os::unix::ffi::OsStrExt, path::Path};
 
 use fspy_shared_unix::exec::ExecResolveConfig;
 use libc::{c_char, c_int};
@@ -31,14 +31,6 @@ unsafe fn handle_posix_spawn(
     argv: *const *mut c_char,
     envp: *const *mut c_char,
 ) -> c_int {
-    struct AssertSend<T>(T);
-    #[expect(
-        clippy::non_send_fields_in_send_ty,
-        reason = "the closure captures raw pointers that are valid for the duration of the thread::scope call, so sending them to the scoped thread is safe"
-    )]
-    // SAFETY: the raw pointers captured inside T are valid for the duration of the thread::scope call, so sending them to the scoped thread is safe
-    unsafe impl<T> Send for AssertSend<T> {}
-
     let client = global_client()
         .expect("posix_spawn(p) unexpectedly called before client initialized in ctor");
 
@@ -58,21 +50,21 @@ unsafe fn handle_posix_spawn(
                         raw_command.envp.cast(),
                     )
                 };
-                if let Some(pre_exec) = pre_exec {
-                    thread::scope(move |s| {
-                        let call_original = AssertSend(call_original);
-                        s.spawn(move || {
-                            let call_original = call_original;
-                            pre_exec.run()?;
-
-                            nix::Result::Ok((call_original.0)())
-                        })
-                        .join()
-                        .unwrap()
-                    })
-                } else {
-                    Ok(call_original())
+                if pre_exec.is_some() {
+                    // Static Linux executables cannot be instrumented through
+                    // LD_PRELOAD. Installing a seccomp-unotify listener here
+                    // can make libc's posix_spawn fail before the child exists
+                    // (reported by Node as spawnSync EINVAL). Let the spawn
+                    // proceed, but tell the parent the trace is incomplete so
+                    // task caching is skipped.
+                    // SAFETY: raw_command.prog is a valid C string produced
+                    // from the resolved Exec just above.
+                    let program = CStr::from_ptr(raw_command.prog);
+                    client.record_untracked_exec(Path::new(std::ffi::OsStr::from_bytes(
+                        program.to_bytes(),
+                    )));
                 }
+                Ok(call_original())
             },
         )
     };

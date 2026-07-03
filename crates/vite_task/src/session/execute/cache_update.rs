@@ -27,6 +27,9 @@ use crate::{
 /// cfg-agnostic so the decision logic below doesn't need `cfg(fspy)` — the
 /// value is only ever `Some` when tracking happened (see [`observe_fspy`]).
 struct TrackingOutcome {
+    /// fspy reported that a descendant process could not be tracked fully.
+    incomplete: bool,
+
     path_reads: HashMap<RelativePathBuf, PathRead>,
     /// Auto-output writes after output exclusions are applied. Empty when
     /// `output_config.includes_auto` is false.
@@ -97,6 +100,12 @@ pub(super) async fn update_cache(
         &ignored_output_rels,
         workspace_root,
     );
+
+    if let Some(TrackingOutcome { incomplete: true, .. }) = &fspy_outcome {
+        // Task ran successfully, but fspy could not fully observe a descendant
+        // process. A cache entry would risk stale hits, so skip updating.
+        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None);
+    }
 
     if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome {
         // fspy-inferred read-write overlap: the task wrote to a file it also
@@ -246,6 +255,7 @@ fn observe_fspy(
             let read_write_overlap =
                 filtered_path_reads.keys().find(|p| filtered_path_writes.contains(*p)).cloned();
             TrackingOutcome {
+                incomplete: tracked.incomplete,
                 path_reads: filtered_path_reads,
                 path_writes: filtered_path_writes,
                 read_write_overlap,

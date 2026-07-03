@@ -16,6 +16,7 @@ bitflags! {
         const READ = 1;
         const WRITE = 1 << 1;
         const READ_DIR = 1 << 2;
+        const UNTRACKED_EXEC = 1 << 3;
     }
 }
 
