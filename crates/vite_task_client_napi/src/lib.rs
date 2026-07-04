@@ -30,7 +30,7 @@
 )]
 use std::{collections::HashMap, ffi::OsStr};
 
-use napi::{Either, Error, Result};
+use napi::{Either, Error, Result, bindgen_prelude::Undefined};
 use napi_derive::napi;
 use vite_task_client::{Client, GetEnvsQuery};
 
@@ -85,17 +85,24 @@ impl RunnerClient {
     }
 
     #[napi]
-    pub fn get_env(&self, name: String, options: Option<GetEnvOptions>) -> Result<Option<String>> {
+    pub fn get_env(
+        &self,
+        name: String,
+        options: Option<GetEnvOptions>,
+    ) -> Result<Either<String, Undefined>> {
         let tracked = options.and_then(|o| o.tracked).unwrap_or(true);
         let value = self
             .client
             .get_env(OsStr::new(&name), tracked)
             .map_err(|err| err_string(vite_str::format!("{err}")))?;
-        value.map_or(Ok(None), |value| {
-            value.to_str().map(|s| Some(s.to_owned())).ok_or_else(|| {
-                err_string(vite_str::format!("env value for {name} is not valid UTF-8"))
+        let value = value
+            .map(|value| {
+                value.to_str().map(str::to_owned).ok_or_else(|| {
+                    err_string(vite_str::format!("env value for {name} is not valid UTF-8"))
+                })
             })
-        })
+            .transpose()?;
+        Ok(value.into())
     }
 
     #[napi]

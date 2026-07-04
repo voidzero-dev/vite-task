@@ -277,6 +277,20 @@ steps = [
 ]
 
 [[e2e]]
+name = "fetch_env_missing_returns_undefined"
+comment = """
+Exercises the public `getEnv(name)` contract for an absent env var. The client API must expose `undefined` so callers can distinguish absence using the documented API.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-missing-env",
+  ], comment = "missing env values are normalized to undefined" },
+]
+
+[[e2e]]
 name = "fetch_env_reads_undeclared_env"
 comment = """
 Exercises `getEnv(name)`: the tool asks the runner for an env var that is not declared in the task's `env` list. This verifies runner-served envs resolve from the unfiltered spawn env context while the child process env remains cache-filtered.
