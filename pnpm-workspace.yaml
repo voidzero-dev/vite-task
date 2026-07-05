@@ -13,7 +13,7 @@ catalog:
   oxlint: ^1.55.0
   oxlint-tsgolint: ^0.24.0
   typescript: ^6.0.3
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.1
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.2
   vite-plus: 0.2.2
 
 catalogMode: prefer
@@ -23,7 +23,7 @@ overrides:
   # exercise the real vite-task-client integration. The global `vite: catalog:`
   # override above routes vite to the Vite+ toolchain fork, which does not carry
   # the integration — so scope vite-task-tools' `vite` to a real upstream build.
-  vite-task-tools>vite: 8.1.2
+  vite-task-tools>vite: 8.1.3
 peerDependencyRules:
   allowAny:
     - vite
