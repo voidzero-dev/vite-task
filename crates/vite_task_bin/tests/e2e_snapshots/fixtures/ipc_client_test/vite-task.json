@@ -58,6 +58,10 @@
       "command": "node scripts/fetch_env.mjs PROBE_ENV",
       "cache": true
     },
+    "fetch-missing-env": {
+      "command": "node scripts/assert_undefined_env.mjs",
+      "cache": true
+    },
     "fetch-env-explicit-input": {
       "command": "node scripts/fetch_env.mjs PROBE_ENV",
       "input": [],
