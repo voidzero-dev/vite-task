@@ -46,6 +46,8 @@ pub struct SelectParams<'a> {
     pub query: Option<&'a str>,
     /// Header line rendered above the list (e.g. an error message).
     pub header: Option<&'a str>,
+    /// Prompt line rendered above the list in interactive mode.
+    pub prompt: &'a str,
     /// Max visible rows (interactive only).
     pub page_size: usize,
 }
@@ -86,6 +88,7 @@ pub fn select_list(
             params.query,
             selected_index,
             params.header,
+            params.prompt,
             params.page_size,
             after_render,
         ),
@@ -126,6 +129,7 @@ fn non_interactive(
             visible_row_range: 0..row_count,
             hidden_count: 0,
             header,
+            prompt: "",
             query: None,
             show_group_headers: false,
             line_ending: "\n",

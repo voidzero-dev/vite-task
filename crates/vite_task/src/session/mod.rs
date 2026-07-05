@@ -530,6 +530,7 @@ impl<'a> Session<'a> {
             items: &select_items,
             query: not_found_name,
             header: header.as_deref(),
+            prompt: "Select a task (\u{2191}/\u{2193}, Enter to run, type to search):",
             page_size: 12,
         };
 

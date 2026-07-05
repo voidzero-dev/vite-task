@@ -226,6 +226,8 @@ pub struct RenderParams<'a> {
     /// Number of selectable items beyond the visible range.
     pub hidden_count: usize,
     pub header: Option<&'a str>,
+    /// Prompt line text, rendered when `query` is `Some` (interactive only).
+    pub prompt: &'a str,
     /// Current search text. `Some` enables the prompt line (interactive only).
     pub query: Option<&'a str>,
     /// Whether to render group header lines. When `false`, items are still
@@ -265,6 +267,7 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         visible_row_range,
         hidden_count,
         header,
+        prompt,
         query,
         show_group_headers,
         line_ending,
@@ -286,15 +289,9 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
         // Print ": " separator before query only when query is non-empty,
         // to avoid a trailing space that Windows ConPTY would strip.
         if q.is_empty() {
-            write!(
-                writer,
-                "Select a task (\u{2191}/\u{2193}, Enter to run, type to search):{line_ending}",
-            )?;
+            write!(writer, "{prompt}{line_ending}")?;
         } else {
-            write!(
-                writer,
-                "Select a task (\u{2191}/\u{2193}, Enter to run, type to search): {q}{line_ending}",
-            )?;
+            write!(writer, "{prompt} {q}{line_ending}")?;
         }
         write!(writer, "{line_ending}")?;
         lines += 2;
@@ -446,6 +443,7 @@ fn render(
     stdout: &mut impl Write,
     state: &mut State<'_>,
     header: Option<&str>,
+    prompt: &str,
 ) -> anyhow::Result<()> {
     // Move cursor up to clear previous render
     if state.rendered_lines > 0 {
@@ -471,6 +469,7 @@ fn render(
             visible_row_range: state.visible_display_rows(),
             hidden_count: state.hidden_item_count(),
             header,
+            prompt,
             query: Some(&state.query),
             show_group_headers: true,
             line_ending: "\r\n",
@@ -487,6 +486,7 @@ pub fn run(
     initial_query: Option<&str>,
     selected_index: &mut usize,
     header: Option<&str>,
+    prompt: &str,
     page_size: usize,
     mut after_render: impl FnMut(&RenderState<'_>),
 ) -> anyhow::Result<super::SelectResult> {
@@ -502,7 +502,7 @@ pub fn run(
     let mut state = State::new(items, initial_query, page_size);
 
     // Initial render
-    render(&mut out, &mut state, header)?;
+    render(&mut out, &mut state, header, prompt)?;
     after_render(&RenderState { query: &state.query, selected_index: state.selected });
 
     loop {
@@ -545,7 +545,7 @@ pub fn run(
             _ => continue,
         }
 
-        render(&mut out, &mut state, header)?;
+        render(&mut out, &mut state, header, prompt)?;
         after_render(&RenderState { query: &state.query, selected_index: state.selected });
     }
 }
@@ -569,6 +569,8 @@ fn cleanup(stdout: &mut impl Write, state: &State<'_>) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    const TASK_PROMPT: &str = "Select a task (\u{2191}/\u{2193}, Enter to run, type to search):";
+
     use super::*;
 
     fn make_items(items: &[(&str, &str)]) -> Vec<SelectItem> {
@@ -630,6 +632,7 @@ mod tests {
                 visible_row_range: 0..len,
                 hidden_count: 0,
                 header: None,
+                prompt: TASK_PROMPT,
                 query: None,
                 show_group_headers: false,
                 line_ending: "\n",
@@ -658,6 +661,7 @@ mod tests {
                 visible_row_range: 0..len,
                 hidden_count: 0,
                 header: None,
+                prompt: TASK_PROMPT,
                 query: Some(query),
                 show_group_headers: true,
                 line_ending: "\n",
