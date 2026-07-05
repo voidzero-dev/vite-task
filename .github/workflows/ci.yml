@@ -32,7 +32,7 @@ jobs:
       code-changed: ${{ steps.filter.outputs.code }}
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         id: filter
         with:
           filters: |
@@ -170,7 +170,7 @@ jobs:
 
       - run: rustup target add x86_64-pc-windows-msvc
 
-      - uses: taiki-e/install-action@682e7d9e49c5e653d371fc6adbda67653461378a # v2.82.4
+      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-nextest,cargo-xwin
 
@@ -178,7 +178,7 @@ jobs:
       # job's wall time on a cold cache; the unpacked result is immutable for a
       # given manifest version, so cache it. Bump the key when bumping the
       # xwin version.
-      - uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: xwin-cache
         with:
           path: ~/.cache/cargo-xwin
@@ -203,7 +203,7 @@ jobs:
           path: windows-tests.tar.zst
           retention-days: 7
 
-      - uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: steps.xwin-cache.outputs.cache-hit != 'true'
         with:
           path: ~/.cache/cargo-xwin
@@ -253,7 +253,7 @@ jobs:
         with:
           name: windows-test-archive
 
-      - uses: taiki-e/install-action@682e7d9e49c5e653d371fc6adbda67653461378a # v2.82.4
+      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-nextest
 
