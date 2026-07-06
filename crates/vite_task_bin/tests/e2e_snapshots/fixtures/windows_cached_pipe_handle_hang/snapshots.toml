@@ -1,0 +1,7 @@
+[[e2e]]
+name = "windows_cached_pipe_handle_hang"
+platform = "windows"
+comment = """
+A cached Windows leaf whose direct child exits while a descendant keeps stdout/stderr handles open should still observe the direct child exit and continue to the next `&&` item.
+"""
+steps = [["vt", "run", "test"]]

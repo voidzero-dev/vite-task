@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "test": {
+      "command": "cmd /c start /b vtt barrier .hold stdio 1 --hang && vtt print after",
+      "cache": true
+    }
+  }
+}
