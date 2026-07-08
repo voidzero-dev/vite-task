@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Failures while waiting for a started task process to exit no longer incorrectly say the process failed to spawn ([#515](https://github.com/voidzero-dev/vite-task/pull/515)).
 - **Fixed** Missing env vars requested through `@voidzero-dev/vite-task-client` now return `undefined` instead of `null`, preserving Vite production `NODE_ENV` semantics when builds run through `vp run` ([#508](https://github.com/voidzero-dev/vite-task/pull/508)).
 - **Fixed** Windows builds no longer hang on CI when a `node_modules/.bin` `.cmd` shim is routed through PowerShell: the npm/pnpm/yarn `.ps1` wrappers read stdin and block forever on a non-TTY pipe, so the PowerShell rewrite is now skipped when stdin is not an interactive terminal, falling back to the `.cmd` (which never reads stdin) ([#491](https://github.com/voidzero-dev/vite-task/pull/491)).
 - **Added** First-party support for caching `vite build` with zero cache config, giving Vite projects correct cache hits out of the box ([vitejs/vite#22453](https://github.com/vitejs/vite/pull/22453)).
