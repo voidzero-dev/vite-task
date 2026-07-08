@@ -446,7 +446,7 @@ async fn run(
         let child_work = Box::pin(run_child(child, sinks, None, fast_fail_token.clone()));
         (child_work.await, None)
     };
-    let outcome = wait_result.map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
+    let outcome = wait_result.map_err(Report::failed)?;
     let duration = start.elapsed();
 
     // Extract reports, or short-circuit when the IPC server failed. An Err
@@ -580,18 +580,17 @@ fn replay_cache_hit(
     Report::CacheHit
 }
 
-/// Phase 6: drain the child's pipes (if piped) and wait for exit, with a
-/// single error sink — a pipe failure cancels (so the wait kills the child
-/// instead of orphaning it) and surfaces through the same returned result as
-/// a wait failure. After the child exits (on every path), `stop_accepting`
-/// is signalled so the IPC server stops accepting and starts draining.
+/// Phase 6: drain the child's pipes (if piped) and wait for exit. A pipe
+/// failure cancels the child so the wait future kills it instead of orphaning
+/// it. After the child exits (on every path), `stop_accepting` is signalled so
+/// the IPC server stops accepting and starts draining.
 async fn run_child(
     mut child: ChildHandle,
     sinks: Option<PipeSinks<'_>>,
     stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
-) -> anyhow::Result<ChildOutcome> {
-    let pipe_result: anyhow::Result<()> = if let Some(sinks) = sinks {
+) -> Result<ChildOutcome, ExecutionError> {
+    let pipe_result: Result<(), ExecutionError> = if let Some(sinks) = sinks {
         let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
         let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
         #[expect(
@@ -599,13 +598,15 @@ async fn run_child(
             reason = "pipe_stdio streams child I/O and creates a large future"
         )]
         let r = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        r.map_err(anyhow::Error::from)
+        r.map_err(|err| ExecutionError::Spawn(err.into()))
     } else {
         Ok(())
     };
 
     let wait_result = match pipe_result {
-        Ok(()) => child.wait.await.map_err(anyhow::Error::from),
+        Ok(()) => {
+            child.wait.await.map_err(|err| ExecutionError::WaitForTaskProcessExit(err.into()))
+        }
         Err(err) => {
             // Pipe failed — cancel so `child.wait` kills the child instead of
             // orphaning it. Still signal the server below so it can drain.

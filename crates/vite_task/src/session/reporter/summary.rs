@@ -152,6 +152,7 @@ pub enum SavedCacheMissReason {
 pub enum SavedExecutionError {
     Cache { kind: SavedCacheErrorKind, message: Str },
     Spawn { message: Str },
+    WaitForTaskProcessExit { message: Str },
     PostRunFingerprint { message: Str },
     IpcServerBind { message: Str },
 }
@@ -238,6 +239,9 @@ impl SavedExecutionError {
             ExecutionError::Spawn(source) => {
                 Self::Spawn { message: vite_str::format!("{source:#}") }
             }
+            ExecutionError::WaitForTaskProcessExit(source) => {
+                Self::WaitForTaskProcessExit { message: vite_str::format!("{source:#}") }
+            }
             ExecutionError::PostRunFingerprint(source) => {
                 Self::PostRunFingerprint { message: vite_str::format!("{source:#}") }
             }
@@ -259,6 +263,9 @@ impl SavedExecutionError {
             }
             Self::Spawn { message } => {
                 vite_str::format!("Failed to spawn process: {message}")
+            }
+            Self::WaitForTaskProcessExit { message } => {
+                vite_str::format!("Failed to wait for task process to exit: {message}")
             }
             Self::PostRunFingerprint { message } => {
                 vite_str::format!("Failed to create post-run fingerprint: {message}")
