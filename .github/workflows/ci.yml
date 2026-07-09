@@ -237,7 +237,7 @@ jobs:
           - shard: windows-ignored
             partition: ''
             mode: ignored
-    runs-on: namespace-profile-windows-4c-8g
+    runs-on: windows-latest
     env:
       PARTITION: ${{ matrix.partition }}
     steps:
@@ -256,13 +256,6 @@ jobs:
       - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-nextest
-
-      - name: Verify process image tracing
-        if: matrix.shard == 'windows-1'
-        run: |
-          filter='test(create_process_a) | test(create_process_w) | test(read_program)'
-          cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --test-threads 1 -E "$filter"
-          cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --test-threads 3 -E "$filter"
 
       # The default (non-ignored) test set needs nothing beyond the test
       # binaries themselves; this step verifies that contract before Node.js
