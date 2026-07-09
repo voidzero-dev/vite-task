@@ -119,7 +119,7 @@ pub enum CacheUpdateStatus {
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss(CacheMiss),
-    Hit { replayed_duration: Duration },
+    Hit { replayed_duration: Duration, logs_replayed: bool },
 }
 
 /// Convert `ExitStatus` to an i32 exit code.

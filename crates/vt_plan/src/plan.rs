@@ -489,7 +489,7 @@ fn resolve_synthetic_cache_config(
             Ok(match synthetic_cache_config {
                 UserCacheConfig::Disabled { .. } => Option::None,
                 UserCacheConfig::Enabled { enabled_cache_config, .. } => {
-                    let EnabledCacheConfig { env, untracked_env, input, output } =
+                    let EnabledCacheConfig { replay_logs: _, env, untracked_env, input, output } =
                         enabled_cache_config;
                     parent_config.env_config.fingerprinted_envs.extend(env.unwrap_or_default());
                     parent_config
@@ -672,6 +672,7 @@ fn plan_spawn_execution(
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
+                replay_logs: cache_config.replay_logs,
                 unfiltered_envs: Arc::clone(envs),
             });
         }
@@ -939,6 +940,7 @@ mod tests {
 
     fn parent_config(includes_auto: bool, positive_globs: &[&str]) -> CacheConfig {
         CacheConfig {
+            replay_logs: true,
             env_config: EnvConfig {
                 fingerprinted_envs: FxHashSet::default(),
                 untracked_env: FxHashSet::default(),
@@ -967,6 +969,7 @@ mod tests {
         let result = resolve_synthetic_cache_config(
             ParentCacheConfig::Inherited(parent),
             UserCacheConfig::with_config(EnabledCacheConfig {
+                replay_logs: None,
                 env: None,
                 untracked_env: None,
                 input: None,
@@ -989,6 +992,7 @@ mod tests {
         let result = resolve_synthetic_cache_config(
             ParentCacheConfig::Inherited(parent),
             UserCacheConfig::with_config(EnabledCacheConfig {
+                replay_logs: None,
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
@@ -1011,6 +1015,7 @@ mod tests {
         let result = resolve_synthetic_cache_config(
             ParentCacheConfig::Inherited(parent),
             UserCacheConfig::with_config(EnabledCacheConfig {
+                replay_logs: None,
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
@@ -1036,6 +1041,7 @@ mod tests {
         let result = resolve_synthetic_cache_config(
             ParentCacheConfig::Inherited(parent),
             UserCacheConfig::with_config(EnabledCacheConfig {
+                replay_logs: None,
                 env: None,
                 untracked_env: None,
                 input: Some(vec![
@@ -1065,6 +1071,7 @@ mod tests {
         let result = resolve_synthetic_cache_config(
             ParentCacheConfig::Inherited(parent),
             UserCacheConfig::with_config(EnabledCacheConfig {
+                replay_logs: None,
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
@@ -1089,6 +1096,7 @@ mod tests {
         let result = resolve_synthetic_cache_config(
             ParentCacheConfig::Disabled,
             UserCacheConfig::with_config(EnabledCacheConfig {
+                replay_logs: None,
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
@@ -1122,6 +1130,7 @@ mod tests {
         let result = resolve_synthetic_cache_config(
             ParentCacheConfig::Inherited(parent),
             UserCacheConfig::with_config(EnabledCacheConfig {
+                replay_logs: None,
                 env: None,
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("!dist/**".into())]),

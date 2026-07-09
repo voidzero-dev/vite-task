@@ -55,6 +55,10 @@ pub struct CacheMetadata {
     /// Used at execution time to determine what output files to archive.
     pub output_config: ResolvedGlobConfig,
 
+    /// Whether cached stdout/stderr should be replayed on cache hits.
+    #[serde(skip_serializing_if = "is_true")]
+    pub replay_logs: bool,
+
     /// The unfiltered env context for runner-aware APIs. This is the planning
     /// context's envs before spawn-env filtering, including command prefix envs
     /// from this command and enclosing nested `vp run` expansions.
@@ -64,6 +68,10 @@ pub struct CacheMetadata {
     /// mirrors the ambient environment and would make snapshots noisy.
     #[serde(skip)]
     pub unfiltered_envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+}
+
+const fn is_true(value: &bool) -> bool {
+    *value
 }
 
 /// Fingerprint for spawn execution that affects caching.

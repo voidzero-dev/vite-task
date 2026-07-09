@@ -63,8 +63,12 @@ pub struct TaskSummary {
 /// making invalid combinations unrepresentable.
 #[derive(Serialize, Deserialize)]
 pub enum TaskResult {
-    /// Cache hit — output was replayed from cache. Always successful.
-    CacheHit { saved_duration_ms: u64 },
+    /// Cache hit. Always successful.
+    CacheHit {
+        saved_duration_ms: u64,
+        #[serde(default = "default_logs_replayed")]
+        logs_replayed: bool,
+    },
 
     /// In-process execution (built-in command like echo). Always successful.
     InProcess,
@@ -90,6 +94,10 @@ pub enum SpawnedCacheStatus {
     Miss(SavedCacheMissReason),
     /// No cache configuration for this task.
     Disabled,
+}
+
+const fn default_logs_replayed() -> bool {
+    true
 }
 
 /// Outcome of a spawned process.
@@ -121,7 +129,7 @@ pub enum SpawnOutcome {
     /// No `infra_error` field: cache operations are skipped on non-zero exit.
     Failed { exit_code: NonZeroI32 },
 
-    /// Execution failed without a usable process exit status.
+    /// Could not start the process (e.g., command not found).
     SpawnError(SavedExecutionError),
 }
 
@@ -152,8 +160,6 @@ pub enum SavedCacheMissReason {
 pub enum SavedExecutionError {
     Cache { kind: SavedCacheErrorKind, message: Str },
     Spawn { message: Str },
-    ForwardTaskProcessOutput { message: Str },
-    WaitForTaskProcessExit { message: Str },
     PostRunFingerprint { message: Str },
     IpcServerBind { message: Str },
 }
@@ -193,7 +199,7 @@ impl SummaryStats {
 
         for task in tasks {
             match &task.result {
-                TaskResult::CacheHit { saved_duration_ms } => {
+                TaskResult::CacheHit { saved_duration_ms, .. } => {
                     stats.cache_hits += 1;
                     stats.total_saved += Duration::from_millis(*saved_duration_ms);
                 }
@@ -237,12 +243,8 @@ impl SavedExecutionError {
                 },
                 message: vt_str::format!("{source:#}"),
             },
-            ExecutionError::Spawn(source) => Self::Spawn { message: vt_str::format!("{source:#}") },
-            ExecutionError::ForwardTaskProcessOutput(source) => {
-                Self::ForwardTaskProcessOutput { message: vt_str::format!("{source:#}") }
-            }
-            ExecutionError::WaitForTaskProcessExit(source) => {
-                Self::WaitForTaskProcessExit { message: vt_str::format!("{source:#}") }
+            ExecutionError::Spawn(source) => {
+                Self::Spawn { message: vt_str::format!("{source:#}") }
             }
             ExecutionError::PostRunFingerprint(source) => {
                 Self::PostRunFingerprint { message: vt_str::format!("{source:#}") }
@@ -265,12 +267,6 @@ impl SavedExecutionError {
             }
             Self::Spawn { message } => {
                 vt_str::format!("Failed to spawn process: {message}")
-            }
-            Self::ForwardTaskProcessOutput { message } => {
-                vt_str::format!("Failed to forward task process output: {message}")
-            }
-            Self::WaitForTaskProcessExit { message } => {
-                vt_str::format!("Failed to wait for task process to exit: {message}")
             }
             Self::PostRunFingerprint { message } => {
                 vt_str::format!("Failed to create post-run fingerprint: {message}")
@@ -345,9 +341,10 @@ impl TaskResult {
         );
 
         match cache_status {
-            CacheStatus::Hit { replayed_duration } => {
-                Self::CacheHit { saved_duration_ms: duration_to_ms(*replayed_duration) }
-            }
+            CacheStatus::Hit { replayed_duration, logs_replayed } => Self::CacheHit {
+                saved_duration_ms: duration_to_ms(*replayed_duration),
+                logs_replayed: *logs_replayed,
+            },
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
@@ -565,10 +562,14 @@ impl TaskResult {
         }
 
         match self {
-            Self::CacheHit { saved_duration_ms } => {
+            Self::CacheHit { saved_duration_ms, logs_replayed } => {
                 let d = Duration::from_millis(*saved_duration_ms);
                 let formatted_duration = format_summary_duration(d);
-                vt_str::format!("→ Cache hit - output replayed - {formatted_duration} saved")
+                if *logs_replayed {
+                    vt_str::format!("→ Cache hit - output replayed - {formatted_duration} saved")
+                } else {
+                    vt_str::format!("→ Cache hit - logs skipped - {formatted_duration} saved")
+                }
             }
             Self::InProcess => Str::from("→ Cache disabled for built-in command"),
             Self::Spawned { cache_status, .. } => match cache_status {
@@ -667,7 +668,9 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
     let cache_disabled_str = if stats.cache_disabled > 0 {
         let n = stats.cache_disabled;
         Str::from(
-            vt_str::format!("• {n} cache disabled").style(Style::new().bright_black()).to_string(),
+            vt_str::format!("• {n} cache disabled")
+                .style(Style::new().bright_black())
+                .to_string(),
         )
     } else {
         Str::default()
@@ -917,29 +920,5 @@ fn format_input_modified_notice(buf: &mut Vec<u8>, task_names: &[Str]) {
         let _ = write!(buf, " not cached because it modified its input.");
     } else {
         let _ = write!(buf, " not cached because they modified their inputs.");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn output_forwarding_error_has_distinct_message() {
-        let error = ExecutionError::ForwardTaskProcessOutput(anyhow::anyhow!(
-            "Resource temporarily unavailable (os error 11)"
-        ));
-
-        let saved = SavedExecutionError::from_execution_error(&error);
-
-        assert!(matches!(
-            &saved,
-            SavedExecutionError::ForwardTaskProcessOutput { message }
-                if message.as_str() == "Resource temporarily unavailable (os error 11)"
-        ));
-        assert_eq!(
-            saved.display_message().as_str(),
-            "Failed to forward task process output: Resource temporarily unavailable (os error 11)"
-        );
     }
 }

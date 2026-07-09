@@ -149,9 +149,13 @@ fn format_env_changed_inline(names: &[&Str]) -> Str {
 /// Note: Returns plain text without styling. The reporter applies colors.
 pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
     match cache_status {
-        CacheStatus::Hit { .. } => {
-            // Show "cache hit" indicator when replaying from cache
-            Some(Str::from("◉ cache hit, replaying"))
+        CacheStatus::Hit { logs_replayed, .. } => {
+            if *logs_replayed {
+                // Show "cache hit" indicator when replaying from cache
+                Some(Str::from("◉ cache hit, replaying"))
+            } else {
+                Some(Str::from("◉ cache hit"))
+            }
         }
         CacheStatus::Miss(CacheMiss::NotFound) => {
             // No inline message for "not found" case - just show command
