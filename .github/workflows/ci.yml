@@ -263,14 +263,24 @@ jobs:
       # job never depends on the runner's Rust toolchain.
       - name: Run tests
         if: matrix.mode == 'default'
-        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION"
+        run: |
+          for iteration in {1..50}; do
+            echo "::group::Iteration $iteration/50"
+            cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION"
+            echo "::endgroup::"
+          done
 
       - uses: oxc-project/setup-node@4c588e9266bd930b6ddc34307df0659ed511d187 # v1.3.1
         if: matrix.mode == 'ignored'
 
       - name: Run ignored tests
         if: matrix.mode == 'ignored'
-        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
+        run: |
+          for iteration in {1..50}; do
+            echo "::group::Iteration $iteration/50"
+            cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
+            echo "::endgroup::"
+          done
 
   test-musl:
     needs: detect-changes
