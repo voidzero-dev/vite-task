@@ -257,6 +257,13 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Verify process image tracing
+        if: matrix.shard == 'windows-1'
+        run: |
+          filter='test(create_process_a) | test(create_process_w) | test(read_program)'
+          cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --test-threads 1 -E "$filter"
+          cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --test-threads 3 -E "$filter"
+
       # The default (non-ignored) test set needs nothing beyond the test
       # binaries themselves; this step verifies that contract before Node.js
       # and pnpm enter the picture. `cargo-nextest` is invoked directly so the
