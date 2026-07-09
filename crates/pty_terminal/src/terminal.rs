@@ -28,7 +28,7 @@ pub struct PtyReader {
 pub struct PtyWriter {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     parser: Arc<Mutex<vt100::Parser<Vt100Callbacks>>>,
-    master: Box<dyn MasterPty + Send>,
+    master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
 }
 
 /// A cloneable handle to a child process spawned in a PTY.
@@ -249,18 +249,23 @@ impl PtyWriter {
     ///
     /// # Errors
     ///
-    /// Returns an error if the PTY cannot be resized.
+    /// Returns an error if the child process has exited or the PTY cannot be resized.
     ///
     /// # Panics
     ///
-    /// Panics if the parser lock is poisoned.
+    /// Panics if the PTY master or parser lock is poisoned.
     pub fn resize(&self, size: ScreenSize) -> anyhow::Result<()> {
-        self.master.resize(portable_pty::PtySize {
-            rows: size.rows,
-            cols: size.cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
+        self.master
+            .lock()
+            .unwrap()
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Child process has exited"))?
+            .resize(portable_pty::PtySize {
+                rows: size.rows,
+                cols: size.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })?;
 
         self.parser.lock().unwrap().screen_mut().set_size(size.rows, size.cols);
 
@@ -299,9 +304,6 @@ impl Terminal {
     ///
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     ///
-    /// # Panics
-    ///
-    /// Panics if the writer lock is poisoned when the background thread closes it.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
         // On musl libc (Alpine Linux), concurrent PTY operations trigger
         // SIGSEGV/SIGBUS in musl internals (sysconf, fcntl). This affects
@@ -324,7 +326,7 @@ impl Terminal {
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
         let mut child = pty_pair.slave.spawn_command(cmd)?;
         let child_killer = child.clone_killer();
-        let master = pty_pair.master;
+        let master = Arc::new(Mutex::new(Some(pty_pair.master)));
         let exit_status: Arc<OnceLock<ChildWaitResult>> = Arc::new(OnceLock::new());
 
         // Background thread: wait for child to exit, then clean up.
@@ -338,17 +340,30 @@ impl Terminal {
         // over guarantees the PTY stays connected while the child runs.
         thread::spawn({
             let writer = Arc::clone(&writer);
+            let master = Arc::downgrade(&master);
             let exit_status = Arc::clone(&exit_status);
             let slave = pty_pair.slave;
             move || {
-                let _ = exit_status.set(child.wait().map_err(Arc::new));
+                let result = child.wait().map_err(Arc::new);
+                // Pin the master before publishing the result so a waiter cannot
+                // race cleanup and run a blocking ClosePseudoConsole itself.
+                let master = master.upgrade();
+                let _ = exit_status.set(result);
                 // On musl, serialize FD cleanup (close) with PTY spawn to
                 // prevent racing on musl-internal state.
                 #[cfg(target_env = "musl")]
                 let _cleanup_guard = PTY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-                // Close writer first, then drop slave to trigger EOF on the reader.
-                *writer.lock().unwrap() = None;
+                // Close writer and slave before the master. On pre-26100 Windows,
+                // dropping the master calls ClosePseudoConsole and may block until
+                // the caller concurrently drains the output pipe.
+                let writer =
+                    writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+                drop(writer);
                 drop(slave);
+                let master = master.and_then(|master| {
+                    master.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+                });
+                drop(master);
             }
         });
 

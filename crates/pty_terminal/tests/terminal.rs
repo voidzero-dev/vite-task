@@ -380,13 +380,15 @@ fn read_to_end_returns_exit_status_success() {
         println!("success");
     }));
 
-    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle, .. } =
+    let Terminal { mut pty_reader, pty_writer: _retained_pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    // Keep the writer alive: the child monitor must release the PTY master while output is drained.
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
     let status = child_handle.wait().unwrap();
     assert!(status.success());
     assert_eq!(status.exit_code(), 0);
+    assert!(String::from_utf8_lossy(&discard).contains("success"));
 }
 
 #[test]
@@ -396,8 +398,9 @@ fn read_to_end_returns_exit_status_nonzero() {
         std::process::exit(42);
     }));
 
-    let Terminal { mut pty_reader, pty_writer: _pty_writer, child_handle, .. } =
+    let Terminal { mut pty_reader, pty_writer: _retained_pty_writer, child_handle, .. } =
         Terminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    // Keep the writer alive: the child monitor must release the PTY master while output is drained.
     let mut discard = Vec::new();
     pty_reader.read_to_end(&mut discard).unwrap();
     let status = child_handle.wait().unwrap();
