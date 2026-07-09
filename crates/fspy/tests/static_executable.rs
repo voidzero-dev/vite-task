@@ -7,12 +7,14 @@ use std::{
     fs::{self, Permissions},
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
+    process::Stdio,
     sync::LazyLock,
 };
 
 use fspy::PathAccessIterable;
 use fspy_shared_unix::is_dynamically_linked_to_libc;
 use test_log::test;
+use tokio::io::AsyncReadExt as _;
 
 use crate::test_utils::assert_contains;
 
@@ -119,4 +121,35 @@ async fn stat() {
 async fn execve() {
     let accesses = track_test_bin(&["execve", "/hello"], None).await;
     assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::READ);
+}
+
+#[test(tokio::test)]
+async fn dynamic_static_dynamic_preserves_preload_payload() {
+    let tmp_dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let script_path = tmp_dir.join("fspy-dynamic-descendant.sh");
+    fs::write(
+        &script_path,
+        b"#!/bin/sh\nif [ -n \"$FSPY_PAYLOAD\" ] && [ -n \"$LD_PRELOAD\" ]; then\n  printf fspy-env-preserved\nelse\n  printf fspy-env-missing\n  exit 1\nfi\n",
+    )
+    .unwrap();
+    fs::set_permissions(&script_path, Permissions::from_mode(0o755)).unwrap();
+
+    let mut command = fspy::Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg("exec \"$1\" execve \"$2\"")
+        .arg("sh")
+        .arg(test_bin_path())
+        .arg(&script_path);
+    command.stdout(Stdio::piped());
+    let mut child = command.spawn(tokio_util::sync::CancellationToken::new()).await.unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let read_stdout = async move {
+        let mut output = Vec::new();
+        stdout.read_to_end(&mut output).await.unwrap();
+        output
+    };
+    let (output, termination) = tokio::join!(read_stdout, child.wait_handle);
+    assert!(termination.unwrap().status.success());
+    assert_eq!(output, b"fspy-env-preserved");
 }

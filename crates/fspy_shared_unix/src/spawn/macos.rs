@@ -27,6 +27,7 @@ impl PreExec {
 pub fn handle_exec(
     command: &mut Exec,
     encoded_payload: &EncodedPayload,
+    _install_listener: bool,
 ) -> nix::Result<Option<PreExec>> {
     const DYLD_INSERT_LIBRARIES: &[u8] = b"DYLD_INSERT_LIBRARIES";
 

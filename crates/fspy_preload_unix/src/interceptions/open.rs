@@ -14,7 +14,7 @@ const fn has_mode_arg(o_flags: c_int) -> bool {
         return true;
     }
     #[cfg(target_os = "linux")]
-    if o_flags & libc::O_TMPFILE != 0 {
+    if o_flags & libc::O_TMPFILE == libc::O_TMPFILE {
         return true;
     }
     false

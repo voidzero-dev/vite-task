@@ -39,6 +39,15 @@ struct TrackingOutcome {
 type TrackedEnvValues = BTreeMap<Str, Option<EnvValueHash>>;
 type TrackedEnvQueryValues = BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>;
 
+#[cfg(fspy)]
+fn reject_incomplete_tracing(
+    tracing_error: &mut Option<std::io::Error>,
+) -> Option<(CacheUpdateStatus, Option<ExecutionError>)> {
+    tracing_error
+        .take()
+        .map(|_| (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None))
+}
+
 /// Decide whether the finished run may be cached, and store it if so.
 ///
 /// Every outcome returns a `(status, error)` pair for the caller's single
@@ -54,7 +63,7 @@ pub(super) async fn update_cache(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     state: CacheState<'_>,
-    outcome: &ChildOutcome,
+    outcome: &mut ChildOutcome,
     reports: Option<&Reports>,
     duration: Duration,
     cancelled: bool,
@@ -87,6 +96,11 @@ pub(super) async fn update_cache(
     if !outcome.exit_status.success() {
         // Execution failed with non-zero exit status — don't update cache.
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
+    }
+
+    #[cfg(fspy)]
+    if let Some(rejection) = reject_incomplete_tracing(&mut outcome.tracing_error) {
+        return rejection;
     }
 
     let fspy_outcome = observe_fspy(
@@ -411,6 +425,24 @@ mod tests {
     use vite_path::{AbsolutePath, RelativePathBuf};
 
     use super::normalize_ignored_paths;
+    #[cfg(fspy)]
+    use super::reject_incomplete_tracing;
+    #[cfg(fspy)]
+    use crate::session::event::{CacheNotUpdatedReason, CacheUpdateStatus};
+
+    #[cfg(fspy)]
+    #[test]
+    fn incomplete_tracing_disables_cache_update() {
+        let mut tracing_error = Some(std::io::Error::other("bad notification"));
+        let (status, error) = reject_incomplete_tracing(&mut tracing_error).unwrap();
+
+        assert!(tracing_error.is_none());
+        assert!(matches!(
+            status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled)
+        ));
+        assert!(error.is_none());
+    }
 
     #[test]
     fn normalize_ignored_paths_cleans_relative_components() {

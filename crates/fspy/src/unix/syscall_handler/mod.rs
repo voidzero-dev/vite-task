@@ -57,14 +57,17 @@ impl SyscallHandler {
             }
             path = Cow::Owned(resolved_path);
         }
-        self.arena.add(PathAccess {
-            mode: match flags & libc::O_ACCMODE {
-                libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
-                libc::O_WRONLY => AccessMode::WRITE,
-                _ => AccessMode::READ,
-            },
-            path: path.as_os_str().into(),
-        });
+        let mut mode = match flags & libc::O_ACCMODE {
+            libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
+            libc::O_WRONLY => AccessMode::WRITE,
+            _ => AccessMode::READ,
+        };
+        if flags & (libc::O_CREAT | libc::O_TRUNC) != 0
+            || flags & libc::O_TMPFILE == libc::O_TMPFILE
+        {
+            mode.insert(AccessMode::WRITE);
+        }
+        self.arena.add(PathAccess { mode, path: path.as_os_str().into() });
         Ok(())
     }
 

@@ -1,0 +1,19 @@
+[package]
+name = "fspy_syscall_intercept"
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[lib]
+doctest = false
+
+[target.'cfg(all(target_os = "linux", not(target_env = "musl"), any(target_arch = "aarch64", target_arch = "x86_64")))'.dependencies]
+libc = { workspace = true }
+object = { workspace = true }
+
+[target.'cfg(all(target_os = "linux", not(target_env = "musl"), target_arch = "x86_64"))'.dependencies]
+iced-x86 = { workspace = true }
+
+[lints]
+workspace = true

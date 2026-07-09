@@ -38,7 +38,32 @@ pub fn handle_exec(
     command: &mut Exec,
     config: ExecResolveConfig,
     encoded_payload: &EncodedPayload,
+    on_path_access: impl FnMut(AccessMode, &Path),
+) -> nix::Result<Option<PreExec>> {
+    handle_exec_inner(command, config, encoded_payload, on_path_access, false)
+}
+
+/// Prepares the root command and, on Linux, returns the action that installs its
+/// single seccomp listener before exec.
+///
+/// # Errors
+///
+/// Returns the same errors as [`handle_exec`].
+pub fn handle_root_exec(
+    command: &mut Exec,
+    config: ExecResolveConfig,
+    encoded_payload: &EncodedPayload,
+    on_path_access: impl FnMut(AccessMode, &Path),
+) -> nix::Result<Option<PreExec>> {
+    handle_exec_inner(command, config, encoded_payload, on_path_access, true)
+}
+
+fn handle_exec_inner(
+    command: &mut Exec,
+    config: ExecResolveConfig,
+    encoded_payload: &EncodedPayload,
     mut on_path_access: impl FnMut(AccessMode, &Path),
+    install_listener: bool,
 ) -> nix::Result<Option<PreExec>> {
     let mut on_path_access = |mode: AccessMode, path: &Path| {
         if path.is_absolute() {
@@ -52,5 +77,5 @@ pub fn handle_exec(
     command.resolve(&mut on_path_access, config)?;
     on_path_access(AccessMode::READ, Path::new(OsStr::from_bytes(&command.program)));
 
-    os_specific::handle_exec(command, encoded_payload)
+    os_specific::handle_exec(command, encoded_payload, install_listener)
 }

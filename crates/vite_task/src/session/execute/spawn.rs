@@ -44,6 +44,9 @@ pub struct ChildOutcome {
     /// Raw fspy accesses. `Some` iff `fspy` was `true` at spawn time.
     #[cfg(fspy)]
     pub path_accesses: Option<PathAccessIterable>,
+    /// An error that made fspy's observations incomplete.
+    #[cfg(fspy)]
+    pub tracing_error: Option<io::Error>,
 }
 
 /// Spawn a command with the requested fspy and stdio configuration.
@@ -147,6 +150,7 @@ where
         Ok(ChildOutcome {
             exit_status: termination.status,
             path_accesses: Some(termination.path_accesses),
+            tracing_error: termination.tracing_error,
         })
     }
     .boxed_local();
@@ -191,6 +195,8 @@ fn spawn_tokio(
             exit_status,
             #[cfg(fspy)]
             path_accesses: None,
+            #[cfg(fspy)]
+            tracing_error: None,
         })
     }
     .boxed_local();

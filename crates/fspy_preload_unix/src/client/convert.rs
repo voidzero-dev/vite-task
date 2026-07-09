@@ -105,11 +105,22 @@ impl ToAccessMode for AccessMode {
 pub struct OpenFlags(pub c_int);
 impl ToAccessMode for OpenFlags {
     unsafe fn to_access_mode(self) -> AccessMode {
-        match self.0 & libc::O_ACCMODE {
+        let mode = match self.0 & libc::O_ACCMODE {
             libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
             libc::O_WRONLY => AccessMode::WRITE,
             _ => AccessMode::READ,
-        }
+        };
+        #[cfg(target_os = "linux")]
+        let mode = {
+            let mut mode = mode;
+            if self.0 & (libc::O_CREAT | libc::O_TRUNC) != 0
+                || self.0 & libc::O_TMPFILE == libc::O_TMPFILE
+            {
+                mode.insert(AccessMode::WRITE);
+            }
+            mode
+        };
+        mode
     }
 }
 
@@ -118,8 +129,9 @@ impl ToAccessMode for ModeStr {
     unsafe fn to_access_mode(self) -> AccessMode {
         // SAFETY: self.0 is a non-null pointer to a valid null-terminated C string, as guaranteed by the libc calling convention
         let mode_str = unsafe { CStr::from_ptr(self.0) }.to_bytes().as_bstr();
-        let has_read = mode_str.contains(&b'r');
-        let has_write = mode_str.contains(&b'w') || mode_str.contains(&b'a');
+        let has_update = mode_str.contains(&b'+');
+        let has_read = mode_str.contains(&b'r') || has_update;
+        let has_write = mode_str.contains(&b'w') || mode_str.contains(&b'a') || has_update;
         match (has_read, has_write) {
             (false, true) => AccessMode::WRITE,
             (true, true) => AccessMode::READ | AccessMode::WRITE,

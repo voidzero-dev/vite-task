@@ -17,5 +17,8 @@ fspy_shared_unix = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true, features = ["signal", "fs", "socket", "mman", "time"] }
 
+[target.'cfg(all(target_os = "linux", not(target_env = "musl"), any(target_arch = "aarch64", target_arch = "x86_64")))'.dependencies]
+fspy_syscall_intercept = { workspace = true }
+
 [lints]
 workspace = true

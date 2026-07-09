@@ -32,6 +32,11 @@ pub struct ChildTermination {
     pub status: ExitStatus,
     /// The path accesses captured from the child process.
     pub path_accesses: PathAccessIterable,
+    /// The error that made filesystem tracing incomplete, if any.
+    ///
+    /// The target process is allowed to continue after a seccomp notification
+    /// decoding error, so its exit status remains available to callers.
+    pub tracing_error: Option<io::Error>,
 }
 
 pub struct TrackedChild {

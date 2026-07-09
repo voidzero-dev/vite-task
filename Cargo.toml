@@ -78,13 +78,18 @@ fspy_preload_windows = { path = "crates/fspy_preload_windows", artifact = "cdyli
 fspy_seccomp_unotify = { path = "crates/fspy_seccomp_unotify" }
 fspy_shared = { path = "crates/fspy_shared" }
 fspy_shared_unix = { path = "crates/fspy_shared_unix" }
+fspy_syscall_intercept = { path = "crates/fspy_syscall_intercept" }
 futures = "0.3.31"
 futures-util = "0.3.31"
 globset = "0.4.18"
 jsonc-parser = { version = "0.32.0", features = ["serde"] }
+iced-x86 = { version = "1.21.0", default-features = false, features = [
+  "decoder",
+  "instr_info",
+  "std",
+] }
 libc = "0.2.185"
 libtest-mimic = "0.8.2"
-memmap2 = "0.9.7"
 monostate = "1.0.2"
 napi = "3"
 napi-build = "2"
@@ -99,6 +104,7 @@ ouroboros = "0.18.5"
 owo-colors = { version = "4.1.0", features = ["supports-colors"] }
 passfd = { git = "https://github.com/polachok/passfd", rev = "d55881752c16aced1a49a75f9c428d38d3767213", default-features = false }
 notify = "8.0.0"
+object = { version = "0.37.3", default-features = false, features = ["elf", "read_core", "std"] }
 path-clean = "1.0.1"
 pathdiff = "0.2.3"
 petgraph = "0.8.2"

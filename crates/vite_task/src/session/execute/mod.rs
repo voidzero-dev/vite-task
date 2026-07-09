@@ -446,7 +446,7 @@ async fn run(
         let child_work = Box::pin(run_child(child, sinks, None, fast_fail_token.clone()));
         (child_work.await, None)
     };
-    let outcome = wait_result.map_err(Report::failed)?;
+    let mut outcome = wait_result.map_err(Report::failed)?;
     let duration = start.elapsed();
 
     // Extract reports, or short-circuit when the IPC server failed. An Err
@@ -480,7 +480,7 @@ async fn run(
                 workspace_root,
                 cache_dir,
                 state,
-                &outcome,
+                &mut outcome,
                 reports.as_ref(),
                 duration,
                 cancelled,

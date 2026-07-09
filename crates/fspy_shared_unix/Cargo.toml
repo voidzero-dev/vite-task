@@ -14,12 +14,9 @@ fspy_shared = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 stackalloc = { workspace = true }
 
-[dev-dependencies]
-
 [target.'cfg(target_os = "linux")'.dependencies]
 elf = { workspace = true }
 fspy_seccomp_unotify = { workspace = true, features = ["target"] }
-memmap2 = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 phf = { workspace = true }

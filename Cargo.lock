@@ -1304,6 +1304,7 @@ dependencies = [
  "ctor",
  "fspy_shared",
  "fspy_shared_unix",
+ "fspy_syscall_intercept",
  "libc",
  "nix 0.31.2",
  "wincode",
@@ -1375,11 +1376,19 @@ dependencies = [
  "elf",
  "fspy_seccomp_unotify",
  "fspy_shared",
- "memmap2",
  "nix 0.31.2",
  "phf 0.13.1",
  "stackalloc",
  "wincode",
+]
+
+[[package]]
+name = "fspy_syscall_intercept"
+version = "0.0.0"
+dependencies = [
+ "iced-x86",
+ "libc",
+ "object",
 ]
 
 [[package]]
@@ -1611,6 +1620,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d46837a0ed51fe95bd3b05de33cd64a1ee88fc797477ca48446872504507c5"
 dependencies = [
  "typenum",
+]
+
+[[package]]
+name = "iced-x86"
+version = "1.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c447cff8c7f384a7d4f741cfcff32f75f3ad02b406432e8d6c878d56b1edf6b"
+dependencies = [
+ "lazy_static",
 ]
 
 [[package]]
@@ -1980,15 +1998,6 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
-
-[[package]]
-name = "memmap2"
-version = "0.9.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "744133e4a0e0a658e1374cf3bf8e415c4052a15a111acd372764c55b4177d490"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "memmem"

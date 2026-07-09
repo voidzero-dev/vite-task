@@ -2,14 +2,13 @@
 
 Run a command and capture all the paths it tries to access.
 
-## macOS/Linux (glibc) implementation
+## macOS implementation
 
-It uses `DYLD_INSERT_LIBRARIES` on macOS and `LD_PRELOAD` on Linux to inject a shared library that intercepts file system calls.
-The injection process is almost identical on both platforms other than the environment variable name. The implementation is in `src/unix`.
+It uses `DYLD_INSERT_LIBRARIES` to inject a shared library that intercepts file system calls.
 
-## Linux-specific implementation for fully static binaries
+## Linux implementation
 
-For fully static binaries (such as `esbuild`), `LD_PRELOAD` does not work. In this case, `seccomp_unotify` is used to intercept direct system calls. The handler is implemented in `src/unix/syscall_handler`.
+Linux installs one inherited `seccomp_unotify` filter for the complete task process tree. Dynamically linked executables also receive an `LD_PRELOAD` library that accelerates safely patchable syscall sites. Static binaries, direct syscalls, and every declined acceleration case continue through seccomp.
 
 ## Linux musl implementation
 

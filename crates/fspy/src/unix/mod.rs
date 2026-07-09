@@ -16,7 +16,7 @@ use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{Payload, encode_payload},
-    spawn::handle_exec,
+    spawn::handle_root_exec,
 };
 use futures_util::FutureExt;
 #[cfg(target_os = "linux")]
@@ -27,6 +27,11 @@ use tokio_util::sync::CancellationToken;
 #[cfg(not(target_env = "musl"))]
 use crate::ipc::{OwnedReceiverLockGuard, SHM_CAPACITY};
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
+
+// Reserved for the preload syscall gate. The payload communicates the exact post-syscall PC so
+// the injected library does not need to duplicate this address.
+#[cfg(target_os = "linux")]
+const GATE_POST_SYSCALL_PC: u64 = 0x0000_0001_0000_0008;
 
 #[derive(Debug)]
 pub struct SpyImpl {
@@ -75,7 +80,8 @@ impl SpyImpl {
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
         #[cfg(target_os = "linux")]
-        let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
+        let supervisor =
+            supervise::<SyscallHandler>(GATE_POST_SYSCALL_PC).map_err(SpawnError::Supervisor)?;
 
         #[cfg(not(target_env = "musl"))]
         let (ipc_channel_conf, ipc_receiver) =
@@ -99,7 +105,7 @@ impl SpyImpl {
 
         let mut exec = command.get_exec();
         let mut exec_resolve_accesses = PathAccessArena::default();
-        let pre_exec = handle_exec(
+        let pre_exec = handle_root_exec(
             &mut exec,
             ExecResolveConfig::search_path_enabled(None),
             &encoded_payload,
@@ -149,13 +155,18 @@ impl SpyImpl {
                 let arenas = std::iter::once(exec_resolve_accesses);
                 // Stop the supervisor and collect path accesses from it.
                 #[cfg(target_os = "linux")]
-                let arenas = arenas.chain(
-                    supervisor
-                        .stop()
-                        .await?
-                        .into_iter()
-                        .map(syscall_handler::SyscallHandler::into_arena),
-                );
+                let supervisor_outcome = supervisor.stop().await;
+                #[cfg(target_os = "linux")]
+                let tracing_error = supervisor_outcome.error;
+                #[cfg(target_os = "linux")]
+                let supervisor_arenas = supervisor_outcome
+                    .handlers
+                    .into_iter()
+                    .map(syscall_handler::SyscallHandler::into_arena);
+                #[cfg(target_os = "linux")]
+                let arenas = arenas.chain(supervisor_arenas);
+                #[cfg(not(target_os = "linux"))]
+                let tracing_error = None;
                 let arenas = arenas.collect::<Vec<_>>();
 
                 // Lock the ipc channel after the child has exited.
@@ -169,7 +180,7 @@ impl SpyImpl {
                     ipc_receiver_lock_guard,
                 };
 
-                io::Result::Ok(ChildTermination { status, path_accesses })
+                io::Result::Ok(ChildTermination { status, path_accesses, tracing_error })
             })
             .map(|f| f?) // flatten JoinError and io::Result
             .boxed(),

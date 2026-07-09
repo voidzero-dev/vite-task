@@ -3,6 +3,8 @@
 // warning about unused features on those targets.
 #![cfg_attr(all(unix, not(target_env = "musl")), feature(c_variadic))]
 
+#[cfg(all(target_os = "linux", not(target_env = "musl")))]
+mod accel;
 #[cfg(all(unix, not(target_env = "musl")))]
 mod client;
 #[cfg(all(unix, not(target_env = "musl")))]

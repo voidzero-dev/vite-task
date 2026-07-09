@@ -67,6 +67,10 @@ impl SpyImpl {
     }
 
     #[expect(clippy::unused_async, reason = "async signature required by SpyImpl trait")]
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "the platform implementations share an async call contract"
+    )]
     pub(crate) async fn spawn(
         &self,
         mut command: Command,
@@ -164,7 +168,7 @@ impl SpyImpl {
                 let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;
                 let path_accesses = PathAccessIterable { ipc_receiver_lock_guard };
 
-                io::Result::Ok(ChildTermination { status, path_accesses })
+                io::Result::Ok(ChildTermination { status, path_accesses, tracing_error: None })
             })
             .map(|f| f?) // flatten JoinError and io::Result
             .boxed(),

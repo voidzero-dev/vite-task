@@ -2,7 +2,10 @@ use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
 
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
-    ipc::{PathAccess, channel::Sender},
+    ipc::{
+        PathAccess,
+        channel::{ClaimFrameError, Sender, SenderWriteError},
+    },
     windows::{PAYLOAD_ID, Payload},
 };
 use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
@@ -18,6 +21,14 @@ impl<'a> Client<'a> {
 
         let ipc_sender = match payload.channel_conf.sender() {
             Ok(sender) => Some(sender),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::NotFound
+                ) =>
+            {
+                None
+            }
             Err(err) => {
                 // this can happen if the process is started after the root target process has exited.
                 // By that time the channel would have been closed in the receiver side.
@@ -40,7 +51,13 @@ impl<'a> Client<'a> {
         let Some(sender) = &self.ipc_sender else {
             return;
         };
-        sender.write_encoded(&access).expect("failed to send path access");
+        if sender.is_lock_native_path(access.path) {
+            return;
+        }
+        match sender.write_encoded(&access) {
+            Ok(()) | Err(SenderWriteError::Channel(ClaimFrameError::Closed(_))) => {}
+            Err(error) => panic!("failed to send path access: {error}"),
+        }
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {
