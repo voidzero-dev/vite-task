@@ -438,7 +438,7 @@ fn run_case(
             cmd.env("PATH", &e2e_env_path);
             // Use `xterm-256color` and report color support so the runner does
             // NOT wrap its output writers with [`anstream::StripStream`]. The
-            // strip layer would otherwise eat OSC8 milestone sequences that
+            // strip layer would otherwise eat OSC title sequences that
             // the test harness relies on to synchronise with the child. ANSI
             // escapes emitted by the runner still get flattened to plain text
             // by vt100's `Screen::contents()` when the snapshot is rendered,

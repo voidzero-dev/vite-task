@@ -70,15 +70,12 @@ impl Reader {
         let mut buf = [0u8; 4096];
 
         loop {
-            let found = self
-                .pty
-                .get_ref()
-                .take_window_titles()
-                .into_iter()
-                .filter_map(|title| pty_terminal_test_client::decode_milestone_title(&title))
-                .any(|milestone| milestone.name == name);
-            if found {
-                return self.screen_contents();
+            while let Some(title) = self.pty.get_ref().take_window_title() {
+                if pty_terminal_test_client::decode_milestone_title(&title)
+                    .is_some_and(|milestone| milestone == name)
+                {
+                    return self.screen_contents();
+                }
             }
 
             let n = self.pty.read(&mut buf).expect("PTY read failed");

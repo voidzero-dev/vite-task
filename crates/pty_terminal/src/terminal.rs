@@ -174,14 +174,14 @@ impl PtyReader {
         out
     }
 
-    /// Drains window titles received while parsing PTY output.
+    /// Takes the next window title received while parsing PTY output.
     ///
     /// # Panics
     ///
     /// Panics if the parser lock is poisoned.
     #[must_use]
-    pub fn take_window_titles(&self) -> VecDeque<Vec<u8>> {
-        std::mem::take(&mut self.parser.lock().unwrap().callbacks_mut().window_titles)
+    pub fn take_window_title(&self) -> Option<Vec<u8>> {
+        self.parser.lock().unwrap().callbacks_mut().window_titles.pop_front()
     }
 
     /// Returns the current cursor position as `(row, col)`, both 0-indexed.
