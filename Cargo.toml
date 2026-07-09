@@ -161,6 +161,7 @@ vite_task_plan = { path = "crates/vite_task_plan" }
 vite_task_server = { path = "crates/vite_task_server" }
 vite_workspace = { path = "crates/vite_workspace" }
 vt100 = "0.16.2"
+vte = "0.15.0"
 wax = "0.7.0"
 which = "8.0.0"
 widestring = "1.2.0"

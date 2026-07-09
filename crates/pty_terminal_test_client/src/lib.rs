@@ -6,6 +6,8 @@ const OSC_ST: &str = "\x1b\\";
 const MILESTONE_HYPERTEXT: &str = "\u{200b}";
 /// OSC 8 close sequence.
 pub const MILESTONE_FENCE: &[u8] = b"\x1b]8;;\x1b\\";
+/// Rendered fence that follows each milestone marker.
+pub const MILESTONE_RENDER_FENCE: &[u8] = MILESTONE_HYPERTEXT.as_bytes();
 
 /// Builds an OSC 8 marker with milestone name encoded in the hyperlink URI.
 ///
@@ -45,12 +47,12 @@ const fn decode_hex_nibble(byte: u8) -> Option<u8> {
 /// Returns `Some(name)` only when the URI uses the milestone prefix and the
 /// suffix is valid hex-encoded UTF-8.
 #[must_use]
-pub fn decode_milestone_from_osc8_params(params: &[Vec<u8>]) -> Option<String> {
-    if params.first().is_none_or(|p| p.as_slice() != b"8") {
+pub fn decode_milestone_from_osc8_params<T: AsRef<[u8]>>(params: &[T]) -> Option<String> {
+    if params.first().is_none_or(|p| p.as_ref() != b"8") {
         return None;
     }
 
-    let uri = params.get(2)?.as_slice();
+    let uri = params.get(2)?.as_ref();
     let encoded = uri.strip_prefix(MILESTONE_URI_PREFIX.as_bytes())?;
     if encoded.is_empty() || encoded.len() % 2 != 0 {
         return None;
@@ -80,7 +82,8 @@ pub fn decode_milestone_from_osc8_params(params: &[Vec<u8>]) -> Option<String> {
 ///
 /// Milestones include a zero-width hyperlink anchor (`U+200B`) before closing.
 /// This keeps the hyperlink metadata observable in `ConPTY` output paths that can
-/// drop zero-length hyperlinks.
+/// drop zero-length hyperlinks. The test harness also waits for this rendered
+/// character so preceding screen output cannot be overtaken by the OSC marker.
 ///
 /// When the `testing` feature is disabled, this is a no-op.
 ///

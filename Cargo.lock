@@ -2863,6 +2863,7 @@ dependencies = [
  "pty_terminal",
  "pty_terminal_test_client",
  "subprocess_test",
+ "vte",
 ]
 
 [[package]]
