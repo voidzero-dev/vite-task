@@ -12,7 +12,7 @@ use ntapi::{
     },
     ntpsapi::{
         NtCreateUserProcess, PPS_ATTRIBUTE_LIST, PPS_CREATE_INFO, PS_ATTRIBUTE,
-        PS_ATTRIBUTE_IMAGE_NAME, PS_ATTRIBUTE_LIST,
+        PS_ATTRIBUTE_IMAGE_NAME, PS_ATTRIBUTE_LIST, PsAttributeMax,
     },
 };
 use winapi::{
@@ -36,6 +36,15 @@ use crate::windows::{
     detour::{Detour, DetourAny},
 };
 
+// CreateProcess ultimately asks NtCreateUserProcess to open the executable image. Some Windows
+// versions perform that open entirely inside the syscall, so it never reaches the NtCreateFile and
+// query functions hooked below. PS_ATTRIBUTE_IMAGE_NAME is the kernel-facing path that identifies
+// the image to open; RTL_USER_PROCESS_PARAMETERS.ImagePathName is only metadata for the child PEB
+// and can intentionally name a different file.
+//
+// Record the image before forwarding the syscall, matching the attempted-access semantics of the
+// other NT hooks in this module. This is important for missing executables: the failed lookup is
+// still an input access even though NtCreateUserProcess returns an error.
 static DETOUR_NT_CREATE_USER_PROCESS: Detour<
     unsafe extern "system" fn(
         process_handle: PHANDLE,
@@ -92,21 +101,37 @@ static DETOUR_NT_CREATE_USER_PROCESS: Detour<
     };
 
 unsafe fn handle_process_image(attribute_list: PPS_ATTRIBUTE_LIST) {
+    // The borrowed path is serialized synchronously by send_process_image and cannot outlive the
+    // NtCreateUserProcess call whose attribute list owns it.
     // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
     if let Some(image_path) = unsafe { read_process_image_attribute(attribute_list) } {
         send_process_image(image_path);
     }
 }
 
+/// Find the kernel-facing executable name in an `NtCreateUserProcess` attribute list.
+///
+/// `PS_ATTRIBUTE_LIST` is a variable-length structure: `TotalLength` covers a fixed-size header
+/// followed by contiguous `PS_ATTRIBUTE` entries. Its Rust definition contains one placeholder
+/// element, so the actual entry count must be derived from `TotalLength`, not from the array type.
+///
+/// The returned slice borrows the caller's `PS_ATTRIBUTE_IMAGE_NAME` buffer and is valid only while
+/// the intercepted `NtCreateUserProcess` call is active.
+///
+/// # Safety
+///
+/// `attribute_list` and the image-name buffer it references must remain valid for the duration of
+/// the intercepted call, as required by `NtCreateUserProcess`.
 unsafe fn read_process_image_attribute<'a>(
     attribute_list: PPS_ATTRIBUTE_LIST,
 ) -> Option<&'a [u16]> {
-    const MAX_ATTRIBUTE_COUNT: usize = 64;
-
     if attribute_list.is_null() {
         return None;
     }
 
+    // Copy fixed-size fields through ReadProcessMemory instead of creating references to arbitrary
+    // syscall pointers. A malformed native call should be forwarded to Windows, which can reject
+    // it, rather than causing undefined behavior in the tracing DLL.
     let attribute_list = attribute_list.cast::<u8>();
     let total_length_address = attribute_list
         .wrapping_add(offset_of!(PS_ATTRIBUTE_LIST, TotalLength))
@@ -114,6 +139,9 @@ unsafe fn read_process_image_attribute<'a>(
         .cast::<c_void>();
     // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
     let total_length = unsafe { read_current_process_value::<usize>(total_length_address) }?;
+
+    // Attributes is a trailing array. Subtract its byte offset to remove the header, then require
+    // all remaining bytes to describe complete PS_ATTRIBUTE entries.
     let attributes_offset = offset_of!(PS_ATTRIBUTE_LIST, Attributes);
     let attributes_length = total_length.checked_sub(attributes_offset)?;
     if attributes_length % size_of::<PS_ATTRIBUTE>() != 0 {
@@ -121,7 +149,10 @@ unsafe fn read_process_image_attribute<'a>(
     }
 
     let attribute_count = attributes_length / size_of::<PS_ATTRIBUTE>();
-    if attribute_count > MAX_ATTRIBUTE_COUNT {
+    // PsAttributeMax is the one-past-last value in Windows' PS_ATTRIBUTE_NUM enumeration. A valid
+    // list cannot contain more distinct process/thread attribute kinds than this; the bound also
+    // prevents a hostile TotalLength from making the detour scan unbounded caller memory.
+    if attribute_count > usize::try_from(PsAttributeMax).unwrap() {
         return None;
     }
 
@@ -135,21 +166,26 @@ unsafe fn read_process_image_attribute<'a>(
             continue;
         }
 
-        // SAFETY: PS_ATTRIBUTE_IMAGE_NAME stores its counted string in ValuePtr
+        // Unlike a UNICODE_STRING, PS_ATTRIBUTE_IMAGE_NAME stores the path buffer directly in
+        // ValuePtr and stores its byte length in Size. It is the image path consumed by the kernel,
+        // so do not fall back to the separately spoofable process-parameter path.
+        // SAFETY: PS_ATTRIBUTE_IMAGE_NAME stores its counted string in ValuePtr.
         let image_path = unsafe { attribute.u.ValuePtr };
-        // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
-        return unsafe {
-            read_current_process_wide_string(image_path.cast_const(), attribute.Size)
-        };
+        // SAFETY: the attribute contract keeps the counted image-name buffer valid for this call.
+        return unsafe { borrow_wide_string(image_path.cast_const(), attribute.Size) };
     }
 
     None
 }
 
-unsafe fn read_current_process_wide_string<'a>(
-    address: *const c_void,
-    byte_len: usize,
-) -> Option<&'a [u16]> {
+/// Borrow a counted UTF-16 string supplied to the intercepted native call.
+///
+/// # Safety
+///
+/// `address` must point to `byte_len` readable bytes that remain valid for the returned lifetime.
+unsafe fn borrow_wide_string<'a>(address: *const c_void, byte_len: usize) -> Option<&'a [u16]> {
+    // Native image names originate as UNICODE_STRING values, whose length is an unsigned 16-bit
+    // byte count. Reject larger or odd byte counts before turning the raw buffer into u16 elements.
     if address.is_null()
         || byte_len == 0
         || byte_len > usize::from(u16::MAX)
@@ -158,9 +194,11 @@ unsafe fn read_current_process_wide_string<'a>(
         return None;
     }
 
-    // SAFETY: PS_ATTRIBUTE_IMAGE_NAME points to a counted UTF-16 buffer for this call
+    // SAFETY: the caller guarantees a readable, suitably aligned UTF-16 buffer of byte_len bytes.
     let image_path =
         unsafe { std::slice::from_raw_parts(address.cast(), byte_len / size_of::<u16>()) };
+    // NT paths cannot contain an embedded NUL. Rejecting one also prevents NativePath from
+    // representing a different path than APIs that treat NUL as a terminator.
     if image_path.contains(&0) {
         return None;
     }
@@ -168,11 +206,22 @@ unsafe fn read_current_process_wide_string<'a>(
 }
 
 fn send_process_image(image_path: &[u16]) {
+    // Sender serialization completes before this function returns, so NativePath does not retain
+    // the borrowed PS_ATTRIBUTE_IMAGE_NAME buffer.
     // SAFETY: accessing the global client which was initialized during DLL_PROCESS_ATTACH
     unsafe { global_client() }
         .send(PathAccess { mode: AccessMode::READ, path: NativePath::from_wide(image_path) });
 }
 
+/// Copy a fixed-size value from a pointer supplied to the intercepted syscall.
+///
+/// `ReadProcessMemory` is used even though the source belongs to this process: unlike a Rust raw
+/// pointer dereference, it fails cleanly when the range is unreadable. This lets the real syscall
+/// preserve responsibility for reporting malformed arguments.
+///
+/// # Safety
+///
+/// Every bit pattern read from `address` must be valid for `T`.
 unsafe fn read_current_process_value<T>(address: *const c_void) -> Option<T> {
     let mut value = MaybeUninit::<T>::uninit();
     let mut bytes_read = 0;
