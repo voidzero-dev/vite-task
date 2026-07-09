@@ -1,6 +1,6 @@
 use std::{
     ffi::c_void,
-    mem::{MaybeUninit, offset_of, size_of},
+    mem::{offset_of, size_of},
 };
 
 use fspy_shared::ipc::{AccessMode, NativePath, PathAccess};
@@ -23,11 +23,7 @@ use winapi::{
             PUNICODE_STRING, PVOID, ULONG,
         },
     },
-    um::{
-        memoryapi::ReadProcessMemory,
-        processthreadsapi::GetCurrentProcess,
-        winnt::{ACCESS_MASK, GENERIC_READ},
-    },
+    um::winnt::{ACCESS_MASK, GENERIC_READ},
 };
 
 use crate::windows::{
@@ -101,11 +97,13 @@ static DETOUR_NT_CREATE_USER_PROCESS: Detour<
     };
 
 unsafe fn handle_process_image(attribute_list: PPS_ATTRIBUTE_LIST) {
-    // The borrowed path is serialized synchronously by send_process_image and cannot outlive the
-    // NtCreateUserProcess call whose attribute list owns it.
-    // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+    // SAFETY: NtCreateUserProcess requires its attribute list to remain valid for this call.
     if let Some(image_path) = unsafe { read_process_image_attribute(attribute_list) } {
-        send_process_image(image_path);
+        // Sender serialization completes before this call returns, so NativePath does not retain
+        // the borrowed PS_ATTRIBUTE_IMAGE_NAME buffer past the NtCreateUserProcess call.
+        // SAFETY: accessing the global client which was initialized during DLL_PROCESS_ATTACH
+        unsafe { global_client() }
+            .send(PathAccess { mode: AccessMode::READ, path: NativePath::from_wide(image_path) });
     }
 }
 
@@ -129,16 +127,10 @@ unsafe fn read_process_image_attribute<'a>(
         return None;
     }
 
-    // Copy fixed-size fields through ReadProcessMemory instead of creating references to arbitrary
-    // syscall pointers. A malformed native call should be forwarded to Windows, which can reject
-    // it, rather than causing undefined behavior in the tracing DLL.
-    let attribute_list = attribute_list.cast::<u8>();
-    let total_length_address = attribute_list
-        .wrapping_add(offset_of!(PS_ATTRIBUTE_LIST, TotalLength))
-        .cast_const()
-        .cast::<c_void>();
-    // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
-    let total_length = unsafe { read_current_process_value::<usize>(total_length_address) }?;
+    // NtCreateUserProcess owns the argument contract here: a non-null attribute list and every
+    // entry covered by TotalLength must remain readable for the duration of the call.
+    // SAFETY: the native API contract guarantees a readable, aligned TotalLength field.
+    let total_length = unsafe { (*attribute_list).TotalLength };
 
     // Attributes is a trailing array. Subtract its byte offset to remove the header, then require
     // all remaining bytes to describe complete PS_ATTRIBUTE entries.
@@ -156,12 +148,13 @@ unsafe fn read_process_image_attribute<'a>(
         return None;
     }
 
+    // SAFETY: addr_of avoids creating a one-element array reference for the variable-length tail.
+    let attributes: *const PS_ATTRIBUTE =
+        unsafe { std::ptr::addr_of!((*attribute_list).Attributes).cast() };
     for index in 0..attribute_count {
-        let attribute_offset = attributes_offset + index * size_of::<PS_ATTRIBUTE>();
-        let attribute_address =
-            attribute_list.wrapping_add(attribute_offset).cast_const().cast::<c_void>();
-        // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
-        let attribute = unsafe { read_current_process_value::<PS_ATTRIBUTE>(attribute_address) }?;
+        let attribute_address = attributes.wrapping_add(index);
+        // SAFETY: TotalLength was validated to cover complete, aligned PS_ATTRIBUTE entries.
+        let attribute = unsafe { attribute_address.read() };
         if attribute.Attribute != PS_ATTRIBUTE_IMAGE_NAME {
             continue;
         }
@@ -203,43 +196,6 @@ unsafe fn borrow_wide_string<'a>(address: *const c_void, byte_len: usize) -> Opt
         return None;
     }
     Some(image_path)
-}
-
-fn send_process_image(image_path: &[u16]) {
-    // Sender serialization completes before this function returns, so NativePath does not retain
-    // the borrowed PS_ATTRIBUTE_IMAGE_NAME buffer.
-    // SAFETY: accessing the global client which was initialized during DLL_PROCESS_ATTACH
-    unsafe { global_client() }
-        .send(PathAccess { mode: AccessMode::READ, path: NativePath::from_wide(image_path) });
-}
-
-/// Copy a fixed-size value from a pointer supplied to the intercepted syscall.
-///
-/// `ReadProcessMemory` is used even though the source belongs to this process: unlike a Rust raw
-/// pointer dereference, it fails cleanly when the range is unreadable. This lets the real syscall
-/// preserve responsibility for reporting malformed arguments.
-///
-/// # Safety
-///
-/// Every bit pattern read from `address` must be valid for `T`.
-unsafe fn read_current_process_value<T>(address: *const c_void) -> Option<T> {
-    let mut value = MaybeUninit::<T>::uninit();
-    let mut bytes_read = 0;
-    // SAFETY: ReadProcessMemory reports invalid source memory without dereferencing it in Rust
-    let copied = unsafe {
-        ReadProcessMemory(
-            GetCurrentProcess(),
-            address,
-            value.as_mut_ptr().cast(),
-            size_of::<T>(),
-            &raw mut bytes_read,
-        )
-    };
-    if copied == 0 || bytes_read != size_of::<T>() {
-        return None;
-    }
-    // SAFETY: ReadProcessMemory initialized all bytes of value
-    Some(unsafe { value.assume_init() })
 }
 
 static DETOUR_NT_CREATE_FILE: Detour<
