@@ -2,9 +2,7 @@ use std::io;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
-/// Prefix distinguishing milestone titles from ordinary application titles.
-pub const MILESTONE_TITLE_MARKER: &str = "pty-terminal-test:";
-const MAX_MILESTONE_NAME_BYTES: usize = 144;
+const MILESTONE_TITLE_MARKER: &str = "pty-terminal-test:";
 
 /// A decoded window-title milestone.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,25 +17,13 @@ pub struct DecodedMilestone {
 ///
 /// # Errors
 ///
-/// Returns an error when the name is empty or too long, secure randomness is
-/// unavailable, or the generated title exceeds the Windows title limit.
+/// Returns an error when secure randomness is unavailable.
 pub fn encode_milestone_title(name: &str) -> io::Result<String> {
-    if name.is_empty() || name.len() > MAX_MILESTONE_NAME_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "milestone name must contain 1 to 144 UTF-8 bytes",
-        ));
-    }
-
     let mut random = [0u8; 16];
     getrandom::fill(&mut random).map_err(io::Error::other)?;
     let id = u128::from_be_bytes(random);
     let encoded_name = URL_SAFE_NO_PAD.encode(name.as_bytes());
-    let title = format!("{MILESTONE_TITLE_MARKER}{id:032x}:{encoded_name}");
-    if title.len() >= 255 {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "milestone title is too long"));
-    }
-    Ok(title)
+    Ok(format!("{MILESTONE_TITLE_MARKER}{id:032x}:{encoded_name}"))
 }
 
 /// Decodes a milestone title, ignoring ordinary application title updates.
@@ -48,18 +34,13 @@ pub fn decode_milestone_title(title: &[u8]) -> Option<DecodedMilestone> {
     let (&b':', encoded_name) = encoded_name.split_first()? else {
         return None;
     };
-    if !encoded_id.iter().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
-        || encoded_name.is_empty()
-    {
+    if !encoded_id.iter().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte)) {
         return None;
     }
 
     let id = u128::from_str_radix(std::str::from_utf8(encoded_id).ok()?, 16).ok()?;
     let name_bytes = URL_SAFE_NO_PAD.decode(encoded_name).ok()?;
-    if name_bytes.is_empty()
-        || name_bytes.len() > MAX_MILESTONE_NAME_BYTES
-        || URL_SAFE_NO_PAD.encode(&name_bytes).as_bytes() != encoded_name
-    {
+    if URL_SAFE_NO_PAD.encode(&name_bytes).as_bytes() != encoded_name {
         return None;
     }
     Some(DecodedMilestone { id, name: String::from_utf8(name_bytes).ok()? })
@@ -136,6 +117,14 @@ mod tests {
         let title = encode_milestone_title("task-select:lib#:0").unwrap();
         let decoded = decode_milestone_title(title.as_bytes()).unwrap();
         assert_eq!(decoded.name, "task-select:lib#:0");
+    }
+
+    #[test]
+    fn arbitrary_names_round_trip() {
+        for name in [String::new(), "milestone".repeat(1_000)] {
+            let title = encode_milestone_title(&name).unwrap();
+            assert_eq!(decode_milestone_title(title.as_bytes()).unwrap().name, name);
+        }
     }
 
     #[test]

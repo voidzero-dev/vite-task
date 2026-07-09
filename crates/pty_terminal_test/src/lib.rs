@@ -42,11 +42,7 @@ impl TestTerminal {
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
         let Terminal { pty_reader, pty_writer, child_handle, .. } =
-            Terminal::spawn_capturing_window_titles(
-                size,
-                cmd,
-                pty_terminal_test_client::MILESTONE_TITLE_MARKER.as_bytes(),
-            )?;
+            Terminal::spawn_capturing_window_titles(size, cmd)?;
         Ok(Self {
             writer: pty_writer,
             reader: Reader {

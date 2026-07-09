@@ -80,16 +80,13 @@ impl WindowTitleEvent {
 struct Vt100Callbacks {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     unhandled_osc_sequences: VecDeque<Vec<Vec<u8>>>,
-    window_title_prefix: Option<Vec<u8>>,
+    capture_window_titles: bool,
     window_title_events: VecDeque<WindowTitleEvent>,
 }
 
 impl vt100::Callbacks for Vt100Callbacks {
     fn set_window_title(&mut self, screen: &mut vt100::Screen, title: &[u8]) {
-        let Some(prefix) = self.window_title_prefix.as_deref() else {
-            return;
-        };
-        if !title.starts_with(prefix) {
+        if !self.capture_window_titles {
             return;
         }
         if self.window_title_events.len() == MAX_WINDOW_TITLE_EVENTS {
@@ -331,10 +328,10 @@ impl Terminal {
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     ///
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
-        Self::spawn_inner(size, cmd, None)
+        Self::spawn_inner(size, cmd, false)
     }
 
-    /// Spawns a child and captures matching window-title updates with screen snapshots.
+    /// Spawns a child and captures window-title updates with screen snapshots.
     ///
     /// # Errors
     ///
@@ -342,15 +339,14 @@ impl Terminal {
     pub fn spawn_capturing_window_titles(
         size: ScreenSize,
         cmd: CommandBuilder,
-        title_prefix: &[u8],
     ) -> anyhow::Result<Self> {
-        Self::spawn_inner(size, cmd, Some(title_prefix.to_vec()))
+        Self::spawn_inner(size, cmd, true)
     }
 
     fn spawn_inner(
         size: ScreenSize,
         cmd: CommandBuilder,
-        window_title_prefix: Option<Vec<u8>>,
+        capture_window_titles: bool,
     ) -> anyhow::Result<Self> {
         // On musl libc (Alpine Linux), concurrent PTY operations trigger
         // SIGSEGV/SIGBUS in musl internals (sysconf, fcntl). This affects
@@ -421,7 +417,7 @@ impl Terminal {
             Vt100Callbacks {
                 writer: Arc::clone(&writer),
                 unhandled_osc_sequences: VecDeque::new(),
-                window_title_prefix,
+                capture_window_titles,
                 window_title_events: VecDeque::new(),
             },
         )));
