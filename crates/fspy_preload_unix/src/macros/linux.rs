@@ -28,7 +28,10 @@ macro_rules! intercept {
             #[cfg(test)]
             #[test]
             fn symbol_64_does_not_exist() {
-               ::core::assert_eq!($crate::macros::symbol_exists(::core::stringify!($name)), false);
+                ::core::assert_eq!(
+                    $crate::macros::symbol_exists(::core::concat!(::core::stringify!($name), 64)),
+                    false,
+                );
             }
         }
     };
@@ -47,7 +50,7 @@ pub fn symbol_exists(name: &str) -> bool {
 }
 
 macro_rules! intercept_inner {
-    ($name: ident: $fn_sig: ty; $test_fn: item ) => {
+    ($name: ident: $fn_sig: ty; $test_fn: item) => {
         const _: $fn_sig = $name;
         const _: $fn_sig = $crate::libc::$name;
 
@@ -66,17 +69,44 @@ macro_rules! intercept_inner {
             #[expect(clippy::allow_attributes, reason = "using allow because unused_imports may or may not fire depending on macro expansion")]
             #[allow(unused_imports, reason = "glob import brings types into scope for macro-generated code")]
             use super::*;
+            #[expect(
+                clippy::allow_attributes,
+                reason = "using allow because dead_code only fires for optional original symbols"
+            )]
+            #[allow(
+                dead_code,
+                reason = "not every interposer forwards to its generated original function"
+            )]
             pub unsafe fn original() -> $fn_sig {
-                static LAZY: std::sync::LazyLock<$fn_sig> = std::sync::LazyLock::new(||
-                    // SAFETY: dlsym with RTLD_NEXT returns the next symbol in the dynamic linking order,
-                    // and transmute converts the resulting function pointer to the expected function signature.
-                    // The caller guarantees the symbol name matches the expected function signature via the macro invocation.
-                    unsafe {
-                    ::core::mem::transmute(::libc::dlsym(
-                        ::libc::RTLD_NEXT,
-                        ::core::concat!(::core::stringify!($name), "\0").as_ptr().cast(),
+                try_original().unwrap_or_else(|| {
+                    panic!(::core::concat!(
+                        "original symbol not found: ",
+                        ::core::stringify!($name)
                     ))
-                });
+                })
+            }
+            pub fn try_original() -> ::core::option::Option<$fn_sig> {
+                static LAZY: std::sync::LazyLock<::core::option::Option<$fn_sig>> =
+                    std::sync::LazyLock::new(|| {
+                        // SAFETY: dlsym with RTLD_NEXT returns the next symbol in the dynamic
+                        // linking order. A non-null pointer has the signature checked by the
+                        // macro invocation.
+                        let symbol = unsafe {
+                            ::libc::dlsym(
+                                ::libc::RTLD_NEXT,
+                                ::core::concat!(::core::stringify!($name), "\0").as_ptr().cast(),
+                            )
+                        };
+                        if symbol.is_null() {
+                            ::core::option::Option::None
+                        } else {
+                            // SAFETY: the symbol name and function signature are paired by the
+                            // macro invocation, and null was checked above.
+                            ::core::option::Option::Some(unsafe {
+                                ::core::mem::transmute::<*mut ::libc::c_void, $fn_sig>(symbol)
+                            })
+                        }
+                    });
                 *LAZY
             }
             $test_fn

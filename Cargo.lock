@@ -4311,6 +4311,7 @@ dependencies = [
  "jsonc-parser",
  "libc",
  "libtest-mimic",
+ "nix 0.31.2",
  "notify",
  "preload_test_lib",
  "pty_terminal",

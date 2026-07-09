@@ -23,7 +23,10 @@ mod print_file;
 mod read_stdin;
 mod replace_file_content;
 mod rm;
+#[cfg(target_os = "linux")]
+mod small_dev_shm;
 mod stat_file;
+mod stat_long_filename;
 mod touch_file;
 mod write_file;
 
@@ -32,7 +35,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, stat-file, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stat-file, stat_long_filename, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -64,10 +67,15 @@ fn main() {
         "read-stdin" => read_stdin::run(),
         "replace-file-content" => replace_file_content::run(&args[2..]),
         "rm" => rm::run(&args[2..]),
+        #[cfg(target_os = "linux")]
+        "small_dev_shm" => small_dev_shm::run(&args[2..]).map_err(Into::into),
+        #[cfg(not(target_os = "linux"))]
+        "small_dev_shm" => Err("vtt small_dev_shm is only supported on Linux".into()),
         "stat-file" => {
             stat_file::run(&args[2..]);
             Ok(())
         }
+        "stat_long_filename" => stat_long_filename::run(&args[2..]),
         "touch-file" => touch_file::run(&args[2..]),
         "write-file" => write_file::run(&args[2..]),
         other => {
