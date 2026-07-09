@@ -35,6 +35,10 @@ pub struct PtyWriter {
 pub struct ChildHandle {
     child_killer: Box<dyn ChildKiller + Send + Sync>,
     exit_status: Arc<OnceLock<ChildWaitResult>>,
+    /// The child's process id, captured at spawn. The child is a session (and
+    /// thus process-group) leader (portable-pty `setsid`s it), so callers can
+    /// signal its whole group to reap grandchildren it left behind.
+    pid: Option<u32>,
 }
 
 impl Clone for ChildHandle {
@@ -42,6 +46,7 @@ impl Clone for ChildHandle {
         Self {
             child_killer: self.child_killer.clone_killer(),
             exit_status: Arc::clone(&self.exit_status),
+            pid: self.pid,
         }
     }
 }
@@ -295,6 +300,16 @@ impl ChildHandle {
         self.child_killer.kill()?;
         Ok(())
     }
+
+    /// The child's process id, or `None` if it was unavailable at spawn.
+    ///
+    /// The child is a session/process-group leader, so `kill(-pid, …)` on Unix
+    /// signals the whole group — useful for reaping grandchildren that inherited
+    /// the PTY slave fd and would otherwise keep the master from reaching EOF.
+    #[must_use]
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
 }
 
 impl Terminal {
@@ -325,6 +340,7 @@ impl Terminal {
         let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
         let mut child = pty_pair.slave.spawn_command(cmd)?;
+        let pid = child.process_id();
         let child_killer = child.clone_killer();
         let master = Arc::new(Mutex::new(Some(pty_pair.master)));
         let exit_status: Arc<OnceLock<ChildWaitResult>> = Arc::new(OnceLock::new());
@@ -380,7 +396,7 @@ impl Terminal {
         Ok(Self {
             pty_reader: PtyReader { reader, parser: Arc::clone(&parser) },
             pty_writer: PtyWriter { writer, parser, master },
-            child_handle: ChildHandle { child_killer, exit_status },
+            child_handle: ChildHandle { child_killer, exit_status, pid },
         })
     }
 }
