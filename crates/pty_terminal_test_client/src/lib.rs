@@ -5,8 +5,15 @@ const OSC_ST: &str = "\x1b\\";
 /// Invisible hyperlink text anchor.
 const MILESTONE_HYPERTEXT: &str = "\u{200b}";
 /// OSC 8 close sequence.
+///
+/// This terminates hyperlink metadata only. It is a control sequence and does
+/// not guarantee that `ConPTY` has emitted preceding rendered text.
 pub const MILESTONE_FENCE: &[u8] = b"\x1b]8;;\x1b\\";
-/// Rendered fence that follows each milestone marker.
+/// Zero-width printable fence that follows each milestone marker.
+///
+/// Unlike the OSC control sequences, `ConPTY` emits this character through its
+/// rendering path. Observing it therefore confirms that earlier rendered text
+/// has reached the reader.
 pub const MILESTONE_RENDER_FENCE: &[u8] = MILESTONE_HYPERTEXT.as_bytes();
 
 /// Builds an OSC 8 marker with milestone name encoded in the hyperlink URI.
@@ -96,7 +103,8 @@ pub fn mark_milestone(name: &str) {
 
     let milestone = encoded_milestone(name);
     let mut stdout = stdout();
-    // Flush prior output, then emit milestone sequence.
+    // Flush prior output before emitting the marker. On ConPTY this flush alone
+    // is not a rendering barrier; the reader waits for MILESTONE_RENDER_FENCE.
     stdout.flush().unwrap();
     stdout.write_all(&milestone).unwrap();
 
