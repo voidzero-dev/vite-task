@@ -56,7 +56,7 @@ pty-terminal-test:<32-hex-random-id>:<name-base64url>
 1. Drain title events captured by `PtyReader`.
 2. Ignore ordinary titles and completed non-target milestones.
 3. If no match exists, continue reading from the PTY and repeat.
-4. Return the screen snapshot captured at the requested title boundary.
+4. Return the current screen once the requested title is observed.
 
 ## Cross-platform behavior
 

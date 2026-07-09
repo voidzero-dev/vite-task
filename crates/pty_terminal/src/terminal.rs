@@ -11,7 +11,6 @@ use portable_pty::{ChildKiller, ExitStatus, MasterPty};
 use crate::geo::ScreenSize;
 
 type ChildWaitResult = Result<ExitStatus, Arc<std::io::Error>>;
-const MAX_WINDOW_TITLE_EVENTS: usize = 256;
 
 /// The read half of a PTY connection. Implements [`Read`].
 ///
@@ -54,42 +53,14 @@ pub struct Terminal {
     pub child_handle: ChildHandle,
 }
 
-/// Window-title update captured with the terminal screen at its parse boundary.
-pub struct WindowTitleEvent {
-    title: Vec<u8>,
-    screen: vt100::Screen,
-}
-
-impl WindowTitleEvent {
-    #[must_use]
-    pub fn title(&self) -> &[u8] {
-        &self.title
-    }
-
-    #[must_use]
-    pub fn screen_contents(&self) -> String {
-        self.screen.contents()
-    }
-}
-
 struct Vt100Callbacks {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
-    unhandled_osc_sequences: VecDeque<Vec<Vec<u8>>>,
-    window_title_events: VecDeque<WindowTitleEvent>,
+    window_titles: VecDeque<Vec<u8>>,
 }
 
 impl vt100::Callbacks for Vt100Callbacks {
-    fn set_window_title(&mut self, screen: &mut vt100::Screen, title: &[u8]) {
-        if self.window_title_events.len() == MAX_WINDOW_TITLE_EVENTS {
-            self.window_title_events.pop_front();
-        }
-        self.window_title_events
-            .push_back(WindowTitleEvent { title: title.to_vec(), screen: screen.clone() });
-    }
-
-    fn unhandled_osc(&mut self, _screen: &mut vt100::Screen, params: &[&[u8]]) {
-        let owned: Vec<Vec<u8>> = params.iter().map(|p| p.to_vec()).collect();
-        self.unhandled_osc_sequences.push_back(owned);
+    fn set_window_title(&mut self, _screen: &mut vt100::Screen, title: &[u8]) {
+        self.window_titles.push_back(title.to_vec());
     }
 
     fn unhandled_csi(
@@ -203,27 +174,14 @@ impl PtyReader {
         out
     }
 
-    /// Drains and returns all unhandled OSC sequences received since the last call.
-    ///
-    /// Each entry is a list of byte-vector parameters from a single OSC sequence
-    /// (`ESC ] param1 ; param2 ; ... ST`).
+    /// Drains window titles received while parsing PTY output.
     ///
     /// # Panics
     ///
     /// Panics if the parser lock is poisoned.
     #[must_use]
-    pub fn take_unhandled_osc_sequences(&self) -> VecDeque<Vec<Vec<u8>>> {
-        std::mem::take(&mut self.parser.lock().unwrap().callbacks_mut().unhandled_osc_sequences)
-    }
-
-    /// Drains title events captured while parsing PTY output.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the parser lock is poisoned.
-    #[must_use]
-    pub fn take_window_title_events(&self) -> VecDeque<WindowTitleEvent> {
-        std::mem::take(&mut self.parser.lock().unwrap().callbacks_mut().window_title_events)
+    pub fn take_window_titles(&self) -> VecDeque<Vec<u8>> {
+        std::mem::take(&mut self.parser.lock().unwrap().callbacks_mut().window_titles)
     }
 
     /// Returns the current cursor position as `(row, col)`, both 0-indexed.
@@ -409,11 +367,7 @@ impl Terminal {
             size.rows,
             size.cols,
             0,
-            Vt100Callbacks {
-                writer: Arc::clone(&writer),
-                unhandled_osc_sequences: VecDeque::new(),
-                window_title_events: VecDeque::new(),
-            },
+            Vt100Callbacks { writer: Arc::clone(&writer), window_titles: VecDeque::new() },
         )));
 
         Ok(Self {

@@ -1,10 +1,7 @@
-use std::{
-    collections::VecDeque,
-    io::{BufReader, Read},
-};
+use std::io::{BufReader, Read};
 
 pub use portable_pty::CommandBuilder;
-use pty_terminal::terminal::{PtyReader, Terminal, WindowTitleEvent};
+use pty_terminal::terminal::{PtyReader, Terminal};
 pub use pty_terminal::{
     ExitStatus,
     geo::ScreenSize,
@@ -25,13 +22,7 @@ pub struct TestTerminal {
 /// The read half of a test terminal, wrapping [`PtyReader`] with milestone support.
 pub struct Reader {
     pty: BufReader<PtyReader>,
-    milestones: VecDeque<CompletedMilestone>,
     child_handle: ChildHandle,
-}
-
-struct CompletedMilestone {
-    marker: pty_terminal_test_client::DecodedMilestone,
-    event: WindowTitleEvent,
 }
 
 impl TestTerminal {
@@ -44,11 +35,7 @@ impl TestTerminal {
         let Terminal { pty_reader, pty_writer, child_handle, .. } = Terminal::spawn(size, cmd)?;
         Ok(Self {
             writer: pty_writer,
-            reader: Reader {
-                pty: BufReader::new(pty_reader),
-                milestones: VecDeque::new(),
-                child_handle: child_handle.clone(),
-            },
+            reader: Reader { pty: BufReader::new(pty_reader), child_handle: child_handle.clone() },
             child_handle,
         })
     }
@@ -72,8 +59,7 @@ impl Reader {
     ///
     /// Returns the terminal screen contents at the moment the milestone is detected.
     ///
-    /// Milestones use a uniform title token across platforms. The screen is
-    /// captured by the terminal parser at the exact title parse boundary.
+    /// Milestones use a uniform title token across platforms.
     ///
     /// # Panics
     ///
@@ -84,23 +70,19 @@ impl Reader {
         let mut buf = [0u8; 4096];
 
         loop {
-            self.collect_milestones();
-            while let Some(milestone) = self.milestones.pop_front() {
-                if milestone.marker.name == name {
-                    return milestone.event.screen_contents();
-                }
+            let found = self
+                .pty
+                .get_ref()
+                .take_window_titles()
+                .into_iter()
+                .filter_map(|title| pty_terminal_test_client::decode_milestone_title(&title))
+                .any(|milestone| milestone.name == name);
+            if found {
+                return self.screen_contents();
             }
 
             let n = self.pty.read(&mut buf).expect("PTY read failed");
             assert!(n > 0, "EOF reached before milestone '{name}'");
-        }
-    }
-
-    fn collect_milestones(&mut self) {
-        for event in self.pty.get_ref().take_window_title_events() {
-            if let Some(marker) = pty_terminal_test_client::decode_milestone_title(event.title()) {
-                self.milestones.push_back(CompletedMilestone { marker, event });
-            }
         }
     }
 
