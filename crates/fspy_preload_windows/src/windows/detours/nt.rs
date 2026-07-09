@@ -1,18 +1,31 @@
+use std::{
+    ffi::c_void,
+    mem::{MaybeUninit, offset_of, size_of},
+};
+
 use fspy_shared::ipc::{AccessMode, NativePath, PathAccess};
-use ntapi::ntioapi::{
-    FILE_INFORMATION_CLASS, NtQueryDirectoryFile, NtQueryFullAttributesFile,
-    NtQueryInformationByName, PFILE_BASIC_INFORMATION, PFILE_NETWORK_OPEN_INFORMATION,
-    PIO_APC_ROUTINE, PIO_STATUS_BLOCK,
+use ntapi::{
+    ntioapi::{
+        FILE_INFORMATION_CLASS, NtQueryDirectoryFile, NtQueryFullAttributesFile,
+        NtQueryInformationByName, PFILE_BASIC_INFORMATION, PFILE_NETWORK_OPEN_INFORMATION,
+        PIO_APC_ROUTINE, PIO_STATUS_BLOCK,
+    },
+    ntpsapi::{NtCreateUserProcess, PPS_ATTRIBUTE_LIST, PPS_CREATE_INFO},
+    ntrtl::{RTL_USER_PROC_PARAMS_NORMALIZED, RTL_USER_PROCESS_PARAMETERS},
 };
 use winapi::{
     shared::{
         minwindef::HFILE,
         ntdef::{
             BOOLEAN, HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES,
-            PUNICODE_STRING, PVOID, ULONG,
+            PUNICODE_STRING, PVOID, ULONG, UNICODE_STRING,
         },
     },
-    um::winnt::{ACCESS_MASK, GENERIC_READ},
+    um::{
+        memoryapi::ReadProcessMemory,
+        processthreadsapi::GetCurrentProcess,
+        winnt::{ACCESS_MASK, GENERIC_READ},
+    },
 };
 
 use crate::windows::{
@@ -20,6 +33,144 @@ use crate::windows::{
     convert::{ToAbsolutePath, ToAccessMode},
     detour::{Detour, DetourAny},
 };
+
+static DETOUR_NT_CREATE_USER_PROCESS: Detour<
+    unsafe extern "system" fn(
+        process_handle: PHANDLE,
+        thread_handle: PHANDLE,
+        process_desired_access: ACCESS_MASK,
+        thread_desired_access: ACCESS_MASK,
+        process_object_attributes: POBJECT_ATTRIBUTES,
+        thread_object_attributes: POBJECT_ATTRIBUTES,
+        process_flags: ULONG,
+        thread_flags: ULONG,
+        process_parameters: PVOID,
+        create_info: PPS_CREATE_INFO,
+        attribute_list: PPS_ATTRIBUTE_LIST,
+    ) -> NTSTATUS,
+> =
+    // SAFETY: initializing Detour with the real NtCreateUserProcess function pointer
+    unsafe {
+        Detour::new(c"NtCreateUserProcess", NtCreateUserProcess, {
+            unsafe extern "system" fn new_fn(
+                process_handle: PHANDLE,
+                thread_handle: PHANDLE,
+                process_desired_access: ACCESS_MASK,
+                thread_desired_access: ACCESS_MASK,
+                process_object_attributes: POBJECT_ATTRIBUTES,
+                thread_object_attributes: POBJECT_ATTRIBUTES,
+                process_flags: ULONG,
+                thread_flags: ULONG,
+                process_parameters: PVOID,
+                create_info: PPS_CREATE_INFO,
+                attribute_list: PPS_ATTRIBUTE_LIST,
+            ) -> NTSTATUS {
+                // SAFETY: observing valid process parameters before forwarding them unchanged
+                unsafe { handle_process_image(process_parameters) };
+
+                // SAFETY: calling the original NtCreateUserProcess with all original arguments
+                unsafe {
+                    (DETOUR_NT_CREATE_USER_PROCESS.real())(
+                        process_handle,
+                        thread_handle,
+                        process_desired_access,
+                        thread_desired_access,
+                        process_object_attributes,
+                        thread_object_attributes,
+                        process_flags,
+                        thread_flags,
+                        process_parameters,
+                        create_info,
+                        attribute_list,
+                    )
+                }
+            }
+            new_fn
+        })
+    };
+
+unsafe fn handle_process_image(process_parameters: PVOID) {
+    if process_parameters.is_null() {
+        return;
+    }
+
+    let parameters = process_parameters.cast::<u8>();
+    let flags_address = parameters
+        .wrapping_add(offset_of!(RTL_USER_PROCESS_PARAMETERS, Flags))
+        .cast_const()
+        .cast::<c_void>();
+    // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+    let Some(flags) = (unsafe { read_current_process_value::<ULONG>(flags_address) }) else {
+        return;
+    };
+    if flags & RTL_USER_PROC_PARAMS_NORMALIZED == 0 {
+        return;
+    }
+
+    let image_path_address = parameters
+        .wrapping_add(offset_of!(RTL_USER_PROCESS_PARAMETERS, ImagePathName))
+        .cast_const()
+        .cast::<c_void>();
+    // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+    let Some(image_path) =
+        (unsafe { read_current_process_value::<UNICODE_STRING>(image_path_address) })
+    else {
+        return;
+    };
+    if image_path.Length == 0
+        || image_path.Buffer.is_null()
+        || image_path.Length % 2 != 0
+        || image_path.Length > image_path.MaximumLength
+    {
+        return;
+    }
+
+    let image_path_len = usize::from(image_path.Length) / size_of::<u16>();
+    let mut image_path_copy = Vec::<u16>::with_capacity(image_path_len);
+    let mut bytes_read = 0;
+    // SAFETY: the destination has enough capacity and is initialized only after a complete copy
+    let copied = unsafe {
+        ReadProcessMemory(
+            GetCurrentProcess(),
+            image_path.Buffer.cast_const().cast(),
+            image_path_copy.as_mut_ptr().cast(),
+            usize::from(image_path.Length),
+            &raw mut bytes_read,
+        )
+    };
+    if copied == 0 || bytes_read != usize::from(image_path.Length) {
+        return;
+    }
+    // SAFETY: ReadProcessMemory initialized exactly image_path_len u16 values
+    unsafe { image_path_copy.set_len(image_path_len) };
+    if image_path_copy.contains(&0) {
+        return;
+    }
+
+    // SAFETY: accessing the global client which was initialized during DLL_PROCESS_ATTACH
+    unsafe { global_client() }
+        .send(PathAccess { mode: AccessMode::READ, path: NativePath::from_wide(&image_path_copy) });
+}
+
+unsafe fn read_current_process_value<T>(address: *const c_void) -> Option<T> {
+    let mut value = MaybeUninit::<T>::uninit();
+    let mut bytes_read = 0;
+    // SAFETY: ReadProcessMemory reports invalid source memory without dereferencing it in Rust
+    let copied = unsafe {
+        ReadProcessMemory(
+            GetCurrentProcess(),
+            address,
+            value.as_mut_ptr().cast(),
+            size_of::<T>(),
+            &raw mut bytes_read,
+        )
+    };
+    if copied == 0 || bytes_read != size_of::<T>() {
+        return None;
+    }
+    // SAFETY: ReadProcessMemory initialized all bytes of value
+    Some(unsafe { value.assume_init() })
+}
 
 static DETOUR_NT_CREATE_FILE: Detour<
     unsafe extern "system" fn(
@@ -380,6 +531,7 @@ static DETOUR_NT_QUERY_DIRECTORY_FILE_EX: Detour<NtQueryDirectoryFileExFn> =
     };
 
 pub const DETOURS: &[DetourAny] = &[
+    DETOUR_NT_CREATE_USER_PROCESS.as_any(),
     DETOUR_NT_CREATE_FILE.as_any(),
     DETOUR_NT_OPEN_FILE.as_any(),
     DETOUR_NT_QUERY_ATTRIBUTES_FILE.as_any(),
