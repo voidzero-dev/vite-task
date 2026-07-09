@@ -237,7 +237,7 @@ jobs:
           - shard: windows-ignored
             partition: ''
             mode: ignored
-    runs-on: windows-latest
+    runs-on: namespace-profile-windows-4c-8g
     env:
       PARTITION: ${{ matrix.partition }}
     steps:
@@ -263,24 +263,14 @@ jobs:
       # job never depends on the runner's Rust toolchain.
       - name: Run tests
         if: matrix.mode == 'default'
-        run: |
-          for iteration in {1..50}; do
-            echo "::group::Iteration $iteration/50"
-            cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION"
-            echo "::endgroup::"
-          done
+        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION"
 
       - uses: oxc-project/setup-node@4c588e9266bd930b6ddc34307df0659ed511d187 # v1.3.1
         if: matrix.mode == 'ignored'
 
       - name: Run ignored tests
         if: matrix.mode == 'ignored'
-        run: |
-          for iteration in {1..50}; do
-            echo "::group::Iteration $iteration/50"
-            cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
-            echo "::endgroup::"
-          done
+        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
 
   test-musl:
     needs: detect-changes
