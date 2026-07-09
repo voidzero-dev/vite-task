@@ -135,7 +135,7 @@ jobs:
   # (clang-cl + lld-link against the xwin-downloaded MSVC CRT/Windows SDK)
   # and packed into a portable nextest archive. The Windows runners then only
   # download the archive and run it: no Rust toolchain or compilation on the
-  # slow runners. Six nextest partitions avoid most repeated setup while keeping
+  # slow runners. Two nextest partitions avoid most repeated setup while keeping
   # enough parallelism for the Windows-heavy default test workload. The much
   # smaller Node-backed ignored suite runs once in its own job, avoiding
   # duplicate Windows Node setup.
@@ -217,22 +217,10 @@ jobs:
       matrix:
         include:
           - shard: windows-1
-            partition: count:1/6
+            partition: count:1/2
             mode: default
           - shard: windows-2
-            partition: count:2/6
-            mode: default
-          - shard: windows-3
-            partition: count:3/6
-            mode: default
-          - shard: windows-4
-            partition: count:4/6
-            mode: default
-          - shard: windows-5
-            partition: count:5/6
-            mode: default
-          - shard: windows-6
-            partition: count:6/6
+            partition: count:2/2
             mode: default
           - shard: windows-ignored
             partition: ''
