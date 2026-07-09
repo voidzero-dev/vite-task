@@ -237,7 +237,7 @@ jobs:
           - shard: windows-ignored
             partition: ''
             mode: ignored
-    runs-on: namespace-profile-windows-4c-8g
+    runs-on: windows-latest
     env:
       PARTITION: ${{ matrix.partition }}
     steps:
