@@ -5,21 +5,84 @@ use std::{
     ptr::NonNull,
 };
 
+#[cfg(test)]
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx,
+};
 use windows_sys::Win32::{
-    Foundation::{ERROR_ALREADY_EXISTS, GetLastError},
+    Foundation::{ERROR_ALREADY_EXISTS, ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, GetLastError},
     Storage::FileSystem::{
         FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE, FILE_SHARE_READ,
         FILE_SHARE_WRITE,
     },
-    System::Memory::{
-        CreateFileMappingW, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
-        OpenFileMappingW, PAGE_READWRITE, UnmapViewOfFile,
+    System::{
+        IO::DeviceIoControl,
+        Ioctl::FSCTL_SET_SPARSE,
+        Memory::{
+            CreateFileMappingW, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
+            OpenFileMappingW, PAGE_READWRITE, UnmapViewOfFile,
+        },
     },
 };
 
 pub(super) const SHARE_ALL: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 pub(super) const TEMPORARY: u32 = FILE_ATTRIBUTE_TEMPORARY;
 pub(super) const DELETE_ON_CLOSE: u32 = FILE_FLAG_DELETE_ON_CLOSE;
+
+pub(super) fn set_sparse(file: &std::fs::File) -> io::Result<()> {
+    let mut bytes_returned = 0;
+    // SAFETY: `file` supplies a valid synchronous file handle. FSCTL_SET_SPARSE
+    // requires no input or output buffers, and `bytes_returned` is writable for
+    // the duration of the call.
+    let result = unsafe {
+        DeviceIoControl(
+            file.as_raw_handle().cast(),
+            FSCTL_SET_SPARSE,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            &raw mut bytes_returned,
+            std::ptr::null_mut(),
+        )
+    };
+    if result == 0 { Err(last_error()) } else { Ok(()) }
+}
+
+pub(super) fn is_sparse_unsupported(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(code)
+            if code == ERROR_INVALID_FUNCTION.cast_signed()
+                || code == ERROR_NOT_SUPPORTED.cast_signed()
+    )
+}
+
+#[cfg(test)]
+pub(super) fn file_sizes(file: &std::fs::File) -> io::Result<(u64, u64)> {
+    let mut info = FILE_STANDARD_INFO::default();
+    let info_size = u32::try_from(std::mem::size_of::<FILE_STANDARD_INFO>())
+        .map_err(|_| io::Error::other("file size information is too large"))?;
+    // SAFETY: `file` supplies a valid handle and `info` is a writable
+    // FILE_STANDARD_INFO buffer of exactly `info_size` bytes.
+    let result = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle().cast(),
+            FileStandardInfo,
+            (&raw mut info).cast(),
+            info_size,
+        )
+    };
+    if result == 0 {
+        return Err(last_error());
+    }
+
+    let logical_size = u64::try_from(info.EndOfFile)
+        .map_err(|_| io::Error::other("file has a negative logical size"))?;
+    let allocated_size = u64::try_from(info.AllocationSize)
+        .map_err(|_| io::Error::other("file has a negative allocated size"))?;
+    Ok((logical_size, allocated_size))
+}
 
 pub(super) fn create_file_mapping(file: &std::fs::File, name: &str) -> io::Result<OwnedHandle> {
     let name = wide_name(name);
