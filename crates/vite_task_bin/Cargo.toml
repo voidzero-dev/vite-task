@@ -20,7 +20,7 @@ anyhow = { workspace = true }
 ctrlc = { workspace = true }
 libc = { workspace = true }
 notify = { workspace = true }
-pty_terminal_test_client = { workspace = true, features = ["testing"] }
+pty_terminal_test_client = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 jsonc-parser = { workspace = true }
@@ -38,6 +38,7 @@ libtest-mimic = { workspace = true }
 snapshot_test = { workspace = true }
 pty_terminal = { workspace = true }
 pty_terminal_test = { workspace = true }
+pty_terminal_test_client = { workspace = true, features = ["testing"] }
 regex = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 shell-escape = { workspace = true }

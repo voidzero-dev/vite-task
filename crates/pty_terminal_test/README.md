@@ -45,26 +45,25 @@ assert!(status.success());
 
 ## Milestone protocol
 
-Milestones are encoded as an OSC 8 hyperlink:
+Milestones are encoded as unique window titles:
 
-- open: `ESC ] 8 ; ; https://milestone.invalid/<hex(name)> ESC \`
-- hypertext: zero-width space (`U+200B`)
-- close: `ESC ] 8 ; ; ESC \`
+```text
+pty-terminal-test:<32-hex-random-id>:<name-base64url>
+```
 
 `Reader::expect_milestone` works like this:
 
-1. Drain parsed unhandled OSC sequences from `PtyReader`.
-2. Decode OSC 8 URI payload back into milestone name.
-3. If no match yet, continue reading from PTY and repeat.
-4. On match, return current `screen_contents()`.
-
-The helper strips the protocol's zero-width space from returned screen text.
+1. Drain title events captured by `PtyReader`.
+2. Ignore ordinary titles and completed non-target milestones.
+3. If no match exists, continue reading from the PTY and repeat.
+4. Return the screen snapshot captured at the requested title boundary.
 
 ## Cross-platform behavior
 
-The OSC 8 + zero-width anchor approach is used because it works across Unix and
-Windows ConPTY in this project. In particular, zero-length hyperlink opens can
-be lost on some Windows output paths, so the zero-width anchor is intentional.
+On Windows the client calls `SetConsoleTitleW`; ConPTY emits the resulting title
+through its asynchronous renderer after preceding text and cursor state. On Unix
+the client emits an OSC 2 title update, which follows normal PTY byte ordering.
+The same token decoder and test API are used on every platform.
 
 ## Typical test pattern
 

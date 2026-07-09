@@ -11,6 +11,7 @@ use portable_pty::{ChildKiller, ExitStatus, MasterPty};
 use crate::geo::ScreenSize;
 
 type ChildWaitResult = Result<ExitStatus, Arc<std::io::Error>>;
+const MAX_WINDOW_TITLE_EVENTS: usize = 256;
 
 /// The read half of a PTY connection. Implements [`Read`].
 ///
@@ -53,12 +54,51 @@ pub struct Terminal {
     pub child_handle: ChildHandle,
 }
 
+/// Window-title update captured with the terminal screen at its parse boundary.
+pub struct WindowTitleEvent {
+    title: Vec<u8>,
+    screen: vt100::Screen,
+}
+
+impl WindowTitleEvent {
+    #[must_use]
+    pub fn title(&self) -> &[u8] {
+        &self.title
+    }
+
+    #[must_use]
+    pub fn screen_contents(&self) -> String {
+        self.screen.contents()
+    }
+
+    #[must_use]
+    pub fn screen_contents_formatted(&self) -> Vec<u8> {
+        format_screen(&self.screen)
+    }
+}
+
 struct Vt100Callbacks {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     unhandled_osc_sequences: VecDeque<Vec<Vec<u8>>>,
+    window_title_prefix: Option<Vec<u8>>,
+    window_title_events: VecDeque<WindowTitleEvent>,
 }
 
 impl vt100::Callbacks for Vt100Callbacks {
+    fn set_window_title(&mut self, screen: &mut vt100::Screen, title: &[u8]) {
+        let Some(prefix) = self.window_title_prefix.as_deref() else {
+            return;
+        };
+        if !title.starts_with(prefix) {
+            return;
+        }
+        if self.window_title_events.len() == MAX_WINDOW_TITLE_EVENTS {
+            self.window_title_events.pop_front();
+        }
+        self.window_title_events
+            .push_back(WindowTitleEvent { title: title.to_vec(), screen: screen.clone() });
+    }
+
     fn unhandled_osc(&mut self, _screen: &mut vt100::Screen, params: &[&[u8]]) {
         let owned: Vec<Vec<u8>> = params.iter().map(|p| p.to_vec()).collect();
         self.unhandled_osc_sequences.push_back(owned);
@@ -145,34 +185,10 @@ impl PtyReader {
     /// # Panics
     ///
     /// Panics if the parser lock is poisoned.
-    #[expect(
-        clippy::significant_drop_tightening,
-        reason = "vt100::Screen::rows_formatted yields borrowed iterators that need the guard alive"
-    )]
     #[must_use]
     pub fn screen_contents_formatted(&self) -> Vec<u8> {
-        const RESET: &[u8] = b"\x1b[m";
         let guard = self.parser.lock().unwrap();
-        let screen = guard.screen();
-        let cols = screen.size().1;
-        let rows: Vec<Vec<u8>> = screen
-            .rows_formatted(0, cols)
-            .map(|mut row| {
-                while let Some(idx) = row.windows(RESET.len()).position(|w| w == RESET) {
-                    row.drain(idx..idx + RESET.len());
-                }
-                row
-            })
-            .collect();
-        let last_non_empty = rows.iter().rposition(|r| !r.is_empty()).map_or(0, |i| i + 1);
-        let mut out = Vec::new();
-        for (i, row) in rows[..last_non_empty].iter().enumerate() {
-            if i > 0 {
-                out.push(b'\n');
-            }
-            out.extend_from_slice(row);
-        }
-        out
+        format_screen(guard.screen())
     }
 
     /// Drains and returns all unhandled OSC sequences received since the last call.
@@ -186,6 +202,16 @@ impl PtyReader {
     #[must_use]
     pub fn take_unhandled_osc_sequences(&self) -> VecDeque<Vec<Vec<u8>>> {
         std::mem::take(&mut self.parser.lock().unwrap().callbacks_mut().unhandled_osc_sequences)
+    }
+
+    /// Drains title events captured while parsing PTY output.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parser lock is poisoned.
+    #[must_use]
+    pub fn take_window_title_events(&self) -> VecDeque<WindowTitleEvent> {
+        std::mem::take(&mut self.parser.lock().unwrap().callbacks_mut().window_title_events)
     }
 
     /// Returns the current cursor position as `(row, col)`, both 0-indexed.
@@ -305,6 +331,27 @@ impl Terminal {
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     ///
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
+        Self::spawn_inner(size, cmd, None)
+    }
+
+    /// Spawns a child and captures matching window-title updates with screen snapshots.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the PTY cannot be opened or the command fails to spawn.
+    pub fn spawn_capturing_window_titles(
+        size: ScreenSize,
+        cmd: CommandBuilder,
+        title_prefix: &[u8],
+    ) -> anyhow::Result<Self> {
+        Self::spawn_inner(size, cmd, Some(title_prefix.to_vec()))
+    }
+
+    fn spawn_inner(
+        size: ScreenSize,
+        cmd: CommandBuilder,
+        window_title_prefix: Option<Vec<u8>>,
+    ) -> anyhow::Result<Self> {
         // On musl libc (Alpine Linux), concurrent PTY operations trigger
         // SIGSEGV/SIGBUS in musl internals (sysconf, fcntl). This affects
         // both openpty+fork and FD cleanup (close) from background threads.
@@ -374,6 +421,8 @@ impl Terminal {
             Vt100Callbacks {
                 writer: Arc::clone(&writer),
                 unhandled_osc_sequences: VecDeque::new(),
+                window_title_prefix,
+                window_title_events: VecDeque::new(),
             },
         )));
 
@@ -383,4 +432,27 @@ impl Terminal {
             child_handle: ChildHandle { child_killer, exit_status },
         })
     }
+}
+
+fn format_screen(screen: &vt100::Screen) -> Vec<u8> {
+    const RESET: &[u8] = b"\x1b[m";
+    let cols = screen.size().1;
+    let rows: Vec<Vec<u8>> = screen
+        .rows_formatted(0, cols)
+        .map(|mut row| {
+            while let Some(idx) = row.windows(RESET.len()).position(|w| w == RESET) {
+                row.drain(idx..idx + RESET.len());
+            }
+            row
+        })
+        .collect();
+    let last_non_empty = rows.iter().rposition(|r| !r.is_empty()).map_or(0, |i| i + 1);
+    let mut out = Vec::new();
+    for (i, row) in rows[..last_non_empty].iter().enumerate() {
+        if i > 0 {
+            out.push(b'\n');
+        }
+        out.extend_from_slice(row);
+    }
+    out
 }

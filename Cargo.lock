@@ -2868,6 +2868,11 @@ dependencies = [
 [[package]]
 name = "pty_terminal_test_client"
 version = "0.0.0"
+dependencies = [
+ "base64",
+ "getrandom 0.4.2",
+ "winapi",
+]
 
 [[package]]
 name = "quote"

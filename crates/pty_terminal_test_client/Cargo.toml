@@ -11,9 +11,15 @@ rust-version.workspace = true
 default = []
 testing = []
 
+[dependencies]
+base64 = { workspace = true }
+getrandom = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { workspace = true, features = ["wincon"] }
+
 [lints]
 workspace = true
 
 [lib]
-test = false
 doctest = false

@@ -535,13 +535,9 @@ impl<'a> Session<'a> {
         };
 
         let select_result = vite_select::select_list(&mut stdout, &params, mode, |state| {
-            use std::io::Write;
             let milestone_name =
                 vite_str::format!("task-select:{}:{}", state.query, state.selected_index);
-            let milestone_bytes = pty_terminal_test_client::encoded_milestone(&milestone_name);
-            let mut out = std::io::stdout();
-            let _ = out.write_all(&milestone_bytes);
-            let _ = out.flush();
+            pty_terminal_test_client::mark_milestone(&milestone_name);
         })?;
 
         if matches!(select_result, vite_select::SelectResult::Cancelled) {

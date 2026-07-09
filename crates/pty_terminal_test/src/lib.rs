@@ -1,14 +1,15 @@
-use std::io::{BufReader, Read};
+use std::{
+    collections::VecDeque,
+    io::{BufReader, Read},
+};
 
 pub use portable_pty::CommandBuilder;
-use pty_terminal::terminal::{PtyReader, Terminal};
+use pty_terminal::terminal::{PtyReader, Terminal, WindowTitleEvent};
 pub use pty_terminal::{
     ExitStatus,
     geo::ScreenSize,
     terminal::{ChildHandle, PtyWriter},
 };
-
-const MILESTONE_HYPERTEXT: char = '\u{200b}';
 
 /// A test-oriented terminal that provides milestone-based synchronization.
 ///
@@ -24,7 +25,13 @@ pub struct TestTerminal {
 /// The read half of a test terminal, wrapping [`PtyReader`] with milestone support.
 pub struct Reader {
     pty: BufReader<PtyReader>,
+    milestones: VecDeque<CompletedMilestone>,
     child_handle: ChildHandle,
+}
+
+struct CompletedMilestone {
+    marker: pty_terminal_test_client::DecodedMilestone,
+    event: WindowTitleEvent,
 }
 
 impl TestTerminal {
@@ -34,22 +41,29 @@ impl TestTerminal {
     ///
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
-        let Terminal { pty_reader, pty_writer, child_handle, .. } = Terminal::spawn(size, cmd)?;
+        let Terminal { pty_reader, pty_writer, child_handle, .. } =
+            Terminal::spawn_capturing_window_titles(
+                size,
+                cmd,
+                pty_terminal_test_client::MILESTONE_TITLE_MARKER.as_bytes(),
+            )?;
         Ok(Self {
             writer: pty_writer,
-            reader: Reader { pty: BufReader::new(pty_reader), child_handle: child_handle.clone() },
+            reader: Reader {
+                pty: BufReader::new(pty_reader),
+                milestones: VecDeque::new(),
+                child_handle: child_handle.clone(),
+            },
             child_handle,
         })
     }
 }
 
 impl Reader {
-    /// Returns terminal screen contents with milestone hyperlink text removed.
+    /// Returns the current terminal screen contents.
     #[must_use]
     pub fn screen_contents(&self) -> String {
-        let mut contents = self.pty.get_ref().screen_contents();
-        contents.retain(|ch| ch != MILESTONE_HYPERTEXT);
-        contents
+        self.pty.get_ref().screen_contents()
     }
 
     /// Returns the screen contents with inline ANSI SGR escape codes preserved.
@@ -63,11 +77,8 @@ impl Reader {
     ///
     /// Returns the terminal screen contents at the moment the milestone is detected.
     ///
-    /// Milestones use a uniform protocol across platforms: the milestone name
-    /// is encoded in an OSC 8 hyperlink URI. We parse unhandled OSC sequences
-    /// from the VT parser state (instead of raw byte matching), then decode the
-    /// milestone URI payload. The zero-width milestone hyperlink anchor is
-    /// stripped from returned screen contents.
+    /// Milestones use a uniform title token across platforms. The screen is
+    /// captured by the terminal parser at the exact title parse boundary.
     ///
     /// # Panics
     ///
@@ -78,21 +89,23 @@ impl Reader {
         let mut buf = [0u8; 4096];
 
         loop {
-            let found = self
-                .pty
-                .get_ref()
-                .take_unhandled_osc_sequences()
-                .into_iter()
-                .filter_map(|params| {
-                    pty_terminal_test_client::decode_milestone_from_osc8_params(&params)
-                })
-                .any(|decoded| decoded == name);
-            if found {
-                return self.screen_contents();
+            self.collect_milestones();
+            while let Some(milestone) = self.milestones.pop_front() {
+                if milestone.marker.name == name {
+                    return milestone.event.screen_contents();
+                }
             }
 
             let n = self.pty.read(&mut buf).expect("PTY read failed");
             assert!(n > 0, "EOF reached before milestone '{name}'");
+        }
+    }
+
+    fn collect_milestones(&mut self) {
+        for event in self.pty.get_ref().take_window_title_events() {
+            if let Some(marker) = pty_terminal_test_client::decode_milestone_title(event.title()) {
+                self.milestones.push_back(CompletedMilestone { marker, event });
+            }
         }
     }
 

@@ -81,6 +81,7 @@ fspy_shared_unix = { path = "crates/fspy_shared_unix" }
 futures = "0.3.31"
 futures-util = "0.3.31"
 globset = "0.4.18"
+getrandom = "0.4.2"
 jsonc-parser = { version = "0.32.0", features = ["serde"] }
 libc = "0.2.185"
 libtest-mimic = "0.8.2"
