@@ -114,7 +114,7 @@ impl Deref for Sender {
 }
 
 #[cfg_attr(
-    not(target_os = "linux"),
+    target_os = "windows",
     expect(
         clippy::non_send_fields_in_send_ty,
         reason = "`Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to"
@@ -135,7 +135,7 @@ pub struct Receiver {
 }
 
 #[cfg_attr(
-    not(target_os = "linux"),
+    target_os = "windows",
     expect(
         clippy::non_send_fields_in_send_ty,
         reason = "Receiver doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock"

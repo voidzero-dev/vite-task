@@ -7,9 +7,6 @@ license.workspace = true
 publish = false
 rust-version.workspace = true
 
-[target.'cfg(not(any(target_os = "linux", target_os = "windows")))'.dependencies]
-shared_memory = { workspace = true, features = ["logging"] }
-
 [target.'cfg(target_os = "linux")'.dependencies]
 memmap2 = { workspace = true }
 passfd = { workspace = true, features = ["async"] }
@@ -17,6 +14,11 @@ rustix = { workspace = true, features = ["fs", "net", "process"] }
 tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+memmap2 = { workspace = true }
+rustix = { workspace = true, features = ["fs", "param", "shm"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
