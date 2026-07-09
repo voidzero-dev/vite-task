@@ -130,14 +130,12 @@ unsafe fn read_process_image_attribute<'a>(
     let attribute_count =
         (attribute_list.TotalLength - attributes_offset) / size_of::<PS_ATTRIBUTE>();
 
-    // SAFETY: TotalLength covers a contiguous variable-length tail by API contract; addr_of avoids
-    // first creating a reference to the one-element placeholder array in the Rust definition.
-    let attributes: &[PS_ATTRIBUTE] = unsafe {
-        std::slice::from_raw_parts(
-            std::ptr::addr_of!(attribute_list.Attributes).cast(),
-            attribute_count,
-        )
-    };
+    // The Rust field exposes the first placeholder entry as a reference; TotalLength describes how
+    // many contiguous entries follow it in the actual variable-length allocation.
+    let first_attribute = attribute_list.Attributes.first()?;
+    // SAFETY: TotalLength covers a contiguous variable-length tail starting at first_attribute.
+    let attributes: &[PS_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts(std::ptr::from_ref(first_attribute), attribute_count) };
     for attribute in attributes {
         if attribute.Attribute != PS_ATTRIBUTE_IMAGE_NAME {
             continue;
