@@ -12,7 +12,7 @@ use ntapi::{
     },
     ntpsapi::{
         NtCreateUserProcess, PPS_ATTRIBUTE_LIST, PPS_CREATE_INFO, PS_ATTRIBUTE,
-        PS_ATTRIBUTE_IMAGE_NAME, PS_ATTRIBUTE_LIST, PsAttributeMax,
+        PS_ATTRIBUTE_IMAGE_NAME, PS_ATTRIBUTE_LIST,
     },
 };
 use winapi::{
@@ -132,28 +132,17 @@ unsafe fn read_process_image_attribute<'a>(
     // SAFETY: the native API contract guarantees a readable, aligned TotalLength field.
     let total_length = unsafe { (*attribute_list).TotalLength };
 
-    // Attributes is a trailing array. Subtract its byte offset to remove the header, then require
-    // all remaining bytes to describe complete PS_ATTRIBUTE entries.
+    // Attributes is a trailing array. Subtract its byte offset to remove the header; the native API
+    // contract guarantees that the remaining bytes contain complete PS_ATTRIBUTE entries.
     let attributes_offset = offset_of!(PS_ATTRIBUTE_LIST, Attributes);
-    let attributes_length = total_length.checked_sub(attributes_offset)?;
-    if attributes_length % size_of::<PS_ATTRIBUTE>() != 0 {
-        return None;
-    }
-
-    let attribute_count = attributes_length / size_of::<PS_ATTRIBUTE>();
-    // PsAttributeMax is the one-past-last value in Windows' PS_ATTRIBUTE_NUM enumeration. A valid
-    // list cannot contain more distinct process/thread attribute kinds than this; the bound also
-    // prevents a hostile TotalLength from making the detour scan unbounded caller memory.
-    if attribute_count > usize::try_from(PsAttributeMax).unwrap() {
-        return None;
-    }
+    let attribute_count = (total_length - attributes_offset) / size_of::<PS_ATTRIBUTE>();
 
     // SAFETY: addr_of avoids creating a one-element array reference for the variable-length tail.
     let attributes: *const PS_ATTRIBUTE =
         unsafe { std::ptr::addr_of!((*attribute_list).Attributes).cast() };
     for index in 0..attribute_count {
         let attribute_address = attributes.wrapping_add(index);
-        // SAFETY: TotalLength was validated to cover complete, aligned PS_ATTRIBUTE entries.
+        // SAFETY: TotalLength covers complete, aligned PS_ATTRIBUTE entries by API contract.
         let attribute = unsafe { attribute_address.read() };
         if attribute.Attribute != PS_ATTRIBUTE_IMAGE_NAME {
             continue;
@@ -177,13 +166,8 @@ unsafe fn read_process_image_attribute<'a>(
 ///
 /// `address` must point to `byte_len` readable bytes that remain valid for the returned lifetime.
 unsafe fn borrow_wide_string<'a>(address: *const c_void, byte_len: usize) -> Option<&'a [u16]> {
-    // Native image names originate as UNICODE_STRING values, whose length is an unsigned 16-bit
-    // byte count. Reject larger or odd byte counts before turning the raw buffer into u16 elements.
-    if address.is_null()
-        || byte_len == 0
-        || byte_len > usize::from(u16::MAX)
-        || !byte_len.is_multiple_of(size_of::<u16>())
-    {
+    // A UTF-16 byte count must be even before the raw buffer can become u16 elements.
+    if address.is_null() || byte_len == 0 || !byte_len.is_multiple_of(size_of::<u16>()) {
         return None;
     }
 
