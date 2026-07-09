@@ -70,25 +70,16 @@ impl WindowTitleEvent {
     pub fn screen_contents(&self) -> String {
         self.screen.contents()
     }
-
-    #[must_use]
-    pub fn screen_contents_formatted(&self) -> Vec<u8> {
-        format_screen(&self.screen)
-    }
 }
 
 struct Vt100Callbacks {
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     unhandled_osc_sequences: VecDeque<Vec<Vec<u8>>>,
-    capture_window_titles: bool,
     window_title_events: VecDeque<WindowTitleEvent>,
 }
 
 impl vt100::Callbacks for Vt100Callbacks {
     fn set_window_title(&mut self, screen: &mut vt100::Screen, title: &[u8]) {
-        if !self.capture_window_titles {
-            return;
-        }
         if self.window_title_events.len() == MAX_WINDOW_TITLE_EVENTS {
             self.window_title_events.pop_front();
         }
@@ -182,10 +173,34 @@ impl PtyReader {
     /// # Panics
     ///
     /// Panics if the parser lock is poisoned.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "vt100::Screen::rows_formatted yields borrowed iterators that need the guard alive"
+    )]
     #[must_use]
     pub fn screen_contents_formatted(&self) -> Vec<u8> {
+        const RESET: &[u8] = b"\x1b[m";
         let guard = self.parser.lock().unwrap();
-        format_screen(guard.screen())
+        let screen = guard.screen();
+        let cols = screen.size().1;
+        let rows: Vec<Vec<u8>> = screen
+            .rows_formatted(0, cols)
+            .map(|mut row| {
+                while let Some(idx) = row.windows(RESET.len()).position(|w| w == RESET) {
+                    row.drain(idx..idx + RESET.len());
+                }
+                row
+            })
+            .collect();
+        let last_non_empty = rows.iter().rposition(|r| !r.is_empty()).map_or(0, |i| i + 1);
+        let mut out = Vec::new();
+        for (i, row) in rows[..last_non_empty].iter().enumerate() {
+            if i > 0 {
+                out.push(b'\n');
+            }
+            out.extend_from_slice(row);
+        }
+        out
     }
 
     /// Drains and returns all unhandled OSC sequences received since the last call.
@@ -328,26 +343,6 @@ impl Terminal {
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     ///
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
-        Self::spawn_inner(size, cmd, false)
-    }
-
-    /// Spawns a child and captures window-title updates with screen snapshots.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the PTY cannot be opened or the command fails to spawn.
-    pub fn spawn_capturing_window_titles(
-        size: ScreenSize,
-        cmd: CommandBuilder,
-    ) -> anyhow::Result<Self> {
-        Self::spawn_inner(size, cmd, true)
-    }
-
-    fn spawn_inner(
-        size: ScreenSize,
-        cmd: CommandBuilder,
-        capture_window_titles: bool,
-    ) -> anyhow::Result<Self> {
         // On musl libc (Alpine Linux), concurrent PTY operations trigger
         // SIGSEGV/SIGBUS in musl internals (sysconf, fcntl). This affects
         // both openpty+fork and FD cleanup (close) from background threads.
@@ -417,7 +412,6 @@ impl Terminal {
             Vt100Callbacks {
                 writer: Arc::clone(&writer),
                 unhandled_osc_sequences: VecDeque::new(),
-                capture_window_titles,
                 window_title_events: VecDeque::new(),
             },
         )));
@@ -428,27 +422,4 @@ impl Terminal {
             child_handle: ChildHandle { child_killer, exit_status },
         })
     }
-}
-
-fn format_screen(screen: &vt100::Screen) -> Vec<u8> {
-    const RESET: &[u8] = b"\x1b[m";
-    let cols = screen.size().1;
-    let rows: Vec<Vec<u8>> = screen
-        .rows_formatted(0, cols)
-        .map(|mut row| {
-            while let Some(idx) = row.windows(RESET.len()).position(|w| w == RESET) {
-                row.drain(idx..idx + RESET.len());
-            }
-            row
-        })
-        .collect();
-    let last_non_empty = rows.iter().rposition(|r| !r.is_empty()).map_or(0, |i| i + 1);
-    let mut out = Vec::new();
-    for (i, row) in rows[..last_non_empty].iter().enumerate() {
-        if i > 0 {
-            out.push(b'\n');
-        }
-        out.extend_from_slice(row);
-    }
-    out
 }
