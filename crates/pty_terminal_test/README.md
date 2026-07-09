@@ -53,10 +53,10 @@ Milestones are encoded as an OSC 8 hyperlink:
 
 `Reader::expect_milestone` works like this:
 
-1. Decode OSC 8 URI payloads from the PTY stream back into milestone names.
-2. Pair each marker with its following zero-width rendered anchor.
-3. Wait until both the requested marker and its anchor have arrived.
-4. Return the current `screen_contents()`.
+1. Drain parsed unhandled OSC sequences from `PtyReader`.
+2. Decode OSC 8 URI payload back into milestone name.
+3. If no match yet, continue reading from PTY and repeat.
+4. On match, return current `screen_contents()`.
 
 The helper strips the protocol's zero-width space from returned screen text.
 
@@ -65,8 +65,6 @@ The helper strips the protocol's zero-width space from returned screen text.
 The OSC 8 + zero-width anchor approach is used because it works across Unix and
 Windows ConPTY in this project. In particular, zero-length hyperlink opens can
 be lost on some Windows output paths, so the zero-width anchor is intentional.
-Waiting for the anchor also prevents ConPTY's control-sequence path from
-delivering a milestone before earlier rendered text.
 
 ## Typical test pattern
 

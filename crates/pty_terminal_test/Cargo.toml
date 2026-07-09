@@ -12,7 +12,6 @@ anyhow = { workspace = true }
 portable-pty = { workspace = true }
 pty_terminal = { workspace = true }
 pty_terminal_test_client = { workspace = true }
-vte = { workspace = true }
 
 [dev-dependencies]
 crossterm = { workspace = true }
@@ -25,6 +24,7 @@ subprocess_test = { workspace = true, features = ["portable-pty"] }
 workspace = true
 
 [lib]
+test = false
 doctest = false
 
 [package.metadata.cargo-shear]
