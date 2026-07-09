@@ -10,7 +10,10 @@ use ntapi::{
         NtQueryInformationByName, PFILE_BASIC_INFORMATION, PFILE_NETWORK_OPEN_INFORMATION,
         PIO_APC_ROUTINE, PIO_STATUS_BLOCK,
     },
-    ntpsapi::{NtCreateUserProcess, PPS_ATTRIBUTE_LIST, PPS_CREATE_INFO},
+    ntpsapi::{
+        NtCreateUserProcess, PPS_ATTRIBUTE_LIST, PPS_CREATE_INFO, PS_ATTRIBUTE,
+        PS_ATTRIBUTE_IMAGE_NAME, PS_ATTRIBUTE_LIST,
+    },
     ntrtl::{RTL_USER_PROC_PARAMS_NORMALIZED, RTL_USER_PROCESS_PARAMETERS},
 };
 use winapi::{
@@ -65,8 +68,8 @@ static DETOUR_NT_CREATE_USER_PROCESS: Detour<
                 create_info: PPS_CREATE_INFO,
                 attribute_list: PPS_ATTRIBUTE_LIST,
             ) -> NTSTATUS {
-                // SAFETY: observing valid process parameters before forwarding them unchanged
-                unsafe { handle_process_image(process_parameters) };
+                // SAFETY: observing caller memory without changing the forwarded arguments
+                unsafe { handle_process_image(attribute_list, process_parameters) };
 
                 // SAFETY: calling the original NtCreateUserProcess with all original arguments
                 unsafe {
@@ -89,9 +92,79 @@ static DETOUR_NT_CREATE_USER_PROCESS: Detour<
         })
     };
 
-unsafe fn handle_process_image(process_parameters: PVOID) {
-    if process_parameters.is_null() {
+unsafe fn handle_process_image(attribute_list: PPS_ATTRIBUTE_LIST, process_parameters: PVOID) {
+    // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+    match unsafe { read_process_image_attribute(attribute_list) } {
+        Ok(Some(image_path)) => {
+            send_process_image(&image_path);
+            return;
+        }
+        Ok(None) => {}
+        Err(()) => return,
+    }
+
+    // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+    let Some(image_path) = (unsafe { read_process_parameters_image(process_parameters) }) else {
         return;
+    };
+    send_process_image(&image_path);
+}
+
+unsafe fn read_process_image_attribute(
+    attribute_list: PPS_ATTRIBUTE_LIST,
+) -> Result<Option<Vec<u16>>, ()> {
+    const MAX_ATTRIBUTE_COUNT: usize = 64;
+
+    if attribute_list.is_null() {
+        return Ok(None);
+    }
+
+    let attribute_list = attribute_list.cast::<u8>();
+    let total_length_address = attribute_list
+        .wrapping_add(offset_of!(PS_ATTRIBUTE_LIST, TotalLength))
+        .cast_const()
+        .cast::<c_void>();
+    // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+    let total_length =
+        unsafe { read_current_process_value::<usize>(total_length_address) }.ok_or(())?;
+    let attributes_offset = offset_of!(PS_ATTRIBUTE_LIST, Attributes);
+    let attributes_length = total_length.checked_sub(attributes_offset).ok_or(())?;
+    if attributes_length % size_of::<PS_ATTRIBUTE>() != 0 {
+        return Err(());
+    }
+
+    let attribute_count = attributes_length / size_of::<PS_ATTRIBUTE>();
+    if attribute_count > MAX_ATTRIBUTE_COUNT {
+        return Err(());
+    }
+
+    for index in 0..attribute_count {
+        let attribute_offset = attributes_offset + index * size_of::<PS_ATTRIBUTE>();
+        let attribute_address =
+            attribute_list.wrapping_add(attribute_offset).cast_const().cast::<c_void>();
+        // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+        let attribute =
+            unsafe { read_current_process_value::<PS_ATTRIBUTE>(attribute_address) }.ok_or(())?;
+        if attribute.Attribute != PS_ATTRIBUTE_IMAGE_NAME {
+            continue;
+        }
+
+        // SAFETY: PS_ATTRIBUTE_IMAGE_NAME stores its counted string in ValuePtr
+        let image_path = unsafe { attribute.u.ValuePtr };
+        // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+        return unsafe {
+            read_current_process_wide_string(image_path.cast_const(), attribute.Size)
+        }
+        .map(Some)
+        .ok_or(());
+    }
+
+    Ok(None)
+}
+
+unsafe fn read_process_parameters_image(process_parameters: PVOID) -> Option<Vec<u16>> {
+    if process_parameters.is_null() {
+        return None;
     }
 
     let parameters = process_parameters.cast::<u8>();
@@ -100,11 +173,9 @@ unsafe fn handle_process_image(process_parameters: PVOID) {
         .cast_const()
         .cast::<c_void>();
     // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
-    let Some(flags) = (unsafe { read_current_process_value::<ULONG>(flags_address) }) else {
-        return;
-    };
+    let flags = (unsafe { read_current_process_value::<ULONG>(flags_address) })?;
     if flags & RTL_USER_PROC_PARAMS_NORMALIZED == 0 {
-        return;
+        return None;
     }
 
     let image_path_address = parameters
@@ -112,44 +183,64 @@ unsafe fn handle_process_image(process_parameters: PVOID) {
         .cast_const()
         .cast::<c_void>();
     // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
-    let Some(image_path) =
-        (unsafe { read_current_process_value::<UNICODE_STRING>(image_path_address) })
-    else {
-        return;
-    };
+    let image_path = (unsafe { read_current_process_value::<UNICODE_STRING>(image_path_address) })?;
     if image_path.Length == 0
         || image_path.Buffer.is_null()
         || image_path.Length % 2 != 0
         || image_path.Length > image_path.MaximumLength
     {
-        return;
+        return None;
     }
 
-    let image_path_len = usize::from(image_path.Length) / size_of::<u16>();
-    let mut image_path_copy = Vec::<u16>::with_capacity(image_path_len);
+    // SAFETY: invalid caller-provided memory is handled by ReadProcessMemory
+    unsafe {
+        read_current_process_wide_string(
+            image_path.Buffer.cast_const().cast(),
+            usize::from(image_path.Length),
+        )
+    }
+}
+
+unsafe fn read_current_process_wide_string(
+    address: *const c_void,
+    byte_len: usize,
+) -> Option<Vec<u16>> {
+    if address.is_null()
+        || byte_len == 0
+        || byte_len > usize::from(u16::MAX)
+        || !byte_len.is_multiple_of(size_of::<u16>())
+    {
+        return None;
+    }
+
+    let image_path_len = byte_len / size_of::<u16>();
+    let mut image_path = Vec::<u16>::with_capacity(image_path_len);
     let mut bytes_read = 0;
     // SAFETY: the destination has enough capacity and is initialized only after a complete copy
     let copied = unsafe {
         ReadProcessMemory(
             GetCurrentProcess(),
-            image_path.Buffer.cast_const().cast(),
-            image_path_copy.as_mut_ptr().cast(),
-            usize::from(image_path.Length),
+            address,
+            image_path.as_mut_ptr().cast(),
+            byte_len,
             &raw mut bytes_read,
         )
     };
-    if copied == 0 || bytes_read != usize::from(image_path.Length) {
-        return;
+    if copied == 0 || bytes_read != byte_len {
+        return None;
     }
     // SAFETY: ReadProcessMemory initialized exactly image_path_len u16 values
-    unsafe { image_path_copy.set_len(image_path_len) };
-    if image_path_copy.contains(&0) {
-        return;
+    unsafe { image_path.set_len(image_path_len) };
+    if image_path.contains(&0) {
+        return None;
     }
+    Some(image_path)
+}
 
+fn send_process_image(image_path: &[u16]) {
     // SAFETY: accessing the global client which was initialized during DLL_PROCESS_ATTACH
     unsafe { global_client() }
-        .send(PathAccess { mode: AccessMode::READ, path: NativePath::from_wide(&image_path_copy) });
+        .send(PathAccess { mode: AccessMode::READ, path: NativePath::from_wide(image_path) });
 }
 
 unsafe fn read_current_process_value<T>(address: *const c_void) -> Option<T> {

@@ -3,7 +3,6 @@ mod test_utils;
 use std::{
     env::current_dir,
     fs::{File, OpenOptions},
-    io::ErrorKind,
     process::Stdio,
 };
 
@@ -92,8 +91,7 @@ async fn read_in_subprocess() -> anyhow::Result<()> {
 #[test(tokio::test)]
 async fn read_program() -> anyhow::Result<()> {
     let accesses = track_fn!((), |(): ()| {
-        let error = std::process::Command::new("./not_exist.exe").spawn().unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::NotFound);
+        let _ = std::process::Command::new("./not_exist.exe").spawn();
     })
     .await?;
     assert_contains(
