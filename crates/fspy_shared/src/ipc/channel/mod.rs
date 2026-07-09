@@ -4,7 +4,7 @@ mod shm_io;
 
 use std::{env::temp_dir, fs::File, io, mem::MaybeUninit, ops::Deref, path::PathBuf, sync::Arc};
 
-use shared_memory::{Shmem, ShmemConf};
+use fspy_shm::Shm;
 pub use shm_io::FrameMut;
 use shm_io::{ShmReader, ShmWriter};
 use tracing::debug;
@@ -63,22 +63,11 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
 
-    #[cfg_attr(
-        not(windows),
-        expect(unused_mut, reason = "mut required on Windows, unused on Unix")
-    )]
-    let mut conf = ShmemConf::new().size(capacity);
-    // On Windows, allow opening raw shared memory (without backing file) for DLL injection scenarios
-    #[cfg(target_os = "windows")]
-    {
-        conf = conf.allow_raw(true);
-    }
-
-    let shm = conf.create().map_err(io::Error::other)?;
+    let shm = fspy_shm::create(capacity)?;
 
     let conf = ChannelConf {
         lock_file_path: lock_file_path.as_os_str().into(),
-        shm_id: shm.get_os_id().into(),
+        shm_id: shm.id().into(),
         shm_size: capacity,
     };
 
@@ -98,17 +87,7 @@ impl ChannelConf {
         let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
         lock_file.try_lock_shared()?;
 
-        #[cfg_attr(
-            not(windows),
-            expect(unused_mut, reason = "mut required on Windows, unused on Unix")
-        )]
-        let mut conf = ShmemConf::new().size(self.shm_size).os_id(&self.shm_id);
-        // On Windows, allow opening raw shared memory (without backing file) for DLL injection scenarios
-        #[cfg(target_os = "windows")]
-        {
-            conf = conf.allow_raw(true);
-        }
-        let shm = conf.open().map_err(io::Error::other)?;
+        let shm = fspy_shm::open(&self.shm_id, self.shm_size)?;
         // SAFETY: `shm` is a freshly opened shared memory region with valid pointer and size.
         // Exclusive write access is ensured by the shared file lock held by this sender.
         let writer = unsafe { ShmWriter::new(shm) };
@@ -117,7 +96,7 @@ impl ChannelConf {
 }
 
 pub struct Sender {
-    writer: ShmWriter<Shmem>,
+    writer: ShmWriter<Shm>,
     lock_file_path: Box<NativeStr>,
     lock_file: File,
 }
@@ -131,7 +110,7 @@ impl Drop for Sender {
 }
 
 impl Deref for Sender {
-    type Target = ShmWriter<Shmem>;
+    type Target = ShmWriter<Shm>;
 
     fn deref(&self) -> &Self::Target {
         &self.writer
@@ -153,7 +132,7 @@ unsafe impl Sync for Sender {}
 pub struct Receiver {
     lock_file_path: PathBuf,
     lock_file: File,
-    shm: Shmem,
+    shm: Shm,
 }
 
 #[expect(
@@ -175,7 +154,7 @@ impl Drop for Receiver {
 }
 
 impl Receiver {
-    fn new(lock_file_path: PathBuf, shm: Shmem) -> io::Result<Self> {
+    fn new(lock_file_path: PathBuf, shm: Shm) -> io::Result<Self> {
         let lock_file = File::create(&lock_file_path)?;
         Ok(Self { lock_file_path, lock_file, shm })
     }

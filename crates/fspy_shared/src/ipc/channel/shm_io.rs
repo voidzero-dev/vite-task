@@ -9,7 +9,7 @@ use std::{
 };
 
 use bytemuck::must_cast;
-use shared_memory::Shmem;
+use fspy_shm::Shm;
 use wincode::{SchemaWrite, Serialize as _, config::DefaultConfig};
 
 // `ShmWriter` writes headers using atomic operations to prevent partial writes due to crashes,
@@ -28,7 +28,7 @@ pub trait AsRawSlice {
     fn as_raw_slice(&self) -> *mut [u8];
 }
 
-impl AsRawSlice for Shmem {
+impl AsRawSlice for Shm {
     fn as_raw_slice(&self) -> *mut [u8] {
         slice_from_raw_parts_mut(self.as_ptr(), self.len())
     }
@@ -665,21 +665,22 @@ mod tests {
     #[test]
     #[cfg(not(miri))]
     fn real_shm_across_processes() {
-        use shared_memory::ShmemConf;
         use subprocess_test::command_for_fn;
 
         const CHILD_COUNT: usize = 12;
         const FRAME_COUNT_EACH_CHILD: usize = 100;
 
-        let shm = ShmemConf::new().size(1024 * 1024).create().unwrap();
-        let shm_name = shm.get_os_id().to_owned();
+        const SHM_SIZE: usize = 1024 * 1024;
+
+        let shm = fspy_shm::create(SHM_SIZE).unwrap();
+        let shm_name = shm.id().to_owned();
 
         let children: Vec<Child> = (0..CHILD_COUNT)
             .map(|child_index| {
                 let cmd = command_for_fn!(
                     (shm_name.clone(), child_index),
                     |(shm_name, child_index): (String, usize)| {
-                        let shm = ShmemConf::new().os_id(shm_name).open().unwrap();
+                        let shm = fspy_shm::open(&shm_name, SHM_SIZE).unwrap();
                         // SAFETY: `shm` is a freshly opened shared memory region with a valid
                         // pointer and size. Concurrent write access is safe because `ShmWriter`
                         // uses atomic operations.

@@ -1,0 +1,24 @@
+[package]
+name = "fspy_shm"
+version = "0.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[dependencies]
+shared_memory = { workspace = true, features = ["logging"] }
+
+[dev-dependencies]
+ctor = { workspace = true }
+subprocess_test = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[package.metadata.cargo-shear]
+ignored = ["ctor"]

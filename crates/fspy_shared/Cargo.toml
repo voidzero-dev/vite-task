@@ -11,8 +11,8 @@ bitflags = { workspace = true }
 bumpalo = { workspace = true }
 bstr = { workspace = true }
 bytemuck = { workspace = true, features = ["must_cast", "derive"] }
+fspy_shm = { workspace = true }
 native_str = { workspace = true }
-shared_memory = { workspace = true, features = ["logging"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
@@ -26,7 +26,6 @@ winapi = { workspace = true, features = ["std"] }
 assert2 = { workspace = true }
 ctor = { workspace = true }
 rustc-hash = { workspace = true }
-shared_memory = { workspace = true, features = ["logging"] }
 subprocess_test = { workspace = true }
 
 [lints]

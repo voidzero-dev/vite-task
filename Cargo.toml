@@ -76,6 +76,7 @@ fspy_detours_sys = { path = "crates/fspy_detours_sys" }
 fspy_preload_unix = { path = "crates/fspy_preload_unix", artifact = "cdylib", target = "target" }
 fspy_preload_windows = { path = "crates/fspy_preload_windows", artifact = "cdylib", target = "target" }
 fspy_seccomp_unotify = { path = "crates/fspy_seccomp_unotify" }
+fspy_shm = { path = "crates/fspy_shm" }
 fspy_shared = { path = "crates/fspy_shared" }
 fspy_shared_unix = { path = "crates/fspy_shared_unix" }
 futures = "0.3.31"
