@@ -1,7 +1,4 @@
-use std::{
-    ffi::c_void,
-    mem::{offset_of, size_of},
-};
+use std::mem::{offset_of, size_of};
 
 use fspy_shared::ipc::{AccessMode, NativePath, PathAccess};
 use ntapi::{
@@ -123,27 +120,25 @@ unsafe fn handle_process_image(attribute_list: PPS_ATTRIBUTE_LIST) {
 unsafe fn read_process_image_attribute<'a>(
     attribute_list: PPS_ATTRIBUTE_LIST,
 ) -> Option<&'a [u16]> {
-    if attribute_list.is_null() {
-        return None;
-    }
-
-    // NtCreateUserProcess owns the argument contract here: a non-null attribute list and every
-    // entry covered by TotalLength must remain readable for the duration of the call.
-    // SAFETY: the native API contract guarantees a readable, aligned TotalLength field.
-    let total_length = unsafe { (*attribute_list).TotalLength };
+    // SAFETY: NtCreateUserProcess keeps a supplied attribute list valid for this call; a null
+    // optional pointer is parsed as None.
+    let attribute_list = unsafe { attribute_list.as_ref()? };
 
     // Attributes is a trailing array. Subtract its byte offset to remove the header; the native API
     // contract guarantees that the remaining bytes contain complete PS_ATTRIBUTE entries.
     let attributes_offset = offset_of!(PS_ATTRIBUTE_LIST, Attributes);
-    let attribute_count = (total_length - attributes_offset) / size_of::<PS_ATTRIBUTE>();
+    let attribute_count =
+        (attribute_list.TotalLength - attributes_offset) / size_of::<PS_ATTRIBUTE>();
 
-    // SAFETY: addr_of avoids creating a one-element array reference for the variable-length tail.
-    let attributes: *const PS_ATTRIBUTE =
-        unsafe { std::ptr::addr_of!((*attribute_list).Attributes).cast() };
-    for index in 0..attribute_count {
-        let attribute_address = attributes.wrapping_add(index);
-        // SAFETY: TotalLength covers complete, aligned PS_ATTRIBUTE entries by API contract.
-        let attribute = unsafe { attribute_address.read() };
+    // SAFETY: TotalLength covers a contiguous variable-length tail by API contract; addr_of avoids
+    // first creating a reference to the one-element placeholder array in the Rust definition.
+    let attributes: &[PS_ATTRIBUTE] = unsafe {
+        std::slice::from_raw_parts(
+            std::ptr::addr_of!(attribute_list.Attributes).cast(),
+            attribute_count,
+        )
+    };
+    for attribute in attributes {
         if attribute.Attribute != PS_ATTRIBUTE_IMAGE_NAME {
             continue;
         }
@@ -151,35 +146,20 @@ unsafe fn read_process_image_attribute<'a>(
         // Unlike a UNICODE_STRING, PS_ATTRIBUTE_IMAGE_NAME stores the path buffer directly in
         // ValuePtr and stores its byte length in Size. It is the image path consumed by the kernel,
         // so do not fall back to the separately spoofable process-parameter path.
-        // SAFETY: PS_ATTRIBUTE_IMAGE_NAME stores its counted string in ValuePtr.
-        let image_path = unsafe { attribute.u.ValuePtr };
-        // SAFETY: the attribute contract keeps the counted image-name buffer valid for this call.
-        return unsafe { borrow_wide_string(image_path.cast_const(), attribute.Size) };
+        // SAFETY: PS_ATTRIBUTE_IMAGE_NAME stores a valid UTF-16 pointer in ValuePtr for this call;
+        // a null pointer is parsed as None.
+        let image_path = unsafe { attribute.u.ValuePtr.cast::<u16>().as_ref()? };
+        // SAFETY: the attribute contract guarantees a valid UTF-16 buffer of Size bytes for this
+        // call. Size is the counted string length, so no NUL-terminator parsing is needed.
+        return Some(unsafe {
+            std::slice::from_raw_parts(
+                std::ptr::from_ref(image_path),
+                attribute.Size / size_of::<u16>(),
+            )
+        });
     }
 
     None
-}
-
-/// Borrow a counted UTF-16 string supplied to the intercepted native call.
-///
-/// # Safety
-///
-/// `address` must point to `byte_len` readable bytes that remain valid for the returned lifetime.
-unsafe fn borrow_wide_string<'a>(address: *const c_void, byte_len: usize) -> Option<&'a [u16]> {
-    // A UTF-16 byte count must be even before the raw buffer can become u16 elements.
-    if address.is_null() || byte_len == 0 || !byte_len.is_multiple_of(size_of::<u16>()) {
-        return None;
-    }
-
-    // SAFETY: the caller guarantees a readable, suitably aligned UTF-16 buffer of byte_len bytes.
-    let image_path =
-        unsafe { std::slice::from_raw_parts(address.cast(), byte_len / size_of::<u16>()) };
-    // NT paths cannot contain an embedded NUL. Rejecting one also prevents NativePath from
-    // representing a different path than APIs that treat NUL as a terminator.
-    if image_path.contains(&0) {
-        return None;
-    }
-    Some(image_path)
 }
 
 static DETOUR_NT_CREATE_FILE: Detour<
