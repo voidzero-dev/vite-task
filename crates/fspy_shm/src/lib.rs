@@ -1,23 +1,4 @@
-//! Behavior-neutral shared-memory facade for fspy channels.
-//!
-//! # Ownership semantics
-//!
-//! [`create`] returns the mapping's unique owner; [`open`] attaches an
-//! additional view of an existing mapping. All platform implementations
-//! uphold the same contract:
-//!
-//! - While the owner is alive, [`open`] succeeds for any process that knows
-//!   the mapping's id.
-//! - Already-open views remain fully usable after the owner is dropped and
-//!   keep the underlying memory alive for their own lifetime.
-//! - Once the owner is dropped, new [`open`] calls are no longer guaranteed
-//!   to succeed: they fail on POSIX platforms (the name is unlinked), while
-//!   on Windows they may still succeed as long as other handles or views keep
-//!   the underlying section object alive.
-//!
-//! The fspy channel additionally gates sender creation with the receiver's
-//! lock file, so the platform difference in the last point is not observable
-//! in-protocol.
+#![doc = include_str!("../README.md")]
 
 use std::io;
 
