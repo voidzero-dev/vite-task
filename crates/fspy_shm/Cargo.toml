@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 rust-version.workspace = true
 
-[target.'cfg(not(target_os = "linux"))'.dependencies]
+[target.'cfg(not(any(target_os = "linux", target_os = "windows")))'.dependencies]
 shared_memory = { workspace = true, features = ["logging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -18,6 +18,16 @@ tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+base64 = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Memory",
+] }
 
 [dev-dependencies]
 ctor = { workspace = true }

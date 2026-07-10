@@ -99,8 +99,13 @@ pub const fn access_mask_to_mode(desired_access: ACCESS_MASK) -> AccessMode {
     }
 }
 
+#[link(name = "kernel32")]
 unsafe extern "system" {
     fn LocalFree(hmem: HLOCAL) -> HLOCAL;
+}
+
+#[link(name = "pathcch")]
+unsafe extern "system" {
     fn PathAllocCombine(
         pszpathin: PCWSTR,
         pszmore: PCWSTR,
