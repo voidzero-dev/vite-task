@@ -45,7 +45,7 @@ pub enum Error {
     #[error("invalid message from the task")]
     InvalidRequest(#[source] wincode::ReadError),
 
-    #[error("non-absolute path from the task: {path:?}")]
+    #[error("non-absolute path from the task: {}", .path.display())]
     NonAbsolutePath { path: OsString },
 
     #[error("invalid glob pattern from the task: {:?}", .0.pattern)]

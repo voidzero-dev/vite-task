@@ -3,7 +3,7 @@
     reason = "Arc<Path> is used for non-UTF-8 path data in error types"
 )]
 use std::path::Path;
-use std::{env::JoinPathsError, ffi::OsStr, sync::Arc};
+use std::{env::JoinPathsError, ffi::OsStr, fmt, sync::Arc};
 
 use vite_path::{AbsolutePath, relative::InvalidPathDataError};
 use vite_str::Str;
@@ -47,7 +47,11 @@ impl std::fmt::Display for WhichError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PathFingerprintErrorKind {
-    #[error("Path {path:?} is outside of the workspace {workspace_path:?}")]
+    #[error(
+        "Path {} is outside of the workspace {}",
+        .path.as_path().display(),
+        .workspace_path.as_path().display()
+    )]
     PathOutsideWorkspace { path: Arc<AbsolutePath>, workspace_path: Arc<AbsolutePath> },
     #[error("Path {path:?} contains characters that make it non-portable")]
     NonPortableRelativePath {
@@ -119,7 +123,11 @@ pub enum Error {
     #[error(transparent)]
     TaskRecursionDetected(#[from] TaskRecursionError),
 
-    #[error("Invalid vite task command: {program} with args {args:?} under cwd {cwd:?}")]
+    #[error(
+        "Invalid Vite+ command: {} under cwd {}",
+        display_command(.program.as_str(), .args),
+        .cwd.as_path().display()
+    )]
     ParsePlanRequest {
         program: Str,
         args: Arc<[Str]>,
@@ -175,4 +183,24 @@ pub enum Error {
     /// as a closed loop (the first and last elements are the same).
     #[error("Cycle dependency detected: {}", _0.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(" -> "))]
     CycleDependencyDetected(Vec<TaskDisplay>),
+}
+
+struct DisplayCommand<'a> {
+    program: &'a str,
+    args: &'a [Str],
+}
+
+impl fmt::Display for DisplayCommand<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&shell_escape::escape(self.program.into()), f)?;
+        for arg in self.args {
+            f.write_str(" ")?;
+            fmt::Display::fmt(&shell_escape::escape(arg.as_str().into()), f)?;
+        }
+        Ok(())
+    }
+}
+
+const fn display_command<'a>(program: &'a str, args: &'a [Str]) -> DisplayCommand<'a> {
+    DisplayCommand { program, args }
 }

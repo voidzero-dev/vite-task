@@ -234,6 +234,8 @@ fn server_returns_error_on_non_absolute_path() {
     })
     .expect_err("driver should surface the protocol error");
 
+    assert_eq!(err.to_string(), "non-absolute path from the task: relative/path");
+
     match err {
         Error::NonAbsolutePath { path } => {
             assert_eq!(path, OsStr::new("relative/path"));

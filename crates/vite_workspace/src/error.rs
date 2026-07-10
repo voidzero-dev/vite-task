@@ -16,10 +16,14 @@ pub enum Error {
     #[error("Duplicate package name `{name}` found at `{path1}` and `{path2}`")]
     DuplicatedPackageName { name: Str, path1: RelativePathBuf, path2: RelativePathBuf },
 
-    #[error("Package not found in workspace: `{0:?}`")]
+    #[error("Package not found in workspace: `{}`", .0.as_path().display())]
     PackageJsonNotFound(AbsolutePathBuf),
 
-    #[error("Package at `{package_path:?}` is outside workspace root `{workspace_root:?}`")]
+    #[error(
+        "Package at `{}` is outside workspace root `{}`",
+        .package_path.as_path().display(),
+        .workspace_root.as_path().display()
+    )]
     PackageOutsideWorkspace { package_path: Arc<AbsolutePath>, workspace_root: Arc<AbsolutePath> },
 
     #[error(
@@ -35,14 +39,14 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] io::Error),
 
-    #[error("Failed to parse JSON file at {file_path:?}")]
+    #[error("Failed to parse JSON file at {}", .file_path.as_path().display())]
     SerdeJson {
         file_path: Arc<AbsolutePath>,
         #[source]
         serde_json_error: serde_json::Error,
     },
 
-    #[error("Failed to parse YAML file at {file_path:?}")]
+    #[error("Failed to parse YAML file at {}", .file_path.as_path().display())]
     SerdeYaml {
         file_path: Arc<AbsolutePath>,
         #[source]

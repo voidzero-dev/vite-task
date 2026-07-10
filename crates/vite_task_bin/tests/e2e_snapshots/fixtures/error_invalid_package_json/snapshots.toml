@@ -1,0 +1,18 @@
+[[e2e]]
+name = "invalid_package_json_error"
+comment = """
+Tests that package parse errors display paths without Rust debug formatting
+"""
+steps = [
+  [
+    "vtt",
+    "cp",
+    "packages/broken/package.invalid",
+    "packages/broken/package.json",
+  ],
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+]

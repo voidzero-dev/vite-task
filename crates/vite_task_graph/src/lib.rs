@@ -4,7 +4,7 @@ pub mod loader;
 pub mod query;
 mod specifier;
 
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, fmt, sync::Arc};
 
 use config::{
     ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
@@ -93,7 +93,7 @@ pub enum TaskGraphLoadError {
     #[error("Failed to load package graph")]
     PackageGraphLoadError(#[from] vite_workspace::Error),
 
-    #[error("Failed to load task config file for package at {package_path:?}")]
+    #[error("Failed to load task config file for package at {}", .package_path.as_path().display())]
     ConfigLoadError {
         package_path: Arc<AbsolutePath>,
         #[source]
@@ -138,7 +138,10 @@ pub enum TaskGraphLoadError {
 /// - When the specifier is from a CLI command, `UnknownPackageError` can be a real error type in case cwd is not in any package.
 #[derive(Debug, thiserror::Error, Serialize)]
 pub enum SpecifierLookupError<PackageUnknownError = Infallible> {
-    #[error("Package '{package_name}' is ambiguous among multiple packages: {package_paths:?}")]
+    #[error(
+        "Package '{package_name}' is ambiguous among multiple packages: {}",
+        display_package_paths(.package_paths)
+    )]
     AmbiguousPackageName { package_name: Str, package_paths: Box<[Arc<AbsolutePath>]> },
 
     #[error("Package '{package_name}' not found")]
@@ -156,6 +159,24 @@ pub enum SpecifierLookupError<PackageUnknownError = Infallible> {
         "Nowhere to look for task '{task_name}' because the package is unknown: {unspecifier_package_error}"
     )]
     PackageUnknown { unspecifier_package_error: PackageUnknownError, task_name: Str },
+}
+
+struct DisplayPackagePaths<'a>(&'a [Arc<AbsolutePath>]);
+
+impl fmt::Display for DisplayPackagePaths<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, path) in self.0.iter().enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            fmt::Display::fmt(&path.as_path().display(), f)?;
+        }
+        Ok(())
+    }
+}
+
+const fn display_package_paths(paths: &[Arc<AbsolutePath>]) -> DisplayPackagePaths<'_> {
+    DisplayPackagePaths(paths)
 }
 
 /// newtype of `DefaultIx` for indices in task graphs
