@@ -51,7 +51,6 @@ pub struct ChannelConf {
     lock_file_path: Box<NativeStr>,
     #[wincode(with = "ArcStrSchema")]
     shm_id: Arc<str>,
-    shm_size: usize,
 }
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders
@@ -65,11 +64,8 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
 
     let shm = fspy_shm::create(capacity)?;
 
-    let conf = ChannelConf {
-        lock_file_path: lock_file_path.as_os_str().into(),
-        shm_id: shm.id().into(),
-        shm_size: capacity,
-    };
+    let conf =
+        ChannelConf { lock_file_path: lock_file_path.as_os_str().into(), shm_id: shm.id().into() };
 
     let receiver = Receiver::new(lock_file_path, shm)?;
     Ok((conf, receiver))
@@ -87,7 +83,7 @@ impl ChannelConf {
         let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
         lock_file.try_lock_shared()?;
 
-        let shm = fspy_shm::open(&self.shm_id, self.shm_size)?;
+        let shm = fspy_shm::open(&self.shm_id)?;
         // SAFETY: `shm` is a freshly opened shared memory region with valid pointer and size.
         // Exclusive write access is ensured by the shared file lock held by this sender.
         let writer = unsafe { ShmWriter::new(shm) };
