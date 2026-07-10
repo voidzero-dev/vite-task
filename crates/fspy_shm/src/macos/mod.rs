@@ -5,7 +5,7 @@ use std::{io, slice};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use memmap2::{MmapOptions, MmapRaw};
 use rustix::{
-    fs::{Mode, ftruncate},
+    fs::{Mode, fstat, ftruncate},
     io::Errno,
     shm::{self, OFlags},
 };
@@ -71,9 +71,15 @@ pub fn create(size: usize) -> io::Result<Shm> {
 /// # Errors
 ///
 /// Returns an error if the mapping is unavailable.
-pub fn open(id: &str, size: usize) -> io::Result<Shm> {
+pub fn open(id: &str) -> io::Result<Shm> {
     // `rustix::shm::open` sets `FD_CLOEXEC` on the returned descriptor.
     let fd = shm::open(id, OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
+    let stat = fstat(&fd)?;
+    let size = usize::try_from(stat.st_size)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory size"))?;
+    if size == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "shared-memory size is zero"));
+    }
     let mapping = MmapOptions::new().len(size).map_raw(&fd)?;
 
     Ok(Shm { id: id.to_owned(), mapping, owner: false })
@@ -135,7 +141,7 @@ mod tests {
         const PRODUCTION_SIZE: usize = 4 * 1024 * 1024 * 1024;
 
         let owner = create(PRODUCTION_SIZE).unwrap();
-        let opened = open(owner.id(), PRODUCTION_SIZE).unwrap();
+        let opened = open(owner.id()).unwrap();
 
         // SAFETY: Both endpoint indexes are within the exact mapped length and
         // accesses are synchronized within this test.
