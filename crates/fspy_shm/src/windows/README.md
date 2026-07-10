@@ -1,34 +1,35 @@
 # Windows backend
 
-The Windows backend maps a sparse temporary file through a named section. This
-provides name-based opens and a large logical mapping without charging its full
-size to system commit or disk allocation.
+The Windows backend maps a sparse temporary file and gives the mapping a
+Windows section name. Another process can open the same bytes using only that
+name. Creating the mapping does not reserve its full size in system commit or
+disk space.
 
 ## Options considered
 
-| Option                                                       | Decision                                                                                                                            |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Paging-file-backed section                                   | Rejected because the section's full size is charged against system commit.                                                          |
-| Reserved section with incremental `VirtualAlloc(MEM_COMMIT)` | Rejected because concurrent writers would need a shared commit frontier and refill protocol.                                        |
-| Sparse temporary file with a named section                   | Selected. Untouched ranges consume neither disk allocation nor commit, and the section name provides process-independent discovery. |
+| Option                                                       | Decision                                                                                                                      |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Paging-file-backed section                                   | Rejected because the section's full size is charged against system commit.                                                    |
+| Reserved section with incremental `VirtualAlloc(MEM_COMMIT)` | Rejected because writers would need to coordinate when committing more pages.                                                 |
+| Sparse temporary file with a named section                   | Selected. Disk blocks are allocated only for written ranges, and another process can open the mapping using the section name. |
 
-`FILE_ATTRIBUTE_TEMPORARY` favors cache retention but does not prevent
-writeback under memory pressure. Sparseness avoids allocation only for
-untouched ranges. Creation fails if the temporary volume does not support
-sparse files.
+`FILE_ATTRIBUTE_TEMPORARY` tells Windows to keep file data in memory when
+possible, but Windows may still write dirty pages to disk under memory
+pressure. Creation fails if the temporary volume does not support sparse
+files.
 
 ## Why not `shared_memory`
 
-`shared_memory` creates and extends a regular backing file before callers can
-mark it sparse, so it cannot provide the required allocation behavior.
+`shared_memory` creates and extends a regular file before fspy can mark it
+sparse. It therefore cannot ensure that untouched ranges use no disk blocks.
 
-`shared_memory` also uses the backing-file path as part of its persistence
-protocol. Fspy uses the section name for discovery so an opener does not need
-the creator's temporary-directory path.
+`shared_memory` also uses the file path to identify the mapping. Fspy uses the
+section name, so another process does not need the creator's temporary-file
+path.
 
 ## Lifetime semantics
 
 Dropping the owner unmaps its view and closes the delete-on-close backing file.
 Existing views keep the section alive. The section name may remain openable
-during that period, so `ChannelConf::sender` uses the receiver's lock file as
-the authoritative lifetime gate.
+during that period. `ChannelConf::sender` checks the receiver's lock file first
+to prevent new senders after the receiver has shut down.
