@@ -12,11 +12,10 @@ size to system commit or disk allocation.
 | Reserved section with incremental `VirtualAlloc(MEM_COMMIT)` | Rejected because concurrent writers would need a shared commit frontier and refill protocol.                                        |
 | Sparse temporary file with a named section                   | Selected. Untouched ranges consume neither disk allocation nor commit, and the section name provides process-independent discovery. |
 
-[`FILE_ATTRIBUTE_TEMPORARY`](https://learn.microsoft.com/windows/win32/api/fileapi/ns-fileapi-createfile2_extended_parameters)
-favors cache retention but does not prevent writeback under memory pressure.
-[Sparseness](https://learn.microsoft.com/windows/win32/fileio/sparse-files)
-avoids allocation only for untouched ranges. Creation fails if the temporary
-volume does not support sparse files.
+`FILE_ATTRIBUTE_TEMPORARY` favors cache retention but does not prevent
+writeback under memory pressure. Sparseness avoids allocation only for
+untouched ranges. Creation fails if the temporary volume does not support
+sparse files.
 
 ## Why not `shared_memory`
 
