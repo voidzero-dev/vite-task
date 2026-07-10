@@ -1,15 +1,11 @@
-use std::{
-    ffi::{OsStr, OsString},
-    fmt,
-    path::PathBuf,
-};
+use std::{ffi::OsString, path::PathBuf};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SpawnError {
     #[error(
         "could not resolve the full path of program '{}' with PATH={} under cwd({})",
         .program.display(),
-        display_path_env(.path.as_deref()),
+        .path.as_deref().unwrap_or_else(|| std::ffi::OsStr::new("<not set>")).display(),
         .cwd.display()
     )]
     Which {
@@ -33,19 +29,4 @@ pub enum SpawnError {
 
     #[error("underlying os error: {0}")]
     OsSpawn(std::io::Error),
-}
-
-struct DisplayPathEnv<'a>(Option<&'a OsStr>);
-
-impl fmt::Display for DisplayPathEnv<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            Some(path) => fmt::Display::fmt(&path.display(), f),
-            None => f.write_str("<not set>"),
-        }
-    }
-}
-
-const fn display_path_env(path: Option<&OsStr>) -> DisplayPathEnv<'_> {
-    DisplayPathEnv(path)
 }
