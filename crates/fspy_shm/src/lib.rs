@@ -10,11 +10,7 @@ mod os_impl;
 #[path = "windows/mod.rs"]
 mod os_impl;
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub use os_impl::{Shm, create, open};
-
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-compile_error!("fspy_shm does not support this platform");
 
 #[cfg(test)]
 mod tests {
