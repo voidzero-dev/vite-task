@@ -1,38 +1,19 @@
 # macOS backend
 
-The macOS backend uses named POSIX shared-memory objects and maps them with
-`mmap`. POSIX shared memory provides native string-based discovery without a
-filesystem path or descriptor broker, and mapped reads and writes require no
-syscalls.
-
-## Runtime flow
-
-`create(size)` performs these steps:
-
-1. Generate a name containing random bytes and a tag derived from the requested
-   size.
-2. Validate the name against the restricted format used by this backend.
-3. Call `shm_open` with create, exclusive, and read-write flags. Retry if the
-   random name already exists.
-4. Install the owner guard immediately so any later initialization failure
-   unlinks the new name.
-5. Set the object's logical size and map an exact-size shared view.
-6. Close the descriptor. The mapped view keeps the memory object alive.
-
-`open(id, size)` validates the identifier, opens the POSIX object, verifies its
-size, and maps exactly `size` bytes. It does not use the current directory or a
-temporary-directory environment variable.
+The macOS backend uses named POSIX shared memory. It provides string-based
+discovery, demand-backed mapped storage, and POSIX unlink semantics without a
+filesystem path or descriptor broker.
 
 ## Requirements
 
 The backend must provide:
 
-- a string identifier that another process can open,
+- a serialized identifier that another process can open,
 - demand-backed storage for a large logical mapping,
-- ordinary memory and atomic operations for concurrent writers,
+- memory and atomic operations for concurrent writers,
 - exact logical-size validation, and
-- POSIX unlink behavior where existing views survive owner cleanup but new
-  opens fail.
+- owner cleanup that preserves already-open views while preventing later
+  opens.
 
 ## Options considered
 
@@ -40,49 +21,32 @@ The backend must provide:
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | Anonymous `mmap` with inheritance    | Rejected. Processes created later cannot recover the mapping from a string identifier.                              |
 | Temporary file mapping               | Rejected. A pathname, cleanup protocol, and possible disk writeback add no benefit over native POSIX shared memory. |
-| Mach memory entry with port transfer | Rejected. It would require a Mach-port broker to turn the entry into a serializable identifier.                     |
+| Mach memory entry with port transfer | Rejected. It would require a Mach-port broker to turn the entry into a serialized identifier.                       |
 | POSIX `shm_open`                     | Selected. It directly supplies naming, cross-process opening, demand-backed mapping, and unlink semantics.          |
+
+Linux rejects POSIX `shm_open` because Linux normally routes it through the
+container's size-limited `/dev/shm` mount. macOS does not have that mount-level
+constraint, so a broker would add complexity without solving a macOS problem.
 
 ## Why not `shared_memory`
 
-The `shared_memory` macOS backend uses the same POSIX primitives, but its open
+The `shared_memory` macOS backend uses the same POSIX primitive, but its open
 path ignores the caller's expected size and reports `fstat().st_size` as the
 mapping length. Darwin can report that size rounded to a virtual-memory page,
 so the facade can expose more bytes than the logical channel capacity and
 cannot reject nearby size mismatches.
 
-The local backend maps the requested logical size and validates both the
-reported object size and a size tag stored in the identifier. The tag
-distinguishes requested sizes that Darwin rounds to the same page, while the
-reported size distinguishes larger differences.
+The local backend maps the requested logical size. It validates the reported
+object size and a compact size tag in the identifier, which distinguishes
+logical sizes that Darwin rounds to the same page.
 
-Owning this small backend also removes `shared_memory`'s general persistence,
-ownership-transfer, logging, and compatibility surface from the dependency
-graph. Fspy needs only named creation, opening, mapping, and owner unlink.
+Owning this small backend also removes `shared_memory`'s persistence,
+ownership-transfer, logging, and compatibility surface. Fspy needs only named
+creation, opening, mapping, exact-size validation, and owner unlink.
 
-## Identifier format
+## Lifetime semantics
 
-Darwin limits portable POSIX shared-memory names to a short slash-prefixed
-form. Identifiers use `/fspy_`, 80 random bits, and a 16-bit size tag, all
-encoded as lowercase hexadecimal. The complete name remains within the Darwin
-limit while retaining enough randomness for collision resistance.
-
-Creation still handles collisions correctly by retrying `shm_open` after
-`EEXIST`. `open` accepts only the canonical prefix, length, and lowercase-hex
-format generated by this module.
-
-## Lifetime
-
-The owner stores the POSIX name in an RAII guard. Dropping the owner calls
-`shm_unlink`, which prevents new opens. Existing mappings remain valid until
-each process unmaps its own view.
-
-The owner guard is created immediately after `shm_open`. If sizing or mapping
-fails, stack unwinding unlinks the partially initialized object instead of
-leaving a stale name.
-
-## Verification
-
-The module tests cover canonical identifiers, malformed names, exact and
-non-page-aligned sizes, collision retry, cleanup after failed initialization,
-cross-view endpoint access, and the production-size mapping.
+Dropping the owner unlinks the POSIX name, preventing later opens. Existing
+views remain valid until each process unmaps its own view. Initialization
+failures after name creation also unlink the name rather than leaving a stale
+shared-memory object.
