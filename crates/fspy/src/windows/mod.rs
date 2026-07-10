@@ -66,11 +66,7 @@ impl SpyImpl {
         Ok(Self { ansi_dll_path_with_nul: ansi_dll_path_with_nul.into() })
     }
 
-    #[expect(
-        clippy::unused_async,
-        clippy::unused_async_trait_impl,
-        reason = "platform implementations share an async call site"
-    )]
+    #[expect(clippy::unused_async, reason = "async signature required by SpyImpl trait")]
     pub(crate) async fn spawn(
         &self,
         mut command: Command,
