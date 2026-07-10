@@ -85,7 +85,7 @@ pub(super) fn file_sizes(file: &std::fs::File) -> io::Result<(u64, u64)> {
 }
 
 pub(super) fn create_file_mapping(file: &std::fs::File, name: &str) -> io::Result<OwnedHandle> {
-    let name = wide_name(name);
+    let name = wide_name(name)?;
     // SAFETY: `file` supplies a valid handle, the security pointer is null, and
     // `name` is a live, NUL-terminated UTF-16 buffer for the duration of the call.
     let raw_handle = unsafe {
@@ -116,7 +116,7 @@ pub(super) fn create_file_mapping(file: &std::fs::File, name: &str) -> io::Resul
 }
 
 pub(super) fn open_file_mapping(name: &str) -> io::Result<OwnedHandle> {
-    let name = wide_name(name);
+    let name = wide_name(name)?;
     // SAFETY: `name` is a live, NUL-terminated UTF-16 buffer and inheritance is disabled.
     let raw_handle = unsafe { OpenFileMappingW(FILE_MAP_WRITE, 0, name.as_ptr()) };
     if raw_handle.is_null() {
@@ -161,8 +161,14 @@ impl Drop for MappedView {
     }
 }
 
-fn wide_name(name: &str) -> Vec<u16> {
-    name.encode_utf16().chain(once(0)).collect()
+fn wide_name(name: &str) -> io::Result<Vec<u16>> {
+    if name.contains('\0') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "shared-memory name contains a NUL",
+        ));
+    }
+    Ok(name.encode_utf16().chain(once(0)).collect())
 }
 
 fn last_error() -> io::Error {

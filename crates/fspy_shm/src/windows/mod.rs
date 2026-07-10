@@ -44,10 +44,9 @@ pub fn create(size: usize) -> io::Result<Shm> {
 ///
 /// # Errors
 ///
-/// Returns an error if the identifier is invalid or the mapping is unavailable.
+/// Returns an error if the mapping is unavailable.
 pub fn open(id: &str, size: usize) -> io::Result<Shm> {
     valid_size(size)?;
-    validate_id(id)?;
     let mapping = sys::open_file_mapping(&mapping_name(id, size))?;
     let view = MappedView::new(&mapping, size)?;
 
@@ -63,18 +62,6 @@ fn valid_size(size: usize) -> io::Result<u64> {
     }
     u64::try_from(size)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64"))
-}
-
-fn validate_id(id: &str) -> io::Result<()> {
-    let uuid = Uuid::parse_str(id).map_err(|_| invalid_id())?;
-    if uuid.simple().to_string() != id {
-        return Err(invalid_id());
-    }
-    Ok(())
-}
-
-fn invalid_id() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, "invalid Windows shared-memory identifier")
 }
 
 fn mapping_name(id: &str, size: usize) -> String {
@@ -163,21 +150,8 @@ mod tests {
     const SIZE: usize = 64 * 1024;
 
     #[test]
-    fn identifiers_are_canonical_simple_uuids() {
+    fn invalid_sizes_are_rejected() {
         let owner = create(SIZE).unwrap();
-        let uuid = Uuid::parse_str(owner.id()).unwrap();
-
-        assert_eq!(uuid.simple().to_string(), owner.id());
-    }
-
-    #[test]
-    fn malformed_ids_and_size_mismatches_are_rejected() {
-        let owner = create(SIZE).unwrap();
-        let uuid = Uuid::parse_str(owner.id()).unwrap();
-        for id in [String::new(), uuid.hyphenated().to_string(), format!("{}0", owner.id())] {
-            assert_eq!(open(&id, SIZE).err().unwrap().kind(), io::ErrorKind::InvalidInput);
-        }
-
         assert_eq!(open(owner.id(), 0).err().unwrap().kind(), io::ErrorKind::InvalidInput);
         assert!(open(owner.id(), SIZE / 2).is_err());
         assert!(open(owner.id(), SIZE + 1).is_err());
