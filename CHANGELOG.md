@@ -1,6 +1,6 @@
 # Changelog
 
-- **Improved** Windows file-access tracking now uses sparse temporary backing files where supported, avoiding an upfront 4 GiB disk allocation per task.
+- **Improved** Windows file-access tracking now uses sparse temporary backing files where supported, avoiding upfront allocation of the full backing file on disk ([#524](https://github.com/voidzero-dev/vite-task/pull/524)).
 - **Fixed** Automatic file-access tracking on Linux now works in containers and Kubernetes runners with limited `/dev/shm` space ([#353](https://github.com/voidzero-dev/vite-task/issues/353), [#523](https://github.com/voidzero-dev/vite-task/pull/523)).
 - **Fixed** Windows automatic input tracking now records executable image reads when process creation performs the lookup inside `NtCreateUserProcess` ([#518](https://github.com/voidzero-dev/vite-task/pull/518)).
 - **Fixed** Failures while waiting for a started task process to exit no longer incorrectly say the process failed to spawn ([#515](https://github.com/voidzero-dev/vite-task/pull/515)).
