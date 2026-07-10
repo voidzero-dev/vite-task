@@ -99,6 +99,9 @@ pub const fn access_mask_to_mode(desired_access: ACCESS_MASK) -> AccessMode {
     }
 }
 
+// These APIs use separate import libraries. The Windows `shared_memory`
+// dependency used to bring `pathcch` into the final DLL; fspy_shm's native
+// backend removes that dependency, so name both libraries here.
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn LocalFree(hmem: HLOCAL) -> HLOCAL;
