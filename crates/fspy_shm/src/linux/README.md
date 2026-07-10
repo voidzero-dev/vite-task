@@ -1,6 +1,6 @@
 # Linux backend
 
-The Linux backend stores data in a sealed `memfd`. A process opens the mapping by connecting to an abstract Unix-domain socket and receiving the descriptor from a broker. After that, it reads and writes the mapped memory directly.
+The Linux backend stores data in a sealed `memfd`. A process opens the mapping by connecting to an abstract Unix-domain socket and receiving the descriptor from a broker. It reads the fixed size from the descriptor, maps the full object, and then accesses the memory directly.
 
 The backend must avoid `/dev/shm` quotas, expose a large mapping without allocating every page up front, support synchronous opens from preload code, and stop new opens when the owner is dropped without invalidating existing views.
 

@@ -161,7 +161,7 @@ mod tests {
         let clients = (0..12)
             .map(|_| {
                 let id = id.clone();
-                tokio::task::spawn_blocking(move || crate::open(&id, 4096))
+                tokio::task::spawn_blocking(move || crate::open(&id))
             })
             .collect::<Vec<_>>();
 
@@ -177,8 +177,8 @@ mod tests {
         let first_id = first.id().to_owned();
         let second_id = second.id().to_owned();
 
-        let first_opened = open_blocking(first_id, 4096).await.unwrap();
-        let second_opened = open_blocking(second_id, 4096).await.unwrap();
+        let first_opened = open_blocking(first_id).await.unwrap();
+        let second_opened = open_blocking(second_id).await.unwrap();
         // SAFETY: Both mappings are live and the accesses are in bounds and synchronized.
         unsafe {
             first.as_ptr().write(17);
@@ -189,21 +189,20 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn size_mismatch_and_unavailable_ids_are_rejected() {
+    async fn unavailable_ids_are_rejected() {
         let owner = crate::create(4096).unwrap();
         let id = owner.id().to_owned();
 
-        assert!(open_blocking(id.clone(), 8192).await.is_err());
-        assert!(open_blocking("not-a-broker-id".to_owned(), 4096).await.is_err());
-        assert!(open_blocking("x".repeat(108), 4096).await.is_err());
-        assert!(open_blocking(id, 4096).await.is_ok());
+        assert!(open_blocking("not-a-broker-id".to_owned()).await.is_err());
+        assert!(open_blocking("x".repeat(108)).await.is_err());
+        assert!(open_blocking(id).await.is_ok());
     }
 
     async fn request_memfd_blocking(id: String) -> rustix::io::Result<OwnedFd> {
         tokio::task::spawn_blocking(move || request_memfd(&id)).await.unwrap()
     }
 
-    async fn open_blocking(id: String, size: usize) -> io::Result<crate::Shm> {
-        tokio::task::spawn_blocking(move || crate::open(&id, size)).await.unwrap()
+    async fn open_blocking(id: String) -> io::Result<crate::Shm> {
+        tokio::task::spawn_blocking(move || crate::open(&id)).await.unwrap()
     }
 }

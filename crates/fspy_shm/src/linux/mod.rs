@@ -55,16 +55,14 @@ pub fn create(size: usize) -> io::Result<Shm> {
 /// # Errors
 ///
 /// Returns an error if the identifier is invalid, the broker is gone, or the
-/// received memfd has an unexpected size.
-pub fn open(id: &str, size: usize) -> io::Result<Shm> {
-    let size_u64 = valid_size(size)?;
+/// received memfd has an invalid size.
+pub fn open(id: &str) -> io::Result<Shm> {
     let memfd = broker::request_memfd(id)?;
     let stat = fstat(&memfd)?;
-    if u64::try_from(stat.st_size).ok() != Some(size_u64) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "shared-memory size does not match broker descriptor",
-        ));
+    let size = usize::try_from(stat.st_size)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory size"))?;
+    if size == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "shared-memory size is zero"));
     }
     let mapping = MmapOptions::new().len(size).map_raw(&memfd)?;
     Ok(Shm { id: id.to_owned(), mapping, _service: None })
