@@ -46,16 +46,21 @@ pub(super) fn set_sparse(file: &std::fs::File) -> io::Result<()> {
             std::ptr::null_mut(),
         )
     };
-    if result == 0 { Err(last_error()) } else { Ok(()) }
-}
+    if result != 0 {
+        return Ok(());
+    }
 
-pub(super) fn is_sparse_unsupported(error: &io::Error) -> bool {
-    matches!(
+    let error = last_error();
+    if matches!(
         error.raw_os_error(),
         Some(code)
             if code == ERROR_INVALID_FUNCTION.cast_signed()
                 || code == ERROR_NOT_SUPPORTED.cast_signed()
-    )
+    ) {
+        Ok(())
+    } else {
+        Err(error)
+    }
 }
 
 #[cfg(test)]

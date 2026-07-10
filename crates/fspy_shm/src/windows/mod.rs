@@ -5,7 +5,6 @@ use std::{
     fs::{self, File, OpenOptions},
     io,
     os::windows::fs::OpenOptionsExt,
-    path::PathBuf,
     slice,
 };
 
@@ -32,8 +31,18 @@ pub struct Shm {
 pub fn create(size: usize) -> io::Result<Shm> {
     let size_u64 = valid_size(size)?;
     let id = Uuid::new_v4().simple().to_string();
-    let backing_file = create_backing_file(&id)?;
-    initialize_backing_file(&backing_file, size_u64)?;
+    let backing_dir = temp_dir().join(BACKING_DIR);
+    fs::create_dir_all(&backing_dir)?;
+    let backing_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .share_mode(sys::SHARE_ALL)
+        .attributes(sys::TEMPORARY)
+        .custom_flags(sys::DELETE_ON_CLOSE)
+        .open(backing_dir.join(format!("{id}.shm")))?;
+    sys::set_sparse(&backing_file)?;
+    backing_file.set_len(size_u64)?;
     let mapping = sys::create_file_mapping(&backing_file, &mapping_name(&id, size))?;
     let view = MappedView::new(&mapping, size)?;
 
@@ -66,40 +75,6 @@ fn valid_size(size: usize) -> io::Result<u64> {
 
 fn mapping_name(id: &str, size: usize) -> String {
     format!("{MAPPING_NAME_PREFIX}{id}-{size}")
-}
-
-fn backing_path(id: &str) -> PathBuf {
-    temp_dir().join(BACKING_DIR).join(format!("{id}.shm"))
-}
-
-fn create_backing_file(id: &str) -> io::Result<File> {
-    let path = backing_path(id);
-    fs::create_dir_all(path.parent().unwrap())?;
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .share_mode(sys::SHARE_ALL)
-        .attributes(sys::TEMPORARY)
-        .custom_flags(sys::DELETE_ON_CLOSE)
-        .open(path)
-}
-
-fn initialize_backing_file(file: &File, size: u64) -> io::Result<()> {
-    initialize_backing_file_with(file, size, sys::set_sparse)
-}
-
-fn initialize_backing_file_with(
-    file: &File,
-    size: u64,
-    set_sparse: impl FnOnce(&File) -> io::Result<()>,
-) -> io::Result<()> {
-    if let Err(error) = set_sparse(file)
-        && !sys::is_sparse_unsupported(&error)
-    {
-        return Err(error);
-    }
-    file.set_len(size)
 }
 
 #[expect(clippy::len_without_is_empty, reason = "shared-memory mappings are always non-empty")]
@@ -141,9 +116,6 @@ mod tests {
     use std::{ffi::OsString, fs, process::Command};
 
     use subprocess_test::command_for_fn;
-    use windows_sys::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED,
-    };
 
     use super::*;
 
@@ -190,7 +162,7 @@ mod tests {
     fn owner_cleanup_deletes_backing_file_and_preserves_existing_views() {
         let owner = create(SIZE).unwrap();
         let id = owner.id().to_owned();
-        let path = backing_path(&id);
+        let path = temp_dir().join(BACKING_DIR).join(format!("{id}.shm"));
         let opened = open(&id, SIZE).unwrap();
         assert!(path.exists());
 
@@ -205,33 +177,6 @@ mod tests {
         drop(opened);
         drop(reopened);
         assert!(open(&id, SIZE).is_err());
-    }
-
-    #[test]
-    fn unsupported_sparse_errors_fall_back_to_extending_the_file() {
-        for code in [ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED] {
-            let file = test_backing_file();
-            initialize_backing_file_with(&file, SIZE as u64, |_| {
-                Err(io::Error::from_raw_os_error(code.cast_signed()))
-            })
-            .unwrap();
-
-            assert_eq!(file.metadata().unwrap().len(), SIZE as u64);
-        }
-    }
-
-    #[test]
-    fn other_sparse_errors_do_not_extend_the_file() {
-        for code in [ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER] {
-            let file = test_backing_file();
-            let error = initialize_backing_file_with(&file, SIZE as u64, |_| {
-                Err(io::Error::from_raw_os_error(code.cast_signed()))
-            })
-            .unwrap_err();
-
-            assert_eq!(error.raw_os_error(), Some(code.cast_signed()));
-            assert_eq!(file.metadata().unwrap().len(), 0);
-        }
     }
 
     #[cfg(target_pointer_width = "64")]
@@ -259,9 +204,5 @@ mod tests {
         let (logical_size, endpoint_allocation) = sys::file_sizes(backing_file).unwrap();
         assert_eq!(logical_size, PRODUCTION_SIZE as u64);
         assert!(endpoint_allocation < MAX_ENDPOINT_ALLOCATION);
-    }
-
-    fn test_backing_file() -> File {
-        create_backing_file(&Uuid::new_v4().simple().to_string()).unwrap()
     }
 }
