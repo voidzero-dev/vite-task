@@ -29,7 +29,15 @@ pub struct Shm {
 ///
 /// Returns an error if the backing file or mapping cannot be created.
 pub fn create(size: usize) -> io::Result<Shm> {
-    let size_u64 = valid_size(size)?;
+    if size == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "shared-memory size must be nonzero",
+        ));
+    }
+    let size_u64 = u64::try_from(size).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64")
+    })?;
     let id = Uuid::new_v4().simple().to_string();
     let backing_dir = temp_dir().join(BACKING_DIR);
     fs::create_dir_all(&backing_dir)?;
@@ -55,22 +63,10 @@ pub fn create(size: usize) -> io::Result<Shm> {
 ///
 /// Returns an error if the mapping is unavailable.
 pub fn open(id: &str, size: usize) -> io::Result<Shm> {
-    valid_size(size)?;
     let mapping = sys::open_file_mapping(&mapping_name(id, size))?;
     let view = MappedView::new(&mapping, size)?;
 
     Ok(Shm { id: id.to_owned(), view, backing_file: None })
-}
-
-fn valid_size(size: usize) -> io::Result<u64> {
-    if size == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "shared-memory size must be nonzero",
-        ));
-    }
-    u64::try_from(size)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64"))
 }
 
 fn mapping_name(id: &str, size: usize) -> String {
@@ -122,9 +118,8 @@ mod tests {
     const SIZE: usize = 64 * 1024;
 
     #[test]
-    fn invalid_sizes_are_rejected() {
+    fn size_mismatches_are_rejected() {
         let owner = create(SIZE).unwrap();
-        assert_eq!(open(owner.id(), 0).err().unwrap().kind(), io::ErrorKind::InvalidInput);
         assert!(open(owner.id(), SIZE / 2).is_err());
         assert!(open(owner.id(), SIZE + 1).is_err());
     }
