@@ -72,13 +72,14 @@ pub fn create(size: usize) -> io::Result<Shm> {
 ///
 /// Returns an error if the mapping is unavailable.
 pub fn open(id: &str) -> io::Result<Shm> {
-    // A Mach named-memory handle is a task-local port right that another
-    // process can use only after receiving it over IPC. POSIX shared memory
-    // keeps this operation addressable by a string without a transfer service.
     // `rustix::shm::open` sets `FD_CLOEXEC` on the returned descriptor.
     let fd = shm::open(id, OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
-    // The owner sets the size before publishing `id`, and fspy never resizes
-    // the object afterward, so it stays fixed across `fstat` and `mmap`.
+    // macOS cannot seal a POSIX shared-memory object against resizing. If
+    // another process shrank it between `fstat` and `mmap`, `mmap` would use the
+    // old size and accessing truncated pages could raise `SIGBUS`. Fspy sets
+    // the size before sharing `id` and never changes it afterward. A fixed-size
+    // Mach memory entry would remove the race, but another process cannot open
+    // one by name; the owner would have to send its Mach port over IPC.
     let stat = fstat(&fd)?;
     let size = usize::try_from(stat.st_size)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory size"))?;
