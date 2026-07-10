@@ -12,13 +12,12 @@ use rustix::{
 use uuid::Uuid;
 
 const NAME_PREFIX: &str = "/fspy_";
-const ID_BYTES: usize = 9;
 
 /// An owned macOS shared-memory mapping.
 pub struct Shm {
     id: String,
     mapping: MmapRaw,
-    owner_name: Option<String>,
+    owner: bool,
 }
 
 /// Creates a POSIX shared-memory mapping of `size` bytes and returns its
@@ -40,9 +39,8 @@ pub fn create(size: usize) -> io::Result<Shm> {
 
     loop {
         let id = new_id();
-        let name = mapping_name(&id, size);
         let fd = match shm::open(
-            name.as_str(),
+            id.as_str(),
             OFlags::CREATE | OFlags::EXCL | OFlags::RDWR,
             Mode::RUSR | Mode::WUSR,
         ) {
@@ -52,18 +50,18 @@ pub fn create(size: usize) -> io::Result<Shm> {
         };
 
         if let Err(error) = ftruncate(&fd, size_u64) {
-            let _ = shm::unlink(name.as_str());
+            let _ = shm::unlink(id.as_str());
             return Err(error.into());
         }
         let mapping = match MmapOptions::new().len(size).map_raw(&fd) {
             Ok(mapping) => mapping,
             Err(error) => {
-                let _ = shm::unlink(name.as_str());
+                let _ = shm::unlink(id.as_str());
                 return Err(error);
             }
         };
 
-        return Ok(Shm { id, mapping, owner_name: Some(name) });
+        return Ok(Shm { id, mapping, owner: true });
     }
 }
 
@@ -73,26 +71,20 @@ pub fn create(size: usize) -> io::Result<Shm> {
 ///
 /// Returns an error if the mapping is unavailable.
 pub fn open(id: &str, size: usize) -> io::Result<Shm> {
-    let name = mapping_name(id, size);
-    let fd = shm::open(name.as_str(), OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
+    let fd = shm::open(id, OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
     let mapping = MmapOptions::new().len(size).map_raw(&fd)?;
 
-    Ok(Shm { id: id.to_owned(), mapping, owner_name: None })
+    Ok(Shm { id: id.to_owned(), mapping, owner: false })
 }
 
 fn new_id() -> String {
-    let uuid = Uuid::new_v4();
-    URL_SAFE_NO_PAD.encode(&uuid.as_bytes()[..ID_BYTES])
-}
-
-fn mapping_name(id: &str, size: usize) -> String {
-    format!("{NAME_PREFIX}{id}_{}", URL_SAFE_NO_PAD.encode(size.to_be_bytes()))
+    format!("{NAME_PREFIX}{}", URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()))
 }
 
 impl Drop for Shm {
     fn drop(&mut self) {
-        if let Some(name) = &self.owner_name {
-            let _ = shm::unlink(name.as_str());
+        if self.owner {
+            let _ = shm::unlink(self.id.as_str());
         }
     }
 }
@@ -134,14 +126,6 @@ impl Shm {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn size_mismatches_are_rejected() {
-        let owner = create(100).unwrap();
-
-        assert!(open(owner.id(), 99).is_err());
-        assert!(open(owner.id(), 101).is_err());
-    }
 
     #[cfg(target_pointer_width = "64")]
     #[test]
