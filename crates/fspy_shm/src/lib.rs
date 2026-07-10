@@ -1,18 +1,17 @@
 #![doc = include_str!("../README.md")]
 
 #[cfg(target_os = "linux")]
-mod linux;
+#[path = "linux/mod.rs"]
+mod os_impl;
 #[cfg(target_os = "macos")]
-mod macos;
+#[path = "macos/mod.rs"]
+mod os_impl;
 #[cfg(target_os = "windows")]
-mod windows;
+#[path = "windows/mod.rs"]
+mod os_impl;
 
-#[cfg(target_os = "linux")]
-pub use linux::{Shm, create, open};
-#[cfg(target_os = "macos")]
-pub use macos::{Shm, create, open};
-#[cfg(target_os = "windows")]
-pub use windows::{Shm, create, open};
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub use os_impl::{Shm, create, open};
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 compile_error!("fspy_shm does not support this platform");
