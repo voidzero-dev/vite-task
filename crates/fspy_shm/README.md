@@ -37,6 +37,4 @@ Each platform keeps its implementation rationale beside its source:
 - [macOS: named POSIX shared memory](src/macos/README.md)
 - [Windows: sparse file-backed named mapping](src/windows/README.md)
 
-All implementations provide the API above. Their identifiers and operating
-system objects differ. Each platform README explains the chosen API and why
-the previous `shared_memory` backend did not meet its requirements.
+All implementations provide the API above. Their identifiers and operating system objects differ. Each platform README explains the chosen API and why the previous `shared_memory` backend did not meet its requirements.
