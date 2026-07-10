@@ -54,7 +54,7 @@ pub fn create(size: usize) -> io::Result<Shm> {
     sys::set_sparse(&backing_file)?;
     backing_file.set_len(size_u64)?;
     let mapping = sys::create_file_mapping(&backing_file, &mapping_name(&id, size))?;
-    let view = MappedView::new(&mapping, size)?;
+    let view = MappedView::new(mapping, size)?;
 
     Ok(Shm { id, view, backing_file: Some(backing_file) })
 }
@@ -66,7 +66,7 @@ pub fn create(size: usize) -> io::Result<Shm> {
 /// Returns an error if the mapping is unavailable.
 pub fn open(id: &str, size: usize) -> io::Result<Shm> {
     let mapping = sys::open_file_mapping(&mapping_name(id, size))?;
-    let view = MappedView::new(&mapping, size)?;
+    let view = MappedView::new(mapping, size)?;
 
     Ok(Shm { id: id.to_owned(), view, backing_file: None })
 }

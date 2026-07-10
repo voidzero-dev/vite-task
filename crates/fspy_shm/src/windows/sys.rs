@@ -121,16 +121,17 @@ pub(super) fn open_file_mapping(name: &str) -> io::Result<OwnedHandle> {
 pub(super) struct MappedView {
     pointer: NonNull<u8>,
     len: usize,
+    _mapping: OwnedHandle,
 }
 
 impl MappedView {
-    pub(super) fn new(mapping: &OwnedHandle, len: usize) -> io::Result<Self> {
+    pub(super) fn new(mapping: OwnedHandle, len: usize) -> io::Result<Self> {
         // SAFETY: `mapping` is a valid file-mapping handle. Offset zero and
         // `len` describe the exact view retained by the returned guard.
         let view =
             unsafe { MapViewOfFile(mapping.as_raw_handle().cast(), FILE_MAP_WRITE, 0, 0, len) };
         let pointer = NonNull::new(view.Value.cast::<u8>()).ok_or_else(last_error)?;
-        Ok(Self { pointer, len })
+        Ok(Self { pointer, len, _mapping: mapping })
     }
 
     pub(super) const fn as_ptr(&self) -> *mut u8 {
