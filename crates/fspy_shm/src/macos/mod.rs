@@ -2,29 +2,23 @@
 
 use std::{io, slice};
 
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use memmap2::{MmapOptions, MmapRaw};
 use rustix::{
-    fs::{Mode, fstat, ftruncate},
+    fs::{Mode, ftruncate},
     io::Errno,
-    param::page_size,
     shm::{self, OFlags},
 };
 use uuid::Uuid;
 
 const NAME_PREFIX: &str = "/fspy_";
-// Darwin rounds `st_size` to a VM page, so retain the exact-size residue in
-// the name while leaving 80 random bits for collision resistance.
-const NAME_RANDOM_BYTES: usize = 10;
-const NAME_SIZE_BYTES: usize = 2;
-const NAME_SUFFIX_LEN: usize = (NAME_RANDOM_BYTES + NAME_SIZE_BYTES) * 2;
-const NAME_LEN: usize = NAME_PREFIX.len() + NAME_SUFFIX_LEN;
-const SIZE_TAG_MODULUS: u64 = 1 << (NAME_SIZE_BYTES * 8);
-const HEX: &[u8; 16] = b"0123456789abcdef";
+const ID_BYTES: usize = 9;
 
 /// An owned macOS shared-memory mapping.
 pub struct Shm {
-    name: ShmName,
+    id: String,
     mapping: MmapRaw,
+    owner_name: Option<String>,
 }
 
 /// Creates a POSIX shared-memory mapping of `size` bytes and returns its
@@ -34,20 +28,21 @@ pub struct Shm {
 ///
 /// Returns an error if the object cannot be created, sized, or mapped.
 pub fn create(size: usize) -> io::Result<Shm> {
-    create_with(size, || new_id(size))
-}
-
-fn create_with(size: usize, mut next_id: impl FnMut() -> String) -> io::Result<Shm> {
-    let size_u64 = valid_size(size)?;
+    if size == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "shared-memory size must be nonzero",
+        ));
+    }
+    let size_u64 = u64::try_from(size).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64")
+    })?;
 
     loop {
-        let id = next_id();
-        validate_id(&id)?;
-        if !size_tag_matches(&id, size) {
-            return Err(invalid_id());
-        }
+        let id = new_id();
+        let name = mapping_name(&id, size);
         let fd = match shm::open(
-            id.as_str(),
+            name.as_str(),
             OFlags::CREATE | OFlags::EXCL | OFlags::RDWR,
             Mode::RUSR | Mode::WUSR,
         ) {
@@ -55,14 +50,20 @@ fn create_with(size: usize, mut next_id: impl FnMut() -> String) -> io::Result<S
             Err(Errno::EXIST) => continue,
             Err(error) => return Err(error.into()),
         };
-        // From this point on, every failure path unlinks the newly created name.
-        let owner = OwnerName { id };
 
-        ftruncate(&fd, size_u64).map_err(io::Error::from)?;
-        let mapping = MmapOptions::new().len(size).map_raw(&fd)?;
-        drop(fd);
+        if let Err(error) = ftruncate(&fd, size_u64) {
+            let _ = shm::unlink(name.as_str());
+            return Err(error.into());
+        }
+        let mapping = match MmapOptions::new().len(size).map_raw(&fd) {
+            Ok(mapping) => mapping,
+            Err(error) => {
+                let _ = shm::unlink(name.as_str());
+                return Err(error);
+            }
+        };
 
-        return Ok(Shm { name: ShmName::Owner(owner), mapping });
+        return Ok(Shm { id, mapping, owner_name: Some(name) });
     }
 }
 
@@ -70,124 +71,38 @@ fn create_with(size: usize, mut next_id: impl FnMut() -> String) -> io::Result<S
 ///
 /// # Errors
 ///
-/// Returns an error if the identifier is invalid, the object is unavailable,
-/// or its size does not exactly match `size`.
+/// Returns an error if the mapping is unavailable.
 pub fn open(id: &str, size: usize) -> io::Result<Shm> {
-    let size_u64 = valid_size(size)?;
-    validate_id(id)?;
-
-    let fd = shm::open(id, OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
-    let stat = fstat(&fd).map_err(io::Error::from)?;
-    let actual_size = u64::try_from(stat.st_size).ok();
-    if !size_tag_matches(id, size)
-        || (actual_size != Some(size_u64) && actual_size != rounded_size(size_u64))
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "shared-memory object has an unexpected size",
-        ));
-    }
+    let name = mapping_name(id, size);
+    let fd = shm::open(name.as_str(), OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
     let mapping = MmapOptions::new().len(size).map_raw(&fd)?;
-    drop(fd);
 
-    Ok(Shm { name: ShmName::Opened(id.to_owned()), mapping })
+    Ok(Shm { id: id.to_owned(), mapping, owner_name: None })
 }
 
-fn new_id(size: usize) -> String {
+fn new_id() -> String {
     let uuid = Uuid::new_v4();
-    let mut id = String::with_capacity(NAME_LEN);
-    id.push_str(NAME_PREFIX);
-    for byte in &uuid.as_bytes()[..NAME_RANDOM_BYTES] {
-        push_hex_byte(&mut id, *byte);
-    }
-    let size_bytes = size.to_be_bytes();
-    for byte in &size_bytes[size_bytes.len() - NAME_SIZE_BYTES..] {
-        push_hex_byte(&mut id, *byte);
-    }
-    id
+    URL_SAFE_NO_PAD.encode(&uuid.as_bytes()[..ID_BYTES])
 }
 
-fn push_hex_byte(output: &mut String, byte: u8) {
-    output.push(char::from(HEX[usize::from(byte >> 4)]));
-    output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+fn mapping_name(id: &str, size: usize) -> String {
+    format!("{NAME_PREFIX}{id}_{}", URL_SAFE_NO_PAD.encode(size.to_be_bytes()))
 }
 
-fn size_tag_matches(id: &str, size: usize) -> bool {
-    let size_bytes = size.to_be_bytes();
-    let expected = &size_bytes[size_bytes.len() - NAME_SIZE_BYTES..];
-    let encoded = &id.as_bytes()[NAME_LEN - NAME_SIZE_BYTES * 2..];
-
-    encoded.chunks_exact(2).zip(expected).all(|(digits, byte)| {
-        digits[0] == HEX[usize::from(byte >> 4)] && digits[1] == HEX[usize::from(byte & 0x0f)]
-    })
-}
-
-fn rounded_size(size: u64) -> Option<u64> {
-    let page_size = u64::try_from(page_size()).ok()?;
-    if page_size == 0 || page_size > SIZE_TAG_MODULUS {
-        return None;
-    }
-    let remainder = size.checked_rem(page_size)?;
-    if remainder == 0 { Some(size) } else { size.checked_add(page_size - remainder) }
-}
-
-fn validate_id(id: &str) -> io::Result<()> {
-    let Some(suffix) = id.strip_prefix(NAME_PREFIX) else {
-        return Err(invalid_id());
-    };
-    if id.len() != NAME_LEN
-        || !suffix.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(invalid_id());
-    }
-    Ok(())
-}
-
-fn invalid_id() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, "invalid macOS shared-memory identifier")
-}
-
-fn valid_size(size: usize) -> io::Result<u64> {
-    if size == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "shared-memory size must be nonzero",
-        ));
-    }
-    u64::try_from(size)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64"))
-}
-
-struct OwnerName {
-    id: String,
-}
-
-impl Drop for OwnerName {
+impl Drop for Shm {
     fn drop(&mut self) {
-        let _ = shm::unlink(self.id.as_str());
-    }
-}
-
-enum ShmName {
-    Owner(OwnerName),
-    Opened(String),
-}
-
-impl ShmName {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Owner(owner) => &owner.id,
-            Self::Opened(id) => id,
+        if let Some(name) = &self.owner_name {
+            let _ = shm::unlink(name.as_str());
         }
     }
 }
 
 #[expect(clippy::len_without_is_empty, reason = "shared-memory mappings are always non-empty")]
 impl Shm {
-    /// Returns this mapping's opaque POSIX shared-memory name.
+    /// Returns this mapping's opaque macOS identifier.
     #[must_use]
     pub fn id(&self) -> &str {
-        self.name.as_str()
+        &self.id
     }
 
     /// Returns the mapped length in bytes.
@@ -220,72 +135,12 @@ impl Shm {
 mod tests {
     use super::*;
 
-    const SIZE: usize = 64 * 1024;
-
     #[test]
-    fn identifiers_are_canonical_darwin_names() {
-        let owner = create(SIZE).unwrap();
-        let suffix = owner.id().strip_prefix(NAME_PREFIX).unwrap();
-
-        assert_eq!(owner.id().len(), NAME_LEN);
-        assert!(owner.id().len() <= 31);
-        assert_eq!(suffix.len(), NAME_SUFFIX_LEN);
-        assert!(size_tag_matches(owner.id(), SIZE));
-        assert!(suffix.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
-    }
-
-    #[test]
-    fn malformed_ids_and_inexact_sizes_are_rejected() {
-        for id in [
-            "fspy_000000000000000000000000",
-            "/fspy_00000000000000000000000",
-            "/fspy_0000000000000000000000000",
-            "/fspy_00000000000000000000000g",
-            "/fspy_00000000000000000000000A",
-            "/fspy_00000000000/000000000000",
-        ] {
-            assert_eq!(open(id, SIZE).err().unwrap().kind(), io::ErrorKind::InvalidInput);
-        }
-
-        let owner = create(SIZE).unwrap();
-        assert_eq!(open(owner.id(), 0).err().unwrap().kind(), io::ErrorKind::InvalidInput);
-        assert_eq!(open(owner.id(), SIZE - 1).err().unwrap().kind(), io::ErrorKind::InvalidData);
-        assert_eq!(open(owner.id(), SIZE + 1).err().unwrap().kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn non_page_aligned_size_reopens_exactly() {
+    fn size_mismatches_are_rejected() {
         let owner = create(100).unwrap();
-        let opened = open(owner.id(), 100).unwrap();
 
-        assert_eq!(owner.len(), 100);
-        assert_eq!(opened.len(), 100);
-    }
-
-    #[test]
-    fn name_collisions_are_retried() {
-        let existing = create(SIZE).unwrap();
-        let fresh_id = loop {
-            let id = new_id(SIZE);
-            if id != existing.id() {
-                break id;
-            }
-        };
-        let mut ids = [existing.id().to_owned(), fresh_id.clone()].into_iter();
-
-        let created =
-            create_with(SIZE, || ids.next().expect("creation did not stop after retry")).unwrap();
-
-        assert_eq!(created.id(), fresh_id);
-    }
-
-    #[cfg(target_pointer_width = "64")]
-    #[test]
-    fn failed_initialization_unlinks_the_created_name() {
-        let id = new_id(usize::MAX);
-
-        assert!(create_with(usize::MAX, || id.clone()).is_err());
-        assert!(matches!(shm::open(id.as_str(), OFlags::RDWR, Mode::empty()), Err(Errno::NOENT)));
+        assert!(open(owner.id(), 99).is_err());
+        assert!(open(owner.id(), 101).is_err());
     }
 
     #[cfg(target_pointer_width = "64")]

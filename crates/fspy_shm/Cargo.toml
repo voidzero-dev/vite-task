@@ -17,8 +17,9 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+base64 = { workspace = true }
 memmap2 = { workspace = true }
-rustix = { workspace = true, features = ["fs", "param", "shm"] }
+rustix = { workspace = true, features = ["fs", "shm"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

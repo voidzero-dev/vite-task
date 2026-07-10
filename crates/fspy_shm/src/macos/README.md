@@ -19,7 +19,8 @@ Unlike Linux, macOS does not route POSIX shared memory through a container's
 
 `shared_memory` opens the size reported by `fstat` instead of validating the
 caller's expected size. Darwin rounds the object size to a VM page, so that API
-cannot preserve fspy's exact logical-size contract.
+cannot preserve fspy's exact logical-size contract. Fspy includes the logical
+size in the native name instead.
 
 ## Lifetime semantics
 
