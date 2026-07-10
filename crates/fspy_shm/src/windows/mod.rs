@@ -1,29 +1,3 @@
-//! Windows shared-memory backend.
-//!
-//! fspy's production channel uses a 4 GiB logical mapping. Multiple processes
-//! append records through atomics and pointer writes, so each record must not
-//! require a system call.
-//!
-//! Windows page-file-backed named mappings offer two allocation modes. With
-//! `SEC_COMMIT`, Windows charges the whole mapping against system commit when
-//! a process maps the view. `SEC_RESERVE` avoids that charge, but a writer must
-//! call `VirtualAlloc` before it touches a reserved page. Committing large
-//! chunks would keep system calls off the normal write path, but it would
-//! require a cross-process protocol that commits a chunk before publishing
-//! space to writers and recovers if the process doing the commit exits.
-//!
-//! This backend uses a sparse temporary file. `FSCTL_SET_SPARSE` leaves unused
-//! ranges unallocated, while the mapped view gives writers the pointer-based
-//! fast path. `FILE_ATTRIBUTE_TEMPORARY` asks Windows to retain dirty data in
-//! memory when cache is available, and `FILE_FLAG_DELETE_ON_CLOSE` cleans up
-//! the file when its owner drops.
-//!
-//! Windows may write dirty mapped pages to the file under memory pressure, so
-//! this design does not guarantee zero disk I/O. It avoids an upfront 4 GiB
-//! physical allocation and per-record system calls with less synchronization
-//! machinery than `SEC_RESERVE`. Reconsider this choice if benchmarks under
-//! memory pressure show that file-backed writeback affects task performance.
-
 mod sys;
 
 use std::{
@@ -45,7 +19,8 @@ const BACKING_DIR: &str = "vite-task-fspy";
 pub struct Shm {
     id: String,
     view: MappedView,
-    _backing_file: Option<File>,
+    #[cfg_attr(not(test), expect(dead_code, reason = "retained for owner cleanup"))]
+    backing_file: Option<File>,
 }
 
 /// Creates a sparse, temporary file-backed named mapping of `size` bytes and
@@ -62,7 +37,7 @@ pub fn create(size: usize) -> io::Result<Shm> {
     let mapping = sys::create_file_mapping(&backing_file, &mapping_name(&id, size))?;
     let view = MappedView::new(&mapping, size)?;
 
-    Ok(Shm { id, view, _backing_file: Some(backing_file) })
+    Ok(Shm { id, view, backing_file: Some(backing_file) })
 }
 
 /// Opens the named mapping identified by `id`.
@@ -76,7 +51,7 @@ pub fn open(id: &str, size: usize) -> io::Result<Shm> {
     let mapping = sys::open_file_mapping(&mapping_name(id, size))?;
     let view = MappedView::new(&mapping, size)?;
 
-    Ok(Shm { id: id.to_owned(), view, _backing_file: None })
+    Ok(Shm { id: id.to_owned(), view, backing_file: None })
 }
 
 fn valid_size(size: usize) -> io::Result<u64> {
@@ -292,7 +267,7 @@ mod tests {
         const MAX_ENDPOINT_ALLOCATION: u64 = 16 * 1024 * 1024;
 
         let owner = create(PRODUCTION_SIZE).unwrap();
-        let backing_file = owner._backing_file.as_ref().unwrap();
+        let backing_file = owner.backing_file.as_ref().unwrap();
         let (logical_size, initial_allocation) = sys::file_sizes(backing_file).unwrap();
         assert_eq!(logical_size, PRODUCTION_SIZE as u64);
         assert!(initial_allocation < MAX_ENDPOINT_ALLOCATION);
