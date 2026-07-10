@@ -1,4 +1,4 @@
-# fspy_shm
+# `fspy_shm`
 
 `fspy_shm` is the private shared-memory layer used by fspy IPC channels. It gives the channel one API for creating a mapping, passing its identifier to another process, and opening additional views of the same bytes.
 
@@ -8,14 +8,14 @@
 
 The public API is defined in [`src/lib.rs`](src/lib.rs).
 
-| API               | Contract                                                                                |
-| ----------------- | --------------------------------------------------------------------------------------- |
-| `create(size)`    | Creates a non-empty mapping and returns its unique owner.                                |
-| `open(id)`        | Opens another view and derives its size from the operating-system mapping.               |
-| `Shm::id()`       | Returns the identifier to send to another process.                                      |
-| `Shm::len()`      | Returns the mapped size.                                                                |
-| `Shm::as_ptr()`   | Returns a mutable raw pointer to the first byte.                                        |
-| `Shm::as_slice()` | Returns a shared slice. The caller must prevent mutation for the slice's lifetime.      |
+| API               | Contract                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `create(size)`    | Creates a non-empty mapping and returns its unique owner.                          |
+| `open(id)`        | Opens another view and derives its size from the operating-system mapping.         |
+| `Shm::id()`       | Returns the identifier to send to another process.                                 |
+| `Shm::len()`      | Returns the mapped size.                                                           |
+| `Shm::as_ptr()`   | Returns a mutable raw pointer to the first byte.                                   |
+| `Shm::as_slice()` | Returns a shared slice. The caller must prevent mutation for the slice's lifetime. |
 
 `Shm` does not synchronize memory access. The fspy channel combines it with atomic frame headers and a lock file. Senders hold a shared file lock while writing. The receiver takes the exclusive lock before reading, which waits for existing senders and rejects new ones.
 
