@@ -39,6 +39,7 @@ pub fn create(size: usize) -> io::Result<Shm> {
 
     loop {
         let id = new_id();
+        // `rustix::shm::open` sets `FD_CLOEXEC` on the returned descriptor.
         let fd = match shm::open(
             id.as_str(),
             OFlags::CREATE | OFlags::EXCL | OFlags::RDWR,
@@ -71,6 +72,7 @@ pub fn create(size: usize) -> io::Result<Shm> {
 ///
 /// Returns an error if the mapping is unavailable.
 pub fn open(id: &str, size: usize) -> io::Result<Shm> {
+    // `rustix::shm::open` sets `FD_CLOEXEC` on the returned descriptor.
     let fd = shm::open(id, OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
     let mapping = MmapOptions::new().len(size).map_raw(&fd)?;
 
