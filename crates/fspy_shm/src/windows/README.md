@@ -86,7 +86,7 @@ and the receiver removes that path before dropping the mapping owner.
 
 The backend requires sparse-file support. It returns the `FSCTL_SET_SPARSE`
 error instead of silently falling back to a fully allocated file. NTFS and
-ReFS support sparse files; a temporary directory on an unsupported filesystem
+`ReFS` support sparse files; a temporary directory on an unsupported filesystem
 cannot host this mapping.
 
 ## Verification
