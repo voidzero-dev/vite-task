@@ -74,12 +74,10 @@ pub fn create(size: usize) -> io::Result<Shm> {
 pub fn open(id: &str) -> io::Result<Shm> {
     // `rustix::shm::open` sets `FD_CLOEXEC` on the returned descriptor.
     let fd = shm::open(id, OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
-    // macOS cannot seal a POSIX shared-memory object against resizing. If
-    // another process shrank it between `fstat` and `mmap`, `mmap` would use the
-    // old size and accessing truncated pages could raise `SIGBUS`. Fspy sets
-    // the size before sharing `id` and never changes it afterward. A fixed-size
-    // Mach memory entry would remove the race, but another process cannot open
-    // one by name; the owner would have to send its Mach port over IPC.
+    // Another process that opens this object for writing can resize it. If it
+    // shrinks the object after `fstat`, `mmap` rejects the requested size and
+    // `open` returns an error. Fspy sets the size before sharing `id` and never
+    // changes it afterward.
     let stat = fstat(&fd)?;
     let size = usize::try_from(stat.st_size)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory size"))?;
