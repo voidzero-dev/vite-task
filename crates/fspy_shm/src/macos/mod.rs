@@ -1,3 +1,5 @@
+#![doc = include_str!("README.md")]
+
 use std::{io, slice};
 
 use memmap2::{MmapOptions, MmapRaw};
