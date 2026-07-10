@@ -11,7 +11,7 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 | API               | Contract                                                                           |
 | ----------------- | ---------------------------------------------------------------------------------- |
 | `create(size)`    | Creates a non-empty mapping and returns its unique owner.                          |
-| `open(id)`        | Opens another view and derives its size from the operating-system mapping.         |
+| `open(id)`        | Opens another view of the mapping identified by `id`.                              |
 | `Shm::id()`       | Returns the identifier to send to another process.                                 |
 | `Shm::len()`      | Returns the mapped size.                                                           |
 | `Shm::as_ptr()`   | Returns a mutable raw pointer to the first byte.                                   |
