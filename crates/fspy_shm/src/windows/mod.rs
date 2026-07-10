@@ -1,3 +1,29 @@
+//! Windows shared-memory backend.
+//!
+//! fspy's production channel uses a 4 GiB logical mapping. Multiple processes
+//! append records through atomics and pointer writes, so each record must not
+//! require a system call.
+//!
+//! Windows page-file-backed named mappings offer two allocation modes. With
+//! `SEC_COMMIT`, Windows charges the whole mapping against system commit when
+//! a process maps the view. `SEC_RESERVE` avoids that charge, but a writer must
+//! call `VirtualAlloc` before it touches a reserved page. Committing large
+//! chunks would keep system calls off the normal write path, but it would
+//! require a cross-process protocol that commits a chunk before publishing
+//! space to writers and recovers if the process doing the commit exits.
+//!
+//! This backend uses a sparse temporary file. `FSCTL_SET_SPARSE` leaves unused
+//! ranges unallocated, while the mapped view gives writers the pointer-based
+//! fast path. `FILE_ATTRIBUTE_TEMPORARY` asks Windows to retain dirty data in
+//! memory when cache is available, and `FILE_FLAG_DELETE_ON_CLOSE` cleans up
+//! the file when its owner drops.
+//!
+//! Windows may write dirty mapped pages to the file under memory pressure, so
+//! this design does not guarantee zero disk I/O. It avoids an upfront 4 GiB
+//! physical allocation and per-record system calls with less synchronization
+//! machinery than `SEC_RESERVE`. Reconsider this choice if benchmarks under
+//! memory pressure show that file-backed writeback affects task performance.
+
 mod sys;
 
 use std::{
