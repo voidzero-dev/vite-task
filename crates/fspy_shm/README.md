@@ -29,6 +29,10 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 
 The channel hides that difference with its lock file. [`ChannelConf::sender`](../fspy_shared/src/ipc/channel/mod.rs) opens and locks the receiver's exact lock-file path before it calls `fspy_shm::open`. The receiver removes that path before dropping the owner, so a sender that starts later fails before opening shared memory.
 
-## Backend boundary
+## Platform designs
 
-At this point in the stack, `fspy_shm` delegates mapping creation and opening to the [`shared_memory`](https://crates.io/crates/shared_memory) crate. Because callers use only the API above, later changes can replace the backend on each platform without changing the channel protocol.
+Each platform keeps its implementation rationale beside its source:
+
+- [Linux: `memfd` with a descriptor broker](src/linux/README.md)
+
+At this point in the stack, Windows and macOS still delegate mapping creation and opening to the [`shared_memory`](https://crates.io/crates/shared_memory) crate.
