@@ -69,9 +69,12 @@ async fn run_broker(listener: UnixListener, memfd: OwnedFd, stop: CancellationTo
 }
 
 pub(super) fn request_memfd(id: &str) -> rustix::io::Result<OwnedFd> {
+    // Prevent the broker connection from leaking into later execs.
     let socket = socket_with(AddressFamily::UNIX, SocketType::STREAM, SocketFlags::CLOEXEC, None)?;
     let address = SocketAddrUnix::new_abstract_name(id.as_bytes())?;
     connect(&socket, &address)?;
+    // `SCM_RIGHTS` does not preserve descriptor flags; `passfd` sets
+    // `FD_CLOEXEC` on the received descriptor before returning it.
     let descriptor = SyncFdPassingExt::recv_fd(&socket.as_raw_fd())
         .map_err(|error| Errno::from_io_error(&error).unwrap_or(Errno::IO))?;
     // SAFETY: passfd returns a newly received descriptor owned by the caller.
