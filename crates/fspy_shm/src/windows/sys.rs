@@ -6,10 +6,10 @@ use std::{
 };
 
 use windows_sys::Win32::{
-    Foundation::{ERROR_ALREADY_EXISTS, GENERIC_READ, GENERIC_WRITE, GetLastError},
+    Foundation::{ERROR_ALREADY_EXISTS, GetLastError},
     Storage::FileSystem::{
-        DELETE, FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
     },
     System::Memory::{
         CreateFileMappingW, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
@@ -19,16 +19,10 @@ use windows_sys::Win32::{
 
 pub(super) const SHARE_ALL: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 pub(super) const TEMPORARY: u32 = FILE_ATTRIBUTE_TEMPORARY;
-pub(super) const DELETE_ON_CLOSE: u32 = FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE;
-pub(super) const DELETE_ACCESS: u32 = GENERIC_READ | GENERIC_WRITE | DELETE;
+pub(super) const DELETE_ON_CLOSE: u32 = FILE_FLAG_DELETE_ON_CLOSE;
 
-pub(super) enum CreatedMapping {
-    Created(OwnedHandle),
-    AlreadyExists,
-}
-
-pub(super) fn create_file_mapping(file: &std::fs::File, name: &str) -> io::Result<CreatedMapping> {
-    let name = wide_name(name)?;
+pub(super) fn create_file_mapping(file: &std::fs::File, name: &str) -> io::Result<OwnedHandle> {
+    let name = wide_name(name);
     // SAFETY: `file` supplies a valid handle, the security pointer is null, and
     // `name` is a live, NUL-terminated UTF-16 buffer for the duration of the call.
     let raw_handle = unsafe {
@@ -52,14 +46,14 @@ pub(super) fn create_file_mapping(file: &std::fs::File, name: &str) -> io::Resul
     // SAFETY: A non-null CreateFileMappingW result is an owned mapping handle.
     let handle = unsafe { OwnedHandle::from_raw_handle(raw_handle.cast()) };
     if error == ERROR_ALREADY_EXISTS {
-        Ok(CreatedMapping::AlreadyExists)
+        Err(io::Error::new(io::ErrorKind::AlreadyExists, "shared-memory mapping already exists"))
     } else {
-        Ok(CreatedMapping::Created(handle))
+        Ok(handle)
     }
 }
 
 pub(super) fn open_file_mapping(name: &str) -> io::Result<OwnedHandle> {
-    let name = wide_name(name)?;
+    let name = wide_name(name);
     // SAFETY: `name` is a live, NUL-terminated UTF-16 buffer and inheritance is disabled.
     let raw_handle = unsafe { OpenFileMappingW(FILE_MAP_WRITE, 0, name.as_ptr()) };
     if raw_handle.is_null() {
@@ -104,14 +98,8 @@ impl Drop for MappedView {
     }
 }
 
-fn wide_name(name: &str) -> io::Result<Vec<u16>> {
-    if name.contains('\0') {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "shared-memory name contains a NUL",
-        ));
-    }
-    Ok(name.encode_utf16().chain(once(0)).collect())
+fn wide_name(name: &str) -> Vec<u16> {
+    name.encode_utf16().chain(once(0)).collect()
 }
 
 fn last_error() -> io::Error {

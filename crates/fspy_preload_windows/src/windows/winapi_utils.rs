@@ -6,8 +6,8 @@ use widestring::{U16CStr, U16Str};
 use winapi::{
     ctypes::c_long,
     shared::{
-        minwindef::{BOOL, FALSE, HLOCAL, MAX_PATH, ULONG},
-        ntdef::{HANDLE, HRESULT, PCWSTR, PWSTR, UNICODE_STRING},
+        minwindef::{BOOL, FALSE, MAX_PATH},
+        ntdef::{HANDLE, PWSTR, UNICODE_STRING},
         winerror::{NO_ERROR, S_OK},
     },
     um::{
@@ -17,6 +17,10 @@ use winapi::{
             GENERIC_WRITE,
         },
     },
+};
+use windows_sys::Win32::{
+    Foundation::LocalFree,
+    UI::Shell::{PATHCCH_ALLOW_LONG_PATHS, PathAllocCombine},
 };
 use winsafe::{GetLastError, co};
 
@@ -99,24 +103,6 @@ pub const fn access_mask_to_mode(desired_access: ACCESS_MASK) -> AccessMode {
     }
 }
 
-// These APIs use separate import libraries. The Windows `shared_memory`
-// dependency used to bring `pathcch` into the final DLL; fspy_shm's native
-// backend removes that dependency, so name both libraries here.
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn LocalFree(hmem: HLOCAL) -> HLOCAL;
-}
-
-#[link(name = "pathcch")]
-unsafe extern "system" {
-    fn PathAllocCombine(
-        pszpathin: PCWSTR,
-        pszmore: PCWSTR,
-        dwflags: ULONG,
-        ppszpathout: *mut PWSTR,
-    ) -> HRESULT;
-}
-
 pub struct HeapPath(PWSTR);
 impl HeapPath {
     #[must_use]
@@ -133,7 +119,6 @@ impl Drop for HeapPath {
 }
 
 pub fn combine_paths(path1: &U16CStr, path2: &U16CStr) -> winsafe::SysResult<HeapPath> {
-    const PATHCCH_ALLOW_LONG_PATHS: ULONG = 0x0000_0001;
     let mut out = std::ptr::null_mut();
     // SAFETY: FFI call to PathAllocCombine with valid null-terminated wide string pointers
     let hr = unsafe {
