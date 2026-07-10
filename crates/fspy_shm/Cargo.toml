@@ -7,12 +7,22 @@ license.workspace = true
 publish = false
 rust-version.workspace = true
 
-[dependencies]
+[target.'cfg(not(target_os = "linux"))'.dependencies]
 shared_memory = { workspace = true, features = ["logging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+memmap2 = { workspace = true }
+passfd = { workspace = true, features = ["async"] }
+rustix = { workspace = true, features = ["fs", "net"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 ctor = { workspace = true }
 subprocess_test = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

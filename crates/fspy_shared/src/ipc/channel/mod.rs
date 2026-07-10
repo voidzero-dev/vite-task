@@ -113,9 +113,12 @@ impl Deref for Sender {
     }
 }
 
-#[expect(
-    clippy::non_send_fields_in_send_ty,
-    reason = "`Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to"
+#[cfg_attr(
+    not(target_os = "linux"),
+    expect(
+        clippy::non_send_fields_in_send_ty,
+        reason = "`Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to"
+    )
 )]
 /// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
 unsafe impl Send for Sender {}
@@ -131,9 +134,12 @@ pub struct Receiver {
     shm: Shm,
 }
 
-#[expect(
-    clippy::non_send_fields_in_send_ty,
-    reason = "Receiver doesn't read or write `shm`. It only pass it to `ReceiverLockGuard` under the lock"
+#[cfg_attr(
+    not(target_os = "linux"),
+    expect(
+        clippy::non_send_fields_in_send_ty,
+        reason = "Receiver doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock"
+    )
 )]
 /// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
 unsafe impl Send for Receiver {}
@@ -200,8 +206,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn smoke() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn smoke() {
         let (conf, receiver) = channel(100).unwrap();
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
             let sender = conf.sender().unwrap();
@@ -220,9 +226,9 @@ mod tests {
         assert!(frames.next().is_none());
     }
 
-    #[test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
-    fn forbid_new_senders_after_locked() {
+    async fn forbid_new_senders_after_locked() {
         let (conf, receiver) = channel(42).unwrap();
         let _lock = receiver.lock().unwrap();
 
@@ -233,9 +239,9 @@ mod tests {
         assert_eq!(B(&output.stdout), B("false"));
     }
 
-    #[test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
-    fn forbid_new_senders_after_receiver_dropped() {
+    async fn forbid_new_senders_after_receiver_dropped() {
         let (conf, receiver) = channel(42).unwrap();
         drop(receiver);
 
@@ -246,8 +252,8 @@ mod tests {
         assert_eq!(B(&output.stdout), B("false"));
     }
 
-    #[test]
-    fn concurrent_senders() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_senders() {
         let (conf, receiver) = channel(8192).unwrap();
         for i in 0u16..200 {
             let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {

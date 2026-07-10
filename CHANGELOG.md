@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Linux tasks can track file access when containers or Kubernetes runners have little space in `/dev/shm` ([#353](https://github.com/voidzero-dev/vite-task/issues/353), [#523](https://github.com/voidzero-dev/vite-task/pull/523)).
 - **Fixed** Windows automatic input tracking now records executable image reads when process creation performs the lookup inside `NtCreateUserProcess` ([#518](https://github.com/voidzero-dev/vite-task/pull/518)).
 - **Fixed** Failures while waiting for a started task process to exit no longer incorrectly say the process failed to spawn ([#515](https://github.com/voidzero-dev/vite-task/pull/515)).
 - **Fixed** Missing env vars requested through `@voidzero-dev/vite-task-client` now return `undefined` instead of `null`, preserving Vite production `NODE_ENV` semantics when builds run through `vp run` ([#508](https://github.com/voidzero-dev/vite-task/pull/508)).

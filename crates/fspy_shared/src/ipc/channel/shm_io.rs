@@ -672,6 +672,18 @@ mod tests {
 
         const SHM_SIZE: usize = 1024 * 1024;
 
+        // On Linux, `fspy_shm::create` spawns the mapping's broker onto the
+        // ambient tokio runtime, which serves the child processes' opens.
+        #[cfg(target_os = "linux")]
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_io()
+            .enable_time()
+            .build()
+            .unwrap();
+        #[cfg(target_os = "linux")]
+        let _guard = runtime.enter();
+
         let shm = fspy_shm::create(SHM_SIZE).unwrap();
         let shm_name = shm.id().to_owned();
 
