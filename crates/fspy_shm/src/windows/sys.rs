@@ -10,7 +10,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx,
 };
 use windows_sys::Win32::{
-    Foundation::{ERROR_ALREADY_EXISTS, ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, GetLastError},
+    Foundation::{ERROR_ALREADY_EXISTS, GetLastError},
     Storage::FileSystem::{
         FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE, FILE_SHARE_READ,
         FILE_SHARE_WRITE,
@@ -46,21 +46,7 @@ pub(super) fn set_sparse(file: &std::fs::File) -> io::Result<()> {
             std::ptr::null_mut(),
         )
     };
-    if result != 0 {
-        return Ok(());
-    }
-
-    let error = last_error();
-    if matches!(
-        error.raw_os_error(),
-        Some(code)
-            if code == ERROR_INVALID_FUNCTION.cast_signed()
-                || code == ERROR_NOT_SUPPORTED.cast_signed()
-    ) {
-        Ok(())
-    } else {
-        Err(error)
-    }
+    if result == 0 { Err(last_error()) } else { Ok(()) }
 }
 
 #[cfg(test)]
