@@ -1,6 +1,6 @@
 # macOS backend
 
-The macOS backend uses named POSIX shared memory. Another process opens the object by name, reads its current size from the descriptor, and maps the complete object. Pages are allocated as they are accessed, and dropping the owner removes the name. Fspy does not need a separate service to pass file descriptors between processes.
+The macOS backend uses named POSIX shared memory. Another process opens the same object by name. Pages are allocated as they are accessed, and dropping the owner removes the name. Fspy does not need a separate service to pass file descriptors between processes.
 
 ## Options considered
 
