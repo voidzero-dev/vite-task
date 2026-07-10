@@ -1,6 +1,6 @@
 # Windows backend
 
-The Windows backend maps a sparse temporary file and gives the mapping a Windows section name. Another process can open the same bytes using only that name. Creating the mapping does not reserve its full size in system commit or disk space.
+The Windows backend maps a sparse temporary file and gives the mapping a Windows section name. Another process opens the complete section using only that name and derives its length from the mapped view. Creating the mapping does not reserve its full size in system commit or disk space.
 
 ## Options considered
 

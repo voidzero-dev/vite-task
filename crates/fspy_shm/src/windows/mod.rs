@@ -53,8 +53,8 @@ pub fn create(size: usize) -> io::Result<Shm> {
         .open(backing_dir.join(format!("{id}.shm")))?;
     sys::set_sparse(&backing_file)?;
     backing_file.set_len(size_u64)?;
-    let mapping = sys::create_file_mapping(&backing_file, &mapping_name(&id, size))?;
-    let view = MappedView::new(mapping, size)?;
+    let mapping = sys::create_file_mapping(&backing_file, &mapping_name(&id))?;
+    let view = MappedView::new(mapping)?;
 
     Ok(Shm { id, view, backing_file: Some(backing_file) })
 }
@@ -64,15 +64,15 @@ pub fn create(size: usize) -> io::Result<Shm> {
 /// # Errors
 ///
 /// Returns an error if the mapping is unavailable.
-pub fn open(id: &str, size: usize) -> io::Result<Shm> {
-    let mapping = sys::open_file_mapping(&mapping_name(id, size))?;
-    let view = MappedView::new(mapping, size)?;
+pub fn open(id: &str) -> io::Result<Shm> {
+    let mapping = sys::open_file_mapping(&mapping_name(id))?;
+    let view = MappedView::new(mapping)?;
 
     Ok(Shm { id: id.to_owned(), view, backing_file: None })
 }
 
-fn mapping_name(id: &str, size: usize) -> String {
-    format!("{MAPPING_NAME_PREFIX}{id}-{size}")
+fn mapping_name(id: &str) -> String {
+    format!("{MAPPING_NAME_PREFIX}{id}")
 }
 
 #[expect(clippy::len_without_is_empty, reason = "shared-memory mappings are always non-empty")]
@@ -120,13 +120,6 @@ mod tests {
     const SIZE: usize = 64 * 1024;
 
     #[test]
-    fn size_mismatches_are_rejected() {
-        let owner = create(SIZE).unwrap();
-        assert!(open(owner.id(), SIZE / 2).is_err());
-        assert!(open(owner.id(), SIZE + 1).is_err());
-    }
-
-    #[test]
     fn subprocess_open_ignores_changed_temp_and_working_directory() {
         let owner = create(SIZE).unwrap();
         let changed_cwd =
@@ -136,7 +129,7 @@ mod tests {
         unsafe { owner.as_ptr().write(17) };
 
         let mut command = command_for_fn!(owner.id().to_owned(), |id: String| {
-            let opened = open(&id, SIZE).unwrap();
+            let opened = open(&id).unwrap();
             // SAFETY: The parent waits for this child and does not access the
             // mapping concurrently.
             unsafe {
@@ -160,7 +153,7 @@ mod tests {
         let owner = create(SIZE).unwrap();
         let id = owner.id().to_owned();
         let path = temp_dir().join(BACKING_DIR).join(format!("{id}.shm"));
-        let opened = open(&id, SIZE).unwrap();
+        let opened = open(&id).unwrap();
         assert!(path.exists());
 
         drop(owner);
@@ -170,10 +163,10 @@ mod tests {
         unsafe { opened.as_ptr().write(17) };
         // SAFETY: The preceding write is complete and the mapping remains live.
         assert_eq!(unsafe { opened.as_ptr().read() }, 17);
-        let reopened = open(&id, SIZE).unwrap();
+        let reopened = open(&id).unwrap();
         drop(opened);
         drop(reopened);
-        assert!(open(&id, SIZE).is_err());
+        assert!(open(&id).is_err());
     }
 
     #[cfg(target_pointer_width = "64")]
@@ -188,7 +181,7 @@ mod tests {
         assert_eq!(logical_size, PRODUCTION_SIZE as u64);
         assert!(initial_allocation < MAX_ENDPOINT_ALLOCATION);
 
-        let opened = open(owner.id(), PRODUCTION_SIZE).unwrap();
+        let opened = open(owner.id()).unwrap();
         // SAFETY: Both endpoint indexes are within the exact mapped length and
         // accesses are synchronized within this test.
         unsafe {

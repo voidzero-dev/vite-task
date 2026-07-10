@@ -19,8 +19,9 @@ use windows_sys::Win32::{
         IO::DeviceIoControl,
         Ioctl::FSCTL_SET_SPARSE,
         Memory::{
-            CreateFileMappingW, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
-            OpenFileMappingW, PAGE_READWRITE, UnmapViewOfFile,
+            CreateFileMappingW, FILE_MAP_WRITE, MEMORY_BASIC_INFORMATION,
+            MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, OpenFileMappingW, PAGE_READWRITE,
+            UnmapViewOfFile, VirtualQuery,
         },
     },
 };
@@ -125,12 +126,33 @@ pub(super) struct MappedView {
 }
 
 impl MappedView {
-    pub(super) fn new(mapping: OwnedHandle, len: usize) -> io::Result<Self> {
-        // SAFETY: `mapping` is a valid file-mapping handle. Offset zero and
-        // `len` describe the exact view retained by the returned guard.
+    pub(super) fn new(mapping: OwnedHandle) -> io::Result<Self> {
+        // SAFETY: `mapping` is a valid file-mapping handle. Offset and length
+        // zero map the complete section.
         let view =
-            unsafe { MapViewOfFile(mapping.as_raw_handle().cast(), FILE_MAP_WRITE, 0, 0, len) };
+            unsafe { MapViewOfFile(mapping.as_raw_handle().cast(), FILE_MAP_WRITE, 0, 0, 0) };
         let pointer = NonNull::new(view.Value.cast::<u8>()).ok_or_else(last_error)?;
+
+        let mut info = MEMORY_BASIC_INFORMATION::default();
+        // SAFETY: `pointer` is inside the mapped view and `info` is writable for
+        // its exact size.
+        let result = unsafe {
+            VirtualQuery(
+                pointer.as_ptr().cast(),
+                &raw mut info,
+                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+            )
+        };
+        if result == 0 {
+            let error = last_error();
+            // SAFETY: `pointer` is the base address returned by MapViewOfFile.
+            let _ = unsafe {
+                UnmapViewOfFile(MEMORY_MAPPED_VIEW_ADDRESS { Value: pointer.as_ptr().cast() })
+            };
+            return Err(error);
+        }
+
+        let len = info.RegionSize;
         Ok(Self { pointer, len, _mapping: mapping })
     }
 
