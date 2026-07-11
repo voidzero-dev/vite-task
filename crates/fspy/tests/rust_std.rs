@@ -2,7 +2,7 @@ mod test_utils;
 
 use std::{
     env::current_dir,
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     process::Stdio,
 };
 
@@ -31,6 +31,22 @@ async fn open_write() -> anyhow::Result<()> {
     })
     .await?;
     assert_contains(&accesses, tmp_path.as_path(), AccessMode::WRITE);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn metadata() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let tmp_path = tmp_dir.path().join("hello");
+    File::create(&tmp_path)?;
+    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
+        let _ = fs::metadata(tmp_path_str);
+    })
+    .await?;
+    assert_contains(&accesses, tmp_path.as_path(), AccessMode::READ);
 
     Ok(())
 }

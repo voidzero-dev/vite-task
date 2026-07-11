@@ -1,4 +1,4 @@
-//! Behavior-neutral shared-memory facade for fspy channels.
+#![doc = include_str!("../README.md")]
 
 use std::io;
 
@@ -9,7 +9,11 @@ pub struct Shm {
     inner: Shmem,
 }
 
-/// Creates a shared-memory mapping of `size` bytes.
+/// Creates a shared-memory mapping of `size` bytes and returns its owner.
+///
+/// Dropping the returned owner stops new [`open`] calls from being guaranteed
+/// to succeed, while views that are already open stay usable (see the
+/// [ownership semantics](crate)).
 ///
 /// # Errors
 ///
@@ -23,13 +27,17 @@ pub fn create(size: usize) -> io::Result<Shm> {
     Ok(Shm { inner })
 }
 
-/// Opens the shared-memory mapping identified by `id`.
+/// Opens a view of the shared-memory mapping identified by `id`.
+///
+/// Guaranteed to succeed only while the mapping's owner is alive; the
+/// returned view stays usable independently of the owner afterwards (see the
+/// [ownership semantics](crate)).
 ///
 /// # Errors
 ///
 /// Returns an error if the mapping does not exist or cannot be mapped.
-pub fn open(id: &str, size: usize) -> io::Result<Shm> {
-    let conf = ShmemConf::new().size(size).os_id(id);
+pub fn open(id: &str) -> io::Result<Shm> {
+    let conf = ShmemConf::new().os_id(id);
     #[cfg(target_os = "windows")]
     let conf = conf.allow_raw(true);
 
@@ -89,7 +97,7 @@ mod tests {
         // SAFETY: No writes occur while this slice is borrowed.
         assert!(unsafe { owner.as_slice() }.iter().all(|byte| *byte == 0));
 
-        let opened = open(owner.id(), SIZE).unwrap();
+        let opened = open(owner.id()).unwrap();
         assert_eq!(opened.id(), owner.id());
         assert_eq!(opened.len(), SIZE);
 
@@ -105,7 +113,7 @@ mod tests {
         write_byte(&owner, 0, 17);
 
         let command = command_for_fn!(owner.id().to_owned(), |id: String| {
-            let opened = open(&id, SIZE).unwrap();
+            let opened = open(&id).unwrap();
             assert_eq!(read_byte(&opened, 0), 17);
             write_byte(&opened, SIZE - 1, 29);
         });
@@ -119,20 +127,20 @@ mod tests {
         let id = owner.id().to_owned();
         drop(owner);
 
-        assert!(open(&id, SIZE).is_err());
+        assert!(open(&id).is_err());
     }
 
     #[test]
     fn opened_mapping_survives_owner_drop() {
         let owner = create(SIZE).unwrap();
         let id = owner.id().to_owned();
-        let opened = open(&id, SIZE).unwrap();
+        let opened = open(&id).unwrap();
         write_byte(&owner, 0, 17);
         drop(owner);
 
         // Windows keeps the named object alive while an opened view exists.
         #[cfg(not(target_os = "windows"))]
-        assert!(open(&id, SIZE).is_err());
+        assert!(open(&id).is_err());
         assert_eq!(read_byte(&opened, 0), 17);
         write_byte(&opened, SIZE - 1, 29);
         assert_eq!(read_byte(&opened, SIZE - 1), 29);

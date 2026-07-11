@@ -680,7 +680,7 @@ mod tests {
                 let cmd = command_for_fn!(
                     (shm_name.clone(), child_index),
                     |(shm_name, child_index): (String, usize)| {
-                        let shm = fspy_shm::open(&shm_name, SHM_SIZE).unwrap();
+                        let shm = fspy_shm::open(&shm_name).unwrap();
                         // SAFETY: `shm` is a freshly opened shared memory region with a valid
                         // pointer and size. Concurrent write access is safe because `ShmWriter`
                         // uses atomic operations.

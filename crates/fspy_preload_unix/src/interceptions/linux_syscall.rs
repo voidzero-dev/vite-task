@@ -2,7 +2,10 @@ use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int, c_long};
 
 use crate::{
-    client::{convert::PathAt, handle_open},
+    client::{
+        convert::{Fd, PathAt},
+        handle_open,
+    },
     macros::intercept,
 };
 
@@ -23,16 +26,26 @@ unsafe extern "C" fn syscall(syscall_no: c_long, mut args: ...) -> c_long {
     let a5 = unsafe { args.next_arg::<c_long>() };
 
     if syscall_no == libc::SYS_statx {
-        // c-style conversion is expected: (4294967196 -> -100 aka libc::AT_FDCWD)
+        // C-style conversions are expected for the variadic syscall arguments.
         #[expect(
             clippy::cast_possible_truncation,
-            reason = "c-style conversion is expected: (4294967196 -> -100 aka libc::AT_FDCWD)"
+            reason = "C-style conversion from c_long syscall arguments to c_int"
         )]
         let dirfd = a0 as c_int;
         let pathname = a1 as *const c_char;
-        // SAFETY: pathname is a valid pointer to a null-terminated C string provided via the syscall arguments
-        unsafe {
-            handle_open(PathAt(dirfd, pathname), AccessMode::READ);
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "C-style conversion from c_long syscall arguments to c_int"
+        )]
+        let flags = a2 as c_int;
+        if pathname.is_null() {
+            if flags & libc::AT_EMPTY_PATH != 0 {
+                // SAFETY: dirfd is provided by the statx syscall caller.
+                unsafe { handle_open(Fd(dirfd), AccessMode::READ) };
+            }
+        } else {
+            // SAFETY: pathname is a non-null C string pointer provided by the statx syscall caller.
+            unsafe { handle_open(PathAt(dirfd, pathname), AccessMode::READ) };
         }
     }
     // SAFETY: forwarding the syscall to the original libc syscall function with the extracted arguments

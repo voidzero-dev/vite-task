@@ -31,6 +31,9 @@ vite_str = { workspace = true }
 vite_task = { workspace = true }
 which = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true, features = ["mount", "sched", "user"] }
+
 [dev-dependencies]
 cow-utils = { workspace = true }
 cp_r = { workspace = true }
