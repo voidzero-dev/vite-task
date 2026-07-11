@@ -10,7 +10,7 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 
 | API               | Contract                                                                           |
 | ----------------- | ---------------------------------------------------------------------------------- |
-| `create(size)`    | Creates a non-empty mapping and returns its unique owner.                          |
+| `create(size)`    | Creates a non-empty, zero-initialized mapping and returns its unique owner.        |
 | `open(id)`        | Opens another view of the mapping identified by `id`.                              |
 | `Shm::id()`       | Returns the identifier to send to another process.                                 |
 | `Shm::len()`      | Returns the mapped size.                                                           |
@@ -18,6 +18,8 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 | `Shm::as_slice()` | Returns a shared slice. The caller must prevent mutation for the slice's lifetime. |
 
 `Shm` does not synchronize memory access. The fspy channel combines it with atomic frame headers and a lock file. Senders hold a shared file lock while writing. The receiver takes the exclusive lock before reading, which waits for existing senders and rejects new ones.
+
+Every byte in a mapping returned by `create` is initially zero. `open` exposes the mapping's current contents and does not reinitialize them.
 
 ## Ownership semantics
 

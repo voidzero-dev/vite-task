@@ -22,14 +22,23 @@ mod tests {
 
     // Page-aligned on all supported targets.
     const SIZE: usize = 64 * 1024;
+    // Use one byte more than 64 KiB to test multiple pages and a partial last page.
+    const ZERO_INITIALIZED_SIZE: usize = SIZE + 1;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn new_mapping_is_zero_initialized_in_all_views() {
+        let owner = create(ZERO_INITIALIZED_SIZE).unwrap();
+        let opened = open(owner.id()).unwrap();
+
+        assert_zero_initialized(&owner);
+        assert_zero_initialized(&opened);
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn create_and_open_are_shared() {
         let owner = create(SIZE).unwrap();
         assert_eq!(owner.len(), SIZE);
         assert_eq!(owner.as_ptr() as usize % align_of::<usize>(), 0);
-        // SAFETY: No writes occur while this slice is borrowed.
-        assert!(unsafe { owner.as_slice() }.iter().all(|byte| *byte == 0));
 
         let opened = open(owner.id()).unwrap();
         assert_eq!(opened.id(), owner.id());
@@ -88,6 +97,12 @@ mod tests {
         assert!(index < shm.len());
         // SAFETY: The index is in bounds and tests synchronize all accesses.
         unsafe { shm.as_ptr().add(index).read() }
+    }
+
+    fn assert_zero_initialized(shm: &Shm) {
+        assert!(shm.len() >= ZERO_INITIALIZED_SIZE);
+        // SAFETY: No writes occur while this slice is borrowed.
+        assert!(unsafe { shm.as_slice() }.iter().all(|byte| *byte == 0));
     }
 
     fn write_byte(shm: &Shm, index: usize, value: u8) {

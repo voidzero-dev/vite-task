@@ -24,8 +24,8 @@ pub struct Shm {
     owner: bool,
 }
 
-/// Creates a POSIX shared-memory mapping of `size` bytes and returns its
-/// owner.
+/// Creates a zero-initialized POSIX shared-memory mapping of `size` bytes and
+/// returns its owner.
 ///
 /// # Errors
 ///

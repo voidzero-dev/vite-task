@@ -24,8 +24,8 @@ pub struct Shm {
     backing_file: Option<File>,
 }
 
-/// Creates a sparse, temporary file-backed named mapping of `size` bytes and
-/// returns its owner.
+/// Creates a zero-initialized, sparse, temporary file-backed named mapping of
+/// `size` bytes and returns its owner.
 ///
 /// # Errors
 ///

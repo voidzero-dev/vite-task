@@ -17,7 +17,8 @@ pub struct Shm {
     _service: Option<DropGuard>,
 }
 
-/// Creates a sealed memfd mapping of `size` bytes and returns its owner.
+/// Creates a zero-initialized sealed memfd mapping of `size` bytes and returns
+/// its owner.
 ///
 /// The memfd is handed out to other processes by a broker task spawned onto
 /// the ambient tokio runtime. The broker stops on its own when the owner is
