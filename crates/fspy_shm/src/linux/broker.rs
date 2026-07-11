@@ -12,7 +12,11 @@ use std::{
 use passfd::{FdPassingExt as SyncFdPassingExt, tokio::FdPassingExt as AsyncFdPassingExt};
 use rustix::{
     io::Errno,
-    net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with},
+    net::{
+        AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with,
+        sockopt::socket_peercred,
+    },
+    process::{Uid, geteuid},
 };
 use tokio::{net::UnixListener, task::JoinSet};
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -36,11 +40,16 @@ pub(super) fn new(
     let listener = UnixListener::bind(OsStr::from_bytes(&address))?;
 
     let stop = CancellationToken::new();
-    let service = run_broker(listener, memfd, stop.clone());
+    let service = run_broker(listener, memfd, geteuid(), stop.clone());
     Ok((id, service, stop.drop_guard()))
 }
 
-async fn run_broker(listener: UnixListener, memfd: OwnedFd, stop: CancellationToken) {
+async fn run_broker(
+    listener: UnixListener,
+    memfd: OwnedFd,
+    owner_uid: Uid,
+    stop: CancellationToken,
+) {
     let memfd = Arc::new(memfd);
     let mut sends = JoinSet::new();
     loop {
@@ -50,6 +59,22 @@ async fn run_broker(listener: UnixListener, memfd: OwnedFd, stop: CancellationTo
             _result = sends.join_next(), if !sends.is_empty() => {}
             client = listener.accept() => match client {
                 Ok((client, _address)) => {
+                    // Abstract sockets have no filesystem permissions, so authenticate the
+                    // connecting process with the kernel-provided SO_PEERCRED credentials:
+                    // https://man7.org/linux/man-pages/man7/unix.7.html
+                    // D-Bus prefers the same mechanism because it requires no peer cooperation:
+                    // https://dbus.freedesktop.org/doc/api/html/dbus-sysdeps-unix_8c_source.html#l02296
+                    let credentials = match socket_peercred(&client) {
+                        Ok(credentials) => credentials,
+                        Err(error) => {
+                            debug!("shared-memory broker failed to read peer credentials: {error}");
+                            continue;
+                        }
+                    };
+                    if credentials.uid != owner_uid {
+                        debug!("shared-memory broker rejected a client owned by another user");
+                        continue;
+                    }
                     let memfd = Arc::clone(&memfd);
                     sends.spawn(async move {
                         if let Err(error) =

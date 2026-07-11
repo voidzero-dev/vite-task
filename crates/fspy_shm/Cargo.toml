@@ -13,7 +13,7 @@ shared_memory = { workspace = true, features = ["logging"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 memmap2 = { workspace = true }
 passfd = { workspace = true, features = ["async"] }
-rustix = { workspace = true, features = ["fs", "net"] }
+rustix = { workspace = true, features = ["fs", "net", "process"] }
 tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
