@@ -67,7 +67,7 @@ The test suite has no known pre-existing failures or flaky tests. If a test fail
 
 ### Cross-Platform Testing
 
-**CRITICAL**: This project must work on both Unix (macOS/Linux) and Windows. Skipping tests on either platform is **UNACCEPTABLE**.
+**CRITICAL**: This project must work on both Unix (macOS/Linux) and Windows. Skipping tests on either platform is **UNACCEPTABLE**, except on musl targets when an essential dependency or required platform capability is unavailable. Document the unavailable requirement and keep the skip scoped to musl.
 
 - Use `#[cfg(unix)]` and `#[cfg(windows)]` for platform-specific code within tests
 - Both platforms must execute the test and verify the feature works correctly
@@ -146,7 +146,7 @@ Enforced by `.clippy.toml`:
 
 ### Cross-Platform Requirements
 
-All code must work on both Unix and Windows without platform skipping:
+All code must work on both Unix and Windows without platform skipping. The only exception is for tests on musl targets when an essential dependency or required platform capability is unavailable; document the reason and scope the skip to musl.
 
 - Use `#[cfg(unix)]` / `#[cfg(windows)]` for platform-specific implementations
 - Platform differences should be handled gracefully, not skipped

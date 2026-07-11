@@ -78,7 +78,7 @@ See `playground/README.md` for the full task list and dependency structure.
 
 ## Cross-Platform Development
 
-This project must work on macOS, Linux, and Windows. Skipping tests on any platform is not acceptable.
+This project must work on macOS, Linux, and Windows. Skipping tests on any platform is not acceptable, except on musl targets when an essential dependency or required platform capability is unavailable. Document the unavailable requirement and keep the skip scoped to musl.
 
 - Use `#[cfg(unix)]` / `#[cfg(windows)]` for platform-specific code
 - Use cross-platform libraries where possible (e.g., `terminal_size` instead of raw ioctl/ConPTY)
