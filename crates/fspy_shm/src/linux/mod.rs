@@ -2,10 +2,11 @@
 
 mod broker;
 
-use std::{io, slice};
+use std::{io, os::fd::OwnedFd, slice};
 
+use memfd::{FileSeal, MemfdOptions};
 use memmap2::{MmapOptions, MmapRaw};
-use rustix::fs::{MemfdFlags, SealFlags, fcntl_add_seals, fstat, ftruncate, memfd_create};
+use nix::sys::stat::fstat;
 use tokio_util::sync::DropGuard;
 
 /// An owned Linux shared-memory mapping.
@@ -33,13 +34,19 @@ pub fn create(size: usize) -> io::Result<Shm> {
     let size_u64 = valid_size(size)?;
     // Prevent the descriptor from leaking across exec while permitting the
     // size and seal set to be locked after initialization.
-    let memfd =
-        memfd_create("vite-task-shared-memory", MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING)?;
-    ftruncate(&memfd, size_u64)?;
+    let memfd = MemfdOptions::new()
+        .allow_sealing(true)
+        .close_on_exec(true)
+        .create("vite-task-shared-memory")
+        .map_err(memfd_error)?;
+    memfd.as_file().set_len(size_u64)?;
     // Keep the initialized size fixed and prevent removal of these seals;
     // writes through the shared mapping remain allowed.
-    fcntl_add_seals(&memfd, SealFlags::GROW | SealFlags::SHRINK | SealFlags::SEAL)?;
-    let mapping = MmapOptions::new().len(size).map_raw(&memfd)?;
+    memfd
+        .add_seals(&[FileSeal::SealGrow, FileSeal::SealShrink, FileSeal::SealSeal])
+        .map_err(memfd_error)?;
+    let mapping = MmapOptions::new().len(size).map_raw(memfd.as_file())?;
+    let memfd: OwnedFd = memfd.into_file().into();
     let (id, service, guard) = broker::new(memfd)?;
     runtime.spawn(service);
 
@@ -77,6 +84,14 @@ fn valid_size(size: usize) -> io::Result<u64> {
     }
     u64::try_from(size)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64"))
+}
+
+fn memfd_error(error: memfd::Error) -> io::Error {
+    match error {
+        memfd::Error::Create(error)
+        | memfd::Error::AddSeals(error)
+        | memfd::Error::GetSeals(error) => error,
+    }
 }
 
 #[expect(clippy::len_without_is_empty, reason = "shared-memory mappings are always non-empty")]

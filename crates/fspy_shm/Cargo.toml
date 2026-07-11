@@ -9,8 +9,9 @@ rust-version.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 memmap2 = { workspace = true }
+memfd = { workspace = true }
 passfd = { workspace = true, features = ["async"] }
-rustix = { workspace = true, features = ["fs", "net", "process"] }
+nix = { workspace = true, features = ["fs", "socket", "user"] }
 tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
@@ -19,7 +20,7 @@ uuid = { workspace = true, features = ["v4"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 base64 = { workspace = true }
 memmap2 = { workspace = true }
-rustix = { workspace = true, features = ["fs", "shm"] }
+nix = { workspace = true, features = ["fs", "mman"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

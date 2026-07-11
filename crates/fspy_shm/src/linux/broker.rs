@@ -9,15 +9,14 @@ use std::{
     sync::Arc,
 };
 
-use passfd::{FdPassingExt as SyncFdPassingExt, tokio::FdPassingExt as AsyncFdPassingExt};
-use rustix::{
-    io::Errno,
-    net::{
-        AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with,
-        sockopt::socket_peercred,
+use nix::{
+    sys::socket::{
+        AddressFamily, SockFlag, SockType, UnixAddr, connect, getsockopt, socket,
+        sockopt::PeerCredentials,
     },
-    process::{Uid, geteuid},
+    unistd::{Uid, geteuid},
 };
+use passfd::{FdPassingExt as SyncFdPassingExt, tokio::FdPassingExt as AsyncFdPassingExt};
 use tokio::{net::UnixListener, task::JoinSet};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{debug, warn};
@@ -64,14 +63,14 @@ async fn run_broker(
                     // https://man7.org/linux/man-pages/man7/unix.7.html
                     // D-Bus prefers the same mechanism because it requires no peer cooperation:
                     // https://gitlab.freedesktop.org/dbus/dbus/-/blob/958bf9db2100553bcd2fe2a854e1ebb42e886054/dbus/dbus-sysdeps-unix.c#L2296-2303
-                    let credentials = match socket_peercred(&client) {
+                    let credentials = match getsockopt(&client, PeerCredentials) {
                         Ok(credentials) => credentials,
                         Err(error) => {
                             debug!("shared-memory broker failed to read peer credentials: {error}");
                             continue;
                         }
                     };
-                    if credentials.uid != owner_uid {
+                    if credentials.uid() != owner_uid.as_raw() {
                         debug!("shared-memory broker rejected a client owned by another user");
                         continue;
                     }
@@ -93,15 +92,14 @@ async fn run_broker(
     }
 }
 
-pub(super) fn request_memfd(id: &str) -> rustix::io::Result<OwnedFd> {
+pub(super) fn request_memfd(id: &str) -> io::Result<OwnedFd> {
     // Prevent the broker connection from leaking into later execs.
-    let socket = socket_with(AddressFamily::UNIX, SocketType::STREAM, SocketFlags::CLOEXEC, None)?;
-    let address = SocketAddrUnix::new_abstract_name(id.as_bytes())?;
-    connect(&socket, &address)?;
+    let socket = socket(AddressFamily::Unix, SockType::Stream, SockFlag::SOCK_CLOEXEC, None)?;
+    let address = UnixAddr::new_abstract(id.as_bytes())?;
+    connect(socket.as_raw_fd(), &address)?;
     // `SCM_RIGHTS` does not preserve descriptor flags; `passfd` sets
     // `FD_CLOEXEC` on the received descriptor before returning it.
-    let descriptor = SyncFdPassingExt::recv_fd(&socket.as_raw_fd())
-        .map_err(|error| Errno::from_io_error(&error).unwrap_or(Errno::IO))?;
+    let descriptor = SyncFdPassingExt::recv_fd(&socket.as_raw_fd())?;
     // SAFETY: passfd returns a newly received descriptor owned by the caller.
     Ok(unsafe { OwnedFd::from_raw_fd(descriptor) })
 }
@@ -110,10 +108,8 @@ pub(super) fn request_memfd(id: &str) -> rustix::io::Result<OwnedFd> {
 mod tests {
     use std::{io, process::Command};
 
-    use rustix::{
-        fs::{SealFlags, fcntl_get_seals},
-        io::{FdFlags, fcntl_getfd},
-    };
+    use memfd::MemfdOptions;
+    use nix::fcntl::{FcntlArg, FdFlag, SealFlag, fcntl};
     use subprocess_test::command_for_fn;
 
     use super::*;
@@ -152,9 +148,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn broker_stops_when_guard_drops() {
-        let memfd = rustix::fs::memfd_create("shared-memory-test", rustix::fs::MemfdFlags::CLOEXEC)
-            .map_err(io::Error::from)
-            .unwrap();
+        let memfd: OwnedFd = MemfdOptions::new()
+            .close_on_exec(true)
+            .create("shared-memory-test")
+            .unwrap()
+            .into_file()
+            .into();
         let (_id, service, guard) = new(memfd).unwrap();
         let broker = tokio::spawn(service);
         tokio::task::yield_now().await;
@@ -172,10 +171,13 @@ mod tests {
         let owner = crate::create(4096).unwrap();
         let id = owner.id().to_owned();
         let descriptor = request_memfd_blocking(id).await.unwrap();
-        assert!(fcntl_getfd(&descriptor).unwrap().contains(FdFlags::CLOEXEC));
+        assert!(
+            FdFlag::from_bits_retain(fcntl(&descriptor, FcntlArg::F_GETFD).unwrap())
+                .contains(FdFlag::FD_CLOEXEC)
+        );
         assert_eq!(
-            fcntl_get_seals(&descriptor).unwrap(),
-            SealFlags::GROW | SealFlags::SHRINK | SealFlags::SEAL
+            SealFlag::from_bits_retain(fcntl(&descriptor, FcntlArg::F_GET_SEALS).unwrap()),
+            SealFlag::F_SEAL_GROW | SealFlag::F_SEAL_SHRINK | SealFlag::F_SEAL_SEAL
         );
     }
 
@@ -223,7 +225,7 @@ mod tests {
         assert!(open_blocking(id).await.is_ok());
     }
 
-    async fn request_memfd_blocking(id: String) -> rustix::io::Result<OwnedFd> {
+    async fn request_memfd_blocking(id: String) -> io::Result<OwnedFd> {
         tokio::task::spawn_blocking(move || request_memfd(&id)).await.unwrap()
     }
 

@@ -1,13 +1,17 @@
 #![doc = include_str!("README.md")]
 
-use std::{io, slice};
+use std::{io, os::fd::AsFd, slice};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use memmap2::{MmapOptions, MmapRaw};
-use rustix::{
-    fs::{Mode, fstat, ftruncate},
-    io::Errno,
-    shm::{self, OFlags},
+use nix::{
+    errno::Errno,
+    fcntl::{FcntlArg, FdFlag, OFlag, fcntl},
+    sys::{
+        mman::{shm_open, shm_unlink},
+        stat::{Mode, fstat},
+    },
+    unistd::ftruncate,
 };
 use uuid::Uuid;
 
@@ -33,31 +37,34 @@ pub fn create(size: usize) -> io::Result<Shm> {
             "shared-memory size must be nonzero",
         ));
     }
-    let size_u64 = u64::try_from(size).map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64")
+    let size_i64 = i64::try_from(size).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds supported range")
     })?;
 
     loop {
         let id = new_id();
-        // `rustix::shm::open` sets `FD_CLOEXEC` on the returned descriptor.
-        let fd = match shm::open(
+        let fd = match shm_open(
             id.as_str(),
-            OFlags::CREATE | OFlags::EXCL | OFlags::RDWR,
-            Mode::RUSR | Mode::WUSR,
+            OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_RDWR,
+            Mode::S_IRUSR | Mode::S_IWUSR,
         ) {
             Ok(fd) => fd,
-            Err(Errno::EXIST) => continue,
+            Err(Errno::EEXIST) => continue,
             Err(error) => return Err(error.into()),
         };
 
-        if let Err(error) = ftruncate(&fd, size_u64) {
-            let _ = shm::unlink(id.as_str());
+        if let Err(error) = ensure_cloexec(&fd) {
+            let _ = shm_unlink(id.as_str());
+            return Err(error.into());
+        }
+        if let Err(error) = ftruncate(&fd, size_i64) {
+            let _ = shm_unlink(id.as_str());
             return Err(error.into());
         }
         let mapping = match MmapOptions::new().len(size).map_raw(&fd) {
             Ok(mapping) => mapping,
             Err(error) => {
-                let _ = shm::unlink(id.as_str());
+                let _ = shm_unlink(id.as_str());
                 return Err(error);
             }
         };
@@ -72,8 +79,8 @@ pub fn create(size: usize) -> io::Result<Shm> {
 ///
 /// Returns an error if the mapping is unavailable.
 pub fn open(id: &str) -> io::Result<Shm> {
-    // `rustix::shm::open` sets `FD_CLOEXEC` on the returned descriptor.
-    let fd = shm::open(id, OFlags::RDWR, Mode::empty()).map_err(io::Error::from)?;
+    let fd = shm_open(id, OFlag::O_RDWR, Mode::empty())?;
+    ensure_cloexec(&fd)?;
     // If another process shrinks the object before `mmap`, `mmap` returns an
     // error. If it resizes the object after `mmap`, `open` does not access the
     // mapped pages. A concurrent resize cannot make `open` access invalid memory.
@@ -92,10 +99,19 @@ fn new_id() -> String {
     format!("{NAME_PREFIX}{}", URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()))
 }
 
+// macOS rejects O_CLOEXEC for shm_open, so preserve the descriptor guarantee via fcntl.
+fn ensure_cloexec<Fd: AsFd>(fd: &Fd) -> nix::Result<()> {
+    let flags = FdFlag::from_bits_retain(fcntl(fd, FcntlArg::F_GETFD)?);
+    if !flags.contains(FdFlag::FD_CLOEXEC) {
+        fcntl(fd, FcntlArg::F_SETFD(flags | FdFlag::FD_CLOEXEC))?;
+    }
+    Ok(())
+}
+
 impl Drop for Shm {
     fn drop(&mut self) {
         if self.owner {
-            let _ = shm::unlink(self.id.as_str());
+            let _ = shm_unlink(self.id.as_str());
         }
     }
 }
