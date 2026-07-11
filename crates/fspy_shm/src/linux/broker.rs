@@ -63,7 +63,7 @@ async fn run_broker(
                     // connecting process with the kernel-provided SO_PEERCRED credentials:
                     // https://man7.org/linux/man-pages/man7/unix.7.html
                     // D-Bus prefers the same mechanism because it requires no peer cooperation:
-                    // https://dbus.freedesktop.org/doc/api/html/dbus-sysdeps-unix_8c_source.html#l02296
+                    // https://gitlab.freedesktop.org/dbus/dbus/-/blob/958bf9db2100553bcd2fe2a854e1ebb42e886054/dbus/dbus-sysdeps-unix.c#L2296-2303
                     let credentials = match socket_peercred(&client) {
                         Ok(credentials) => credentials,
                         Err(error) => {
