@@ -1,0 +1,57 @@
+[[e2e]]
+name = "vitest_browser_caches_inputs_and_restores_outputs"
+comment = """
+Vitest browser mode runs in headless Chromium with explicit automatic input and output tracking. A source change must invalidate the cache, while an unchanged run must restore the browser command's generated output without rerunning Vitest. Playwright's bundled Chromium is unavailable on musl, so this browser-specific case is skipped only there.
+"""
+platform = "non-musl"
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "test",
+  ], comment = "first browser run: cache miss writes dist/result.json" },
+  { argv = [
+    "vtt",
+    "grep-file",
+    "dist/result.json",
+    "hello browser alpha",
+  ], comment = "Vitest's JSON report contains the initial imported value" },
+  { argv = [
+    "vtt",
+    "rm",
+    "dist/result.json",
+  ], comment = "remove the generated output so restoration is observable" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "test",
+  ], comment = "unchanged inputs: cache hit restores dist/result.json" },
+  { argv = [
+    "vtt",
+    "grep-file",
+    "dist/result.json",
+    "hello browser alpha",
+  ], comment = "the automatic output archive restored Vitest's report" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "src/greeting.js",
+    "hello browser alpha",
+    "hello browser bravo",
+  ], comment = "modify a module loaded by the browser" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "test",
+  ], comment = "automatic input changed: cache miss reruns the browser test" },
+  { argv = [
+    "vtt",
+    "grep-file",
+    "dist/result.json",
+    "hello browser bravo",
+  ], comment = "the rerun's JSON report contains the modified imported value" },
+]

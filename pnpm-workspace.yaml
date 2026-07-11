@@ -3,21 +3,30 @@ packages:
   - packages/tools
   - packages/vite-task-client
 
+allowBuilds:
+  '@playwright/browser-chromium': true
+
 catalog:
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
+  '@playwright/browser-chromium': 1.52.0
+  '@vitest/browser-playwright': 4.1.10
   cross-env: ^10.1.0
   husky: ^9.1.7
   lint-staged: ^17.0.0
   oxfmt: 0.57.0
   oxlint: ^1.55.0
   oxlint-tsgolint: ^0.24.0
+  # Playwright 1.52 pins the browser package to Chromium 136.
+  playwright: 1.52.0
   typescript: ^6.0.3
   vite: npm:@voidzero-dev/vite-plus-core@0.2.2
   vite-plus: 0.2.4
+  vitest: 4.1.10
 
 catalogMode: prefer
 overrides:
+  playwright: 1.52.0
   vite: 'catalog:'
   # The e2e harness symlinks packages/tools' `vite` binary into fixtures to
   # exercise the real vite-task-client integration. The global `vite: catalog:`

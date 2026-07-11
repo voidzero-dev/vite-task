@@ -4,7 +4,7 @@
 
 - [Rust](https://rustup.rs/) (see [rust-toolchain.toml](rust-toolchain.toml) for the required version)
 - [Node.js](https://nodejs.org/) (^20.19.0 || >=22.12.0)
-- [pnpm](https://pnpm.io/) (10.x)
+- [pnpm](https://pnpm.io/) (11.x)
 - [just](https://just.systems/) — task runner for build commands
 - [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) — for installing Rust tools
 
@@ -51,12 +51,13 @@ UPDATE_SNAPSHOTS=1 cargo test                           # Update snapshots
 Integration tests that need Node.js or the `packages/tools` binaries (e.g. `oxlint`) are marked `#[ignore]` — and `[[e2e]]` cases in e2e snapshots.toml can opt in with `ignore = true`. Default `cargo test` runs only the tests that need nothing beyond the Rust toolchain; to run the rest:
 
 ```bash
-pnpm install                           # at the workspace root (installs packages/tools too)
+pnpm install                           # at the workspace root (installs packages/tools and Chromium too)
 cargo test -- --include-ignored        # run everything
 cargo test -- --ignored                # run only the previously-ignored tests
 ```
 
 You don't need `pnpm install` in test fixture directories.
+Playwright's bundled Chromium is unavailable on musl, so the Vitest browser fixture is skipped there.
 
 ### Test Fixtures
 
