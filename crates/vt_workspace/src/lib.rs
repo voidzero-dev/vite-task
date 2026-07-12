@@ -13,7 +13,10 @@ use vec1::smallvec_v1::SmallVec1;
 use vt_glob::path::PathGlobSet;
 use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vt_str::Str;
-use wax::{Glob, walk::Entry as _};
+use wax::{
+    Glob,
+    walk::{Entry as _, FileIterator as _},
+};
 
 pub use crate::{
     error::Error,
@@ -134,7 +137,9 @@ impl WorkspaceMemberGlobs {
         // TODO: parallelize this
         for inclusion in inclusions {
             let glob = Glob::new(&inclusion)?;
-            for entry in glob.walk(workspace_root.as_path().to_path_buf()) {
+            for entry in
+                glob.walk(workspace_root.as_path().to_path_buf()).not("**/node_modules/**")?
+            {
                 let Ok(entry) = entry else {
                     continue;
                 };
@@ -592,6 +597,30 @@ mod tests {
         }
         assert!(found_included, "Should have found included package");
         assert!(!found_excluded, "Should not have found excluded package");
+    }
+
+    #[test]
+    fn test_get_package_graph_workspace_ignores_node_modules() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+        fs::write(
+            temp_dir_path.join("package.json"),
+            r#"{"name":"root","workspaces":["samples/**"]}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(temp_dir_path.join("samples/app/node_modules/dependency")).unwrap();
+        fs::write(temp_dir_path.join("samples/app/package.json"), r#"{"name":"app"}"#).unwrap();
+        fs::write(
+            temp_dir_path.join("samples/app/node_modules/dependency/package.json"),
+            r#"{"name":"dependency"}"#,
+        )
+        .unwrap();
+
+        let graph = discover_package_graph(temp_dir_path).unwrap();
+        let package_names: HashSet<_> =
+            graph.node_weights().map(|package| package.package_json.name.as_str()).collect();
+
+        assert_eq!(package_names, HashSet::from_iter(["root", "app"]));
     }
 
     #[test]
