@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "test": {
+      "command": "vitest run",
+      "cache": true,
+      "input": [{ "auto": true }],
+      // TODO: Add @voidzero-dev/vite-task-client and have Vitest report this path as ignored.
+      "output": [{ "auto": true }, "!node_modules/.vite/vitest/**"],
+      "untrackedEnv": ["PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"]
+    }
+  }
+}

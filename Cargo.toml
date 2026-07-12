@@ -87,6 +87,7 @@ jsonc-parser = { version = "0.32.0", features = ["serde"] }
 libc = "0.2.185"
 libtest-mimic = "0.8.2"
 memmap2 = "0.9.11"
+memfd = "0.6.5"
 monostate = "1.0.2"
 napi = "3"
 napi-build = "2"
@@ -122,7 +123,6 @@ serde = "1.0.219"
 serde_json = "1.0.140"
 serde_norway = "0.9.42"
 sha2 = "0.11.0"
-shared_memory = "0.12.4"
 shell-escape = "0.1.5"
 similar = "3.0.0"
 smallvec = { version = "2.0.0-alpha.12", features = ["std"] }
@@ -167,6 +167,7 @@ wax = "0.7.0"
 which = "8.0.0"
 widestring = "1.2.0"
 winapi = "0.3.9"
+windows-sys = "0.61"
 winsafe = { version = "0.0.27", features = ["kernel"] }
 xxhash-rust = { version = "0.8.15", features = ["const_xxh3"] }
 ntest = "0.9.5"

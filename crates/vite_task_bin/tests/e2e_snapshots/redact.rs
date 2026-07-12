@@ -45,6 +45,10 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
         use cow_utils::CowUtils as _;
         workspace_root_stripped.cow_replace('\\', r"\\").into_owned()
     };
+    let workspace_root_forward_slashes = {
+        use cow_utils::CowUtils as _;
+        workspace_root_stripped.cow_replace('\\', "/").into_owned()
+    };
 
     let mut redactions: Vec<(&str, &str)> = vec![
         (workspace_root, "<workspace>"),
@@ -60,6 +64,9 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
         && workspace_root_stripped_escaped != workspace_root_full_escaped
     {
         redactions.insert(1, (&workspace_root_stripped_escaped, "<workspace>"));
+    }
+    if workspace_root_forward_slashes != workspace_root_stripped {
+        redactions.push((&workspace_root_forward_slashes, "<workspace>"));
     }
 
     redact_string(&mut output, &redactions);

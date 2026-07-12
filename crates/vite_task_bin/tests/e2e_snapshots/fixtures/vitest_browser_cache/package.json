@@ -1,0 +1,5 @@
+{
+  "name": "vitest-browser-cache-fixture",
+  "private": true,
+  "type": "module"
+}

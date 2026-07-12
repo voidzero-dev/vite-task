@@ -10,7 +10,7 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 
 | API               | Contract                                                                           |
 | ----------------- | ---------------------------------------------------------------------------------- |
-| `create(size)`    | Creates a non-empty mapping and returns its unique owner.                          |
+| `create(size)`    | Creates a non-empty, zero-initialized mapping and returns its unique owner.        |
 | `open(id)`        | Opens another view of the mapping identified by `id`.                              |
 | `Shm::id()`       | Returns the identifier to send to another process.                                 |
 | `Shm::len()`      | Returns the mapped size.                                                           |
@@ -18,6 +18,8 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 | `Shm::as_slice()` | Returns a shared slice. The caller must prevent mutation for the slice's lifetime. |
 
 `Shm` does not synchronize memory access. The fspy channel combines it with atomic frame headers and a lock file. Senders hold a shared file lock while writing. The receiver takes the exclusive lock before reading, which waits for existing senders and rejects new ones.
+
+Every byte in a mapping returned by `create` is initially zero. `open` exposes the mapping's current contents and does not reinitialize them.
 
 ## Ownership semantics
 
@@ -29,6 +31,12 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 
 The channel hides that difference with its lock file. [`ChannelConf::sender`](../fspy_shared/src/ipc/channel/mod.rs) opens and locks the receiver's exact lock-file path before it calls `fspy_shm::open`. The receiver removes that path before dropping the owner, so a sender that starts later fails before opening shared memory.
 
-## Backend boundary
+## Platform designs
 
-At this point in the stack, `fspy_shm` delegates mapping creation and opening to the [`shared_memory`](https://crates.io/crates/shared_memory) crate. Because callers use only the API above, later changes can replace the backend on each platform without changing the channel protocol.
+Each platform keeps its implementation rationale beside its source:
+
+- [Linux: `memfd` with a descriptor broker](src/linux/README.md)
+- [macOS: named POSIX shared memory](src/macos/README.md)
+- [Windows: sparse file-backed named mapping](src/windows/README.md)
+
+All implementations provide the API above. Their identifiers and operating system objects differ. Each platform README explains the chosen API and why the previous `shared_memory` backend did not meet its requirements.

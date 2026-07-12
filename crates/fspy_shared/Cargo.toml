@@ -27,6 +27,7 @@ assert2 = { workspace = true }
 ctor = { workspace = true }
 rustc-hash = { workspace = true }
 subprocess_test = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

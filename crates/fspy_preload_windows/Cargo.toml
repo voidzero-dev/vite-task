@@ -23,6 +23,7 @@ winapi = { workspace = true, features = [
   "memoryapi",
   "std",
 ] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Shell"] }
 winsafe = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]

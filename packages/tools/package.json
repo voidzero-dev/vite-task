@@ -3,11 +3,15 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@playwright/browser-chromium": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
     "@voidzero-dev/vite-task-client": "workspace:*",
     "cross-env": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "vite": "catalog:"
+    "playwright": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

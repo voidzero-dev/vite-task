@@ -1,7 +1,7 @@
 [[e2e]]
 name = "constrained_dev_shm"
 comment = """
-Mounting a one-page `/dev/shm` reproduces the SIGBUS seen before fspy moved its shared-memory backing to memfd.
+With fspy's shared-memory backing moved to memfd, file-access tracking succeeds without consuming a one-page `/dev/shm` mount.
 """
 platform = "linux-gnu"
 ignore = true

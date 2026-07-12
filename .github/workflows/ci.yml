@@ -69,6 +69,10 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.code-changed == 'true'
     name: Test (${{ matrix.shard }})
+    env:
+      # Playwright detects the physical Apple Silicon CPU under Rosetta. Force
+      # its x64 browser for the x86_64 shard so fspy can inject its x64 preload.
+      PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: ${{ matrix.target == 'x86_64-apple-darwin' && 'mac15' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +131,13 @@ jobs:
       - uses: oxc-project/setup-node@4c588e9266bd930b6ddc34307df0659ed511d187 # v1.3.1
         with:
           architecture: ${{ matrix.target == 'x86_64-apple-darwin' && 'x64' || '' }}
+
+      - name: Install Chromium
+        run: pnpm --filter vite-task-tools rebuild @playwright/browser-chromium
+
+      - name: Install Chromium system dependencies
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        run: pnpm --filter vite-task-tools exec playwright install-deps chromium
 
       - name: Run ignored tests
         run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }} -- --ignored
@@ -256,6 +267,10 @@ jobs:
       - uses: oxc-project/setup-node@4c588e9266bd930b6ddc34307df0659ed511d187 # v1.3.1
         if: matrix.mode == 'ignored'
 
+      - name: Install Chromium
+        if: matrix.mode == 'ignored'
+        run: pnpm --filter vite-task-tools rebuild @playwright/browser-chromium
+
       - name: Run ignored tests
         if: matrix.mode == 'ignored'
         run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
@@ -279,6 +294,9 @@ jobs:
       # On musl, concurrent PTY operations can trigger SIGSEGV in musl internals.
       # Run test threads sequentially to avoid the race.
       RUST_TEST_THREADS: 1
+      # Playwright's bundled Chromium does not support musl. The browser fixture
+      # is filtered out there, so avoid downloading an unusable glibc binary.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
     steps:
       - name: Install Alpine dependencies
         shell: sh {0}

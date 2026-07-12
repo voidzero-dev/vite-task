@@ -18,9 +18,13 @@ use vite_str::Str;
 use vite_workspace::find_workspace_root;
 
 /// Timeout for each step in e2e tests.
-/// Windows CI needs a longer timeout due to Git Bash startup overhead and slower I/O.
+/// Windows CI and `x86_64` macOS CI need longer for process and browser startup.
 const STEP_TIMEOUT: Duration =
-    if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(20) };
+    if cfg!(any(windows, all(target_os = "macos", target_arch = "x86_64"))) {
+        Duration::from_secs(60)
+    } else {
+        Duration::from_secs(20)
+    };
 
 /// Screen size for the PTY terminal. Large enough to avoid line wrapping.
 const SCREEN_SIZE: ScreenSize = ScreenSize { rows: 500, cols: 500 };
@@ -226,8 +230,8 @@ struct E2e {
     #[serde(default)]
     pub cwd: RelativePathBuf,
     pub steps: Vec<Step>,
-    /// Optional platform filter: "unix", "linux", "linux-gnu", "macos", or
-    /// "windows". If set, test only runs on that platform.
+    /// Optional platform filter: "unix", "linux", "linux-gnu", "non-musl",
+    /// "macos", or "windows". If set, test only runs on that platform.
     #[serde(default)]
     pub platform: Option<Str>,
     /// When true, the generated libtest-mimic trial is marked `#[ignore]`
@@ -444,6 +448,11 @@ fn run_case(
             // by vt100's `Screen::contents()` when the snapshot is rendered,
             // so this does not introduce colour-noise into existing snapshots.
             cmd.env("TERM", "xterm-256color");
+            // The macOS x64 CI shard needs Playwright to select an x64 browser
+            // while running under Rosetta on Apple Silicon.
+            if let Some(value) = env::var_os("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE") {
+                cmd.env("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE", value);
+            }
             // On Windows, ensure common executable extensions are included in PATHEXT for command resolution in subprocesses.
             if cfg!(windows) {
                 cmd.env("PATHEXT", ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC");
@@ -662,6 +671,9 @@ fn main() {
                             // spawned children, which breaks fixtures that
                             // depend on interposer ordering.
                             "linux-gnu" => cfg!(target_os = "linux") && !cfg!(target_env = "musl"),
+                            // Playwright's bundled browser binaries do not
+                            // support musl targets.
+                            "non-musl" => !cfg!(target_env = "musl"),
                             other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
                         };
                         if !should_run {
