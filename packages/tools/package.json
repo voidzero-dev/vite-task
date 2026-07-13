@@ -6,6 +6,7 @@
     "@playwright/browser-chromium": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "@voidzero-dev/vite-task-client": "workspace:*",
+    "bun": "catalog:",
     "cross-env": "catalog:",
     "deno": "catalog:",
     "oxfmt": "catalog:",

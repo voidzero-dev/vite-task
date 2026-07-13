@@ -53,10 +53,13 @@ fn track_script(
     })
 }
 
-// Deno does not distribute a musl runtime, so only its generated cases are
-// excluded there. Node remains covered by the same tests on musl.
+// Bun's Linux runtime uses direct syscalls, which require universal seccomp
+// tracing instead of preload interception. Deno does not distribute a musl
+// runtime. Node remains covered on every target.
 #[test_case("node")]
 #[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn read_sync(runtime: &str) -> anyhow::Result<()> {
@@ -67,6 +70,8 @@ fn read_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn exist_sync(runtime: &str) -> anyhow::Result<()> {
@@ -77,6 +82,8 @@ fn exist_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn stat_sync(runtime: &str) -> anyhow::Result<()> {
@@ -87,6 +94,8 @@ fn stat_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn create_read_stream(runtime: &str) -> anyhow::Result<()> {
@@ -101,6 +110,8 @@ fn create_read_stream(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn create_write_stream(runtime: &str) -> anyhow::Result<()> {
@@ -117,6 +128,8 @@ fn create_write_stream(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn write_sync(runtime: &str) -> anyhow::Result<()> {
@@ -133,6 +146,8 @@ fn write_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn read_dir_sync(runtime: &str) -> anyhow::Result<()> {
@@ -143,6 +158,8 @@ fn read_dir_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn subprocess(runtime: &str) -> anyhow::Result<()> {

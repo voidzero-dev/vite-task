@@ -5,6 +5,7 @@ packages:
 
 allowBuilds:
   '@playwright/browser-chromium': true
+  bun: true
   deno: true
 
 catalog:
@@ -12,6 +13,7 @@ catalog:
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.52.0
   '@vitest/browser-playwright': 4.1.10
+  bun: 1.3.14
   cross-env: ^10.1.0
   deno: 2.9.2
   husky: ^9.1.7
