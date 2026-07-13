@@ -1257,6 +1257,7 @@ dependencies = [
  "materialized_artifact",
  "materialized_artifact_build",
  "nix 0.31.2",
+ "ntest",
  "ouroboros",
  "rustc-hash",
  "sha2 0.11.0",
