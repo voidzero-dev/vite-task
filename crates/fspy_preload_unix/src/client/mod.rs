@@ -2,8 +2,8 @@ pub mod convert;
 pub mod raw_exec;
 
 use std::{
-    ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _, path::Path,
-    sync::OnceLock,
+    cell::Cell, ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _,
+    path::Path, sync::OnceLock,
 };
 
 use convert::{ToAbsolutePath, ToAccessMode};
@@ -125,15 +125,37 @@ impl Client {
 
 static CLIENT: OnceLock<Client> = OnceLock::new();
 
+// Resolving and reporting a file access can call another interposed function.
+// Suppress same-thread re-entry to prevent recursive access handling while
+// still recording accesses from other threads.
+thread_local! {
+    static HANDLING_OPEN: Cell<bool> = const { Cell::new(false) };
+}
+
+struct ResetHandling<'a>(&'a Cell<bool>);
+impl Drop for ResetHandling<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
+
 pub fn global_client() -> Option<&'static Client> {
     CLIENT.get()
 }
 
 pub unsafe fn handle_open(path: impl ToAbsolutePath, mode: impl ToAccessMode) {
-    if let Some(client) = global_client() {
-        // SAFETY: path and mode contain valid pointers/values forwarded from the interposed function's caller
-        unsafe { client.try_handle_open(path, mode) }.unwrap();
-    }
+    HANDLING_OPEN.with(|handling| {
+        if handling.replace(true) {
+            return;
+        }
+
+        let _reset = ResetHandling(handling);
+
+        if let Some(client) = global_client() {
+            // SAFETY: path and mode contain valid pointers/values forwarded from the interposed function's caller
+            unsafe { client.try_handle_open(path, mode) }.unwrap();
+        }
+    });
 }
 
 #[cfg(not(test))]
