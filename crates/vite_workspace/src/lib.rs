@@ -100,6 +100,14 @@ impl WorkspaceMemberGlobs {
         let mut all = Vec::<Str>::new();
         for mut pattern in self.workspaces {
             pattern.push_str(if pattern.ends_with('/') { "package.json" } else { "/package.json" });
+            // npm treats workspace patterns as root-relative and strips a leading `./`.
+            let path_start = usize::from(pattern.starts_with('!'));
+            if pattern[path_start..].starts_with("./") {
+                let mut normalized = Str::with_capacity(pattern.len() - 2);
+                normalized.push_str(&pattern[..path_start]);
+                normalized.push_str(&pattern[path_start + 2..]);
+                pattern = normalized;
+            }
             if pattern.starts_with('!') {
                 has_negated = true;
             } else {
@@ -925,7 +933,7 @@ mod tests {
         let root_package = serde_json::json!({
             "name": "npm-monorepo",
             "private": true,
-            "workspaces": ["packages/*", "apps/*"]
+            "workspaces": ["./packages/*", "./apps/*"]
         });
         fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
 
