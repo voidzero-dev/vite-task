@@ -27,4 +27,20 @@ unsafe extern "C" {
         nbytes: c_int,
         basep: *mut c_long,
     ) -> c_int;
+
+    #[cfg(target_os = "macos")]
+    #[link_name = "open$NOCANCEL"]
+    pub unsafe fn open_nocancel(path: *const c_char, flags: c_int, ...) -> c_int;
+
+    #[cfg(target_os = "macos")]
+    #[link_name = "openat$NOCANCEL"]
+    pub unsafe fn openat_nocancel(dirfd: c_int, path: *const c_char, flags: c_int, ...) -> c_int;
+
+    #[cfg(target_os = "macos")]
+    pub unsafe fn __getdirentries64(
+        fd: c_int,
+        buf: *mut u8,
+        buf_len: usize,
+        basep: *mut i64,
+    ) -> isize;
 }

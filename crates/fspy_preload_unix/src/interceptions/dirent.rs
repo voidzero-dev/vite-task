@@ -26,7 +26,8 @@ unsafe extern "C" fn scandir(
 
 #[cfg(target_os = "macos")]
 mod macos_only {
-    use super::{AccessMode, c_char, c_int, c_void, handle_open, intercept};
+    use super::{AccessMode, Fd, c_char, c_int, c_void, handle_open, intercept};
+
     intercept!(scandir_b: unsafe extern "C" fn (
         dirname: *const c_char,
         namelist: *mut c_void,
@@ -43,6 +44,19 @@ mod macos_only {
         unsafe { handle_open(dirname, AccessMode::READ_DIR) };
         // SAFETY: calling the original libc scandir_b() with the same arguments forwarded from the interposed function
         unsafe { scandir_b::original()(dirname, namelist, select, compar) }
+    }
+
+    intercept!(__getdirentries64: unsafe extern "C" fn(c_int, *mut u8, usize, *mut i64) -> isize);
+    unsafe extern "C" fn __getdirentries64(
+        fd: c_int,
+        buf: *mut u8,
+        buf_len: usize,
+        basep: *mut i64,
+    ) -> isize {
+        // SAFETY: fd is a valid file descriptor provided by the caller of __getdirentries64
+        unsafe { handle_open(Fd(fd), AccessMode::READ_DIR) };
+        // SAFETY: calling the original libc __getdirentries64() with the same arguments forwarded from the interposed function
+        unsafe { __getdirentries64::original()(fd, buf, buf_len, basep) }
     }
 }
 

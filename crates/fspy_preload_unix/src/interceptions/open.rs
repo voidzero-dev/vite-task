@@ -62,6 +62,45 @@ unsafe extern "C" fn openat(
     }
 }
 
+#[cfg(target_os = "macos")]
+intercept!(open_nocancel: unsafe extern "C" fn(*const c_char, c_int, ...) -> c_int);
+#[cfg(target_os = "macos")]
+unsafe extern "C" fn open_nocancel(path: *const c_char, flags: c_int, mut args: ...) -> c_int {
+    // SAFETY: path is a valid C string pointer provided by the caller of open$NOCANCEL
+    unsafe { handle_open(path, OpenFlags(flags)) };
+    if has_mode_arg(flags) {
+        // SAFETY: O_CREAT requires a mode argument, matching the open$NOCANCEL contract
+        let mode: Mode = unsafe { args.next_arg() };
+        // SAFETY: calling the original libc open$NOCANCEL() with the same arguments forwarded from the interposed function
+        unsafe { open_nocancel::original()(path, flags, mode) }
+    } else {
+        // SAFETY: calling the original libc open$NOCANCEL() with the same arguments forwarded from the interposed function
+        unsafe { open_nocancel::original()(path, flags) }
+    }
+}
+
+#[cfg(target_os = "macos")]
+intercept!(openat_nocancel: unsafe extern "C" fn(c_int, *const c_char, c_int, ...) -> c_int);
+#[cfg(target_os = "macos")]
+unsafe extern "C" fn openat_nocancel(
+    dirfd: c_int,
+    path: *const c_char,
+    flags: c_int,
+    mut args: ...
+) -> c_int {
+    // SAFETY: dirfd and path are valid arguments provided by the caller of openat$NOCANCEL
+    unsafe { handle_open(PathAt(dirfd, path), OpenFlags(flags)) };
+    if has_mode_arg(flags) {
+        // SAFETY: O_CREAT requires a mode argument, matching the openat$NOCANCEL contract
+        let mode: Mode = unsafe { args.next_arg() };
+        // SAFETY: calling the original libc openat$NOCANCEL() with the same arguments forwarded from the interposed function
+        unsafe { openat_nocancel::original()(dirfd, path, flags, mode) }
+    } else {
+        // SAFETY: calling the original libc openat$NOCANCEL() with the same arguments forwarded from the interposed function
+        unsafe { openat_nocancel::original()(dirfd, path, flags) }
+    }
+}
+
 intercept!(fopen(64): unsafe extern "C" fn(path: *const c_char, mode: *const c_char) -> *mut FILE);
 unsafe extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> *mut libc::FILE {
     // SAFETY: path and mode are valid C string pointers provided by the caller of the interposed function

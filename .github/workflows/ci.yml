@@ -132,8 +132,16 @@ jobs:
         with:
           architecture: ${{ matrix.target == 'x86_64-apple-darwin' && 'x64' || '' }}
 
-      - name: Install Chromium
-        run: pnpm --filter vite-task-tools rebuild @playwright/browser-chromium
+      - name: Install runtime binaries
+        run: |
+          if [[ '${{ matrix.target }}' == 'x86_64-apple-darwin' ]]; then
+            # Bun normally prefers the native arm64 binary under Rosetta, but
+            # this job needs x64 Bun so the x64 preload dylib can be injected.
+            PATH="$(dirname "$(command -v node)"):$PNPM_HOME:/usr/bin:/bin" \
+              pnpm --filter vite-task-tools rebuild --pending
+          else
+            pnpm --filter vite-task-tools rebuild --pending
+          fi
 
       - name: Install Chromium system dependencies
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
@@ -267,9 +275,9 @@ jobs:
       - uses: oxc-project/setup-node@4c588e9266bd930b6ddc34307df0659ed511d187 # v1.3.1
         if: matrix.mode == 'ignored'
 
-      - name: Install Chromium
+      - name: Install runtime binaries
         if: matrix.mode == 'ignored'
-        run: pnpm --filter vite-task-tools rebuild @playwright/browser-chromium
+        run: pnpm --filter vite-task-tools rebuild --pending
 
       - name: Run ignored tests
         if: matrix.mode == 'ignored'
