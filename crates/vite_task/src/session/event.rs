@@ -41,6 +41,10 @@ pub enum ExecutionError {
     #[error("Failed to spawn process")]
     Spawn(#[source] anyhow::Error),
 
+    /// The child process started, but the runner failed while forwarding its output.
+    #[error("Failed to forward task process output")]
+    ForwardTaskProcessOutput(#[source] anyhow::Error),
+
     /// The child process started, but the runner failed while waiting for it to exit.
     #[error("Failed to wait for task process to exit")]
     WaitForTaskProcessExit(#[source] anyhow::Error),
