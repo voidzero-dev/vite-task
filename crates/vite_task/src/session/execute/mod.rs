@@ -598,7 +598,7 @@ async fn run_child(
             reason = "pipe_stdio streams child I/O and creates a large future"
         )]
         let r = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        r.map_err(|err| ExecutionError::Spawn(err.into()))
+        r.map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()))
     } else {
         Ok(())
     };
