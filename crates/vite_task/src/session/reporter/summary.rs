@@ -121,7 +121,7 @@ pub enum SpawnOutcome {
     /// No `infra_error` field: cache operations are skipped on non-zero exit.
     Failed { exit_code: NonZeroI32 },
 
-    /// Could not start the process (e.g., command not found).
+    /// Execution failed without a usable process exit status.
     SpawnError(SavedExecutionError),
 }
 
@@ -152,6 +152,7 @@ pub enum SavedCacheMissReason {
 pub enum SavedExecutionError {
     Cache { kind: SavedCacheErrorKind, message: Str },
     Spawn { message: Str },
+    ForwardTaskProcessOutput { message: Str },
     WaitForTaskProcessExit { message: Str },
     PostRunFingerprint { message: Str },
     IpcServerBind { message: Str },
@@ -239,6 +240,9 @@ impl SavedExecutionError {
             ExecutionError::Spawn(source) => {
                 Self::Spawn { message: vite_str::format!("{source:#}") }
             }
+            ExecutionError::ForwardTaskProcessOutput(source) => {
+                Self::ForwardTaskProcessOutput { message: vite_str::format!("{source:#}") }
+            }
             ExecutionError::WaitForTaskProcessExit(source) => {
                 Self::WaitForTaskProcessExit { message: vite_str::format!("{source:#}") }
             }
@@ -263,6 +267,9 @@ impl SavedExecutionError {
             }
             Self::Spawn { message } => {
                 vite_str::format!("Failed to spawn process: {message}")
+            }
+            Self::ForwardTaskProcessOutput { message } => {
+                vite_str::format!("Failed to forward task process output: {message}")
             }
             Self::WaitForTaskProcessExit { message } => {
                 vite_str::format!("Failed to wait for task process to exit: {message}")
@@ -914,5 +921,29 @@ fn format_input_modified_notice(buf: &mut Vec<u8>, task_names: &[Str]) {
         let _ = write!(buf, " not cached because it modified its input.");
     } else {
         let _ = write!(buf, " not cached because they modified their inputs.");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_forwarding_error_has_distinct_message() {
+        let error = ExecutionError::ForwardTaskProcessOutput(anyhow::anyhow!(
+            "Resource temporarily unavailable (os error 11)"
+        ));
+
+        let saved = SavedExecutionError::from_execution_error(&error);
+
+        assert!(matches!(
+            &saved,
+            SavedExecutionError::ForwardTaskProcessOutput { message }
+                if message.as_str() == "Resource temporarily unavailable (os error 11)"
+        ));
+        assert_eq!(
+            saved.display_message().as_str(),
+            "Failed to forward task process output: Resource temporarily unavailable (os error 11)"
+        );
     }
 }
