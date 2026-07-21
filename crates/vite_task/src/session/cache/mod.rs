@@ -20,7 +20,7 @@ use vite_task_graph::config::ResolvedGlobConfig;
 use vite_task_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
 use wincode::{
     SchemaRead, SchemaReadOwned, SchemaWrite,
-    config::{ConfigCore, DefaultConfig},
+    config::{ConfigCore, Configuration},
     error::{ReadResult, WriteResult},
     io::{Reader, Writer},
 };
@@ -29,6 +29,25 @@ use super::execute::{
     fingerprint::{PostRunFingerprint, TrackedEnvQuery},
     pipe::StdOutput,
 };
+
+const TASK_CACHE_PREALLOCATION_SIZE_LIMIT: usize = 256 * 1024 * 1024;
+type TaskCacheConfig = Configuration<true, TASK_CACHE_PREALLOCATION_SIZE_LIMIT>;
+const TASK_CACHE_CONFIG: TaskCacheConfig =
+    Configuration::default().with_preallocation_size_limit::<TASK_CACHE_PREALLOCATION_SIZE_LIMIT>();
+
+fn serialize_cache<T>(value: &T) -> WriteResult<Vec<u8>>
+where
+    T: SchemaWrite<TaskCacheConfig, Src = T> + ?Sized,
+{
+    wincode::config::serialize(value, TASK_CACHE_CONFIG)
+}
+
+fn deserialize_cache<T>(bytes: &[u8]) -> ReadResult<T>
+where
+    T: SchemaReadOwned<TaskCacheConfig, Dst = T>,
+{
+    wincode::config::deserialize_exact(bytes, TASK_CACHE_CONFIG)
+}
 
 /// Cache lookup key identifying a task's execution configuration.
 ///
@@ -255,7 +274,7 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
 /// its own cache warm across branch switches, and a cache from a different
 /// version is simply ignored (it lives in a directory this build never looks
 /// at) rather than aborting the run. Bumping the version starts a fresh cache.
-const CACHE_SCHEMA_VERSION: u32 = 17;
+const CACHE_SCHEMA_VERSION: u32 = 18;
 
 /// Name of the per-version subdirectory (e.g. `v14`) under the task-cache
 /// directory that holds the database and output archives for the current
@@ -461,14 +480,14 @@ impl ExecutionCache {
         reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
     )]
     async fn get_key_by_value<
-        K: SchemaWrite<DefaultConfig, Src = K>,
-        V: SchemaReadOwned<DefaultConfig, Dst = V>,
+        K: SchemaWrite<TaskCacheConfig, Src = K>,
+        V: SchemaReadOwned<TaskCacheConfig, Dst = V>,
     >(
         &self,
         table: &str,
         key: &K,
     ) -> anyhow::Result<Option<V>> {
-        let key_blob = wincode::serialize(key)?;
+        let key_blob = serialize_cache(key)?;
         let value_blob = {
             let conn = self.conn.lock().await;
             #[expect(
@@ -484,7 +503,7 @@ impl ExecutionCache {
         let Some(value_blob) = value_blob else {
             return Ok(None);
         };
-        let value: V = wincode::deserialize(&value_blob)?;
+        let value: V = deserialize_cache(&value_blob)?;
         Ok(Some(value))
     }
 
@@ -507,16 +526,16 @@ impl ExecutionCache {
         reason = "lock guard must be held while executing the prepared statement"
     )]
     async fn upsert<
-        K: SchemaWrite<DefaultConfig, Src = K>,
-        V: SchemaWrite<DefaultConfig, Src = V>,
+        K: SchemaWrite<TaskCacheConfig, Src = K>,
+        V: SchemaWrite<TaskCacheConfig, Src = V>,
     >(
         &self,
         table: &str,
         key: &K,
         value: &V,
     ) -> anyhow::Result<()> {
-        let key_blob = wincode::serialize(key)?;
-        let value_blob = wincode::serialize(value)?;
+        let key_blob = serialize_cache(key)?;
+        let value_blob = serialize_cache(value)?;
         let conn = self.conn.lock().await;
         #[expect(clippy::disallowed_macros, reason = "SQL query string for rusqlite requires String")]
         let mut update_stmt = conn.prepare_cached(&format!(
@@ -547,8 +566,8 @@ impl ExecutionCache {
         reason = "lock guard must be held while iterating over query rows"
     )]
     async fn list_table<
-        K: SchemaReadOwned<DefaultConfig, Dst = K> + Serialize,
-        V: SchemaReadOwned<DefaultConfig, Dst = V> + Serialize,
+        K: SchemaReadOwned<TaskCacheConfig, Dst = K> + Serialize,
+        V: SchemaReadOwned<TaskCacheConfig, Dst = V> + Serialize,
     >(
         &self,
         table: &str,
@@ -564,8 +583,8 @@ impl ExecutionCache {
         while let Some(row) = rows.next()? {
             let key_blob: Vec<u8> = row.get(0)?;
             let value_blob: Vec<u8> = row.get(1)?;
-            let key: K = wincode::deserialize(&key_blob)?;
-            let value: V = wincode::deserialize(&value_blob)?;
+            let key: K = deserialize_cache(&key_blob)?;
+            let value: V = deserialize_cache(&value_blob)?;
             writeln!(
                 out,
                 "{} => {}",
