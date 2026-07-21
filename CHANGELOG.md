@@ -1,6 +1,7 @@
 # Changelog
 
 - **Fixed** Vite+ diagnostics now display individual paths and working directories without Rust debug formatting such as quoted paths or escaped Windows backslashes ([#534](https://github.com/voidzero-dev/vite-task/pull/534)).
+- **Fixed** npm workspace patterns beginning with `./` now discover matching packages correctly ([vite-plus#2201](https://github.com/voidzero-dev/vite-plus/issues/2201), [#547](https://github.com/voidzero-dev/vite-task/pull/547)).
 - **Fixed** Failures while forwarding output from a started task process no longer incorrectly say the process failed to spawn ([#506](https://github.com/voidzero-dev/vite-task/issues/506)).
 - **Fixed** An issue where Bun tasks on macOS did not rerun when files they read, wrote, or listed changed ([#532](https://github.com/voidzero-dev/vite-task/issues/532), [#542](https://github.com/voidzero-dev/vite-task/pull/542)).
 - **Improved** Windows file-access tracking now uses sparse temporary backing files where supported, avoiding upfront allocation of the full backing file on disk ([#524](https://github.com/voidzero-dev/vite-task/pull/524)).

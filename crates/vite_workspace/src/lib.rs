@@ -98,9 +98,31 @@ impl WorkspaceMemberGlobs {
         let mut has_negated = false;
         let mut inclusions = Vec::<Str>::new();
         let mut all = Vec::<Str>::new();
-        for mut pattern in self.workspaces {
-            pattern.push_str(if pattern.ends_with('/') { "package.json" } else { "/package.json" });
-            if pattern.starts_with('!') {
+        for pattern in self.workspaces {
+            // Ported from npm's workspace pattern normalization:
+            // https://github.com/npm/map-workspaces/blob/76ea3c852171790e245052e006329de15b09e60e/lib/index.js#L17
+            let exclusion_count = pattern.bytes().take_while(|byte| *byte == b'!').count();
+            let path = &pattern[exclusion_count..];
+            let path_without_optional_dot = path.strip_prefix('.').unwrap_or(path);
+            let path = if path_without_optional_dot.starts_with('/') {
+                path_without_optional_dot.trim_start_matches('/')
+            } else {
+                path
+            };
+            let is_negated = exclusion_count % 2 == 1;
+
+            let mut pattern = Str::with_capacity(pattern.len() + "/package.json".len());
+            if is_negated {
+                pattern.push('!');
+            }
+            pattern.push_str(path);
+            pattern.push_str(if path.is_empty() || path.ends_with('/') {
+                "package.json"
+            } else {
+                "/package.json"
+            });
+
+            if is_negated {
                 has_negated = true;
             } else {
                 inclusions.push(pattern.clone());
@@ -925,7 +947,7 @@ mod tests {
         let root_package = serde_json::json!({
             "name": "npm-monorepo",
             "private": true,
-            "workspaces": ["packages/*", "apps/*"]
+            "workspaces": ["./packages/*", "./apps/*"]
         });
         fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
 
@@ -1006,6 +1028,59 @@ mod tests {
         assert!(found_ui_to_shared, "UI should depend on shared");
         assert!(found_web_to_shared, "Web app should depend on shared");
         assert!(found_web_to_ui, "Web app should depend on UI");
+    }
+
+    #[test]
+    fn test_get_package_graph_npm_workspace_with_root_relative_prefixes() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
+
+        let root_package = serde_json::json!({
+            "name": "npm-monorepo",
+            "private": true,
+            "workspaces": [
+                "./packages/single-slash",
+                ".//packages/double-slash",
+                ".///packages/triple-slash",
+                "/packages/rooted",
+                "//packages/double-rooted",
+                "!.///packages/excluded",
+                "!!./packages/even-negations",
+                "./packages/odd-negations",
+                "!!!.//packages/odd-negations"
+            ]
+        });
+        fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
+
+        let package_names = [
+            "single-slash",
+            "double-slash",
+            "triple-slash",
+            "rooted",
+            "double-rooted",
+            "even-negations",
+        ];
+        for package_name in package_names.iter().copied().chain(["excluded", "odd-negations"]) {
+            let package_path = temp_dir_path.join("packages").join(package_name);
+            fs::create_dir_all(&package_path).unwrap();
+            fs::write(
+                package_path.join("package.json"),
+                serde_json::json!({ "name": package_name }).to_string(),
+            )
+            .unwrap();
+        }
+
+        let graph = discover_package_graph(temp_dir_path).unwrap();
+        let packages_found: FxHashSet<_> =
+            graph.node_weights().map(|node| node.package_json.name.as_str()).collect();
+
+        assert_eq!(graph.node_count(), package_names.len() + 1);
+        assert!(packages_found.contains("npm-monorepo"));
+        for package_name in package_names {
+            assert!(packages_found.contains(package_name), "Should have found {package_name}");
+        }
+        assert!(!packages_found.contains("excluded"));
+        assert!(!packages_found.contains("odd-negations"));
     }
 
     #[test]
