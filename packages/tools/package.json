@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@playwright/browser-chromium": "catalog:",
+    "@tailwindcss/cli": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "@voidzero-dev/vite-task-client": "workspace:*",
     "bun": "catalog:",
@@ -13,6 +14,8 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "playwright": "catalog:",
+    "rolldown-plugin-dts": "catalog:",
+    "tsdown": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
   }

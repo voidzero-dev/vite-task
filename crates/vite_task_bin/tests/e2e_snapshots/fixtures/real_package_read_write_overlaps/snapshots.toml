@@ -1,0 +1,44 @@
+[[e2e]]
+name = "tsdown_clean_reads_and_rewrites_dist"
+comment = """
+tsdown expands the configured clean paths with `tinyglobby` and removes every matched entry before the bundle writes its replacement. With an existing `dist/index.js`, the build therefore observes and removes that path before emitting `dist/index.js` again. See [`cleanOutDir`](https://github.com/rolldown/tsdown/blob/49cc5f953f1b6ab13968fef8509d69767373253b/src/features/clean.ts#L14-L45).
+"""
+cwd = "cases/tsdown-clean"
+ignore = true
+steps = [{ argv = ["vt", "run", "-v", "overlap"] }]
+
+[[e2e]]
+name = "tsdown_shebang_reads_and_changes_emitted_entry"
+comment = """
+After Rolldown writes a shebang entry, tsdown checks that emitted file with `access` and then changes its mode with `chmod`. The same `dist/index.js` is consequently read and mutated during one build. See [the shebang plugin](https://github.com/rolldown/tsdown/blob/49cc5f953f1b6ab13968fef8509d69767373253b/src/features/shebang.ts#L18-L34) and [`fsExists`](https://github.com/rolldown/tsdown/blob/49cc5f953f1b6ab13968fef8509d69767373253b/src/utils/fs.ts#L5-L9).
+"""
+cwd = "cases/tsdown-shebang"
+ignore = true
+steps = [{ argv = ["vt", "run", "-v", "overlap"] }]
+
+[[e2e]]
+name = "dts_self_resolution_reads_and_rewrites_declaration"
+comment = """
+The source imports a type through its own package name, whose `exports.types` target is the existing `dist/index.d.ts`. rolldown-plugin-dts delegates that import to TypeScript's bundler resolver and creates a TypeScript program, so the declaration is resolved and read before the declaration bundle replaces the same path. See [`tscResolve`](https://github.com/sxzz/rolldown-plugin-dts/blob/363cc09b660675e15ec8791ce0f05f1044a7048a/src/tsc/resolver.ts#L7-L38) and [the TypeScript program construction](https://github.com/sxzz/rolldown-plugin-dts/blob/363cc09b660675e15ec8791ce0f05f1044a7048a/src/tsc/emit-compiler.ts#L112-L128).
+"""
+cwd = "cases/dts-self-resolution"
+ignore = true
+steps = [{ argv = ["vt", "run", "-v", "overlap"] }]
+
+[[e2e]]
+name = "tailwind_reads_and_rewrites_output"
+comment = """
+Tailwind's CLI stats and reads an existing output file to compare its contents with the newly generated CSS, then writes the file when the contents differ. This makes `dist/output.css` both a read and a write in one command. See [`outputFile`](https://github.com/tailwindlabs/tailwindcss/blob/8a14a710102cae195f6811e8578bef9477bc6be9/packages/%40tailwindcss-cli/src/commands/build/utils.ts#L15-L34).
+"""
+cwd = "cases/tailwind-output"
+ignore = true
+steps = [{ argv = ["vt", "run", "-v", "overlap"] }]
+
+[[e2e]]
+name = "oxfmt_reads_and_rewrites_source"
+comment = """
+In write mode, oxfmt reads each source file, formats the text, and writes changed text back to that same path. The checked-in `source.ts` is intentionally unformatted, so the file is both read and written. See [the formatter service's read and write sequence](https://github.com/oxc-project/oxc/blob/5306f24d9e82ae36ad9c3c964f33075bc589c799/apps/oxfmt/src/cli/service.rs#L42-L82) and [`read_to_string`](https://github.com/oxc-project/oxc/blob/5306f24d9e82ae36ad9c3c964f33075bc589c799/apps/oxfmt/src/core/utils.rs#L50-L53).
+"""
+cwd = "cases/oxfmt-in-place"
+ignore = true
+steps = [{ argv = ["vt", "run", "-v", "overlap"] }]

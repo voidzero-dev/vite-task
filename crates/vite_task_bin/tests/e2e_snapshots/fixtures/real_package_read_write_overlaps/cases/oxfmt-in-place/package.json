@@ -1,0 +1,7 @@
+{
+  "name": "oxfmt-in-place-overlap",
+  "private": true,
+  "scripts": {
+    "overlap": "oxfmt --threads=1 source.ts"
+  }
+}

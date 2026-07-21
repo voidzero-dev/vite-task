@@ -1,0 +1,14 @@
+{
+  "name": "dts-self-resolution-overlap",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "overlap": "tsdown --logLevel silent"
+  }
+}

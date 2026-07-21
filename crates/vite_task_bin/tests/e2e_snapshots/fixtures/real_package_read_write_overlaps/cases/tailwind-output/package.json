@@ -1,0 +1,7 @@
+{
+  "name": "tailwind-output-overlap",
+  "private": true,
+  "scripts": {
+    "overlap": "tailwindcss -i input.css -o dist/output.css --minify"
+  }
+}

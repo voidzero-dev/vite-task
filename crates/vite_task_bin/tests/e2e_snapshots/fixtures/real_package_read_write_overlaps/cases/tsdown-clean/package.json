@@ -1,0 +1,8 @@
+{
+  "name": "tsdown-clean-overlap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "overlap": "tsdown --logLevel silent"
+  }
+}

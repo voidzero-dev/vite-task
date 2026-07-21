@@ -15,6 +15,7 @@ export default defineConfig({
     singleQuote: true,
     ignorePatterns: [
       'crates/fspy_detours_sys/detours',
+      'crates/vite_task_bin/tests/e2e_snapshots/fixtures/real_package_read_write_overlaps/cases/oxfmt-in-place/source.ts',
       'crates/vite_task_graph/run-config.ts',
       '**/fixtures/*/snapshots',
       'packages/vite-task-client/src/index.d.ts',

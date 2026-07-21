@@ -4,11 +4,13 @@ packages:
   - packages/vite-task-client
 
 allowBuilds:
+  '@parcel/watcher': true
   '@playwright/browser-chromium': true
   bun: true
   deno: true
 
 catalog:
+  '@tailwindcss/cli': 4.3.1
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.61.1
@@ -23,6 +25,8 @@ catalog:
   oxlint-tsgolint: ^0.24.0
   # Playwright 1.52 pins the browser package to Chromium 136.
   playwright: 1.61.1
+  rolldown-plugin-dts: 0.22.2
+  tsdown: 0.20.3
   typescript: ^6.0.3
   vite: npm:@voidzero-dev/vite-plus-core@0.2.4
   vite-plus: 0.2.5
