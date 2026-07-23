@@ -1,0 +1,20 @@
+[package]
+name = "fspy_benchmark_target"
+version = "0.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+vite_path = { workspace = true }
+vite_str = { workspace = true }
+
+[[bin]]
+name = "fspy_benchmark_target"
+test = false
+doctest = false

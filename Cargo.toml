@@ -64,6 +64,7 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 csv-async = { version = "1.3.1", features = ["tokio"] }
 ctor = "1.0"
 ctrlc = "3.5.2"
+criterion2 = { version = "3.0.4", default-features = false }
 derive_more = "2.0.1"
 diff-struct = "0.5.3"
 directories = "6.0.0"
@@ -72,6 +73,7 @@ materialized_artifact = { path = "crates/materialized_artifact" }
 materialized_artifact_build = { path = "crates/materialized_artifact_build" }
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
+fspy_benchmark_target = { path = "crates/fspy_benchmark_target", artifact = "bin" }
 fspy_detours_sys = { path = "crates/fspy_detours_sys" }
 fspy_preload_unix = { path = "crates/fspy_preload_unix", artifact = "cdylib", target = "target" }
 fspy_preload_windows = { path = "crates/fspy_preload_windows", artifact = "cdylib", target = "target" }
@@ -177,6 +179,7 @@ zstd = "0.13"
 [workspace.metadata.cargo-shear]
 ignored = [
   # These are artifact dependencies. They are not directly `use`d in Rust code.
+  "fspy_benchmark_target",
   "fspy_preload_unix",
   "fspy_preload_windows",
   "vite_task_client_napi",
