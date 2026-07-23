@@ -124,6 +124,7 @@ jobs:
           name: ${{ steps.baseline.outputs.current-artifact-name }}
           path: .benchmark-results/${{ matrix.platform }}.*
           if-no-files-found: error
+          include-hidden-files: true
           overwrite: true
           retention-days: 90
 
