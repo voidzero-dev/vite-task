@@ -15,11 +15,9 @@ create the session temp that Claude Code supplies before sandboxed Bash commands
 
 ## `srt --settings claude-code-default-sandbox.json vt run inner`
 
-**Exit code:** 1
-
 ```
 $ vtt print-file input.txt
-✗ Failed to set up task communication: Operation not permitted (os error 1)
+tracked input
 ```
 
 ## `vtt replace-file-content input.txt tracked modified`
@@ -29,9 +27,7 @@ $ vtt print-file input.txt
 
 ## `srt --settings claude-code-default-sandbox.json vt run inner`
 
-**Exit code:** 1
-
 ```
-$ vtt print-file input.txt
-✗ Failed to set up task communication: Operation not permitted (os error 1)
+$ vtt print-file input.txt ○ cache miss: 'input.txt' modified, executing
+modified input
 ```
