@@ -425,16 +425,19 @@ fn run_case(
 
             let argv = step.argv();
 
-            // Only vt and vtt are allowed as step programs.
             let program = argv[0].as_str();
-            assert!(
-                program == "vt" || program == "vtt",
-                "step program must be 'vt' or 'vtt', got '{program}'"
-            );
-            let exe_env = vite_str::format!("CARGO_BIN_EXE_{program}");
-            let resolved =
-                env::var_os(exe_env.as_str()).unwrap_or_else(|| panic!("{exe_env} not set"));
-            let mut cmd = CommandBuilder::new(resolved);
+            // Resolve the locally built task binaries exactly. Other programs
+            // are resolved through the prepared PATH, allowing ignored tests
+            // to opt into external toolchains without weakening the default
+            // suite's self-contained execution.
+            let mut cmd = if matches!(program, "vt" | "vtt") {
+                let exe_env = vite_str::format!("CARGO_BIN_EXE_{program}");
+                let resolved =
+                    env::var_os(exe_env.as_str()).unwrap_or_else(|| panic!("{exe_env} not set"));
+                CommandBuilder::new(resolved)
+            } else {
+                CommandBuilder::new(program)
+            };
             for arg in &argv[1..] {
                 cmd.arg(arg.as_str());
             }
