@@ -8,6 +8,7 @@ use std::{
 use futures::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
 use native_str::NativeStr;
 use rustc_hash::{FxHashMap, FxHashSet};
+use socket_ipc::{Server as TransportServer, ServerConnection as Stream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use vt_ipc_shared::{
@@ -265,13 +266,13 @@ impl StopAccepting {
 ///
 /// # Errors
 ///
-/// Returns an error if creating the listener fails (on Unix, this includes
-/// creating the temp socket path).
+/// Returns an error if creating the transport server fails.
 pub fn serve<'h, H: Handler + 'h>(
     handler: H,
 ) -> io::Result<(impl Iterator<Item = (&'static OsStr, OsString)>, ServerHandle<'h, H>)> {
     let stop_token = CancellationToken::new();
-    let (name, bound) = bind_listener()?;
+    let server = TransportServer::bind()?;
+    let name = server.name().to_owned();
 
     let run_stop = stop_token.clone();
     let driver = async move {
@@ -282,7 +283,7 @@ pub fn serve<'h, H: Handler + 'h>(
         // single-threaded runtime and handler methods are synchronous (no
         // awaits, so no borrow spans a yield point).
         let handler = RefCell::new(handler);
-        let first_err = run(bound, &handler, run_stop).await;
+        let first_err = run(server, &handler, run_stop).await;
         first_err.map_or_else(|| Ok(handler.into_inner()), Err)
     }
     .boxed_local();
@@ -293,83 +294,8 @@ pub fn serve<'h, H: Handler + 'h>(
     ))
 }
 
-#[cfg(unix)]
-type Stream = tokio::net::UnixStream;
-#[cfg(windows)]
-type Stream = tokio::net::windows::named_pipe::NamedPipeServer;
-
-/// The bound listener for the IPC server.
-///
-/// Unix: a Tokio [`UnixListener`](tokio::net::UnixListener) bound inside a
-/// [`NamedTempFile`](tempfile::NamedTempFile) so its socket file is unlinked
-/// on `Drop`. Windows: a single named-pipe instance that is created up front
-/// and replaced on each `accept` (a new pipe instance must be created before
-/// the previous one is handed to the client, otherwise concurrent connect
-/// attempts race for it).
-#[cfg(unix)]
-struct Bound {
-    file: tempfile::NamedTempFile<tokio::net::UnixListener>,
-}
-
-#[cfg(windows)]
-struct Bound {
-    pipe_name: OsString,
-    pending: tokio::net::windows::named_pipe::NamedPipeServer,
-}
-
-#[cfg(unix)]
-fn bind_listener() -> io::Result<(OsString, Bound)> {
-    // `make` lets us bind the socket directly to the path tempfile picks; the
-    // closure is responsible for creating the file (`UnixListener::bind` does).
-    // The `NamedTempFile` wrapper unlinks the socket path on `Drop`.
-    let file = tempfile::Builder::new()
-        .prefix("vite_task_ipc_")
-        .make(|path| tokio::net::UnixListener::bind(path))?;
-    let name = file.path().as_os_str().to_owned();
-    Ok((name, Bound { file }))
-}
-
-#[cfg(windows)]
-fn bind_listener() -> io::Result<(OsString, Bound)> {
-    use tokio::net::windows::named_pipe::ServerOptions;
-
-    #[expect(
-        clippy::disallowed_macros,
-        reason = "pipe name always exceeds Str inline capacity; format! is the simplest construction"
-    )]
-    let pipe_name = OsString::from(format!(r"\\.\pipe\vite_task_ipc_{}", uuid::Uuid::new_v4()));
-    let pending = ServerOptions::new().first_pipe_instance(true).create(&pipe_name)?;
-    Ok((pipe_name.clone(), Bound { pipe_name, pending }))
-}
-
-impl Bound {
-    #[cfg(unix)]
-    #[expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "Windows variant requires &mut self to swap pending instance; keep the signature uniform across cfgs so `run` can call it identically."
-    )]
-    async fn accept(&mut self) -> io::Result<Stream> {
-        let (stream, _addr) = self.file.as_file().accept().await?;
-        Ok(stream)
-    }
-
-    #[cfg(windows)]
-    async fn accept(&mut self) -> io::Result<Stream> {
-        use tokio::net::windows::named_pipe::ServerOptions;
-
-        // Wait for the next client to connect to the currently-pending
-        // instance, then immediately create a fresh instance to listen for the
-        // connection after that. Creating the next instance before yielding the
-        // accepted one ensures no client gets `ERROR_PIPE_BUSY` during the
-        // handoff.
-        self.pending.connect().await?;
-        let next = ServerOptions::new().create(&self.pipe_name)?;
-        Ok(std::mem::replace(&mut self.pending, next))
-    }
-}
-
 async fn run<H: Handler>(
-    mut bound: Bound,
+    mut server: TransportServer,
     handler: &RefCell<H>,
     shutdown: CancellationToken,
 ) -> Option<Error> {
@@ -380,7 +306,7 @@ async fn run<H: Handler>(
     loop {
         tokio::select! {
             () = shutdown.cancelled() => break,
-            accept_result = bound.accept() => {
+            accept_result = server.accept() => {
                 match accept_result {
                     Ok(stream) => {
                         clients.push(handle_client(stream, handler).boxed_local());
@@ -401,9 +327,8 @@ async fn run<H: Handler>(
         }
     }
 
-    // Stop accepting: drop the listener (and on Unix unlink the socket file).
-    // Existing client streams continue to work.
-    drop(bound);
+    // Stop accepting. Existing client streams continue to work.
+    drop(server);
 
     // Drain phase: wait for all in-flight per-client tasks to finish.
     while let Some(result) = clients.next().await {
@@ -422,7 +347,7 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
     loop {
         match read_frame(&mut stream, &mut buf).await {
             Ok(()) => {}
-            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(err) if is_client_gone(&err) => return Ok(()),
             Err(err) => return Err(Error::ReadFrame(err)),
         }
 
@@ -449,7 +374,13 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
             Request::GetEnv { name, tracked } => {
                 let value = handler.borrow_mut().get_env(name.to_cow_os_str().as_ref(), tracked);
                 let response = GetEnvResponse { env_value: value.as_deref().map(Into::into) };
-                write_response(&mut stream, &response).await.map_err(Error::WriteResponse)?;
+                if let Err(err) = write_response(&mut stream, &response).await {
+                    return if is_client_gone(&err) {
+                        Ok(())
+                    } else {
+                        Err(Error::WriteResponse(err))
+                    };
+                }
             }
             Request::GetEnvs { query, tracked } => {
                 let matches = handler.borrow_mut().get_envs(&query, tracked).map_err(|source| {
@@ -465,10 +396,25 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
                 let response = GetEnvsResponse {
                     entries: matches.iter().map(|(k, v)| ((&**k).into(), (&**v).into())).collect(),
                 };
-                write_response(&mut stream, &response).await.map_err(Error::WriteResponse)?;
+                if let Err(err) = write_response(&mut stream, &response).await {
+                    return if is_client_gone(&err) {
+                        Ok(())
+                    } else {
+                        Err(Error::WriteResponse(err))
+                    };
+                }
             }
         }
     }
+}
+
+/// True when an I/O error reports the client being gone rather than a broken
+/// transport. Reads see a dead client as end of file, or as a broken pipe on
+/// Windows named pipes; response writes see a broken pipe on both platforms.
+/// One client's death only ends that client's stream, and an unread response
+/// loses nothing: the recorded set is collected when the driver drains.
+fn is_client_gone(err: &io::Error) -> bool {
+    matches!(err.kind(), io::ErrorKind::UnexpectedEof | io::ErrorKind::BrokenPipe)
 }
 
 fn native_str_to_abs_path(ns: &NativeStr) -> Result<Arc<AbsolutePath>, Error> {

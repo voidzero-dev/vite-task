@@ -135,6 +135,7 @@ sigsafe_alloc = { path = "crates/sigsafe_alloc" }
 similar = "3.0.0"
 smallvec = { version = "2.0.0-alpha.12", features = ["std"] }
 snapshot_test = { path = "crates/snapshot_test" }
+socket_ipc = { path = "crates/socket_ipc" }
 stackalloc = "1.2.1"
 subprocess_test = { path = "crates/subprocess_test" }
 supports-color = "3.0.1"

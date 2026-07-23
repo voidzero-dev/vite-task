@@ -6,15 +6,11 @@ use std::{
 };
 
 use native_str::NativeStr;
-
-#[cfg(unix)]
-type RawStream = std::os::unix::net::UnixStream;
-#[cfg(windows)]
-type RawStream = std::fs::File;
 use rustc_hash::FxHashMap;
+use socket_ipc::Client as RawStream;
 use tokio::runtime::Builder;
 use vt_client::{Client, GetEnvsQuery};
-use vt_ipc_shared::{GetEnvResponse, Request};
+use vt_ipc_shared::{EnvQuery as RawEnvQuery, GetEnvResponse, Request};
 use vt_server::{EnvQuery, Error, Recorder, Reports, ServerHandle, serve};
 
 fn env_map(pairs: &[(&str, &str)]) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
@@ -64,14 +60,8 @@ fn flush(client: &Client) {
     let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__"), false).unwrap();
 }
 
-#[cfg(unix)]
 fn connect_raw(name: &OsStr) -> RawStream {
-    std::os::unix::net::UnixStream::connect(name).expect("connect raw")
-}
-
-#[cfg(windows)]
-fn connect_raw(name: &OsStr) -> RawStream {
-    std::fs::OpenOptions::new().read(true).write(true).open(name).expect("connect raw")
+    RawStream::connect(name).expect("connect raw")
 }
 
 fn send_frame(stream: &mut RawStream, request: &Request<'_>) {
@@ -129,6 +119,35 @@ fn raw_disable_cache_request_disables_cache() {
     })
     .expect("driver returned error");
 
+    assert!(reports.cache_disabled);
+}
+
+/// A client that dies between sending a request and reading the answer must
+/// only end its own stream, never fail the session server.
+#[test]
+fn client_gone_before_reading_response_is_not_an_error() {
+    // Enough env entries that the response cannot fit any pipe buffer: the
+    // server's write can only finish after this client reads, and it never
+    // does, so the write reliably fails with a broken pipe.
+    let mut envs = FxHashMap::default();
+    for i in 0..4096 {
+        let mut key = OsString::from("VP_TEST_");
+        key.push(i.to_string());
+        envs.insert(Arc::<OsStr>::from(&*key), Arc::<OsStr>::from(OsStr::new(&*"v".repeat(64))));
+    }
+
+    let reports = run_with_server(envs, |envs| {
+        let name = &envs[0].1;
+        let mut stream = connect_raw(name);
+        send_frame(&mut stream, &Request::DisableCache);
+        send_frame(
+            &mut stream,
+            &Request::GetEnvs { query: RawEnvQuery::Prefix("VP_TEST_"), tracked: false },
+        );
+    })
+    .expect("driver must survive the dead client");
+
+    // The frame before the abandoned request still got through.
     assert!(reports.cache_disabled);
 }
 

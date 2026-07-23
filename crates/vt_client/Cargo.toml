@@ -9,12 +9,10 @@ rust-version.workspace = true
 [dependencies]
 native_str = { workspace = true }
 rustc-hash = { workspace = true }
+socket_ipc = { workspace = true }
 vt_path = { workspace = true }
 vt_ipc_shared = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
-
-[target.'cfg(windows)'.dependencies]
-winapi = { workspace = true, features = ["namedpipeapi"] }
 
 [lints]
 workspace = true

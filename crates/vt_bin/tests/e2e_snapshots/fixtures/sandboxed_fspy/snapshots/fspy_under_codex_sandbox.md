@@ -6,11 +6,9 @@ The nested `vt` enables fspy for automatic input inference; changing the file re
 
 ## `codex sandbox -P :workspace vt run inner`
 
-**Exit code:** 1
-
 ```
 $ vtt print-file input.txt
-✗ Failed to set up task communication: Operation not permitted (os error 1)
+tracked input
 ```
 
 ## `vtt replace-file-content input.txt tracked modified`
@@ -20,9 +18,7 @@ $ vtt print-file input.txt
 
 ## `codex sandbox -P :workspace vt run inner`
 
-**Exit code:** 1
-
 ```
-$ vtt print-file input.txt
-✗ Failed to set up task communication: Operation not permitted (os error 1)
+$ vtt print-file input.txt ○ cache miss: 'input.txt' modified, executing
+modified input
 ```

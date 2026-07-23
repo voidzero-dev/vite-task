@@ -3508,6 +3508,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket_ipc"
+version = "0.0.0"
+dependencies = [
+ "nix 0.31.2",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "vt_path",
+ "winapi",
+]
+
+[[package]]
 name = "sqlite-wasm-rs"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4254,9 +4266,9 @@ version = "0.0.0"
 dependencies = [
  "native_str",
  "rustc-hash",
+ "socket_ipc",
  "vt_ipc_shared",
  "vt_path",
- "winapi",
  "wincode",
 ]
 
@@ -4404,12 +4416,11 @@ dependencies = [
  "futures",
  "native_str",
  "rustc-hash",
- "tempfile",
+ "socket_ipc",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
- "uuid",
  "vt_client",
  "vt_glob",
  "vt_ipc_shared",
