@@ -20,7 +20,7 @@ catalog:
   lint-staged: ^17.0.0
   oxfmt: 0.60.0
   oxlint: ^1.55.0
-  oxlint-tsgolint: ^0.25.0
+  oxlint-tsgolint: ^7.0.0
   # Playwright 1.52 pins the browser package to Chromium 136.
   playwright: 1.61.1
   typescript: ^6.0.3
