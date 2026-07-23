@@ -105,7 +105,7 @@ async fn run_untracked(target: &str, fixture: &AbsolutePath) -> ExitStatus {
         .args(benchmark_args(fixture))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::inherit());
     command.status().await.expect("failed to run untracked benchmark target")
 }
 
@@ -115,7 +115,7 @@ async fn run_tracked(target: &str, fixture: &AbsolutePath) -> ChildTermination {
         .args(benchmark_args(fixture))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::inherit());
     command
         .spawn(CancellationToken::new())
         .await
@@ -131,9 +131,9 @@ fn benchmark_args(fixture: &AbsolutePath) -> [&OsStr; 3] {
 
 fn criterion_config() -> Criterion {
     Criterion::default()
-        .sample_size(20)
-        .warm_up_time(Duration::from_secs(2))
-        .measurement_time(Duration::from_secs(10))
+        .sample_size(10)
+        .warm_up_time(Duration::from_millis(500))
+        .measurement_time(Duration::from_secs(1))
 }
 
 criterion_group! {
