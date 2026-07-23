@@ -2,10 +2,14 @@ name: Fspy Benchmark Fork Report
 
 permissions: {}
 
-on:
+on: # zizmor: ignore[dangerous-triggers] PR artifacts are read as text and never executed.
   workflow_run:
     workflows: [Fspy Benchmark]
     types: [completed]
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   comment:
