@@ -9,6 +9,8 @@ allowBuilds:
   deno: true
 
 catalog:
+  '@anthropic-ai/sandbox-runtime': 0.0.67
+  '@openai/codex': 0.145.0
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.61.1
