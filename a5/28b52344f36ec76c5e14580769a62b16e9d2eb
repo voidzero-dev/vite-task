@@ -1,0 +1,19 @@
+crates/fspy_benchmark/benches/fspy.rs
+  s_e5ec3c97709fc1::t_f75f3c278a2246 41-49,70,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a528b52344f36ec76c5e14580769a62b16e9d2eb",
+  "prompts": {},
+  "sessions": {
+    "s_e5ec3c97709fc1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_069cdd00affes629ZhFC9klgbJ",
+        "model": "claude-opus-5"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
