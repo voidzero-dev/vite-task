@@ -47,8 +47,8 @@ fn benchmark_target(
             let mut tracked = Duration::ZERO;
             let mut untracked = Duration::ZERO;
             for _ in 0..iterations {
-                tracked += measure_tracked(runtime, target);
                 untracked += measure_untracked(runtime, target);
+                tracked += measure_tracked(runtime, target);
             }
             // Keep clamped samples reportable at a stable 1 ns per-iteration floor.
             tracked.saturating_sub(untracked).max(Duration::from_nanos(iterations))

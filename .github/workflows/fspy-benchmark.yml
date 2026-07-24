@@ -1,4 +1,4 @@
-name: Fspy Benchmark
+name: fspy benchmark
 
 permissions: {}
 
@@ -83,15 +83,19 @@ jobs:
             baseline=(--save-baseline main)
           fi
           set -o pipefail
+          result_file=".benchmark-results/${{ matrix.platform }}.txt"
           cargo bench --locked -p fspy_benchmark --bench fspy -- \
-            --color never -n "${baseline[@]}" |
-            tee ".benchmark-results/${{ matrix.platform }}.txt"
+            --color never --verbose -n "${baseline[@]}" |
+            tee "$result_file"
+          result="$(<"$result_file")"
+          printf '%s' "$result" > "$result_file"
 
       - name: Add job summary
         run: |
           {
             echo '```text'
             cat ".benchmark-results/${{ matrix.platform }}.txt"
+            echo
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -145,6 +149,7 @@ jobs:
               echo
               echo '```text'
               cat ".benchmark-results/$platform.txt"
+              echo
               echo '```'
               echo
             done
