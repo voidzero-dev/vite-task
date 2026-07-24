@@ -1,0 +1,21 @@
+.github/workflows/fspy-benchmark.yml
+  s_e5ec3c97709fc1::t_cb13e76cf6f0c8 72,108
+crates/fspy_benchmark/benches/fspy.rs
+  s_e5ec3c97709fc1::t_bc4d2aa8ca439c 47,61,71,73-74,77,84-85,88-95,104,106-107,167-169,171,195,199,201-212,219,221,224-225,229,231,235-237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "33e07a488ade965e600b1ae3123382a964c1311d",
+  "prompts": {},
+  "sessions": {
+    "s_e5ec3c97709fc1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_069cdd00affes629ZhFC9klgbJ",
+        "model": "claude-opus-5"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
