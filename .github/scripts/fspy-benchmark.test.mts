@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { renderReport } from './fspy-benchmark.mjs';
+import { renderReport } from './fspy-benchmark.mts';
 
-function result(platform, architecture, runId, untracked, tracked) {
+function result(
+  platform: string,
+  architecture: string,
+  runId: string,
+  untracked: number,
+  tracked: number,
+) {
   return {
     platform,
     architecture,
@@ -18,7 +24,7 @@ function result(platform, architecture, runId, untracked, tracked) {
   };
 }
 
-test('renders normalized change against a compatible baseline', () => {
+void test('renders normalized change against a compatible baseline', () => {
   const baseline = result('linux', 'X64', '10', 100, 120);
   const current = result('linux', 'X64', '20', 100, 132);
   const report = renderReport(current, baseline);
@@ -28,7 +34,7 @@ test('renders normalized change against a compatible baseline', () => {
   assert.match(report, /Compared with main at `12345678`/);
 });
 
-test('does not compare different architectures', () => {
+void test('does not compare different architectures', () => {
   const baseline = result('macos', 'X64', '10', 100, 120);
   const current = result('macos', 'ARM64', '20', 100, 132);
   const report = renderReport(current, baseline);

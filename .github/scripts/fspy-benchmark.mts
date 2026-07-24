@@ -1,15 +1,65 @@
 #!/usr/bin/env node
 
+// Support script for the Fspy Benchmark workflow (.github/workflows/fspy-benchmark.yml).
+// Executed directly with `node`, which strips the type annotations at load time,
+// so only erasable TypeScript syntax is allowed (no enums, namespaces, etc.).
+
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { arch, cpus, platform as osPlatform, release } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+// Mirrors THREAD_COUNT and FILES_PER_THREAD in crates/fspy_benchmark/benches/fspy.rs.
+// Only used to describe the workload in reports.
 const THREAD_COUNT = 4;
 const FILES_PER_THREAD = 2048;
 
-function parseArgs(args) {
-  const parsed = new Map();
+type Args = Map<string, string>;
+
+/** One Criterion estimate, in nanoseconds. */
+interface Estimate {
+  meanNs: number;
+  meanLowerNs: number;
+  meanUpperNs: number;
+  medianNs: number;
+}
+
+/** The subset of a stored benchmark result that reports are rendered from. */
+interface ReportInput {
+  platform: string;
+  architecture: string;
+  os: { cpu: string };
+  commit: string;
+  runId: string;
+  workload: { threadCount: number; filesPerThread: number; totalOpens: number };
+  benchmarks: Record<string, { meanNs: number }>;
+}
+
+/** The full result JSON produced by `collect` and uploaded as an artifact. */
+interface BenchmarkResult extends ReportInput {
+  schemaVersion: number;
+  os: { platform: string; release: string; cpu: string };
+  runner: string;
+  runAttempt: string;
+  event: string;
+  pullRequest: string;
+  benchmarks: Record<string, Estimate>;
+}
+
+interface BaselineArtifact {
+  name: string;
+  runId: string;
+  createdAt: string;
+}
+
+interface IssueComment {
+  id: number;
+  body?: string | null;
+  user?: { type?: string } | null;
+}
+
+function parseArgs(args: string[]): Args {
+  const parsed = new Map<string, string>();
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
     const value = args[index + 1];
@@ -21,7 +71,7 @@ function parseArgs(args) {
   return parsed;
 }
 
-function required(args, name) {
+function required(args: Args, name: string): string {
   const value = args.get(name);
   if (value === undefined || value === '') {
     throw new Error(`missing --${name}`);
@@ -29,7 +79,13 @@ function required(args, name) {
   return value;
 }
 
-async function githubJson(path, init = {}) {
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`missing ${name}`);
+  return value;
+}
+
+async function githubJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = requiredEnv('GITHUB_TOKEN');
   const response = await fetch(`https://api.github.com${path}`, {
     ...init,
@@ -44,31 +100,48 @@ async function githubJson(path, init = {}) {
   if (!response.ok) {
     throw new Error(`GitHub API ${response.status}: ${await response.text()}`);
   }
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
-function requiredEnv(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`missing ${name}`);
-  return value;
-}
-
-async function findLatestArtifact(name, currentRunId) {
+async function findLatestArtifact(
+  name: string,
+  currentRunId: string,
+): Promise<BaselineArtifact | undefined> {
   const repository = requiredEnv('GITHUB_REPOSITORY');
-  const response = await githubJson(
-    `/repos/${repository}/actions/artifacts?name=${encodeURIComponent(name)}&per_page=100`,
+  // The name filter is applied server-side, so one page covers the recent history.
+  const response = await githubJson<{
+    artifacts: {
+      name: string;
+      expired: boolean;
+      created_at: string;
+      workflow_run?: { id: number } | null;
+    }[];
+  }>(`/repos/${repository}/actions/artifacts?name=${encodeURIComponent(name)}&per_page=100`);
+  return (
+    response.artifacts
+      .flatMap((artifact) =>
+        !artifact.expired && artifact.workflow_run?.id != null
+          ? [
+              {
+                name: artifact.name,
+                runId: String(artifact.workflow_run.id),
+                createdAt: artifact.created_at,
+              },
+            ]
+          : [],
+      )
+      // Skip the current run so a re-run attempt does not compare against the
+      // artifact its own previous attempt uploaded.
+      .filter((artifact) => artifact.runId !== currentRunId)
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0]
   );
-  return response.artifacts
-    .filter(
-      (artifact) =>
-        !artifact.expired &&
-        artifact.workflow_run?.id != null &&
-        String(artifact.workflow_run.id) !== String(currentRunId),
-    )
-    .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0];
 }
 
-async function resolveBaseline(args) {
+// Emits step outputs consumed by the workflow's baseline download and result
+// upload steps. The baseline is always the latest `main` artifact: comparing
+// against earlier runs of the same PR would mask regressions that accumulate
+// over the PR's lifetime.
+async function resolveBaseline(args: Args): Promise<void> {
   const outputPath = requiredEnv('GITHUB_OUTPUT');
   const platform = required(args, 'platform');
   const context = required(args, 'context');
@@ -81,14 +154,26 @@ async function resolveBaseline(args) {
     `found=${artifact ? 'true' : 'false'}`,
   ];
   if (artifact) {
-    outputs.push(`artifact-name=${artifact.name}`, `run-id=${artifact.workflow_run.id}`);
+    outputs.push(`artifact-name=${artifact.name}`, `run-id=${artifact.runId}`);
   }
   await appendFile(outputPath, `${outputs.join('\n')}\n`);
 }
 
-async function readEstimate(criterionRoot, target, mode) {
+// Criterion writes the estimates of its most recent run to
+// <criterion root>/<target>/<mode>/new/estimates.json.
+async function readEstimate(
+  criterionRoot: string,
+  target: string,
+  mode: string,
+): Promise<Estimate> {
   const path = join(criterionRoot, target, mode, 'new', 'estimates.json');
-  const estimates = JSON.parse(await readFile(path, 'utf8'));
+  const estimates = JSON.parse(await readFile(path, 'utf8')) as {
+    mean: {
+      point_estimate: number;
+      confidence_interval: { lower_bound: number; upper_bound: number };
+    };
+    median: { point_estimate: number };
+  };
   return {
     meanNs: estimates.mean.point_estimate,
     meanLowerNs: estimates.mean.confidence_interval.lower_bound,
@@ -97,12 +182,14 @@ async function readEstimate(criterionRoot, target, mode) {
   };
 }
 
-async function collect(args) {
+// Combines Criterion's output with run metadata into the JSON document that is
+// uploaded as an artifact and later consumed as a comparison baseline.
+async function collect(args: Args): Promise<void> {
   const criterionRoot = required(args, 'criterion-root');
   const output = required(args, 'output');
   const platform = required(args, 'platform');
   const expectStatic = args.get('expect-static') === 'true';
-  const benchmarks = {
+  const benchmarks: Record<string, Estimate> = {
     'dynamic/untracked': await readEstimate(criterionRoot, 'dynamic', 'untracked'),
     'dynamic/tracked': await readEstimate(criterionRoot, 'dynamic', 'tracked'),
   };
@@ -111,10 +198,10 @@ async function collect(args) {
     benchmarks['static/tracked'] = await readEstimate(criterionRoot, 'static', 'tracked');
   }
 
-  const result = {
+  const result: BenchmarkResult = {
     schemaVersion: 1,
     platform,
-    architecture: process.env.RUNNER_ARCH ?? arch(),
+    architecture: process.env['RUNNER_ARCH'] ?? arch(),
     os: {
       platform: osPlatform(),
       release: release(),
@@ -138,36 +225,40 @@ async function collect(args) {
   await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
 }
 
-function ratio(result, target) {
-  return (
-    result.benchmarks[`${target}/tracked`].meanNs / result.benchmarks[`${target}/untracked`].meanNs
-  );
+/** Wall-clock cost of tracking, as tracked time over untracked time. */
+function ratio(result: ReportInput, target: string): number {
+  const tracked = result.benchmarks[`${target}/tracked`];
+  const untracked = result.benchmarks[`${target}/untracked`];
+  if (!tracked || !untracked) throw new Error(`missing benchmark data for ${target}`);
+  return tracked.meanNs / untracked.meanNs;
 }
 
-function percentage(value) {
+function percentage(value: number): string {
   const sign = value > 0 ? '+' : '';
   return `${sign}${(value * 100).toFixed(2)}%`;
 }
 
-function duration(nanoseconds) {
+function duration(nanoseconds: number): string {
   if (nanoseconds >= 1e9) return `${(nanoseconds / 1e9).toFixed(3)} s`;
   if (nanoseconds >= 1e6) return `${(nanoseconds / 1e6).toFixed(3)} ms`;
   if (nanoseconds >= 1e3) return `${(nanoseconds / 1e3).toFixed(3)} µs`;
   return `${nanoseconds.toFixed(1)} ns`;
 }
 
-function resultLink(result) {
-  const repository = process.env.GITHUB_REPOSITORY;
+function resultLink(result: ReportInput): string {
+  const repository = process.env['GITHUB_REPOSITORY'];
   if (!repository || !result.runId) return '';
   return `https://github.com/${repository}/actions/runs/${result.runId}`;
 }
 
-export function renderReport(current, baseline) {
+export function renderReport(current: ReportInput, baseline?: ReportInput): string {
+  // Overhead ratios are only comparable within one architecture; a runner
+  // profile can move to different hardware over time.
   const compatible =
-    baseline &&
+    baseline !== undefined &&
     current.platform === baseline.platform &&
     current.architecture === baseline.architecture;
-  const lines = [`### ${current.platform[0].toUpperCase()}${current.platform.slice(1)}`, ''];
+  const lines = [`### ${current.platform.charAt(0).toUpperCase()}${current.platform.slice(1)}`, ''];
 
   if (compatible) {
     const link = resultLink(baseline);
@@ -191,15 +282,19 @@ export function renderReport(current, baseline) {
     ? ['dynamic', 'static']
     : ['dynamic'];
   for (const target of targets) {
-    const untracked = current.benchmarks[`${target}/untracked`].meanNs;
-    const tracked = current.benchmarks[`${target}/tracked`].meanNs;
+    const untracked = current.benchmarks[`${target}/untracked`];
+    const tracked = current.benchmarks[`${target}/tracked`];
+    if (!untracked || !tracked) throw new Error(`missing benchmark data for ${target}`);
     const overhead = ratio(current, target) - 1;
+    // Change of the overhead ratio relative to the baseline. Comparing ratios
+    // instead of absolute times cancels machine-speed differences between
+    // runner instances.
     const normalizedChange =
       compatible && Object.hasOwn(baseline.benchmarks, `${target}/tracked`)
         ? ratio(current, target) / ratio(baseline, target) - 1
         : undefined;
     lines.push(
-      `| ${target} | ${duration(untracked)} | ${duration(tracked)} | ${percentage(overhead)} | ${normalizedChange === undefined ? '—' : percentage(normalizedChange)} |`,
+      `| ${target} | ${duration(untracked.meanNs)} | ${duration(tracked.meanNs)} | ${percentage(overhead)} | ${normalizedChange === undefined ? '—' : percentage(normalizedChange)} |`,
     );
   }
 
@@ -213,15 +308,17 @@ export function renderReport(current, baseline) {
   return `${lines.join('\n')}\n`;
 }
 
-async function compare(args) {
-  const current = JSON.parse(await readFile(required(args, 'current'), 'utf8'));
+async function compare(args: Args): Promise<void> {
+  const current = JSON.parse(await readFile(required(args, 'current'), 'utf8')) as BenchmarkResult;
   const baselinePath = args.get('baseline');
-  let baseline;
+  let baseline: BenchmarkResult | undefined;
   if (baselinePath) {
     try {
-      baseline = JSON.parse(await readFile(baselinePath, 'utf8'));
+      baseline = JSON.parse(await readFile(baselinePath, 'utf8')) as BenchmarkResult;
     } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+      // The workflow always passes --baseline; the file is absent when no
+      // baseline artifact was found.
+      if ((error as { code?: string }).code !== 'ENOENT') throw error;
     }
   }
   const report = renderReport(current, baseline);
@@ -231,13 +328,15 @@ async function compare(args) {
 
 const COMMENT_MARKER = '<!-- fspy-benchmark-report -->';
 
-async function comment(args) {
+// Creates or updates the sticky PR comment. The invisible marker identifies
+// the comment, so later runs edit it in place instead of posting a new one.
+async function comment(args: Args): Promise<void> {
   const repository = requiredEnv('GITHUB_REPOSITORY');
   const pullRequest = required(args, 'pull-request');
   const commit = required(args, 'commit');
   const resultsDir = required(args, 'results-dir');
 
-  const sections = [];
+  const sections: string[] = [];
   for (const platform of ['linux', 'macos', 'windows']) {
     sections.push(await readFile(join(resultsDir, `${platform}.md`), 'utf8'));
   }
@@ -252,7 +351,7 @@ async function comment(args) {
     '',
   ].join('\n');
 
-  const comments = await githubJson(
+  const comments = await githubJson<IssueComment[]>(
     `/repos/${repository}/issues/${pullRequest}/comments?per_page=100`,
   );
   const existing = comments.find(
@@ -268,7 +367,7 @@ async function comment(args) {
   });
 }
 
-async function main() {
+async function main(): Promise<void> {
   const command = process.argv[2];
   const args = parseArgs(process.argv.slice(3));
   if (command === 'resolve-baseline') {
@@ -284,10 +383,12 @@ async function main() {
   }
 }
 
+// Run only when executed directly, so the test file can import renderReport.
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
 if (import.meta.url === invokedPath) {
-  main().catch((error) => {
-    process.stderr.write(`${error.stack ?? error}\n`);
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   });
 }

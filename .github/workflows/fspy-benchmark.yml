@@ -81,7 +81,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          node .github/scripts/fspy-benchmark.mjs resolve-baseline
+          node .github/scripts/fspy-benchmark.mts resolve-baseline
           --platform "${{ matrix.platform }}"
           --context "${{ steps.context.outputs.name }}"
 
@@ -100,7 +100,7 @@ jobs:
 
       - name: Collect benchmark results
         run: >-
-          node .github/scripts/fspy-benchmark.mjs collect
+          node .github/scripts/fspy-benchmark.mts collect
           --criterion-root "$CARGO_TARGET_DIR/criterion/fspy"
           --output ".benchmark-results/${{ matrix.platform }}.json"
           --platform "${{ matrix.platform }}"
@@ -114,7 +114,7 @@ jobs:
 
       - name: Compare benchmark results
         run: >-
-          node .github/scripts/fspy-benchmark.mjs compare
+          node .github/scripts/fspy-benchmark.mts compare
           --current ".benchmark-results/${{ matrix.platform }}.json"
           --baseline ".benchmark-baseline/${{ matrix.platform }}.json"
           --output ".benchmark-results/${{ matrix.platform }}.md"
@@ -159,7 +159,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: >-
-          node .github/scripts/fspy-benchmark.mjs comment
+          node .github/scripts/fspy-benchmark.mts comment
           --results-dir .benchmark-results
           --pull-request "$PR_NUMBER"
           --commit "$HEAD_SHA"
