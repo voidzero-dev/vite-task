@@ -108,8 +108,8 @@ async fn run_tracked(target: &str) -> ChildTermination {
 fn criterion_config() -> Criterion {
     Criterion::default()
         .sample_size(10)
-        .warm_up_time(Duration::from_millis(500))
-        .measurement_time(Duration::from_secs(60))
+        .warm_up_time(Duration::from_secs(5))
+        .measurement_time(Duration::from_secs(180))
 }
 
 criterion_group! {

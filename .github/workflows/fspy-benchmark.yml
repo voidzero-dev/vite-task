@@ -72,15 +72,40 @@ jobs:
           search_artifacts: true
           if_no_artifact_found: warn
 
+      - name: Download pull request baseline
+        id: pr-baseline
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.main-baseline.outputs.found_artifact != 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: dawidd6/action-download-artifact@b6e2e70617bc3265edd6dab6c906732b2f1ae151 # v21
+        with:
+          github_token: ${{ github.token }}
+          workflow: fspy-benchmark.yml
+          workflow_conclusion: success
+          branch: ${{ github.event.pull_request.head.ref }}
+          event: pull_request
+          name: fspy-benchmark-baseline-pr-v1-${{ github.event.pull_request.number }}-${{ matrix.platform }}
+          path: ${{ env.CRITERION_HOME }}/fspy
+          search_artifacts: true
+          if_no_artifact_found: warn
+
       - name: Run benchmark
         env:
-          BASELINE_FOUND: ${{ steps.main-baseline.outputs.found_artifact }}
+          MAIN_BASELINE_FOUND: ${{ steps.main-baseline.outputs.found_artifact }}
+          PR_BASELINE_FOUND: ${{ steps.pr-baseline.outputs.found_artifact }}
         run: |
           mkdir -p .benchmark-results
-          if [[ "$GITHUB_EVENT_NAME" == "push" || "$BASELINE_FOUND" != "true" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
             baseline=(--save-baseline main)
-          else
+          elif [[ "$MAIN_BASELINE_FOUND" == "true" ]]; then
             baseline=(--baseline main)
+          elif [[ "$PR_BASELINE_FOUND" == "true" ]]; then
+            baseline=(--baseline pr)
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            baseline=(--save-baseline pr)
+          else
+            baseline=(--save-baseline main)
           fi
           set -o pipefail
           cargo bench --locked -p fspy_benchmark --bench fspy -- \
@@ -95,11 +120,40 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Save pull request baseline
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.main-baseline.outputs.found_artifact != 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          for target in dynamic static; do
+            source="$CRITERION_HOME/fspy/$target/new"
+            if [[ -d "$source" ]]; then
+              mkdir -p "$CRITERION_HOME/fspy/$target/pr"
+              cp -R "$source/." "$CRITERION_HOME/fspy/$target/pr/"
+            fi
+          done
+
       - name: Upload main baseline
         if: github.event_name == 'push' && github.ref_name == 'main'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fspy-benchmark-baseline-v1-${{ matrix.platform }}
+          path: ${{ env.CRITERION_HOME }}/fspy
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 90
+
+      - name: Upload pull request baseline
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.main-baseline.outputs.found_artifact != 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        # Until main has a baseline, keep Criterion's data so the next commit
+        # in this pull request can compare against its latest run.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fspy-benchmark-baseline-pr-v1-${{ github.event.pull_request.number }}-${{ matrix.platform }}
           path: ${{ env.CRITERION_HOME }}/fspy
           if-no-files-found: error
           overwrite: true
