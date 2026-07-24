@@ -12,7 +12,6 @@ use tokio::runtime::{Builder, Runtime};
 use tokio_util::sync::CancellationToken;
 
 const DYNAMIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_TARGET");
-const PROCESS_PAIRS_PER_SAMPLE: u64 = 500;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const STATIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_STATIC_TARGET");
@@ -45,19 +44,14 @@ fn benchmark_target(
 
     group.bench_with_input(BenchmarkId::from_parameter(target_name), &target, |bencher, target| {
         bencher.iter_custom(|iterations| {
-            // Keep run averages comparable when the delta misleads Criterion's calibration.
-            let measured_iterations = PROCESS_PAIRS_PER_SAMPLE;
             let mut tracked = Duration::ZERO;
             let mut untracked = Duration::ZERO;
-            for _ in 0..measured_iterations {
-                untracked += measure_untracked(runtime, target);
+            for _ in 0..iterations {
                 tracked += measure_tracked(runtime, target);
+                untracked += measure_untracked(runtime, target);
             }
-            tracked
-                .saturating_sub(untracked)
-                .div_f64(measured_iterations as f64)
-                .max(Duration::from_nanos(1))
-                .mul_f64(iterations as f64)
+            // Keep clamped samples reportable at a stable 1 ns per-iteration floor.
+            tracked.saturating_sub(untracked).max(Duration::from_nanos(iterations))
         });
     });
 }
@@ -114,8 +108,8 @@ async fn run_tracked(target: &str) -> ChildTermination {
 fn criterion_config() -> Criterion {
     Criterion::default()
         .sample_size(10)
-        .warm_up_time(Duration::from_secs(5))
-        .measurement_time(Duration::from_secs(60))
+        .warm_up_time(Duration::from_millis(500))
+        .measurement_time(Duration::from_secs(5))
 }
 
 criterion_group! {
