@@ -1,30 +1,36 @@
 pub mod convert;
 pub mod raw_exec;
 
+mod fork_tracker;
+mod process_sender;
+
 use std::{
     cell::Cell, ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _,
     path::Path, sync::OnceLock,
 };
 
 use convert::{ToAbsolutePath, ToAccessMode};
-use fspy_shared::ipc::{PathAccess, channel::Sender};
+use fspy_shared::ipc::PathAccess;
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::EncodedPayload,
     spawn::{PreExec, handle_exec},
 };
+use process_sender::ProcessSender;
 use raw_exec::RawExec;
 use wincode::Serialize as _;
 
 pub struct Client {
     encoded_payload: EncodedPayload,
-    ipc_sender: Option<Sender>,
+    ipc_sender: ProcessSender,
 }
 
-// SAFETY: Client fields are only mutated during initialization in the ctor; after that, all access is read-only
+// SAFETY: ProcessSender publishes immutable sender states through atomics, and
+// the remaining Client state is read-only after initialization.
 #[cfg(target_os = "macos")]
 unsafe impl Sync for Client {}
-// SAFETY: Client is only sent once during initialization; after that it lives in a static OnceLock
+// SAFETY: Client is moved into the static OnceLock during initialization. Its
+// ProcessSender and read-only payload may then be shared between threads.
 #[cfg(target_os = "macos")]
 unsafe impl Send for Client {}
 
@@ -35,32 +41,18 @@ impl Debug for Client {
 }
 
 impl Client {
-    #[expect(
-        clippy::print_stderr,
-        reason = "preload library intentionally uses stderr for error reporting"
-    )]
     #[cfg(not(test))]
     fn from_env() -> Self {
         use fspy_shared_unix::payload::decode_payload_from_env;
 
         let encoded_payload = decode_payload_from_env().unwrap();
-
-        let ipc_sender = match encoded_payload.payload.ipc_channel_conf.sender() {
-            Ok(sender) => Some(sender),
-            Err(err) => {
-                // this can happen if the process is started after the root target process has exited.
-                // By that time the channel would have been closed in the receiver side.
-                // In this case we just leave a message and skip sending any path accesses.
-                eprintln!("fspy: failed to create ipc sender: {err}");
-                None
-            }
-        };
+        let ipc_sender = ProcessSender::new(&encoded_payload.payload.ipc_channel_conf).unwrap();
 
         Self { encoded_payload, ipc_sender }
     }
 
     fn send(&self, mode: fspy_shared::ipc::AccessMode, path: &Path) -> anyhow::Result<()> {
-        let Some(ipc_sender) = &self.ipc_sender else {
+        let Some(ipc_sender) = self.ipc_sender.sender() else {
             // ipc channel not available, skip sending
             return Ok(());
         };
