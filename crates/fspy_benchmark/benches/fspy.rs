@@ -12,7 +12,7 @@ use tokio::runtime::{Builder, Runtime};
 use tokio_util::sync::CancellationToken;
 
 const DYNAMIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_TARGET");
-const MIN_PROCESS_PAIRS_PER_SAMPLE: u64 = 500;
+const PROCESS_PAIRS_PER_SAMPLE: u64 = 500;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const STATIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_STATIC_TARGET");
@@ -45,7 +45,8 @@ fn benchmark_target(
 
     group.bench_with_input(BenchmarkId::from_parameter(target_name), &target, |bencher, target| {
         bencher.iter_custom(|iterations| {
-            let measured_iterations = iterations.max(MIN_PROCESS_PAIRS_PER_SAMPLE);
+            // Keep run averages comparable when the delta misleads Criterion's calibration.
+            let measured_iterations = PROCESS_PAIRS_PER_SAMPLE;
             let mut tracked = Duration::ZERO;
             let mut untracked = Duration::ZERO;
             for _ in 0..measured_iterations {
