@@ -6,8 +6,8 @@ use std::{
 };
 
 use criterion::{
-    BenchmarkGroup, BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main,
-    measurement::WallTime,
+    BenchmarkGroup, BenchmarkId, Criterion, SamplingMode, Throughput, criterion_group,
+    criterion_main, measurement::WallTime,
 };
 use fspy::{ChildTermination, Command};
 use tempfile::TempDir;
@@ -36,6 +36,8 @@ fn benchmark(criterion: &mut Criterion) {
     let runtime = Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
     let mut group = criterion.benchmark_group("fspy");
     group.sampling_mode(SamplingMode::Flat);
+    // Criterion reports per-open time alongside wall time.
+    group.throughput(Throughput::Elements((TOTAL_FILE_COUNT * PASSES) as u64));
 
     benchmark_target(&mut group, &runtime, "dynamic", DYNAMIC_TARGET, &fixture_root);
 
