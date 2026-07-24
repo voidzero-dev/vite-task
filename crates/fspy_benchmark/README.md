@@ -1,8 +1,10 @@
 # fspy benchmark
 
 This benchmark measures the wall-clock overhead fspy adds to a filesystem-heavy child process.
-The target starts four threads. Each thread opens 2,048 distinct, pre-created files for reading
-and drops every handle immediately.
+The target starts four threads. Each thread opens 2,048 distinct, pre-created files for reading,
+dropping every handle immediately, and repeats this for 16 passes — 131,072 tracked opens per
+run. The passes keep per-open interception cost dominant over process startup, whose variance on
+CI runners would otherwise drown the tracked/untracked delta.
 
 The fixture is created before Criterion starts measuring. Tracked and untracked runs execute the
 same target with the same arguments, empty environment, working directory, and standard streams.

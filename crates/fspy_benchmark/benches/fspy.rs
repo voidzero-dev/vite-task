@@ -15,11 +15,17 @@ use tokio::runtime::{Builder, Runtime};
 use tokio_util::sync::CancellationToken;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 
+// Mirrored by .github/scripts/fspy-benchmark.mts for report rendering.
+// The passes multiplier makes per-open interception cost dominate process
+// startup in the measurement; with a single pass the tracked/untracked delta
+// is the same order as spawn-time variance on CI runners.
 const THREAD_COUNT: usize = 4;
 const FILES_PER_THREAD: usize = 2048;
+const PASSES: usize = 16;
 const TOTAL_FILE_COUNT: usize = THREAD_COUNT * FILES_PER_THREAD;
 const THREAD_COUNT_ARG: &str = "4";
 const FILES_PER_THREAD_ARG: &str = "2048";
+const PASSES_ARG: &str = "16";
 const DYNAMIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_TARGET");
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -92,6 +98,8 @@ fn validate_tracked_run(runtime: &Runtime, target: &str, fixture: &AbsolutePath)
         .iter()
         .filter(|access| access.path.strip_path_prefix(fixture, |result| result.is_ok()))
         .count();
+    // Requires every distinct fixture file to be observed, independent of
+    // whether repeated accesses to the same path are deduplicated.
     assert!(
         fixture_access_count >= TOTAL_FILE_COUNT,
         "expected at least {TOTAL_FILE_COUNT} fixture accesses, captured {fixture_access_count}"
@@ -125,15 +133,20 @@ async fn run_tracked(target: &str, fixture: &AbsolutePath) -> ChildTermination {
         .expect("failed to wait for tracked benchmark target")
 }
 
-fn benchmark_args(fixture: &AbsolutePath) -> [&OsStr; 3] {
-    [fixture.as_path().as_os_str(), OsStr::new(THREAD_COUNT_ARG), OsStr::new(FILES_PER_THREAD_ARG)]
+fn benchmark_args(fixture: &AbsolutePath) -> [&OsStr; 4] {
+    [
+        fixture.as_path().as_os_str(),
+        OsStr::new(THREAD_COUNT_ARG),
+        OsStr::new(FILES_PER_THREAD_ARG),
+        OsStr::new(PASSES_ARG),
+    ]
 }
 
 fn criterion_config() -> Criterion {
     Criterion::default()
         .sample_size(10)
         .warm_up_time(Duration::from_millis(500))
-        .measurement_time(Duration::from_secs(1))
+        .measurement_time(Duration::from_secs(5))
 }
 
 criterion_group! {

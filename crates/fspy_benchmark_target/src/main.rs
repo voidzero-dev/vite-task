@@ -14,9 +14,10 @@ fn main() {
         .expect("fixture root must be absolute");
     let thread_count = parse_usize(args.next(), "thread count");
     let files_per_thread = parse_usize(args.next(), "files per thread");
+    let passes = parse_usize(args.next(), "passes");
     assert!(args.next().is_none(), "unexpected extra arguments");
 
-    run(&root, thread_count, files_per_thread);
+    run(&root, thread_count, files_per_thread, passes);
 }
 
 fn parse_usize(value: Option<std::ffi::OsString>, name: &str) -> usize {
@@ -28,9 +29,10 @@ fn parse_usize(value: Option<std::ffi::OsString>, name: &str) -> usize {
         .unwrap_or_else(|_| panic!("invalid {name}"))
 }
 
-fn run(root: &AbsolutePath, thread_count: usize, files_per_thread: usize) {
+fn run(root: &AbsolutePath, thread_count: usize, files_per_thread: usize, passes: usize) {
     assert!(thread_count > 1, "benchmark requires multiple threads");
     assert!(files_per_thread > 0, "benchmark requires at least one file per thread");
+    assert!(passes > 0, "benchmark requires at least one pass");
 
     let paths = (0..thread_count * files_per_thread)
         .map(|index| root.join(vite_str::format!("file-{index:05}.txt")))
@@ -42,10 +44,12 @@ fn run(root: &AbsolutePath, thread_count: usize, files_per_thread: usize) {
             let barrier = Arc::clone(&barrier);
             scope.spawn(move || {
                 barrier.wait();
-                for path in thread_paths {
-                    drop(File::open(path).unwrap_or_else(|error| {
-                        panic!("failed to open {}: {error}", path.as_absolute_path())
-                    }));
+                for _ in 0..passes {
+                    for path in thread_paths {
+                        drop(File::open(path).unwrap_or_else(|error| {
+                            panic!("failed to open {}: {error}", path.as_absolute_path())
+                        }));
+                    }
                 }
             });
         }

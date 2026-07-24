@@ -9,35 +9,45 @@ import { arch, cpus, platform as osPlatform, release } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// Mirrors THREAD_COUNT and FILES_PER_THREAD in crates/fspy_benchmark/benches/fspy.rs.
-// Only used to describe the workload in reports.
+// Mirrors THREAD_COUNT, FILES_PER_THREAD, and PASSES in
+// crates/fspy_benchmark/benches/fspy.rs. Only used to describe the workload in
+// reports.
 const THREAD_COUNT = 4;
 const FILES_PER_THREAD = 2048;
+const PASSES = 16;
+
+// Bump when the workload or result shape changes; results from different
+// schema versions are not comparable.
+const SCHEMA_VERSION = 2;
 
 type Args = Map<string, string>;
 
-/** One Criterion estimate, in nanoseconds. */
-interface Estimate {
+/** Mean with its confidence interval, in nanoseconds. */
+interface EstimateSummary {
   meanNs: number;
   meanLowerNs: number;
   meanUpperNs: number;
+}
+
+/** One Criterion estimate, in nanoseconds. */
+interface Estimate extends EstimateSummary {
   medianNs: number;
 }
 
 /** The subset of a stored benchmark result that reports are rendered from. */
 interface ReportInput {
+  schemaVersion: number;
   platform: string;
   architecture: string;
   os: { cpu: string };
   commit: string;
   runId: string;
-  workload: { threadCount: number; filesPerThread: number; totalOpens: number };
-  benchmarks: Record<string, { meanNs: number }>;
+  workload: { threadCount: number; filesPerThread: number; passes: number; totalOpens: number };
+  benchmarks: Record<string, EstimateSummary>;
 }
 
 /** The full result JSON produced by `collect` and uploaded as an artifact. */
 interface BenchmarkResult extends ReportInput {
-  schemaVersion: number;
   os: { platform: string; release: string; cpu: string };
   runner: string;
   runAttempt: string;
@@ -199,7 +209,7 @@ async function collect(args: Args): Promise<void> {
   }
 
   const result: BenchmarkResult = {
-    schemaVersion: 1,
+    schemaVersion: SCHEMA_VERSION,
     platform,
     architecture: process.env['RUNNER_ARCH'] ?? arch(),
     os: {
@@ -216,7 +226,8 @@ async function collect(args: Args): Promise<void> {
     workload: {
       threadCount: THREAD_COUNT,
       filesPerThread: FILES_PER_THREAD,
-      totalOpens: THREAD_COUNT * FILES_PER_THREAD,
+      passes: PASSES,
+      totalOpens: THREAD_COUNT * FILES_PER_THREAD * PASSES,
     },
     benchmarks,
   };
@@ -245,6 +256,12 @@ function duration(nanoseconds: number): string {
   return `${nanoseconds.toFixed(1)} ns`;
 }
 
+/** Mean with the half-width of its confidence interval, e.g. `12.3 ms ±1.4%`. */
+function durationWithUncertainty(estimate: EstimateSummary): string {
+  const halfWidth = (estimate.meanUpperNs - estimate.meanLowerNs) / 2 / estimate.meanNs;
+  return `${duration(estimate.meanNs)} ±${(halfWidth * 100).toFixed(1)}%`;
+}
+
 function resultLink(result: ReportInput): string {
   const repository = process.env['GITHUB_REPOSITORY'];
   if (!repository || !result.runId) return '';
@@ -252,10 +269,12 @@ function resultLink(result: ReportInput): string {
 }
 
 export function renderReport(current: ReportInput, baseline?: ReportInput): string {
-  // Overhead ratios are only comparable within one architecture; a runner
-  // profile can move to different hardware over time.
+  // Overhead ratios are only comparable within one architecture and one
+  // workload: a runner profile can move to different hardware over time, and
+  // schema bumps change what is measured.
   const compatible =
     baseline !== undefined &&
+    current.schemaVersion === baseline.schemaVersion &&
     current.platform === baseline.platform &&
     current.architecture === baseline.architecture;
   const lines = [`### ${current.platform.charAt(0).toUpperCase()}${current.platform.slice(1)}`, ''];
@@ -266,7 +285,9 @@ export function renderReport(current: ReportInput, baseline?: ReportInput): stri
     lines.push(`Compared with ${description} at \`${baseline.commit.slice(0, 8)}\`.`, '');
   } else if (baseline) {
     lines.push(
-      `No comparison: the baseline architecture is \`${baseline.architecture}\`, current is \`${current.architecture}\`.`,
+      baseline.schemaVersion === current.schemaVersion
+        ? `No comparison: the baseline architecture is \`${baseline.architecture}\`, current is \`${current.architecture}\`.`
+        : `No comparison: the baseline uses result schema ${baseline.schemaVersion}, current is ${current.schemaVersion}.`,
       '',
     );
   } else {
@@ -294,13 +315,13 @@ export function renderReport(current: ReportInput, baseline?: ReportInput): stri
         ? ratio(current, target) / ratio(baseline, target) - 1
         : undefined;
     lines.push(
-      `| ${target} | ${duration(untracked.meanNs)} | ${duration(tracked.meanNs)} | ${percentage(overhead)} | ${normalizedChange === undefined ? '—' : percentage(normalizedChange)} |`,
+      `| ${target} | ${durationWithUncertainty(untracked)} | ${durationWithUncertainty(tracked)} | ${percentage(overhead)} | ${normalizedChange === undefined ? '—' : percentage(normalizedChange)} |`,
     );
   }
 
   lines.push(
     '',
-    `Workload: ${current.workload.threadCount} threads, ${current.workload.filesPerThread.toLocaleString('en-US')} files per thread, ${current.workload.totalOpens.toLocaleString('en-US')} total open-and-close operations.`,
+    `Workload: ${current.workload.threadCount} threads × ${current.workload.filesPerThread.toLocaleString('en-US')} files × ${current.workload.passes.toLocaleString('en-US')} passes, ${current.workload.totalOpens.toLocaleString('en-US')} total open-and-close operations.`,
     '',
     `<sub>\`${current.architecture}\` · ${current.os.cpu} · run [${current.runId}](${resultLink(current)})</sub>`,
     '',
