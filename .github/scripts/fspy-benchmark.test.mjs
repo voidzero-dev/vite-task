@@ -21,17 +21,17 @@ function result(platform, architecture, runId, untracked, tracked) {
 test('renders normalized change against a compatible baseline', () => {
   const baseline = result('linux', 'X64', '10', 100, 120);
   const current = result('linux', 'X64', '20', 100, 132);
-  const report = renderReport(current, baseline, 'previous PR run');
+  const report = renderReport(current, baseline);
 
   assert.match(report, /fspy overhead \| Normalized change/);
   assert.match(report, /\+32\.00% \| \+10\.00%/);
-  assert.match(report, /previous PR run/);
+  assert.match(report, /Compared with main at `12345678`/);
 });
 
 test('does not compare different architectures', () => {
   const baseline = result('macos', 'X64', '10', 100, 120);
   const current = result('macos', 'ARM64', '20', 100, 132);
-  const report = renderReport(current, baseline, 'main');
+  const report = renderReport(current, baseline);
 
   assert.match(report, /No comparison/);
   assert.match(report, /\+32\.00% \| —/);

@@ -29,14 +29,16 @@ function required(args, name) {
   return value;
 }
 
-async function githubJson(path) {
+async function githubJson(path, init = {}) {
   const token = requiredEnv('GITHUB_TOKEN');
   const response = await fetch(`https://api.github.com${path}`, {
+    ...init,
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${token}`,
       'X-GitHub-Api-Version': '2022-11-28',
       'User-Agent': 'vite-task-fspy-benchmark',
+      ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
   });
   if (!response.ok) {
@@ -58,7 +60,10 @@ async function findLatestArtifact(name, currentRunId) {
   );
   return response.artifacts
     .filter(
-      (artifact) => !artifact.expired && String(artifact.workflow_run?.id) !== String(currentRunId),
+      (artifact) =>
+        !artifact.expired &&
+        artifact.workflow_run?.id != null &&
+        String(artifact.workflow_run.id) !== String(currentRunId),
     )
     .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0];
 }
@@ -69,29 +74,14 @@ async function resolveBaseline(args) {
   const context = required(args, 'context');
   const currentRunId = requiredEnv('GITHUB_RUN_ID');
   const currentArtifactName = `fspy-benchmark-${platform}-${context}`;
-  const candidates = [currentArtifactName];
-  if (context !== 'main') candidates.push(`fspy-benchmark-${platform}-main`);
-
-  let artifact;
-  let kind;
-  for (const candidate of candidates) {
-    artifact = await findLatestArtifact(candidate, currentRunId);
-    if (artifact) {
-      kind = candidate === currentArtifactName ? 'previous PR run' : 'main';
-      break;
-    }
-  }
+  const artifact = await findLatestArtifact(`fspy-benchmark-${platform}-main`, currentRunId);
 
   const outputs = [
     `current-artifact-name=${currentArtifactName}`,
     `found=${artifact ? 'true' : 'false'}`,
   ];
   if (artifact) {
-    outputs.push(
-      `artifact-name=${artifact.name}`,
-      `run-id=${artifact.workflow_run.id}`,
-      `kind=${kind}`,
-    );
+    outputs.push(`artifact-name=${artifact.name}`, `run-id=${artifact.workflow_run.id}`);
   }
   await appendFile(outputPath, `${outputs.join('\n')}\n`);
 }
@@ -172,7 +162,7 @@ function resultLink(result) {
   return `https://github.com/${repository}/actions/runs/${result.runId}`;
 }
 
-export function renderReport(current, baseline, baselineKind = '') {
+export function renderReport(current, baseline) {
   const compatible =
     baseline &&
     current.platform === baseline.platform &&
@@ -181,9 +171,7 @@ export function renderReport(current, baseline, baselineKind = '') {
 
   if (compatible) {
     const link = resultLink(baseline);
-    const description = link
-      ? `[${baselineKind || 'baseline'}](${link})`
-      : baselineKind || 'baseline';
+    const description = link ? `[main](${link})` : 'main';
     lines.push(`Compared with ${description} at \`${baseline.commit.slice(0, 8)}\`.`, '');
   } else if (baseline) {
     lines.push(
@@ -191,7 +179,7 @@ export function renderReport(current, baseline, baselineKind = '') {
       '',
     );
   } else {
-    lines.push('No previous result was available for this runner.', '');
+    lines.push('No `main` result was available for this runner.', '');
   }
 
   lines.push(
@@ -236,9 +224,48 @@ async function compare(args) {
       if (error.code !== 'ENOENT') throw error;
     }
   }
-  const report = renderReport(current, baseline, args.get('baseline-kind') ?? '');
+  const report = renderReport(current, baseline);
   await writeFile(required(args, 'output'), report);
   process.stdout.write(report);
+}
+
+const COMMENT_MARKER = '<!-- fspy-benchmark-report -->';
+
+async function comment(args) {
+  const repository = requiredEnv('GITHUB_REPOSITORY');
+  const pullRequest = required(args, 'pull-request');
+  const commit = required(args, 'commit');
+  const resultsDir = required(args, 'results-dir');
+
+  const sections = [];
+  for (const platform of ['linux', 'macos', 'windows']) {
+    sections.push(await readFile(join(resultsDir, `${platform}.md`), 'utf8'));
+  }
+  const body = [
+    COMMENT_MARKER,
+    '## fspy benchmark',
+    '',
+    `Results for commit \`${commit}\`. Each platform is compared with the latest \`main\` result.`,
+    '',
+    ...sections,
+    '<sub>This comment is updated by the Fspy Benchmark workflow.</sub>',
+    '',
+  ].join('\n');
+
+  const comments = await githubJson(
+    `/repos/${repository}/issues/${pullRequest}/comments?per_page=100`,
+  );
+  const existing = comments.find(
+    (existingComment) =>
+      existingComment.user?.type === 'Bot' && existingComment.body?.includes(COMMENT_MARKER),
+  );
+  const path = existing
+    ? `/repos/${repository}/issues/comments/${existing.id}`
+    : `/repos/${repository}/issues/${pullRequest}/comments`;
+  await githubJson(path, {
+    method: existing ? 'PATCH' : 'POST',
+    body: JSON.stringify({ body }),
+  });
 }
 
 async function main() {
@@ -250,6 +277,8 @@ async function main() {
     await collect(args);
   } else if (command === 'compare') {
     await compare(args);
+  } else if (command === 'comment') {
+    await comment(args);
   } else {
     throw new Error(`unknown command: ${command ?? '<none>'}`);
   }

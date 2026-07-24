@@ -23,4 +23,4 @@ just benchmark-fspy
 ```
 
 CI runs it on the Linux, macOS, and Windows Namespace runner profiles. Each result is compared with
-the latest result from the same pull request, falling back to the latest `main` result.
+the latest `main` result.

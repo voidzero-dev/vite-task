@@ -61,11 +61,16 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          # Only real main-branch runs may publish the main baseline artifact;
+          # a workflow_dispatch run from another branch must not pollute it.
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             context="pr-$PR_NUMBER"
             pull_request="$PR_NUMBER"
-          else
+          elif [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
             context="main"
+            pull_request="none"
+          else
+            context="dispatch"
             pull_request="none"
           fi
           echo "name=$context" >> "$GITHUB_OUTPUT"
@@ -112,7 +117,6 @@ jobs:
           node .github/scripts/fspy-benchmark.mjs compare
           --current ".benchmark-results/${{ matrix.platform }}.json"
           --baseline ".benchmark-baseline/${{ matrix.platform }}.json"
-          --baseline-kind "${{ steps.baseline.outputs.kind }}"
           --output ".benchmark-results/${{ matrix.platform }}.md"
 
       - name: Add job summary
@@ -140,6 +144,8 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+
       - name: Download current results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -147,58 +153,13 @@ jobs:
           path: .benchmark-results
           merge-multiple: true
 
-      - name: Build PR comment
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          {
-            echo '<!-- fspy-benchmark-report -->'
-            echo '## fspy benchmark'
-            echo
-            echo "Results for commit \`$GITHUB_SHA\`. Each platform uses its latest result from this PR, falling back to \`main\`."
-            echo
-            for platform in linux macos windows; do
-              cat ".benchmark-results/$platform.md"
-            done
-            echo
-            echo '<sub>This comment is updated by the Fspy Benchmark workflow.</sub>'
-          } > benchmark-comment.md
-
       - name: Update PR comment
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          node --input-type=module <<'EOF'
-          import { readFile } from "node:fs/promises";
-
-          const marker = "<!-- fspy-benchmark-report -->";
-          const repository = process.env.GITHUB_REPOSITORY;
-          const token = process.env.GITHUB_TOKEN;
-          const pullRequest = process.env.PR_NUMBER;
-          const headers = {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            "X-GitHub-Api-Version": "2022-11-28",
-          };
-          const commentsResponse = await fetch(
-            `https://api.github.com/repos/${repository}/issues/${pullRequest}/comments?per_page=100`,
-            { headers },
-          );
-          if (!commentsResponse.ok) throw new Error(await commentsResponse.text());
-          const comments = await commentsResponse.json();
-          const existing = comments.find(
-            (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker),
-          );
-          const body = await readFile("benchmark-comment.md", "utf8");
-          const url = existing
-            ? `https://api.github.com/repos/${repository}/issues/comments/${existing.id}`
-            : `https://api.github.com/repos/${repository}/issues/${pullRequest}/comments`;
-          const response = await fetch(url, {
-            method: existing ? "PATCH" : "POST",
-            headers,
-            body: JSON.stringify({ body }),
-          });
-          if (!response.ok) throw new Error(await response.text());
-          EOF
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          node .github/scripts/fspy-benchmark.mjs comment
+          --results-dir .benchmark-results
+          --pull-request "$PR_NUMBER"
+          --commit "$HEAD_SHA"
