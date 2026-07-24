@@ -1307,28 +1307,17 @@ dependencies = [
  "fspy",
  "fspy_benchmark_static_target",
  "fspy_benchmark_target",
- "tempfile",
  "tokio",
  "tokio-util",
- "vite_path",
- "vite_str",
 ]
 
 [[package]]
 name = "fspy_benchmark_static_target"
 version = "0.0.0"
-dependencies = [
- "vite_path",
- "vite_str",
-]
 
 [[package]]
 name = "fspy_benchmark_target"
 version = "0.0.0"
-dependencies = [
- "vite_path",
- "vite_str",
-]
 
 [[package]]
 name = "fspy_detours_sys"

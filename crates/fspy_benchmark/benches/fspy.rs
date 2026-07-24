@@ -1,48 +1,35 @@
 use std::{
-    ffi::OsStr,
-    fs::File,
     process::{ExitStatus, Stdio},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use criterion::{
-    BenchmarkGroup, BenchmarkId, Criterion, SamplingMode, Throughput, criterion_group,
-    criterion_main, measurement::WallTime,
+    BenchmarkGroup, BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main,
+    measurement::WallTime,
 };
 use fspy::{ChildTermination, Command};
-use tempfile::TempDir;
 use tokio::runtime::{Builder, Runtime};
 use tokio_util::sync::CancellationToken;
-use vite_path::{AbsolutePath, AbsolutePathBuf};
 
-// Mirrored by .github/scripts/fspy-benchmark.mts for report rendering.
-// The passes multiplier makes per-open interception cost dominate process
-// startup in the measurement; with a single pass the tracked/untracked delta
-// is the same order as spawn-time variance on CI runners.
-const THREAD_COUNT: usize = 4;
-const FILES_PER_THREAD: usize = 2048;
-const PASSES: usize = 16;
-const TOTAL_FILE_COUNT: usize = THREAD_COUNT * FILES_PER_THREAD;
-const THREAD_COUNT_ARG: &str = "4";
-const FILES_PER_THREAD_ARG: &str = "2048";
-const PASSES_ARG: &str = "16";
 const DYNAMIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_TARGET");
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const STATIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_STATIC_TARGET");
 
+#[cfg(unix)]
+const MISSING_PATH: &str = "/.fspy-benchmark-missing";
+#[cfg(windows)]
+const MISSING_PATH: &str = r"C:\.fspy-benchmark-missing";
+
 fn benchmark(criterion: &mut Criterion) {
-    let (_fixture, fixture_root) = create_fixture();
     let runtime = Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
     let mut group = criterion.benchmark_group("fspy");
     group.sampling_mode(SamplingMode::Flat);
-    // Criterion reports per-open time alongside wall time.
-    group.throughput(Throughput::Elements((TOTAL_FILE_COUNT * PASSES) as u64));
 
-    benchmark_target(&mut group, &runtime, "dynamic", DYNAMIC_TARGET, &fixture_root);
+    benchmark_target(&mut group, &runtime, "dynamic", DYNAMIC_TARGET);
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    benchmark_target(&mut group, &runtime, "static", STATIC_TARGET, &fixture_root);
+    benchmark_target(&mut group, &runtime, "static", STATIC_TARGET);
 
     group.finish();
 }
@@ -52,80 +39,63 @@ fn benchmark_target(
     runtime: &Runtime,
     target_name: &str,
     target: &str,
-    fixture: &AbsolutePath,
 ) {
-    validate_tracked_run(runtime, target, fixture);
+    validate_tracked_run(runtime, target);
 
-    group.bench_with_input(
-        BenchmarkId::new(target_name, "untracked"),
-        &target,
-        |bencher, target| {
-            bencher.iter_with_setup_wrapper(|runner| {
-                let status = runner.run(|| runtime.block_on(run_untracked(target, fixture)));
-                assert!(status.success(), "untracked benchmark target failed: {status}");
-            });
-        },
-    );
-
-    group.bench_with_input(BenchmarkId::new(target_name, "tracked"), &target, |bencher, target| {
-        bencher.iter_with_setup_wrapper(|runner| {
-            let termination = runner.run(|| runtime.block_on(run_tracked(target, fixture)));
-            assert!(
-                termination.status.success(),
-                "tracked benchmark target failed: {}",
-                termination.status
-            );
+    group.bench_with_input(BenchmarkId::from_parameter(target_name), &target, |bencher, target| {
+        bencher.iter_custom(|iterations| {
+            let mut tracked = Duration::ZERO;
+            let mut untracked = Duration::ZERO;
+            for _ in 0..iterations {
+                tracked += measure_tracked(runtime, target);
+                untracked += measure_untracked(runtime, target);
+            }
+            // Keep clamped samples reportable at a stable 1 ns per-iteration floor.
+            tracked.saturating_sub(untracked).max(Duration::from_nanos(iterations))
         });
     });
 }
 
-fn create_fixture() -> (TempDir, AbsolutePathBuf) {
-    let fixture = tempfile::tempdir().expect("failed to create benchmark fixture");
-    let fixture_root = AbsolutePathBuf::new(fixture.path().to_path_buf())
-        .expect("temporary path must be absolute");
-    for index in 0..TOTAL_FILE_COUNT {
-        let path = fixture_root.join(vite_str::format!("file-{index:05}.txt"));
-        File::create(&path).unwrap_or_else(|error| {
-            panic!("failed to create {}: {error}", path.as_absolute_path())
-        });
-    }
-    (fixture, fixture_root)
-}
-
-fn validate_tracked_run(runtime: &Runtime, target: &str, fixture: &AbsolutePath) {
-    let termination = runtime.block_on(run_tracked(target, fixture));
+fn validate_tracked_run(runtime: &Runtime, target: &str) {
+    let termination = runtime.block_on(run_tracked(target));
     assert!(termination.status.success(), "benchmark target failed: {}", termination.status);
-    let fixture_access_count = termination
-        .path_accesses
-        .iter()
-        .filter(|access| access.path.strip_path_prefix(fixture, |result| result.is_ok()))
-        .count();
-    // Requires every distinct fixture file to be observed, independent of
-    // whether repeated accesses to the same path are deduplicated.
-    assert!(
-        fixture_access_count >= TOTAL_FILE_COUNT,
-        "expected at least {TOTAL_FILE_COUNT} fixture accesses, captured {fixture_access_count}"
-    );
+    let captured_missing_access = termination.path_accesses.iter().any(|access| {
+        access.path.strip_path_prefix(MISSING_PATH, |result| {
+            result.is_ok_and(|path| path.as_os_str().is_empty())
+        })
+    });
+    assert!(captured_missing_access, "failed to capture access to {MISSING_PATH}");
 }
 
-async fn run_untracked(target: &str, fixture: &AbsolutePath) -> ExitStatus {
+fn measure_untracked(runtime: &Runtime, target: &str) -> Duration {
+    let start = Instant::now();
+    let status = runtime.block_on(run_untracked(target));
+    let elapsed = start.elapsed();
+    assert!(status.success(), "untracked benchmark target failed: {status}");
+    elapsed
+}
+
+fn measure_tracked(runtime: &Runtime, target: &str) -> Duration {
+    let start = Instant::now();
+    let termination = runtime.block_on(run_tracked(target));
+    let elapsed = start.elapsed();
+    assert!(
+        termination.status.success(),
+        "tracked benchmark target failed: {}",
+        termination.status
+    );
+    elapsed
+}
+
+async fn run_untracked(target: &str) -> ExitStatus {
     let mut command = tokio::process::Command::new(target);
-    command
-        .env_clear()
-        .args(benchmark_args(fixture))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
+    command.env_clear().stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit());
     command.status().await.expect("failed to run untracked benchmark target")
 }
 
-async fn run_tracked(target: &str, fixture: &AbsolutePath) -> ChildTermination {
+async fn run_tracked(target: &str) -> ChildTermination {
     let mut command = Command::new(target);
-    command
-        .args(benchmark_args(fixture))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit());
     command
         .spawn(CancellationToken::new())
         .await
@@ -135,20 +105,11 @@ async fn run_tracked(target: &str, fixture: &AbsolutePath) -> ChildTermination {
         .expect("failed to wait for tracked benchmark target")
 }
 
-fn benchmark_args(fixture: &AbsolutePath) -> [&OsStr; 4] {
-    [
-        fixture.as_path().as_os_str(),
-        OsStr::new(THREAD_COUNT_ARG),
-        OsStr::new(FILES_PER_THREAD_ARG),
-        OsStr::new(PASSES_ARG),
-    ]
-}
-
 fn criterion_config() -> Criterion {
     Criterion::default()
         .sample_size(10)
         .warm_up_time(Duration::from_millis(500))
-        .measurement_time(Duration::from_secs(5))
+        .measurement_time(Duration::from_secs(60))
 }
 
 criterion_group! {

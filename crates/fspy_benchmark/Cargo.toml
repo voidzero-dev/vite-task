@@ -23,11 +23,8 @@ harness = false
 criterion2 = { workspace = true }
 fspy = { workspace = true }
 fspy_benchmark_target = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread"] }
 tokio-util = { workspace = true }
-vite_path = { workspace = true }
-vite_str = { workspace = true }
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dev-dependencies]
 fspy_benchmark_static_target = { path = "../fspy_benchmark_static_target", artifact = "bin", target = "x86_64-unknown-linux-musl" }

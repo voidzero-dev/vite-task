@@ -10,10 +10,6 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
-vite_path = { workspace = true }
-vite_str = { workspace = true }
-
 [[bin]]
 name = "fspy_benchmark_target"
 test = false

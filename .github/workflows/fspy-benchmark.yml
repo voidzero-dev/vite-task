@@ -40,6 +40,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CRITERION_HOME: ${{ github.workspace }}/target/criterion
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
 
@@ -52,88 +53,67 @@ jobs:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: fspy-benchmark-${{ matrix.platform }}
 
-      # The support script is TypeScript; running it needs the .node-version
-      # Node, which strips types natively. Runner-preinstalled Node may be
-      # older.
-      - uses: oxc-project/setup-node@4c588e9266bd930b6ddc34307df0659ed511d187 # v1.3.1
-
       - name: Install static target
         if: matrix.static
         run: rustup target add x86_64-unknown-linux-musl
 
-      - name: Set benchmark context
-        id: context
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          # Only real main-branch runs may publish the main baseline artifact;
-          # a workflow_dispatch run from another branch must not pollute it.
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            context="pr-$PR_NUMBER"
-            pull_request="$PR_NUMBER"
-          elif [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
-            context="main"
-            pull_request="none"
-          else
-            context="dispatch"
-            pull_request="none"
-          fi
-          echo "name=$context" >> "$GITHUB_OUTPUT"
-          echo "pull-request=$pull_request" >> "$GITHUB_OUTPUT"
-
-      - name: Find comparison baseline
-        id: baseline
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          node .github/scripts/fspy-benchmark.mts resolve-baseline
-          --platform "${{ matrix.platform }}"
-          --context "${{ steps.context.outputs.name }}"
-
-      - name: Download comparison baseline
-        if: steps.baseline.outputs.found == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download main baseline
+        id: main-baseline
+        if: github.event_name != 'push'
+        uses: dawidd6/action-download-artifact@b6e2e70617bc3265edd6dab6c906732b2f1ae151 # v21
         with:
-          name: ${{ steps.baseline.outputs.artifact-name }}
-          path: .benchmark-baseline
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ steps.baseline.outputs.run-id }}
+          github_token: ${{ github.token }}
+          workflow: fspy-benchmark.yml
+          workflow_conclusion: success
+          branch: main
+          event: push
+          name: fspy-benchmark-baseline-v1-${{ matrix.platform }}
+          path: ${{ env.CRITERION_HOME }}/fspy
+          search_artifacts: true
+          if_no_artifact_found: warn
 
       - name: Run benchmark
-        run: cargo bench --locked -p fspy_benchmark --bench fspy
-
-      - name: Collect benchmark results
-        run: >-
-          node .github/scripts/fspy-benchmark.mts collect
-          --criterion-root "$CARGO_TARGET_DIR/criterion/fspy"
-          --output ".benchmark-results/${{ matrix.platform }}.json"
-          --platform "${{ matrix.platform }}"
-          --expect-static "${{ matrix.static }}"
-          --runner "${{ matrix.os }}"
-          --commit "$GITHUB_SHA"
-          --run-id "$GITHUB_RUN_ID"
-          --run-attempt "$GITHUB_RUN_ATTEMPT"
-          --event "$GITHUB_EVENT_NAME"
-          --pull-request "${{ steps.context.outputs.pull-request }}"
-
-      - name: Compare benchmark results
-        run: >-
-          node .github/scripts/fspy-benchmark.mts compare
-          --current ".benchmark-results/${{ matrix.platform }}.json"
-          --baseline ".benchmark-baseline/${{ matrix.platform }}.json"
-          --output ".benchmark-results/${{ matrix.platform }}.md"
+        env:
+          BASELINE_FOUND: ${{ steps.main-baseline.outputs.found_artifact }}
+        run: |
+          mkdir -p .benchmark-results
+          if [[ "$GITHUB_EVENT_NAME" == "push" || "$BASELINE_FOUND" != "true" ]]; then
+            baseline=(--save-baseline main)
+          else
+            baseline=(--baseline main)
+          fi
+          set -o pipefail
+          cargo bench --locked -p fspy_benchmark --bench fspy -- \
+            --color never -n "${baseline[@]}" |
+            tee ".benchmark-results/${{ matrix.platform }}.txt"
 
       - name: Add job summary
-        run: cat ".benchmark-results/${{ matrix.platform }}.md" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          {
+            echo '```text'
+            cat ".benchmark-results/${{ matrix.platform }}.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload benchmark result
+      - name: Upload main baseline
+        if: github.event_name == 'push' && github.ref_name == 'main'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ steps.baseline.outputs.current-artifact-name }}
-          path: .benchmark-results/${{ matrix.platform }}.*
+          name: fspy-benchmark-baseline-v1-${{ matrix.platform }}
+          path: ${{ env.CRITERION_HOME }}/fspy
           if-no-files-found: error
-          include-hidden-files: true
+          overwrite: true
+          retention-days: 90
+
+      - name: Upload benchmark report
+        if: github.event_name == 'pull_request'
+        # Matrix jobs have isolated filesystems, so persist each report for the
+        # comment job to combine into one sticky comment after all platforms finish.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fspy-benchmark-report-${{ matrix.platform }}
+          path: .benchmark-results/${{ matrix.platform }}.txt
+          if-no-files-found: error
           overwrite: true
           retention-days: 90
 
@@ -146,27 +126,32 @@ jobs:
     runs-on: namespace-profile-linux-x64-default
     permissions:
       actions: read
-      contents: read
       pull-requests: write
     steps:
-      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
-
-      - uses: oxc-project/setup-node@4c588e9266bd930b6ddc34307df0659ed511d187 # v1.3.1
-
-      - name: Download current results
+      - name: Download benchmark reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: fspy-benchmark-*-pr-${{ github.event.pull_request.number }}
+          pattern: fspy-benchmark-report-*
           path: .benchmark-results
           merge-multiple: true
 
+      - name: Assemble comment
+        run: |
+          {
+            echo '## fspy benchmark'
+            echo
+            for platform in linux macos windows; do
+              echo "### $platform"
+              echo
+              echo '```text'
+              cat ".benchmark-results/$platform.txt"
+              echo '```'
+              echo
+            done
+          } > .benchmark-results/comment.md
+
       - name: Update PR comment
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: >-
-          node .github/scripts/fspy-benchmark.mts comment
-          --results-dir .benchmark-results
-          --pull-request "$PR_NUMBER"
-          --commit "$HEAD_SHA"
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+        with:
+          header: fspy-benchmark
+          path: .benchmark-results/comment.md
