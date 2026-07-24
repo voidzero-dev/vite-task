@@ -109,7 +109,7 @@ fn criterion_config() -> Criterion {
     Criterion::default()
         .sample_size(10)
         .warm_up_time(Duration::from_secs(5))
-        .measurement_time(Duration::from_secs(180))
+        .measurement_time(Duration::from_secs(60))
 }
 
 criterion_group! {
