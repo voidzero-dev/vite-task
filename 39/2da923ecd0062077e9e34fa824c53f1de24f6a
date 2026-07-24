@@ -1,0 +1,19 @@
+crates/fspy_benchmark/README.md
+  s_e051e3ac362778::t_67465bef9f008c 3-4,6-16,23-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "392da923ecd0062077e9e34fa824c53f1de24f6a",
+  "prompts": {},
+  "sessions": {
+    "s_e051e3ac362778": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_e051e3ac362778",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
