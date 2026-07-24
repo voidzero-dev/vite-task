@@ -1,0 +1,62 @@
+crates/fspy_benchmark_target/src/main.rs
+  s_98fd74ffae7f50::t_4769ece89108dd 2,8-9,17-22,25,29
+crates/fspy_benchmark/benches/fspy.rs
+  s_e5ec3c97709fc1::t_bc4d2aa8ca439c 47,70,81,83-84,87,94-95,98-105,114,116-117,177-179,181,205,209-222,229,231,234-235,239,241,245-247
+  s_6f96fbc660338b::t_5493773617c779 7-9,29-31,36-37,79-80,82,85-86,88,96-97,106-107,121,180,182-204,206-208,223-228,230,232-233,236-238
+  s_e5ec3c97709fc1::t_f75f3c278a2246 34
+  s_e5ec3c97709fc1::t_ffe10f6980b79b 38
+  s_98fd74ffae7f50::t_698f573b7ccc5d 25-28,32-33,46,90-93,108-113,115,131,133,139,141,151,153-157,161,163-167,243
+  s_e5ec3c97709fc1::t_5762db04294143 35
+  s_e5ec3c97709fc1::t_59c45e923fd991 39-45,52-58,60-62,64,74,78
+crates/fspy_benchmark/README.md
+  s_e051e3ac362778::t_67465bef9f008c 3-4,6,9-10,12-15,22-25
+  s_a44dda7e8a0b24::t_774b94e5b0a230 7-8,11,26-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f11ef1c76fee9e1264bbc2c11a1f7218c55b0fc3",
+  "prompts": {},
+  "sessions": {
+    "s_6f96fbc660338b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_6f96fbc660338b",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    },
+    "s_98fd74ffae7f50": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_98fd74ffae7f50",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    },
+    "s_a44dda7e8a0b24": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_a44dda7e8a0b24",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    },
+    "s_e051e3ac362778": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_e051e3ac362778",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    },
+    "s_e5ec3c97709fc1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_069cdd00affes629ZhFC9klgbJ",
+        "model": "claude-opus-5"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
