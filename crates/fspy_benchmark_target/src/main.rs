@@ -5,7 +5,7 @@ use std::{
 };
 
 const THREAD_COUNT: usize = 4;
-const OPEN_COUNT_PER_THREAD: usize = 8_192;
+const OPEN_COUNT_PER_THREAD: usize = 2_048;
 
 #[cfg(unix)]
 const MISSING_PATH: &str = "/.fspy-benchmark-missing";
