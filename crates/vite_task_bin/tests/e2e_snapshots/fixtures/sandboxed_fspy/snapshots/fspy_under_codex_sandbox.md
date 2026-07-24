@@ -10,7 +10,7 @@ The nested `vt` enables fspy for automatic input inference; changing the file re
 
 ```
 $ vtt print-file input.txt
-✗ Failed to spawn process: failed to create IPC channel: Operation not permitted (os error 1)
+✗ Failed to set up task communication: Operation not permitted (os error 1)
 ```
 
 ## `vtt replace-file-content input.txt tracked modified`
@@ -24,5 +24,5 @@ $ vtt print-file input.txt
 
 ```
 $ vtt print-file input.txt
-✗ Failed to spawn process: failed to create IPC channel: Operation not permitted (os error 1)
+✗ Failed to set up task communication: Operation not permitted (os error 1)
 ```

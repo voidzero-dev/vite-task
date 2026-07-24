@@ -4126,18 +4126,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vite_ipc"
-version = "0.0.0"
-dependencies = [
- "nix 0.31.2",
- "tempfile",
- "tokio",
- "uuid",
- "vite_path",
- "winapi",
-]
-
-[[package]]
 name = "vite_path"
 version = "0.1.0"
 dependencies = [
@@ -4286,9 +4274,9 @@ version = "0.0.0"
 dependencies = [
  "native_str",
  "rustc-hash",
- "vite_ipc",
  "vite_path",
  "vite_task_ipc_shared",
+ "winapi",
  "wincode",
 ]
 
@@ -4380,12 +4368,13 @@ dependencies = [
  "futures",
  "native_str",
  "rustc-hash",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
  "vite_glob",
- "vite_ipc",
  "vite_path",
  "vite_task_client",
  "vite_task_ipc_shared",

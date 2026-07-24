@@ -6,9 +6,13 @@ use std::{
 };
 
 use native_str::NativeStr;
+
+#[cfg(unix)]
+type RawStream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type RawStream = std::fs::File;
 use rustc_hash::FxHashMap;
 use tokio::runtime::Builder;
-use vite_ipc::Client as RawStream;
 use vite_task_client::{Client, GetEnvsQuery};
 use vite_task_ipc_shared::{GetEnvResponse, Request};
 use vite_task_server::{EnvQuery, Error, Recorder, Reports, ServerHandle, serve};
@@ -60,8 +64,14 @@ fn flush(client: &Client) {
     let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__"), false).unwrap();
 }
 
+#[cfg(unix)]
 fn connect_raw(name: &OsStr) -> RawStream {
-    RawStream::connect(name).expect("connect raw")
+    std::os::unix::net::UnixStream::connect(name).expect("connect raw")
+}
+
+#[cfg(windows)]
+fn connect_raw(name: &OsStr) -> RawStream {
+    std::fs::OpenOptions::new().read(true).write(true).open(name).expect("connect raw")
 }
 
 fn send_frame(stream: &mut RawStream, request: &Request<'_>) {
