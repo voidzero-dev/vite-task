@@ -1,0 +1,21 @@
+crates/fspy_preload_unix/src/interceptions/mutate.rs
+  s_13beef4a2fbc3f::t_f4c4000a1897d1 35,110
+crates/vite_task/src/session/execute/classify.rs
+  s_13beef4a2fbc3f::t_1fa23b12754840 94,123-125,127,138,150-176,178-183,211,223,290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "19c1b7601b6ff5de587a25757c6609d667c2587d",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
