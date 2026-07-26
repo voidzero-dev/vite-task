@@ -1,0 +1,28 @@
+crates/fspy_benchmark/benches/fspy.rs
+  s_e5ec3c97709fc1::t_804d2edad2a733 61
+  s_e5ec3c97709fc1::t_7df7852d6846ce 17,62-65,78
+  s_e5ec3c97709fc1::t_2a13bde6c7508f 2-4,14-16,18,51,53-55,66-77,79,81-87,89-92,94,102-109,112-119,129-130,134-140,142-154,168,177,179-180,183-184,186-187,189-190,192-199,204-217,229-260,262,265-271,277,280-287,290,295,311,366-369
+.github/workflows/fspy-benchmark.yml
+  s_e5ec3c97709fc1::t_85c002fd772b08 149
+  s_e5ec3c97709fc1::t_74ccf7c42aaff7 99,120-121,150,153
+  s_e5ec3c97709fc1::t_75f69f808f962a 23,30,88
+  s_e5ec3c97709fc1::t_ee1dca5dcac07c 31
+crates/fspy_benchmark_target/src/main.rs
+  s_e5ec3c97709fc1::t_787b50b65eb561 6,21-25,46-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4c59cd4bca32a70e20f7a0c45b9eea2fef31efce",
+  "prompts": {},
+  "sessions": {
+    "s_e5ec3c97709fc1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_069cdd00affes629ZhFC9klgbJ",
+        "model": "claude-opus-5"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
