@@ -1,0 +1,19 @@
+crates/fspy/tests/test_utils/mod.rs
+  s_2b0a1b6d7881c3::t_1e9b81562578d3 49-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1b2066a3fbc2770b20ddb4a47af6bcb6dc4c007c",
+  "prompts": {},
+  "sessions": {
+    "s_2b0a1b6d7881c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_2b0a1b6d7881c3",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
