@@ -1,0 +1,57 @@
+crates/vite_task_bin/src/vtt/main.rs
+  s_13beef4a2fbc3f::t_378b9bca65b830 25-26,40,81-82
+crates/vite_task_bin/src/vtt/publish_dir.rs
+  s_13beef4a2fbc3f::t_6fc0b60fcf0f03 1-48
+crates/vite_task_bin/src/vtt/rename.rs
+  s_13beef4a2fbc3f::t_3014c0d0543530 1-15
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/.gitignore
+  s_13beef4a2fbc3f::t_a1de9496e6ab9b 1-3
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/package.json
+  s_13beef4a2fbc3f::t_e17475754dcb6a 1
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/atomic-pkg/package.json
+  s_13beef4a2fbc3f::t_c0382449d607c9 1
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/atomic-pkg/src/data.txt
+  s_13beef4a2fbc3f::t_88be4c7806cab8 1
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/atomic-pkg/vite-task.json
+  s_13beef4a2fbc3f::t_fae9470c253eae 1-7
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/clean-pkg/package.json
+  s_13beef4a2fbc3f::t_4b6836dad5fd34 1
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/clean-pkg/src/data.txt
+  s_13beef4a2fbc3f::t_00d59f3b71f94a 1
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/clean-pkg/vite-task.json
+  s_13beef4a2fbc3f::t_72964a288bb2f0 1-7
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/state-pkg/package.json
+  s_13beef4a2fbc3f::t_f6287e66507baf 1
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/state-pkg/src/data.txt
+  s_13beef4a2fbc3f::t_6b16cab4e5822d 1
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/state-pkg/vite-task.json
+  s_13beef4a2fbc3f::t_62bb9feaf55df8 1-7
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/pnpm-workspace.yaml
+  s_13beef4a2fbc3f::t_775403caea380d 1-2
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/snapshots.toml
+  s_13beef4a2fbc3f::t_51aa7eb1d1fe7b 1-39
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/snapshots/atomic_directory_publish_is_cached_and_restored.md
+  s_13beef4a2fbc3f::t_b0b5244c029915 1-38
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/snapshots/gitignored_state_read_then_rewritten_is_an_output.md
+  s_13beef4a2fbc3f::t_d00e4209f3b93c 1-35
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/snapshots/output_directory_cleanup_still_caches.md
+  s_13beef4a2fbc3f::t_ea3293cbd081e0 1-38
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/vite-task.json
+  s_13beef4a2fbc3f::t_dcc393c52b6122 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0675b3905ee7ab3018ba4484243afa49426f45c8",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
