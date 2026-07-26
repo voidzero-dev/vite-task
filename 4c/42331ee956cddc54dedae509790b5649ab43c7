@@ -1,0 +1,31 @@
+crates/fspy/src/unix/syscall_handler/mod.rs
+  s_13beef4a2fbc3f::t_ea99bc0f710e93 3,25-33,51-77,122-181,212-218
+crates/fspy/src/unix/syscall_handler/mutate.rs
+  s_13beef4a2fbc3f::t_63bb061f6838de 1-64
+crates/fspy_seccomp_unotify/src/supervisor/handler/arg.rs
+  s_6d4196d89204fe::t_01c3473d843bca 230-248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4c42331ee956cddc54dedae509790b5649ab43c7",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    },
+    "s_6d4196d89204fe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_6d4196d89204fe",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
