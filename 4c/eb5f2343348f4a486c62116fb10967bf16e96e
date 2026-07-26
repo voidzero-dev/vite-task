@@ -1,0 +1,25 @@
+DECISIONS.md
+  s_13beef4a2fbc3f::t_9c52fda8a6e2b1 169-214
+crates/vite_task/src/session/execute/cache_update.rs
+  s_13beef4a2fbc3f::t_75016acb6a81c1 258-260,272-291
+crates/vite_task/src/session/execute/classify.rs
+  s_13beef4a2fbc3f::t_bf4837e07b3eb9 247-259,277-288
+crates/vite_task/src/session/execute/gitignore.rs
+  s_13beef4a2fbc3f::t_fea4a4cef60ab8 65-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4ceb5f2343348f4a486c62116fb10967bf16e96e",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
