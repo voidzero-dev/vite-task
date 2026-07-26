@@ -1,0 +1,63 @@
+Cargo.lock
+  s_13beef4a2fbc3f::t_983e635c5b4ff7 1614-1629,4215
+Cargo.toml
+  s_13beef4a2fbc3f::t_0b961d488137bc 87
+DECISIONS.md
+  s_13beef4a2fbc3f::t_4ff0e34fe46dc8 76-168
+crates/fspy_preload_unix/src/interceptions/access.rs
+  s_13beef4a2fbc3f::t_fad40dbce84daa 5,12-16,27-31
+crates/fspy_preload_unix/src/interceptions/dirent.rs
+  s_13beef4a2fbc3f::t_5f8c7d725b9f98 5,22-24,29,44-46,57-59,71-73,79-81,87-89
+crates/fspy_preload_unix/src/interceptions/mutate.rs
+  s_13beef4a2fbc3f::t_dd3ade9eb4dd34 10-18,23,28,31-33,41-42,48,50,53,57,67-68,70,72-73,84-86,88,104-116,118-119,135-143,149-150,155-156,158,163-166,168,173-174,176,181-182,184
+crates/fspy_preload_unix/src/interceptions/open.rs
+  s_13beef4a2fbc3f::t_b213e8e0725192 5-6,30-32,34,36,40,50-53,56,58,62,69-71,73,75,79,91-93,95,97,101,106-107,109,118-119,121
+crates/fspy_preload_unix/src/interceptions/stat.rs
+  s_13beef4a2fbc3f::t_d935a07f189681 7,14-18,25-29,40-44,74,78,80-81
+crates/vite_task/Cargo.toml
+  s_13beef4a2fbc3f::t_d348aa6be78aae 23
+crates/vite_task/src/session/cache/mod.rs
+  s_13beef4a2fbc3f::t_9dfdd643be7097 277
+crates/vite_task/src/session/execute/cache_update.rs
+  s_13beef4a2fbc3f::t_3376cf8164ce5f 14,29-30,34-35,138,206-209,213-269
+crates/vite_task/src/session/execute/classify.rs
+  s_13beef4a2fbc3f::t_4a15cf76319bc7 1-287
+crates/vite_task/src/session/execute/fingerprint.rs
+  s_13beef4a2fbc3f::t_f3623163c53f3e 82-88,117,125-126,128,154,333,344-345,378,389,394,417,421,430,454,459,489
+crates/vite_task/src/session/execute/mod.rs
+  s_13beef4a2fbc3f::t_5596aade5f2053 2-5
+crates/fspy/src/unix/syscall_handler/mod.rs
+  s_b90f9c0b669589::t_c1792bdf4c38f7 60-81
+crates/fspy_preload_unix/src/client/mod.rs
+  s_b90f9c0b669589::t_1704f930561ba6 161
+crates/fspy_shared/src/ipc/mod.rs
+  s_b90f9c0b669589::t_4e6ca6023ae390 15,17-23,25-28,37-53,58,60,62-63,66,73-74,76-78,81
+crates/vite_task/src/session/execute/gitignore.rs
+  s_b90f9c0b669589::t_9ffdb754f11a46 1-64
+crates/vite_task/src/session/execute/tracked_accesses.rs
+  s_b90f9c0b669589::t_9fa6965aee4190 1-6,13,16,18-19,22,30,45,47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7c1de0c3c074c798d6f93e16d853e1d46081e690",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    },
+    "s_b90f9c0b669589": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_b90f9c0b669589",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}

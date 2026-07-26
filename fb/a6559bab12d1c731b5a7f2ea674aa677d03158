@@ -1,0 +1,21 @@
+crates/fspy/src/windows/mod.rs
+  s_13beef4a2fbc3f::t_0665867c191595 69-73
+crates/vite_powershell/src/lib.rs
+  s_13beef4a2fbc3f::t_0df88fa3851734 30-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fba6559bab12d1c731b5a7f2ea674aa677d03158",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}

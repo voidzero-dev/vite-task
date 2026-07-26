@@ -1,0 +1,41 @@
+DECISIONS.md
+  s_13beef4a2fbc3f::t_2e57bd758fa05d 57,82,103,123,246
+crates/fspy_preload_unix/src/interceptions/mutate.rs
+  s_13beef4a2fbc3f::t_00c74a1672b5f5 38-39,114,142
+crates/vite_task/src/session/execute/cache_update.rs
+  s_13beef4a2fbc3f::t_ddd8b043737a4a 18-20,265
+crates/vite_task/src/session/execute/classify.rs
+  s_13beef4a2fbc3f::t_13c7ddc02bb971 219-220,242,326-328
+crates/vite_task/src/session/execute/mod.rs
+  s_13beef4a2fbc3f::t_69fc5a6c83a7e7 4
+crates/vite_task_bin/src/vtt/main.rs
+  s_13beef4a2fbc3f::t_e7b3f878d469e1 24,26
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/package.json
+  s_13beef4a2fbc3f::t_0e6ad0330d5d8d 1-5
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/atomic-pkg/package.json
+  s_13beef4a2fbc3f::t_b336fdc143a93f 1-4
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/clean-pkg/package.json
+  s_13beef4a2fbc3f::t_1b1c79242c3cf0 1-4
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/sibling-pkg/package.json
+  s_13beef4a2fbc3f::t_e30f95772cd7ba 1-4
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/packages/state-pkg/package.json
+  s_13beef4a2fbc3f::t_4059c5f3154a95 1-4
+crates/vite_task_bin/tests/e2e_snapshots/fixtures/auto_output_tracking/snapshots.toml
+  s_13beef4a2fbc3f::t_2c02ab9b4f45f9 8-33,43-68,77,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c7fea038290a23353c4e2d3e8ad66dd0b1f30b6c",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
