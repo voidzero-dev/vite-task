@@ -1,0 +1,19 @@
+crates/vite_task/src/session/execute/classify.rs
+  s_1cb923480d8c56::t_a94a073aace5d0 181-189,216-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "05d55a8769cda6ffa8b36c938bab7a2ecbbd64b3",
+  "prompts": {},
+  "sessions": {
+    "s_1cb923480d8c56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_1cb923480d8c56",
+        "model": "unknown"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
