@@ -189,7 +189,7 @@ jobs:
 
       - run: rustup target add x86_64-pc-windows-msvc
 
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2.85.0
         with:
           tool: cargo-nextest,cargo-xwin
 
@@ -260,7 +260,7 @@ jobs:
         with:
           name: windows-test-archive
 
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2.85.0
         with:
           tool: cargo-nextest
 
