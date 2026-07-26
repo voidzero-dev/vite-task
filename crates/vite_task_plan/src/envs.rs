@@ -11,6 +11,12 @@ use wincode::{SchemaRead, SchemaWrite};
 const SHA256_DIGEST_LEN: usize = 32;
 const SHA256_PREFIX: &str = "sha256:";
 
+/// Name of the environment variable set to `1` in every process a task spawns.
+///
+/// Lets a tool tell that it is running as part of a task rather than having
+/// been invoked directly.
+pub const MARKER_ENV_NAME: &str = "VP_RUN";
+
 /// SHA-256 digest of a fingerprinted environment variable value.
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Clone, Copy)]
 pub struct EnvValueHash([u8; SHA256_DIGEST_LEN]);

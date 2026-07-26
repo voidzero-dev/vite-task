@@ -12,6 +12,7 @@ mod ps1_shim;
 use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 
 use context::PlanContext;
+pub use envs::MARKER_ENV_NAME;
 pub use error::Error;
 pub use execution_graph::{DEFAULT_CONCURRENCY_LIMIT, ExecutionGraph};
 pub use in_process::InProcessExecution;

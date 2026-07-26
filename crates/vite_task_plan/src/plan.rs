@@ -31,7 +31,7 @@ use crate::{
     ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, PlanContext,
     SpawnCommand, SpawnExecution, TaskExecution,
     cache_metadata::{CacheMetadata, ExecutionCacheKey, ProgramFingerprint, SpawnFingerprint},
-    envs::{EnvFingerprints, EnvValueHash},
+    envs::{EnvFingerprints, EnvValueHash, MARKER_ENV_NAME},
     error::{CdCommandError, Error, PathFingerprintError, PathFingerprintErrorKind, PathType},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex, InnerExecutionGraph},
     in_process::InProcessExecution,
@@ -679,6 +679,13 @@ fn plan_spawn_execution(
             });
         }
     }
+
+    // Mark the child as task-spawned. Set after `EnvFingerprints::resolve` has
+    // filtered `spawn_envs`, so a task's `env`/`untrackedEnv` patterns cannot
+    // drop it, and always to `1`, so a stale value in the parent environment
+    // cannot make a task look like it was invoked directly. A prefix
+    // assignment (`VP_RUN=… command`) still wins: those are applied below.
+    spawn_envs.insert(OsStr::new(MARKER_ENV_NAME).into(), OsStr::new("1").into());
 
     // Add prefix envs to spawn envs.
     spawn_envs.extend(prefix_envs.iter().map(|(name, value)| {

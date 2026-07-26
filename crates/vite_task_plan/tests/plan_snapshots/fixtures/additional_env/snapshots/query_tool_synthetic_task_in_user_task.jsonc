@@ -76,7 +76,8 @@
                     "spawn_envs": {
                       "FORCE_COLOR": "1",
                       "PATH": "<workspace>/node_modules/.bin:<tools>",
-                      "TEST_VAR": "hello_world"
+                      "TEST_VAR": "hello_world",
+                      "VP_RUN": "1"
                     },
                     "cwd": "<workspace>/"
                   }

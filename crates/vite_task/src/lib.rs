@@ -17,4 +17,4 @@ pub use vite_task_graph::{
 };
 /// Re-exports useful for `CommandHandler` implementations.
 pub use vite_task_plan::get_path_env;
-pub use vite_task_plan::{plan_request, plan_request::ScriptCommand};
+pub use vite_task_plan::{MARKER_ENV_NAME, plan_request, plan_request::ScriptCommand};

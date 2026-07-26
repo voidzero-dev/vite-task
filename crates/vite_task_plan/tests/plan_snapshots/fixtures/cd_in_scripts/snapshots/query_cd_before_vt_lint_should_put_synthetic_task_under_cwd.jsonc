@@ -73,7 +73,8 @@
                     ],
                     "spawn_envs": {
                       "FORCE_COLOR": "1",
-                      "PATH": "<workspace>/node_modules/.bin:<tools>"
+                      "PATH": "<workspace>/node_modules/.bin:<tools>",
+                      "VP_RUN": "1"
                     },
                     "cwd": "<workspace>/src"
                   }
