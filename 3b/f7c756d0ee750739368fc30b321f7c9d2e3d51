@@ -1,0 +1,23 @@
+crates/fspy_preload_windows/src/windows/convert.rs
+  s_13beef4a2fbc3f::t_8eb2e9204025ad 37-47
+crates/fspy_preload_windows/src/windows/detours/nt.rs
+  s_13beef4a2fbc3f::t_d101422c8dd9cd 30,195-203,205,541,543-634
+crates/fspy_preload_windows/src/windows/winapi_utils.rs
+  s_13beef4a2fbc3f::t_9fee9848bbb19d 1-4,8,109-137,171-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3bf7c756d0ee750739368fc30b321f7c9d2e3d51",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
