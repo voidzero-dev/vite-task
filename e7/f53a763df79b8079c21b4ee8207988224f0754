@@ -1,0 +1,19 @@
+INVESTIGATE.md
+  s_13beef4a2fbc3f::t_7a7bce2a4fd76c 1,3-5,7-8,10-31,34-36,39-41,43-46,50,52-53,55-57,59-61,64-65,68-130,132,134,136-142,144,146-148,150,153-155,158-161,163-170,172,174-177,180-182,185-186,189-235,238-301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e7f53a763df79b8079c21b4ee8207988224f0754",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
