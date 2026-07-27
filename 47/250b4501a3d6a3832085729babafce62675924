@@ -1,0 +1,19 @@
+INVESTIGATE.md
+  s_13beef4a2fbc3f::t_07539573ced527 1-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "47250b4501a3d6a3832085729babafce62675924",
+  "prompts": {},
+  "sessions": {
+    "s_13beef4a2fbc3f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06bd19f8fffeD4iMcIeVNEmX3P",
+        "model": "gpt-5.6"
+      },
+      "human_author": "wan9chi <dk4rest@gmail.com>"
+    }
+  }
+}
