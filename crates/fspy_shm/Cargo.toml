@@ -7,37 +7,21 @@ license.workspace = true
 publish = false
 rust-version.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[dependencies]
 memmap2 = { workspace = true }
-memfd = { workspace = true }
-passfd = { workspace = true, features = ["async"] }
-nix = { workspace = true, features = ["fs", "socket", "user"] }
-tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
-tokio-util = { workspace = true }
-tracing = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-base64 = { workspace = true }
-memmap2 = { workspace = true }
-nix = { workspace = true, features = ["fs", "mman"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-uuid = { workspace = true, features = ["v4"] }
 windows-sys = { workspace = true, features = [
   "Win32_Foundation",
-  "Win32_Security",
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
   "Win32_System_Ioctl",
-  "Win32_System_Memory",
 ] }
 
 [dev-dependencies]
 ctor = { workspace = true }
 subprocess_test = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
