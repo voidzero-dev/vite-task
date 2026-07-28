@@ -6,6 +6,13 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, reopened, synchronize]
+    # Only changes that can move fspy's cost: fspy and benchmark crates, their
+    # locked dependencies, the toolchain, and this workflow.
+    paths:
+      - 'crates/fspy*/**'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/fspy-benchmark.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
