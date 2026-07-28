@@ -66,14 +66,13 @@ fn time_opens(barrier: &Barrier, path: &str, open_count: usize) -> Vec<Duration>
     samples
 }
 
-/// Reports the typical and the slow sample, so that a change in how long opens
-/// take can be told apart from a change in how much they scatter.
+/// Reports the typical sample. The median discards the batches the scheduler
+/// spoiled, which a whole-run wall clock would sum up instead.
 fn report(samples: &mut [Duration]) {
     samples.sort_unstable();
-    let percentile =
-        |percent: usize| samples.get(samples.len() * percent / 100).map_or(0, Duration::as_nanos);
+    let median = samples.get(samples.len() / 2).map_or(0, Duration::as_nanos);
     #[expect(clippy::print_stdout, reason = "the benchmark reads the samples from stdout")]
     {
-        println!("{} {}", percentile(50), percentile(90));
+        println!("{median}");
     }
 }

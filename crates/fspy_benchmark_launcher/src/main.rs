@@ -6,7 +6,7 @@
 //! the harness always builds this crate from the same source for both.
 //!
 //! Prints one line to stdout: the wall clock of the launch in nanoseconds,
-//! followed by the two batch timings the target reported for itself.
+//! followed by the batch timing the target reported for itself.
 
 use std::{env, ffi::OsString, process::Stdio, time::Instant};
 
@@ -90,7 +90,7 @@ async fn run_untracked(target: &OsString, target_args: &[OsString]) -> Launch {
     Launch { wall_nanos, stdout }
 }
 
-/// Relays the samples the target timed for itself after the wall clock, so the
+/// Relays the sample the target timed for itself after the wall clock, so the
 /// harness reads every number from one line.
 async fn report(mut launch: Launch) {
     let mut samples = Vec::new();

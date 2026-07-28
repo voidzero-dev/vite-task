@@ -5,12 +5,9 @@ cost is two separable things, and each is measured apart from the other so that 
 
 - `launch` is the wall clock of a launch that opens nothing, so it prices starting a process under
   tracking: injection, session setup, and teardown.
-- `access` is how long a batch of opens takes, timed by the thread that runs them, so it prices
-  interception itself rather than the launch around it.
-- `access-tail` is the slow end of the same samples, which moves when accesses start to scatter
-  rather than to cost more.
-- `access-concurrent` is `access` with a second thread intercepting at the same time, each thread
-  opening a path of its own.
+- `access` is how long a batch of opens takes, timed by each of two threads opening a path of
+  their own, so it prices interception under the concurrency a tracked process actually has,
+  rather than the launch around it.
 
 Linux measures a dynamically linked target that exercises `LD_PRELOAD` plus a
 `x86_64-unknown-linux-musl` target that exercises seccomp user notification. macOS measures
@@ -34,8 +31,9 @@ So nothing is ever compared across runs. The pieces are split so that the two fs
 compared can run side by side on one machine:
 
 - `fspy_benchmark_target` (and its static twin) is the workload: it opens missing paths from a
-  configurable number of threads and reports how long its batches took on stdout. It does not link
-  fspy.
+  configurable number of threads and reports the median batch time on stdout. Batches are a few
+  microseconds long, so the median falls on batches the scheduler left alone; a whole-run wall
+  clock would sum every disturbance instead. It does not link fspy.
 - `fspy_benchmark_launcher` runs the target once — tracked through `fspy::Command`, or untracked
   for context — and prints the launch wall clock plus the target's numbers. It is the only piece
   that links fspy.

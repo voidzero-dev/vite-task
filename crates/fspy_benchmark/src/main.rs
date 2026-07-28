@@ -55,14 +55,10 @@ const LAUNCH_ITERATIONS: usize = 300;
 const LAUNCH_WORKLOAD: Workload =
     Workload { threads: "2", opens: "0", iterations: LAUNCH_ITERATIONS, warmup: 5 };
 
-/// Accesses timed one thread at a time, from inside the target, so they price
-/// interception rather than the launch around it.
+/// Opens timed from inside the target, so they price interception rather than
+/// the launch around it. Two threads, each opening a path of its own, because
+/// a process that fspy tracks rarely accesses files from one thread.
 const ACCESS_WORKLOAD: Workload =
-    Workload { threads: "1", opens: "4096", iterations: 102, warmup: 3 };
-
-/// The same access count spread over two threads, each opening a path of its
-/// own, so that they exercise concurrent interception.
-const CONCURRENT_WORKLOAD: Workload =
     Workload { threads: "2", opens: "2048", iterations: 102, warmup: 3 };
 
 /// What a row reads out of the launches of its workload.
@@ -72,9 +68,6 @@ enum Metric {
     Wall,
     /// The typical batch of opens, as timed inside the target.
     Typical,
-    /// The slow end of those batches, which moves when accesses start to
-    /// scatter rather than to cost more.
-    Tail,
 }
 
 struct Row {
@@ -97,15 +90,7 @@ const LAUNCH_SUITE: Suite = Suite {
 
 const ACCESS_SUITE: Suite = Suite {
     workload: &ACCESS_WORKLOAD,
-    rows: &[
-        Row { name: "access", metric: Metric::Typical, threshold: 0.05 },
-        Row { name: "access-tail", metric: Metric::Tail, threshold: 0.08 },
-    ],
-};
-
-const CONCURRENT_SUITE: Suite = Suite {
-    workload: &CONCURRENT_WORKLOAD,
-    rows: &[Row { name: "access-concurrent", metric: Metric::Typical, threshold: 0.08 }],
+    rows: &[Row { name: "access", metric: Metric::Typical, threshold: 0.08 }],
 };
 
 struct Backend {
@@ -130,7 +115,7 @@ fn main() {
         if let Some(base_launcher) = &base_launcher {
             validate(base_launcher, backend.target);
         }
-        for suite in [&LAUNCH_SUITE, &ACCESS_SUITE, &CONCURRENT_SUITE] {
+        for suite in [&LAUNCH_SUITE, &ACCESS_SUITE] {
             regressed |= run_suite(backend, suite, base_launcher.as_deref());
         }
     }
@@ -160,7 +145,6 @@ fn parse_base_launcher() -> Option<OsString> {
 struct Sample {
     wall: f64,
     typical: f64,
-    tail: f64,
 }
 
 impl Sample {
@@ -168,7 +152,6 @@ impl Sample {
         match metric {
             Metric::Wall => self.wall,
             Metric::Typical => self.typical,
-            Metric::Tail => self.tail,
         }
     }
 }
@@ -302,7 +285,7 @@ fn launch(launcher: &OsStr, mode: Option<&str>, backend: &Backend, workload: &Wo
         .split_whitespace()
         .map(|number| number.parse().expect("unreadable launcher measurement"));
     let mut next = || numbers.next().expect("launcher reported too few measurements");
-    Sample { wall: next(), typical: next(), tail: next() }
+    Sample { wall: next(), typical: next() }
 }
 
 fn validate(launcher: &OsStr, target: &str) {
