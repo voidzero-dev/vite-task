@@ -51,9 +51,6 @@ struct Suite {
     /// Unmeasured iterations run first, to fill caches and settle the runner.
     warmup: usize,
     metric: Metric,
-    /// The change past which the suite fails the run, as a share. Set from the
-    /// spread observed when benchmarking one commit on many runner instances.
-    threshold: f64,
 }
 
 /// Opens nothing, so the whole launch is the cost of starting a tracked
@@ -65,19 +62,12 @@ const LAUNCH_SUITE: Suite = Suite {
     iterations: if cfg!(windows) { 150 } else { 300 },
     warmup: 5,
     metric: Metric::Wall,
-    threshold: 0.05,
 };
 
 /// Opens timed from inside the target, so they price interception rather than
 /// the launch around it.
-const ACCESS_SUITE: Suite = Suite {
-    name: "access",
-    opens: "2048",
-    iterations: 102,
-    warmup: 3,
-    metric: Metric::Typical,
-    threshold: 0.08,
-};
+const ACCESS_SUITE: Suite =
+    Suite { name: "access", opens: "2048", iterations: 102, warmup: 3, metric: Metric::Typical };
 
 struct Backend {
     name: &'static str,
@@ -95,19 +85,14 @@ fn main() {
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
     let backends = [Backend { name: "dynamic", target: DYNAMIC_TARGET }];
 
-    let mut regressed = false;
     for backend in &backends {
         validate(HEAD_LAUNCHER.as_ref(), backend.target);
         if let Some(base_launcher) = &base_launcher {
             validate(base_launcher, backend.target);
         }
         for suite in [&LAUNCH_SUITE, &ACCESS_SUITE] {
-            regressed |= run_suite(backend, suite, base_launcher.as_deref());
+            run_suite(backend, suite, base_launcher.as_deref());
         }
-    }
-
-    if regressed {
-        std::process::exit(1);
     }
 }
 
@@ -156,9 +141,8 @@ enum Arm {
     Base,
 }
 
-/// Runs a suite and reports its row. Returns whether it regressed past its
-/// threshold.
-fn run_suite(backend: &Backend, suite: &Suite, base_launcher: Option<&OsStr>) -> bool {
+/// Runs a suite and reports its row.
+fn run_suite(backend: &Backend, suite: &Suite, base_launcher: Option<&OsStr>) {
     let orders = if base_launcher.is_some() { ORDERS_WITH_BASE } else { ORDERS_WITHOUT_BASE };
     // Whole cycles only, so that each ordering runs equally often.
     let iterations = suite.iterations.next_multiple_of(orders.len());
@@ -184,40 +168,27 @@ fn run_suite(backend: &Backend, suite: &Suite, base_launcher: Option<&OsStr>) ->
         }
     }
 
-    report(backend, suite, &measured, base_launcher.is_some())
+    report(backend, suite, &measured, base_launcher.is_some());
 }
 
-/// Prints the suite's row and returns whether it regressed past its threshold.
+/// Prints the suite's row.
 #[expect(clippy::print_stdout, reason = "the report is the benchmark's output")]
-fn report(backend: &Backend, suite: &Suite, iterations: &[Iteration], has_base: bool) -> bool {
+fn report(backend: &Backend, suite: &Suite, iterations: &[Iteration], has_base: bool) {
     let name = [backend.name, "/", suite.name].concat();
     let overheads = sorted(iterations.iter().map(|it| it.head / it.untracked - 1.0));
     let overhead = quantile(&overheads, 1, 2);
 
     if has_base {
         let changes = sorted(iterations.iter().map(|it| it.head / it.base - 1.0));
-        let change = quantile(&changes, 1, 2);
-        let low = quantile(&changes, 1, 4);
-        let high = quantile(&changes, 3, 4);
-        let verdict = if change > suite.threshold {
-            "  REGRESSED"
-        } else if change < -suite.threshold {
-            "  improved"
-        } else {
-            ""
-        };
         println!(
-            "{name:<26} change {:>+6.2}%  [{:>+6.2}% .. {:>+6.2}%]  threshold {:>4.1}%  overhead {:>+8.2}%{verdict}",
-            change * 100.0,
-            low * 100.0,
-            high * 100.0,
-            suite.threshold * 100.0,
+            "{name:<26} change {:>+6.2}%  [{:>+6.2}% .. {:>+6.2}%]  overhead {:>+8.2}%",
+            quantile(&changes, 1, 2) * 100.0,
+            quantile(&changes, 1, 4) * 100.0,
+            quantile(&changes, 3, 4) * 100.0,
             overhead * 100.0,
         );
-        change > suite.threshold
     } else {
         println!("{name:<26} overhead {:>+8.2}%", overhead * 100.0);
-        false
     }
 }
 

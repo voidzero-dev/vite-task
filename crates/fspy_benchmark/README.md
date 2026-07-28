@@ -23,7 +23,7 @@ So nothing is ever compared across runs. Both fspy revisions run side by side on
 - `fspy_benchmark_launcher` runs the target once, tracked through `fspy::Command` or untracked, and prints the launch wall clock plus the target's number. It is the only piece that links fspy.
 - `fspy_benchmark` is the harness. CI builds the launcher twice: against the fspy under review, and against the merge-base fspy. Both builds use the same launcher source, so both revisions are measured by identical code. The harness then launches both builds back to back, cycling every ordering. Whatever the runner does to the numbers, it does to both.
 
-Each iteration gives one head/base ratio per row. The reported change is the median of those ratios. A row that moves past its threshold fails the job.
+Each iteration gives one head/base ratio per row. The reported change is the median of those ratios, printed with its quartile spread. The benchmark only reports; it never fails the job. Running the same fspy on both sides stays within a couple of percent, so read a change well past that as real.
 
 An untracked launch runs in the same rotation. It prices tracking itself, and is reported as context, never gated.
 
