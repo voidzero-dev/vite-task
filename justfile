@@ -48,7 +48,7 @@ lint-windows:
   cargo-xwin clippy --workspace --all-targets --all-features --target x86_64-pc-windows-msvc -- --deny warnings
 
 benchmark-fspy:
-  cargo bench -p fspy_benchmark --bench fspy
+  cargo run --release -p fspy_benchmark
 
 [unix]
 doc:
