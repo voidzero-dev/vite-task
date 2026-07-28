@@ -4,23 +4,11 @@ permissions: {}
 
 on:
   workflow_dispatch:
-  # Only changes that can move fspy's cost: fspy and benchmark crates, their
-  # locked dependencies, the toolchain, and this workflow. Runs on main only
-  # keep the build cache warm and record the overhead history.
   pull_request:
-    paths:
-      - 'crates/fspy*/**'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/fspy-benchmark.yml'
+  # Runs on main keep the build cache warm and record the overhead history.
   push:
     branches:
       - main
-    paths:
-      - 'crates/fspy*/**'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/fspy-benchmark.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
