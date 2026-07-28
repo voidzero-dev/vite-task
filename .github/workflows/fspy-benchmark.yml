@@ -113,7 +113,8 @@ jobs:
         run: |
           {
             echo '```text'
-            cat ".benchmark-results/${{ matrix.platform }}.txt"
+            cat ".benchmark-results/${{ matrix.platform }}.txt" ||
+              echo 'no report; the benchmark failed before producing one'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -130,7 +131,9 @@ jobs:
         with:
           name: fspy-benchmark-report-${{ matrix.platform }}
           path: .benchmark-results/${{ matrix.platform }}.txt
-          if-no-files-found: error
+          # A job that failed before producing a report has nothing to upload;
+          # the comment job prints its own placeholder for the platform.
+          if-no-files-found: warn
           retention-days: 1
 
   comment:

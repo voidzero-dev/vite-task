@@ -17,5 +17,8 @@ doctest = false
 
 [dependencies]
 fspy = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "process", "rt-multi-thread"] }
+# macros is fspy's, not ours: revisions of fspy that use select! without
+# declaring the feature only compile when a dependent enables it, and this
+# crate is built against the merge-base fspy on every benchmark run.
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread"] }
 tokio-util = { workspace = true }
