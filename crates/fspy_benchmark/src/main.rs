@@ -12,8 +12,8 @@
 //! numbers, it is doing to both sides.
 //!
 //! Each iteration launches every arm — baseline-tracked, head-tracked, and
-//! untracked — back to back in rotating order, and yields the ratio of head
-//! to baseline per metric. The reported change is the median of those ratios,
+//! untracked — back to back, cycling every ordering, and yields the ratio of
+//! head to baseline per metric. The reported change is the median of those ratios,
 //! so it prices exactly one thing: what the fspy change under review costs a
 //! tracked process. The untracked arm prices tracking itself, as context.
 
@@ -36,7 +36,8 @@ struct Workload {
     threads: &'static str,
     /// Opens per target thread, passed through to it.
     opens: &'static str,
-    /// Measured iterations. Each one launches every arm once.
+    /// Measured iterations. Each one launches every arm once. A multiple of
+    /// every order-cycle length, so each ordering runs equally often.
     iterations: usize,
     /// Unmeasured iterations run first, to fill caches and settle the runner.
     warmup: usize,
@@ -57,12 +58,12 @@ const LAUNCH_WORKLOAD: Workload =
 /// Accesses timed one thread at a time, from inside the target, so they price
 /// interception rather than the launch around it.
 const ACCESS_WORKLOAD: Workload =
-    Workload { threads: "1", opens: "4096", iterations: 100, warmup: 3 };
+    Workload { threads: "1", opens: "4096", iterations: 102, warmup: 3 };
 
 /// The same access count spread over two threads, each opening a path of its
 /// own, so that they exercise concurrent interception.
 const CONCURRENT_WORKLOAD: Workload =
-    Workload { threads: "2", opens: "2048", iterations: 100, warmup: 3 };
+    Workload { threads: "2", opens: "2048", iterations: 102, warmup: 3 };
 
 /// What a row reads out of the launches of its workload.
 #[derive(Clone, Copy)]
@@ -180,25 +181,46 @@ struct Iteration {
     untracked: Sample,
 }
 
+/// Every ordering of the arms of an iteration. Cycling through all of them —
+/// rather than rotating one fixed cycle, which keeps every arm's neighbors
+/// the same forever — evens out both what position an arm runs in and which
+/// arm's leftovers it runs after.
+const ORDERS_WITHOUT_BASE: &[&[Arm]] =
+    &[&[Arm::Head, Arm::Untracked], &[Arm::Untracked, Arm::Head]];
+const ORDERS_WITH_BASE: &[&[Arm]] = &[
+    &[Arm::Head, Arm::Untracked, Arm::Base],
+    &[Arm::Untracked, Arm::Base, Arm::Head],
+    &[Arm::Base, Arm::Head, Arm::Untracked],
+    &[Arm::Base, Arm::Untracked, Arm::Head],
+    &[Arm::Untracked, Arm::Head, Arm::Base],
+    &[Arm::Head, Arm::Base, Arm::Untracked],
+];
+
+#[derive(Clone, Copy)]
+enum Arm {
+    Head,
+    Untracked,
+    Base,
+}
+
 /// Runs a suite's workload and reports its rows. Returns whether any row
 /// regressed past its threshold.
 fn run_suite(backend: &Backend, suite: &Suite, base_launcher: Option<&OsStr>) -> bool {
     let workload = suite.workload;
-    let arm_count = if base_launcher.is_some() { 3 } else { 2 };
+    let orders = if base_launcher.is_some() { ORDERS_WITH_BASE } else { ORDERS_WITHOUT_BASE };
     let mut iterations = Vec::with_capacity(workload.iterations);
     for index in 0..workload.warmup + workload.iterations {
         let mut iteration = Iteration::default();
-        // Rotate which arm goes first, so that no arm always pays for waking
-        // the machine up or always benefits from the caches the previous arm
-        // warmed.
-        for position in 0..arm_count {
-            match (index + position) % arm_count {
-                0 => iteration.head = launch(HEAD_LAUNCHER.as_ref(), None, backend, workload),
-                1 => {
+        for &arm in orders[index % orders.len()] {
+            match arm {
+                Arm::Head => {
+                    iteration.head = launch(HEAD_LAUNCHER.as_ref(), None, backend, workload);
+                }
+                Arm::Untracked => {
                     iteration.untracked =
                         launch(HEAD_LAUNCHER.as_ref(), Some("--untracked"), backend, workload);
                 }
-                _ => {
+                Arm::Base => {
                     iteration.base = launch(base_launcher.unwrap(), None, backend, workload);
                 }
             }

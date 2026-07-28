@@ -41,8 +41,8 @@ compared can run side by side on one machine:
   that links fspy.
 - `fspy_benchmark` is the harness. CI builds the launcher twice, against the fspy under review and
   against the merge-base fspy (from the same launcher source, so both revisions are measured by
-  identical code), then the harness launches both builds interleaved, back to back, in rotating
-  order. Whatever the runner instance is doing to the numbers, it is doing to both arms.
+  identical code), then the harness launches both builds interleaved, back to back, cycling
+  every ordering. Whatever the runner instance is doing to the numbers, it is doing to both arms.
 
 Each iteration yields the ratio of the head launch to the base launch per metric; the reported
 change is the median of those ratios. An untracked arm runs in the same rotation and prices
