@@ -2,41 +2,71 @@
 
 `fspy_shm` is the private shared-memory layer used by fspy IPC channels. It gives the channel one API for creating a mapping, passing its identifier to another process, and opening additional views of the same bytes.
 
-`fspy_shm` exposes only the operations used by fspy. Callers must treat an identifier as a string and must not depend on a platform's naming scheme.
+`fspy_shm` exposes only the operations used by fspy. Treat an identifier as an opaque `OsStr`; do not depend on how it is built.
 
 ## API
 
 The public API is defined in [`src/lib.rs`](src/lib.rs).
 
-| API               | Contract                                                                           |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| `create(size)`    | Creates a non-empty, zero-initialized mapping and returns its unique owner.        |
-| `open(id)`        | Opens another view of the mapping identified by `id`.                              |
-| `Shm::id()`       | Returns the identifier to send to another process.                                 |
-| `Shm::len()`      | Returns the mapped size.                                                           |
-| `Shm::as_ptr()`   | Returns a mutable raw pointer to the first byte.                                   |
-| `Shm::as_slice()` | Returns a shared slice. The caller must prevent mutation for the slice's lifetime. |
+| API                   | Contract                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `create(size)`        | Creates a zero-initialized backing file of `size` bytes and returns its `ShmKeeper`.    |
+| `open(id)`            | Opens a `Mapping` of the shared memory identified by `id`.                              |
+| `ShmKeeper::id()`     | Returns the identifier any process, including the creator, passes to `open`.            |
+| `Mapping::len()`      | Returns the mapped size.                                                                |
+| `Mapping::as_ptr()`   | Returns a mutable raw pointer to the first byte.                                        |
+| `Mapping::as_slice()` | Returns the bytes as a shared slice. The caller must prevent mutation for its lifetime. |
 
-`Shm` does not synchronize memory access. The fspy channel combines it with atomic frame headers and a lock file. Senders hold a shared file lock while writing. The receiver takes the exclusive lock before reading, which waits for existing senders and rejects new ones.
+`ShmKeeper` is the name: while it lives, `open` succeeds, and dropping it removes the backing file. `Mapping` is the bytes: it keeps them alive until dropped and can do nothing else. The creating process gets its own view through `open`, like every other process. Neither type synchronizes memory access. The fspy channel adds that on top with atomic frame headers and a lock file: senders hold a shared file lock while writing, and the receiver takes the exclusive lock before reading, which waits for existing senders and rejects new ones.
 
 Every byte in a mapping returned by `create` is initially zero. `open` exposes the mapping's current contents and does not reinitialize them.
 
-## Ownership semantics
+## Implementation
 
-`create` returns the only owner. `open` returns non-owning views.
+One implementation serves every platform: a sparse file named `vite-task-fspy-<uuid>.shm` directly in the system temporary directory. The identifier is the file's absolute path, so another process opens the mapping by opening that path. There is no broker, no global object name, and no asynchronous runtime. The files sit in the temporary directory itself rather than a shared subdirectory: a subdirectory would belong to whichever user created it first and block everyone else, while uniquely named `0o600` files in a sticky-bit directory work for all users.
 
-- While the owner is alive, a process that knows the identifier can open the mapping.
-- An opened view remains usable after the owner is dropped. Its operating system mapping keeps the underlying bytes alive.
-- After the owner is dropped, new opens behave differently by platform. POSIX removes the name. Windows can continue accepting opens by section name until the final handle or view is closed.
+Only written pages ever occupy memory or disk. The multi-gigabyte capacity fspy asks for therefore costs about as much as the data a run actually records.
 
-The channel hides that difference with its lock file. [`ChannelConf::sender`](../fspy_shared/src/ipc/channel/mod.rs) opens and locks the receiver's exact lock-file path before it calls `fspy_shm::open`. The receiver removes that path before dropping the owner, so a sender that starts later fails before opening shared memory.
+The platform-specific parts are five short passages:
 
-## Platform designs
+| Concern           | Unix                                     | Windows                                                                              |
+| ----------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| Same-user access  | `mode(0o600)` on the backing file        | the per-user `%TEMP%` ACL                                                            |
+| Mapping           | `memmap2`                                | an unnamed section, mapped directly (see below)                                      |
+| Sparseness        | file holes, produced by setting a length | `FSCTL_SET_SPARSE` before setting a length, or NTFS allocates every cluster          |
+| Owner cleanup     | unlink the path                          | close the `FILE_FLAG_DELETE_ON_CLOSE` handle, since a mapped file cannot be unlinked |
+| Descriptor safety | `O_CLOEXEC`, the Rust standard default   | non-inheritable handles, the Rust standard default                                   |
 
-Each platform keeps its implementation rationale beside its source:
+`FILE_ATTRIBUTE_TEMPORARY` asks Windows to keep the data in memory when it can. Creation fails on a volume without sparse-file support.
 
-- [Linux: `memfd` with a descriptor broker](src/linux/README.md)
-- [macOS: named POSIX shared memory](src/macos/README.md)
-- [Windows: sparse file-backed named mapping](src/windows/README.md)
+Windows maps the file itself instead of going through `memmap2`. `memmap2` duplicates the file handle and keeps it for the mapping's lifetime, and `FILE_FLAG_DELETE_ON_CLOSE` fires only once every handle to the file is closed, so a `memmap2` view would defer the keeper's cleanup until the last mapping in any process went away. A direct view holds a section reference and no handle, which keeps the lifetime semantics below the same on every platform. Nothing in the channel depends on when the name disappears, so the deferral would not break correctness; the direct mapping stays because one lifetime story and one test suite for all platforms are worth eighty lines of exercised unsafe code. Revisit if `memmap2` can map without retaining the handle.
 
-All implementations provide the API above. Their identifiers and operating system objects differ. Each platform README explains the chosen API and why the previous `shared_memory` backend did not meet its requirements.
+## Options considered
+
+| Option                                    | Decision                                                                                                                                                                                        |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POSIX shared memory                       | Rejected. Coding-agent sandboxes deny it on macOS (`ipc-posix-shm-write-create`), and Linux stores the objects in `/dev/shm`, so they share that mount's size limit.                            |
+| `memfd` with a descriptor broker          | Rejected. Handing the descriptor to another process needs a Unix-domain socket, which the same sandboxes block, and the broker needed an ambient asynchronous runtime just to create a mapping. |
+| System V shared memory                    | Rejected. IPC namespace limits affect availability and the owner must explicitly remove the segment.                                                                                            |
+| Paging-file-backed section                | Rejected. The section's full size is charged against the system commit limit.                                                                                                                   |
+| Reserved section with incremental commits | Rejected. Writers would have to coordinate when committing more pages.                                                                                                                          |
+| Mach memory entry with port transfer      | Rejected. Another process can receive the memory entry only through a Mach port, which needs a separate service.                                                                                |
+| Sparse temporary file, opened by path     | Selected. Every sandbox fspy runs under permits it, no descriptor has to be passed, and all platforms end up with the same lifetime semantics.                                                  |
+
+Earlier revisions rejected temporary files because dirty pages can reach disk. Only pages fspy writes are dirty, about a hundred kilobytes per run, so writeback costs little. Unlike POSIX shared memory on Linux, a temporary file does not compete for the `/dev/shm` mount's size limit.
+
+## Why not `shared_memory`
+
+`shared_memory` uses POSIX `shm_open` on Unix, which keeps the sandbox and `/dev/shm` problems above. On Windows it creates and extends a regular file before fspy could mark it sparse, so untouched ranges would still consume disk blocks.
+
+## Lifetime semantics
+
+`create` returns the only keeper. `open` returns plain `Mapping`s.
+
+- While the keeper is alive, a process that knows the identifier can open the mapping.
+- Dropping the keeper removes the backing file's name, so later opens fail. This is cleanup; a protocol that must invalidate the shared memory's contents writes that into the bytes.
+- A `Mapping` stays usable after the keeper is gone. It holds no handle and knows no name, so it can neither delay the keeper's cleanup nor extend the identifier's validity.
+
+The channel guards the same window from its own side: [`ChannelConf::sender`](../fspy_shared/src/ipc/channel/mod.rs) opens and locks the receiver's exact lock-file path before it calls `fspy_shm::open`, and the receiver removes that path before dropping the keeper, so a sender that starts later fails before opening shared memory.
+
+If the keeper's process is killed, Windows deletes the backing file as the kernel closes the handle. Unix leaves a sparse file behind for the system's temporary-file reaper.

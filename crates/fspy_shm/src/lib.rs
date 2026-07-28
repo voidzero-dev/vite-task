@@ -1,113 +1,101 @@
 #![doc = include_str!("../README.md")]
 
-#[cfg(target_os = "linux")]
-#[path = "linux/mod.rs"]
-mod os_impl;
-#[cfg(target_os = "macos")]
-#[path = "macos/mod.rs"]
-mod os_impl;
-#[cfg(target_os = "windows")]
-#[path = "windows/mod.rs"]
-mod os_impl;
+mod file_backed;
 
-pub use os_impl::{Shm, create, open};
+pub use file_backed::{Mapping, ShmKeeper, create, open};
 
 #[cfg(test)]
 mod tests {
-    use std::{mem::align_of, process::Command};
+    use std::{ffi::OsStr, mem::align_of, process::Command};
 
     use subprocess_test::command_for_fn;
 
-    use super::{Shm, create, open};
+    use super::{Mapping, create, open};
 
     // Page-aligned on all supported targets.
     const SIZE: usize = 64 * 1024;
     // Use one byte more than 64 KiB to test multiple pages and a partial last page.
     const ZERO_INITIALIZED_SIZE: usize = SIZE + 1;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn new_mapping_is_zero_initialized_in_all_views() {
-        let owner = create(ZERO_INITIALIZED_SIZE).unwrap();
-        let opened = open(owner.id()).unwrap();
+    #[test]
+    fn new_mapping_is_zero_initialized_in_all_views() {
+        let keeper = create(ZERO_INITIALIZED_SIZE).unwrap();
+        let first = open(keeper.id()).unwrap();
+        let second = open(keeper.id()).unwrap();
 
-        assert_zero_initialized(&owner);
-        assert_zero_initialized(&opened);
+        assert_zero_initialized(&first);
+        assert_zero_initialized(&second);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn create_and_open_are_shared() {
-        let owner = create(SIZE).unwrap();
-        assert_eq!(owner.len(), SIZE);
-        assert_eq!(owner.as_ptr() as usize % align_of::<usize>(), 0);
+    #[test]
+    fn mappings_of_one_keeper_are_shared() {
+        let keeper = create(SIZE).unwrap();
+        let first = open(keeper.id()).unwrap();
+        assert_eq!(first.len(), SIZE);
+        assert_eq!(first.as_ptr() as usize % align_of::<usize>(), 0);
 
-        let opened = open(owner.id()).unwrap();
-        assert_eq!(opened.id(), owner.id());
-        assert_eq!(opened.len(), SIZE);
+        let second = open(keeper.id()).unwrap();
+        assert_eq!(second.len(), SIZE);
 
-        write_byte(&owner, 0, 17);
-        assert_eq!(read_byte(&opened, 0), 17);
-        write_byte(&opened, SIZE - 1, 29);
-        assert_eq!(read_byte(&owner, SIZE - 1), 29);
+        write_byte(&first, 0, 17);
+        assert_eq!(read_byte(&second, 0), 17);
+        write_byte(&second, SIZE - 1, 29);
+        assert_eq!(read_byte(&first, SIZE - 1), 29);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn mapping_is_visible_across_processes() {
-        let owner = create(SIZE).unwrap();
-        write_byte(&owner, 0, 17);
+    #[test]
+    fn mapping_is_visible_across_processes() {
+        let keeper = create(SIZE).unwrap();
+        let mapping = open(keeper.id()).unwrap();
+        write_byte(&mapping, 0, 17);
 
-        let command = command_for_fn!(owner.id().to_owned(), |id: String| {
-            let opened = open(&id).unwrap();
+        let id = keeper.id().to_str().expect("test temp dir is UTF-8").to_owned();
+        let command = command_for_fn!(id, |id: String| {
+            let opened = open(OsStr::new(&id)).unwrap();
             assert_eq!(read_byte(&opened, 0), 17);
             write_byte(&opened, SIZE - 1, 29);
         });
-        let success =
-            tokio::task::spawn_blocking(move || Command::from(command).status().unwrap().success())
-                .await
-                .unwrap();
-        assert!(success);
-        assert_eq!(read_byte(&owner, SIZE - 1), 29);
+        assert!(Command::from(command).status().unwrap().success());
+        assert_eq!(read_byte(&mapping, SIZE - 1), 29);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn owner_drop_prevents_new_opens() {
-        let owner = create(SIZE).unwrap();
-        let id = owner.id().to_owned();
-        drop(owner);
+    #[test]
+    fn keeper_drop_prevents_new_opens() {
+        let keeper = create(SIZE).unwrap();
+        let id = keeper.id().to_owned();
+        drop(keeper);
 
         assert!(open(&id).is_err());
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn opened_mapping_survives_owner_drop() {
-        let owner = create(SIZE).unwrap();
-        let id = owner.id().to_owned();
+    #[test]
+    fn opened_mapping_survives_keeper_drop() {
+        let keeper = create(SIZE).unwrap();
+        let id = keeper.id().to_owned();
         let opened = open(&id).unwrap();
-        write_byte(&owner, 0, 17);
-        drop(owner);
+        write_byte(&opened, 0, 17);
+        drop(keeper);
 
-        // Windows keeps the named object alive while an opened view exists.
-        #[cfg(not(target_os = "windows"))]
         assert!(open(&id).is_err());
         assert_eq!(read_byte(&opened, 0), 17);
         write_byte(&opened, SIZE - 1, 29);
         assert_eq!(read_byte(&opened, SIZE - 1), 29);
     }
 
-    fn read_byte(shm: &Shm, index: usize) -> u8 {
-        assert!(index < shm.len());
+    fn read_byte(mapping: &Mapping, index: usize) -> u8 {
+        assert!(index < mapping.len());
         // SAFETY: The index is in bounds and tests synchronize all accesses.
-        unsafe { shm.as_ptr().add(index).read() }
+        unsafe { mapping.as_ptr().add(index).read() }
     }
 
-    fn assert_zero_initialized(shm: &Shm) {
-        assert!(shm.len() >= ZERO_INITIALIZED_SIZE);
-        // SAFETY: No writes occur while this slice is borrowed.
-        assert!(unsafe { shm.as_slice() }.iter().all(|byte| *byte == 0));
+    fn assert_zero_initialized(mapping: &Mapping) {
+        assert!(mapping.len() >= ZERO_INITIALIZED_SIZE);
+        assert!((0..mapping.len()).all(|index| read_byte(mapping, index) == 0));
     }
 
-    fn write_byte(shm: &Shm, index: usize, value: u8) {
-        assert!(index < shm.len());
+    fn write_byte(mapping: &Mapping, index: usize, value: u8) {
+        assert!(index < mapping.len());
         // SAFETY: The index is in bounds and tests synchronize all accesses.
-        unsafe { shm.as_ptr().add(index).write(value) };
+        unsafe { mapping.as_ptr().add(index).write(value) };
     }
 }

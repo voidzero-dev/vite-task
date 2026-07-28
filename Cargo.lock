@@ -1380,16 +1380,9 @@ dependencies = [
 name = "fspy_shm"
 version = "0.0.0"
 dependencies = [
- "base64",
  "ctor",
- "memfd",
  "memmap2",
- "nix 0.31.2",
- "passfd",
  "subprocess_test",
- "tokio",
- "tokio-util",
- "tracing",
  "uuid",
  "windows-sys 0.61.2",
 ]
@@ -1992,15 +1985,6 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
-
-[[package]]
-name = "memfd"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227"
-dependencies = [
- "rustix",
-]
 
 [[package]]
 name = "memmap2"

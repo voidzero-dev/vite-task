@@ -89,7 +89,6 @@ jsonc-parser = { version = "0.32.0", features = ["serde"] }
 libc = "0.2.185"
 libtest-mimic = "0.8.2"
 memmap2 = "0.9.11"
-memfd = "0.6.5"
 monostate = "1.0.2"
 napi = "3"
 napi-build = "2"

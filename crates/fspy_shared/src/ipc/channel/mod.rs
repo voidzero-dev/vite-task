@@ -2,55 +2,22 @@
 
 mod shm_io;
 
-use std::{env::temp_dir, fs::File, io, mem::MaybeUninit, ops::Deref, path::PathBuf, sync::Arc};
+use std::{env::temp_dir, fs::File, io, ops::Deref, path::PathBuf};
 
-use fspy_shm::Shm;
+use fspy_shm::{Mapping, ShmKeeper};
 pub use shm_io::FrameMut;
 use shm_io::{ShmReader, ShmWriter};
 use tracing::debug;
 use uuid::Uuid;
-use wincode::{
-    SchemaRead, SchemaWrite,
-    config::Config,
-    error::{ReadResult, WriteResult},
-    io::{Reader, Writer},
-};
+use wincode::{SchemaRead, SchemaWrite};
 
 use super::NativeStr;
-
-/// wincode schema adapter for `Arc<str>`, which is a foreign type with unsized inner.
-pub(crate) struct ArcStrSchema;
-
-// SAFETY: Delegates to `str`'s SchemaWrite impl, preserving its size/write invariants.
-unsafe impl<C: Config> SchemaWrite<C> for ArcStrSchema {
-    type Src = Arc<str>;
-
-    fn size_of(src: &Self::Src) -> WriteResult<usize> {
-        <str as SchemaWrite<C>>::size_of(src)
-    }
-
-    fn write(writer: impl Writer, src: &Self::Src) -> WriteResult<()> {
-        <str as SchemaWrite<C>>::write(writer, src)
-    }
-}
-
-// SAFETY: Delegates to `&str`'s SchemaRead impl; dst is initialized on Ok.
-unsafe impl<'de, C: Config> SchemaRead<'de, C> for ArcStrSchema {
-    type Dst = Arc<str>;
-
-    fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
-        let s: &str = <&str as SchemaRead<'de, C>>::get(&mut reader)?;
-        dst.write(Arc::from(s));
-        Ok(())
-    }
-}
 
 /// Serializable configuration to create channel senders.
 #[derive(SchemaWrite, SchemaRead, Clone, Debug)]
 pub struct ChannelConf {
     lock_file_path: Box<NativeStr>,
-    #[wincode(with = "ArcStrSchema")]
-    shm_id: Arc<str>,
+    shm_id: Box<NativeStr>,
 }
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders
@@ -62,12 +29,16 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
 
-    let shm = fspy_shm::create(capacity)?;
+    let keeper = fspy_shm::create(capacity)?;
+    // The creating process has no privileged view; it opens one like any other.
+    let mapping = fspy_shm::open(keeper.id())?;
 
-    let conf =
-        ChannelConf { lock_file_path: lock_file_path.as_os_str().into(), shm_id: shm.id().into() };
+    let conf = ChannelConf {
+        lock_file_path: lock_file_path.as_os_str().into(),
+        shm_id: keeper.id().into(),
+    };
 
-    let receiver = Receiver::new(lock_file_path, shm)?;
+    let receiver = Receiver::new(lock_file_path, keeper, mapping)?;
     Ok((conf, receiver))
 }
 
@@ -83,7 +54,7 @@ impl ChannelConf {
         let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
         lock_file.try_lock_shared()?;
 
-        let shm = fspy_shm::open(&self.shm_id)?;
+        let shm = fspy_shm::open(&self.shm_id.to_cow_os_str())?;
         // SAFETY: `shm` is a freshly opened shared memory region with valid pointer and size.
         // Exclusive write access is ensured by the shared file lock held by this sender.
         let writer = unsafe { ShmWriter::new(shm) };
@@ -92,7 +63,7 @@ impl ChannelConf {
 }
 
 pub struct Sender {
-    writer: ShmWriter<Shm>,
+    writer: ShmWriter<Mapping>,
     lock_file_path: Box<NativeStr>,
     lock_file: File,
 }
@@ -106,20 +77,13 @@ impl Drop for Sender {
 }
 
 impl Deref for Sender {
-    type Target = ShmWriter<Shm>;
+    type Target = ShmWriter<Mapping>;
 
     fn deref(&self) -> &Self::Target {
         &self.writer
     }
 }
 
-#[cfg_attr(
-    target_os = "windows",
-    expect(
-        clippy::non_send_fields_in_send_ty,
-        reason = "`Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to"
-    )
-)]
 /// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
 unsafe impl Send for Sender {}
 
@@ -131,16 +95,11 @@ unsafe impl Sync for Sender {}
 pub struct Receiver {
     lock_file_path: PathBuf,
     lock_file: File,
-    shm: Shm,
+    /// Keeps the backing file's name alive for as long as senders may attach.
+    _keeper: ShmKeeper,
+    mapping: Mapping,
 }
 
-#[cfg_attr(
-    target_os = "windows",
-    expect(
-        clippy::non_send_fields_in_send_ty,
-        reason = "Receiver doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock"
-    )
-)]
 /// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
 unsafe impl Send for Receiver {}
 
@@ -156,9 +115,9 @@ impl Drop for Receiver {
 }
 
 impl Receiver {
-    fn new(lock_file_path: PathBuf, shm: Shm) -> io::Result<Self> {
+    fn new(lock_file_path: PathBuf, keeper: ShmKeeper, mapping: Mapping) -> io::Result<Self> {
         let lock_file = File::create(&lock_file_path)?;
-        Ok(Self { lock_file_path, lock_file, shm })
+        Ok(Self { lock_file_path, lock_file, _keeper: keeper, mapping })
     }
 
     /// Lock the shared memory for unique read access.
@@ -172,7 +131,7 @@ impl Receiver {
         self.lock_file.lock()?;
         // SAFETY: The exclusive file lock is held, so no writers can access the shared memory.
         // The lock ensures all prior writes are visible to this thread.
-        let reader = ShmReader::new(unsafe { self.shm.as_slice() });
+        let reader = ShmReader::new(unsafe { self.mapping.as_slice() });
         Ok(ReceiverLockGuard { reader, lock_file: &self.lock_file })
     }
 }

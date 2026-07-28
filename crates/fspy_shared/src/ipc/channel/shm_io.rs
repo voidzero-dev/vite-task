@@ -9,7 +9,7 @@ use std::{
 };
 
 use bytemuck::must_cast;
-use fspy_shm::Shm;
+use fspy_shm::Mapping;
 use wincode::{SchemaWrite, Serialize as _, config::DefaultConfig};
 
 // `ShmWriter` writes headers using atomic operations to prevent partial writes due to crashes,
@@ -28,7 +28,7 @@ pub trait AsRawSlice {
     fn as_raw_slice(&self) -> *mut [u8];
 }
 
-impl AsRawSlice for Shm {
+impl AsRawSlice for Mapping {
     fn as_raw_slice(&self) -> *mut [u8] {
         slice_from_raw_parts_mut(self.as_ptr(), self.len())
     }
@@ -672,27 +672,15 @@ mod tests {
 
         const SHM_SIZE: usize = 1024 * 1024;
 
-        // On Linux, `fspy_shm::create` spawns the mapping's broker onto the
-        // ambient tokio runtime, which serves the child processes' opens.
-        #[cfg(target_os = "linux")]
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_io()
-            .enable_time()
-            .build()
-            .unwrap();
-        #[cfg(target_os = "linux")]
-        let _guard = runtime.enter();
-
-        let shm = fspy_shm::create(SHM_SIZE).unwrap();
-        let shm_name = shm.id().to_owned();
+        let keeper = fspy_shm::create(SHM_SIZE).unwrap();
+        let shm_name = keeper.id().to_str().expect("test temp dir is UTF-8").to_owned();
 
         let children: Vec<Child> = (0..CHILD_COUNT)
             .map(|child_index| {
                 let cmd = command_for_fn!(
                     (shm_name.clone(), child_index),
                     |(shm_name, child_index): (String, usize)| {
-                        let shm = fspy_shm::open(&shm_name).unwrap();
+                        let shm = fspy_shm::open(std::ffi::OsStr::new(&shm_name)).unwrap();
                         // SAFETY: `shm` is a freshly opened shared memory region with a valid
                         // pointer and size. Concurrent write access is safe because `ShmWriter`
                         // uses atomic operations.
@@ -712,9 +700,10 @@ mod tests {
             assert!(status.success());
         }
 
+        let mapping = fspy_shm::open(keeper.id()).unwrap();
         // SAFETY: All child processes have exited (waited above), so no concurrent writers exist.
         // The shared memory is valid and fully written.
-        let shm = unsafe { shm.as_slice() };
+        let shm = unsafe { mapping.as_slice() };
         let reader = ShmReader::new(shm);
         let frames = reader.iter_frames().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert_eq!(frames.len(), CHILD_COUNT * FRAME_COUNT_EACH_CHILD);

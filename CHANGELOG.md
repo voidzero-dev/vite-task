@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Automatic file-access tracking now backs its shared memory with a sparse temporary file on every platform, so tasks are still tracked inside coding-agent sandboxes that deny POSIX shared memory and Unix domain sockets ([#563](https://github.com/voidzero-dev/vite-task/issues/563), [#576](https://github.com/voidzero-dev/vite-task/pull/576)).
 - **Added** Tasks now run with `VP_RUN=1` set, so tools can tell they are running under `vp run` instead of being invoked directly ([#570](https://github.com/voidzero-dev/vite-task/pull/570)).
 - **Fixed** The task cache now supports much larger automatically tracked input sets without hitting wincode's default 4 MiB sequence preallocation limit ([#554](https://github.com/voidzero-dev/vite-task/pull/554)).
 - **Fixed** npm workspace patterns beginning with `./` now discover matching packages correctly ([vite-plus#2201](https://github.com/voidzero-dev/vite-plus/issues/2201), [#547](https://github.com/voidzero-dev/vite-task/pull/547)).
