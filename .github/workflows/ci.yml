@@ -353,16 +353,14 @@ jobs:
           tools: cargo-shear@1.11.1,cargo-autoinherit@0.1.6
           components: clippy rust-docs rustfmt
 
-      # fspy_benchmark has a x86_64-unknown-linux-musl artifact dependency, so
-      # documenting the workspace needs the musl standard library.
-      - run: rustup target add x86_64-unknown-linux-musl
-
       - uses: oxc-project/setup-node@4c588e9266bd930b6ddc34307df0659ed511d187 # v1.3.1
       - run: pnpm exec vp fmt --check
       - run: cargo autoinherit && git diff --exit-code
       - run: cargo shear --deny-warnings
       - run: cargo fmt --check
-      - run: RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --document-private-items
+      # --exclude fspy_benchmark: documenting it would build its musl artifact
+      # dependency, which needs a rust-std this job otherwise has no use for.
+      - run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --exclude fspy_benchmark --no-deps --document-private-items
 
       - uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14 # v1.48.0
         with:

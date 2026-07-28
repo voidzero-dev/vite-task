@@ -4,10 +4,18 @@ permissions: {}
 
 on:
   workflow_dispatch:
+  # Only changes that can move fspy's cost: fspy and benchmark crates, their
+  # locked dependencies, the toolchain, and this workflow. Runs on main only
+  # keep the build cache warm and record the overhead history.
   pull_request:
-    types: [opened, reopened, synchronize]
-    # Only changes that can move fspy's cost: fspy and benchmark crates, their
-    # locked dependencies, the toolchain, and this workflow.
+    paths:
+      - 'crates/fspy*/**'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/fspy-benchmark.yml'
+  push:
+    branches:
+      - main
     paths:
       - 'crates/fspy*/**'
       - 'Cargo.lock'
@@ -16,7 +24,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
 
 defaults:
   run:
@@ -47,7 +55,6 @@ jobs:
             static: false
     runs-on: ${{ matrix.os }}
     env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
       BASE_DIR: ${{ github.workspace }}/../fspy-benchmark-base
     steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
@@ -58,7 +65,9 @@ jobs:
 
       - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
         with:
-          save-cache: true
+          # Caches saved by pull request runs are scoped to their branch, so
+          # only runs on main seed the cache every other run restores.
+          save-cache: ${{ github.ref_name == 'main' }}
           cache-key: fspy-benchmark-${{ matrix.platform }}
 
       - name: Install static target
@@ -82,7 +91,10 @@ jobs:
         if: github.event_name == 'pull_request'
         working-directory: ${{ env.BASE_DIR }}
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target/fspy-base
+          # Share the head build's target directory: the crates.io graph is
+          # fingerprinted by package and profile, not by workspace, so only the
+          # fspy path crates build twice.
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: |
           # Both fspy revisions must be measured by identical code, and the
           # baseline may predate the launcher crate, so overlay the head's
@@ -90,6 +102,10 @@ jobs:
           rm -rf crates/fspy_benchmark_launcher
           cp -R "$GITHUB_WORKSPACE/crates/fspy_benchmark_launcher" crates/fspy_benchmark_launcher
           cargo build --release -p fspy_benchmark_launcher
+          # Set the binary aside before the head build overwrites it.
+          exe=""
+          [[ "$RUNNER_OS" == "Windows" ]] && exe=.exe
+          cp "$CARGO_TARGET_DIR/release/fspy_benchmark_launcher$exe" "$RUNNER_TEMP/fspy-base-launcher$exe"
 
       - name: Run benchmark
         run: |
@@ -97,7 +113,7 @@ jobs:
           [[ "$RUNNER_OS" == "Windows" ]] && exe=.exe
           args=()
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            args=(--base-launcher "$CARGO_TARGET_DIR/fspy-base/release/fspy_benchmark_launcher$exe")
+            args=(--base-launcher "$RUNNER_TEMP/fspy-base-launcher$exe")
           fi
           mkdir -p .benchmark-results
           set -o pipefail
@@ -114,16 +130,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark report
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         # Matrix jobs have isolated filesystems, so persist each report for the
-        # comment job to combine into one sticky comment after all platforms finish.
+        # comment job to combine into one sticky comment after all platforms
+        # finish. Fork pull requests get no comment, so nothing consumes their
+        # reports; the job summary already carries them.
+        if: >-
+          !cancelled() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fspy-benchmark-report-${{ matrix.platform }}
           path: .benchmark-results/${{ matrix.platform }}.txt
           if-no-files-found: error
-          overwrite: true
-          retention-days: 90
+          retention-days: 1
 
   comment:
     name: Report benchmark
