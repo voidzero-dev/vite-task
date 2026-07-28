@@ -17,5 +17,5 @@ doctest = false
 
 [dependencies]
 fspy = { workspace = true }
-tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["io-util", "process", "rt-multi-thread"] }
 tokio-util = { workspace = true }

@@ -1,13 +1,10 @@
 use std::{
     env,
     fs::File,
-    sync::{Arc, Barrier},
+    sync::Barrier,
     thread,
     time::{Duration, Instant},
 };
-
-const DEFAULT_THREAD_COUNT: usize = 4;
-const DEFAULT_OPEN_COUNT_PER_THREAD: usize = 512;
 
 /// Opens behind one timing sample. Timing every open on its own would leave the
 /// sample close to the clock's granularity, which is 42 ns on Apple silicon and
@@ -15,30 +12,26 @@ const DEFAULT_OPEN_COUNT_PER_THREAD: usize = 512;
 /// enough that the scheduler only ever spoils a few of them.
 const OPENS_PER_SAMPLE: usize = 8;
 
-#[cfg(unix)]
-const MISSING_PATH: &str = "/.fspy-benchmark-missing";
-#[cfg(windows)]
-const MISSING_PATH: &str = r"C:\.fspy-benchmark-missing";
-
-/// Threads open distinct paths so that they do not contend for the same lookup.
-const THREAD_SUFFIXES: [&str; 8] = ["", "1", "2", "3", "4", "5", "6", "7"];
-
 fn main() {
     let mut args = env::args().skip(1);
-    let thread_count =
-        args.next().and_then(|arg| arg.parse().ok()).unwrap_or(DEFAULT_THREAD_COUNT).max(1);
-    let open_count_per_thread =
-        args.next().and_then(|arg| arg.parse().ok()).unwrap_or(DEFAULT_OPEN_COUNT_PER_THREAD);
-    let barrier = Arc::new(Barrier::new(thread_count));
+    let mut next = || args.next().expect("usage: fspy_benchmark_target THREADS OPENS PATH");
+    let thread_count: usize = next().parse().expect("unreadable thread count");
+    let open_count_per_thread: usize = next().parse().expect("unreadable open count");
+    let base_path = next();
 
-    let mut samples = Vec::new();
+    let barrier = &Barrier::new(thread_count);
+    let mut samples = Vec::with_capacity(thread_count * (open_count_per_thread / OPENS_PER_SAMPLE));
     thread::scope(|scope| {
         let workers: Vec<_> = (0..thread_count)
             .map(|index| {
-                let barrier = Arc::clone(&barrier);
-                let mut path = MISSING_PATH.to_owned();
-                path.push_str(THREAD_SUFFIXES[index % THREAD_SUFFIXES.len()]);
-                scope.spawn(move || time_opens(&barrier, &path, open_count_per_thread))
+                // Threads open distinct paths so that they do not contend for
+                // the same lookup. The first thread opens the bare path, which
+                // is the one the launcher validates was captured.
+                let mut path = base_path.clone();
+                if index > 0 {
+                    path.push_str(&index.to_string());
+                }
+                scope.spawn(move || time_opens(barrier, &path, open_count_per_thread))
             })
             .collect();
         for worker in workers {

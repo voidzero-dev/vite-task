@@ -14,6 +14,9 @@ use fspy::Command;
 use tokio::{io::AsyncReadExt as _, process::ChildStdout, runtime::Builder};
 use tokio_util::sync::CancellationToken;
 
+/// The base path the target opens, appended to its arguments so that only this
+/// crate names it: the target derives its per-thread paths from it, and
+/// validation asserts the bare path was captured.
 #[cfg(unix)]
 const MISSING_PATH: &str = "/.fspy-benchmark-missing";
 #[cfg(windows)]
@@ -61,7 +64,12 @@ struct Launch {
 /// nothing of this launcher's own startup.
 async fn run_tracked(target: &OsString, target_args: &[OsString]) -> Launch {
     let mut command = Command::new(target);
-    command.args(target_args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+    command
+        .args(target_args)
+        .arg(MISSING_PATH)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
     let start = Instant::now();
     let mut child = command
         .spawn(CancellationToken::new())
@@ -80,7 +88,12 @@ async fn run_tracked(target: &OsString, target_args: &[OsString]) -> Launch {
 
 async fn run_untracked(target: &OsString, target_args: &[OsString]) -> Launch {
     let mut command = tokio::process::Command::new(target);
-    command.args(target_args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+    command
+        .args(target_args)
+        .arg(MISSING_PATH)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
     let start = Instant::now();
     let mut child = command.spawn().expect("failed to spawn untracked benchmark target");
     let stdout = child.stdout.take().expect("untracked benchmark target has no stdout");
@@ -93,12 +106,12 @@ async fn run_untracked(target: &OsString, target_args: &[OsString]) -> Launch {
 /// Relays the sample the target timed for itself after the wall clock, so the
 /// harness reads every number from one line.
 async fn report(mut launch: Launch) {
-    let mut samples = Vec::new();
-    launch.stdout.read_to_end(&mut samples).await.expect("failed to read reported samples");
-    let samples = str::from_utf8(&samples).expect("reported samples are not utf-8");
+    let mut sample = Vec::new();
+    launch.stdout.read_to_end(&mut sample).await.expect("failed to read the reported sample");
+    let sample = str::from_utf8(&sample).expect("the reported sample is not utf-8");
     #[expect(clippy::print_stdout, reason = "the harness reads the measurement from stdout")]
     {
-        println!("{} {}", launch.wall_nanos, samples.trim());
+        println!("{} {}", launch.wall_nanos, sample.trim());
     }
 }
 
@@ -106,7 +119,12 @@ async fn report(mut launch: Launch) {
 /// that the harness never benchmarks tracking that silently stopped working.
 async fn validate(target: &OsString, target_args: &[OsString]) {
     let mut command = Command::new(target);
-    command.args(target_args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit());
+    command
+        .args(target_args)
+        .arg(MISSING_PATH)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
     let termination = command
         .spawn(CancellationToken::new())
         .await

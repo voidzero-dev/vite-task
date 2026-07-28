@@ -179,7 +179,6 @@ zstd = "0.13"
 [workspace.metadata.cargo-shear]
 ignored = [
   # These are artifact dependencies. They are not directly `use`d in Rust code.
-  "fspy_benchmark_target",
   "fspy_preload_unix",
   "fspy_preload_windows",
   "vite_task_client_napi",

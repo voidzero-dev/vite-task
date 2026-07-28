@@ -13,9 +13,10 @@
 //!
 //! Each iteration launches every arm — baseline-tracked, head-tracked, and
 //! untracked — back to back, cycling every ordering, and yields the ratio of
-//! head to baseline per metric. The reported change is the median of those ratios,
-//! so it prices exactly one thing: what the fspy change under review costs a
-//! tracked process. The untracked arm prices tracking itself, as context.
+//! head to baseline per metric. The reported change is the median of those
+//! ratios, so it prices exactly one thing: what the fspy change under review
+//! costs a tracked process. The untracked arm prices tracking itself, as
+//! context.
 
 use std::{
     env,
@@ -28,40 +29,11 @@ const DYNAMIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_TARGET");
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const STATIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_STATIC_TARGET");
 
-/// Opens one small batch, only to prove that capturing works before measuring.
-const VALIDATION_ARGS: [&str; 2] = ["1", "8"];
+/// Threads the target runs, passed through to it. Two, because a process that
+/// fspy tracks rarely accesses files from one thread.
+const THREADS: &str = "2";
 
-struct Workload {
-    /// Thread count the target spawns, passed through to it.
-    threads: &'static str,
-    /// Opens per target thread, passed through to it.
-    opens: &'static str,
-    /// Measured iterations. Each one launches every arm once. A multiple of
-    /// every order-cycle length, so each ordering runs equally often.
-    iterations: usize,
-    /// Unmeasured iterations run first, to fill caches and settle the runner.
-    warmup: usize,
-}
-
-/// Launches cost several times more wall clock on Windows, so it affords
-/// fewer of them in the same time.
-#[cfg(windows)]
-const LAUNCH_ITERATIONS: usize = 150;
-#[cfg(not(windows))]
-const LAUNCH_ITERATIONS: usize = 300;
-
-/// Opens nothing, so the whole launch is the cost of starting a tracked
-/// process. Two threads, because a process that fspy tracks rarely has one.
-const LAUNCH_WORKLOAD: Workload =
-    Workload { threads: "2", opens: "0", iterations: LAUNCH_ITERATIONS, warmup: 5 };
-
-/// Opens timed from inside the target, so they price interception rather than
-/// the launch around it. Two threads, each opening a path of its own, because
-/// a process that fspy tracks rarely accesses files from one thread.
-const ACCESS_WORKLOAD: Workload =
-    Workload { threads: "2", opens: "2048", iterations: 102, warmup: 3 };
-
-/// What a row reads out of the launches of its workload.
+/// What a suite reads out of its launches.
 #[derive(Clone, Copy)]
 enum Metric {
     /// Wall clock of the launch, from spawn to reap.
@@ -70,27 +42,41 @@ enum Metric {
     Typical,
 }
 
-struct Row {
+struct Suite {
     name: &'static str,
+    /// Opens per target thread, passed through to it.
+    opens: &'static str,
+    /// Measured iterations. Each one launches every arm once.
+    iterations: usize,
+    /// Unmeasured iterations run first, to fill caches and settle the runner.
+    warmup: usize,
     metric: Metric,
-    /// The change past which the row fails the run, as a share. Set from the
+    /// The change past which the suite fails the run, as a share. Set from the
     /// spread observed when benchmarking one commit on many runner instances.
     threshold: f64,
 }
 
-struct Suite {
-    workload: &'static Workload,
-    rows: &'static [Row],
-}
-
+/// Opens nothing, so the whole launch is the cost of starting a tracked
+/// process. Launches cost several times more wall clock on Windows, so it
+/// affords fewer of them in the same time.
 const LAUNCH_SUITE: Suite = Suite {
-    workload: &LAUNCH_WORKLOAD,
-    rows: &[Row { name: "launch", metric: Metric::Wall, threshold: 0.05 }],
+    name: "launch",
+    opens: "0",
+    iterations: if cfg!(windows) { 150 } else { 300 },
+    warmup: 5,
+    metric: Metric::Wall,
+    threshold: 0.05,
 };
 
+/// Opens timed from inside the target, so they price interception rather than
+/// the launch around it.
 const ACCESS_SUITE: Suite = Suite {
-    workload: &ACCESS_WORKLOAD,
-    rows: &[Row { name: "access", metric: Metric::Typical, threshold: 0.08 }],
+    name: "access",
+    opens: "2048",
+    iterations: 102,
+    warmup: 3,
+    metric: Metric::Typical,
+    threshold: 0.08,
 };
 
 struct Backend {
@@ -140,28 +126,12 @@ fn parse_base_launcher() -> Option<OsString> {
     base_launcher
 }
 
-/// What one launch measured, in nanoseconds.
-#[derive(Clone, Copy, Default)]
-struct Sample {
-    wall: f64,
-    typical: f64,
-}
-
-impl Sample {
-    const fn metric(&self, metric: Metric) -> f64 {
-        match metric {
-            Metric::Wall => self.wall,
-            Metric::Typical => self.typical,
-        }
-    }
-}
-
-/// One iteration's launches, one per arm.
+/// One iteration's measurements, one per arm, in nanoseconds.
 #[derive(Default)]
 struct Iteration {
-    base: Sample,
-    head: Sample,
-    untracked: Sample,
+    base: f64,
+    head: f64,
+    untracked: f64,
 }
 
 /// Every ordering of the arms of an iteration. Cycling through all of them —
@@ -186,62 +156,52 @@ enum Arm {
     Base,
 }
 
-/// Runs a suite's workload and reports its rows. Returns whether any row
-/// regressed past its threshold.
+/// Runs a suite and reports its row. Returns whether it regressed past its
+/// threshold.
 fn run_suite(backend: &Backend, suite: &Suite, base_launcher: Option<&OsStr>) -> bool {
-    let workload = suite.workload;
     let orders = if base_launcher.is_some() { ORDERS_WITH_BASE } else { ORDERS_WITHOUT_BASE };
-    let mut iterations = Vec::with_capacity(workload.iterations);
-    for index in 0..workload.warmup + workload.iterations {
+    // Whole cycles only, so that each ordering runs equally often.
+    let iterations = suite.iterations.next_multiple_of(orders.len());
+    let mut measured = Vec::with_capacity(iterations);
+    for index in 0..suite.warmup + iterations {
         let mut iteration = Iteration::default();
         for &arm in orders[index % orders.len()] {
             match arm {
                 Arm::Head => {
-                    iteration.head = launch(HEAD_LAUNCHER.as_ref(), None, backend, workload);
+                    iteration.head = launch(HEAD_LAUNCHER.as_ref(), None, backend, suite);
                 }
                 Arm::Untracked => {
                     iteration.untracked =
-                        launch(HEAD_LAUNCHER.as_ref(), Some("--untracked"), backend, workload);
+                        launch(HEAD_LAUNCHER.as_ref(), Some("--untracked"), backend, suite);
                 }
                 Arm::Base => {
-                    iteration.base = launch(base_launcher.unwrap(), None, backend, workload);
+                    iteration.base = launch(base_launcher.unwrap(), None, backend, suite);
                 }
             }
         }
-        if index >= workload.warmup {
-            iterations.push(iteration);
+        if index >= suite.warmup {
+            measured.push(iteration);
         }
     }
 
-    let mut regressed = false;
-    for row in suite.rows {
-        regressed |= report_row(backend, row, &iterations, base_launcher.is_some());
-    }
-    regressed
+    report(backend, suite, &measured, base_launcher.is_some())
 }
 
-/// Prints one row and returns whether it regressed past its threshold.
+/// Prints the suite's row and returns whether it regressed past its threshold.
 #[expect(clippy::print_stdout, reason = "the report is the benchmark's output")]
-fn report_row(backend: &Backend, row: &Row, iterations: &[Iteration], has_base: bool) -> bool {
-    let name = [backend.name, "/", row.name].concat();
-    let overhead = median(
-        iterations
-            .iter()
-            .map(|it| it.head.metric(row.metric) / it.untracked.metric(row.metric) - 1.0),
-    );
+fn report(backend: &Backend, suite: &Suite, iterations: &[Iteration], has_base: bool) -> bool {
+    let name = [backend.name, "/", suite.name].concat();
+    let overheads = sorted(iterations.iter().map(|it| it.head / it.untracked - 1.0));
+    let overhead = quantile(&overheads, 1, 2);
 
     if has_base {
-        let mut changes: Vec<f64> = iterations
-            .iter()
-            .map(|it| it.head.metric(row.metric) / it.base.metric(row.metric) - 1.0)
-            .collect();
-        changes.sort_unstable_by(f64::total_cmp);
-        let change = changes[changes.len() / 2];
-        let low = changes[changes.len() / 4];
-        let high = changes[changes.len() * 3 / 4];
-        let verdict = if change > row.threshold {
+        let changes = sorted(iterations.iter().map(|it| it.head / it.base - 1.0));
+        let change = quantile(&changes, 1, 2);
+        let low = quantile(&changes, 1, 4);
+        let high = quantile(&changes, 3, 4);
+        let verdict = if change > suite.threshold {
             "  REGRESSED"
-        } else if change < -row.threshold {
+        } else if change < -suite.threshold {
             "  improved"
         } else {
             ""
@@ -251,30 +211,35 @@ fn report_row(backend: &Backend, row: &Row, iterations: &[Iteration], has_base: 
             change * 100.0,
             low * 100.0,
             high * 100.0,
-            row.threshold * 100.0,
+            suite.threshold * 100.0,
             overhead * 100.0,
         );
-        change > row.threshold
+        change > suite.threshold
     } else {
         println!("{name:<26} overhead {:>+8.2}%", overhead * 100.0);
         false
     }
 }
 
-fn median(values: impl Iterator<Item = f64>) -> f64 {
+fn sorted(values: impl Iterator<Item = f64>) -> Vec<f64> {
     let mut values: Vec<f64> = values.collect();
     values.sort_unstable_by(f64::total_cmp);
-    values[values.len() / 2]
+    values
 }
 
-/// Launches one arm and reads the three numbers its launcher printed.
-fn launch(launcher: &OsStr, mode: Option<&str>, backend: &Backend, workload: &Workload) -> Sample {
+fn quantile(sorted: &[f64], numerator: usize, denominator: usize) -> f64 {
+    sorted[sorted.len() * numerator / denominator]
+}
+
+/// Launches one arm and reads the metric the suite names out of the two
+/// numbers its launcher printed.
+fn launch(launcher: &OsStr, mode: Option<&str>, backend: &Backend, suite: &Suite) -> f64 {
     let mut command = Command::new(launcher);
     if let Some(mode) = mode {
         command.arg(mode);
     }
     let output = command
-        .args([backend.target, workload.threads, workload.opens])
+        .args([backend.target, THREADS, suite.opens])
         .stdin(Stdio::null())
         .stderr(Stdio::inherit())
         .output()
@@ -285,14 +250,21 @@ fn launch(launcher: &OsStr, mode: Option<&str>, backend: &Backend, workload: &Wo
         .split_whitespace()
         .map(|number| number.parse().expect("unreadable launcher measurement"));
     let mut next = || numbers.next().expect("launcher reported too few measurements");
-    Sample { wall: next(), typical: next() }
+    let [wall, typical] = [next(), next()];
+    match suite.metric {
+        Metric::Wall => wall,
+        Metric::Typical => typical,
+    }
 }
 
 fn validate(launcher: &OsStr, target: &str) {
     let status = Command::new(launcher)
         .arg("--validate")
         .arg(target)
-        .args(VALIDATION_ARGS)
+        // One thread opening one batch: the count matches the target's
+        // OPENS_PER_SAMPLE. Fewer would open nothing, which validation
+        // catches by failing to capture the access.
+        .args(["1", "8"])
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
