@@ -323,6 +323,44 @@ mod tests {
         );
     }
 
+    /// Throwaway probe two: does manual removal also work while another HANDLE
+    /// (share-delete) is still open, as a retained memmap2 handle would be?
+    #[cfg(windows)]
+    #[test]
+    fn probe_manual_delete_with_open_handle() {
+        let path = std::path::absolute(temp_dir())
+            .unwrap()
+            .join(format!("{BACKING_PREFIX}probe2-{}.shm", Uuid::new_v4().simple()));
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        {
+            use std::os::windows::fs::OpenOptionsExt as _;
+            options.share_mode(sys::SHARE_ALL).attributes(sys::TEMPORARY);
+        }
+        let file = options.open(&path).unwrap();
+        sys::set_sparse(&file).unwrap();
+        file.set_len(65536).unwrap();
+        let mapping = map(&file, 65536).unwrap();
+        // Keep `file` open: it stands in for the handle memmap2 would retain.
+        // SAFETY: in bounds, no concurrent access.
+        unsafe { mapping.as_ptr().write(17) };
+
+        let removed = fs::remove_file(&path);
+        let exists_after = path.exists();
+        let reopen_fails = OpenOptions::new().read(true).open(&path).is_err();
+        // SAFETY: in bounds, no concurrent access.
+        let view_alive = unsafe { mapping.as_ptr().read() } == 17;
+        let handle_still_writes = {
+            use std::io::Write as _;
+            (&file).write_all(b"x").is_ok()
+        };
+        panic!(
+            "PROBE2 remove_file={removed:?} exists_after={exists_after} \
+             reopen_fails={reopen_fails} view_alive={view_alive} \
+             handle_still_writes={handle_still_writes}"
+        );
+    }
+
     #[test]
     fn subprocess_open_ignores_changed_temp_and_working_directory() {
         let keeper = create(SIZE).unwrap();
