@@ -227,3 +227,22 @@ impl<T1: FromSyscallArg, T2: FromSyscallArg, T3: FromSyscallArg, T4: FromSyscall
         ))
     }
 }
+
+impl<
+    T1: FromSyscallArg,
+    T2: FromSyscallArg,
+    T3: FromSyscallArg,
+    T4: FromSyscallArg,
+    T5: FromSyscallArg,
+> FromNotify for (T1, T2, T3, T4, T5)
+{
+    fn from_notify(notif: &seccomp_notif) -> io::Result<Self> {
+        Ok((
+            T1::from_syscall_arg(notif.data.args[0])?,
+            T2::from_syscall_arg(notif.data.args[1])?,
+            T3::from_syscall_arg(notif.data.args[2])?,
+            T4::from_syscall_arg(notif.data.args[3])?,
+            T5::from_syscall_arg(notif.data.args[4])?,
+        ))
+    }
+}

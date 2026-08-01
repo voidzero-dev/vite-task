@@ -1,27 +1,25 @@
-//! Normalize raw fspy path accesses into workspace-relative, filtered form.
+//! Normalize raw fspy path accesses into workspace-relative, ordered form.
+//!
+//! Order is preserved because the classification rules depend on it: a task that
+//! wrote a path before reading it is observing its own output, while one that
+//! read before writing consumed something that existed. Collapsing accesses into
+//! per-path read and write sets, as this module used to, throws that away.
 //!
 //! User-configured negative globs are NOT applied here. They are applied later,
 //! separately for reads (input config) and writes (output config), since those
 //! two configs are independent.
 #![cfg(fspy)]
 
-use std::collections::hash_map::Entry;
-
-use fspy::{AccessMode, PathAccessIterable};
-use rustc_hash::FxHashSet;
+use fspy::PathAccessIterable;
 use vite_path::{AbsolutePath, RelativePathBuf};
 
-use super::fingerprint::PathRead;
-use crate::collections::HashMap;
+use super::classify::TrackedEvent;
 
-/// Tracked file accesses from fspy, normalized to workspace-relative paths.
+/// Tracked file accesses from fspy, normalized to workspace-relative paths and
+/// kept in observation order.
 #[derive(Default, Debug)]
 pub struct TrackedPathAccesses {
-    /// Tracked path reads
-    pub path_reads: HashMap<RelativePathBuf, PathRead>,
-
-    /// Tracked path writes
-    pub path_writes: FxHashSet<RelativePathBuf>,
+    pub events: Vec<TrackedEvent>,
 }
 
 impl TrackedPathAccesses {
@@ -29,7 +27,7 @@ impl TrackedPathAccesses {
     /// normalizing `..` components. `.git/*` paths are skipped. User-configured
     /// negatives are applied by the caller (see module docs).
     pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
-        let mut accesses = Self::default();
+        let mut events = Vec::new();
         for access in raw.iter() {
             // Strip workspace root and clean `..` components in one pass.
             // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
@@ -44,27 +42,9 @@ impl TrackedPathAccesses {
                 continue;
             };
 
-            if access.mode.contains(AccessMode::READ) {
-                accesses
-                    .path_reads
-                    .entry(relative_path.clone())
-                    .or_insert(PathRead { read_dir_entries: false });
-            }
-            if access.mode.contains(AccessMode::WRITE) {
-                accesses.path_writes.insert(relative_path.clone());
-            }
-            if access.mode.contains(AccessMode::READ_DIR) {
-                match accesses.path_reads.entry(relative_path) {
-                    Entry::Occupied(mut occupied) => {
-                        occupied.get_mut().read_dir_entries = true;
-                    }
-                    Entry::Vacant(vacant) => {
-                        vacant.insert(PathRead { read_dir_entries: true });
-                    }
-                }
-            }
+            events.push(TrackedEvent { path: relative_path, mode: access.mode });
         }
-        accesses
+        Self { events }
     }
 }
 

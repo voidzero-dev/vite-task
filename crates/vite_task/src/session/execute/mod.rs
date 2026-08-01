@@ -1,5 +1,9 @@
 mod cache_update;
+#[cfg(fspy)]
+mod classify;
 pub mod fingerprint;
+#[cfg(fspy)]
+mod gitignore;
 pub mod glob;
 mod hash;
 pub mod pipe;

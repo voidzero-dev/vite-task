@@ -27,6 +27,7 @@ use crate::windows::{
     client::global_client,
     convert::{ToAbsolutePath, ToAccessMode},
     detour::{Detour, DetourAny},
+    winapi_utils::{create_disposition_to_mode, handle_is_directory, rename_target_path},
 };
 
 // CreateProcess ultimately asks NtCreateUserProcess to open the executable image. Some Windows
@@ -191,8 +192,17 @@ static DETOUR_NT_CREATE_FILE: Detour<
                 ea_buffer: PVOID,
                 ea_length: ULONG,
             ) -> HFILE {
+                // CreateDisposition is Windows' O_CREAT/O_TRUNC/O_EXCL. Without
+                // it a handle opened for writing is indistinguishable from one
+                // that actually replaces content, and only the latter is a
+                // mutation.
+                let mode = {
+                    // SAFETY: converting the access mask through the FFI-aware trait
+                    let access = unsafe { desired_access.to_access_mode() };
+                    access | create_disposition_to_mode(create_disposition)
+                };
                 // SAFETY: intercepting file open to record access before forwarding to real function
-                unsafe { handle_open(desired_access, object_attributes) };
+                unsafe { handle_open(mode, object_attributes) };
 
                 // SAFETY: calling the original NtCreateFile with all original arguments
                 unsafe {
@@ -528,4 +538,97 @@ pub const DETOURS: &[DetourAny] = &[
     DETOUR_NT_QUERY_INFORMATION_BY_NAME.as_any(),
     DETOUR_NT_QUERY_DIRECTORY_FILE.as_any(),
     DETOUR_NT_QUERY_DIRECTORY_FILE_EX.as_any(),
+    DETOUR_NT_SET_INFORMATION_FILE.as_any(),
 ];
+
+/// Rename and delete both travel through `NtSetInformationFile` on Windows
+/// rather than through dedicated syscalls, so this one detour covers what
+/// `rename`, `unlink` and `rmdir` cover on Unix.
+///
+/// Without it, a tool that publishes atomically is invisible: the write lands on
+/// a temporary path that no longer exists, and the destination is never seen to
+/// change. Directory renames are worse, because a build that stages into
+/// `dist.tmp` and swaps it into place reports no write for any real output.
+///
+/// Like every other interception here, this records the call's arguments and
+/// never its result. The Linux seccomp backend cannot observe outcomes at all, so
+/// an outcome-dependent rule would hold on some platforms and not others.
+pub static DETOUR_NT_SET_INFORMATION_FILE: Detour<
+    unsafe extern "system" fn(
+        file_handle: HANDLE,
+        io_status_block: PIO_STATUS_BLOCK,
+        file_information: PVOID,
+        length: ULONG,
+        file_information_class: FILE_INFORMATION_CLASS,
+    ) -> NTSTATUS,
+> =
+    // SAFETY: initializing Detour with the real NtSetInformationFile and our replacement
+    unsafe {
+        Detour::new(c"NtSetInformationFile", ntapi::ntioapi::NtSetInformationFile, {
+            unsafe extern "system" fn new_nt_set_information_file(
+                file_handle: HANDLE,
+                io_status_block: PIO_STATUS_BLOCK,
+                file_information: PVOID,
+                length: ULONG,
+                file_information_class: FILE_INFORMATION_CLASS,
+            ) -> NTSTATUS {
+                // Values from the NtSetInformationFile contract.
+                const FILE_RENAME_INFORMATION_CLASS: FILE_INFORMATION_CLASS = 10;
+                const FILE_RENAME_INFORMATION_EX_CLASS: FILE_INFORMATION_CLASS = 65;
+                const FILE_DISPOSITION_INFORMATION_CLASS: FILE_INFORMATION_CLASS = 13;
+                const FILE_DISPOSITION_INFORMATION_EX_CLASS: FILE_INFORMATION_CLASS = 64;
+
+                match file_information_class {
+                    FILE_RENAME_INFORMATION_CLASS | FILE_RENAME_INFORMATION_EX_CLASS => {
+                        // SAFETY: file_handle is supplied by the caller
+                        let is_directory = unsafe { handle_is_directory(file_handle) };
+                        let dir_flag =
+                            if is_directory { AccessMode::IS_DIR } else { AccessMode::empty() };
+                        // SAFETY: file_handle refers to the rename source, still
+                        // valid before the call
+                        unsafe {
+                            handle_open(
+                                AccessMode::RENAME_FROM | AccessMode::DELETED | dir_flag,
+                                file_handle,
+                            );
+                        }
+                        // SAFETY: file_information holds `length` bytes of
+                        // FILE_RENAME_INFORMATION per the caller's contract, and
+                        // the helper bounds-checks against `length`
+                        let target =
+                            unsafe { rename_target_path(file_information.cast::<u8>(), length) };
+                        if let Some(target) = target {
+                            // SAFETY: target is an owned null-terminated wide string
+                            unsafe {
+                                handle_open(
+                                    AccessMode::RENAME_TO | AccessMode::WRITE | dir_flag,
+                                    target.as_ucstr().as_ustr(),
+                                );
+                            }
+                        }
+                    }
+                    FILE_DISPOSITION_INFORMATION_CLASS | FILE_DISPOSITION_INFORMATION_EX_CLASS => {
+                        // SAFETY: file_handle is supplied by the caller
+                        let is_directory = unsafe { handle_is_directory(file_handle) };
+                        let dir_flag =
+                            if is_directory { AccessMode::IS_DIR } else { AccessMode::empty() };
+                        // SAFETY: file_handle is still valid before the call
+                        unsafe { handle_open(AccessMode::DELETED | dir_flag, file_handle) };
+                    }
+                    _ => {}
+                }
+
+                // SAFETY: calling the original NtSetInformationFile with all original arguments
+                unsafe {
+                    (DETOUR_NT_SET_INFORMATION_FILE.real())(
+                        file_handle,
+                        io_status_block,
+                        file_information,
+                        length,
+                        file_information_class,
+                    )
+                }
+            }
+            new_nt_set_information_file
+        })
+    };

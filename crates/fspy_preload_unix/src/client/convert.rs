@@ -105,11 +105,23 @@ impl ToAccessMode for AccessMode {
 pub struct OpenFlags(pub c_int);
 impl ToAccessMode for OpenFlags {
     unsafe fn to_access_mode(self) -> AccessMode {
-        match self.0 & libc::O_ACCMODE {
+        let mut mode = match self.0 & libc::O_ACCMODE {
             libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
             libc::O_WRONLY => AccessMode::WRITE,
             _ => AccessMode::READ,
+        };
+        // Creation and truncation intent is what separates a real mutation from
+        // a descriptor that merely could have been written.
+        if self.0 & libc::O_CREAT != 0 {
+            mode |= AccessMode::CREATE;
         }
+        if self.0 & libc::O_TRUNC != 0 {
+            mode |= AccessMode::TRUNCATE;
+        }
+        if self.0 & libc::O_EXCL != 0 {
+            mode |= AccessMode::EXCLUSIVE;
+        }
+        mode
     }
 }
 
@@ -120,10 +132,18 @@ impl ToAccessMode for ModeStr {
         let mode_str = unsafe { CStr::from_ptr(self.0) }.to_bytes().as_bstr();
         let has_read = mode_str.contains(&b'r');
         let has_write = mode_str.contains(&b'w') || mode_str.contains(&b'a');
-        match (has_read, has_write) {
+        let mut mode = match (has_read, has_write) {
             (false, true) => AccessMode::WRITE,
             (true, true) => AccessMode::READ | AccessMode::WRITE,
             _ => AccessMode::READ,
+        };
+        // "w" and "w+" truncate and create; "a" and "a+" create without
+        // truncating. Both mutate, so mark them the way the open flags would.
+        if mode_str.contains(&b'w') {
+            mode |= AccessMode::CREATE | AccessMode::TRUNCATE;
+        } else if mode_str.contains(&b'a') {
+            mode |= AccessMode::CREATE;
         }
+        mode
     }
 }

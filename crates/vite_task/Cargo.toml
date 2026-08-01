@@ -20,6 +20,7 @@ clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "from"] }
 futures-util = { workspace = true }
+ignore = { workspace = true }
 once_cell = { workspace = true }
 owo-colors = { workspace = true }
 petgraph = { workspace = true }

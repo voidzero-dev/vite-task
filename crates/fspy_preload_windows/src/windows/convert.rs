@@ -34,6 +34,17 @@ pub trait ToAbsolutePath {
     ) -> winsafe::SysResult<R>;
 }
 
+/// An already-resolved absolute path, used for a rename destination that was
+/// reconstructed from `FILE_RENAME_INFORMATION` rather than taken from a handle.
+impl ToAbsolutePath for &U16Str {
+    unsafe fn to_absolute_path<R, F: FnOnce(Option<&U16Str>) -> winsafe::SysResult<R>>(
+        self,
+        f: F,
+    ) -> winsafe::SysResult<R> {
+        f(Some(self))
+    }
+}
+
 impl ToAbsolutePath for HANDLE {
     unsafe fn to_absolute_path<R, F: FnOnce(Option<&U16Str>) -> winsafe::SysResult<R>>(
         self,

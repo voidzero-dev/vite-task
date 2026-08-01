@@ -17,6 +17,16 @@ use fspy::{AccessMode, PathAccessIterable};
 )]
 pub use subprocess_test::command_for_fn;
 
+/// Flags describing how an access was requested rather than what kind of access
+/// it was. They differ between runtimes for the same API: `writeFileSync`
+/// truncates on Node and Deno but not on Bun. Spelling them out in every test
+/// would assert the runtime's open flags rather than the behaviour under test, so
+/// they only participate when a test names one explicitly.
+const MODIFIERS: AccessMode = AccessMode::CREATE
+    .union(AccessMode::TRUNCATE)
+    .union(AccessMode::EXCLUSIVE)
+    .union(AccessMode::IS_DIR);
+
 /// # Panics
 ///
 /// Panics if the expected path access is not found or has the wrong mode.
@@ -44,6 +54,10 @@ pub fn assert_contains(
     if actual_mode.contains(AccessMode::READ_DIR) {
         // READ_DIR already implies READ.
         actual_mode.remove(AccessMode::READ);
+    }
+
+    if !expected_mode.intersects(MODIFIERS) {
+        actual_mode.remove(MODIFIERS);
     }
 
     assert_eq!(

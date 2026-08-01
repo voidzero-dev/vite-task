@@ -11,28 +11,26 @@ use vite_task_server::Reports;
 
 use super::{
     CacheState,
-    fingerprint::{PathRead, PostRunFingerprint, TrackedEnvQuery},
+    fingerprint::{PostRunFingerprint, TrackedEnvQuery},
     glob,
     spawn::ChildOutcome,
 };
-use crate::{
-    collections::HashMap,
-    session::{
-        cache::{CacheEntryValue, ExecutionCache, archive},
-        event::{CacheErrorKind, CacheNotUpdatedReason, CacheUpdateStatus, ExecutionError},
-    },
+use crate::session::{
+    cache::{CacheEntryValue, ExecutionCache, archive},
+    event::{CacheErrorKind, CacheNotUpdatedReason, CacheUpdateStatus, ExecutionError},
 };
 
 /// Post-execution summary of what fspy observed for a single task. Fields are
 /// cfg-agnostic so the decision logic below doesn't need `cfg(fspy)` — the
 /// value is only ever `Some` when tracking happened (see [`observe_fspy`]).
 struct TrackingOutcome {
-    path_reads: HashMap<RelativePathBuf, PathRead>,
+    /// Paths to fingerprint after the run.
+    path_reads: FxHashSet<RelativePathBuf>,
     /// Auto-output writes after output exclusions are applied. Empty when
     /// `output_config.includes_auto` is false.
     path_writes: FxHashSet<RelativePathBuf>,
-    /// First path that was both read and written during execution, if any.
-    /// A non-empty value means caching this task is unsound.
+    /// A tracked path this run read and then rewrote. The prerun fingerprint no
+    /// longer describes it, so caching this task is unsound.
     read_write_overlap: Option<RelativePathBuf>,
 }
 
@@ -135,7 +133,7 @@ pub(super) async fn update_cache(
     // Paths already in globbed_inputs are skipped: the overlap check above
     // guarantees no input modification, so the prerun hash is the correct
     // post-exec hash.
-    let empty_path_reads = HashMap::default();
+    let empty_path_reads = FxHashSet::default();
     let path_reads = fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
     let post_run_fingerprint = match PostRunFingerprint::create(
         path_reads,
@@ -203,53 +201,85 @@ fn observe_fspy(
 ) -> Option<TrackingOutcome> {
     #[cfg(fspy)]
     {
-        use super::tracked_accesses::TrackedPathAccesses;
+        use super::{
+            classify::{ClassifyContext, classify},
+            tracked_accesses::TrackedPathAccesses,
+        };
 
         outcome.path_accesses.as_ref().map(|raw| {
             let tracked = TrackedPathAccesses::from_raw(raw, workspace_root);
-            let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
-                // fspy can be attached for auto-output-only tasks. In that
-                // mode reads must not become inferred inputs.
-                if metadata.input_config.includes_auto
-                    && let Some(fspy) = fspy
+
+            // fspy can be attached for auto-output-only or auto-input-only
+            // tasks. In those modes the other side must stay empty.
+            let infer_inputs = metadata.input_config.includes_auto && fspy.is_some();
+            let infer_outputs = metadata.output_config.includes_auto && fspy.is_some();
+
+            let gitignore = super::gitignore::WorkspaceGitignore::open(workspace_root);
+            let is_gitignored = |path: &RelativePathBuf| gitignore.is_ignored(path);
+
+            let context = ClassifyContext {
+                workspace_root,
+                infer_inputs,
+                infer_outputs,
+                is_gitignored: &is_gitignored,
+            };
+
+            // Negative globs and tool-reported ignores are applied to the
+            // classified result rather than to raw events, because a path
+            // excluded from inputs may still be a legitimate output and vice
+            // versa.
+            let classification = classify(&tracked.events, &context, &|_| false);
+
+            let excluded_from_inputs = |path: &RelativePathBuf| {
+                fspy.is_some_and(|fspy| fspy.input_negative_globs.is_match(path.as_str()))
+                    || is_ignored(path, ignored_input_rels)
+            };
+            let excluded_from_outputs = |path: &RelativePathBuf| {
+                fspy.is_some_and(|fspy| fspy.output_negative_globs.is_match(path.as_str()))
+                    || is_ignored(path, ignored_output_rels)
+            };
+
+            let path_reads: FxHashSet<RelativePathBuf> = classification
+                .inputs
+                .iter()
+                .filter(|path| !excluded_from_inputs(path))
+                .cloned()
+                .collect();
+
+            let path_writes: FxHashSet<RelativePathBuf> = classification
+                .outputs
+                .iter()
+                .filter(|path| !excluded_from_outputs(path))
+                .cloned()
+                .collect();
+
+            let modified_for_debug = classification.modified_input.clone();
+            let unexplained_for_debug = classification.unexplained_mutation.clone();
+
+            // A modified input only blocks caching if it is still tracked as an
+            // input after exclusions; excluding it is the user saying they know.
+            let read_write_overlap = classification
+                .modified_input
+                .filter(|path| !excluded_from_inputs(path))
+                .or_else(|| {
+                    classification.unexplained_mutation.filter(|path| !excluded_from_outputs(path))
+                });
+
+            if std::env::var_os("VITE_TASK_DEBUG_TRACKING").is_some() {
+                #[expect(clippy::print_stderr, reason = "opt-in diagnostic")]
                 {
-                    tracked
-                        .path_reads
-                        .iter()
-                        .filter(|(path, _)| {
-                            !fspy.input_negative_globs.is_match(path.as_str())
-                                && !is_ignored(path, ignored_input_rels)
-                        })
-                        .map(|(path, read)| (path.clone(), *read))
-                        .collect()
-                } else {
-                    HashMap::default()
-                };
-            let filtered_path_writes: FxHashSet<RelativePathBuf> =
-                // fspy can also be attached for auto-input-only tasks. In that
-                // mode writes must not become auto outputs or overlap candidates.
-                if metadata.output_config.includes_auto
-                    && let Some(fspy) = fspy
-                {
-                    tracked
-                        .path_writes
-                        .iter()
-                        .filter(|path| {
-                            !fspy.output_negative_globs.is_match(path.as_str())
-                                && !is_ignored(path, ignored_output_rels)
-                        })
-                        .cloned()
-                        .collect()
-                } else {
-                    FxHashSet::default()
-                };
-            let read_write_overlap =
-                filtered_path_reads.keys().find(|p| filtered_path_writes.contains(*p)).cloned();
-            TrackingOutcome {
-                path_reads: filtered_path_reads,
-                path_writes: filtered_path_writes,
-                read_write_overlap,
+                    eprintln!(
+                        "[tracking] result inputs={} outputs={} modified={:?} unexplained={:?} \
+                         overlap={:?} infer_in={infer_inputs} infer_out={infer_outputs}",
+                        classification.inputs.len(),
+                        classification.outputs.len(),
+                        modified_for_debug,
+                        unexplained_for_debug,
+                        read_write_overlap,
+                    );
+                }
             }
+            TrackingOutcome { path_reads, path_writes, read_write_overlap }
         })
     }
     #[cfg(not(fspy))]

@@ -32,12 +32,6 @@ pub enum TrackedEnvQuery {
     Prefix(Str),
 }
 
-/// Path read access info
-#[derive(Debug, Clone, Copy)]
-pub struct PathRead {
-    pub read_dir_entries: bool,
-}
-
 /// Post-run fingerprint capturing file state after execution.
 /// Used to validate whether cached outputs are still valid.
 #[derive(SchemaWrite, SchemaRead, Debug, Default, Serialize)]
@@ -85,11 +79,13 @@ pub enum PathFingerprint {
     NotFound,
     /// File content hash using `xxHash3_64`
     FileContentHash(u64),
-    /// Directory with optional entry listing.
-    /// `Folder(None)` means the directory was opened but entries were not read
-    /// (e.g., for `openat` calls).
-    /// `Folder(Some(_))` contains the directory entries sorted by name.
-    Folder(Option<BTreeMap<Str, DirEntryKind>>),
+    /// Directory entries, sorted by name.
+    ///
+    /// A directory only reaches here if the task listed it. A bare stat carries
+    /// nothing but existence, cannot detect a content change, and is routinely a
+    /// probe of the task's own output directory, so classification drops those
+    /// before fingerprinting.
+    Folder(BTreeMap<Str, DirEntryKind>),
 }
 
 /// Kind of directory entry
@@ -118,7 +114,7 @@ impl PostRunFingerprint {
     /// * `tracked_env_queries` - Tool-requested bulk env queries (query -> match-set hashes)
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
-        inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
+        inferred_path_reads: &rustc_hash::FxHashSet<RelativePathBuf>,
         base_dir: &AbsolutePath,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
@@ -126,10 +122,10 @@ impl PostRunFingerprint {
     ) -> anyhow::Result<Self> {
         let inferred_inputs = inferred_path_reads
             .par_iter()
-            .filter(|(path, _)| !globbed_inputs.contains_key(*path))
-            .map(|(relative_path, path_read)| {
+            .filter(|path| !globbed_inputs.contains_key(*path))
+            .map(|relative_path| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
-                let fingerprint = fingerprint_path(&full_path, *path_read)?;
+                let fingerprint = fingerprint_path(&full_path)?;
                 Ok((relative_path.clone(), fingerprint))
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
@@ -155,10 +151,7 @@ impl PostRunFingerprint {
         let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
             |(input_relative_path, path_fingerprint)| {
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
-                let path_read = PathRead {
-                    read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
-                };
-                let current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
+                let current_path_fingerprint = match fingerprint_path(&input_full_path) {
                     Ok(ok) => ok,
                     Err(err) => return Some(Err(err)),
                 };
@@ -337,7 +330,7 @@ fn determine_change_kind<'a>(
             (InputChangeKind::ContentModified, None)
         }
         (PathFingerprint::Folder(old), PathFingerprint::Folder(new)) => {
-            determine_folder_change_kind(old.as_ref(), new.as_ref())
+            determine_folder_change_kind(old, new)
         }
         // Type changed (file ↔ folder)
         _ => (InputChangeKind::Added, None),
@@ -348,13 +341,9 @@ fn determine_change_kind<'a>(
 /// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
 /// Returns the specific entry name that was added or removed, if identifiable.
 fn determine_folder_change_kind<'a>(
-    old: Option<&'a BTreeMap<Str, DirEntryKind>>,
-    new: Option<&'a BTreeMap<Str, DirEntryKind>>,
+    old_entries: &'a BTreeMap<Str, DirEntryKind>,
+    new_entries: &'a BTreeMap<Str, DirEntryKind>,
 ) -> (InputChangeKind, Option<&'a Str>) {
-    let (Some(old_entries), Some(new_entries)) = (old, new) else {
-        return (InputChangeKind::Added, None);
-    };
-
     let mut old_iter = old_entries.iter();
     let mut new_iter = new_entries.iter();
     let mut o = old_iter.next();
@@ -386,10 +375,7 @@ fn should_ignore_entry(name: &[u8]) -> bool {
 }
 
 /// Fingerprint a single path
-pub fn fingerprint_path(
-    path: &Arc<AbsolutePath>,
-    path_read: PathRead,
-) -> anyhow::Result<PathFingerprint> {
+pub fn fingerprint_path(path: &Arc<AbsolutePath>) -> anyhow::Result<PathFingerprint> {
     let std_path = path.as_path();
 
     let file = match File::open(std_path) {
@@ -400,12 +386,12 @@ pub fn fingerprint_path(
             {
                 if err.kind() == io::ErrorKind::PermissionDenied {
                     // This might be a directory - try reading it as such
-                    return process_directory(std_path, path_read);
+                    return process_directory(std_path);
                 }
                 // On Windows, paths with trailing backslash (from joining empty path)
                 // fail with NotFound (error code 3). Try as directory in this case.
                 if err.raw_os_error() == Some(3) && std_path.to_string_lossy().ends_with('\\') {
-                    return process_directory(std_path, path_read);
+                    return process_directory(std_path);
                 }
             }
             if err.kind() != io::ErrorKind::NotFound {
@@ -428,11 +414,11 @@ pub fn fingerprint_path(
         // Is a directory on Unix - use the optimized nix implementation
         #[cfg(unix)]
         {
-            return process_directory_unix(reader.get_ref(), path_read);
+            return process_directory_unix(reader.get_ref());
         }
         #[cfg(windows)]
         {
-            return process_directory(std_path, path_read);
+            return process_directory(std_path);
         }
     }
     Ok(PathFingerprint::FileContentHash(super::hash::hash_content(reader)?))
@@ -441,14 +427,7 @@ pub fn fingerprint_path(
 /// Process a directory on Windows using `std::fs::read_dir`
 #[cfg(windows)]
 #[expect(clippy::disallowed_types, reason = "Windows fallback uses std::path::Path directly")]
-fn process_directory(
-    path: &std::path::Path,
-    path_read: PathRead,
-) -> anyhow::Result<PathFingerprint> {
-    if !path_read.read_dir_entries {
-        return Ok(PathFingerprint::Folder(None));
-    }
-
+fn process_directory(path: &std::path::Path) -> anyhow::Result<PathFingerprint> {
     let mut entries = BTreeMap::new();
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
@@ -472,17 +451,13 @@ fn process_directory(
         entries.insert(Str::from(name_str.as_ref()), kind);
     }
 
-    Ok(PathFingerprint::Folder(Some(entries)))
+    Ok(PathFingerprint::Folder(entries))
 }
 
 /// Process a directory on Unix using nix for efficiency
 #[cfg(unix)]
-fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<PathFingerprint> {
+fn process_directory_unix(file: &File) -> anyhow::Result<PathFingerprint> {
     use std::os::fd::AsFd;
-
-    if !path_read.read_dir_entries {
-        return Ok(PathFingerprint::Folder(None));
-    }
 
     let fd = file.as_fd();
     let mut dir = nix::dir::Dir::from_fd(fd.try_clone_to_owned()?)?;
@@ -511,7 +486,7 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
         entries.insert(Str::from(name_str.as_ref()), kind);
     }
 
-    Ok(PathFingerprint::Folder(Some(entries)))
+    Ok(PathFingerprint::Folder(entries))
 }
 
 #[cfg(test)]

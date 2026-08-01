@@ -20,7 +20,9 @@ mod print_color;
 mod print_cwd;
 mod print_env;
 mod print_file;
+mod publish_dir;
 mod read_stdin;
+mod rename;
 mod replace_file_content;
 mod rm;
 #[cfg(target_os = "linux")]
@@ -35,7 +37,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stat-file, stat_long_filename, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, publish-dir, read-stdin, rename, replace-file-content, rm, small_dev_shm, stat-file, stat_long_filename, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -76,6 +78,8 @@ fn main() {
             Ok(())
         }
         "stat_long_filename" => stat_long_filename::run(&args[2..]),
+        "publish-dir" => publish_dir::run(&args[2..]),
+        "rename" => rename::run(&args[2..]),
         "touch-file" => touch_file::run(&args[2..]),
         "write-file" => write_file::run(&args[2..]),
         other => {

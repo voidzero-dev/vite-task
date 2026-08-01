@@ -1,0 +1,85 @@
+[[e2e]]
+name = "atomic_directory_publish_is_cached_and_restored"
+comment = """
+A task that stages output under `dist.tmp` and renames the directory into place must still have its outputs collected. Every write lands on the staging path and only the directory itself carries the rename, so a tracker that ignores directory renames archives nothing and a later cache hit restores an incomplete tree. The third run removes `dist` first to prove the outputs really came back from the archive rather than from the previous run leaving them behind.
+"""
+cwd = "packages/atomic-pkg"
+steps = [
+  [
+    "vt",
+    "run",
+    "task",
+  ],
+  [
+    "vt",
+    "run",
+    "task",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ],
+  [
+    "vt",
+    "run",
+    "task",
+  ],
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+]
+
+[[e2e]]
+name = "output_directory_cleanup_still_caches"
+comment = """
+Build tools empty their output directory before writing to it, which means they stat and list it. Those reads must not make the directory an input: its contents are the task's own product, and a fingerprint of them can never match on a clean checkout where the directory does not exist yet.
+"""
+cwd = "packages/clean-pkg"
+steps = [
+  [
+    "vt",
+    "run",
+    "task",
+  ],
+  [
+    "vt",
+    "run",
+    "task",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ],
+  [
+    "vt",
+    "run",
+    "task",
+  ],
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+]
+
+[[e2e]]
+name = "gitignored_state_read_then_rewritten_is_an_output"
+comment = """
+A path a task reads and then rewrites is either a source it fixed up or state it manages, and access mechanics cannot tell those apart. Version control can: this file is gitignored, so it is derived state and belongs in the archive. Compare `input_read_write_not_cached`, where the same access pattern on a tracked source blocks caching instead.
+"""
+cwd = "packages/state-pkg"
+steps = [["vt", "run", "task"], ["vt", "run", "task"], ["vtt", "print-file", ".cache/state.txt"]]
+
+[[e2e]]
+name = "reading_inside_own_output_tree_still_caches"
+comment = """
+A compound command's `&&` segments are separate cached tasks. Here the middle segment reads a file inside its own package's output directory while the last segment writes another file there, which is the shape of emdash's admin build: `tsdown` reads `dist/locales/<locale>/messages.mjs` and a later `locale:copy` step rewrites those files. Fingerprinting content a sibling task rewrites can never settle, so a read is treated as the task's own derived state when version control calls it derived *and* it sits under a directory the same task wrote into. Requiring both is what keeps `node_modules/<dep>/dist` a real input, so changing a dependency still invalidates its consumers.
+"""
+cwd = "packages/sibling-pkg"
+steps = [["vt", "run", "task"], ["vt", "run", "task"], ["vt", "run", "task"]]

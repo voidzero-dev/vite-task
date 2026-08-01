@@ -22,9 +22,9 @@ cwd = "packages/rw-pkg"
 steps = [["vt", "run", "-v", "task"]]
 
 [[e2e]]
-name = "single_O_RDWR_open_is_not_cached"
+name = "single_O_RDWR_open_without_writing_is_cached"
 comment = """
-Opening a single file with `O_RDWR` (e.g. `touch` keeping the file) should count as a read-write overlap and prevent caching, just like separate read+write syscalls.
+Opening a file `O_RDWR` and never writing to it leaves the file untouched, so it is a read and not a read-write overlap. Write capability alone must not block caching: formatters such as Biome open a clean source file read-write on every run and only write when there is something to fix, and lock files across cargo, rustc and Parcel are opened `O_RDWR` and only ever flocked. A mutation requires truncation, exclusive creation, or being a rename destination.
 """
 cwd = "packages/touch-pkg"
 steps = [["vt", "run", "task"], ["vt", "run", "task"]]
