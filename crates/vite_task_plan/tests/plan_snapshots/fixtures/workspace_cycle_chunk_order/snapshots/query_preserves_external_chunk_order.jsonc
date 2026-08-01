@@ -1,0 +1,11 @@
+// run -r build
+{
+  "packages/a#build": [
+    "packages/base#build"
+  ],
+  "packages/b#build": [],
+  "packages/base#build": [],
+  "packages/consumer#build": [
+    "packages/b#build"
+  ]
+}

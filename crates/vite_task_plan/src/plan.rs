@@ -706,7 +706,10 @@ fn plan_spawn_execution(
 /// Expand the parsed task request (like `run -r build`/`lint`) into an execution graph.
 ///
 /// Builds a `DiGraph` of task executions, then validates it is acyclic via
-/// `ExecutionGraph::try_from_graph`. Returns `CycleDependencyDetected` if a cycle is found.
+/// `ExecutionGraph::try_from_graph`. Cycles from workspace package ordering are
+/// already broken during the query stage (see
+/// `IndexedTaskGraph::break_package_ordering_cycles`), so a cycle here means an
+/// explicit `dependsOn` cycle and is reported as `CycleDependencyDetected`.
 ///
 /// **Prune rule:** If the expanding task (the task whose command triggered
 /// this nested query) appears in the expansion result, it is pruned from the graph

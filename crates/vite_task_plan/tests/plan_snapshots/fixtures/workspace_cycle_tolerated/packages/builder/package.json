@@ -1,0 +1,9 @@
+{
+  "name": "@test/builder",
+  "scripts": {
+    "build": "echo building builder"
+  },
+  "peerDependencies": {
+    "@test/app": "workspace:*"
+  }
+}

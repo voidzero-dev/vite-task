@@ -141,6 +141,13 @@ impl IndexedTaskGraph {
             self.add_dependencies(&mut execution_graph, |_| TaskDependencyType::is_explicit());
         }
 
+        // Workspace package ordering can form cycles (e.g. a peer/dev back-edge
+        // between siblings). pnpm tolerates these by running the cyclic packages
+        // together; mirror that by dropping the package-ordering edges inside any
+        // cyclic component. Explicit `dependsOn` cycles are preserved and still
+        // error downstream in the planner.
+        self.break_package_ordering_cycles(&mut execution_graph);
+
         Ok(TaskQueryResult {
             execution_graph,
             unmatched_selectors: resolution.unmatched_selectors,
@@ -249,6 +256,51 @@ impl IndexedTaskGraph {
             }
 
             frontier = next_frontier;
+        }
+    }
+
+    /// Break cycles that arise purely from workspace **package ordering**, matching
+    /// pnpm's behavior of collapsing cyclic workspace packages into a single chunk
+    /// that runs together with no ordering between them.
+    ///
+    /// Package-ordering edges are the implicit "same task across dependent packages"
+    /// edges added by [`Self::map_subgraph_to_tasks`]; they have no corresponding
+    /// edge in `task_graph`. When such edges form a cycle (e.g. `app` depends on
+    /// `builder` while `builder` lists `app` as a peer/dev dependency), the cyclic
+    /// packages cannot be linearized — but the cycle is not a real ordering
+    /// constraint, so the package-ordering edges inside each cyclic component are
+    /// dropped. The affected tasks then run concurrently, respecting only any
+    /// explicit `dependsOn` order that remains among them.
+    ///
+    /// Explicit `dependsOn` cycles are left intact: they are genuine configuration
+    /// errors and are still reported downstream by `ExecutionGraph::try_from_graph`.
+    fn break_package_ordering_cycles(&self, execution_graph: &mut TaskExecutionGraph) {
+        for scc in petgraph::algo::tarjan_scc(&execution_graph.graph) {
+            // `tarjan_scc` yields a single-node component for every acyclic node;
+            // a genuine cycle has more than one node. Package ordering never
+            // produces a self-loop — self-referential package dependencies are
+            // skipped when the package graph is built.
+            if scc.len() < 2 {
+                continue;
+            }
+            let scc_nodes: FxHashSet<TaskNodeIndex> = scc.iter().copied().collect();
+            // Intra-SCC edges with no matching `dependsOn` edge in the task graph
+            // are package-ordering edges; collect them, then drop them to break the
+            // cycle. Explicit edges are kept (and may still error downstream).
+            let package_ordering_edges: Vec<(TaskNodeIndex, TaskNodeIndex)> = scc
+                .iter()
+                .flat_map(|&from| {
+                    execution_graph
+                        .graph
+                        .neighbors(from)
+                        .filter(|to| scc_nodes.contains(to))
+                        .filter(move |&to| self.task_graph.find_edge(from, to).is_none())
+                        .map(move |to| (from, to))
+                })
+                .collect();
+            for (from, to) in package_ordering_edges {
+                execution_graph.graph.remove_edge(from, to);
+            }
         }
     }
 }

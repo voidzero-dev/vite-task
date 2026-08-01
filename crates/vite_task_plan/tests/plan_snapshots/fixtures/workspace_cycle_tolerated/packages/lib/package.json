@@ -1,0 +1,9 @@
+{
+  "name": "@test/lib",
+  "scripts": {
+    "build": "echo building lib"
+  },
+  "devDependencies": {
+    "@test/web": "workspace:*"
+  }
+}

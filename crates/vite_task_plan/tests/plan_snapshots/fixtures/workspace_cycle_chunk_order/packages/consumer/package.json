@@ -1,0 +1,9 @@
+{
+  "name": "@test/consumer",
+  "scripts": {
+    "build": "echo building consumer"
+  },
+  "dependencies": {
+    "@test/b": "workspace:*"
+  }
+}
