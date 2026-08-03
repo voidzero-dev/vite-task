@@ -16,8 +16,8 @@ pub enum SpawnError {
     #[error("failed to initialize seccomp_unotify supervisor: {0}")]
     Supervisor(std::io::Error),
 
-    #[error("failed to create IPC channel: {0}")]
-    ChannelCreation(std::io::Error),
+    #[error("failed to create IPC server: {0}")]
+    IpcServer(std::io::Error),
 
     /// On unix systems, the injection happens before the spawn actually occurs on.
     /// On Windows, the injection happens after the spawn but before resuming the process.

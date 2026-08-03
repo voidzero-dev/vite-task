@@ -1,6 +1,7 @@
-use std::io::{Read as _, Write as _};
-#[cfg(unix)]
-use std::sync::mpsc;
+use std::{
+    io::{Read as _, Write as _},
+    sync::mpsc,
+};
 
 use pipe_socket::{Client, Server};
 use tokio::{
@@ -171,5 +172,36 @@ fn connect_fails_when_server_is_gone() {
                 .expect("client task panicked");
             assert!(result.is_err());
         }
+    });
+}
+
+/// Dropping the listener must reject a new client even while an accepted
+/// connection remains open for draining.
+#[test]
+fn connect_fails_after_listener_stops_with_connection_open() {
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let mut server = Server::bind().expect("bind server");
+        let name = server.name().to_owned();
+        let (close_tx, close_rx) = mpsc::channel();
+
+        let client = tokio::task::spawn_blocking(move || {
+            let _client = Client::connect(&name).expect("connect first client");
+            close_rx.recv().expect("wait to close first client");
+        });
+        let connection = server.accept().await.expect("accept first client");
+        let stale_name = server.name().to_owned();
+        drop(server);
+
+        let late_client = tokio::task::spawn_blocking(move || Client::connect(&stale_name));
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), late_client)
+            .await
+            .expect("late connect must not hang")
+            .expect("late client task panicked");
+        assert!(result.is_err());
+
+        close_tx.send(()).expect("close first client");
+        client.await.expect("first client task panicked");
+        drop(connection);
     });
 }

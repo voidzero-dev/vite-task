@@ -1,11 +1,13 @@
-#[cfg(not(target_env = "musl"))]
-pub mod channel;
 mod native_path;
+#[cfg(not(target_env = "musl"))]
+mod path_access_sender;
 use std::fmt::Debug;
 
 use bitflags::bitflags;
 pub use native_path::NativePath;
 pub use native_str::NativeStr;
+#[cfg(not(target_env = "musl"))]
+pub use path_access_sender::PathAccessSender;
 use wincode::{SchemaRead, SchemaWrite};
 
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]

@@ -8,9 +8,9 @@ use std::{io, path::Path};
 
 #[cfg(target_os = "linux")]
 use fspy_seccomp_unotify::supervisor::supervise;
-use fspy_shared::ipc::PathAccess;
 #[cfg(not(target_env = "musl"))]
-use fspy_shared::ipc::{NativeStr, channel::channel};
+use fspy_shared::ipc::NativeStr;
+use fspy_shared::ipc::PathAccess;
 #[cfg(target_os = "macos")]
 use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
@@ -25,7 +25,7 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
-use crate::ipc::{OwnedReceiverLockGuard, SHM_CAPACITY};
+use crate::ipc::IpcSupervisor;
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
 
 #[derive(Debug)]
@@ -78,12 +78,11 @@ impl SpyImpl {
         let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
 
         #[cfg(not(target_env = "musl"))]
-        let (ipc_channel_conf, ipc_receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+        let ipc_supervisor = IpcSupervisor::bind().map_err(SpawnError::IpcServer)?;
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]
-            ipc_channel_conf,
+            server_name: ipc_supervisor.server_name().to_cow_os_str().into_owned().into(),
 
             #[cfg(target_os = "macos")]
             artifacts: self.artifacts.clone(),
@@ -136,7 +135,7 @@ impl SpyImpl {
             stdout: child.stdout.take(),
             stderr: child.stderr.take(),
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
-            // because we need to stop the supervisor and lock the channel as soon as the child exits.
+            // because we need to stop accepting IPC connections as soon as the child exits.
             wait_handle: tokio::spawn(async move {
                 let status = tokio::select! {
                     status = child.wait() => status?,
@@ -145,6 +144,9 @@ impl SpyImpl {
                         child.wait().await?
                     }
                 };
+
+                #[cfg(not(target_env = "musl"))]
+                let mut ipc_arenas = ipc_supervisor.stop().await?;
 
                 let arenas = std::iter::once(exec_resolve_accesses);
                 // Stop the supervisor and collect path accesses from it.
@@ -157,17 +159,12 @@ impl SpyImpl {
                         .map(syscall_handler::SyscallHandler::into_arena),
                 );
                 let arenas = arenas.collect::<Vec<_>>();
-
-                // Lock the ipc channel after the child has exited.
-                // We are not interested in path accesses from descendants after the main child has exited.
                 #[cfg(not(target_env = "musl"))]
-                let ipc_receiver_lock_guard =
-                    OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
-                let path_accesses = PathAccessIterable {
-                    arenas,
-                    #[cfg(not(target_env = "musl"))]
-                    ipc_receiver_lock_guard,
+                let arenas = {
+                    ipc_arenas.extend(arenas);
+                    ipc_arenas
                 };
+                let path_accesses = PathAccessIterable { arenas };
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })
@@ -179,23 +176,10 @@ impl SpyImpl {
 
 pub struct PathAccessIterable {
     arenas: Vec<PathAccessArena>,
-    #[cfg(not(target_env = "musl"))]
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
 }
 
 impl PathAccessIterable {
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        let accesses_in_arena =
-            self.arenas.iter().flat_map(|arena| arena.borrow_accesses().iter()).copied();
-
-        #[cfg(not(target_env = "musl"))]
-        {
-            let accesses_in_shm = self.ipc_receiver_lock_guard.iter_path_accesses();
-            accesses_in_shm.chain(accesses_in_arena)
-        }
-        #[cfg(target_env = "musl")]
-        {
-            accesses_in_arena
-        }
+        self.arenas.iter().flat_map(|arena| arena.borrow_accesses().iter()).copied()
     }
 }

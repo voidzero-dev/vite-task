@@ -22,6 +22,27 @@ async fn open_read() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+async fn open_read_from_multiple_threads() -> anyhow::Result<()> {
+    let accesses = track_fn!((), |(): ()| {
+        let threads = ["thread-one", "thread-two"].map(|path| {
+            std::thread::spawn(move || {
+                let _ = File::open(path);
+            })
+        });
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    })
+    .await?;
+
+    let cwd = current_dir().unwrap();
+    assert_contains(&accesses, cwd.join("thread-one").as_path(), AccessMode::READ);
+    assert_contains(&accesses, cwd.join("thread-two").as_path(), AccessMode::READ);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn open_write() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     let tmp_path = tmp_dir.path().join("hello");

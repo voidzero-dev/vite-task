@@ -4,14 +4,12 @@ use base64::{Engine as _, prelude::BASE64_STANDARD_NO_PAD};
 use bstr::BString;
 #[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::NativeStr;
-#[cfg(not(target_env = "musl"))]
-use fspy_shared::ipc::channel::ChannelConf;
 use wincode::{SchemaRead, SchemaWrite};
 
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub struct Payload {
     #[cfg(not(target_env = "musl"))]
-    pub ipc_channel_conf: ChannelConf,
+    pub server_name: Box<NativeStr>,
 
     #[cfg(not(target_env = "musl"))]
     pub preload_path: Box<NativeStr>,

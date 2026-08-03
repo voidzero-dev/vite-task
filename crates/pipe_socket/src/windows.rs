@@ -19,6 +19,10 @@ pub struct Server {
     /// and created before the accepted instance is handed out, so concurrent
     /// connect attempts never find the pipe without an instance.
     pending: NamedPipeServer,
+    /// A separate instance that no client connects to. Its presence lets a
+    /// client distinguish a busy data pipe from a server that stopped
+    /// accepting while older connections are still draining.
+    _liveness: NamedPipeServer,
 }
 
 impl Server {
@@ -29,7 +33,9 @@ impl Server {
         )]
         let name = OsString::from(format!(r"\\.\pipe\pipe_socket_{}", uuid::Uuid::new_v4()));
         let pending = ServerOptions::new().first_pipe_instance(true).create(&name)?;
-        Ok(Self { name, pending })
+        let liveness =
+            ServerOptions::new().first_pipe_instance(true).create(liveness_name(&name))?;
+        Ok(Self { name, pending, _liveness: liveness })
     }
 
     pub fn name(&self) -> &OsStr {
@@ -83,37 +89,76 @@ impl Client {
     /// Opens the named pipe as a client.
     ///
     /// Opening fails with `ERROR_PIPE_BUSY` when another client claimed the
-    /// server's only pending instance moments earlier, in the window between
-    /// the server accepting one connection and creating the next instance.
-    /// `WaitNamedPipeW` hands that wait to the kernel: it blocks until an
-    /// instance is available and fails when the pipe is gone. No polling and
-    /// no arbitrary timeouts.
+    /// server's pending instance moments earlier, in the window before the
+    /// server creates the next instance. Short `WaitNamedPipeW` waits hand
+    /// that contention to the kernel while periodically checking the separate
+    /// liveness pipe. There is no total timeout: a live server can remain busy
+    /// indefinitely, while a stopped server is detected even if accepted data
+    /// connections still exist.
     pub fn connect(name: &OsStr) -> io::Result<Self> {
         // ERROR_PIPE_BUSY, from WinError.h. `std::io::Error` has no typed
         // constant for it.
         const ERROR_PIPE_BUSY: i32 = 231;
-        // NMPWAIT_WAIT_FOREVER, from WinBase.h. winapi 0.3 does not define
-        // the NMPWAIT_* constants.
-        const NMPWAIT_WAIT_FOREVER: u32 = 0xFFFF_FFFF;
+        // ERROR_SEM_TIMEOUT, from WinError.h.
+        const ERROR_SEM_TIMEOUT: i32 = 121;
+        const LIVENESS_CHECK_INTERVAL_MS: u32 = 100;
 
-        let mut wide: Vec<u16> = name.encode_wide().collect();
-        wide.push(0);
+        let wide = wide_name(name);
+        let liveness_wide = wide_name(&liveness_name(name));
 
         loop {
             match std::fs::OpenOptions::new().read(true).write(true).open(name) {
                 Ok(inner) => return Ok(Self { inner }),
                 Err(err) if err.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                    if !server_is_alive(&liveness_wide)? {
+                        return Err(server_is_gone());
+                    }
+
                     // SAFETY: `wide` is NUL-terminated and remains valid for
                     // the duration of the call.
-                    let ok = unsafe { WaitNamedPipeW(wide.as_ptr(), NMPWAIT_WAIT_FOREVER) };
-                    if ok == 0 {
-                        return Err(io::Error::last_os_error());
+                    let available =
+                        unsafe { WaitNamedPipeW(wide.as_ptr(), LIVENESS_CHECK_INTERVAL_MS) };
+                    if available == 0 {
+                        let error = io::Error::last_os_error();
+                        if error.raw_os_error() != Some(ERROR_SEM_TIMEOUT) {
+                            return Err(error);
+                        }
                     }
                 }
                 Err(err) => return Err(err),
             }
         }
     }
+}
+
+fn liveness_name(name: &OsStr) -> OsString {
+    let mut name = name.to_os_string();
+    name.push("_liveness");
+    name
+}
+
+fn wide_name(name: &OsStr) -> Vec<u16> {
+    name.encode_wide().chain([0]).collect()
+}
+
+fn server_is_alive(liveness_wide: &[u16]) -> io::Result<bool> {
+    // ERROR_FILE_NOT_FOUND, from WinError.h.
+    const ERROR_FILE_NOT_FOUND: i32 = 2;
+
+    // The liveness pipe always has one unclaimed instance, so a zero-timeout
+    // wait succeeds while the server owns it and reports file-not-found after
+    // the server is dropped or its process exits.
+    // SAFETY: `liveness_wide` is NUL-terminated and valid for this call.
+    if unsafe { WaitNamedPipeW(liveness_wide.as_ptr(), 0) } != 0 {
+        return Ok(true);
+    }
+
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(ERROR_FILE_NOT_FOUND) { Ok(false) } else { Err(error) }
+}
+
+fn server_is_gone() -> io::Error {
+    io::Error::new(io::ErrorKind::ConnectionRefused, "IPC server is gone")
 }
 
 impl Read for Client {

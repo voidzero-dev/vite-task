@@ -1,46 +1,54 @@
-use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
+use std::{
+    cell::{RefCell, SyncUnsafeCell},
+    ffi::CStr,
+    mem::MaybeUninit,
+};
 
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
-    ipc::{PathAccess, channel::Sender},
+    ipc::{PathAccess, PathAccessSender},
     windows::{PAYLOAD_ID, Payload},
 };
 use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
 
 pub struct Client<'a> {
     payload: Payload<'a>,
-    ipc_sender: Option<Sender>,
 }
 
 impl<'a> Client<'a> {
     pub fn from_payload_bytes(payload_bytes: &'a [u8]) -> Self {
         let payload: Payload<'a> = wincode::deserialize_exact(payload_bytes).unwrap();
-
-        let ipc_sender = match payload.channel_conf.sender() {
-            Ok(sender) => Some(sender),
-            Err(err) => {
-                // this can happen if the process is started after the root target process has exited.
-                // By that time the channel would have been closed in the receiver side.
-                // In this case we just leave a message and skip sending any path accesses.
-                #[expect(
-                    clippy::print_stderr,
-                    reason = "preload library uses stderr for debug diagnostics"
-                )]
-                {
-                    eprintln!("fspy: failed to create ipc sender: {err}");
-                }
-                None
-            }
-        };
-
-        Self { payload, ipc_sender }
+        Self { payload }
     }
 
     pub fn send(&self, access: PathAccess<'_>) {
-        let Some(sender) = &self.ipc_sender else {
-            return;
-        };
-        sender.write_encoded(&access).expect("failed to send path access");
+        THREAD_CLIENT.with(|thread_client| {
+            // Connecting the pipe triggers the same file APIs fspy detours.
+            // A nested report is transport noise, so skip it.
+            let Ok(mut thread_client) = thread_client.try_borrow_mut() else {
+                return;
+            };
+
+            if matches!(&*thread_client, ThreadClient::Uninitialized) {
+                let server_name = self.payload.server_name.to_cow_os_str();
+                *thread_client = match PathAccessSender::connect(&server_name) {
+                    Ok(sender) => ThreadClient::Connected(sender),
+                    Err(error) => {
+                        report_connection_error(&error);
+                        ThreadClient::Disconnected
+                    }
+                };
+            }
+
+            let error = match &mut *thread_client {
+                ThreadClient::Connected(sender) => sender.send(access).err(),
+                ThreadClient::Uninitialized | ThreadClient::Disconnected => None,
+            };
+            if let Some(error) = error {
+                report_connection_error(&error);
+                *thread_client = ThreadClient::Disconnected;
+            }
+        });
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {
@@ -60,6 +68,21 @@ impl<'a> Client<'a> {
         // SAFETY: payload.ansi_dll_path_with_nul is guaranteed to be a valid null-terminated byte string
         unsafe { CStr::from_bytes_with_nul_unchecked(self.payload.ansi_dll_path_with_nul) }
     }
+}
+
+enum ThreadClient {
+    Uninitialized,
+    Connected(PathAccessSender),
+    Disconnected,
+}
+
+thread_local! {
+    static THREAD_CLIENT: RefCell<ThreadClient> = const { RefCell::new(ThreadClient::Uninitialized) };
+}
+
+#[expect(clippy::print_stderr, reason = "preload library uses stderr for connection diagnostics")]
+fn report_connection_error(error: &std::io::Error) {
+    eprintln!("fspy: path access connection failed: {error}");
 }
 
 static CLIENT: SyncUnsafeCell<MaybeUninit<Client<'static>>> =

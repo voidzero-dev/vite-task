@@ -8,7 +8,7 @@ use std::{
 
 use fspy_detours_sys::{DetourCopyPayloadToProcess, DetourUpdateProcessWithDll};
 use fspy_shared::{
-    ipc::{PathAccess, channel::channel},
+    ipc::PathAccess,
     windows::{PAYLOAD_ID, Payload},
 };
 use futures_util::FutureExt;
@@ -21,21 +21,18 @@ use winapi::{
 use winsafe::co::{CP, WC};
 
 use crate::{
-    ChildTermination, TrackedChild,
-    command::Command,
-    error::SpawnError,
-    ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
+    ChildTermination, TrackedChild, command::Command, error::SpawnError, ipc::IpcSupervisor,
 };
 
 const INTERPOSE_CDYLIB: Artifact = artifact!("fspy_preload");
 
 pub struct PathAccessIterable {
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
+    arenas: Vec<crate::arena::PathAccessArena>,
 }
 
 impl PathAccessIterable {
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        self.ipc_receiver_lock_guard.iter_path_accesses()
+        self.arenas.iter().flat_map(|arena| arena.borrow_accesses().iter()).copied()
     }
 }
 
@@ -78,8 +75,9 @@ impl SpyImpl {
 
         command.creation_flags(CREATE_SUSPENDED);
 
-        let (channel_conf, receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+        let ipc_supervisor = IpcSupervisor::bind().map_err(SpawnError::IpcServer)?;
+        let server_name: Box<fspy_shared::ipc::NativeStr> =
+            ipc_supervisor.server_name().to_cow_os_str().into_owned().into();
 
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;
@@ -99,7 +97,7 @@ impl SpyImpl {
                 }
 
                 let payload = Payload {
-                    channel_conf: channel_conf.clone(),
+                    server_name: server_name.clone(),
                     ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
                 };
                 let payload_bytes = wincode::serialize(&payload).unwrap();
@@ -150,7 +148,7 @@ impl SpyImpl {
             stderr: child.stderr.take(),
             process_handle,
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
-            // because we need to stop the supervisor and lock the channel as soon as the child exits.
+            // because we need to stop accepting IPC connections as soon as the child exits.
             wait_handle: tokio::spawn(async move {
                 let status = tokio::select! {
                     status = child.wait() => status?,
@@ -159,10 +157,8 @@ impl SpyImpl {
                         child.wait().await?
                     }
                 };
-                // Lock the ipc channel after the child has exited.
-                // We are not interested in path accesses from descendants after the main child has exited.
-                let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;
-                let path_accesses = PathAccessIterable { ipc_receiver_lock_guard };
+                let arenas = ipc_supervisor.stop().await?;
+                let path_accesses = PathAccessIterable { arenas };
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })

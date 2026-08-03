@@ -1224,6 +1224,7 @@ dependencies = [
  "nix 0.31.2",
  "ntest",
  "ouroboros",
+ "pipe_socket",
  "rustc-hash",
  "sha2 0.11.0",
  "subprocess_test",
@@ -1298,7 +1299,6 @@ dependencies = [
  "fspy_shared_unix",
  "libc",
  "nix 0.31.2",
- "wincode",
 ]
 
 [[package]]
@@ -1340,20 +1340,11 @@ dependencies = [
 name = "fspy_shared"
 version = "0.0.0"
 dependencies = [
- "assert2",
  "bitflags 2.10.0",
- "bstr",
  "bumpalo",
  "bytemuck",
- "ctor",
- "fspy_shm",
  "native_str",
- "rustc-hash",
- "subprocess_test",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
+ "pipe_socket",
  "vite_path",
  "winapi",
  "wincode",

@@ -13,7 +13,6 @@ mod os_impl;
 #[path = "./windows/mod.rs"]
 mod os_impl;
 
-#[cfg(unix)]
 mod arena;
 mod command;
 

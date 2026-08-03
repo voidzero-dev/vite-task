@@ -4,7 +4,7 @@ use fspy_shared_unix::exec::ExecResolveConfig;
 use libc::{c_char, c_int};
 
 use crate::{
-    client::{global_client, raw_exec::RawExec},
+    client::{enter_posix_spawn, global_client, raw_exec::RawExec},
     macros::intercept,
 };
 
@@ -49,6 +49,7 @@ unsafe fn handle_posix_spawn(
             RawExec { prog: file, argv: argv.cast(), envp: envp.cast() },
             |raw_command, pre_exec| {
                 let call_original = move || {
+                    let _posix_spawn_guard = enter_posix_spawn();
                     original(
                         pid,
                         raw_command.prog,
