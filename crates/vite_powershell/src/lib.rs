@@ -27,10 +27,11 @@ use vite_path::{AbsolutePath, AbsolutePathBuf};
 pub const POWERSHELL_PREFIX: &[&str] =
     &["-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File"];
 
-/// Cached location of the `PowerShell` host. Prefers cross-platform
-/// `pwsh.exe` when present, falling back to the Windows built-in
-/// `powershell.exe`. Returns `None` on non-Windows or when neither host
-/// is on `PATH`.
+/// Cached location of the `PowerShell` host.
+///
+/// Prefers cross-platform `pwsh.exe` when present, falling back to the
+/// Windows built-in `powershell.exe`. Returns `None` on non-Windows or when
+/// neither host is on `PATH`.
 ///
 /// Cached as `Arc<AbsolutePath>` so callers that want shared ownership
 /// (e.g. `vite_task_plan`'s plan-time rewrite) can do `Arc::clone(host)`

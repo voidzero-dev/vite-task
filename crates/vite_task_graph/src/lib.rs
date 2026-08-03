@@ -118,7 +118,7 @@ pub enum TaskGraphLoadError {
         specifier: Str,
         task_display: TaskDisplay,
         #[source]
-        error: SpecifierLookupError,
+        error: Box<SpecifierLookupError>,
     },
 
     #[error("`cache` can only be set in the workspace root config, but found in {package_path}")]
@@ -434,7 +434,7 @@ impl IndexedTaskGraph {
                             )
                             .map_err(|error| {
                                 TaskGraphLoadError::DependencySpecifierLookupError {
-                                    error,
+                                    error: Box::new(error),
                                     specifier: specifier.clone(),
                                     task_display: me.display_task(from_node_index),
                                 }

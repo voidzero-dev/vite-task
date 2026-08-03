@@ -251,7 +251,6 @@ const fn resolve_cache_with_override(
 /// # Errors
 /// Returns an error if the program is not found or path fingerprinting fails.
 #[tracing::instrument(level = "debug", skip_all)]
-#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
 pub fn plan_synthetic(
     workspace_path: &Arc<AbsolutePath>,
     cwd: &Arc<AbsolutePath>,

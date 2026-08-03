@@ -227,7 +227,7 @@ impl App {
             }
             match action {
                 Action::Tick => {
-                    self.last_tick_key_events.drain(..);
+                    self.last_tick_key_events.clear();
                 }
                 Action::Quit => self.should_quit = true,
                 Action::Suspend => self.should_suspend = true,

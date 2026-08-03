@@ -461,7 +461,6 @@ pub enum ParentCacheConfig {
 ///   env config and merges in any additional envs the synthetic command needs.
 /// - If there is no parent (top-level invocation), the synthetic task's own
 ///   [`UserCacheConfig`] is resolved with defaults.
-#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
 fn resolve_synthetic_cache_config(
     parent: ParentCacheConfig,
     synthetic_cache_config: UserCacheConfig,
@@ -542,7 +541,6 @@ fn resolve_synthetic_cache_config(
     }
 }
 
-#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
 pub fn plan_synthetic_request(
     workspace_path: &Arc<AbsolutePath>,
     prefix_envs: &BTreeMap<Str, Str>,
@@ -594,7 +592,6 @@ fn strip_prefix_for_cache(
     }
 }
 
-#[expect(clippy::result_large_err, reason = "Error is large for diagnostics")]
 #[expect(
     clippy::needless_pass_by_value,
     reason = "program_path ownership is needed for Arc construction"
@@ -901,7 +898,6 @@ pub async fn plan_query_request(
 ///
 /// Returns `Ok(None)` if the variable is not set.
 /// Returns `Err` if the variable is set but cannot be parsed as a positive integer.
-#[expect(clippy::result_large_err, reason = "Error type is shared across all plan functions")]
 fn concurrency_limit_from_env(
     envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
 ) -> Result<Option<usize>, Error> {

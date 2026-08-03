@@ -198,7 +198,7 @@ fn sorted(values: impl Iterator<Item = f64>) -> Vec<f64> {
     values
 }
 
-fn quantile(sorted: &[f64], numerator: usize, denominator: usize) -> f64 {
+const fn quantile(sorted: &[f64], numerator: usize, denominator: usize) -> f64 {
     sorted[sorted.len() * numerator / denominator]
 }
 

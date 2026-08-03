@@ -381,7 +381,7 @@ fn determine_folder_change_kind<'a>(
 }
 
 /// Check if a directory entry should be ignored in fingerprinting
-fn should_ignore_entry(name: &[u8]) -> bool {
+const fn should_ignore_entry(name: &[u8]) -> bool {
     matches!(name, b"." | b".." | b".DS_Store") || name.eq_ignore_ascii_case(b"dist")
 }
 
