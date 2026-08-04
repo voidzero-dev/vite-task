@@ -1,0 +1,54 @@
+[package]
+name = "vt_plan"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+wincode = { workspace = true, features = ["derive"] }
+cow-utils = { workspace = true }
+futures-util = { workspace = true }
+pathdiff = { workspace = true }
+petgraph = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
+shell-escape = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+vt_glob = { workspace = true }
+vt_graph_ser = { workspace = true }
+vt_path = { workspace = true }
+vt_powershell = { workspace = true }
+vt_shell = { workspace = true }
+vt_str = { workspace = true }
+vt_graph = { workspace = true }
+which = { workspace = true }
+
+[dev-dependencies]
+clap = { workspace = true, features = ["derive"] }
+copy_dir = { workspace = true }
+libtest-mimic = { workspace = true }
+snapshot_test = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+toml = { workspace = true }
+vt = { workspace = true }
+vt_bin = { workspace = true }
+vt_workspace = { workspace = true }
+
+[[test]]
+name = "plan_snapshots"
+harness = false
+
+[lib]
+doctest = false

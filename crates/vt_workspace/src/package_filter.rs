@@ -4,7 +4,7 @@
 //!
 //! Package selection is deliberately separated from task matching (two-stage model).
 //! This module handles only Stage 1: which packages to include/exclude.
-//! Stage 2 (which tasks to run in those packages) lives in `vt_task_graph`.
+//! Stage 2 (which tasks to run in those packages) lives in `vt_graph`.
 //!
 //! # Filter syntax
 //!

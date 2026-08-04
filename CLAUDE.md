@@ -4,10 +4,10 @@ A monorepo task runner (like Nx/Turbo) with intelligent caching and dependency r
 
 ## Repository Structure
 
-- `crates/vt_task` — Task execution engine with caching and session management
-- `crates/vt_task_bin` — Internal dev CLI binary (`vt`) and task synthesizer
-- `crates/vt_task_graph` — Task dependency graph construction and config loading
-- `crates/vt_task_plan` — Execution planning (resolves env vars, working dirs, commands)
+- `crates/vt` — Task execution engine with caching and session management
+- `crates/vt_bin` — Internal dev CLI binary (`vt`) and task synthesizer
+- `crates/vt_graph` — Task dependency graph construction and config loading
+- `crates/vt_plan` — Execution planning (resolves env vars, working dirs, commands)
 - `crates/vt_workspace` — Workspace detection and package dependency graph
 - `crates/fspy*` — File system access tracing (9 crates: supervisor, preload libs, platform backends)
 - `crates/pty_terminal*` — Cross-platform headless terminal emulator (3 crates)
@@ -48,8 +48,8 @@ PR descriptions must include a `Motivation` section. If the motivation is not cl
 
 ```bash
 cargo test                                              # All tests
-cargo test -p vt_task_bin --test e2e_snapshots        # E2E snapshot tests
-cargo test -p vt_task_plan --test plan_snapshots      # Plan snapshot tests
+cargo test -p vt_bin --test e2e_snapshots        # E2E snapshot tests
+cargo test -p vt_plan --test plan_snapshots      # Plan snapshot tests
 cargo test --test e2e_snapshots -- stdin                # Filter by test name
 UPDATE_SNAPSHOTS=1 cargo test                           # Update snapshots
 ```
@@ -62,8 +62,8 @@ The test suite has no known pre-existing failures or flaky tests. If a test fail
 
 ### Test Fixtures
 
-- **Plan**: `crates/vt_task_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
-- **E2E**: `crates/vt_task_bin/tests/e2e_snapshots/fixtures/` — needed for testing execution, caching, output styling
+- **Plan**: `crates/vt_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
+- **E2E**: `crates/vt_bin/tests/e2e_snapshots/fixtures/` — needed for testing execution, caching, output styling
 
 ### Cross-Platform Testing
 
@@ -78,7 +78,7 @@ The test suite has no known pre-existing failures or flaky tests. If a test fail
 ### Task Execution Pipeline
 
 ```
-CLI (vt_task_bin) → Task Graph (vt_task_graph) → Plan (vt_task_plan) → Execution (vt_task)
+CLI (vt_bin) → Task Graph (vt_graph) → Plan (vt_plan) → Execution (vt)
                           ↑                                                        ↓
                     vt_workspace                                          fspy (file tracing)
 ```

@@ -4133,96 +4133,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vt100"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
-dependencies = [
- "itoa",
- "unicode-width",
- "vte",
-]
-
-[[package]]
-name = "vt_glob"
-version = "0.0.0"
-dependencies = [
- "globset",
- "thiserror 2.0.18",
- "vt_str",
- "wax",
-]
-
-[[package]]
-name = "vt_graph_ser"
-version = "0.1.0"
-dependencies = [
- "petgraph",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "vt_path"
-version = "0.1.0"
-dependencies = [
- "assert2",
- "diff-struct",
- "os_str_bytes",
- "path-clean",
- "ref-cast",
- "serde",
- "thiserror 2.0.18",
- "ts-rs",
- "vt_str",
- "wincode",
-]
-
-[[package]]
-name = "vt_powershell"
-version = "0.1.0"
-dependencies = [
- "tempfile",
- "vt_path",
- "which",
-]
-
-[[package]]
-name = "vt_select"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "assert2",
- "crossterm",
- "nucleo-matcher",
- "vt_str",
-]
-
-[[package]]
-name = "vt_shell"
-version = "0.0.0"
-dependencies = [
- "brush-parser",
- "diff-struct",
- "serde",
- "shell-escape",
- "vt_str",
- "wincode",
-]
-
-[[package]]
-name = "vt_str"
-version = "0.1.0"
-dependencies = [
- "compact_str",
- "diff-struct",
- "serde",
- "ts-rs",
- "wincode",
-]
-
-[[package]]
-name = "vt_task"
+name = "vt"
 version = "0.0.0"
 dependencies = [
  "anstream 1.0.0",
@@ -4254,15 +4165,15 @@ dependencies = [
  "tracing",
  "twox-hash",
  "uuid",
+ "vt_client_napi",
  "vt_glob",
+ "vt_graph",
+ "vt_ipc_shared",
  "vt_path",
+ "vt_plan",
  "vt_select",
+ "vt_server",
  "vt_str",
- "vt_task_client_napi",
- "vt_task_graph",
- "vt_task_ipc_shared",
- "vt_task_plan",
- "vt_task_server",
  "vt_workspace",
  "wax",
  "winapi",
@@ -4271,7 +4182,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "vt_task_bin"
+name = "vt100"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
+dependencies = [
+ "itoa",
+ "unicode-width",
+ "vte",
+]
+
+[[package]]
+name = "vt_bin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4298,38 +4220,48 @@ dependencies = [
  "tokio",
  "toml",
  "vec1",
+ "vt",
  "vt_path",
  "vt_str",
- "vt_task",
  "vt_workspace",
  "which",
 ]
 
 [[package]]
-name = "vt_task_client"
+name = "vt_client"
 version = "0.0.0"
 dependencies = [
  "native_str",
  "rustc-hash",
+ "vt_ipc_shared",
  "vt_path",
- "vt_task_ipc_shared",
  "winapi",
  "wincode",
 ]
 
 [[package]]
-name = "vt_task_client_napi"
+name = "vt_client_napi"
 version = "0.1.0"
 dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "vt_client",
  "vt_str",
- "vt_task_client",
 ]
 
 [[package]]
-name = "vt_task_graph"
+name = "vt_glob"
+version = "0.0.0"
+dependencies = [
+ "globset",
+ "thiserror 2.0.18",
+ "vt_str",
+ "wax",
+]
+
+[[package]]
+name = "vt_graph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4352,7 +4284,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "vt_task_ipc_shared"
+name = "vt_graph_ser"
+version = "0.1.0"
+dependencies = [
+ "petgraph",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "vt_ipc_shared"
 version = "0.0.0"
 dependencies = [
  "native_str",
@@ -4361,7 +4302,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "vt_task_plan"
+name = "vt_path"
+version = "0.1.0"
+dependencies = [
+ "assert2",
+ "diff-struct",
+ "os_str_bytes",
+ "path-clean",
+ "ref-cast",
+ "serde",
+ "thiserror 2.0.18",
+ "ts-rs",
+ "vt_str",
+ "wincode",
+]
+
+[[package]]
+name = "vt_plan"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4384,22 +4341,42 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "vt",
+ "vt_bin",
  "vt_glob",
+ "vt_graph",
  "vt_graph_ser",
  "vt_path",
  "vt_powershell",
  "vt_shell",
  "vt_str",
- "vt_task",
- "vt_task_bin",
- "vt_task_graph",
  "vt_workspace",
  "which",
  "wincode",
 ]
 
 [[package]]
-name = "vt_task_server"
+name = "vt_powershell"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "vt_path",
+ "which",
+]
+
+[[package]]
+name = "vt_select"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "assert2",
+ "crossterm",
+ "nucleo-matcher",
+ "vt_str",
+]
+
+[[package]]
+name = "vt_server"
 version = "0.0.0"
 dependencies = [
  "futures",
@@ -4411,10 +4388,33 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "vt_client",
  "vt_glob",
+ "vt_ipc_shared",
  "vt_path",
- "vt_task_client",
- "vt_task_ipc_shared",
+ "wincode",
+]
+
+[[package]]
+name = "vt_shell"
+version = "0.0.0"
+dependencies = [
+ "brush-parser",
+ "diff-struct",
+ "serde",
+ "shell-escape",
+ "vt_str",
+ "wincode",
+]
+
+[[package]]
+name = "vt_str"
+version = "0.1.0"
+dependencies = [
+ "compact_str",
+ "diff-struct",
+ "serde",
+ "ts-rs",
  "wincode",
 ]
 

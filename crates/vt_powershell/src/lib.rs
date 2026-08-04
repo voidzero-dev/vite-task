@@ -9,7 +9,7 @@
 //! This crate carries only the platform-shared primitives (the
 //! `PowerShell` host lookup, the fixed argument prefix, the
 //! sibling-`.ps1` discovery, and the stdin-TTY gate). Higher-level wrappers in
-//! `vt_task_plan::ps1_shim` (cwd-relative arg rewrite, scoped to
+//! `vt_plan::ps1_shim` (cwd-relative arg rewrite, scoped to
 //! `node_modules/.bin`) and `vite_command::ps1_shim` (absolute-path
 //! arg rewrite, applied to any `.cmd`) compose these primitives with
 //! their own scope rules and return-type conventions.
@@ -34,7 +34,7 @@ pub const POWERSHELL_PREFIX: &[&str] =
 /// neither host is on `PATH`.
 ///
 /// Cached as `Arc<AbsolutePath>` so callers that want shared ownership
-/// (e.g. `vt_task_plan`'s plan-time rewrite) can do `Arc::clone(host)`
+/// (e.g. `vt_plan`'s plan-time rewrite) can do `Arc::clone(host)`
 /// without copying the path.
 #[cfg(windows)]
 #[must_use]
@@ -80,7 +80,7 @@ pub fn find_ps1_sibling(resolved: &AbsolutePath) -> Option<AbsolutePathBuf> {
 /// Cached `stdin.is_terminal()`. The TTY-ness of stdin is fixed for the
 /// process lifetime, so the underlying syscall runs at most once per process.
 ///
-/// Gates the `.cmd` -> PowerShell `.ps1` rewrite that both `vt_task_plan`
+/// Gates the `.cmd` -> PowerShell `.ps1` rewrite that both `vt_plan`
 /// and `vite_command` perform: the npm/pnpm/yarn `.ps1` wrappers read stdin
 /// (`$MyInvocation.ExpectingInput` -> `$input | & node ...`) and hang forever
 /// on a non-TTY pipe or null, as on CI runners. Without a terminal there is

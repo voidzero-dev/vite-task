@@ -7,7 +7,7 @@
 //! # Two-stage model
 //!
 //! Package selection (this module) is deliberately decoupled from task matching
-//! (the task-query layer in `vt_task_graph`). `resolve_query` returns a *package
+//! (the task-query layer in `vt_graph`). `resolve_query` returns a *package
 //! subgraph* — a `DiGraphMap<PackageNodeIndex, ()>` containing only the selected
 //! packages and the original dependency edges between them. The task-query layer
 //! then maps each selected package to its task node, reconnecting across

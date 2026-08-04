@@ -18,7 +18,7 @@ This installs all required Rust tools (`cargo-insta`, `typos-cli`, `cargo-shear`
 
 ## Development Workflow
 
-Officially, Vite Task is distributed as part of Vite+ and invoked via `vp run`. The `vt` binary (`vt_task_bin` crate) is an internal development CLI for working on this repo in pure Rust without building the full Vite+ stack. Use `cargo run --bin vt` to build and run locally during development. Don't reference `vt` in user-facing documentation — it's not a public interface.
+Officially, Vite Task is distributed as part of Vite+ and invoked via `vp run`. The `vt` binary (`vt_bin` crate) is an internal development CLI for working on this repo in pure Rust without building the full Vite+ stack. Use `cargo run --bin vt` to build and run locally during development. Don't reference `vt` in user-facing documentation — it's not a public interface.
 
 |              | `vp run` (Vite+)                             | `vt run` (this repo) |
 | ------------ | -------------------------------------------- | -------------------- |
@@ -42,8 +42,8 @@ just doc      # Generate documentation
 
 ```bash
 cargo test                                              # All tests
-cargo test -p vt_task_bin --test e2e_snapshots        # E2E snapshot tests
-cargo test -p vt_task_plan --test plan_snapshots      # Plan snapshot tests
+cargo test -p vt_bin --test e2e_snapshots        # E2E snapshot tests
+cargo test -p vt_plan --test plan_snapshots      # Plan snapshot tests
 cargo test --test e2e_snapshots -- stdin                # Filter by test name
 UPDATE_SNAPSHOTS=1 cargo test                           # Update snapshots
 ```
@@ -61,8 +61,8 @@ Playwright's bundled Chromium is unavailable on musl, so the Vitest browser fixt
 
 ### Test Fixtures
 
-- **Plan snapshots** — `crates/vt_task_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
-- **E2E snapshots** — `crates/vt_task_bin/tests/e2e_snapshots/fixtures/` — needed for testing actual execution, caching behavior, and output styling
+- **Plan snapshots** — `crates/vt_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
+- **E2E snapshots** — `crates/vt_bin/tests/e2e_snapshots/fixtures/` — needed for testing actual execution, caching behavior, and output styling
 
 See individual crate READMEs for crate-specific testing details.
 

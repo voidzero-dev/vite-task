@@ -155,14 +155,14 @@ vt_powershell = { path = "crates/vt_powershell" }
 vt_select = { path = "crates/vt_select" }
 vt_shell = { path = "crates/vt_shell" }
 vt_str = { path = "crates/vt_str" }
-vt_task = { path = "crates/vt_task" }
-vt_task_bin = { path = "crates/vt_task_bin" }
-vt_task_client = { path = "crates/vt_task_client" }
-vt_task_client_napi = { path = "crates/vt_task_client_napi", artifact = "cdylib", target = "target" }
-vt_task_graph = { path = "crates/vt_task_graph" }
-vt_task_ipc_shared = { path = "crates/vt_task_ipc_shared" }
-vt_task_plan = { path = "crates/vt_task_plan" }
-vt_task_server = { path = "crates/vt_task_server" }
+vt = { path = "crates/vt" }
+vt_bin = { path = "crates/vt_bin" }
+vt_client = { path = "crates/vt_client" }
+vt_client_napi = { path = "crates/vt_client_napi", artifact = "cdylib", target = "target" }
+vt_graph = { path = "crates/vt_graph" }
+vt_ipc_shared = { path = "crates/vt_ipc_shared" }
+vt_plan = { path = "crates/vt_plan" }
+vt_server = { path = "crates/vt_server" }
 vt_workspace = { path = "crates/vt_workspace" }
 vt100 = "0.16.2"
 wax = "0.7.0"
@@ -181,7 +181,7 @@ ignored = [
   # These are artifact dependencies. They are not directly `use`d in Rust code.
   "fspy_preload_unix",
   "fspy_preload_windows",
-  "vt_task_client_napi",
+  "vt_client_napi",
 ]
 
 [profile.dev]
