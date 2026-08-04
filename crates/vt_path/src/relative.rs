@@ -1,0 +1,474 @@
+//! Provides `RelativePath(Buf)`, a relative path type with additional guarantees to make it portable.
+//!
+//! ## Why not use crate `relative-path`
+//! `relative-path::RelativePath` allows backslashes in its components, which is valid in unix systems but not portable to Windows.
+
+use std::{
+    borrow::Borrow,
+    fmt::Display,
+    mem::MaybeUninit,
+    ops::Deref,
+    path::{Component, Path},
+};
+
+use diff::Diff;
+use ref_cast::{RefCastCustom, ref_cast_custom};
+use serde::{Deserialize, Serialize};
+use vt_str::Str;
+use wincode::{SchemaRead, SchemaWrite, config::Config, error::ReadResult, io::Reader};
+
+/// A relative path with additional guarantees to make it portable:
+///
+/// - It is valid utf-8
+/// - It uses slashes `/` as separators, not backslashes `\`
+/// - There's no backslash `\` in components (this is valid in unix systems but not portable to Windows)
+#[derive(RefCastCustom, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct RelativePath(str);
+impl AsRef<Self> for RelativePath {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
+impl AsRef<Path> for RelativePath {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
+
+impl RelativePath {
+    #[ref_cast_custom]
+    unsafe fn assume_portable(path: &str) -> &Self;
+
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn as_path(&self) -> &Path {
+        Path::new(self.as_str())
+    }
+
+    #[must_use]
+    pub fn to_relative_path_buf(&self) -> RelativePathBuf {
+        RelativePathBuf(self.0.into())
+    }
+
+    /// Creates an owned [`RelativePathBuf`] with `rel_path` adjoined to `self`.
+    pub fn join<P: AsRef<Self>>(&self, rel_path: P) -> RelativePathBuf {
+        let mut relative_path_buf = self.to_relative_path_buf();
+        relative_path_buf.push(rel_path);
+        relative_path_buf
+    }
+
+    /// Lexically normalizes the path by resolving `..` components without
+    /// accessing the filesystem. (`.` components are already stripped by
+    /// [`RelativePathBuf::new`].)
+    ///
+    /// **Symlink limitation**: Because this is purely lexical, it can produce
+    /// incorrect results when symlinks are involved. For example, if
+    /// `a/link` is a symlink to `x/y`, then cleaning `a/link/../c`
+    /// yields `a/c` instead of the correct `x/c`. Use
+    /// [`std::fs::canonicalize`] when you need symlink-correct resolution.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cleaned path is no longer a valid relative path.
+    /// This can happen on Windows when malformed inputs such as `foo/C:/bar`
+    /// are cleaned into drive-prefixed paths.
+    pub fn clean(&self) -> Result<RelativePathBuf, FromPathError> {
+        use path_clean::PathClean as _;
+
+        let cleaned = self.as_path().clean();
+        RelativePathBuf::new(cleaned)
+    }
+
+    /// Returns a path that, when joined onto `base`, yields `self`.
+    ///
+    /// If `base` is not a prefix of `self`, returns [`None`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the stripped path contains non-UTF-8 characters, which should not happen for valid `RelativePath` instances.
+    pub fn strip_prefix<P: AsRef<Self>>(&self, base: P) -> Option<&Self> {
+        let stripped_path = Path::new(self.as_str()).strip_prefix(base.as_ref().as_path()).ok()?;
+        // SAFETY: The stripped result of a portable RelativePath is still portable:
+        // it remains valid UTF-8 and contains no backslash separators.
+        Some(unsafe { Self::assume_portable(stripped_path.to_str().unwrap()) })
+    }
+}
+
+/// A owned relative path buf with the same guarantees as `RelativePath`
+#[derive(
+    Debug, SchemaWrite, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, Default,
+)]
+#[expect(
+    clippy::unsafe_derive_deserialize,
+    reason = "unsafe in SchemaRead impl validates portability invariants"
+)]
+pub struct RelativePathBuf(Str);
+
+// SAFETY: Delegates to `Str`'s SchemaRead impl; dst is initialized only on Ok.
+unsafe impl<'de, C: Config> SchemaRead<'de, C> for RelativePathBuf {
+    type Dst = Self;
+
+    fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
+        let path_str = <Str as SchemaRead<'de, C>>::get(&mut reader)?;
+        Self::new(path_str.as_str()).map_or(
+            Err(wincode::error::ReadError::Custom("invalid relative path in encoded data")),
+            |path| {
+                dst.write(path);
+                Ok(())
+            },
+        )
+    }
+}
+
+impl AsRef<Path> for RelativePathBuf {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
+
+impl Display for RelativePathBuf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl PartialEq<RelativePath> for RelativePathBuf {
+    fn eq(&self, other: &RelativePath) -> bool {
+        self.as_relative_path().eq(other)
+    }
+}
+impl PartialEq<&RelativePath> for RelativePathBuf {
+    fn eq(&self, other: &&RelativePath) -> bool {
+        self.as_relative_path().eq(other)
+    }
+}
+
+impl Diff for RelativePathBuf {
+    type Repr = Option<Str>;
+
+    fn diff(&self, other: &Self) -> Self::Repr {
+        self.0.diff(&other.0)
+    }
+
+    fn apply(&mut self, diff: &Self::Repr) {
+        self.0.apply(diff);
+    }
+
+    fn identity() -> Self {
+        Self(Str::identity())
+    }
+}
+
+impl RelativePathBuf {
+    #[must_use]
+    pub fn empty() -> Self {
+        Self("".into())
+    }
+
+    /// Extends `self` with `path`.
+    ///
+    /// Unlike [`std::path::PathBuf::push`], `self` and `path` are both always relative,
+    /// so `self` can only be appended, not replaced
+    pub fn push<P: AsRef<RelativePath>>(&mut self, rel_path: P) {
+        let rel_path_str = rel_path.as_ref().as_str();
+        if rel_path_str.is_empty() {
+            return;
+        }
+        if !self.as_str().is_empty() {
+            self.0.push('/');
+        }
+        self.0.push_str(rel_path_str);
+    }
+
+    /// Creates a new `RelativePathBuf` from a `Path`.
+    ///
+    /// This function normalizes the path by:
+    /// - Removing `.` components
+    /// - Replacing backslash `\` separators with slashes `/` (on Windows)
+    ///
+    /// # Errors
+    /// Returns an error if the path is not relative or contains invalid data that makes it non-portable.
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, FromPathError> {
+        let path = path.as_ref();
+        let mut path_str = Str::with_capacity(path.as_os_str().len());
+        for component in path.components() {
+            match component {
+                Component::Prefix(_) | Component::RootDir => {
+                    return Err(FromPathError::NonRelative);
+                }
+                Component::CurDir => {
+                    // normalize dots
+                    continue;
+                }
+                Component::ParentDir => {
+                    path_str.push_str("..");
+                }
+                Component::Normal(os_str) => {
+                    let Some(component) = os_str.to_str() else {
+                        return Err(InvalidPathDataError::NonUtf8.into());
+                    };
+                    if component.contains('\\') {
+                        return Err(InvalidPathDataError::BackslashInComponent.into());
+                    }
+                    path_str.push_str(component);
+                }
+            }
+            path_str.push('/');
+        }
+        path_str.pop(); // remove last pushed '/'
+        Ok(Self(path_str))
+    }
+
+    #[must_use]
+    pub fn as_relative_path(&self) -> &RelativePath {
+        // SAFETY: RelativePathBuf's constructors (new, SchemaRead) validate portability
+        // invariants, so the inner string is guaranteed to be a valid portable path.
+        unsafe { RelativePath::assume_portable(&self.0) }
+    }
+}
+
+impl TryFrom<&Path> for RelativePathBuf {
+    type Error = FromPathError;
+
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
+        Self::new(path)
+    }
+}
+
+impl TryFrom<&str> for RelativePathBuf {
+    type Error = FromPathError;
+
+    fn try_from(path: &str) -> Result<Self, Self::Error> {
+        let path = Path::new(path);
+        Self::try_from(path)
+    }
+}
+
+impl AsRef<RelativePath> for RelativePathBuf {
+    fn as_ref(&self) -> &RelativePath {
+        self.as_relative_path()
+    }
+}
+
+impl Deref for RelativePathBuf {
+    type Target = RelativePath;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_relative_path()
+    }
+}
+
+impl Borrow<RelativePath> for RelativePathBuf {
+    fn borrow(&self) -> &RelativePath {
+        self.as_relative_path()
+    }
+}
+impl ToOwned for RelativePath {
+    type Owned = RelativePathBuf;
+
+    fn to_owned(&self) -> Self::Owned {
+        self.to_relative_path_buf()
+    }
+}
+
+/// Error when converting a path containing invalid data to `RelativePathbuf`
+#[derive(thiserror::Error, Debug)]
+pub enum InvalidPathDataError {
+    /// One of the components contains non-utf8 data.
+    #[error("path is not portable because contains non-utf8 data")]
+    NonUtf8,
+    /// One of the components contains backslashes `\`.
+    ///
+    /// This is valid in unix systems but not portable to Windows
+    #[error("path is not portable because it contains backslash ('\\') in its components")]
+    BackslashInComponent,
+}
+
+/// Error when converting a `Path` to `RelativePathbuf`
+#[derive(thiserror::Error, Debug)]
+pub enum FromPathError {
+    #[error("path is not relative")]
+    NonRelative,
+    #[error("{0}")]
+    InvalidPathData(#[from] InvalidPathDataError),
+}
+
+#[cfg(feature = "ts-rs")]
+mod ts_impl {
+    use ts_rs::TS;
+
+    use super::RelativePathBuf;
+
+    #[expect(clippy::disallowed_types, reason = "ts_rs::TS trait requires returning std String")]
+    impl TS for RelativePathBuf {
+        type OptionInnerType = Self;
+        type WithoutGenerics = Self;
+
+        fn name(_cfg: &ts_rs::Config) -> String {
+            "string".to_owned()
+        }
+
+        fn inline(_cfg: &ts_rs::Config) -> String {
+            "string".to_owned()
+        }
+
+        fn inline_flattened(_cfg: &ts_rs::Config) -> String {
+            panic!("RelativePathBuf cannot be flattened")
+        }
+
+        fn decl(_cfg: &ts_rs::Config) -> String {
+            panic!("RelativePathBuf is a primitive type")
+        }
+
+        fn decl_concrete(_cfg: &ts_rs::Config) -> String {
+            panic!("RelativePathBuf is a primitive type")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[cfg(windows)]
+    use std::os::windows::ffi::OsStringExt as _;
+
+    use assert2::assert;
+
+    use super::*;
+
+    #[test]
+    fn non_relative() {
+        assert!(
+            let Err(FromPathError::NonRelative) =
+                RelativePathBuf::new(if cfg!(windows) { "C:\\Users" } else { "/home" })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
+
+        let non_utf8_os_str = OsStr::from_bytes(&[0xC0]);
+        assert!(
+            let Err(FromPathError::InvalidPathData(InvalidPathDataError::NonUtf8)) =
+                RelativePathBuf::new(non_utf8_os_str),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn non_utf8() {
+        use std::ffi::OsString;
+        // ill-formed UTF-16: X<high surrogate>Y
+        let non_utf8_path = OsString::from_wide(&[0x0058, 0xD800, 0x0059]);
+        assert!(
+            let Err(FromPathError::InvalidPathData(InvalidPathDataError::NonUtf8)) =
+                RelativePathBuf::new(non_utf8_path),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backslash_in_component() {
+        assert!(
+            let Err(FromPathError::InvalidPathData(InvalidPathDataError::BackslashInComponent)) =
+                RelativePathBuf::new("foo\\bar")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn backslash_in_component() {
+        assert!(let Ok(path) = RelativePathBuf::new("foo\\bar"));
+        assert_eq!(path.as_str(), "foo/bar");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replace_backslash_separators() {
+        let rel_path = RelativePathBuf::new("foo\\bar").unwrap();
+        assert_eq!(rel_path.as_str(), "foo/bar");
+    }
+
+    #[test]
+    fn normalize_dots() {
+        let rel_path = RelativePathBuf::new("./foo/./bar/.").unwrap();
+        assert_eq!(rel_path.as_str(), "foo/bar");
+    }
+
+    #[test]
+    fn normalize_trailing_slashes() {
+        let rel_path = RelativePathBuf::new("foo/bar//").unwrap();
+        assert_eq!(rel_path.as_str(), "foo/bar");
+    }
+    #[test]
+    fn preserve_double_dots() {
+        let rel_path = RelativePathBuf::new("../foo/../bar/..").unwrap();
+        assert_eq!(rel_path.as_str(), "../foo/../bar/..");
+    }
+
+    #[test]
+    fn push() {
+        let mut rel_path = RelativePathBuf::new("foo/bar").unwrap();
+        rel_path.push(RelativePathBuf::new("baz").unwrap());
+        assert_eq!(rel_path.as_str(), "foo/bar/baz");
+    }
+
+    #[test]
+    fn push_empty() {
+        let mut rel_path = RelativePathBuf::new("foo/bar").unwrap();
+        rel_path.push(RelativePathBuf::new("").unwrap());
+        assert_eq!(rel_path.as_str(), "foo/bar");
+    }
+
+    #[test]
+    fn join() {
+        let rel_path = RelativePathBuf::new("foo/bar").unwrap();
+        let joined_path = rel_path.as_relative_path().join(RelativePathBuf::new("baz").unwrap());
+        assert_eq!(joined_path.as_str(), "foo/bar/baz");
+    }
+
+    #[test]
+    fn join_empty() {
+        let rel_path = RelativePathBuf::new("").unwrap();
+        let joined_path = rel_path.as_relative_path().join(RelativePathBuf::new("baz").unwrap());
+        assert_eq!(joined_path.as_str(), "baz");
+    }
+
+    #[test]
+    fn clean() {
+        let rel_path = RelativePathBuf::new("../foo/../bar").unwrap();
+        let cleaned = rel_path.clean().unwrap();
+        assert_eq!(cleaned.as_str(), "../bar");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn clean_malformed_drive_path() {
+        let rel_path = RelativePathBuf::new(r"foo\C:\bar").unwrap();
+        assert!(let Err(FromPathError::NonRelative) = rel_path.clean());
+    }
+
+    #[test]
+    fn strip_prefix() {
+        let rel_path = RelativePathBuf::new("foo/bar/baz").unwrap();
+        let prefix = RelativePathBuf::new("foo").unwrap();
+        let stripped_path = rel_path.strip_prefix(prefix).unwrap();
+        assert_eq!(stripped_path.as_str(), "bar/baz");
+    }
+
+    #[test]
+    fn encode_decode() {
+        let rel_path = RelativePathBuf::new("foo/bar").unwrap();
+        let encoded = wincode::serialize(&rel_path).unwrap();
+        let decoded: RelativePathBuf = wincode::deserialize(&encoded).unwrap();
+        assert_eq!(rel_path, decoded);
+    }
+}

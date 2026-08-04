@@ -1,0 +1,22 @@
+[package]
+name = "vt_glob"
+version = "0.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[dependencies]
+globset = { workspace = true }
+thiserror = { workspace = true }
+wax = { workspace = true }
+
+[dev-dependencies]
+vt_str = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

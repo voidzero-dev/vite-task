@@ -54,10 +54,7 @@ pub struct ChannelConf {
 }
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders
-#[expect(
-    clippy::missing_errors_doc,
-    reason = "non-vite crate: cannot use vite_str/vite_path types"
-)]
+#[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));

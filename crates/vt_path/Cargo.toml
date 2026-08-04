@@ -1,0 +1,34 @@
+[package]
+name = "vt_path"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[dependencies]
+wincode = { workspace = true, features = ["derive"] }
+diff-struct = { workspace = true }
+path-clean = { workspace = true }
+ref-cast = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+thiserror = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+vt_str = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+os_str_bytes = { workspace = true }
+
+[features]
+absolute-redaction = []
+ts-rs = ["dep:ts-rs", "vt_str/ts-rs"]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+assert2 = { workspace = true }
+
+[lib]
+doctest = false

@@ -18,7 +18,7 @@ This installs all required Rust tools (`cargo-insta`, `typos-cli`, `cargo-shear`
 
 ## Development Workflow
 
-Officially, Vite Task is distributed as part of Vite+ and invoked via `vp run`. The `vt` binary (`vite_task_bin` crate) is an internal development CLI for working on this repo in pure Rust without building the full Vite+ stack. Use `cargo run --bin vt` to build and run locally during development. Don't reference `vt` in user-facing documentation — it's not a public interface.
+Officially, Vite Task is distributed as part of Vite+ and invoked via `vp run`. The `vt` binary (`vt_task_bin` crate) is an internal development CLI for working on this repo in pure Rust without building the full Vite+ stack. Use `cargo run --bin vt` to build and run locally during development. Don't reference `vt` in user-facing documentation — it's not a public interface.
 
 |              | `vp run` (Vite+)                             | `vt run` (this repo) |
 | ------------ | -------------------------------------------- | -------------------- |
@@ -42,8 +42,8 @@ just doc      # Generate documentation
 
 ```bash
 cargo test                                              # All tests
-cargo test -p vite_task_bin --test e2e_snapshots        # E2E snapshot tests
-cargo test -p vite_task_plan --test plan_snapshots      # Plan snapshot tests
+cargo test -p vt_task_bin --test e2e_snapshots        # E2E snapshot tests
+cargo test -p vt_task_plan --test plan_snapshots      # Plan snapshot tests
 cargo test --test e2e_snapshots -- stdin                # Filter by test name
 UPDATE_SNAPSHOTS=1 cargo test                           # Update snapshots
 ```
@@ -61,8 +61,8 @@ Playwright's bundled Chromium is unavailable on musl, so the Vitest browser fixt
 
 ### Test Fixtures
 
-- **Plan snapshots** — `crates/vite_task_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
-- **E2E snapshots** — `crates/vite_task_bin/tests/e2e_snapshots/fixtures/` — needed for testing actual execution, caching behavior, and output styling
+- **Plan snapshots** — `crates/vt_task_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
+- **E2E snapshots** — `crates/vt_task_bin/tests/e2e_snapshots/fixtures/` — needed for testing actual execution, caching behavior, and output styling
 
 See individual crate READMEs for crate-specific testing details.
 
@@ -100,23 +100,23 @@ just lint-windows   # Windows via cargo-xwin
 
 These are enforced by `.clippy.toml`:
 
-| Instead of                            | Use                                        |
-| ------------------------------------- | ------------------------------------------ |
-| `HashMap` / `HashSet`                 | `FxHashMap` / `FxHashSet` from rustc-hash  |
-| `std::path::Path` / `PathBuf`         | `vite_path::AbsolutePath` / `RelativePath` |
-| `std::format!`                        | `vite_str::format!`                        |
-| `String` (for small strings)          | `vite_str::Str`                            |
-| `std::env::current_dir`               | `vite_path::current_dir`                   |
-| `.to_lowercase()` / `.to_uppercase()` | `cow_utils` methods                        |
+| Instead of                            | Use                                       |
+| ------------------------------------- | ----------------------------------------- |
+| `HashMap` / `HashSet`                 | `FxHashMap` / `FxHashSet` from rustc-hash |
+| `std::path::Path` / `PathBuf`         | `vt_path::AbsolutePath` / `RelativePath`  |
+| `std::format!`                        | `vt_str::format!`                         |
+| `String` (for small strings)          | `vt_str::Str`                             |
+| `std::env::current_dir`               | `vt_path::current_dir`                    |
+| `.to_lowercase()` / `.to_uppercase()` | `cow_utils` methods                       |
 
 ### Path Type System
 
-All paths use `vite_path` for type safety:
+All paths use `vt_path` for type safety:
 
 - **`AbsolutePath` / `AbsolutePathBuf`** — for internal data flow
 - **`RelativePath` / `RelativePathBuf`** — for cache storage and display
 
-Use `vite_path` methods (`strip_prefix`, `join`, etc.) instead of converting to `std::path`. Only convert to std paths when interfacing with std library functions. Add necessary methods to `vite_path` rather than falling back.
+Use `vt_path` methods (`strip_prefix`, `join`, etc.) instead of converting to `std::path`. Only convert to std paths when interfacing with std library functions. Add necessary methods to `vt_path` rather than falling back.
 
 ## macOS Performance Tip
 

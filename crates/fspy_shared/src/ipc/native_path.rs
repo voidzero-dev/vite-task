@@ -72,7 +72,7 @@ impl NativePath {
         f: F,
     ) -> R {
         let me = self.inner.to_cow_os_str();
-        f(vite_path::strip_path_prefix(&me, base.as_ref().as_os_str()))
+        f(vt_path::strip_path_prefix(&me, base.as_ref().as_os_str()))
     }
 }
 

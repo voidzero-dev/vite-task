@@ -1,7 +1,7 @@
-# Clippy configuration for non-vite crates (fspy_*, subprocess_test, pty_terminal, etc.)
-# that don't depend on vite_str/vite_path.
+# Clippy configuration for non-vt crates (fspy_*, subprocess_test, pty_terminal, etc.)
+# that don't depend on vt_str/vt_path.
 #
-# This is a subset of the root .clippy.toml, with rules recommending vite_str/vite_path
+# This is a subset of the root .clippy.toml, with rules recommending vt_str/vt_path
 # alternatives removed. Generic rules (cow_utils, rustc-hash) still apply.
 #
 # To use: symlink as `.clippy.toml` in the crate's directory:

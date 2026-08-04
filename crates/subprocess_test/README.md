@@ -2,7 +2,7 @@
 
 Provides the `command_for_fn!` macro for running functions in separate processes during tests.
 
-This crate is shared by both `fspy` and `vite_*` crates, so it uses no prefix.
+This crate is shared by both `fspy` and `vt_*` crates, so it uses no prefix.
 
 ## Usage
 
