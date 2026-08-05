@@ -36,7 +36,7 @@ just lint-windows  # Cross-clippy for Windows (requires cargo-xwin)
 just doc           # Documentation generation
 ```
 
-If `gt` (Graphite CLI) is available in PATH, use it instead of `gh` to create pull requests.
+Use `gh stack` to create pull request stacks.
 
 PR titles must use [Conventional Commits](https://www.conventionalcommits.org) format: `type(scope): summary` (scope is optional), e.g. `feat(cache): add LRU eviction`, `fix: handle symlink loops`, `test(e2e): add ctrl-c propagation test`.
 
