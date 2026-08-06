@@ -1,0 +1,155 @@
+use std::{
+    env::{self, join_paths},
+    ffi::OsStr,
+    iter,
+    sync::Arc,
+};
+
+use clap::Parser;
+use vt::{
+    Command, EnabledCacheConfig, HandledCommand, ScriptCommand, SessionConfig, UserCacheConfig,
+    get_path_env, plan_request::SyntheticPlanRequest,
+};
+use vt_path::AbsolutePath;
+use vt_str::Str;
+
+#[derive(Debug, Default)]
+pub struct CommandHandler(());
+
+/// Find an executable in `node_modules/.bin` directories up the tree.
+///
+/// # Errors
+///
+/// Returns an error if the executable cannot be found in any searched path.
+pub fn find_executable(
+    path_env: Option<&Arc<OsStr>>,
+    cwd: &AbsolutePath,
+    executable: &str,
+) -> anyhow::Result<Arc<OsStr>> {
+    #[expect(
+        clippy::disallowed_types,
+        reason = "PathBuf required by env::split_paths and which::which_in APIs"
+    )]
+    let mut paths: Vec<std::path::PathBuf> =
+        path_env.map_or_else(Vec::new, |path_env| env::split_paths(path_env).collect());
+    let mut current_cwd_parent = cwd;
+    loop {
+        let node_modules_bin = current_cwd_parent.join("node_modules").join(".bin");
+        paths.push(node_modules_bin.as_path().to_path_buf());
+        if let Some(parent) = current_cwd_parent.parent() {
+            current_cwd_parent = parent;
+        } else {
+            break;
+        }
+    }
+    let executable_path = which::which_in(executable, Some(join_paths(paths)?), cwd)?;
+    Ok(executable_path.into_os_string().into())
+}
+
+/// Internal argument parser for `vt`/`vp` commands that appear inside task scripts.
+///
+/// [`CommandHandler`] uses this to parse the command line when it intercepts a `vt` or `vp`
+/// invocation during script execution. It extends [`Command`] with a `tool` subcommand that
+/// forwards to the `vtt` test-utility binary — a subcommand that only makes sense within
+/// script execution and is therefore not exposed on the top-level `vt` CLI entry point.
+#[derive(Debug, Parser)]
+#[command(name = "vt", version)]
+enum Args {
+    /// Forward arguments to the `vtt` test-utility binary.
+    ///
+    /// Resolves `vtt` via `node_modules/.bin` lookup (same as any other script executable),
+    /// then synthesizes a cached invocation with the given arguments. The `--` separator,
+    /// if present, is stripped before forwarding.
+    Tool {
+        #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<Str>,
+    },
+    /// Any other `vt` subcommand, delegated to the standard [`Command`] parser.
+    #[command(flatten)]
+    Task(Command),
+}
+
+#[async_trait::async_trait(?Send)]
+impl vt::CommandHandler for CommandHandler {
+    async fn handle_command(
+        &mut self,
+        command: &mut ScriptCommand,
+    ) -> anyhow::Result<HandledCommand> {
+        match command.program.as_str() {
+            "vt" | "vp" => {}
+            // `vpr <args>` is shorthand for `vt run <args>`
+            "vpr" => {
+                command.program = Str::from("vt");
+                command.args =
+                    iter::once(Str::from("run")).chain(command.args.iter().cloned()).collect();
+            }
+            _ => return Ok(HandledCommand::Verbatim),
+        }
+        let args = Args::try_parse_from(
+            std::iter::once(command.program.as_str()).chain(command.args.iter().map(Str::as_str)),
+        )?;
+        match args {
+            Args::Tool { args } => {
+                let program = find_executable(get_path_env(&command.envs), &command.cwd, "vtt")?;
+                Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
+                    program,
+                    args: args.into_iter().filter(|a| a.as_str() != "--").collect(),
+                    cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
+                        env: None,
+                        untracked_env: None,
+                        input: None,
+                        output: None,
+                    }),
+                    envs: Arc::clone(&command.envs),
+                }))
+            }
+            Args::Task(parsed) => Ok(HandledCommand::ViteTaskCommand(parsed)),
+        }
+    }
+}
+
+/// A `UserConfigLoader` implementation that only loads `vite-task.json`.
+///
+/// This is mainly for examples and testing as it does not require Node.js environment.
+#[derive(Default, Debug)]
+pub struct JsonUserConfigLoader(());
+
+#[async_trait::async_trait(?Send)]
+impl vt::loader::UserConfigLoader for JsonUserConfigLoader {
+    async fn load_user_config_file(
+        &self,
+        package_path: &AbsolutePath,
+    ) -> anyhow::Result<Option<vt::config::UserRunConfig>> {
+        let config_path = package_path.join("vite-task.json");
+        let config_content = match tokio::fs::read_to_string(&config_path).await {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(None);
+            }
+            Err(err) => return Err(err.into()),
+        };
+        let json_value: Option<serde_json::Value> = jsonc_parser::parse_to_serde_value(
+            &config_content,
+            &jsonc_parser::ParseOptions::default(),
+        )?;
+        let user_config: vt::config::UserRunConfig =
+            serde_json::from_value(json_value.unwrap_or_default())?;
+        Ok(Some(user_config))
+    }
+}
+
+#[derive(Default)]
+pub struct OwnedSessionConfig {
+    command_handler: CommandHandler,
+    user_config_loader: JsonUserConfigLoader,
+}
+
+impl OwnedSessionConfig {
+    pub fn as_config(&mut self) -> SessionConfig<'_> {
+        SessionConfig {
+            command_handler: &mut self.command_handler,
+            user_config_loader: &mut self.user_config_loader,
+            program_name: Str::from("vt"),
+        }
+    }
+}

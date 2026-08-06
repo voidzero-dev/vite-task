@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "catalog:",
+    "@openai/codex": "catalog:",
     "@playwright/browser-chromium": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "@voidzero-dev/vite-task-client": "workspace:*",

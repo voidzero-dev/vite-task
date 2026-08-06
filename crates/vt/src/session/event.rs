@@ -1,0 +1,141 @@
+use std::{process::ExitStatus, time::Duration};
+
+use vt_path::RelativePathBuf;
+use vt_server::Error as IpcServerError;
+
+use super::cache::CacheMiss;
+
+/// The cache operation that failed.
+#[derive(Debug)]
+pub enum CacheErrorKind {
+    /// Cache lookup (`try_hit`) failed.
+    Lookup,
+    /// Writing the cache entry failed after successful execution.
+    Update,
+}
+
+impl std::fmt::Display for CacheErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Lookup => f.write_str("lookup"),
+            Self::Update => f.write_str("update"),
+        }
+    }
+}
+
+/// Error that occurred during a leaf execution.
+///
+/// Reported through [`super::reporter::LeafExecutionReporter::finish()`] and
+/// displayed by the reporter.
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutionError {
+    /// A cache operation failed.
+    #[error("Cache {kind} failed")]
+    Cache {
+        kind: CacheErrorKind,
+        #[source]
+        source: anyhow::Error,
+    },
+
+    /// The OS failed to spawn the child process (e.g., command not found).
+    #[error("Failed to spawn process")]
+    Spawn(#[source] anyhow::Error),
+
+    /// The child process started, but the runner failed while forwarding its output.
+    #[error("Failed to forward task process output")]
+    ForwardTaskProcessOutput(#[source] anyhow::Error),
+
+    /// The child process started, but the runner failed while waiting for it to exit.
+    #[error("Failed to wait for task process to exit")]
+    WaitForTaskProcessExit(#[source] anyhow::Error),
+
+    /// Creating the post-run fingerprint failed after successful execution.
+    #[error("Failed to create post-run fingerprint")]
+    PostRunFingerprint(#[source] anyhow::Error),
+
+    /// The runner-aware IPC server failed to bind for this task. Reported
+    /// instead of silently degrading so that `{ auto: true }` inputs stay
+    /// observable end-to-end.
+    #[error("Failed to set up task communication")]
+    IpcServerBind(#[source] std::io::Error),
+}
+
+#[derive(Debug, Clone)]
+pub enum CacheDisabledReason {
+    InProcessExecution,
+    NoCacheMetadata,
+}
+
+#[derive(Debug)]
+pub enum CacheNotUpdatedReason {
+    /// Cache was hit - task was replayed from cache, no update needed
+    CacheHit,
+    /// Caching was disabled for this task
+    CacheDisabled,
+    /// Execution exited with non-zero status
+    NonZeroExitStatus,
+    /// Execution was cancelled before the result could be trusted.
+    /// Two possible causes:
+    /// - Ctrl-C: the user interrupted execution; the task may have
+    ///   exited successfully but without completing its intended work.
+    /// - Fast-fail: a sibling task failed, triggering cancellation
+    ///   while this task was still running.
+    Cancelled,
+    /// Task modified files it read during execution (read-write overlap detected by fspy).
+    /// Caching such tasks is unsound because the prerun input hashes become stale.
+    InputModified {
+        /// First path that was both read and written during execution.
+        path: RelativePathBuf,
+    },
+    /// fspy isn't compiled in on this build and the task requires fspy
+    /// (its `input` config includes auto-inference). Task ran but cannot
+    /// be cached without tracked path accesses.
+    FspyUnsupported,
+    /// The runner's IPC server failed during execution, so the collected
+    /// reports may be incomplete. Caching such a run would risk stale
+    /// inputs/outputs on the next hit. Carries the underlying error for
+    /// user-facing reporting.
+    IpcServerError(IpcServerError),
+    /// A runner-aware tool explicitly requested that this run not be cached
+    /// (e.g. vite dev-server, a watch task).
+    ToolRequested,
+}
+
+#[derive(Debug)]
+pub enum CacheUpdateStatus {
+    /// Cache was successfully updated with new fingerprint and outputs
+    Updated,
+    /// Cache was not updated (with reason).
+    /// The reason is part of the `LeafExecutionReporter` trait contract — reporters
+    /// can use it for detailed logging, even if current implementations don't.
+    NotUpdated(CacheNotUpdatedReason),
+}
+
+#[derive(Debug, Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "CacheMiss variant is intentionally large and infrequently cloned"
+)]
+pub enum CacheStatus {
+    Disabled(CacheDisabledReason),
+    Miss(CacheMiss),
+    Hit { replayed_duration: Duration },
+}
+
+/// Convert `ExitStatus` to an i32 exit code.
+/// On Unix, if terminated by signal, returns 128 + `signal_number`.
+pub fn exit_status_to_code(status: ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.code().unwrap_or_else(|| {
+            // Process was terminated by signal, use Unix convention: 128 + signal
+            status.signal().map_or(1, |sig| 128 + sig)
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows always has an exit code
+        status.code().unwrap_or(1)
+    }
+}

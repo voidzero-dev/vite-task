@@ -16,7 +16,7 @@ native_str = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-vite_path = { workspace = true }
+vt_path = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 bytemuck = { workspace = true }

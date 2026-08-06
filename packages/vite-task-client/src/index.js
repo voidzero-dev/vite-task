@@ -16,7 +16,7 @@ import { createRequire } from 'node:module';
 /**
  * Methods exposed by the napi addon. Keep this shape in sync with the
  * `RunnerClient` returned by `load()` in
- * `crates/vite_task_client_napi/src/lib.rs` — any new method added there
+ * `crates/vt_client_napi/src/lib.rs` — any new method added there
  * needs a matching entry here, and vice versa.
  *
  * @type {{

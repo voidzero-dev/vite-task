@@ -779,9 +779,9 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-version = "1.0.1"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7335955a5f85f95f3188623240e081e7b2059a8ad1bae68944b7cfdd718fb10"
+checksum = "2d83cb7e7a873830708d6b02a78cd36a592c6fa14bf267b68725103b85c0d77f"
 dependencies = [
  "link-section",
  "linktime-proc-macro",
@@ -1240,6 +1240,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "fspy_benchmark"
+version = "0.0.0"
+dependencies = [
+ "fspy_benchmark_launcher",
+ "fspy_benchmark_static_target",
+ "fspy_benchmark_target",
+]
+
+[[package]]
+name = "fspy_benchmark_launcher"
+version = "0.0.0"
+dependencies = [
+ "fspy",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "fspy_benchmark_static_target"
+version = "0.0.0"
+
+[[package]]
+name = "fspy_benchmark_target"
+version = "0.0.0"
+
+[[package]]
 name = "fspy_detours_sys"
 version = "0.0.0"
 dependencies = [
@@ -1328,7 +1354,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "vite_path",
+ "vt_path",
  "winapi",
  "wincode",
 ]
@@ -1882,15 +1908,15 @@ dependencies = [
 
 [[package]]
 name = "link-section"
-version = "0.13.1"
+version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea2c24837c4fd5ab6a31d64133eae954f5199247523cf29586117e85245c0dd3"
+checksum = "5ee1a0d6e252afe82e7bc2db42fba60e02ddf3b1accaf8cb21d96e34ba61f3d4"
 
 [[package]]
 name = "linktime-proc-macro"
-version = "0.1.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a44cd706ff0d503ee32b2071166510ca27e281228de10cd3aa8d35ff94560f81"
+checksum = "348d0075b1fc163b26d72a7f75fc5141daf2fd1bdf128d873cbaf6785d495bdf"
 
 [[package]]
 name = "linux-raw-sys"
@@ -3251,9 +3277,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "indexmap",
  "itoa",
@@ -4107,85 +4133,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vite_glob"
-version = "0.0.0"
-dependencies = [
- "globset",
- "thiserror 2.0.18",
- "vite_str",
- "wax",
-]
-
-[[package]]
-name = "vite_graph_ser"
-version = "0.1.0"
-dependencies = [
- "petgraph",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "vite_path"
-version = "0.1.0"
-dependencies = [
- "assert2",
- "diff-struct",
- "os_str_bytes",
- "path-clean",
- "ref-cast",
- "serde",
- "thiserror 2.0.18",
- "ts-rs",
- "vite_str",
- "wincode",
-]
-
-[[package]]
-name = "vite_powershell"
-version = "0.1.0"
-dependencies = [
- "tempfile",
- "vite_path",
- "which",
-]
-
-[[package]]
-name = "vite_select"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "assert2",
- "crossterm",
- "nucleo-matcher",
- "vite_str",
-]
-
-[[package]]
-name = "vite_shell"
-version = "0.0.0"
-dependencies = [
- "brush-parser",
- "diff-struct",
- "serde",
- "shell-escape",
- "vite_str",
- "wincode",
-]
-
-[[package]]
-name = "vite_str"
-version = "0.1.0"
-dependencies = [
- "compact_str",
- "diff-struct",
- "serde",
- "ts-rs",
- "wincode",
-]
-
-[[package]]
-name = "vite_task"
+name = "vt"
 version = "0.0.0"
 dependencies = [
  "anstream 1.0.0",
@@ -4217,16 +4165,16 @@ dependencies = [
  "tracing",
  "twox-hash",
  "uuid",
- "vite_glob",
- "vite_path",
- "vite_select",
- "vite_str",
- "vite_task_client_napi",
- "vite_task_graph",
- "vite_task_ipc_shared",
- "vite_task_plan",
- "vite_task_server",
- "vite_workspace",
+ "vt_client_napi",
+ "vt_glob",
+ "vt_graph",
+ "vt_ipc_shared",
+ "vt_path",
+ "vt_plan",
+ "vt_select",
+ "vt_server",
+ "vt_str",
+ "vt_workspace",
  "wax",
  "winapi",
  "wincode",
@@ -4234,7 +4182,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "vite_task_bin"
+name = "vt100"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
+dependencies = [
+ "itoa",
+ "unicode-width",
+ "vte",
+]
+
+[[package]]
+name = "vt_bin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4261,38 +4220,48 @@ dependencies = [
  "tokio",
  "toml",
  "vec1",
- "vite_path",
- "vite_str",
- "vite_task",
- "vite_workspace",
+ "vt",
+ "vt_path",
+ "vt_str",
+ "vt_workspace",
  "which",
 ]
 
 [[package]]
-name = "vite_task_client"
+name = "vt_client"
 version = "0.0.0"
 dependencies = [
  "native_str",
  "rustc-hash",
- "vite_path",
- "vite_task_ipc_shared",
+ "vt_ipc_shared",
+ "vt_path",
  "winapi",
  "wincode",
 ]
 
 [[package]]
-name = "vite_task_client_napi"
+name = "vt_client_napi"
 version = "0.1.0"
 dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "vite_str",
- "vite_task_client",
+ "vt_client",
+ "vt_str",
 ]
 
 [[package]]
-name = "vite_task_graph"
+name = "vt_glob"
+version = "0.0.0"
+dependencies = [
+ "globset",
+ "thiserror 2.0.18",
+ "vt_str",
+ "wax",
+]
+
+[[package]]
+name = "vt_graph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4307,15 +4276,24 @@ dependencies = [
  "tracing",
  "ts-rs",
  "vec1",
- "vite_path",
- "vite_str",
- "vite_workspace",
+ "vt_path",
+ "vt_str",
+ "vt_workspace",
  "wax",
  "wincode",
 ]
 
 [[package]]
-name = "vite_task_ipc_shared"
+name = "vt_graph_ser"
+version = "0.1.0"
+dependencies = [
+ "petgraph",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "vt_ipc_shared"
 version = "0.0.0"
 dependencies = [
  "native_str",
@@ -4324,7 +4302,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "vite_task_plan"
+name = "vt_path"
+version = "0.1.0"
+dependencies = [
+ "assert2",
+ "diff-struct",
+ "os_str_bytes",
+ "path-clean",
+ "ref-cast",
+ "serde",
+ "thiserror 2.0.18",
+ "ts-rs",
+ "vt_str",
+ "wincode",
+]
+
+[[package]]
+name = "vt_plan"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4347,22 +4341,42 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
- "vite_glob",
- "vite_graph_ser",
- "vite_path",
- "vite_powershell",
- "vite_shell",
- "vite_str",
- "vite_task",
- "vite_task_bin",
- "vite_task_graph",
- "vite_workspace",
+ "vt",
+ "vt_bin",
+ "vt_glob",
+ "vt_graph",
+ "vt_graph_ser",
+ "vt_path",
+ "vt_powershell",
+ "vt_shell",
+ "vt_str",
+ "vt_workspace",
  "which",
  "wincode",
 ]
 
 [[package]]
-name = "vite_task_server"
+name = "vt_powershell"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "vt_path",
+ "which",
+]
+
+[[package]]
+name = "vt_select"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "assert2",
+ "crossterm",
+ "nucleo-matcher",
+ "vt_str",
+]
+
+[[package]]
+name = "vt_server"
 version = "0.0.0"
 dependencies = [
  "futures",
@@ -4374,15 +4388,38 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
- "vite_glob",
- "vite_path",
- "vite_task_client",
- "vite_task_ipc_shared",
+ "vt_client",
+ "vt_glob",
+ "vt_ipc_shared",
+ "vt_path",
  "wincode",
 ]
 
 [[package]]
-name = "vite_tui"
+name = "vt_shell"
+version = "0.0.0"
+dependencies = [
+ "brush-parser",
+ "diff-struct",
+ "serde",
+ "shell-escape",
+ "vt_str",
+ "wincode",
+]
+
+[[package]]
+name = "vt_str"
+version = "0.1.0"
+dependencies = [
+ "compact_str",
+ "diff-struct",
+ "serde",
+ "ts-rs",
+ "wincode",
+]
+
+[[package]]
+name = "vt_tui"
 version = "0.0.0"
 dependencies = [
  "color-eyre",
@@ -4401,7 +4438,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vite_workspace"
+name = "vt_workspace"
 version = "0.0.0"
 dependencies = [
  "clap",
@@ -4414,21 +4451,10 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "vec1",
- "vite_glob",
- "vite_path",
- "vite_str",
+ "vt_glob",
+ "vt_path",
+ "vt_str",
  "wax",
-]
-
-[[package]]
-name = "vt100"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
-dependencies = [
- "itoa",
- "unicode-width",
- "vte",
 ]
 
 [[package]]

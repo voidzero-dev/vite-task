@@ -170,7 +170,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
         // Try to atomically claim the space
         // Different writers only share the header, not each other's content. so relaxed ordering is sufficient.
         let current_end =
-            atomic_header.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current_end| {
+            atomic_header.try_update(Ordering::Relaxed, Ordering::Relaxed, |current_end| {
                 let new_end = roundup_to_align_frame_header(current_end + frame_with_header_size);
 
                 // Check if we have enough space
@@ -193,14 +193,14 @@ impl<M: AsRawSlice> ShmWriter<M> {
 
         // Successfully claimed the space, now write the data
 
-        // SAFETY: The atomic fetch_update above guaranteed that `size_of::<usize>() + current_end`
+        // SAFETY: The atomic try_update above guaranteed that `size_of::<usize>() + current_end`
         // is within the shared memory bounds, so this pointer arithmetic stays within the allocation.
         let frame_start = unsafe {
             shm_ptr.add(/* shm header */ size_of::<usize>() + current_end)
         };
 
         // SAFETY: `frame_start` is properly aligned to `i32` (ensured by `roundup_to_align_frame_header`)
-        // and points within the shared memory allocation (bounds checked by the atomic fetch_update).
+        // and points within the shared memory allocation (bounds checked by the atomic try_update).
         let frame_header = unsafe { AtomicI32::from_ptr(frame_start.cast()) };
 
         // Mark as partially written with positive size

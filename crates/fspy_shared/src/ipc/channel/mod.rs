@@ -54,10 +54,7 @@ pub struct ChannelConf {
 }
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders
-#[expect(
-    clippy::missing_errors_doc,
-    reason = "non-vite crate: cannot use vite_str/vite_path types"
-)]
+#[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
@@ -100,7 +97,8 @@ pub struct Sender {
 impl Drop for Sender {
     fn drop(&mut self) {
         if let Err(err) = self.lock_file.unlock() {
-            debug!("Failed to unlock the shared IPC lock {:?}: {}", self.lock_file_path, err);
+            let lock_file_path = self.lock_file_path.to_cow_os_str();
+            debug!("Failed to unlock the shared IPC lock {}: {}", lock_file_path.display(), err);
         }
     }
 }
@@ -150,7 +148,7 @@ unsafe impl Sync for Receiver {}
 impl Drop for Receiver {
     fn drop(&mut self) {
         if let Err(err) = std::fs::remove_file(&self.lock_file_path) {
-            debug!("Failed to remove IPC lock file {:?}: {}", self.lock_file_path, err);
+            debug!("Failed to remove IPC lock file {}: {}", self.lock_file_path.display(), err);
         }
     }
 }

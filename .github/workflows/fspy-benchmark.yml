@@ -1,0 +1,178 @@
+name: fspy benchmark
+
+permissions: {}
+
+on:
+  workflow_dispatch:
+  pull_request:
+  # Runs on main keep the build cache warm and record the overhead history.
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+defaults:
+  run:
+    shell: bash
+
+# Benchmark results are never compared across runs: runner instances disagree
+# by more than a regression worth catching. Instead, each pull request job
+# builds the benchmark launcher twice — against the fspy under review and
+# against the fspy of the merge base — and the harness interleaves both builds
+# on the same machine. See crates/fspy_benchmark/README.md.
+jobs:
+  benchmark:
+    name: Benchmark (${{ matrix.platform }})
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: namespace-profile-linux-x64-default
+            static: true
+          - platform: macos
+            os: namespace-profile-mac-default
+            static: false
+          - platform: windows
+            os: namespace-profile-windows-4c-8g
+            static: false
+    runs-on: ${{ matrix.os }}
+    env:
+      BASE_DIR: ${{ github.workspace }}/../fspy-benchmark-base
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+
+      - name: Update Detours submodule
+        if: matrix.platform == 'windows'
+        run: git submodule update --init --recursive
+
+      - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
+        with:
+          # Caches saved by pull request runs are scoped to their branch, so
+          # only runs on main seed the cache every other run restores.
+          save-cache: ${{ github.ref_name == 'main' }}
+          cache-key: fspy-benchmark-${{ matrix.platform }}
+
+      - name: Install static target
+        if: matrix.static
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Check out merge base
+        if: github.event_name == 'pull_request'
+        run: |
+          # The checkout is the pull request merged into the base branch, so
+          # its first parent is exactly the base tip the merge was built on.
+          git fetch --depth 2 origin "refs/pull/${{ github.event.pull_request.number }}/merge"
+          git worktree add "$BASE_DIR" "$(git rev-parse FETCH_HEAD^1)"
+
+      - name: Update baseline Detours submodule
+        if: github.event_name == 'pull_request' && matrix.platform == 'windows'
+        working-directory: ${{ env.BASE_DIR }}
+        run: git submodule update --init --recursive
+
+      - name: Build baseline launcher
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ env.BASE_DIR }}
+        env:
+          # Share the head build's target directory: the crates.io graph is
+          # fingerprinted by package and profile, not by workspace, so only the
+          # fspy path crates build twice.
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          # Both fspy revisions must be measured by identical code, and the
+          # baseline may predate the launcher crate, so overlay the head's
+          # launcher source before building it against the baseline fspy.
+          rm -rf crates/fspy_benchmark_launcher
+          cp -R "$GITHUB_WORKSPACE/crates/fspy_benchmark_launcher" crates/fspy_benchmark_launcher
+          cargo build --release -p fspy_benchmark_launcher
+          # Set the binary aside before the head build overwrites it.
+          exe=""
+          [[ "$RUNNER_OS" == "Windows" ]] && exe=.exe
+          cp "$CARGO_TARGET_DIR/release/fspy_benchmark_launcher$exe" "$RUNNER_TEMP/fspy-base-launcher$exe"
+
+      - name: Run benchmark
+        run: |
+          exe=""
+          [[ "$RUNNER_OS" == "Windows" ]] && exe=.exe
+          args=()
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            args=(--base-launcher "$RUNNER_TEMP/fspy-base-launcher$exe")
+          fi
+          mkdir -p .benchmark-results
+          set -o pipefail
+          cargo run --release -p fspy_benchmark -- "${args[@]}" |
+            tee ".benchmark-results/${{ matrix.platform }}.txt"
+
+      - name: Add job summary
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo '```text'
+            cat ".benchmark-results/${{ matrix.platform }}.txt" ||
+              echo 'no report; the benchmark failed before producing one'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark report
+        # Matrix jobs have isolated filesystems, so persist each report for the
+        # comment job to combine into one sticky comment after all platforms
+        # finish. Fork pull requests get no comment, so nothing consumes their
+        # reports; the job summary already carries them.
+        if: >-
+          !cancelled() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fspy-benchmark-report-${{ matrix.platform }}
+          path: .benchmark-results/${{ matrix.platform }}.txt
+          # A job that failed before producing a report has nothing to upload;
+          # the comment job prints its own placeholder for the platform.
+          if-no-files-found: warn
+          retention-days: 1
+
+  comment:
+    name: Report benchmark
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: benchmark
+    runs-on: namespace-profile-linux-x64-default
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Download benchmark reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: fspy-benchmark-report-*
+          path: .benchmark-results
+          merge-multiple: true
+
+      - name: Assemble comment
+        run: |
+          {
+            echo '## fspy benchmark'
+            echo
+            for platform in linux macos windows; do
+              echo "### $platform"
+              echo
+              echo '```text'
+              cat ".benchmark-results/$platform.txt" ||
+                echo "no report; the $platform benchmark job failed before producing one"
+              echo '```'
+              echo
+            done
+          } > .benchmark-results/comment.md
+
+      - name: Update PR comment
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: fspy-benchmark
+          path: .benchmark-results/comment.md

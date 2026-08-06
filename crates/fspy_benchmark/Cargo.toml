@@ -1,0 +1,26 @@
+[package]
+name = "fspy_benchmark"
+version = "0.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "fspy_benchmark"
+test = false
+doctest = false
+
+[dependencies]
+fspy_benchmark_launcher = { workspace = true }
+fspy_benchmark_target = { workspace = true }
+
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+fspy_benchmark_static_target = { path = "../fspy_benchmark_static_target", artifact = "bin", target = "x86_64-unknown-linux-musl" }
+
+[package.metadata.cargo-shear]
+ignored = ["fspy_benchmark_launcher", "fspy_benchmark_target", "fspy_benchmark_static_target"]

@@ -12,7 +12,6 @@
 //!    `dlsym(RTLD_NEXT, …)`, so fspy still sees the real accesses and can
 //!    track them as cache inputs.
 #![cfg(target_os = "linux")]
-#![feature(c_variadic)]
 
 use std::{
     ffi::{CStr, c_char, c_int},

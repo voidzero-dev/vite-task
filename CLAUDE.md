@@ -4,20 +4,20 @@ A monorepo task runner (like Nx/Turbo) with intelligent caching and dependency r
 
 ## Repository Structure
 
-- `crates/vite_task` — Task execution engine with caching and session management
-- `crates/vite_task_bin` — Internal dev CLI binary (`vt`) and task synthesizer
-- `crates/vite_task_graph` — Task dependency graph construction and config loading
-- `crates/vite_task_plan` — Execution planning (resolves env vars, working dirs, commands)
-- `crates/vite_workspace` — Workspace detection and package dependency graph
+- `crates/vt` — Task execution engine with caching and session management
+- `crates/vt_bin` — Internal dev CLI binary (`vt`) and task synthesizer
+- `crates/vt_graph` — Task dependency graph construction and config loading
+- `crates/vt_plan` — Execution planning (resolves env vars, working dirs, commands)
+- `crates/vt_workspace` — Workspace detection and package dependency graph
 - `crates/fspy*` — File system access tracing (9 crates: supervisor, preload libs, platform backends)
 - `crates/pty_terminal*` — Cross-platform headless terminal emulator (3 crates)
-- `crates/vite_path` — Type-safe absolute/relative path system
-- `crates/vite_str` — Stack-allocated compact string type
-- `crates/vite_glob` — Glob pattern matching
-- `crates/vite_shell` — Shell command parsing
-- `crates/vite_select` — Interactive fuzzy selection UI
-- `crates/vite_tui` — Terminal UI components (WIP, unfinished)
-- `crates/vite_graph_ser` — Graph serialization utilities
+- `crates/vt_path` — Type-safe absolute/relative path system
+- `crates/vt_str` — Stack-allocated compact string type
+- `crates/vt_glob` — Glob pattern matching
+- `crates/vt_shell` — Shell command parsing
+- `crates/vt_select` — Interactive fuzzy selection UI
+- `crates/vt_tui` — Terminal UI components (WIP, unfinished)
+- `crates/vt_graph_ser` — Graph serialization utilities
 - `crates/subprocess_test` — Subprocess testing framework
 - `packages/tools` — Node.js test utilities (print, json-edit, check-tty, etc.)
 - `docs/` — Documentation (inputs configuration guide)
@@ -36,7 +36,7 @@ just lint-windows  # Cross-clippy for Windows (requires cargo-xwin)
 just doc           # Documentation generation
 ```
 
-If `gt` (Graphite CLI) is available in PATH, use it instead of `gh` to create pull requests.
+Use `gh stack` to create pull request stacks.
 
 PR titles must use [Conventional Commits](https://www.conventionalcommits.org) format: `type(scope): summary` (scope is optional), e.g. `feat(cache): add LRU eviction`, `fix: handle symlink loops`, `test(e2e): add ctrl-c propagation test`.
 
@@ -48,8 +48,8 @@ PR descriptions must include a `Motivation` section. If the motivation is not cl
 
 ```bash
 cargo test                                              # All tests
-cargo test -p vite_task_bin --test e2e_snapshots        # E2E snapshot tests
-cargo test -p vite_task_plan --test plan_snapshots      # Plan snapshot tests
+cargo test -p vt_bin --test e2e_snapshots        # E2E snapshot tests
+cargo test -p vt_plan --test plan_snapshots      # Plan snapshot tests
 cargo test --test e2e_snapshots -- stdin                # Filter by test name
 UPDATE_SNAPSHOTS=1 cargo test                           # Update snapshots
 ```
@@ -62,8 +62,8 @@ The test suite has no known pre-existing failures or flaky tests. If a test fail
 
 ### Test Fixtures
 
-- **Plan**: `crates/vite_task_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
-- **E2E**: `crates/vite_task_bin/tests/e2e_snapshots/fixtures/` — needed for testing execution, caching, output styling
+- **Plan**: `crates/vt_plan/tests/plan_snapshots/fixtures/` — quicker, sufficient for testing task graph, resolved configs, program paths, cwd, and env vars
+- **E2E**: `crates/vt_bin/tests/e2e_snapshots/fixtures/` — needed for testing execution, caching, output styling
 
 ### Cross-Platform Testing
 
@@ -78,9 +78,9 @@ The test suite has no known pre-existing failures or flaky tests. If a test fail
 ### Task Execution Pipeline
 
 ```
-CLI (vite_task_bin) → Task Graph (vite_task_graph) → Plan (vite_task_plan) → Execution (vite_task)
+CLI (vt_bin) → Task Graph (vt_graph) → Plan (vt_plan) → Execution (vt)
                           ↑                                                        ↓
-                    vite_workspace                                          fspy (file tracing)
+                    vt_workspace                                          fspy (file tracing)
 ```
 
 ### Task Dependencies
@@ -128,21 +128,21 @@ This repo uses internal names that differ from the public-facing product. In cod
 
 Enforced by `.clippy.toml`:
 
-| Instead of                          | Use                                      |
-| ----------------------------------- | ---------------------------------------- |
-| `HashMap`/`HashSet`                 | `FxHashMap`/`FxHashSet` from rustc-hash  |
-| `std::path::Path`/`PathBuf`         | `vite_path::AbsolutePath`/`RelativePath` |
-| `std::format!`                      | `vite_str::format!`                      |
-| `String` (for small strings)        | `vite_str::Str`                          |
-| `std::env::current_dir`             | `vite_path::current_dir`                 |
-| `.to_lowercase()`/`.to_uppercase()` | `cow_utils` methods                      |
+| Instead of                          | Use                                     |
+| ----------------------------------- | --------------------------------------- |
+| `HashMap`/`HashSet`                 | `FxHashMap`/`FxHashSet` from rustc-hash |
+| `std::path::Path`/`PathBuf`         | `vt_path::AbsolutePath`/`RelativePath`  |
+| `std::format!`                      | `vt_str::format!`                       |
+| `String` (for small strings)        | `vt_str::Str`                           |
+| `std::env::current_dir`             | `vt_path::current_dir`                  |
+| `.to_lowercase()`/`.to_uppercase()` | `cow_utils` methods                     |
 
 ### Path Type System
 
 - Use `AbsolutePath` for internal data flow; only convert to `RelativePath` when saving to cache
-- Use methods like `strip_prefix`/`join` from `vite_path` instead of converting to std paths
+- Use methods like `strip_prefix`/`join` from `vt_path` instead of converting to std paths
 - Only convert to std paths when interfacing with std library functions
-- Add necessary methods in `vite_path` instead of falling back to std path types
+- Add necessary methods in `vt_path` instead of falling back to std path types
 
 ### Cross-Platform Requirements
 

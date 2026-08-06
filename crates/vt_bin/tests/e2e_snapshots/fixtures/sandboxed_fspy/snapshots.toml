@@ -1,0 +1,78 @@
+[[e2e]]
+name = "fspy_under_codex_sandbox"
+comment = """
+Runs `vt run inner` under Codex CLI's built-in `:workspace` permission profile, representing its default workspace-editing posture for a trusted repository. The profile makes the workspace roots and system temp directories writable without adding network or Unix socket access. See [Codex permissions](https://learn.chatgpt.com/docs/permissions#define-and-select-a-profile).
+
+The nested `vt` enables fspy for automatic input inference; changing the file read inside the sandbox checks whether it invalidates the cache.
+"""
+platform = "macos"
+ignore = true
+steps = [
+  [
+    "codex",
+    "sandbox",
+    "-P",
+    ":workspace",
+    "vt",
+    "run",
+    "inner",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "input.txt",
+    "tracked",
+    "modified",
+  ],
+  [
+    "codex",
+    "sandbox",
+    "-P",
+    ":workspace",
+    "vt",
+    "run",
+    "inner",
+  ],
+]
+
+[[e2e]]
+name = "fspy_under_anthropic_sandbox_runtime"
+comment = """
+Runs `vt run inner` under a profile matching Claude Code's default enabled Bash sandbox: the working directory and session temp directory are writable, with no pre-allowed network domains or extra Unix socket access. See [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing#filesystem-isolation).
+
+Claude Code normally creates the writable session temp before invoking Sandbox Runtime, so the harness creates the runtime's default `/tmp/claude` directory before calling `srt` directly. The fixture profile provides only `allowWrite: ["."]`; Sandbox Runtime supplies `/tmp/claude` and its other built-in compatibility paths. See [`getDefaultWritePaths` and `generateProxyEnvVars`](https://github.com/anthropic-experimental/sandbox-runtime/blob/main/src/sandbox/sandbox-utils.ts).
+
+The nested `vt` enables fspy for automatic input inference; changing the file read inside the sandbox checks whether it invalidates the cache.
+"""
+platform = "macos"
+ignore = true
+steps = [
+  { argv = [
+    "mkdir",
+    "-p",
+    "/tmp/claude",
+  ], comment = "create the session temp that Claude Code supplies before sandboxed Bash commands" },
+  [
+    "srt",
+    "--settings",
+    "claude-code-default-sandbox.json",
+    "vt",
+    "run",
+    "inner",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "input.txt",
+    "tracked",
+    "modified",
+  ],
+  [
+    "srt",
+    "--settings",
+    "claude-code-default-sandbox.json",
+    "vt",
+    "run",
+    "inner",
+  ],
+]

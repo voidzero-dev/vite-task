@@ -10,7 +10,15 @@ macro_rules! intercept {
             }
         }
         #[cfg(not(test))] // Don't interpose on the test binary
+        #[expect(
+            clippy::allow_attributes,
+            reason = "runtime symbol lint applies only to compiler-known libc symbols"
+        )]
         const _: () = {
+            #[allow(
+                invalid_runtime_symbol_definitions,
+                reason = "naked assembly trampoline forwards the original ABI without a Rust signature"
+            )]
             #[unsafe(naked)]
             #[unsafe(export_name = ::core::concat!(::core::stringify!($name), 64))]
             pub unsafe extern "C" fn interpose_fn() {
@@ -55,7 +63,15 @@ macro_rules! intercept_inner {
         const _: $fn_sig = $crate::libc::$name;
 
         #[cfg(not(test))] // Don't interpose on the test binary
+        #[expect(
+            clippy::allow_attributes,
+            reason = "runtime symbol lint applies only to compiler-known libc symbols"
+        )]
         const _: () = {
+            #[allow(
+                invalid_runtime_symbol_definitions,
+                reason = "naked assembly trampoline forwards the original ABI without a Rust signature"
+            )]
             #[unsafe(naked)]
             #[unsafe(export_name = ::core::stringify!($name))]
             pub unsafe extern "C" fn interpose_fn() {

@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "print-marker-cached": {
+      "command": "vtt print-env VP_RUN",
+      "cache": true,
+      "env": ["NODE_ENV"],
+      "input": ["package.json"],
+      "output": []
+    },
+    "print-marker-uncached": {
+      "command": "vtt print-env VP_RUN",
+      "cache": false
+    }
+  }
+}

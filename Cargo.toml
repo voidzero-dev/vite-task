@@ -72,6 +72,8 @@ materialized_artifact = { path = "crates/materialized_artifact" }
 materialized_artifact_build = { path = "crates/materialized_artifact_build" }
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
+fspy_benchmark_launcher = { path = "crates/fspy_benchmark_launcher", artifact = "bin" }
+fspy_benchmark_target = { path = "crates/fspy_benchmark_target", artifact = "bin" }
 fspy_detours_sys = { path = "crates/fspy_detours_sys" }
 fspy_preload_unix = { path = "crates/fspy_preload_unix", artifact = "cdylib", target = "target" }
 fspy_preload_windows = { path = "crates/fspy_preload_windows", artifact = "cdylib", target = "target" }
@@ -146,22 +148,22 @@ tui-term = "0.3.1"
 twox-hash = "2.1.1"
 uuid = "1.18.1"
 vec1 = "1.12.1"
-vite_glob = { path = "crates/vite_glob" }
-vite_graph_ser = { path = "crates/vite_graph_ser" }
-vite_path = { path = "crates/vite_path" }
-vite_powershell = { path = "crates/vite_powershell" }
-vite_select = { path = "crates/vite_select" }
-vite_shell = { path = "crates/vite_shell" }
-vite_str = { path = "crates/vite_str" }
-vite_task = { path = "crates/vite_task" }
-vite_task_bin = { path = "crates/vite_task_bin" }
-vite_task_client = { path = "crates/vite_task_client" }
-vite_task_client_napi = { path = "crates/vite_task_client_napi", artifact = "cdylib", target = "target" }
-vite_task_graph = { path = "crates/vite_task_graph" }
-vite_task_ipc_shared = { path = "crates/vite_task_ipc_shared" }
-vite_task_plan = { path = "crates/vite_task_plan" }
-vite_task_server = { path = "crates/vite_task_server" }
-vite_workspace = { path = "crates/vite_workspace" }
+vt_glob = { path = "crates/vt_glob" }
+vt_graph_ser = { path = "crates/vt_graph_ser" }
+vt_path = { path = "crates/vt_path" }
+vt_powershell = { path = "crates/vt_powershell" }
+vt_select = { path = "crates/vt_select" }
+vt_shell = { path = "crates/vt_shell" }
+vt_str = { path = "crates/vt_str" }
+vt = { path = "crates/vt" }
+vt_bin = { path = "crates/vt_bin" }
+vt_client = { path = "crates/vt_client" }
+vt_client_napi = { path = "crates/vt_client_napi", artifact = "cdylib", target = "target" }
+vt_graph = { path = "crates/vt_graph" }
+vt_ipc_shared = { path = "crates/vt_ipc_shared" }
+vt_plan = { path = "crates/vt_plan" }
+vt_server = { path = "crates/vt_server" }
+vt_workspace = { path = "crates/vt_workspace" }
 vt100 = "0.16.2"
 wax = "0.7.0"
 which = "8.0.0"
@@ -179,7 +181,7 @@ ignored = [
   # These are artifact dependencies. They are not directly `use`d in Rust code.
   "fspy_preload_unix",
   "fspy_preload_windows",
-  "vite_task_client_napi",
+  "vt_client_napi",
 ]
 
 [profile.dev]

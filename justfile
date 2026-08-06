@@ -47,6 +47,9 @@ lint-linux:
 lint-windows:
   cargo-xwin clippy --workspace --all-targets --all-features --target x86_64-pc-windows-msvc -- --deny warnings
 
+benchmark-fspy:
+  cargo run --release -p fspy_benchmark
+
 [unix]
 doc:
   RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --document-private-items
