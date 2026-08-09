@@ -1,8 +1,5 @@
 mod with_argv;
 
-#[cfg(target_os = "linux")]
-use std::ffi::CString;
-
 use fspy_shared_unix::exec::ExecResolveConfig;
 use libc::{c_char, c_int};
 use with_argv::with_argv;
@@ -195,26 +192,30 @@ mod linux_only {
             reason = "suppresses unused warning on *::original"
         )]
         let _unused = execveat::original;
-        // SAFETY: dirfd and pathname come from the interposed execveat call.
+        let arena = sigsafe_alloc::arena();
+
+        // SAFETY: dirfd and pathname are valid arguments from the interposed execveat call.
         let path = unsafe { PathAt::borrow_raw(dirfd, pathname) };
-        let abs_path_result = path.to_absolute_path(|path| {
-            let Some(path) = path else {
-                return Ok(None);
-            };
-            Ok(Some(CString::new(&**path).unwrap()))
-        });
-        let abs_path = match abs_path_result {
+        let abs_path = match path.to_absolute_path(&arena) {
             Ok(None) => {
                 // SAFETY: forwarding the original arguments to the real execveat syscall
                 return unsafe { execveat::original()(dirfd, pathname, argv, envp, flags) };
             }
-            Ok(Some(path)) => path.as_ptr(),
+            Ok(Some(path)) => path,
             Err(errno) => {
                 errno.set();
                 return -1;
             }
         };
-        handle_exec(ExecResolveConfig::search_path_disabled(), abs_path, argv.cast(), envp.cast())
+
+        // `abs_path` is a C string, so the exec receives a terminated
+        // pointer by construction rather than by convention.
+        handle_exec(
+            ExecResolveConfig::search_path_disabled(),
+            abs_path.as_ptr(),
+            argv.cast(),
+            envp.cast(),
+        )
     }
 
     intercept!(fexecve(64): unsafe extern "C" fn(

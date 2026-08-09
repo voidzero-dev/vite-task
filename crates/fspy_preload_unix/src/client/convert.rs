@@ -1,7 +1,7 @@
 use std::ffi::CStr;
 
 use allocator_api2::{alloc::Allocator, vec::Vec};
-use bstr::{BStr, ByteSlice};
+use bstr::ByteSlice;
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int};
 use sigsafe::{AsRawFd as _, BorrowedFd, CWD};
@@ -24,7 +24,8 @@ fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Op
 }
 
 #[cfg(target_os = "linux")]
-const PROC_FD_PATH_CAPACITY: usize = b"/proc/self/fd/".len() + 11 + 1;
+const PROC_FD_PATH_CAPACITY: usize =
+    b"/proc/self/fd/".len() + <c_int as itoa::Integer>::MAX_STR_LEN + 1;
 
 #[cfg(target_os = "linux")]
 fn proc_fd_path<'buf>(
@@ -66,20 +67,38 @@ fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Op
 }
 
 pub trait ToAbsolutePath {
-    fn to_absolute_path<R, F: FnOnce(Option<&BStr>) -> nix::Result<R>>(
+    /// Resolves this argument to an absolute path allocated in `allocator`,
+    /// or borrowed from the argument itself when it is already absolute.
+    ///
+    /// The result is a C string so that callers forwarding it to an exec —
+    /// which needs a terminator — cannot be handed unterminated bytes;
+    /// [`as_bytes`] gives the path without the NUL.
+    ///
+    /// [`as_bytes`]: sigsafe::CStr::as_bytes
+    fn to_absolute_path<'a, A: Allocator>(
         self,
-        f: F,
-    ) -> nix::Result<R>;
+        allocator: &'a A,
+    ) -> nix::Result<Option<sigsafe::CStr<'a, sigsafe::Fat>>>
+    where
+        Self: 'a;
 }
 
 impl ToAbsolutePath for BorrowedFd<'_> {
-    fn to_absolute_path<R, F: FnOnce(Option<&BStr>) -> nix::Result<R>>(
+    fn to_absolute_path<'a, A: Allocator>(
         self,
-        f: F,
-    ) -> nix::Result<R> {
-        let arena = sigsafe_alloc::arena();
-        let path = get_fd_path(&arena, self)?;
-        f(path.as_ref().map(|path| path.as_slice().as_bstr()))
+        allocator: &'a A,
+    ) -> nix::Result<Option<sigsafe::CStr<'a, sigsafe::Fat>>>
+    where
+        Self: 'a,
+    {
+        let Some(mut path) = get_fd_path(allocator, self)? else {
+            return Ok(None);
+        };
+        path.push(0);
+        // SAFETY: a resolved descriptor path carries no interior NUL, and
+        // exactly one was appended above. The storage stays in `allocator`
+        // until it is dropped, which for a per-call arena ends the call.
+        Ok(Some(unsafe { sigsafe::CStr::from_bytes_with_nul_unchecked(path.leak()) }))
     }
 }
 
@@ -99,46 +118,48 @@ impl PathAt<'_, '_> {
 }
 
 impl ToAbsolutePath for PathAt<'_, '_> {
-    fn to_absolute_path<R, F: FnOnce(Option<&BStr>) -> nix::Result<R>>(
+    fn to_absolute_path<'a, A: Allocator>(
         self,
-        f: F,
-    ) -> nix::Result<R> {
-        let pathname = self.1.count().as_bytes().as_bstr();
+        allocator: &'a A,
+    ) -> nix::Result<Option<sigsafe::CStr<'a, sigsafe::Fat>>>
+    where
+        Self: 'a,
+    {
+        let counted = self.1.count();
+        let pathname = counted.as_bytes();
 
         if pathname.starts_with(b"/") {
-            f(Some(pathname))
+            // Already absolute, and already NUL-terminated by the caller.
+            Ok(Some(counted))
         } else {
-            self.0.to_absolute_path(|base| {
-                let Some(base) = base else {
-                    return f(None);
-                };
-                if pathname.is_empty() {
-                    return f(Some(base));
+            let Some(mut base) = get_fd_path(allocator, self.0)? else {
+                return Ok(None);
+            };
+            if !pathname.is_empty() {
+                if !base.ends_with(b"/") {
+                    base.push(b'/');
                 }
-
-                let arena = sigsafe_alloc::arena();
-                let needs_separator = !base.ends_with(b"/");
-                let mut abs_path = Vec::with_capacity_in(
-                    base.len() + usize::from(needs_separator) + pathname.len(),
-                    &arena,
-                );
-                abs_path.extend_from_slice(base);
-                if needs_separator {
-                    abs_path.push(b'/');
-                }
-                abs_path.extend_from_slice(pathname);
-                f(Some(abs_path.as_slice().as_bstr()))
-            })
+                base.extend_from_slice(pathname);
+            }
+            base.push(0);
+            // SAFETY: neither the directory nor the pathname carries an
+            // interior NUL — both come from C strings or the kernel — and
+            // exactly one was appended above. The storage stays in
+            // `allocator` until it is dropped.
+            Ok(Some(unsafe { sigsafe::CStr::from_bytes_with_nul_unchecked(base.leak()) }))
         }
     }
 }
 
 impl ToAbsolutePath for sigsafe::CStr<'_, sigsafe::Thin> {
-    fn to_absolute_path<R, F: FnOnce(Option<&BStr>) -> nix::Result<R>>(
+    fn to_absolute_path<'a, A: Allocator>(
         self,
-        f: F,
-    ) -> nix::Result<R> {
-        PathAt(CWD, self).to_absolute_path(f)
+        allocator: &'a A,
+    ) -> nix::Result<Option<sigsafe::CStr<'a, sigsafe::Fat>>>
+    where
+        Self: 'a,
+    {
+        PathAt(CWD, self).to_absolute_path(allocator)
     }
 }
 
