@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
 use std::ffi::CString;
 use std::{
-    ffi::{CStr, OsStr},
+    ffi::CStr,
     os::{fd::RawFd, unix::ffi::OsStrExt as _},
     path::PathBuf,
 };
@@ -71,13 +71,27 @@ impl ToAbsolutePath for PathAt {
         if pathname.first().copied() == Some(b'/') {
             f(pathname.into())
         } else {
-            let Some(mut abs_path) = get_fd_path(self.0)? else {
+            let Some(dir) = get_fd_path(self.0)? else {
                 return f(None);
             };
+            // Join `dir` and the relative `pathname` in a per-call bump
+            // arena instead of `PathBuf::push` on the global allocator. This
+            // runs on every fd-relative open/stat, including inside signal
+            // handlers and fork children, where the global allocator's locks
+            // are unsafe to take. The joined path only lives for the `f`
+            // call — nothing escapes the arena.
+            let arena = fspy_alloc::arena();
+            let mut joined = allocator_api2::vec::Vec::new_in(&arena);
+            joined.extend_from_slice(dir.as_os_str().as_bytes());
             if !pathname.is_empty() {
-                abs_path.push(OsStr::from_bytes(pathname));
+                // Mirror `PathBuf::push`: exactly one separator between the
+                // (absolute, non-empty) dir and the relative pathname.
+                if joined.last() != Some(&b'/') {
+                    joined.push(b'/');
+                }
+                joined.extend_from_slice(pathname);
             }
-            f(Some(abs_path.as_os_str().as_bytes().as_bstr()))
+            f(Some(joined.as_bstr()))
         }
     }
 }

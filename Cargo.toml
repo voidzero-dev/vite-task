@@ -39,6 +39,7 @@ multiple_crate_versions = "allow"
 future_not_send = "allow"
 
 [workspace.dependencies]
+allocator-api2 = { version = "0.2", default-features = false }
 artifact_profile = { path = "crates/artifact_profile" }
 anstream = "1.0.0"
 anyhow = "1.0.103"
@@ -51,6 +52,7 @@ bindgen = "0.72.1"
 bitflags = "2.10.0"
 brush-parser = "0.4.0"
 bstr = { version = "1.12.0", default-features = false, features = ["alloc", "std"] }
+bump-scope = { version = "2", default-features = false, features = ["allocator-api2-02"] }
 bumpalo = { version = "3.17.0", features = ["collections"] }
 bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
 cc = "1.2.39"
@@ -121,7 +123,7 @@ ref-cast = "1.0.24"
 regex = "1.11.3"
 rusqlite = "0.39.0"
 rustc-hash = "2.1.1"
-rustix = { version = "1", default-features = false, features = ["mm", "param"] }
+rustix = { version = "1", default-features = false, features = ["mm", "param", "use-libc-auxv"] }
 # SeccompAction::UserNotif (SECCOMP_RET_USER_NOTIF) was added after the latest published release (v0.5.0)
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "08587106340b8e3cb361c7561411510039436857" }
 serde = "1.0.219"

@@ -1,124 +1,147 @@
-//! Lock-free, async-signal-safe global allocator for the fspy preload library.
+//! Async-signal-safe allocation for the fspy preload library.
 //!
 //! The preload library interposes libc functions that POSIX declares
-//! async-signal-safe (`open`, `stat`, `execve`, ...). Programs may call these
-//! from signal handlers, and — more commonly — from the child of `fork()` in a
-//! multithreaded process, where only async-signal-safe calls are permitted:
-//! the libc allocator's locks may be held forever by threads that no longer
-//! exist after the fork. Routing the preload's Rust allocations through this
-//! allocator keeps them safe in both contexts:
+//! async-signal-safe (`open`, `stat`, `execve`, ...). Its code therefore runs
+//! inside signal handlers and in the child of `fork()` in a multithreaded
+//! process — contexts where taking libc malloc's locks can deadlock on a
+//! suspended or vanished lock holder, so the preload's own allocations must
+//! never go through libc malloc.
 //!
-//! - **No locks.** Every state transition is a lock-free compare-and-swap
-//!   loop: an attempt only retries because another running thread completed
-//!   its operation, so nothing ever waits on state that a thread which
-//!   vanished at `fork()` — or sits suspended under a signal handler — would
-//!   have to release. (Lock-free, not wait-free: an individual operation has
-//!   no fixed retry bound under active contention.)
-//! - **No thread-locals.** TLS first-touch allocates through libc malloc on
-//!   some platforms (macOS thread-local variables), which would reintroduce
-//!   the hazard this crate exists to remove.
-//! - **mmap-backed.** Memory comes straight from the kernel. On Linux the
-//!   allocator relies on nothing from libc: mapping syscalls are issued
-//!   directly (rustix's raw backend) and even the page size is discovered by
-//!   probing with raw syscalls. On macOS, which has no stable raw-syscall
-//!   ABI, calls go through the thin libSystem stubs. libc malloc is never
-//!   called anywhere.
-//!
-//! Design: power-of-two size classes (16 B ..= 64 KiB) carve blocks out of
-//! 1 MiB slabs; freed blocks recycle through a per-class Treiber free list
-//! made ABA-safe by a generation tag. Requests larger than the biggest class
-//! (or over-aligned beyond 4 KiB) map and unmap directly. See the `pool`
-//! module for the details.
-//!
-//! Because the allocator is a `const`-initialized static with no lazy setup,
-//! it works from the very first allocation in the process — even before the
-//! preload library's constructor runs.
+//! This crate stacks three layers, and exposes only the top one, [`arena`].
+//! `MmapAllocator` is the bottom: a stateless allocator where every
+//! allocation is a fresh anonymous mapping from the kernel. `ChunkPool`
+//! sits on top of it and caches fixed-size chunks, so that frequent short
+//! tracing calls can reuse memory instead of paying two syscalls per call.
+//! [`arena`] creates one `bump_scope::Bump` per intercepted call, drawing
+//! its chunks from the process-wide pool and returning them on drop.
 
+// Compile as an empty crate on non-unix targets: the allocator backs the
+// unix preload library.
+#![cfg(unix)]
 #![cfg_attr(not(test), no_std)]
 
-// Compile as an empty crate on non-unix targets: the allocator backs the unix
-// preload library. A Windows backend can be added alongside `sys::Mmap` if
-// the Windows preload ever needs one.
-
-#[cfg(unix)]
-mod class;
-#[cfg(unix)]
-mod mapping;
-#[cfg(unix)]
 mod mmap;
-#[cfg(unix)]
 mod pool;
-#[cfg(unix)]
-mod slab;
-#[cfg(unix)]
-mod sys;
 
-#[cfg(unix)]
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    ptr::{self, NonNull},
+use allocator_api2::alloc::Allocator;
+use bump_scope::{
+    Bump,
+    alloc::compat::AllocatorApi2V02Compat,
+    settings::{BumpAllocatorSettings, BumpSettings},
 };
+use mmap::MmapAllocator;
+use pool::ChunkPool;
 
-#[cfg(unix)]
-use crate::{mmap::Mmap, pool::Pool};
+/// Every cached chunk is 64 KiB: a whole multiple of the page size on all
+/// supported targets, and big enough that most intercepted calls fit their
+/// allocations into a single chunk.
+const CHUNK_SIZE: usize = 64 * 1024;
+/// The alignment chunks are allocated with. Must be at least the alignment
+/// `bump_scope::Bump` uses for its chunk requests — 16 (see
+/// [`MmapAllocator`]'s docs for the links). bump-scope does not export that
+/// constant, so the `bump_chunk_requests_fit_the_pool_gates` test pins the
+/// fit instead: it fails if a bump-scope upgrade ever requests chunks the
+/// pool would refuse.
+const CHUNK_ALIGN: usize = 16;
+/// At most this many chunks stay cached, capping retained memory at
+/// `SLOTS * CHUNK_SIZE` = 4 MiB.
+const SLOTS: usize = 64;
 
-/// A lock-free, async-signal-safe, fork-safe [`GlobalAlloc`] implementation.
-///
-/// Intended to be installed as the `#[global_allocator]` of the fspy preload
-/// library. All memory comes from anonymous mappings; libc malloc is never
-/// called, no locks are taken, and no thread-local state is used.
-///
-/// Capacity is bounded by design: each size class can hold at most 256 slabs
-/// of 1 MiB (roughly 200 MiB per class). Requests beyond that — far outside
-/// anything the preload library does — fail like any other out-of-memory
-/// condition (`alloc` returns null).
-#[cfg(unix)]
-pub struct FspyAlloc {
-    pool: Pool<Mmap>,
-}
+/// The process-wide chunk pool. `const`-initialized, so it works from the
+/// first allocation on — even before any constructor has run.
+static CHUNK_POOL: ChunkPool<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS> = ChunkPool::new();
 
-#[cfg(unix)]
-impl FspyAlloc {
-    /// Creates the allocator. `const` so it can back a `static` with no
-    /// runtime initialization.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self { pool: Pool::new() }
-    }
-}
-
-#[cfg(unix)]
-impl Default for FspyAlloc {
+/// `Bump::unallocated` requires its base allocator to implement `Default`
+/// (an arena without chunks has nowhere to store an allocator value, so it
+/// conjures one on first use). Point defaulted references at the
+/// process-wide pool. As an allocator, `&ChunkPool` already works through
+/// allocator-api2's blanket `impl Allocator for &A`.
+impl Default for &'static ChunkPool<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS> {
     fn default() -> Self {
-        Self::new()
+        &CHUNK_POOL
     }
 }
 
-// SAFETY: `Pool` hands out blocks that are non-null, at least `layout.size()`
-// bytes large, aligned to at least `layout.align()`, and exclusively owned
-// until returned via `dealloc`. Allocation failure is reported as null, and
-// none of the methods unwind.
-#[cfg(unix)]
-unsafe impl GlobalAlloc for FspyAlloc {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.pool.alloc(layout).map_or(ptr::null_mut(), NonNull::as_ptr)
+/// Creates a fresh bump arena for one intercepted call, backed by the
+/// process-wide chunk pool.
+///
+/// Creating the arena allocates nothing; the first allocation grabs a whole
+/// chunk — usually a recycled one, so most calls touch no syscalls at all.
+/// Deallocation only takes back the most recent allocation (bump-arena
+/// semantics); everything is freed at once when the arena is dropped, and
+/// its chunks go back to the pool.
+///
+/// The arena itself is single-owner — use one per call, do not share it
+/// across threads. Creating one is safe anywhere, any time: the pool
+/// underneath works in signal handlers and in the child of `fork()` (see
+/// `ChunkPool` and `MmapAllocator` in this crate's source for why).
+#[must_use]
+pub fn arena() -> impl Allocator {
+    // The default `Bump` settings, except the arena starts life without a
+    // chunk, so creating one allocates nothing.
+    type Settings = <BumpSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<false>;
+    Bump::<
+        AllocatorApi2V02Compat<&'static ChunkPool<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS>>,
+        Settings,
+    >::unallocated()
+}
+
+#[cfg(test)]
+mod tests {
+    use core::alloc::Layout;
+
+    use allocator_api2::alloc::Global;
+
+    use super::*;
+
+    /// Pins the fit between `Bump`'s chunk requests and the pool's gates
+    /// (alignment at most [`CHUNK_ALIGN`], size at most [`CHUNK_SIZE`]).
+    /// bump-scope keeps those request parameters private, so this test is
+    /// the enforcement: it fails if an upgrade ever changes them.
+    #[test]
+    fn bump_chunk_requests_fit_the_pool_gates() {
+        let pool = ChunkPool::<Global, CHUNK_SIZE, CHUNK_ALIGN, 4>::new_in(Global);
+        // `try_new_in` requests the first chunk right away; if that request
+        // were over-aligned or oversized, the pool would refuse and this
+        // would be an error.
+        let bump: Bump<AllocatorApi2V02Compat<&ChunkPool<Global, CHUNK_SIZE, CHUNK_ALIGN, 4>>> =
+            Bump::try_new_in(AllocatorApi2V02Compat(&pool)).unwrap();
+        let block = bump.allocate(Layout::from_size_align(100, 8).unwrap()).unwrap();
+        let block_addr = block.cast::<u8>().as_ptr().addr();
+        drop(bump);
+
+        // The chunk went back into the pool's cache (proving it was served
+        // as a chunk, not passed through): the next chunk-sized request
+        // returns the block's surroundings.
+        let recycled = pool.allocate(Layout::from_size_align(100, 8).unwrap()).unwrap();
+        assert_eq!(recycled.len(), CHUNK_SIZE);
+        let base = recycled.cast::<u8>().as_ptr().addr();
+        assert!((base..base + CHUNK_SIZE).contains(&block_addr));
+        // SAFETY: allocated above with a fitting layout.
+        unsafe { pool.deallocate(recycled.cast(), Layout::from_size_align(100, 8).unwrap()) };
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let Some(ptr) = NonNull::new(ptr) else { return };
-        // SAFETY: per the GlobalAlloc contract, `ptr` was returned by this
-        // allocator for this `layout`.
-        unsafe { self.pool.dealloc(ptr, layout) }
-    }
+    #[test]
+    #[cfg(not(miri))]
+    fn arena_allocates_and_returns_chunks_to_the_pool() {
+        let layout = Layout::from_size_align(100, 8).unwrap();
 
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        self.pool.alloc_zeroed(layout).map_or(ptr::null_mut(), NonNull::as_ptr)
-    }
+        let first_arena = arena();
+        let first = first_arena.allocate(layout).unwrap();
+        assert!(first.len() >= 100);
+        // SAFETY: fresh exclusive block of at least 100 bytes.
+        unsafe { first.cast::<u8>().as_ptr().write_bytes(0x5A, 100) };
+        let second = first_arena.allocate(layout).unwrap();
+        assert_ne!(first.cast::<u8>().as_ptr().addr(), second.cast::<u8>().as_ptr().addr());
+        let first_addr = first.cast::<u8>().as_ptr().addr();
+        // Everything dies at once; the chunk goes back to the pool.
+        drop(first_arena);
 
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let Some(ptr) = NonNull::new(ptr) else { return ptr::null_mut() };
-        // SAFETY: per the GlobalAlloc contract, `ptr` was returned by this
-        // allocator for this `layout`, and `new_size` is non-zero.
-        unsafe { self.pool.realloc(ptr, layout, new_size) }.map_or(ptr::null_mut(), NonNull::as_ptr)
+        // No other test touches the process-wide pool, so a new arena draws
+        // the same chunk back and its first allocation lands at the same
+        // address.
+        let second_arena = arena();
+        let again = second_arena.allocate(layout).unwrap();
+        assert_eq!(again.cast::<u8>().as_ptr().addr(), first_addr);
     }
 }

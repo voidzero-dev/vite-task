@@ -8,6 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [target.'cfg(unix)'.dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
 anyhow = { workspace = true }
 wincode = { workspace = true }
 bstr = { workspace = true, default-features = false }

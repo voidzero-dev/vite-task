@@ -1,211 +1,161 @@
-//! Kernel-backed [`Sys`] provider: anonymous mappings via direct syscalls.
-//!
-//! On Linux the provider relies on nothing from libc — rustix issues raw
-//! syscalls, and even the page size is discovered with raw syscalls (see
-//! [`page_size`]). macOS has no stable raw-syscall ABI, so calls go through
-//! the thin libSystem stubs there.
+//! Page-granularity allocator backed by anonymous memory mappings.
 
 use core::{
+    alloc::Layout,
     ptr::{self, NonNull},
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
+use allocator_api2::alloc::{AllocError, Allocator};
 use rustix::mm::{MapFlags, ProtFlags, mmap_anonymous, munmap};
 
-use crate::sys::Sys;
-
-/// Returns the kernel page size, or `None` when it cannot be determined.
+/// A stateless allocator: every allocation is a fresh anonymous mapping and
+/// every deallocation an `munmap`.
 ///
-/// On Linux the value is discovered with raw syscalls only — no libc, no
-/// `/proc`, no minimum kernel version (see [`query_page_size`]). On other
-/// unix platforms (macOS, where every syscall goes through libSystem by
-/// platform contract anyway) it comes from `sysconf` via rustix. Either
-/// way the result is a process constant, validated as a power of two and
-/// cached, so `map` and `unmap` can never disagree on rounding; an
-/// undeterminable page size fails the allocation rather than guessing.
-fn page_size() -> Option<usize> {
-    static CACHE: AtomicUsize = AtomicUsize::new(0);
-    let cached = CACHE.load(Ordering::Relaxed);
-    if cached != 0 {
-        return Some(cached);
-    }
-    let page = query_page_size()?;
-    if !page.is_power_of_two() {
-        return None;
-    }
-    // First store wins; every query returns the same value, so the cache
-    // only avoids repeated probing.
-    let _ = CACHE.compare_exchange(0, page, Ordering::Relaxed, Ordering::Relaxed);
-    Some(page)
+/// # Why it is safe in signal handlers and forked children
+///
+/// It holds no state at all — no locks, no free lists, no thread-locals;
+/// the kernel does all the bookkeeping. A signal or a `fork()` can never
+/// catch it holding a lock or a half-written structure, because there is
+/// nothing to hold. Mapping syscalls go straight to the kernel on Linux
+/// (rustix's raw backend) and through the thin libSystem wrappers on macOS.
+/// The page size comes from static process data (`getauxval` on Linux,
+/// `sysconf` on macOS) — no locks or allocation there either.
+///
+/// # What it accepts
+///
+/// The only intended caller is `bump_scope::Bump`, and `Bump` only ever
+/// asks its base allocator for chunks ([single call site][site]). Chunks
+/// are never zero-sized (a chunk always contains its own header), and
+/// their alignment is [`max(MIN_CHUNK_ALIGN, header alignment)`][chunk-align],
+/// [where `MIN_CHUNK_ALIGN` is 16][mca] — so 16 bytes in practice.
+///
+/// This allocator accepts more than that, because mapped memory gives the
+/// extra range away for free: any non-zero size, and any alignment up to
+/// the page size (mappings are always page-aligned). It refuses only two
+/// kinds of request, which would each need extra code and never happen:
+/// zero-sized layouts (they would need fake dangling blocks) and alignment
+/// above the page size (it would need mapping extra space and trimming the
+/// misaligned edges). The [`Allocator`] contract allows refusing any
+/// request; refused requests get [`AllocError`].
+///
+/// # Cost
+///
+/// Every allocation takes whole pages (4 KiB at least, 16 KiB on Apple
+/// silicon) and one syscall, and so does every deallocation. This
+/// allocator is meant to sit below a chunk pool and bump arenas, not to
+/// serve small allocations directly.
+///
+/// `allocate` returns the whole page-rounded block, and `bump_scope` [uses
+/// the full returned length][fit], so none of the page is wasted.
+///
+/// [mca]: https://docs.rs/bump-scope/2.3.3/src/bump_scope/chunk/size_config.rs.html#8
+/// [chunk-align]: https://docs.rs/bump-scope/2.3.3/src/bump_scope/chunk/size_config.rs.html#56-58
+/// [site]: https://docs.rs/bump-scope/2.3.3/src/bump_scope/raw_bump.rs.html#865
+/// [fit]: https://docs.rs/bump-scope/2.3.3/src/bump_scope/raw_bump.rs.html#873-884
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MmapAllocator;
+
+pub fn page_size() -> usize {
+    // getauxval on Linux, sysconf on macOS: reads of static process data —
+    // no locks, no allocation, valid from the first instruction on.
+    rustix::param::page_size()
 }
 
-/// Discovers the page size by probing, using nothing but raw syscalls.
-///
-/// `mprotect` fails with `EINVAL` unless its address is a multiple of the
-/// page size, so re-protecting a scratch mapping at increasing
-/// power-of-two offsets identifies the page size as the first offset the
-/// kernel accepts (for a power-of-two page size P, the first power of two
-/// P divides is P itself). A handful of syscalls, once per process:
-/// async-signal-safe, fork-safe, and independent of libc, `/proc`
-/// availability, and kernel version.
-///
-/// Why not `rustix::param::page_size()` here (it's fine on macOS)? On
-/// Linux the allocator must not rely on libc, which rules out rustix's
-/// `use-libc-auxv` (`getauxval`) configuration — and rustix's libc-free
-/// fallback is unusable *inside* a global allocator:
-///
-/// - Its lazy init tries `prctl(PR_GET_AUXV)` (kernel 6.4+ only) and
-///   otherwise reads `/proc/self/auxv`; with rustix's `alloc` feature
-///   enabled, that read path heap-allocates (`Vec`) — through *this*
-///   allocator, whose `map` is the caller waiting on the page size —
-///   recursing unboundedly. And we cannot pin `alloc` off: Cargo feature
-///   unification lets any other rustix user in the build graph enable it
-///   for our copy.
-/// - It panics on read errors, truncated auxv, or both sources being
-///   unavailable, where this allocator requires failure to surface as
-///   `None` (panic formatting itself allocates, re-entering the same
-///   uninitialized path).
-///
-/// The probe has neither problem: no allocation, no panic, no minimum
-/// kernel, and its worst case is `None`.
-#[cfg(target_os = "linux")]
-fn query_page_size() -> Option<usize> {
-    use rustix::mm::{MprotectFlags, mprotect};
-
-    /// Smallest page size of any Linux configuration; the probe starts
-    /// here.
-    const MIN_PROBE_PAGE: usize = 4096;
-    /// Generous upper bound for the probe; no supported configuration
-    /// uses larger pages.
-    const MAX_PROBE_PAGE: usize = 1 << 20;
-
-    // Large enough that every probe below stays inside the mapping even
-    // after the kernel rounds the one-byte length up to a full page.
-    let scratch = map_anonymous(2 * MAX_PROBE_PAGE)?;
-    let mut page = None;
-    let mut offset = MIN_PROBE_PAGE;
-    while offset <= MAX_PROBE_PAGE {
-        // SAFETY: `scratch + offset` (plus the page-rounded single byte)
-        // lies within the scratch mapping, which we exclusively own; the
-        // protection flags match the mapping's existing ones.
-        let accepted = unsafe {
-            mprotect(
-                scratch.as_ptr().add(offset).cast(),
-                1,
-                MprotectFlags::READ | MprotectFlags::WRITE,
+// SAFETY: returned blocks are non-null, page-aligned (at least
+// `layout.align()` for every served layout), at least `layout.size()` bytes
+// large (the returned length reports the exact mapped size), stay valid
+// until deallocated, and distinct allocations never overlap.
+unsafe impl Allocator for MmapAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let page = page_size();
+        // Outside the served request profile (see the type docs): refuse
+        // rather than carry an over-alignment or dangling-block code path.
+        if layout.size() == 0 || layout.align() > page {
+            return Err(AllocError);
+        }
+        // `checked_next_multiple_of` is total: `None` on overflow (already
+        // impossible — `Layout` caps sizes at `isize::MAX`) or a zero page
+        // size, with no power-of-two assumption to uphold.
+        let size = layout.size().checked_next_multiple_of(page).ok_or(AllocError)?;
+        // SAFETY: a fresh anonymous private mapping at no particular
+        // address has no memory-safety preconditions.
+        let ptr = unsafe {
+            mmap_anonymous(
+                ptr::null_mut(),
+                size,
+                ProtFlags::READ | ProtFlags::WRITE,
+                MapFlags::PRIVATE,
             )
         }
-        .is_ok();
-        if accepted {
-            page = Some(offset);
-            break;
-        }
-        offset *= 2;
-    }
-    // SAFETY: releasing the scratch mapping created above.
-    let _ = unsafe { munmap(scratch.as_ptr().cast(), 2 * MAX_PROBE_PAGE) };
-    page
-}
-
-#[cfg(not(target_os = "linux"))]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "must match the signature of the fallible Linux probe variant"
-)]
-fn query_page_size() -> Option<usize> {
-    Some(rustix::param::page_size())
-}
-
-const fn round_up(value: usize, align: usize) -> usize {
-    (value + align - 1) & !(align - 1)
-}
-
-fn map_anonymous(len: usize) -> Option<NonNull<u8>> {
-    // SAFETY: a fresh anonymous private mapping at no particular address
-    // has no memory-safety preconditions.
-    let ptr = unsafe {
-        mmap_anonymous(ptr::null_mut(), len, ProtFlags::READ | ProtFlags::WRITE, MapFlags::PRIVATE)
-    }
-    .ok()?;
-    NonNull::new(ptr.cast::<u8>())
-}
-
-/// Kernel-backed provider: anonymous mappings obtained through direct
-/// syscalls, alignment achieved by over-mapping and trimming.
-pub struct Mmap;
-
-impl Sys for Mmap {
-    fn map(size: usize, align: usize) -> Option<NonNull<u8>> {
-        debug_assert!(align.is_power_of_two());
-        let page = page_size()?;
-        let size = round_up(size.max(1), page);
-
-        if align <= page {
-            // Mapping results are aligned to the (verified real) page
-            // size.
-            return map_anonymous(size);
-        }
-
-        // Over-map by `align`, then unmap the misaligned head and the
-        // leftover tail. All cut points are page-aligned: `raw` and
-        // `aligned` are page-aligned, and `size`/`align` are multiples of
-        // the page size.
-        let raw = map_anonymous(size.checked_add(align)?)?;
-        let raw_addr = raw.as_ptr().addr();
-        let aligned_addr = round_up(raw_addr, align);
-        let head = aligned_addr - raw_addr;
-        let tail = align - head;
-        if head > 0 {
-            // SAFETY: `[raw_addr, raw_addr + head)` lies within the fresh
-            // mapping and `raw_addr` is page-aligned. Failure is
-            // impossible for a region we own; if it happened anyway the
-            // pages would merely stay mapped.
-            let _ = unsafe { munmap(raw.as_ptr().cast(), head) };
-        }
-        if tail > 0 {
-            let tail_start = raw.as_ptr().with_addr(aligned_addr + size);
-            // SAFETY: `[aligned_addr + size, raw_addr + size + align)`
-            // lies within the fresh mapping and its start is page-aligned
-            // (see above). Failure is impossible for a region we own.
-            let _ = unsafe { munmap(tail_start.cast(), tail) };
-        }
-        // `aligned_addr` lies inside a successful mapping and so can
-        // never be zero, but checked construction costs nothing here.
-        core::num::NonZero::new(aligned_addr).map(|addr| raw.with_addr(addr))
+        .map_err(|_| AllocError)?;
+        // Mapping results are page-aligned, which covers every served
+        // layout.
+        NonNull::new(ptr.cast::<u8>())
+            .map(|ptr| NonNull::slice_from_raw_parts(ptr, size))
+            .ok_or(AllocError)
     }
 
-    unsafe fn unmap(ptr: NonNull<u8>, size: usize, _align: usize) {
-        // A successful `map` proved the page size, so this cannot fail
-        // for a live mapping; if it somehow did, leaking the region is
-        // the only safe response.
-        let Some(page) = page_size() else { return };
-        // Whether or not `map` trimmed for alignment, the retained region
-        // is exactly `[ptr, ptr + round_up(size, page))`.
-        let size = round_up(size.max(1), page);
-        // SAFETY: caller contract — `ptr`/`size` describe a live mapping
-        // returned by `map`. Failure is impossible for a region we own.
+    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        // Fresh anonymous mappings are already zero-filled by the kernel.
+        self.allocate(layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // The contract lets callers pass any size that fits the block, i.e.
+        // anything in `[requested, mapped]`; every such size rounds up to
+        // the mapped length. Zero-sized blocks are never allocated, so no
+        // dangling pointers can arrive here. Rounding cannot fail for a
+        // layout that fits a block we mapped; leaking the region is the
+        // safe response if it somehow did.
+        let Some(size) = layout.size().checked_next_multiple_of(page_size()) else { return };
+        // SAFETY: caller contract — `ptr` was returned by `allocate` with a
+        // fitting layout and the block is no longer in use. Failure is
+        // impossible for a region we own.
         let _ = unsafe { munmap(ptr.as_ptr().cast(), size) };
     }
 }
 
 #[cfg(all(test, not(miri)))]
 mod tests {
-    use super::Mmap;
-    use crate::sys::Sys;
+    use super::*;
 
     #[test]
-    fn real_mappings_are_aligned_zeroed_and_writable() {
-        for (size, align) in [(1, 1), (4096, 4096), (100, 1 << 20), (5 << 20, 4096)] {
-            let ptr = Mmap::map(size, align).unwrap();
-            assert_eq!(ptr.as_ptr().addr() % align, 0, "align {align}");
-            for i in 0..size {
-                // SAFETY: fresh exclusive mapping of at least `size` bytes.
-                assert_eq!(unsafe { ptr.as_ptr().add(i).read() }, 0);
+    fn blocks_are_aligned_zeroed_and_page_rounded() {
+        for (size, align) in [(1, 1), (100, 64), (4096, 4096), (5 << 20, 8)] {
+            let layout = Layout::from_size_align(size, align).unwrap();
+            let block = MmapAllocator.allocate(layout).unwrap();
+            assert!(block.len() >= size, "size {size}");
+            assert_eq!(block.len() % page_size(), 0);
+            assert_eq!(block.cast::<u8>().as_ptr().addr() % align, 0, "align {align}");
+            for i in 0..block.len() {
+                // SAFETY: fresh exclusive block of `block.len()` bytes.
+                assert_eq!(unsafe { block.cast::<u8>().as_ptr().add(i).read() }, 0);
             }
-            // SAFETY: fresh exclusive mapping of at least `size` bytes.
-            unsafe { ptr.as_ptr().write_bytes(0x5A, size) };
-            // SAFETY: mapped above with the same size and alignment.
-            unsafe { Mmap::unmap(ptr, size, align) };
+            // SAFETY: fresh exclusive block of at least `size` bytes.
+            unsafe { block.cast::<u8>().as_ptr().write_bytes(0x5A, size) };
+            // SAFETY: allocated above; the layout fits the block.
+            unsafe { MmapAllocator.deallocate(block.cast(), layout) };
         }
+    }
+
+    #[test]
+    fn deallocate_accepts_any_fitting_size() {
+        let requested = Layout::from_size_align(100, 8).unwrap();
+        let block = MmapAllocator.allocate(requested).unwrap();
+        // Deallocate with the *returned* size instead of the requested one —
+        // both are within the fit range the contract allows.
+        let fitting = Layout::from_size_align(block.len(), 8).unwrap();
+        // SAFETY: allocated above; `fitting` is within the block's fit range.
+        unsafe { MmapAllocator.deallocate(block.cast(), fitting) };
+    }
+
+    #[test]
+    fn out_of_profile_requests_are_refused() {
+        // Zero-sized and over-page-aligned layouts are outside the served
+        // request profile and must fail cleanly, not misbehave.
+        let zero = Layout::from_size_align(0, 16).unwrap();
+        assert!(MmapAllocator.allocate(zero).is_err());
+        let over_aligned = Layout::from_size_align(64, 1 << 24).unwrap();
+        assert!(MmapAllocator.allocate(over_aligned).is_err());
     }
 }
