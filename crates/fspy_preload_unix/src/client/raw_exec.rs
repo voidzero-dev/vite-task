@@ -43,10 +43,17 @@ impl RawExec {
         mut strs: Vec<BString>,
         f: impl FnOnce(*const *const libc::c_char) -> R,
     ) -> R {
-        let mut ptr_vec = Vec::<*const libc::c_char>::with_capacity(strs.len() + 1);
+        // The pointer array exists only for the `f` call below, and building
+        // it must not go through libc malloc: exec runs in the child of
+        // `fork()` in multithreaded programs (`posix_spawn` forks then
+        // execs), where malloc's lock may be held by a thread that no longer
+        // exists. A per-call arena has exactly this lifetime, and hands back
+        // the memory when the call ends.
+        let arena = sigsafe::alloc::arena();
+        let mut ptr_vec = allocator_api2::vec::Vec::with_capacity_in(strs.len() + 1, &arena);
         for s in &mut strs {
             s.push(0);
-            ptr_vec.push(s.as_ptr().cast());
+            ptr_vec.push(s.as_ptr().cast::<libc::c_char>());
         }
         ptr_vec.push(null());
         f(ptr_vec.as_ptr())
