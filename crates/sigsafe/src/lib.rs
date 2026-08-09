@@ -14,10 +14,16 @@
 #![cfg(unix)]
 #![cfg_attr(not(test), no_std)]
 
+mod c_str;
 pub mod mm;
 pub mod param;
 
-pub use rustix::io::Errno;
+pub use c_str::{CStr, Thin};
+pub use rustix::{
+    fd::{AsRawFd, BorrowedFd},
+    fs::CWD,
+    io::Errno,
+};
 
 // Compile-time proof that rustix uses its raw-syscall backend (`linux_raw`)
 // on Linux — and with it, that no call in this crate goes through libc there.

@@ -1,11 +1,9 @@
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int, c_long};
+use sigsafe::BorrowedFd;
 
 use crate::{
-    client::{
-        convert::{Fd, PathAt},
-        handle_open,
-    },
+    client::{convert::PathAt, handle_open},
     macros::intercept,
 };
 
@@ -41,11 +39,13 @@ unsafe extern "C" fn syscall(syscall_no: c_long, mut args: ...) -> c_long {
         if pathname.is_null() {
             if flags & libc::AT_EMPTY_PATH != 0 {
                 // SAFETY: dirfd is provided by the statx syscall caller.
-                unsafe { handle_open(Fd(dirfd), AccessMode::READ) };
+                unsafe { handle_open(BorrowedFd::borrow_raw(dirfd), AccessMode::READ) };
             }
         } else {
             // SAFETY: pathname is a non-null C string pointer provided by the statx syscall caller.
-            unsafe { handle_open(PathAt(dirfd, pathname), AccessMode::READ) };
+            unsafe {
+                handle_open(PathAt::borrow_raw(dirfd, pathname), AccessMode::READ);
+            };
         }
     }
     // SAFETY: forwarding the syscall to the original libc syscall function with the extracted arguments

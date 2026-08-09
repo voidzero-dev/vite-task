@@ -28,7 +28,7 @@ type Mode = c_int;
 intercept!(open(64): unsafe extern "C" fn(*const c_char, c_int, args: ...) -> c_int);
 unsafe extern "C" fn open(path: *const c_char, flags: c_int, mut args: ...) -> c_int {
     // SAFETY: path is a valid C string pointer provided by the caller of the interposed function
-    unsafe { handle_open(path, OpenFlags(flags)) };
+    unsafe { handle_open(sigsafe::CStr::from_ptr(path), OpenFlags(flags)) };
     if has_mode_arg(flags) {
         // SAFETY: when O_CREAT or O_TMPFILE is set, a mode_t argument is required by the open() contract
         let mode: Mode = unsafe { args.next_arg() };
@@ -48,7 +48,7 @@ unsafe extern "C" fn openat(
     mut args: ...
 ) -> c_int {
     // SAFETY: dirfd and path are valid arguments provided by the caller of the interposed function
-    unsafe { handle_open(PathAt(dirfd, path), OpenFlags(flags)) };
+    unsafe { handle_open(PathAt::borrow_raw(dirfd, path), OpenFlags(flags)) };
 
     if has_mode_arg(flags) {
         // https://github.com/tailhook/openat/issues/21#issuecomment-535914957
@@ -67,7 +67,7 @@ intercept!(open_nocancel: unsafe extern "C" fn(*const c_char, c_int, ...) -> c_i
 #[cfg(target_os = "macos")]
 unsafe extern "C" fn open_nocancel(path: *const c_char, flags: c_int, mut args: ...) -> c_int {
     // SAFETY: path is a valid C string pointer provided by the caller of open$NOCANCEL
-    unsafe { handle_open(path, OpenFlags(flags)) };
+    unsafe { handle_open(sigsafe::CStr::from_ptr(path), OpenFlags(flags)) };
     if has_mode_arg(flags) {
         // SAFETY: O_CREAT requires a mode argument, matching the open$NOCANCEL contract
         let mode: Mode = unsafe { args.next_arg() };
@@ -89,7 +89,7 @@ unsafe extern "C" fn openat_nocancel(
     mut args: ...
 ) -> c_int {
     // SAFETY: dirfd and path are valid arguments provided by the caller of openat$NOCANCEL
-    unsafe { handle_open(PathAt(dirfd, path), OpenFlags(flags)) };
+    unsafe { handle_open(PathAt::borrow_raw(dirfd, path), OpenFlags(flags)) };
     if has_mode_arg(flags) {
         // SAFETY: O_CREAT requires a mode argument, matching the openat$NOCANCEL contract
         let mode: Mode = unsafe { args.next_arg() };
@@ -104,7 +104,7 @@ unsafe extern "C" fn openat_nocancel(
 intercept!(fopen(64): unsafe extern "C" fn(path: *const c_char, mode: *const c_char) -> *mut FILE);
 unsafe extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> *mut libc::FILE {
     // SAFETY: path and mode are valid C string pointers provided by the caller of the interposed function
-    unsafe { handle_open(path, ModeStr(mode)) };
+    unsafe { handle_open(sigsafe::CStr::from_ptr(path), ModeStr(mode)) };
     // SAFETY: calling the original libc fopen() with the same arguments forwarded from the interposed function
     unsafe { fopen::original()(path, mode) }
 }
@@ -116,7 +116,7 @@ unsafe extern "C" fn freopen(
     stream: *mut FILE,
 ) -> *mut FILE {
     // SAFETY: path and mode are valid C string pointers provided by the caller of the interposed function
-    unsafe { handle_open(path, ModeStr(mode)) };
+    unsafe { handle_open(sigsafe::CStr::from_ptr(path), ModeStr(mode)) };
     // SAFETY: calling the original libc freopen() with the same arguments forwarded from the interposed function
     unsafe { freopen::original()(path, mode, stream) }
 }

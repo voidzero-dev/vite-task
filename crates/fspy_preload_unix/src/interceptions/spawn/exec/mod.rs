@@ -195,15 +195,14 @@ mod linux_only {
             reason = "suppresses unused warning on *::original"
         )]
         let _unused = execveat::original;
-        // SAFETY: PathAt wraps a valid dirfd and pathname pointer from the interposed execveat call
-        let abs_path_result = unsafe {
-            PathAt(dirfd, pathname).to_absolute_path(|path| {
-                let Some(path) = path else {
-                    return Ok(None);
-                };
-                Ok(Some(CString::new(&**path).unwrap()))
-            })
-        };
+        // SAFETY: dirfd and pathname come from the interposed execveat call.
+        let path = unsafe { PathAt::borrow_raw(dirfd, pathname) };
+        let abs_path_result = path.to_absolute_path(|path| {
+            let Some(path) = path else {
+                return Ok(None);
+            };
+            Ok(Some(CString::new(&**path).unwrap()))
+        });
         let abs_path = match abs_path_result {
             Ok(None) => {
                 // SAFETY: forwarding the original arguments to the real execveat syscall

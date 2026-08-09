@@ -79,9 +79,8 @@ jobs:
         if: github.event_name == 'pull_request'
         working-directory: ${{ env.BASE_DIR }}
         env:
-          # Share the head build's target directory: the crates.io graph is
-          # fingerprinted by package and profile, not by workspace, so only the
-          # fspy path crates build twice.
+          # Share the head build's target directory so registry dependencies
+          # only build once. Workspace artifacts are removed below.
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: |
           # Both fspy revisions must be measured by identical code, and the
@@ -94,6 +93,9 @@ jobs:
           exe=""
           [[ "$RUNNER_OS" == "Windows" ]] && exe=.exe
           cp "$CARGO_TARGET_DIR/release/fspy_benchmark_launcher$exe" "$RUNNER_TEMP/fspy-base-launcher$exe"
+          # A baseline worktree created after the head can leave newer
+          # workspace artifacts that Cargo considers fresh for the head.
+          cargo clean --release --workspace
 
       - name: Run benchmark
         run: |

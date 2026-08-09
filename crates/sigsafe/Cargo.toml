@@ -8,7 +8,7 @@ publish = false
 doctest = false
 
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true }
+rustix = { workspace = true, features = ["fs"] }
 
 # On Linux the page size is probed from the kernel directly (see param.rs);
 # rustix's `param` is only needed where sysconf is the platform interface.

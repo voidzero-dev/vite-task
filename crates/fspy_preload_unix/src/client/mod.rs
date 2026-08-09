@@ -109,15 +109,12 @@ impl Client {
     ) -> anyhow::Result<()> {
         // SAFETY: mode contains a valid pointer (if ModeStr) or a plain value, as provided by the caller
         let mode = unsafe { mode.to_access_mode() };
-        // SAFETY: path contains valid pointers to C strings/file descriptors, as provided by the caller
-        let () = unsafe {
-            path.to_absolute_path(|abs_path| {
-                let Some(abs_path) = abs_path else {
-                    return Ok(Ok(()));
-                };
-                Ok(self.send(mode, Path::new(OsStr::from_bytes(abs_path))))
-            })
-        }??;
+        let () = path.to_absolute_path(|abs_path| {
+            let Some(abs_path) = abs_path else {
+                return Ok(Ok(()));
+            };
+            Ok(self.send(mode, Path::new(OsStr::from_bytes(abs_path))))
+        })??;
 
         Ok(())
     }
