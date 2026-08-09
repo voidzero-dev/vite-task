@@ -1,0 +1,14 @@
+[package]
+name = "fspy_alloc"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
+
+[lints]
+workspace = true

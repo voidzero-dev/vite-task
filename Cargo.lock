@@ -1244,6 +1244,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fspy_alloc"
+version = "0.0.0"
+dependencies = [
+ "rustix",
+]
+
+[[package]]
 name = "fspy_benchmark"
 version = "0.0.0"
 dependencies = [
@@ -1299,6 +1306,7 @@ dependencies = [
  "artifact_profile",
  "bstr",
  "ctor",
+ "fspy_alloc",
  "fspy_shared",
  "fspy_shared_unix",
  "libc",
