@@ -11,6 +11,8 @@ mod mac;
 
 #[cfg(target_os = "linux")]
 use linux as imp;
+#[cfg(target_os = "linux")]
+pub use linux::readlink;
 #[cfg(target_os = "macos")]
 use mac as imp;
 

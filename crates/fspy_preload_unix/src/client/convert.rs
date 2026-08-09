@@ -1,10 +1,6 @@
-#[cfg(target_os = "linux")]
-use std::ffi::CString;
-use std::{
-    ffi::{CStr, OsStr},
-    os::{fd::RawFd, unix::ffi::OsStrExt as _},
-    path::PathBuf,
-};
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStrExt as _;
+use std::{ffi::CStr, os::fd::RawFd};
 
 use allocator_api2::{alloc::Allocator, vec::Vec};
 use bstr::{BStr, ByteSlice};
@@ -12,16 +8,53 @@ use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int};
 
 #[cfg(target_os = "linux")]
-fn get_fd_path(fd: RawFd) -> nix::Result<Option<PathBuf>> {
-    match nix::fcntl::readlink(CString::new(format!("/proc/self/fd/{fd}")).unwrap().as_c_str()) {
-        Ok(path) => Ok(Some(path.into())),
-        Err(nix::Error::EBADF | nix::Error::ENOENT) => Ok(None), // invalid fd or no such file (Most likely a stdio fd)
-        Err(e) => Err(e),
+fn get_fd_path<A: Allocator>(fd: RawFd, allocator: A) -> nix::Result<Option<Vec<u8, A>>> {
+    let mut path = [0; PROC_FD_PATH_CAPACITY];
+    let path = proc_fd_path(fd, &mut path);
+    match sigsafe_alloc::fs::readlink(allocator, path) {
+        Ok(path) => Ok(Some(path)),
+        Err(sigsafe::Errno::BADF | sigsafe::Errno::NOENT) => Ok(None),
+        Err(errno) => Err(nix::errno::Errno::from_raw(errno.raw_os_error())),
     }
 }
 
+#[cfg(target_os = "linux")]
+const PROC_FD_PATH_CAPACITY: usize = b"/proc/self/fd/".len() + 11 + 1;
+
+#[cfg(target_os = "linux")]
+fn proc_fd_path(
+    fd: RawFd,
+    buf: &mut [u8; PROC_FD_PATH_CAPACITY],
+) -> sigsafe::CStr<'_, sigsafe::Thin> {
+    const PREFIX: &[u8] = b"/proc/self/fd/";
+
+    let mut digits = [0; 11];
+    let mut start = digits.len();
+    let mut value = fd.unsigned_abs();
+    loop {
+        start -= 1;
+        digits[start] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    if fd.is_negative() {
+        start -= 1;
+        digits[start] = b'-';
+    }
+
+    buf[..PREFIX.len()].copy_from_slice(PREFIX);
+    let end = PREFIX.len() + digits.len() - start;
+    buf[PREFIX.len()..end].copy_from_slice(&digits[start..]);
+    buf[end] = 0;
+
+    // SAFETY: the initialized prefix ends in NUL and lives as long as `buf`.
+    unsafe { sigsafe::CStr::from_ptr(buf.as_ptr().cast()) }
+}
+
 #[cfg(target_os = "macos")]
-fn get_fd_path(fd: RawFd) -> nix::Result<Option<PathBuf>> {
+fn get_fd_path(fd: RawFd) -> nix::Result<Option<std::path::PathBuf>> {
     let mut path = std::path::PathBuf::new();
     match nix::fcntl::fcntl(
         // SAFETY: fd is a valid file descriptor provided by the caller, and the borrow does not outlive this function call
@@ -59,8 +92,18 @@ impl ToAbsolutePath for Fd {
             return f(Some(path.as_slice().as_bstr()));
         }
 
-        let path = get_fd_path(self.0)?;
-        f(path.as_ref().map(|path| path.as_os_str().as_bytes().as_bstr()))
+        #[cfg(target_os = "linux")]
+        {
+            let arena = sigsafe_alloc::arena();
+            let path = get_fd_path(self.0, &arena)?;
+            f(path.as_ref().map(|path| path.as_slice().as_bstr()))
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let path = get_fd_path(self.0)?;
+            f(path.as_ref().map(|path| path.as_os_str().as_bytes().as_bstr()))
+        }
     }
 }
 
@@ -76,24 +119,31 @@ impl ToAbsolutePath for PathAt {
 
         if pathname.first().copied() == Some(b'/') {
             f(pathname.into())
-        } else if self.0 == libc::AT_FDCWD {
-            let arena = sigsafe_alloc::arena();
-            let mut abs_path = getcwd(&arena)?;
-            if !pathname.is_empty() {
-                if !abs_path.ends_with(b"/") {
-                    abs_path.push(b'/');
-                }
-                abs_path.extend_from_slice(pathname);
-            }
-            f(Some(abs_path.as_slice().as_bstr()))
         } else {
-            let Some(mut abs_path) = get_fd_path(self.0)? else {
-                return f(None);
-            };
-            if !pathname.is_empty() {
-                abs_path.push(OsStr::from_bytes(pathname));
+            // SAFETY: delegates the same caller-provided descriptor to Fd.
+            unsafe {
+                Fd(self.0).to_absolute_path(|base| {
+                    let Some(base) = base else {
+                        return f(None);
+                    };
+                    if pathname.is_empty() {
+                        return f(Some(base));
+                    }
+
+                    let arena = sigsafe_alloc::arena();
+                    let needs_separator = !base.ends_with(b"/");
+                    let mut abs_path = Vec::with_capacity_in(
+                        base.len() + usize::from(needs_separator) + pathname.len(),
+                        &arena,
+                    );
+                    abs_path.extend_from_slice(base);
+                    if needs_separator {
+                        abs_path.push(b'/');
+                    }
+                    abs_path.extend_from_slice(pathname);
+                    f(Some(abs_path.as_slice().as_bstr()))
+                })
             }
-            f(Some(abs_path.as_os_str().as_bytes().as_bstr()))
         }
     }
 }

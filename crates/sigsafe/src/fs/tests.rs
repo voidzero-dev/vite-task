@@ -25,3 +25,15 @@ fn getcwd_returns_current_directory() {
 fn getcwd_rejects_an_empty_buffer() {
     assert!(matches!(getcwd(&mut []), Err(Errno::RANGE)));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn readlink_returns_the_initialized_target() {
+    let mut buf = [MaybeUninit::uninit(); super::PATH_MAX];
+    // SAFETY: the literal is NUL-terminated and lives for the call.
+    let path = unsafe { crate::CStr::<crate::Thin>::from_ptr(c"/proc/self/exe".as_ptr()) };
+
+    let target = super::readlink(path, &mut buf).unwrap();
+
+    assert_eq!(target, std::fs::read_link("/proc/self/exe").unwrap().as_os_str().as_bytes());
+}
