@@ -6,8 +6,7 @@ use core::{
 };
 
 use allocator_api2::alloc::{AllocError, Allocator};
-
-use crate::{
+use sigsafe::{
     mm::{MapFlags, ProtFlags, mmap_anonymous, munmap},
     param::page_size,
 };
@@ -21,7 +20,7 @@ use crate::{
 /// the kernel does all the bookkeeping. A signal or a `fork()` can never
 /// catch it holding a lock or a half-written structure, because there is
 /// nothing to hold. The mapping calls and the page-size read come from
-/// [`crate::mm`] and [`crate::param`], which carry the same guarantee (see
+/// [`sigsafe::mm`] and [`sigsafe::param`], which carry the same guarantee (see
 /// their docs).
 ///
 /// # What it accepts

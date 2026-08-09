@@ -14,7 +14,6 @@
 #![cfg(unix)]
 #![cfg_attr(not(test), no_std)]
 
-pub mod alloc;
 pub mod mm;
 pub mod param;
 

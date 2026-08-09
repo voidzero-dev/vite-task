@@ -1313,7 +1313,7 @@ dependencies = [
  "fspy_shared_unix",
  "libc",
  "nix 0.31.2",
- "sigsafe",
+ "sigsafe_alloc",
  "wincode",
 ]
 
@@ -3443,9 +3443,16 @@ dependencies = [
 name = "sigsafe"
 version = "0.0.0"
 dependencies = [
+ "rustix",
+]
+
+[[package]]
+name = "sigsafe_alloc"
+version = "0.0.0"
+dependencies = [
  "allocator-api2",
  "bump-scope",
- "rustix",
+ "sigsafe",
 ]
 
 [[package]]

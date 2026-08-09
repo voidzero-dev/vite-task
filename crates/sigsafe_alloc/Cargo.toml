@@ -1,0 +1,21 @@
+[package]
+name = "sigsafe_alloc"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[target.'cfg(unix)'.dependencies]
+allocator-api2 = { workspace = true }
+bump-scope = { workspace = true }
+sigsafe = { workspace = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+# The `alloc` feature provides `Global`, letting tests run the pool against
+# the host allocator (and thus under Miri).
+allocator-api2 = { workspace = true, features = ["alloc"] }
+
+[lints]
+workspace = true
