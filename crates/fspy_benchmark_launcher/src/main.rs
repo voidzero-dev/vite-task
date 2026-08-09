@@ -22,28 +22,42 @@ const MISSING_PATH: &str = "/.fspy-benchmark-missing";
 #[cfg(windows)]
 const MISSING_PATH: &str = r"C:\.fspy-benchmark-missing";
 
+/// With `--relative`, the target opens this bare name from the filesystem
+/// root instead, driving the tracker's relative-path lane: it must resolve
+/// the working directory and join the two. Root as the working directory
+/// makes the joined result exactly [`MISSING_PATH`], so validation checks
+/// the same captured path in both modes.
+const MISSING_RELATIVE_PATH: &str = ".fspy-benchmark-missing";
+#[cfg(unix)]
+const ROOT_DIR: &str = "/";
+#[cfg(windows)]
+const ROOT_DIR: &str = r"C:\";
+
 fn main() {
     let mut args = env::args_os().skip(1).collect::<Vec<_>>();
-    let mode = match args.first().map(OsString::as_os_str) {
-        Some(arg) if arg == "--untracked" => {
-            args.remove(0);
-            Mode::Untracked
+    let mut mode = Mode::Tracked;
+    let mut relative = false;
+    while let Some(flag) = args.first().map(OsString::as_os_str) {
+        if flag == "--untracked" {
+            mode = Mode::Untracked;
+        } else if flag == "--validate" {
+            mode = Mode::Validate;
+        } else if flag == "--relative" {
+            relative = true;
+        } else {
+            break;
         }
-        Some(arg) if arg == "--validate" => {
-            args.remove(0);
-            Mode::Validate
-        }
-        _ => Mode::Tracked,
-    };
+        args.remove(0);
+    }
     let (target, target_args) =
-        args.split_first().expect("usage: fspy_benchmark_launcher [MODE] TARGET ARGS...");
+        args.split_first().expect("usage: fspy_benchmark_launcher [FLAGS] TARGET ARGS...");
 
     let runtime = Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
     runtime.block_on(async {
         match mode {
-            Mode::Tracked => report(run_tracked(target, target_args).await).await,
-            Mode::Untracked => report(run_untracked(target, target_args).await).await,
-            Mode::Validate => validate(target, target_args).await,
+            Mode::Tracked => report(run_tracked(target, target_args, relative).await).await,
+            Mode::Untracked => report(run_untracked(target, target_args, relative).await).await,
+            Mode::Validate => validate(target, target_args, relative).await,
         }
     });
 }
@@ -62,14 +76,17 @@ struct Launch {
 /// Times the launch from just before the spawn to just after the wait, so
 /// that a tracked launch covers session setup, injection, and teardown, and
 /// nothing of this launcher's own startup.
-async fn run_tracked(target: &OsString, target_args: &[OsString]) -> Launch {
+async fn run_tracked(target: &OsString, target_args: &[OsString], relative: bool) -> Launch {
     let mut command = Command::new(target);
     command
         .args(target_args)
-        .arg(MISSING_PATH)
+        .arg(if relative { MISSING_RELATIVE_PATH } else { MISSING_PATH })
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
+    if relative {
+        command.current_dir(ROOT_DIR);
+    }
     let start = Instant::now();
     let mut child = command
         .spawn(CancellationToken::new())
@@ -86,14 +103,17 @@ async fn run_tracked(target: &OsString, target_args: &[OsString]) -> Launch {
     Launch { wall_nanos, stdout }
 }
 
-async fn run_untracked(target: &OsString, target_args: &[OsString]) -> Launch {
+async fn run_untracked(target: &OsString, target_args: &[OsString], relative: bool) -> Launch {
     let mut command = tokio::process::Command::new(target);
     command
         .args(target_args)
-        .arg(MISSING_PATH)
+        .arg(if relative { MISSING_RELATIVE_PATH } else { MISSING_PATH })
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
+    if relative {
+        command.current_dir(ROOT_DIR);
+    }
     let start = Instant::now();
     let mut child = command.spawn().expect("failed to spawn untracked benchmark target");
     let stdout = child.stdout.take().expect("untracked benchmark target has no stdout");
@@ -117,14 +137,20 @@ async fn report(mut launch: Launch) {
 
 /// Runs the target tracked and asserts that its accesses were captured, so
 /// that the harness never benchmarks tracking that silently stopped working.
-async fn validate(target: &OsString, target_args: &[OsString]) {
+/// In relative mode the captured path must come out identical — the tracker
+/// resolves the root working directory and joins the bare name back into
+/// [`MISSING_PATH`] — so the assertion below covers both modes.
+async fn validate(target: &OsString, target_args: &[OsString], relative: bool) {
     let mut command = Command::new(target);
     command
         .args(target_args)
-        .arg(MISSING_PATH)
+        .arg(if relative { MISSING_RELATIVE_PATH } else { MISSING_PATH })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
+    if relative {
+        command.current_dir(ROOT_DIR);
+    }
     let termination = command
         .spawn(CancellationToken::new())
         .await

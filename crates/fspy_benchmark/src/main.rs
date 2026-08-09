@@ -51,6 +51,10 @@ struct Suite {
     /// Unmeasured iterations run first, to fill caches and settle the runner.
     warmup: usize,
     metric: Metric,
+    /// Whether the target opens a relative path (the launcher's
+    /// `--relative`), driving the tracker's working-directory resolution and
+    /// path joining instead of the borrow-only absolute lane.
+    relative: bool,
 }
 
 /// Opens nothing, so the whole launch is the cost of starting a tracked
@@ -62,12 +66,30 @@ const LAUNCH_SUITE: Suite = Suite {
     iterations: if cfg!(windows) { 150 } else { 300 },
     warmup: 5,
     metric: Metric::Wall,
+    relative: false,
 };
 
 /// Opens timed from inside the target, so they price interception rather than
-/// the launch around it.
-const ACCESS_SUITE: Suite =
-    Suite { name: "access", opens: "2048", iterations: 102, warmup: 3, metric: Metric::Typical };
+/// the launch around it. The absolute path takes the tracker's borrow-only
+/// lane; the relative variant prices working-directory resolution and path
+/// joining on top.
+const ACCESS_SUITE: Suite = Suite {
+    name: "access",
+    opens: "2048",
+    iterations: 102,
+    warmup: 3,
+    metric: Metric::Typical,
+    relative: false,
+};
+
+const RELATIVE_ACCESS_SUITE: Suite = Suite {
+    name: "access-relative",
+    opens: "2048",
+    iterations: 102,
+    warmup: 3,
+    metric: Metric::Typical,
+    relative: true,
+};
 
 struct Backend {
     name: &'static str,
@@ -86,11 +108,13 @@ fn main() {
     let backends = [Backend { name: "dynamic", target: DYNAMIC_TARGET }];
 
     for backend in &backends {
-        validate(HEAD_LAUNCHER.as_ref(), backend.target);
-        if let Some(base_launcher) = &base_launcher {
-            validate(base_launcher, backend.target);
+        for relative in [false, true] {
+            validate(HEAD_LAUNCHER.as_ref(), backend.target, relative);
+            if let Some(base_launcher) = &base_launcher {
+                validate(base_launcher, backend.target, relative);
+            }
         }
-        for suite in [&LAUNCH_SUITE, &ACCESS_SUITE] {
+        for suite in [&LAUNCH_SUITE, &ACCESS_SUITE, &RELATIVE_ACCESS_SUITE] {
             run_suite(backend, suite, base_launcher.as_deref());
         }
     }
@@ -209,6 +233,9 @@ fn launch(launcher: &OsStr, mode: Option<&str>, backend: &Backend, suite: &Suite
     if let Some(mode) = mode {
         command.arg(mode);
     }
+    if suite.relative {
+        command.arg("--relative");
+    }
     let output = command
         .args([backend.target, THREADS, suite.opens])
         .stdin(Stdio::null())
@@ -228,9 +255,13 @@ fn launch(launcher: &OsStr, mode: Option<&str>, backend: &Backend, suite: &Suite
     }
 }
 
-fn validate(launcher: &OsStr, target: &str) {
-    let status = Command::new(launcher)
-        .arg("--validate")
+fn validate(launcher: &OsStr, target: &str, relative: bool) {
+    let mut command = Command::new(launcher);
+    command.arg("--validate");
+    if relative {
+        command.arg("--relative");
+    }
+    let status = command
         .arg(target)
         // One thread opening one batch: the count matches the target's
         // OPENS_PER_SAMPLE. Fewer would open nothing, which validation
