@@ -6,16 +6,13 @@ use std::{
     path::PathBuf,
 };
 
+use allocator_api2::{alloc::Allocator, vec::Vec};
 use bstr::{BStr, ByteSlice};
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int};
-use nix::unistd::getcwd;
 
 #[cfg(target_os = "linux")]
 fn get_fd_path(fd: RawFd) -> nix::Result<Option<PathBuf>> {
-    if fd == libc::AT_FDCWD {
-        return Ok(Some(getcwd()?));
-    }
     match nix::fcntl::readlink(CString::new(format!("/proc/self/fd/{fd}")).unwrap().as_c_str()) {
         Ok(path) => Ok(Some(path.into())),
         Err(nix::Error::EBADF | nix::Error::ENOENT) => Ok(None), // invalid fd or no such file (Most likely a stdio fd)
@@ -25,9 +22,6 @@ fn get_fd_path(fd: RawFd) -> nix::Result<Option<PathBuf>> {
 
 #[cfg(target_os = "macos")]
 fn get_fd_path(fd: RawFd) -> nix::Result<Option<PathBuf>> {
-    if fd == libc::AT_FDCWD {
-        return Ok(Some(getcwd()?));
-    }
     let mut path = std::path::PathBuf::new();
     match nix::fcntl::fcntl(
         // SAFETY: fd is a valid file descriptor provided by the caller, and the borrow does not outlive this function call
@@ -40,6 +34,12 @@ fn get_fd_path(fd: RawFd) -> nix::Result<Option<PathBuf>> {
     }
 }
 
+fn getcwd<A: Allocator>(allocator: A) -> nix::Result<Vec<u8, A>> {
+    let bytes = sigsafe_alloc::fs::getcwd(allocator)
+        .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
+        .into_bytes();
+    Ok(bytes)
+}
 pub trait ToAbsolutePath {
     unsafe fn to_absolute_path<R, F: FnOnce(Option<&BStr>) -> nix::Result<R>>(
         self,
@@ -53,8 +53,14 @@ impl ToAbsolutePath for Fd {
         self,
         f: F,
     ) -> nix::Result<R> {
+        if self.0 == libc::AT_FDCWD {
+            let arena = sigsafe_alloc::arena();
+            let path = getcwd(&arena)?;
+            return f(Some(path.as_slice().as_bstr()));
+        }
+
         let path = get_fd_path(self.0)?;
-        f(path.as_ref().map(|p| p.as_os_str().as_bytes().as_bstr()))
+        f(path.as_ref().map(|path| path.as_os_str().as_bytes().as_bstr()))
     }
 }
 
@@ -70,6 +76,16 @@ impl ToAbsolutePath for PathAt {
 
         if pathname.first().copied() == Some(b'/') {
             f(pathname.into())
+        } else if self.0 == libc::AT_FDCWD {
+            let arena = sigsafe_alloc::arena();
+            let mut abs_path = getcwd(&arena)?;
+            if !pathname.is_empty() {
+                if !abs_path.ends_with(b"/") {
+                    abs_path.push(b'/');
+                }
+                abs_path.extend_from_slice(pathname);
+            }
+            f(Some(abs_path.as_slice().as_bstr()))
         } else {
             let Some(mut abs_path) = get_fd_path(self.0)? else {
                 return f(None);

@@ -14,6 +14,8 @@
 #![cfg(unix)]
 #![cfg_attr(not(test), no_std)]
 
+mod c_string;
+pub mod fs;
 mod mmap;
 mod pool;
 
@@ -23,6 +25,7 @@ use bump_scope::{
     alloc::compat::AllocatorApi2V02Compat,
     settings::{BumpAllocatorSettings, BumpSettings},
 };
+pub use c_string::CString;
 use mmap::MmapAllocator;
 use pool::ChunkPool;
 
