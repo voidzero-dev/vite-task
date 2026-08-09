@@ -9,13 +9,16 @@ use std::{
 use bstr::{BStr, ByteSlice};
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int};
-use nix::unistd::getcwd;
 use sigsafe::{AsRawFd as _, BorrowedFd, CWD};
 
 #[cfg(target_os = "linux")]
 fn get_fd_path(fd: BorrowedFd<'_>) -> nix::Result<Option<PathBuf>> {
     if fd.as_raw_fd() == CWD.as_raw_fd() {
-        return Ok(Some(getcwd()?));
+        let arena = sigsafe_alloc::arena();
+        let path = sigsafe_alloc::fs::getcwd(&arena)
+            .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
+            .into_bytes();
+        return Ok(Some(OsStr::from_bytes(&path).into()));
     }
     match nix::fcntl::readlink(
         CString::new(format!("/proc/self/fd/{}", fd.as_raw_fd())).unwrap().as_c_str(),
@@ -29,8 +32,13 @@ fn get_fd_path(fd: BorrowedFd<'_>) -> nix::Result<Option<PathBuf>> {
 #[cfg(target_os = "macos")]
 fn get_fd_path(fd: BorrowedFd<'_>) -> nix::Result<Option<PathBuf>> {
     if fd.as_raw_fd() == CWD.as_raw_fd() {
-        return Ok(Some(getcwd()?));
+        let arena = sigsafe_alloc::arena();
+        let path = sigsafe_alloc::fs::getcwd(&arena)
+            .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
+            .into_bytes();
+        return Ok(Some(OsStr::from_bytes(&path).into()));
     }
+
     let mut path = std::path::PathBuf::new();
     // SAFETY: this std view has the same descriptor and lifetime as the
     // rustix view accepted by this function.

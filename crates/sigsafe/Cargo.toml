@@ -10,6 +10,9 @@ doctest = false
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }
+
 # On Linux the page size is probed from the kernel directly (see param.rs);
 # rustix's `param` is only needed where sysconf is the platform interface.
 [target.'cfg(all(unix, not(target_os = "linux")))'.dependencies]
@@ -19,6 +22,7 @@ rustix = { workspace = true, features = ["param"] }
 # item to reference; `runtime` is the module that has one.
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { workspace = true, features = ["runtime"] }
+syscalls = { workspace = true }
 
 # Cross-validates the page-size probe against rustix's auxv-based answer.
 [target.'cfg(target_os = "linux")'.dev-dependencies]

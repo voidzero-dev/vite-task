@@ -16,11 +16,11 @@ Most of libc is off limits in those places. `malloc` is the classic trap: a sign
 
 Every function in this crate follows three rules:
 
-1. **Syscalls only.** On Linux, nothing goes through libc — the syscall instructions are emitted directly (rustix's raw backend). On macOS there is no stable syscall interface, so calls go through libSystem's wrappers; for the calls exposed here those are thin stubs with no locks and no state.
+1. **Async-signal-safe operations only.** On Linux, kernel calls use raw syscalls. The compiler may lower ordinary memory operations to POSIX async-signal-safe libc routines such as `strlen`. On macOS there is no stable syscall interface, so calls go through libSystem's wrappers; for the calls exposed here those are thin stubs with no locks and no state.
 2. **No locks, no hidden state.** Nothing a signal or a `fork()` could catch locked or half-written. Where shared state is unavoidable it is a fixed set of atomics, each touched by single complete operations.
 3. **No global allocation.** No function touches a heap behind the caller's back. Code that needs memory gets it from an explicit allocator — [`sigsafe_alloc`](../sigsafe_alloc) provides one built on `mmap`.
 
-## How rule 1 is enforced on Linux
+## How raw syscalls are enforced on Linux
 
 rustix can be built with a libc backend instead of raw syscalls, and anything in the dependency graph — including crates outside this repository — can select it (the `rustix/use-libc` feature, or `RUSTFLAGS=--cfg=rustix_use_libc`). No build script can detect that reliably, so [`lib.rs`](src/lib.rs) checks at compile time instead: it references `rustix::runtime`, a module that exists only in rustix's raw-syscall build. Selecting the libc backend makes this crate fail to compile, rather than silently losing the guarantee.
 
@@ -29,6 +29,7 @@ rustix can be built with a libc backend instead of raw syscalls, and anything in
 Functions whose rustix implementation already meets the rules are re-exposed as-is; being listed in a module here is what marks a call as allowed, and the backend check above is what keeps that true.
 
 - `mm` — anonymous memory mappings: `mmap_anonymous`, `munmap`.
+- `fs` — caller-buffer filesystem operations: `getcwd`.
 - `param` — `page_size`.
 
 Allocation without malloc lives in [`sigsafe_alloc`](../sigsafe_alloc).

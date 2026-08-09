@@ -6,8 +6,8 @@
 //! async-signal-safe (`open`, `stat`, `execve`, ...), so its code runs in all
 //! of those places, where libc's own machinery — locks, lazy initialization,
 //! malloc — is off limits. Everything this crate exposes follows three rules:
-//! syscalls only (never through libc on Linux), no locks and no hidden state,
-//! and no global allocation. See README.md for the full approach.
+//! kernel calls bypass libc on Linux, operations use no locks or hidden state,
+//! and nothing allocates globally. See README.md for the full approach.
 
 // Compile as an empty crate on non-unix targets: the crate backs the unix
 // preload library.
@@ -15,18 +15,19 @@
 #![cfg_attr(not(test), no_std)]
 
 mod c_str;
+pub mod fs;
 pub mod mm;
 pub mod param;
 
-pub use c_str::{CStr, Thin};
+pub use c_str::{CStr, Fat, Thin};
 pub use rustix::{
     fd::{AsRawFd, BorrowedFd},
     fs::CWD,
-    io::Errno,
+    io::{Errno, Result},
 };
 
 // Compile-time proof that rustix uses its raw-syscall backend (`linux_raw`)
-// on Linux — and with it, that no call in this crate goes through libc there.
+// on Linux — and with it, that rustix calls do not go through libc there.
 // `rustix::runtime` is gated on that backend (`#[cfg(linux_raw)]`), so this
 // reference fails to resolve, failing the whole build, whenever anything
 // selects the libc backend instead: the `rustix/use-libc` feature (which any
@@ -38,7 +39,7 @@ pub use rustix::{
 // The module's contents are not covered by rustix's stability promise, so a
 // rustix upgrade may break this line. If that happens, re-point it at any
 // other `rustix::runtime` item — do not delete it: it is the only enforcement
-// of the no-libc rule above.
+// of the raw-rustix rule above.
 #[cfg(all(target_os = "linux", not(miri)))]
 const _: () = {
     let _ = rustix::runtime::exit_group;

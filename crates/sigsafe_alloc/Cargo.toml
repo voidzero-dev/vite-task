@@ -8,14 +8,9 @@ publish = false
 doctest = false
 
 [target.'cfg(unix)'.dependencies]
-allocator-api2 = { workspace = true }
+allocator-api2 = { workspace = true, features = ["alloc"] }
 bump-scope = { workspace = true }
 sigsafe = { workspace = true }
-
-[target.'cfg(unix)'.dev-dependencies]
-# The `alloc` feature provides `Global`, letting tests run the pool against
-# the host allocator (and thus under Miri).
-allocator-api2 = { workspace = true, features = ["alloc"] }
 
 [lints]
 workspace = true

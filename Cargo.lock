@@ -3444,7 +3444,9 @@ dependencies = [
 name = "sigsafe"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "rustix",
+ "syscalls",
 ]
 
 [[package]]
