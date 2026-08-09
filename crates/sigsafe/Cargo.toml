@@ -1,0 +1,35 @@
+[package]
+name = "sigsafe"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[target.'cfg(unix)'.dependencies]
+allocator-api2 = { workspace = true }
+bump-scope = { workspace = true }
+rustix = { workspace = true }
+
+# On Linux the page size is probed from the kernel directly (see param.rs);
+# rustix's `param` is only needed where sysconf is the platform interface.
+[target.'cfg(all(unix, not(target_os = "linux")))'.dependencies]
+rustix = { workspace = true, features = ["param"] }
+
+# The compile-time backend check in lib.rs needs a `linux_raw`-gated rustix
+# item to reference; `runtime` is the module that has one.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { workspace = true, features = ["runtime"] }
+
+# Cross-validates the page-size probe against rustix's auxv-based answer.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rustix = { workspace = true, features = ["param"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# The `alloc` feature provides `Global`, letting tests run the pool against
+# the host allocator (and thus under Miri).
+allocator-api2 = { workspace = true, features = ["alloc"] }
+
+[lints]
+workspace = true

@@ -1253,15 +1253,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fspy_alloc"
-version = "0.0.0"
-dependencies = [
- "allocator-api2",
- "bump-scope",
- "rustix",
-]
-
-[[package]]
 name = "fspy_benchmark"
 version = "0.0.0"
 dependencies = [
@@ -1318,11 +1309,11 @@ dependencies = [
  "artifact_profile",
  "bstr",
  "ctor",
- "fspy_alloc",
  "fspy_shared",
  "fspy_shared_unix",
  "libc",
  "nix 0.31.2",
+ "sigsafe",
  "wincode",
 ]
 
@@ -3446,6 +3437,15 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
  "libc",
+]
+
+[[package]]
+name = "sigsafe"
+version = "0.0.0"
+dependencies = [
+ "allocator-api2",
+ "bump-scope",
+ "rustix",
 ]
 
 [[package]]

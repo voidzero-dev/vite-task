@@ -75,7 +75,6 @@ materialized_artifact = { path = "crates/materialized_artifact" }
 materialized_artifact_build = { path = "crates/materialized_artifact_build" }
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
-fspy_alloc = { path = "crates/fspy_alloc" }
 fspy_benchmark_launcher = { path = "crates/fspy_benchmark_launcher", artifact = "bin" }
 fspy_benchmark_target = { path = "crates/fspy_benchmark_target", artifact = "bin" }
 fspy_detours_sys = { path = "crates/fspy_detours_sys" }
@@ -123,7 +122,7 @@ ref-cast = "1.0.24"
 regex = "1.11.3"
 rusqlite = "0.39.0"
 rustc-hash = "2.1.1"
-rustix = { version = "1", default-features = false, features = ["mm", "param", "use-libc-auxv"] }
+rustix = { version = "1", default-features = false, features = ["mm"] }
 # SeccompAction::UserNotif (SECCOMP_RET_USER_NOTIF) was added after the latest published release (v0.5.0)
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "08587106340b8e3cb361c7561411510039436857" }
 serde = "1.0.219"
@@ -131,6 +130,7 @@ serde_json = "1.0.140"
 serde_norway = "0.9.42"
 sha2 = "0.11.0"
 shell-escape = "0.1.5"
+sigsafe = { path = "crates/sigsafe" }
 similar = "3.0.0"
 smallvec = { version = "2.0.0-alpha.12", features = ["std"] }
 snapshot_test = { path = "crates/snapshot_test" }

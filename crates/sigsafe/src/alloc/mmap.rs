@@ -6,7 +6,11 @@ use core::{
 };
 
 use allocator_api2::alloc::{AllocError, Allocator};
-use rustix::mm::{MapFlags, ProtFlags, mmap_anonymous, munmap};
+
+use crate::{
+    mm::{MapFlags, ProtFlags, mmap_anonymous, munmap},
+    param::page_size,
+};
 
 /// A stateless allocator: every allocation is a fresh anonymous mapping and
 /// every deallocation an `munmap`.
@@ -16,10 +20,9 @@ use rustix::mm::{MapFlags, ProtFlags, mmap_anonymous, munmap};
 /// It holds no state at all — no locks, no free lists, no thread-locals;
 /// the kernel does all the bookkeeping. A signal or a `fork()` can never
 /// catch it holding a lock or a half-written structure, because there is
-/// nothing to hold. Mapping syscalls go straight to the kernel on Linux
-/// (rustix's raw backend) and through the thin libSystem wrappers on macOS.
-/// The page size comes from static process data (`getauxval` on Linux,
-/// `sysconf` on macOS) — no locks or allocation there either.
+/// nothing to hold. The mapping calls and the page-size read come from
+/// [`crate::mm`] and [`crate::param`], which carry the same guarantee (see
+/// their docs).
 ///
 /// # What it accepts
 ///
@@ -54,12 +57,6 @@ use rustix::mm::{MapFlags, ProtFlags, mmap_anonymous, munmap};
 /// [fit]: https://docs.rs/bump-scope/2.3.3/src/bump_scope/raw_bump.rs.html#873-884
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MmapAllocator;
-
-pub fn page_size() -> usize {
-    // getauxval on Linux, sysconf on macOS: reads of static process data —
-    // no locks, no allocation, valid from the first instruction on.
-    rustix::param::page_size()
-}
 
 // SAFETY: returned blocks are non-null, page-aligned (at least
 // `layout.align()` for every served layout), at least `layout.size()` bytes

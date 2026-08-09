@@ -13,11 +13,11 @@ anyhow = { workspace = true }
 wincode = { workspace = true }
 bstr = { workspace = true, default-features = false }
 ctor = { workspace = true }
-fspy_alloc = { workspace = true }
 fspy_shared = { workspace = true }
 fspy_shared_unix = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true, features = ["signal", "fs", "socket", "mman", "time"] }
+sigsafe = { workspace = true }
 
 [build-dependencies]
 artifact_profile = { workspace = true }

@@ -80,7 +80,7 @@ impl ToAbsolutePath for PathAt {
             // handlers and fork children, where the global allocator's locks
             // are unsafe to take. The joined path only lives for the `f`
             // call — nothing escapes the arena.
-            let arena = fspy_alloc::arena();
+            let arena = sigsafe::alloc::arena();
             let mut joined = allocator_api2::vec::Vec::new_in(&arena);
             joined.extend_from_slice(dir.as_os_str().as_bytes());
             if !pathname.is_empty() {

@@ -8,7 +8,7 @@ use core::{
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
-use crate::MmapAllocator;
+use super::mmap::MmapAllocator;
 
 /// A fixed-size cache of memory chunks.
 ///
