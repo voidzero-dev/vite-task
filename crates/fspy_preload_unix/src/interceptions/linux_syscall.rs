@@ -45,7 +45,9 @@ unsafe extern "C" fn syscall(syscall_no: c_long, mut args: ...) -> c_long {
             }
         } else {
             // SAFETY: pathname is a non-null C string pointer provided by the statx syscall caller.
-            unsafe { handle_open(PathAt(dirfd, pathname), AccessMode::READ) };
+            unsafe {
+                handle_open(PathAt(dirfd, sigsafe::CStr::from_ptr(pathname)), AccessMode::READ);
+            }
         }
     }
     // SAFETY: forwarding the syscall to the original libc syscall function with the extracted arguments

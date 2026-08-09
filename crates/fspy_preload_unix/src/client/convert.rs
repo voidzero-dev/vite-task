@@ -107,15 +107,15 @@ impl ToAbsolutePath for Fd {
     }
 }
 
-pub struct PathAt(pub c_int, pub *const c_char);
+pub struct PathAt<'a, R>(pub c_int, pub sigsafe::CStr<'a, R>);
 
-impl ToAbsolutePath for PathAt {
+impl<Repr> ToAbsolutePath for PathAt<'_, Repr> {
     unsafe fn to_absolute_path<R, F: FnOnce(Option<&BStr>) -> nix::Result<R>>(
         self,
         f: F,
     ) -> nix::Result<R> {
-        // SAFETY: self.1 is a non-null pointer to a valid null-terminated C string, as guaranteed by the libc calling convention
-        let pathname = unsafe { CStr::from_ptr(self.1) }.to_bytes().as_bstr();
+        // SAFETY: self.1 is a valid NUL-terminated string.
+        let pathname = unsafe { CStr::from_ptr(self.1.as_ptr()) }.to_bytes().as_bstr();
 
         if pathname.first().copied() == Some(b'/') {
             f(pathname.into())
@@ -148,12 +148,12 @@ impl ToAbsolutePath for PathAt {
     }
 }
 
-impl ToAbsolutePath for *const c_char {
+impl<Repr> ToAbsolutePath for sigsafe::CStr<'_, Repr> {
     unsafe fn to_absolute_path<R, F: FnOnce(Option<&BStr>) -> nix::Result<R>>(
         self,
         f: F,
     ) -> nix::Result<R> {
-        // SAFETY: delegates to PathAt::to_absolute_path with AT_FDCWD and the caller-provided C string pointer
+        // SAFETY: delegates the same caller-provided C string to PathAt.
         unsafe { PathAt(libc::AT_FDCWD, self).to_absolute_path(f) }
     }
 }

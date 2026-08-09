@@ -197,7 +197,7 @@ mod linux_only {
         let _unused = execveat::original;
         // SAFETY: PathAt wraps a valid dirfd and pathname pointer from the interposed execveat call
         let abs_path_result = unsafe {
-            PathAt(dirfd, pathname).to_absolute_path(|path| {
+            PathAt(dirfd, sigsafe::CStr::from_ptr(pathname)).to_absolute_path(|path| {
                 let Some(path) = path else {
                     return Ok(None);
                 };

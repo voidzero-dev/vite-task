@@ -12,7 +12,7 @@ intercept!(stat(64): unsafe extern "C" fn(path: *const c_char, buf: *mut stat_st
 unsafe extern "C" fn stat(path: *const c_char, buf: *mut stat_struct) -> c_int {
     // SAFETY: path is a valid C string pointer provided by the caller of the interposed function
     unsafe {
-        handle_open(path, AccessMode::READ);
+        handle_open(sigsafe::CStr::from_ptr(path), AccessMode::READ);
     }
     // SAFETY: calling the original libc stat() with the same arguments forwarded from the interposed function
     unsafe { stat::original()(path, buf) }
@@ -23,7 +23,7 @@ unsafe extern "C" fn lstat(path: *const c_char, buf: *mut stat_struct) -> c_int 
     // TODO: add accessmode ReadNoFollow
     // SAFETY: path is a valid C string pointer provided by the caller of the interposed function
     unsafe {
-        handle_open(path, AccessMode::READ);
+        handle_open(sigsafe::CStr::from_ptr(path), AccessMode::READ);
     }
     // SAFETY: calling the original libc lstat() with the same arguments forwarded from the interposed function
     unsafe { lstat::original()(path, buf) }
@@ -38,7 +38,7 @@ unsafe extern "C" fn fstatat(
 ) -> c_int {
     // SAFETY: dirfd and pathname are valid arguments provided by the caller of the interposed function
     unsafe {
-        handle_open(PathAt(dirfd, pathname), AccessMode::READ);
+        handle_open(PathAt(dirfd, sigsafe::CStr::from_ptr(pathname)), AccessMode::READ);
     }
     // SAFETY: calling the original libc fstatat() with the same arguments forwarded from the interposed function
     unsafe { fstatat::original()(dirfd, pathname, buf, flags) }
@@ -75,7 +75,7 @@ unsafe extern "C" fn statx(
         }
     } else {
         // SAFETY: pathname is a non-null C string pointer provided by the statx caller.
-        unsafe { handle_open(PathAt(dirfd, pathname), AccessMode::READ) };
+        unsafe { handle_open(PathAt(dirfd, sigsafe::CStr::from_ptr(pathname)), AccessMode::READ) };
     }
     // SAFETY: calling the original libc statx() with the same arguments forwarded from the interposed function
     unsafe { original(dirfd, pathname, flags, mask, statxbuf) }
