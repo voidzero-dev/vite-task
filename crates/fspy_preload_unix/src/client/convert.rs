@@ -103,11 +103,10 @@ impl ToAbsolutePath for PathAt<'_, '_> {
         self,
         f: F,
     ) -> nix::Result<R> {
-        // SAFETY: self.1 is a valid NUL-terminated string.
-        let pathname = unsafe { CStr::from_ptr(self.1.as_ptr()) }.to_bytes().as_bstr();
+        let pathname = self.1.count().as_bytes().as_bstr();
 
-        if pathname.first().copied() == Some(b'/') {
-            f(pathname.into())
+        if pathname.starts_with(b"/") {
+            f(Some(pathname))
         } else {
             self.0.to_absolute_path(|base| {
                 let Some(base) = base else {

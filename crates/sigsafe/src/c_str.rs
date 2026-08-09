@@ -102,6 +102,13 @@ impl<'a> CStr<'a, Fat> {
         }
     }
 
+    /// Returns the string's bytes without the terminating NUL.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &'a [u8] {
+        let bytes = self.as_bytes_with_nul();
+        bytes.split_at(bytes.len() - 1).0
+    }
+
     /// Returns the string's bytes, including the terminating NUL.
     #[must_use]
     pub const fn as_bytes_with_nul(&self) -> &'a [u8] {
@@ -132,6 +139,7 @@ mod tests {
         assert_eq!(size_of::<CStr<'_, Thin>>(), size_of::<*const u8>());
         assert_eq!(size_of::<CStr<'_, Fat>>(), size_of::<(*const u8, usize)>());
         assert_eq!(fat.len_with_nul(), 4);
+        assert_eq!(fat.as_bytes(), b"abc");
         assert_eq!(fat.as_bytes_with_nul(), b"abc\0");
         assert_eq!(counted.as_bytes_with_nul(), fat.as_bytes_with_nul());
     }
