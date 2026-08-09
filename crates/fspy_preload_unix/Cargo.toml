@@ -17,5 +17,8 @@ fspy_shared_unix = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true, features = ["signal", "fs", "socket", "mman", "time"] }
 
+[build-dependencies]
+artifact_profile = { workspace = true }
+
 [lints]
 workspace = true
