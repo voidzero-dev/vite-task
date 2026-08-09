@@ -1,7 +1,7 @@
 use core::{mem::MaybeUninit, ptr, slice};
 
 use allocator_api2::{alloc::Allocator, boxed::Box, vec::Vec};
-use sigsafe::{CStr, Fat};
+use sigsafe::{CStr, Fat, Thin};
 
 /// An allocator-backed owned C string.
 pub struct CString<R, A: Allocator> {
@@ -31,7 +31,41 @@ impl<A: Allocator> CString<Fat, A> {
             repr,
         }
     }
+}
 
+impl<A: Allocator> CString<Thin, A> {
+    /// Converts boxed storage to a thin C string without checking its
+    /// contents.
+    ///
+    /// # Safety
+    ///
+    /// `bytes` must begin with a valid NUL-terminated C string. Bytes after
+    /// that string may be uninitialized.
+    #[must_use]
+    pub unsafe fn from_boxed_with_nul_unchecked(bytes: Box<[MaybeUninit<u8>], A>) -> Self {
+        // SAFETY: upheld by the caller. Creating a thin view does not scan the
+        // allocation or retain the string length.
+        let repr = unsafe { CStr::<Thin>::from_ptr(bytes.as_ptr().cast()) }.into_repr();
+        Self { bytes, repr }
+    }
+
+    /// Returns a thin borrowed view of this C string.
+    #[must_use]
+    pub fn as_c_str(&self) -> CStr<'_, Thin> {
+        // SAFETY: upheld by the constructor; `self` owns the storage.
+        unsafe { CStr::from_ptr(self.bytes.as_ptr().cast()) }
+    }
+
+    /// Counts through the terminating NUL and returns a length-retaining C
+    /// string using the same allocation.
+    #[must_use]
+    pub fn count(self) -> CString<Fat, A> {
+        let repr = self.as_c_str().count().into_repr();
+        CString { bytes: self.bytes, repr }
+    }
+}
+
+impl<A: Allocator> CString<Fat, A> {
     /// Extracts a borrowed C string view containing the entire string.
     #[must_use]
     pub fn as_c_str(&self) -> CStr<'_, Fat> {

@@ -1,8 +1,12 @@
 //! Allocating filesystem wrappers.
 
+#[cfg(target_os = "macos")]
+use allocator_api2::boxed::Box;
 use allocator_api2::{alloc::Allocator, vec::Vec};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use sigsafe::Thin;
 #[cfg(target_os = "linux")]
-use sigsafe::{BorrowedFd, CStr, Thin};
+use sigsafe::{BorrowedFd, CStr};
 use sigsafe::{Errno, Fat, Result};
 
 use crate::CString;
@@ -63,6 +67,39 @@ pub fn readlinkat<A: Allocator>(
     }
 }
 
+/// Returns the path associated with `fd`, allocated with `allocator`.
+///
+/// The returned C string remains thin because `F_GETPATH` reports no length.
+///
+/// # Errors
+///
+/// Returns [`Errno::NOMEM`] if storage cannot be allocated, or the error from
+/// [`sigsafe::fs::fcntl_getpath`].
+#[cfg(target_os = "macos")]
+pub fn fcntl_getpath<A: Allocator>(
+    allocator: A,
+    fd: sigsafe::BorrowedFd<'_>,
+) -> Result<CString<Thin, A>> {
+    let mut bytes = path_buffer(allocator)?;
+    sigsafe::fs::fcntl_getpath(fd, &mut bytes)?;
+
+    // SAFETY: `fcntl_getpath` initialized a NUL-terminated string at the start
+    // of `bytes`.
+    Ok(unsafe { CString::from_boxed_with_nul_unchecked(Box::slice(bytes)) })
+}
+
+#[cfg(target_os = "macos")]
+fn path_buffer<A: Allocator>(
+    allocator: A,
+) -> Result<Box<[core::mem::MaybeUninit<u8>; sigsafe::fs::PATH_MAX], A>> {
+    let bytes =
+        Box::<[core::mem::MaybeUninit<u8>; sigsafe::fs::PATH_MAX], A>::try_new_uninit_in(allocator)
+            .map_err(|_| Errno::NOMEM)?;
+
+    // SAFETY: an array of `MaybeUninit<u8>` requires no initialization.
+    Ok(unsafe { bytes.assume_init() })
+}
+
 #[cfg(test)]
 mod tests {
     use allocator_api2::alloc::Global;
@@ -81,6 +118,19 @@ mod tests {
 
         let path = super::getcwd(Global).unwrap();
         assert_eq!(path.into_bytes_with_nul().as_slice(), expected);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn fcntl_getpath_allocates_a_thin_c_string() {
+        use std::{fs::File, os::fd::AsRawFd as _};
+
+        let root = File::open("/").unwrap();
+        // SAFETY: `root` remains open for the call.
+        let root = unsafe { sigsafe::BorrowedFd::borrow_raw(root.as_raw_fd()) };
+        let path = super::fcntl_getpath(Global, root).unwrap();
+
+        assert_eq!(path.as_c_str().count().as_bytes_with_nul(), b"/\0");
     }
 
     #[cfg(target_os = "linux")]

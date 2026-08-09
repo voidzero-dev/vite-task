@@ -35,7 +35,20 @@ fn openat<R>(
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-fn fcntl_getpath<'buf>(
+/// Gets the path associated with `fd`.
+///
+/// `F_GETPATH` writes a NUL-terminated path into its `MAXPATHLEN` buffer but
+/// does not report the length, so this function returns [`CStr<Thin>`] without
+/// scanning for the terminator. The returned C string borrows `buf` and starts
+/// at the same address as `buf`.
+///
+/// This function performs one `fcntl` call and does not retry. `F_GETPATH`
+/// accepts no buffer length and always uses its fixed `MAXPATHLEN` storage.
+///
+/// # Errors
+///
+/// Returns the error reported by `fcntl`.
+pub fn fcntl_getpath<'buf>(
     fd: BorrowedFd<'_>,
     buf: &'buf mut [MaybeUninit<u8>; PATH_MAX],
 ) -> Result<CStr<'buf, Thin>> {

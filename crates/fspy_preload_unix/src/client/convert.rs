@@ -1,10 +1,6 @@
 use std::ffi::CStr;
-#[cfg(target_os = "macos")]
-use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _, path::PathBuf};
 
-#[cfg(target_os = "linux")]
-use allocator_api2::alloc::Allocator;
-use allocator_api2::vec::Vec;
+use allocator_api2::{alloc::Allocator, vec::Vec};
 use bstr::{BStr, ByteSlice};
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int};
@@ -50,23 +46,22 @@ fn proc_fd_path<'buf>(
 }
 
 #[cfg(target_os = "macos")]
-fn get_fd_path(fd: BorrowedFd<'_>) -> nix::Result<Option<PathBuf>> {
+fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Option<Vec<u8, A>>> {
     if fd.as_raw_fd() == CWD.as_raw_fd() {
-        let arena = sigsafe_alloc::arena();
-        let path = sigsafe_alloc::fs::getcwd(&arena)
+        let path = sigsafe_alloc::fs::getcwd(allocator)
             .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
             .into_bytes();
-        return Ok(Some(OsStr::from_bytes(&path).into()));
+        return Ok(Some(path));
     }
 
-    let mut path = std::path::PathBuf::new();
-    // SAFETY: this std view has the same descriptor and lifetime as the
-    // rustix view accepted by this function.
-    let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd.as_raw_fd()) };
-    match nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETPATH(&mut path)) {
-        Ok(_) => Ok(Some(path)),
-        Err(nix::Error::EBADF | nix::Error::ENOENT) => Ok(None), // invalid fd or no such file (Most likely a stdio fd)
-        Err(e) => Err(e),
+    match sigsafe_alloc::fs::fcntl_getpath(allocator, fd) {
+        Ok(path) => {
+            // `F_GETPATH` does not return a length. Count at this caller before
+            // converting its allocation into the returned path.
+            Ok(Some(path.count().into_bytes()))
+        }
+        Err(sigsafe::Errno::BADF | sigsafe::Errno::NOENT) => Ok(None),
+        Err(errno) => Err(nix::errno::Errno::from_raw(errno.raw_os_error())),
     }
 }
 
@@ -82,18 +77,9 @@ impl ToAbsolutePath for BorrowedFd<'_> {
         self,
         f: F,
     ) -> nix::Result<R> {
-        #[cfg(target_os = "linux")]
-        {
-            let arena = sigsafe_alloc::arena();
-            let path = get_fd_path(&arena, self)?;
-            f(path.as_ref().map(|path| path.as_slice().as_bstr()))
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            let path = get_fd_path(self)?;
-            f(path.as_ref().map(|path| path.as_os_str().as_bytes().as_bstr()))
-        }
+        let arena = sigsafe_alloc::arena();
+        let path = get_fd_path(&arena, self)?;
+        f(path.as_ref().map(|path| path.as_slice().as_bstr()))
     }
 }
 

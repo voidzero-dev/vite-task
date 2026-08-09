@@ -28,6 +28,25 @@ fn getcwd_rejects_an_empty_buffer() {
     assert!(matches!(getcwd(&mut []), Err(Errno::RANGE)));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn fcntl_getpath_returns_descriptor_path() {
+    use rustix::{
+        fd::AsFd as _,
+        fs::{Mode, OFlags, open},
+    };
+
+    let root = open(c"/", OFlags::RDONLY, Mode::empty()).unwrap();
+    let mut buf = [MaybeUninit::uninit(); super::PATH_MAX];
+    let buf_ptr = buf.as_ptr().cast::<u8>();
+
+    let path = super::fcntl_getpath(root.as_fd(), &mut buf).unwrap();
+
+    assert_eq!(path.as_ptr().cast::<u8>(), buf_ptr);
+    let path = path.count();
+    assert_eq!(path.as_bytes_with_nul(), b"/\0");
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn readlinkat_returns_the_initialized_target() {

@@ -15,6 +15,8 @@ use linux as imp;
 pub use linux::readlinkat;
 #[cfg(target_os = "macos")]
 use mac as imp;
+#[cfg(target_os = "macos")]
+pub use mac::fcntl_getpath;
 
 /// The platform's maximum pathname size, including the terminating NUL.
 pub const PATH_MAX: usize = imp::PATH_MAX;
