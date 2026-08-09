@@ -20,6 +20,9 @@ nix = { workspace = true, features = ["signal", "fs", "socket", "mman", "time"] 
 sigsafe = { workspace = true }
 sigsafe_alloc = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+itoa = { workspace = true }
+
 [build-dependencies]
 artifact_profile = { workspace = true }
 

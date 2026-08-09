@@ -1,32 +1,52 @@
-#[cfg(target_os = "linux")]
-use std::ffi::CString;
-use std::{
-    ffi::{CStr, OsStr},
-    os::unix::ffi::OsStrExt as _,
-    path::PathBuf,
-};
+use std::ffi::CStr;
+#[cfg(target_os = "macos")]
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _, path::PathBuf};
 
+#[cfg(target_os = "linux")]
+use allocator_api2::alloc::Allocator;
+use allocator_api2::vec::Vec;
 use bstr::{BStr, ByteSlice};
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int};
 use sigsafe::{AsRawFd as _, BorrowedFd, CWD};
 
 #[cfg(target_os = "linux")]
-fn get_fd_path(fd: BorrowedFd<'_>) -> nix::Result<Option<PathBuf>> {
+fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Option<Vec<u8, A>>> {
     if fd.as_raw_fd() == CWD.as_raw_fd() {
-        let arena = sigsafe_alloc::arena();
-        let path = sigsafe_alloc::fs::getcwd(&arena)
+        let path = sigsafe_alloc::fs::getcwd(allocator)
             .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
             .into_bytes();
-        return Ok(Some(OsStr::from_bytes(&path).into()));
+        return Ok(Some(path));
     }
-    match nix::fcntl::readlink(
-        CString::new(format!("/proc/self/fd/{}", fd.as_raw_fd())).unwrap().as_c_str(),
-    ) {
-        Ok(path) => Ok(Some(path.into())),
-        Err(nix::Error::EBADF | nix::Error::ENOENT) => Ok(None), // invalid fd or no such file (Most likely a stdio fd)
-        Err(e) => Err(e),
+    let mut path = [0; PROC_FD_PATH_CAPACITY];
+    let path = proc_fd_path(fd, &mut path);
+    match sigsafe_alloc::fs::readlinkat(allocator, CWD, path) {
+        Ok(path) => Ok(Some(path)),
+        Err(sigsafe::Errno::BADF | sigsafe::Errno::NOENT) => Ok(None),
+        Err(errno) => Err(nix::errno::Errno::from_raw(errno.raw_os_error())),
     }
+}
+
+#[cfg(target_os = "linux")]
+const PROC_FD_PATH_CAPACITY: usize = b"/proc/self/fd/".len() + 11 + 1;
+
+#[cfg(target_os = "linux")]
+fn proc_fd_path<'buf>(
+    fd: BorrowedFd<'_>,
+    buf: &'buf mut [u8; PROC_FD_PATH_CAPACITY],
+) -> sigsafe::CStr<'buf, sigsafe::Thin> {
+    const PREFIX: &[u8] = b"/proc/self/fd/";
+
+    let mut formatted = itoa::Buffer::new();
+    let fd = formatted.format(fd.as_raw_fd()).as_bytes();
+
+    buf[..PREFIX.len()].copy_from_slice(PREFIX);
+    let end = PREFIX.len() + fd.len();
+    buf[PREFIX.len()..end].copy_from_slice(fd);
+    buf[end] = 0;
+
+    // SAFETY: the initialized prefix ends in NUL and lives as long as `buf`.
+    unsafe { sigsafe::CStr::from_ptr(buf.as_ptr().cast()) }
 }
 
 #[cfg(target_os = "macos")]
@@ -62,8 +82,18 @@ impl ToAbsolutePath for BorrowedFd<'_> {
         self,
         f: F,
     ) -> nix::Result<R> {
-        let path = get_fd_path(self)?;
-        f(path.as_ref().map(|path| path.as_os_str().as_bytes().as_bstr()))
+        #[cfg(target_os = "linux")]
+        {
+            let arena = sigsafe_alloc::arena();
+            let path = get_fd_path(&arena, self)?;
+            f(path.as_ref().map(|path| path.as_slice().as_bstr()))
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let path = get_fd_path(self)?;
+            f(path.as_ref().map(|path| path.as_os_str().as_bytes().as_bstr()))
+        }
     }
 }
 
@@ -93,13 +123,27 @@ impl ToAbsolutePath for PathAt<'_, '_> {
         if pathname.first().copied() == Some(b'/') {
             f(pathname.into())
         } else {
-            let Some(mut abs_path) = get_fd_path(self.0)? else {
-                return f(None);
-            };
-            if !pathname.is_empty() {
-                abs_path.push(OsStr::from_bytes(pathname));
-            }
-            f(Some(abs_path.as_os_str().as_bytes().as_bstr()))
+            self.0.to_absolute_path(|base| {
+                let Some(base) = base else {
+                    return f(None);
+                };
+                if pathname.is_empty() {
+                    return f(Some(base));
+                }
+
+                let arena = sigsafe_alloc::arena();
+                let needs_separator = !base.ends_with(b"/");
+                let mut abs_path = Vec::with_capacity_in(
+                    base.len() + usize::from(needs_separator) + pathname.len(),
+                    &arena,
+                );
+                abs_path.extend_from_slice(base);
+                if needs_separator {
+                    abs_path.push(b'/');
+                }
+                abs_path.extend_from_slice(pathname);
+                f(Some(abs_path.as_slice().as_bstr()))
+            })
         }
     }
 }
