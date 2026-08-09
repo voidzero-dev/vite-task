@@ -20,7 +20,10 @@ pub mod mm;
 pub mod param;
 
 pub use c_str::{CStr, Fat, Thin};
-pub use rustix::io::{Errno, Result};
+pub use rustix::{
+    fd::BorrowedFd,
+    io::{Errno, Result},
+};
 
 // Compile-time proof that rustix uses its raw-syscall backend (`linux_raw`)
 // on Linux — and with it, that no call in this crate goes through libc there.

@@ -1,5 +1,3 @@
-#[cfg(target_os = "macos")]
-use std::os::unix::ffi::OsStrExt as _;
 use std::{ffi::CStr, os::fd::RawFd};
 
 use allocator_api2::{alloc::Allocator, vec::Vec};
@@ -54,16 +52,17 @@ fn proc_fd_path(
 }
 
 #[cfg(target_os = "macos")]
-fn get_fd_path(fd: RawFd) -> nix::Result<Option<std::path::PathBuf>> {
-    let mut path = std::path::PathBuf::new();
-    match nix::fcntl::fcntl(
-        // SAFETY: fd is a valid file descriptor provided by the caller, and the borrow does not outlive this function call
-        unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) },
-        nix::fcntl::FcntlArg::F_GETPATH(&mut path),
-    ) {
-        Ok(_) => Ok(Some(path)),
-        Err(nix::Error::EBADF | nix::Error::ENOENT) => Ok(None), // invalid fd or no such file (Most likely a stdio fd)
-        Err(e) => Err(e),
+fn get_fd_path<A: Allocator>(fd: RawFd, allocator: A) -> nix::Result<Option<Vec<u8, A>>> {
+    // SAFETY: the descriptor remains borrowed for this call.
+    let fd = unsafe { sigsafe::BorrowedFd::borrow_raw(fd) };
+    match sigsafe_alloc::fs::fcntl_getpath(allocator, fd) {
+        Ok(path) => {
+            // `F_GETPATH` does not return a length. Count at this caller before
+            // converting its allocation into the returned path.
+            Ok(Some(path.count().into_bytes()))
+        }
+        Err(sigsafe::Errno::BADF | sigsafe::Errno::NOENT) => Ok(None),
+        Err(errno) => Err(nix::errno::Errno::from_raw(errno.raw_os_error())),
     }
 }
 
@@ -101,8 +100,9 @@ impl ToAbsolutePath for Fd {
 
         #[cfg(target_os = "macos")]
         {
-            let path = get_fd_path(self.0)?;
-            f(path.as_ref().map(|path| path.as_os_str().as_bytes().as_bstr()))
+            let arena = sigsafe_alloc::arena();
+            let path = get_fd_path(self.0, &arena)?;
+            f(path.as_ref().map(|path| path.as_slice().as_bstr()))
         }
     }
 }

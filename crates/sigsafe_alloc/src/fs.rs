@@ -4,7 +4,9 @@
 use allocator_api2::vec::Vec;
 use allocator_api2::{alloc::Allocator, boxed::Box};
 #[cfg(target_os = "linux")]
-use sigsafe::{CStr, Thin};
+use sigsafe::CStr;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use sigsafe::Thin;
 use sigsafe::{Errno, Fat, Result};
 
 use crate::CString;
@@ -57,6 +59,26 @@ pub fn readlink<A: Allocator>(allocator: A, path: CStr<'_, Thin>) -> Result<Vec<
     }
 }
 
+/// Returns the path associated with `fd`, allocated with `allocator`.
+///
+/// The returned C string remains thin because `F_GETPATH` reports no length.
+///
+/// # Errors
+///
+/// Returns [`Errno::NOMEM`] if storage cannot be allocated, or the error from
+/// [`sigsafe::fs::fcntl_getpath`].
+#[cfg(target_os = "macos")]
+pub fn fcntl_getpath<A: Allocator>(
+    allocator: A,
+    fd: sigsafe::BorrowedFd<'_>,
+) -> Result<CString<Thin, A>> {
+    let mut bytes = path_buffer(allocator)?;
+    let repr = sigsafe::fs::fcntl_getpath(fd, &mut bytes)?.into_repr();
+
+    // SAFETY: `fcntl_getpath` initialized the C string described by `repr`.
+    Ok(unsafe { CString::from_buffer_unchecked(bytes, repr) })
+}
+
 fn path_buffer<A: Allocator>(
     allocator: A,
 ) -> Result<Box<[core::mem::MaybeUninit<u8>; sigsafe::fs::PATH_MAX], A>> {
@@ -79,6 +101,19 @@ mod tests {
         let expected = sigsafe::fs::getcwd(&mut buffer).unwrap();
 
         assert_eq!(path.as_slice(), &expected.as_bytes_with_nul()[..expected.len_with_nul() - 1]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn fcntl_getpath_allocates_a_thin_c_string() {
+        use std::{fs::File, os::fd::AsRawFd as _};
+
+        let root = File::open("/").unwrap();
+        // SAFETY: `root` remains open for the call.
+        let root = unsafe { sigsafe::BorrowedFd::borrow_raw(root.as_raw_fd()) };
+        let path = super::fcntl_getpath(Global, root).unwrap();
+
+        assert_eq!(path.as_c_str().count().as_bytes_with_nul(), b"/\0");
     }
 
     #[cfg(target_os = "linux")]

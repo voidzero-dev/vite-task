@@ -1,11 +1,11 @@
 use core::{mem::MaybeUninit, slice};
 
 use rustix::{
-    fd::{AsFd as _, AsRawFd as _, BorrowedFd, FromRawFd as _, OwnedFd},
+    fd::{AsFd as _, AsRawFd as _, FromRawFd as _, OwnedFd},
     fs::{Mode, OFlags, fstat, stat},
 };
 
-use crate::{CStr, Errno, Fat, Result, Thin};
+use crate::{BorrowedFd, CStr, Errno, Fat, Result, Thin};
 
 pub(super) const PATH_MAX: usize = libc::PATH_MAX as usize;
 
@@ -25,7 +25,16 @@ fn open<R>(path: CStr<'_, R>, flags: OFlags, mode: Mode) -> Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-fn fcntl_getpath<'buf>(
+/// Gets the path associated with `fd`.
+///
+/// `F_GETPATH` writes a NUL-terminated path into its `MAXPATHLEN` buffer but
+/// does not report the length, so this function returns [`CStr<Thin>`] without
+/// scanning for the terminator.
+///
+/// # Errors
+///
+/// Returns the error reported by `fcntl`.
+pub fn fcntl_getpath<'buf>(
     fd: BorrowedFd<'_>,
     buf: &'buf mut [MaybeUninit<u8>; PATH_MAX],
 ) -> Result<CStr<'buf, Thin>> {

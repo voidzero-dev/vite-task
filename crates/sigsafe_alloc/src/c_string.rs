@@ -1,7 +1,7 @@
 use core::mem::MaybeUninit;
 
 use allocator_api2::{alloc::Allocator, boxed::Box, vec::Vec};
-use sigsafe::Fat;
+use sigsafe::{CStr, Fat, Thin};
 
 /// An allocator-backed owned C string.
 pub struct CString<R, A: Allocator> {
@@ -24,6 +24,23 @@ impl<R, A: Allocator> CString<R, A> {
         // SAFETY: the array and slice have the same element layout and length.
         let bytes = unsafe { Box::from_raw_in(bytes, allocator) };
         Self { bytes, repr }
+    }
+}
+
+impl<A: Allocator> CString<Thin, A> {
+    /// Returns a thin borrowed view of this C string.
+    #[must_use]
+    pub fn as_c_str(&self) -> CStr<'_, Thin> {
+        // SAFETY: upheld by the constructor; `self` owns the storage.
+        unsafe { CStr::from_ptr(self.bytes.as_ptr().cast()) }
+    }
+
+    /// Counts through the terminating NUL and returns a length-retaining C
+    /// string using the same allocation.
+    #[must_use]
+    pub fn count(self) -> CString<Fat, A> {
+        let repr = self.as_c_str().count().into_repr();
+        CString { bytes: self.bytes, repr }
     }
 }
 
