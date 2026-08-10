@@ -4,9 +4,9 @@
   "ignorePaths": ["**/fixtures/**"],
   "packageRules": [
     {
-      "description": "Group all Vite+ packages into a single PR; they are published together at the same version. minimumReleaseAge and schedule keep @voidzero-dev/vite-plus-* (the vite catalog alias) on the same policy as vite-plus; the preset's generic npm rule would otherwise hold the alias behind a 3-day age gate and a Monday schedule.",
+      "description": "Group all Vite+ packages into a single PR; they are published together at the same version, and vp pins vitest to the version bundled in vite-plus. minimumReleaseAge and schedule keep @voidzero-dev/vite-plus-* (the vite catalog alias) on the same policy as vite-plus; the preset's generic npm rule would otherwise hold the alias behind a 3-day age gate and a Monday schedule.",
       "groupName": "vite+",
-      "matchPackageNames": ["vite-plus", "@voidzero-dev/vite-plus-*"],
+      "matchPackageNames": ["vite-plus", "@voidzero-dev/vite-plus-*", "vitest"],
       "minimumReleaseAge": "0 days",
       "schedule": ["at any time"]
     }
