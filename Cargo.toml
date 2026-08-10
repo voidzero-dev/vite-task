@@ -40,7 +40,6 @@ future_not_send = "allow"
 
 [workspace.dependencies]
 allocator-api2 = { version = "0.2", default-features = false }
-artifact_profile = { path = "crates/artifact_profile" }
 anstream = "1.0.0"
 anyhow = "1.0.103"
 assert2 = "0.4.0"
@@ -209,32 +208,3 @@ codegen-units = 1
 strip = "symbols" # set to `false` for debug information
 debug = false # set to `true` for debug information
 panic = "abort" # Let it crash and force ourselves to write safe Rust.
-
-# Cargo compiles artifact dependencies declared under `[build-dependencies]`
-# with the build-override profile — opt-level 0, no codegen-units setting —
-# even in release builds, and even with `target = "target"`. Their output
-# still lands under `target/<triple>/release/`, so the missing optimization
-# is easy to miss. (Artifact deps under `[dependencies]`/`[dev-dependencies]`
-# get the normal profile and need nothing here.) See
-# https://github.com/rust-lang/cargo/issues/16719.
-#
-# These are the workspace's build-dependency artifacts: the preload libraries
-# are injected into every traced process and run inside every intercepted
-# libc call, and the napi library backs the Node.js client.
-#
-# `strip` must be restated: a package override resets an inherited `strip`
-# to "debuginfo" when the field is omitted (Cargo quirk in profile merging).
-[profile.release.package.fspy_preload_unix]
-opt-level = 3
-codegen-units = 1
-strip = "symbols"
-
-[profile.release.package.fspy_preload_windows]
-opt-level = 3
-codegen-units = 1
-strip = "symbols"
-
-[profile.release.package.vt_client_napi]
-opt-level = 3
-codegen-units = 1
-strip = "symbols"

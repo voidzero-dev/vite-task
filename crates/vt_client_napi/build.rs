@@ -8,9 +8,6 @@ extern crate napi_build;
 use std::{env, fs, path::PathBuf};
 
 fn main() {
-    // Shipped inside the built product; see `artifact_profile`.
-    artifact_profile::require_optimized_in_release();
-
     napi_build::setup();
 
     // Keep this crate's napi-derive type-defs out of any consumer's generated

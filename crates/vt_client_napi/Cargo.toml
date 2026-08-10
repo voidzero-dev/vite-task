@@ -18,7 +18,6 @@ vt_str = { workspace = true }
 vt_client = { workspace = true }
 
 [build-dependencies]
-artifact_profile = { workspace = true }
 napi-build = { workspace = true }
 
 [lints]

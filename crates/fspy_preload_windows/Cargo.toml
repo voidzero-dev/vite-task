@@ -29,8 +29,5 @@ winsafe = { workspace = true }
 [target.'cfg(target_os = "windows")'.dev-dependencies]
 tempfile = { workspace = true }
 
-[build-dependencies]
-artifact_profile = { workspace = true }
-
 [lints]
 workspace = true

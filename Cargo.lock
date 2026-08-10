@@ -137,10 +137,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
-name = "artifact_profile"
-version = "0.0.0"
-
-[[package]]
 name = "assert2"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1330,7 +1326,6 @@ dependencies = [
 name = "fspy_preload_unix"
 version = "0.0.0"
 dependencies = [
- "artifact_profile",
  "ctor",
  "fspy_client_unix",
  "fspy_shared",
@@ -1345,7 +1340,6 @@ dependencies = [
 name = "fspy_preload_windows"
 version = "0.1.0"
 dependencies = [
- "artifact_profile",
  "constcat",
  "fspy_detours_sys",
  "fspy_shared",
@@ -4301,7 +4295,6 @@ dependencies = [
 name = "vt_client_napi"
 version = "0.1.0"
 dependencies = [
- "artifact_profile",
  "napi",
  "napi-build",
  "napi-derive",
