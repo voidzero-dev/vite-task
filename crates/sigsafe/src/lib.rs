@@ -15,6 +15,7 @@
 #![cfg_attr(not(test), no_std)]
 
 mod c_str;
+pub mod env;
 pub mod fs;
 pub mod mm;
 pub mod param;
@@ -23,7 +24,7 @@ pub use c_str::{Bytes, CStr, Fat, Thin};
 pub use rustix::{
     fd::{AsRawFd, BorrowedFd},
     fs::CWD,
-    io::{Errno, Result},
+    io::{Errno, Errno as Error, Result},
 };
 
 // Compile-time proof that rustix uses its raw-syscall backend (`linux_raw`)

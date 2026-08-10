@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 allocator-api2 = { workspace = true, features = ["alloc"] }
 anyhow = { workspace = true }
 wincode = { workspace = true }
-bstr = { workspace = true, default-features = false }
+bstr = { workspace = true, features = ["alloc", "std"] }
 ctor = { workspace = true }
 fspy_shared = { workspace = true }
 fspy_shared_unix = { workspace = true }

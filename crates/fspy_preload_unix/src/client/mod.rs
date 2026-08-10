@@ -40,10 +40,10 @@ impl Client {
         reason = "preload library intentionally uses stderr for error reporting"
     )]
     #[cfg(not(test))]
-    fn from_env() -> Self {
+    fn from_env(envs: impl Iterator<Item = sigsafe::env::Entry>) -> Self {
         use fspy_shared_unix::payload::decode_payload_from_env;
 
-        let encoded_payload = decode_payload_from_env().unwrap();
+        let encoded_payload = decode_payload_from_env(envs).unwrap();
 
         let ipc_sender = match encoded_payload.payload.ipc_channel_conf.sender() {
             Ok(sender) => Some(sender),
@@ -155,5 +155,8 @@ pub unsafe fn handle_open(path: impl ToAbsolutePath, mode: impl ToAccessMode) {
 #[cfg(not(test))]
 #[ctor::ctor(unsafe)]
 fn init_client() {
-    CLIENT.set(Client::from_env()).unwrap();
+    // SAFETY: the ctor only reads the process environment while constructing
+    // the client and does not retain borrowed environment views.
+    let current = unsafe { sigsafe::env::current() }.unwrap();
+    CLIENT.set(Client::from_env(current.envs())).unwrap();
 }

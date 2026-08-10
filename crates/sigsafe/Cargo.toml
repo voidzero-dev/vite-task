@@ -7,6 +7,11 @@ publish = false
 [lib]
 doctest = false
 
+[dependencies]
+# Only the borrowed `BStr` type is used. Keeping every feature disabled makes
+# the environment iterator usable without `alloc` or `std`.
+bstr = { workspace = true }
+
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs"] }
 
@@ -21,6 +26,8 @@ rustix = { workspace = true, features = ["param"] }
 # The compile-time backend check in lib.rs needs a `linux_raw`-gated rustix
 # item to reference; `runtime` is the module that has one.
 [target.'cfg(target_os = "linux")'.dependencies]
+# Parsing remains allocation-free and no-std; `atoi` enables `std` by default.
+atoi = { version = "3.1.0", default-features = false }
 rustix = { workspace = true, features = ["runtime"] }
 syscalls = { workspace = true }
 

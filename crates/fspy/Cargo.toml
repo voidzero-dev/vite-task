@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 wincode = { workspace = true }
-bstr = { workspace = true, default-features = false }
+bstr = { workspace = true, features = ["alloc", "std"] }
 bumpalo = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
 materialized_artifact = { workspace = true }

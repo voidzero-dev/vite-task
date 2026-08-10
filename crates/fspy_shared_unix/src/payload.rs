@@ -1,5 +1,3 @@
-use std::os::unix::ffi::OsStringExt;
-
 use base64::{Engine as _, prelude::BASE64_STANDARD_NO_PAD};
 use bstr::BString;
 #[cfg(not(target_env = "musl"))]
@@ -53,19 +51,26 @@ pub fn encode_payload(payload: Payload) -> EncodedPayload {
     EncodedPayload { payload, encoded_string: encoded_string.into() }
 }
 
-/// Decodes the fspy payload from the environment variable
+/// Decodes the fspy payload from an iterator over environment entries.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The environment variable is not found
-/// - The base64 decoding fails
-/// - The deserialization fails
-pub fn decode_payload_from_env() -> anyhow::Result<EncodedPayload> {
-    let Some(encoded_string) = std::env::var_os(PAYLOAD_ENV_NAME) else {
+/// Returns an error if the payload environment variable is missing, base64
+/// decoding fails, or deserialization fails.
+pub fn decode_payload_from_env(
+    mut envs: impl Iterator<Item = sigsafe::env::Entry>,
+) -> anyhow::Result<EncodedPayload> {
+    let Some(encoded_string) = envs.find_map(|(name, value)| {
+        if AsRef::<[u8]>::as_ref(name) == PAYLOAD_ENV_NAME.as_bytes() {
+            value.map(|value| BString::from(value.as_bytes()))
+        } else {
+            None
+        }
+    }) else {
         anyhow::bail!("Environment variable '{PAYLOAD_ENV_NAME}' not found");
     };
-    decode_payload(encoded_string.into_vec().into())
+
+    decode_payload(encoded_string)
 }
 
 fn decode_payload(encoded_string: BString) -> anyhow::Result<EncodedPayload> {

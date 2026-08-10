@@ -187,6 +187,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atoi"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7a8bbe9949e43a1edaa043038c68703b04774156afdfb62ba2cef5bf93d67be"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "atomic"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1391,6 +1400,7 @@ dependencies = [
  "memmap2",
  "nix 0.31.2",
  "phf 0.13.1",
+ "sigsafe",
  "stackalloc",
  "wincode",
 ]
@@ -3429,6 +3439,8 @@ dependencies = [
 name = "sigsafe"
 version = "0.0.0"
 dependencies = [
+ "atoi",
+ "bstr",
  "libc",
  "rustix",
  "syscalls",
