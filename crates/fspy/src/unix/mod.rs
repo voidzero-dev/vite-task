@@ -47,7 +47,8 @@ impl SpyImpl {
         let preload_path = {
             use materialized_artifact::{Artifact, artifact};
 
-            const PRELOAD_CDYLIB: Artifact = artifact!("fspy_preload");
+            const PRELOAD_CDYLIB: Artifact =
+                artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX");
 
             let preload_cdylib_path = PRELOAD_CDYLIB.materialize().suffix(".dylib").at(dir)?;
             preload_cdylib_path.as_path().into()

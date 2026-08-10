@@ -21,7 +21,7 @@ pub fn napi_client_path() -> &'static AbsolutePath {
     static PATH: LazyLock<AbsolutePathBuf> = LazyLock::new(|| {
         let dir = env::temp_dir().join("vt_client_napi");
         let _ = fs::create_dir(&dir);
-        let path = artifact!("vt_client_napi")
+        let path = artifact!("vt_client_napi", "CARGO_CDYLIB_FILE_VT_CLIENT_NAPI")
             .materialize()
             .suffix(".node")
             .at(&dir)

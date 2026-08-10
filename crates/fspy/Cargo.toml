@@ -31,8 +31,23 @@ tokio = { workspace = true, features = ["bytes"] }
 fspy_shared_unix = { workspace = true }
 nix = { workspace = true, features = ["fs", "process", "socket", "feature"] }
 
+# The preload artifact deps live under `[dependencies]` — not
+# `[build-dependencies]`, where Cargo would compile them with the
+# build-override profile (opt-level 0 in release; see
+# https://github.com/rust-lang/cargo/issues/16719) — so they get the normal
+# profile, in this workspace and downstream ones, with no per-package profile
+# overrides. Cargo provides `CARGO_CDYLIB_FILE_*` while compiling this crate
+# for `artifact!` to embed. Each dep is scoped to the targets whose code
+# embeds it, so other targets (e.g. musl, which never dynamically links a
+# preload) don't build a useless empty cdylib. Scoping artifact deps under
+# `[target.cfg…]` is only safe for normal deps: the same shape under
+# `[target.cfg….build-dependencies]` panics cargo's resolver on cross-compile.
+[target.'cfg(all(unix, not(target_env = "musl")))'.dependencies]
+fspy_preload_unix = { workspace = true }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 fspy_detours_sys = { workspace = true }
+fspy_preload_windows = { workspace = true }
 winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi"] }
 winsafe = { workspace = true }
 
@@ -54,17 +69,9 @@ fspy_test_bin = { path = "../fspy_test_bin", artifact = "bin", target = "aarch64
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dev-dependencies]
 fspy_test_bin = { path = "../fspy_test_bin", artifact = "bin", target = "x86_64-unknown-linux-musl" }
 
-# Artifact build-deps must be unconditional: cargo's resolver panics when
-# `artifact = "cdylib"` deps live under a `[target.cfg.build-dependencies]`
-# block on cross-compile. Each preload crate's source is cfg-gated to compile
-# as an empty cdylib on non-applicable targets, so the unused cross-target
-# builds are cheap.
 [build-dependencies]
 anyhow = { workspace = true }
-materialized_artifact_build = { workspace = true }
 flate2 = { workspace = true }
-fspy_preload_unix = { workspace = true }
-fspy_preload_windows = { workspace = true }
 sha2 = { workspace = true }
 tar = { workspace = true }
 

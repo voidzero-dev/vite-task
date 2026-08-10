@@ -9,9 +9,8 @@
 //! the value-add over a bare `include_bytes!`.
 //!
 //! Materialized files are named `{name}_{hash}{suffix}` in the caller-chosen
-//! directory. The hash (computed at build time by
-//! `materialized_artifact_build::register`) gives three properties without
-//! any coordination between processes:
+//! directory. The hash (computed at macro-expansion time by [`artifact!`])
+//! gives three properties without any coordination between processes:
 //!
 //! - **No repeated writes.** [`Materialize::at`] returns the existing path if
 //!   the file is already there; repeated calls and re-runs skip I/O.
@@ -42,22 +41,9 @@ pub struct Artifact {
     hash: &'static str,
 }
 
-/// Construct an [`Artifact`] from the env vars published by a build script
-/// via `materialized_artifact_build::register`.
-#[macro_export]
-macro_rules! artifact {
-    ($name:literal) => {
-        $crate::Artifact::__new(
-            $name,
-            ::core::include_bytes!(::core::env!(::core::concat!(
-                "MATERIALIZED_ARTIFACT_",
-                $name,
-                "_PATH"
-            ))),
-            ::core::env!(::core::concat!("MATERIALIZED_ARTIFACT_", $name, "_HASH")),
-        )
-    };
-}
+/// Construct an [`Artifact`] from an env var holding a file path at compile
+/// time — see the macro's own docs for usage and design notes.
+pub use materialized_artifact_macros::artifact;
 
 impl Artifact {
     #[doc(hidden)]

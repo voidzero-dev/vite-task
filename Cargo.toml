@@ -71,15 +71,15 @@ diff-struct = "0.5.3"
 directories = "6.0.0"
 elf = { version = "0.8.0", default-features = false }
 materialized_artifact = { path = "crates/materialized_artifact" }
-materialized_artifact_build = { path = "crates/materialized_artifact_build" }
+materialized_artifact_macros = { path = "crates/materialized_artifact_macros" }
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
 fspy_benchmark_launcher = { path = "crates/fspy_benchmark_launcher", artifact = "bin" }
 fspy_benchmark_target = { path = "crates/fspy_benchmark_target", artifact = "bin" }
 fspy_client_unix = { path = "crates/fspy_client_unix" }
 fspy_detours_sys = { path = "crates/fspy_detours_sys" }
-fspy_preload_unix = { path = "crates/fspy_preload_unix", artifact = "cdylib", target = "target" }
-fspy_preload_windows = { path = "crates/fspy_preload_windows", artifact = "cdylib", target = "target" }
+fspy_preload_unix = { path = "crates/fspy_preload_unix", artifact = "cdylib" }
+fspy_preload_windows = { path = "crates/fspy_preload_windows", artifact = "cdylib" }
 fspy_seccomp_unotify = { path = "crates/fspy_seccomp_unotify" }
 fspy_shm = { path = "crates/fspy_shm" }
 fspy_shared = { path = "crates/fspy_shared" }
@@ -113,9 +113,11 @@ petgraph = "0.8.2"
 phf = { version = "0.13.0", features = ["macros"] }
 portable-pty = "0.9.0"
 pretty_assertions = "1.4.1"
+proc-macro2 = "1"
 pty_terminal = { path = "crates/pty_terminal" }
 pty_terminal_test = { path = "crates/pty_terminal_test" }
 pty_terminal_test_client = { path = "crates/pty_terminal_test_client" }
+quote = "1"
 ratatui = "0.30.0"
 rayon = "1.10.0"
 ref-cast = "1.0.24"
@@ -139,6 +141,7 @@ socket_ipc = { path = "crates/socket_ipc" }
 stackalloc = "1.2.1"
 subprocess_test = { path = "crates/subprocess_test" }
 supports-color = "3.0.1"
+syn = "2"
 syscalls = { version = "0.8.0", default-features = false }
 tar = "0.4.45"
 tempfile = "3.14.0"
@@ -165,7 +168,7 @@ vt_str = { path = "crates/vt_str" }
 vt = { path = "crates/vt" }
 vt_bin = { path = "crates/vt_bin" }
 vt_client = { path = "crates/vt_client" }
-vt_client_napi = { path = "crates/vt_client_napi", artifact = "cdylib", target = "target" }
+vt_client_napi = { path = "crates/vt_client_napi", artifact = "cdylib" }
 vt_graph = { path = "crates/vt_graph" }
 vt_ipc_shared = { path = "crates/vt_ipc_shared" }
 vt_plan = { path = "crates/vt_plan" }
@@ -208,3 +211,11 @@ codegen-units = 1
 strip = "symbols" # set to `false` for debug information
 debug = false # set to `true` for debug information
 panic = "abort" # Let it crash and force ourselves to write safe Rust.
+
+# The workspace's artifact dependencies (the preload libraries and
+# `vt_client_napi`) are declared under `[dependencies]`, so they get the
+# normal profile — including this release profile — with no per-package
+# overrides. Keeping them out of `[build-dependencies]` matters: there Cargo
+# would compile them with the build-override profile (opt-level 0) even in
+# release builds, in this workspace and in every downstream workspace. See
+# https://github.com/rust-lang/cargo/issues/16719.

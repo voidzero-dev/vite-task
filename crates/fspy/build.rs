@@ -53,9 +53,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 struct BinaryDownload {
-    /// Identifier used both as the on-disk filename in `OUT_DIR` and as the
-    /// env-var prefix consumed by `artifact!($name)` at runtime.
+    /// On-disk filename in `OUT_DIR`.
     name: &'static str,
+    /// Env var published via `cargo:rustc-env`, through which
+    /// `materialized_artifact::artifact!` finds and embeds the binary.
+    env_var: &'static str,
     /// GitHub release asset URL.
     url: &'static str,
     /// Path of the binary within the tarball.
@@ -73,6 +75,7 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
             // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
             BinaryDownload {
                 name: "oils_for_unix",
+                env_var: "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX",
                 url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-arm64.tar.gz",
                 path_in_targz: "oils-for-unix",
                 expected_sha256: "ce4bb80b15f0a0371af08b19b65bfa5ea17d30429ebb911f487de3d2bcc7a07d",
@@ -80,6 +83,7 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
                 name: "coreutils",
+                env_var: "FSPY_MACOS_ARTIFACT_COREUTILS",
                 url: "https://github.com/uutils/coreutils/releases/download/0.4.0/coreutils-0.4.0-aarch64-apple-darwin.tar.gz",
                 path_in_targz: "coreutils-0.4.0-aarch64-apple-darwin/coreutils",
                 expected_sha256: "8e8f38d9323135a19a73d617336fce85380f3c46fcb83d3ae3e031d1c0372f21",
@@ -92,6 +96,7 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
             // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
             BinaryDownload {
                 name: "oils_for_unix",
+                env_var: "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX",
                 url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-x86_64.tar.gz",
                 path_in_targz: "oils-for-unix",
                 expected_sha256: "cf1a95993127770e2a5fff277cd256a2bb28cf97d7f83ae42fdccc172cdb540d",
@@ -99,6 +104,7 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
                 name: "coreutils",
+                env_var: "FSPY_MACOS_ARTIFACT_COREUTILS",
                 url: "https://github.com/uutils/coreutils/releases/download/0.4.0/coreutils-0.4.0-x86_64-apple-darwin.tar.gz",
                 path_in_targz: "coreutils-0.4.0-x86_64-apple-darwin/coreutils",
                 expected_sha256: "6be8bee6e8b91fc44a465203b9cc30538af00084b6657dc136d9e55837753eb1",
@@ -119,8 +125,12 @@ fn fetch_macos_binaries(out_dir: &Path) -> anyhow::Result<()> {
         .context(format!("Unsupported macOS arch: {target_arch}"))?
         .1;
 
-    for BinaryDownload { name, url, path_in_targz, expected_sha256 } in downloads {
+    for BinaryDownload { name, env_var, url, path_in_targz, expected_sha256 } in downloads {
         let dest = out_dir.join(name);
+        let dest_str = dest.to_str().expect("OUT_DIR path must be valid UTF-8");
+        // Emit rerun-if-changed before fetching so cargo still sees it even
+        // if the download or write below fails.
+        println!("cargo:rerun-if-changed={dest_str}");
         // Cache hit: an already-extracted binary whose contents hash to
         // `expected_sha256` is known-good and reused without redownloading.
         let cached = matches!(
@@ -138,22 +148,8 @@ fn fetch_macos_binaries(out_dir: &Path) -> anyhow::Result<()> {
             );
             fs::write(&dest, &data).with_context(|| format!("writing {}", dest.display()))?;
         }
-        materialized_artifact_build::register(name, &dest);
+        println!("cargo:rustc-env={env_var}={dest_str}");
     }
-    Ok(())
-}
-
-fn register_preload_cdylib() -> anyhow::Result<()> {
-    let env_name = match env::var("CARGO_CFG_TARGET_OS").unwrap().as_str() {
-        "windows" => "CARGO_CDYLIB_FILE_FSPY_PRELOAD_WINDOWS",
-        _ if env::var("CARGO_CFG_TARGET_ENV").unwrap() == "musl" => return Ok(()),
-        _ => "CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX",
-    };
-    // The cdylib path is content-addressed by cargo; when its content changes
-    // the path changes. Track it so we re-publish the hash on update.
-    println!("cargo:rerun-if-env-changed={env_name}");
-    let dylib_path = env::var_os(env_name).with_context(|| format!("{env_name} not set"))?;
-    materialized_artifact_build::register("fspy_preload", Path::new(&dylib_path));
     Ok(())
 }
 
@@ -161,6 +157,5 @@ fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     fetch_macos_binaries(&out_dir).context("Failed to fetch macOS binaries")?;
-    register_preload_cdylib().context("Failed to register preload cdylib")?;
     Ok(())
 }

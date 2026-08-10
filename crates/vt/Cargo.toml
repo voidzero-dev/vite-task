@@ -49,6 +49,12 @@ vt_glob = { workspace = true }
 vt_path = { workspace = true }
 vt_select = { workspace = true }
 vt_str = { workspace = true }
+# Artifact dep under `[dependencies]` — not `[build-dependencies]`, where
+# Cargo would compile it with the build-override profile (opt-level 0 in
+# release; see https://github.com/rust-lang/cargo/issues/16719). Cargo
+# provides `CARGO_CDYLIB_FILE_VT_CLIENT_NAPI` while compiling this crate
+# for `artifact!` to embed.
+vt_client_napi = { workspace = true }
 vt_graph = { workspace = true }
 vt_ipc_shared = { workspace = true }
 vt_plan = { workspace = true }
@@ -56,14 +62,6 @@ vt_server = { workspace = true }
 vt_workspace = { workspace = true }
 wax = { workspace = true }
 zstd = { workspace = true }
-
-# Artifact build-deps must be unconditional: cargo's resolver panics when
-# `artifact = "cdylib"` deps live under a `[target.cfg.build-dependencies]`
-# block on cross-compile.
-[build-dependencies]
-anyhow = { workspace = true }
-materialized_artifact_build = { workspace = true }
-vt_client_napi = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -27,7 +27,8 @@ use crate::{
     ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
 };
 
-const INTERPOSE_CDYLIB: Artifact = artifact!("fspy_preload");
+const INTERPOSE_CDYLIB: Artifact =
+    artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_WINDOWS");
 
 pub struct PathAccessIterable {
     ipc_receiver_lock_guard: OwnedReceiverLockGuard,

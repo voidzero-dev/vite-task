@@ -1,17 +1,21 @@
 [package]
-name = "materialized_artifact_build"
+name = "materialized_artifact_macros"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 publish = false
 rust-version.workspace = true
 
+[lib]
+proc-macro = true
+doctest = false
+test = false
+
 [dependencies]
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true }
 xxhash-rust = { workspace = true, features = ["xxh3"] }
 
 [lints]
 workspace = true
-
-[lib]
-doctest = false
-test = false

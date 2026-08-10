@@ -1,7 +1,7 @@
 use materialized_artifact::{Artifact, artifact};
 
-pub const COREUTILS_BINARY: Artifact = artifact!("coreutils");
-pub const OILS_BINARY: Artifact = artifact!("oils_for_unix");
+pub const COREUTILS_BINARY: Artifact = artifact!("coreutils", "FSPY_MACOS_ARTIFACT_COREUTILS");
+pub const OILS_BINARY: Artifact = artifact!("oils_for_unix", "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX");
 
 #[cfg(test)]
 mod tests {
