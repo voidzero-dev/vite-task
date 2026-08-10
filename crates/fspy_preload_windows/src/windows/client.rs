@@ -2,7 +2,10 @@ use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
 
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
-    ipc::{PathAccess, channel::Sender},
+    ipc::{
+        PathAccess,
+        channel::{ClaimError, Sender, WriteEncodedError},
+    },
     windows::{PAYLOAD_ID, Payload},
 };
 use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
@@ -40,7 +43,13 @@ impl<'a> Client<'a> {
         let Some(sender) = &self.ipc_sender else {
             return;
         };
-        sender.write_encoded(&access).expect("failed to send path access");
+        match sender.write_encoded(&access) {
+            Ok(())
+            // The channel was closed because the traced root process exited.
+            // Accesses from whatever is left behind are dropped by design.
+            | Err(WriteEncodedError::Claim(ClaimError::Closed)) => {}
+            Err(err) => panic!("failed to send path access: {err:?}"),
+        }
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {

@@ -2,12 +2,23 @@ pub mod convert;
 pub mod raw_exec;
 
 use std::{
-    cell::Cell, ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _,
-    path::Path, sync::OnceLock,
+    cell::Cell,
+    ffi::OsStr,
+    fmt::Debug,
+    num::NonZeroUsize,
+    os::unix::ffi::OsStrExt as _,
+    path::Path,
+    sync::{
+        OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use convert::{ToAbsolutePath, ToAccessMode};
-use fspy_shared::ipc::{PathAccess, channel::Sender};
+use fspy_shared::ipc::{
+    PathAccess,
+    channel::{ClaimError, Sender},
+};
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::EncodedPayload,
@@ -78,9 +89,16 @@ impl Client {
         let frame_size = NonZeroUsize::new(serialized_size)
             .expect("fspy: encoded PathAccess should never be empty");
 
-        let mut frame = ipc_sender
-            .claim_frame(frame_size)
-            .expect("fspy: failed to claim frame in shared memory");
+        let _in_flight = SendInFlight::begin();
+        let mut frame = match ipc_sender.claim_frame(frame_size) {
+            Ok(frame) => frame,
+            // The channel was closed because the traced root process exited.
+            // Accesses from whatever is left behind are dropped by design.
+            Err(ClaimError::Closed) => return Ok(()),
+            Err(ClaimError::Capacity) => {
+                panic!("fspy: failed to claim frame in shared memory")
+            }
+        };
         let mut writer: &mut [u8] = &mut frame;
         PathAccess::serialize_into(&mut writer, &path_access)?;
         assert_eq!(writer.len(), 0);
@@ -118,6 +136,42 @@ impl Client {
 }
 
 static CLIENT: OnceLock<Client> = OnceLock::new();
+
+/// Sends that are between claiming a frame and finishing it, on any thread.
+static IN_FLIGHT_SENDS: AtomicUsize = AtomicUsize::new(0);
+
+struct SendInFlight;
+
+impl SendInFlight {
+    fn begin() -> Self {
+        IN_FLIGHT_SENDS.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for SendInFlight {
+    fn drop(&mut self) {
+        IN_FLIGHT_SENDS.fetch_sub(1, Ordering::Release);
+    }
+}
+
+/// Waits until no send is mid-frame on any thread of this process.
+///
+/// The exit interception calls this so a voluntary exit never abandons a
+/// claimed frame, which would make the whole run's tracking incomplete. A send
+/// lasts microseconds and never blocks, so this returns almost at once. The
+/// deadline covers a thread that died mid-send without running its drop
+/// (asynchronous `pthread_cancel` and the like): exit is delayed by at most
+/// the deadline, and the runner treats the leaked count as an incomplete run.
+pub fn drain_in_flight_sends() {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+    while IN_FLIGHT_SENDS.load(Ordering::Acquire) != 0 {
+        if std::time::Instant::now() > deadline {
+            return;
+        }
+        std::thread::yield_now();
+    }
+}
 
 // Resolving and reporting a file access can call another interposed function.
 // Suppress same-thread re-entry to prevent recursive access handling while

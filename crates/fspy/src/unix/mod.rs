@@ -10,7 +10,10 @@ use std::{io, path::Path};
 use fspy_seccomp_unotify::supervisor::supervise;
 use fspy_shared::ipc::PathAccess;
 #[cfg(not(target_env = "musl"))]
-use fspy_shared::ipc::{NativeStr, channel::channel};
+use fspy_shared::ipc::{
+    NativeStr,
+    channel::{ChannelFrames, channel},
+};
 #[cfg(target_os = "macos")]
 use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
@@ -25,7 +28,7 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
-use crate::ipc::{OwnedReceiverLockGuard, SHM_CAPACITY};
+use crate::ipc::SHM_CAPACITY;
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
 
 #[derive(Debug)]
@@ -40,7 +43,7 @@ pub struct SpyImpl {
 impl SpyImpl {
     /// Initialize the fs access spy by writing the preload library on disk.
     ///
-    /// On musl targets, we don't build a preload library —
+    /// On musl targets, we don't build a preload library;
     /// only seccomp-based tracking is used.
     pub fn init_in(#[cfg_attr(target_env = "musl", allow(unused))] dir: &Path) -> io::Result<Self> {
         #[cfg(not(target_env = "musl"))]
@@ -158,15 +161,24 @@ impl SpyImpl {
                 );
                 let arenas = arenas.collect::<Vec<_>>();
 
-                // Lock the ipc channel after the child has exited.
-                // We are not interested in path accesses from descendants after the main child has exited.
+                // Close the ipc channel now that the child has exited. We are not
+                // interested in path accesses from descendants after the main child
+                // has exited, and we do not wait for them either: closing is a
+                // single atomic operation that also fences out later writers.
+                // A close error means a traced process was still mid-write; its
+                // frames cannot be read safely, so the run is incomplete.
                 #[cfg(not(target_env = "musl"))]
-                let ipc_receiver_lock_guard =
-                    OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
+                let (shm_frames, incomplete) = ipc_receiver
+                    .close()
+                    .map_or_else(|_| (None, true), |frames| (Some(frames), false));
                 let path_accesses = PathAccessIterable {
                     arenas,
                     #[cfg(not(target_env = "musl"))]
-                    ipc_receiver_lock_guard,
+                    shm_frames,
+                    #[cfg(not(target_env = "musl"))]
+                    incomplete,
+                    #[cfg(target_env = "musl")]
+                    incomplete: false,
                 };
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
@@ -179,8 +191,12 @@ impl SpyImpl {
 
 pub struct PathAccessIterable {
     arenas: Vec<PathAccessArena>,
+    /// `None` when the channel could not be frozen for reading.
     #[cfg(not(target_env = "musl"))]
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
+    shm_frames: Option<ChannelFrames>,
+    /// A traced process was still writing when the channel closed, so the
+    /// recorded accesses are not a complete picture of the run.
+    incomplete: bool,
 }
 
 impl PathAccessIterable {
@@ -190,12 +206,20 @@ impl PathAccessIterable {
 
         #[cfg(not(target_env = "musl"))]
         {
-            let accesses_in_shm = self.ipc_receiver_lock_guard.iter_path_accesses();
+            let accesses_in_shm =
+                self.shm_frames.iter().flat_map(ChannelFrames::iter_path_accesses);
             accesses_in_shm.chain(accesses_in_arena)
         }
         #[cfg(target_env = "musl")]
         {
             accesses_in_arena
         }
+    }
+
+    /// Whether tracking was cut short, which makes the accesses above an
+    /// incomplete record of the run.
+    #[must_use]
+    pub const fn is_incomplete(&self) -> bool {
+        self.incomplete
     }
 }

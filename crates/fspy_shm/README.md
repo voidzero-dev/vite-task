@@ -18,7 +18,7 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 | `Mapping::as_ptr()`   | Returns a mutable raw pointer to the first byte.                                        |
 | `Mapping::as_slice()` | Returns the bytes as a shared slice. The caller must prevent mutation for its lifetime. |
 
-`ShmKeeper` is the name: while it lives, `open` succeeds, and dropping it removes the backing file. `ShmHandle` is the opened file: `create` returns one so the creator never looks its own file up by name, and `open` returns one to everybody else. `Mapping` is the bytes: it keeps them alive until dropped and can do nothing else. None of the three synchronizes memory access. The fspy channel adds that on top with atomic frame headers and a lock file: senders hold a shared file lock while writing, and the receiver takes the exclusive lock before reading, which waits for existing senders and rejects new ones.
+`ShmKeeper` is the name: while it lives, `open` succeeds, and dropping it removes the backing file. `ShmHandle` is the opened file: `create` returns one so the creator never looks its own file up by name, and `open` returns one to everybody else. `Mapping` is the bytes: it keeps them alive until dropped and can do nothing else. None of the three synchronizes memory access. The fspy channel adds that on top with atomic frame headers and a close gate stored in the mapping itself: every writer holds a gate guard while it writes, and the receiver closes the gate with one atomic operation, which refuses every later writer and reports whether any write was still in flight.
 
 Every byte in a mapping returned by `create` is initially zero. `open` exposes the mapping's current contents and does not reinitialize them.
 
@@ -67,6 +67,6 @@ Earlier revisions rejected temporary files because dirty pages can reach disk. O
 - Dropping the keeper removes the backing file's name, so later opens fail. This is cleanup, not a stop signal: processes that already opened the shared memory keep reading and writing. The fspy channel stops writers with the close gate it stores in the shared bytes.
 - An `ShmHandle` and its `Mapping`s stay usable after the keeper is gone. They keep the bytes alive and cannot extend the identifier's validity.
 
-The channel guards the same window from its own side: [`ChannelConf::sender`](../fspy_shared/src/ipc/channel/mod.rs) opens and locks the receiver's exact lock-file path before it calls `fspy_shm::open`, and the receiver removes that path before dropping the keeper, so a sender that starts later fails before opening shared memory.
+The channel builds on that: [`ChannelConf::sender`](../fspy_shared/src/ipc/channel/mod.rs) is just an `open`, and the receiver drops the keeper when it closes the channel. A sender that attached earlier keeps its mapping, but the close gate refuses its claims from then on.
 
 If the keeper's process is killed, its `Drop` never runs and the file stays behind: on Unix for the system's temporary-file reaper, on Windows until a cleanup tool runs. The file costs about as much disk as the run wrote into it.

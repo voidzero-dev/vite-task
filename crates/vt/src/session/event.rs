@@ -87,6 +87,10 @@ pub enum CacheNotUpdatedReason {
         /// First path that was both read and written during execution.
         path: RelativePathBuf,
     },
+    /// A traced process was still writing when file tracking closed at task
+    /// exit, so the recorded accesses are an incomplete picture of the run and
+    /// caching it could miss an input or an output.
+    TrackingIncomplete,
     /// fspy isn't compiled in on this build and the task requires fspy
     /// (its `input` config includes auto-inference). Task ran but cannot
     /// be cached without tracked path accesses.

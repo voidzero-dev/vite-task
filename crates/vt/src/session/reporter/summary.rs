@@ -114,6 +114,11 @@ pub enum SpawnOutcome {
         /// Set when a runner-aware tool called `disableCache()`, skipping
         /// cache update.
         tool_disabled_cache: bool,
+        /// `true` when a traced process was still writing as the task exited,
+        /// so file tracking could not produce a complete record of the run.
+        /// Task ran successfully but cache was not updated.
+        #[serde(default)]
+        tracking_incomplete: bool,
     },
 
     /// Process exited with non-zero status.
@@ -343,6 +348,10 @@ impl TaskResult {
             cache_update_status,
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested)
         );
+        let tracking_incomplete = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
+        );
 
         match cache_status {
             CacheStatus::Hit { replayed_duration } => {
@@ -358,6 +367,7 @@ impl TaskResult {
                     fspy_unsupported,
                     ipc_server_error,
                     tool_disabled_cache,
+                    tracking_incomplete,
                 ),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
@@ -371,6 +381,7 @@ impl TaskResult {
                     fspy_unsupported,
                     ipc_server_error,
                     tool_disabled_cache,
+                    tracking_incomplete,
                 ),
             },
         }
@@ -385,6 +396,7 @@ fn spawn_outcome_from_execution(
     fspy_unsupported: bool,
     ipc_server_error: Option<Str>,
     tool_disabled_cache: bool,
+    tracking_incomplete: bool,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
@@ -396,6 +408,7 @@ fn spawn_outcome_from_execution(
             fspy_unsupported,
             ipc_server_error,
             tool_disabled_cache,
+            tracking_incomplete,
         },
         // Process exited with non-zero code
         (Some(status), _) => {
@@ -416,6 +429,7 @@ fn spawn_outcome_from_execution(
             fspy_unsupported: false,
             ipc_server_error: None,
             tool_disabled_cache: false,
+            tracking_incomplete: false,
         },
     }
 }
@@ -553,6 +567,17 @@ impl TaskResult {
         } = self
         {
             return vt_str::format!("→ Not cached: read and wrote '{path}'");
+        }
+        // Tracking that could not be frozen at task exit — same overrides
+        // precedence as above.
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { tracking_incomplete: true, .. },
+            ..
+        } = self
+        {
+            return Str::from(
+                "→ Not cached: file tracking incomplete (a traced process was still writing at task exit)",
+            );
         }
         // fspy-unsupported-on-this-OS message — same overrides precedence as above
         if let Self::Spawned {

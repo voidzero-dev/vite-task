@@ -34,6 +34,26 @@ struct TrackingOutcome {
     /// First path that was both read and written during execution, if any.
     /// A non-empty value means caching this task is unsound.
     read_write_overlap: Option<RelativePathBuf>,
+    /// Tracking was cut short: a traced process was still writing when the
+    /// channel closed at task exit, so accesses may be missing.
+    incomplete: bool,
+}
+
+/// The reasons a run must not be cached that follow from what fspy observed,
+/// in priority order.
+fn tracking_guard(tracking: &TrackingOutcome) -> Option<CacheNotUpdatedReason> {
+    if tracking.incomplete {
+        // We cannot tell which accesses were lost, so any cache entry built
+        // from this run risks a stale hit later.
+        return Some(CacheNotUpdatedReason::TrackingIncomplete);
+    }
+
+    // fspy-inferred read-write overlap: the task wrote to a file it also read,
+    // so the prerun input hashes are stale and caching is unsound. (We only
+    // check fspy-inferred reads, not globbed_inputs. A task that writes to a
+    // glob-matched file without reading it produces perpetual cache misses but
+    // not a correctness bug.)
+    tracking.read_write_overlap.clone().map(|path| CacheNotUpdatedReason::InputModified { path })
 }
 
 type TrackedEnvValues = BTreeMap<Str, Option<EnvValueHash>>;
@@ -98,18 +118,8 @@ pub(super) async fn update_cache(
         workspace_root,
     );
 
-    if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome {
-        // fspy-inferred read-write overlap: the task wrote to a file it also
-        // read, so the prerun input hashes are stale and caching is unsound.
-        // (We only check fspy-inferred reads, not globbed_inputs. A task that
-        // writes to a glob-matched file without reading it produces perpetual
-        // cache misses but not a correctness bug.)
-        return (
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
-                path: path.clone(),
-            }),
-            None,
-        );
+    if let Some(reason) = fspy_outcome.as_ref().and_then(tracking_guard) {
+        return (CacheUpdateStatus::NotUpdated(reason), None);
     }
 
     if fspy_outcome.is_none() && fspy.is_some() {
@@ -249,6 +259,7 @@ fn observe_fspy(
                 path_reads: filtered_path_reads,
                 path_writes: filtered_path_writes,
                 read_write_overlap,
+                incomplete: raw.is_incomplete(),
             }
         })
     }
@@ -410,7 +421,44 @@ mod tests {
     use rustc_hash::FxHashSet;
     use vt_path::{AbsolutePath, RelativePathBuf};
 
-    use super::normalize_ignored_paths;
+    use super::{TrackingOutcome, normalize_ignored_paths, tracking_guard};
+    use crate::{collections::HashMap, session::event::CacheNotUpdatedReason};
+
+    fn tracking_outcome(read_write_overlap: Option<&str>, incomplete: bool) -> TrackingOutcome {
+        TrackingOutcome {
+            path_reads: HashMap::default(),
+            path_writes: FxHashSet::default(),
+            read_write_overlap: read_write_overlap.map(|path| RelativePathBuf::new(path).unwrap()),
+            incomplete,
+        }
+    }
+
+    #[test]
+    fn complete_tracking_without_overlap_allows_caching() {
+        assert!(tracking_guard(&tracking_outcome(None, false)).is_none());
+    }
+
+    #[test]
+    fn read_write_overlap_blocks_caching() {
+        let reason = tracking_guard(&tracking_outcome(Some("src/generated.ts"), false));
+
+        let Some(CacheNotUpdatedReason::InputModified { path }) = reason else {
+            panic!("expected an input-modified reason, got {reason:?}");
+        };
+        assert_eq!(path.as_str(), "src/generated.ts");
+    }
+
+    #[test]
+    fn incomplete_tracking_blocks_caching_ahead_of_any_overlap() {
+        // Incomplete tracking wins: with accesses missing we cannot even trust
+        // the overlap verdict.
+        let reason = tracking_guard(&tracking_outcome(Some("src/generated.ts"), true));
+
+        assert!(
+            matches!(reason, Some(CacheNotUpdatedReason::TrackingIncomplete)),
+            "expected tracking to be reported as incomplete, got {reason:?}"
+        );
+    }
 
     #[test]
     fn normalize_ignored_paths_cleans_relative_components() {

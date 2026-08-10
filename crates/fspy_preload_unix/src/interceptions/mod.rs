@@ -1,5 +1,6 @@
 mod access;
 mod dirent;
+mod exit;
 mod open;
 mod spawn;
 mod stat;

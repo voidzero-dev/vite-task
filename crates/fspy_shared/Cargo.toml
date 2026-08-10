@@ -14,8 +14,6 @@ bytemuck = { workspace = true, features = ["must_cast", "derive"] }
 fspy_shm = { workspace = true }
 native_str = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
 vt_path = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -27,7 +25,6 @@ assert2 = { workspace = true }
 ctor = { workspace = true }
 rustc-hash = { workspace = true }
 subprocess_test = { workspace = true }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

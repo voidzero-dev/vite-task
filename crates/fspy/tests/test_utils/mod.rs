@@ -49,9 +49,11 @@ pub fn assert_contains(
     assert_eq!(
         expected_mode,
         actual_mode,
-        "Expected to find access to path {} with mode {:?}, but it was not found in: {:?}",
+        "Expected to find access to path {} with mode {:?}, but it was not found in \
+         (tracking incomplete: {}): {:?}",
         expected_path.display(),
         expected_mode,
+        accesses.is_incomplete(),
         accesses.iter().collect::<Vec<_>>()
     );
 }

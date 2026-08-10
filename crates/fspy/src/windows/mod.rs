@@ -8,7 +8,10 @@ use std::{
 
 use fspy_detours_sys::{DetourCopyPayloadToProcess, DetourUpdateProcessWithDll};
 use fspy_shared::{
-    ipc::{PathAccess, channel::channel},
+    ipc::{
+        PathAccess,
+        channel::{ChannelFrames, channel},
+    },
     windows::{PAYLOAD_ID, Payload},
 };
 use futures_util::FutureExt;
@@ -21,21 +24,29 @@ use winapi::{
 use winsafe::co::{CP, WC};
 
 use crate::{
-    ChildTermination, TrackedChild,
-    command::Command,
-    error::SpawnError,
-    ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
+    ChildTermination, TrackedChild, command::Command, error::SpawnError, ipc::SHM_CAPACITY,
 };
 
 const INTERPOSE_CDYLIB: Artifact = artifact!("fspy_preload");
 
 pub struct PathAccessIterable {
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
+    /// `None` when the channel could not be frozen for reading.
+    shm_frames: Option<ChannelFrames>,
+    /// A traced process was still writing when the channel closed, so the
+    /// recorded accesses are not a complete picture of the run.
+    incomplete: bool,
 }
 
 impl PathAccessIterable {
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        self.ipc_receiver_lock_guard.iter_path_accesses()
+        self.shm_frames.iter().flat_map(ChannelFrames::iter_path_accesses)
+    }
+
+    /// Whether tracking was cut short, which makes the accesses above an
+    /// incomplete record of the run.
+    #[must_use]
+    pub const fn is_incomplete(&self) -> bool {
+        self.incomplete
     }
 }
 
@@ -166,10 +177,15 @@ impl SpyImpl {
                         child.wait().await?
                     }
                 };
-                // Lock the ipc channel after the child has exited.
-                // We are not interested in path accesses from descendants after the main child has exited.
-                let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;
-                let path_accesses = PathAccessIterable { ipc_receiver_lock_guard };
+                // Close the ipc channel now that the child has exited. We are not
+                // interested in path accesses from descendants after the main child
+                // has exited, and we do not wait for them either: closing is a
+                // single atomic operation that also fences out later writers.
+                // A close error means a traced process was still mid-write; its
+                // frames cannot be read safely, so the run is incomplete.
+                let (shm_frames, incomplete) =
+                    receiver.close().map_or_else(|_| (None, true), |frames| (Some(frames), false));
+                let path_accesses = PathAccessIterable { shm_frames, incomplete };
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })
