@@ -13,7 +13,6 @@
 
 mod gate;
 mod gated;
-mod shm_io;
 
 use std::io;
 

@@ -27,12 +27,14 @@ use std::{
     sync::{Arc, atomic::AtomicU64},
 };
 
-use wincode::{SchemaWrite, config::DefaultConfig};
+use wincode::{SchemaWrite, Serialize as _, config::DefaultConfig};
 
-use super::{
-    gate::{EnterError, Gate, GateGuard},
-    shm_io::{self, AsRawSlice, ShmReader, ShmWriter},
-};
+use self::shm_io::{ShmReader, ShmWriter};
+use super::gate::{EnterError, Gate, GateGuard};
+
+mod shm_io;
+
+pub use shm_io::AsRawSlice;
 
 /// Bytes reserved in front of the arena for the gate word.
 const GATE_REGION_SIZE: usize = 64;
@@ -125,8 +127,8 @@ impl<M: AsRawSlice> GatedShmWriter<M> {
     /// [`ClaimError::Capacity`] when the arena cannot fit the frame.
     pub fn claim_frame(&self, size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let gate = self.gate().enter()?;
-        let frame = self.arena.claim_frame(size).ok_or(ClaimError::Capacity)?;
-        Ok(FrameMut { frame, _gate: gate })
+        let content = self.arena.claim_frame(size).ok_or(ClaimError::Capacity)?;
+        Ok(FrameMut { content, _gate: gate })
     }
 
     /// Appends an encoded value as a single frame.
@@ -134,20 +136,36 @@ impl<M: AsRawSlice> GatedShmWriter<M> {
     /// # Errors
     ///
     /// Returns [`ClaimError::Closed`] wrapped in [`WriteEncodedError::Claim`]
-    /// once the read end has closed the gate, and otherwise whatever the arena
-    /// reports.
+    /// once the read end has closed the gate, [`WriteEncodedError::ZeroSizedFrame`]
+    /// for a value that encodes to nothing, and otherwise the encoder's error.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the encoder does not fill exactly the size it asked for, which
+    /// would mean the schema is inconsistent with itself.
     pub fn write_encoded<T: SchemaWrite<DefaultConfig, Src = T>>(
         &self,
         value: &T,
     ) -> Result<(), WriteEncodedError> {
-        // The guard is held across the inner write and released only afterwards,
-        // so the frame is complete before the gate count drops.
-        let _gate = self.gate().enter().map_err(ClaimError::from)?;
-        self.arena.write_encoded(value).map_err(|error| match error {
-            shm_io::WriteEncodedError::EncodeError(error) => WriteEncodedError::Encode(error),
-            shm_io::WriteEncodedError::ZeroSizedFrame => WriteEncodedError::ZeroSizedFrame,
-            shm_io::WriteEncodedError::InsufficientSpace => ClaimError::Capacity.into(),
-        })
+        // Enter the gate before touching the value, so a post-close call
+        // reports `Claim(Closed)` no matter what the value encodes to.
+        let gate = self.gate().enter().map_err(ClaimError::from)?;
+
+        let serialized_size =
+            usize::try_from(T::serialized_size(value)?).expect("serialized size exceeds usize");
+        let Some(size) = NonZeroUsize::new(serialized_size) else {
+            return Err(WriteEncodedError::ZeroSizedFrame);
+        };
+
+        let content = self.arena.claim_frame(size).ok_or(ClaimError::Capacity)?;
+        // The frame holds the gate guard, so it is released only after the
+        // content is written.
+        let mut frame = FrameMut { content, _gate: gate };
+        let mut writer: &mut [u8] = &mut frame;
+        T::serialize_into(&mut writer, value)?;
+        assert_eq!(writer.len(), 0);
+
+        Ok(())
     }
 
     fn gate(&self) -> Gate<'_> {
@@ -158,10 +176,11 @@ impl<M: AsRawSlice> GatedShmWriter<M> {
 /// An exclusively owned frame together with the gate guard that keeps the region
 /// open while it is written.
 ///
-/// The frame is declared first so that its completion lands before the gate is
-/// released.
+/// Dropping it releases the gate, which is what publishes the content to a
+/// reader; the arena's own header was already written when the frame was
+/// claimed.
 pub struct FrameMut<'a> {
-    frame: shm_io::FrameMut<'a>,
+    content: &'a mut [u8],
     _gate: GateGuard<'a>,
 }
 
@@ -169,13 +188,13 @@ impl Deref for FrameMut<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.frame
+        self.content
     }
 }
 
 impl DerefMut for FrameMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.frame
+        self.content
     }
 }
 
@@ -408,6 +427,18 @@ mod tests {
     }
 
     #[test]
+    fn write_encoded_after_close_reports_closed_for_any_value() {
+        let (writer, receiver) = endpoints(1024);
+        let _frames = receiver.close().unwrap();
+
+        // A zero-sized value must still report the close, not its own size.
+        assert!(matches!(
+            writer.write_encoded(&()),
+            Err(WriteEncodedError::Claim(ClaimError::Closed))
+        ));
+    }
+
+    #[test]
     fn write_encoded_roundtrips_through_the_gate() {
         let (writer, receiver) = endpoints(1024);
 
@@ -451,5 +482,163 @@ mod tests {
 
         assert_eq!(seen.len(), WRITERS * PER_WRITER);
         assert_eq!(seen[0], "0 0");
+    }
+
+    /// Writers that run out of room must fail cleanly rather than corrupt the
+    /// arena for the ones that fitted.
+    #[test]
+    fn concurrent_writers_exceeding_the_arena() {
+        let (writer, receiver) = endpoints(1024);
+
+        thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..10 {
+                        let _ = write_frame(&writer, b"hello");
+                        let _ = write_frame(&writer, b"foo");
+                        let _ = write_frame(&writer, b"this is a test");
+                    }
+                });
+            }
+        });
+
+        let reader = receiver.close().unwrap();
+        let mut count = 0;
+        for frame in reader.iter_frames() {
+            count += 1;
+            assert!(
+                frame == b"hello" || frame == b"foo" || frame == b"this is a test",
+                "unexpected frame {:?}",
+                from_utf8(frame)
+            );
+        }
+        assert!(count > 20, "expected most writes to fit, got {count}");
+    }
+
+    /// Several threads racing for the last few bytes must all agree on who got
+    /// them, and the reader must walk whatever survived without panicking.
+    #[test]
+    fn concurrent_writers_racing_for_the_last_bytes() {
+        let (writer, receiver) = endpoints(GATE_REGION_SIZE + 200);
+
+        thread::scope(|scope| {
+            for _ in 0..10 {
+                scope.spawn(|| {
+                    let _ = write_frame(
+                        &writer,
+                        b"this_is_a_moderately_long_frame_that_might_cause_races",
+                    );
+                });
+            }
+        });
+
+        let reader = receiver.close().unwrap();
+        let count = reader.iter_frames().count();
+        // Some but not all of them fit into 200 bytes of arena.
+        assert!(count > 0);
+        assert!(count < 10);
+    }
+
+    /// A frame larger than the size header can describe is refused, and the
+    /// arena stays usable afterwards.
+    #[test]
+    fn a_frame_too_large_for_the_header_is_refused() {
+        let (writer, receiver) = endpoints(1024);
+
+        let oversized = NonZeroUsize::new(usize::try_from(u32::MAX).unwrap() + 1).unwrap();
+        assert!(matches!(writer.claim_frame(oversized), Err(ClaimError::Capacity)));
+
+        write_frame(&writer, b"test").unwrap();
+        let reader = receiver.close().unwrap();
+        assert_eq!(reader.iter_frames().collect::<Vec<_>>(), vec![b"test".as_slice()]);
+    }
+
+    #[test]
+    fn a_misaligned_region_is_rejected() {
+        struct Misaligned(MockRegion);
+
+        impl AsRawSlice for Misaligned {
+            fn as_raw_slice(&self) -> *mut [u8] {
+                let raw_slice = self.0.as_raw_slice();
+                slice_from_raw_parts_mut(
+                    // SAFETY: shifting by one byte deliberately misaligns the
+                    // region and stays inside the over-allocated backing buffer.
+                    unsafe { raw_slice.cast::<u8>().add(1) },
+                    raw_slice.len() - 1,
+                )
+            }
+        }
+
+        let misaligned = Misaligned(MockRegion::alloc(1024));
+        assert_ne!(misaligned.as_raw_slice().cast::<u8>() as usize % align_of::<u64>(), 0);
+
+        let result = std::panic::catch_unwind(|| {
+            // SAFETY: the region is deliberately misaligned to check that the
+            // constructor catches it; the assertion fires before any access.
+            unsafe { GatedShmWriter::new(misaligned) };
+        });
+
+        assert!(result.is_err(), "a misaligned region must be rejected");
+    }
+
+    /// The same protocol over a real shared mapping, written by several
+    /// processes at once.
+    #[test]
+    #[cfg(not(miri))]
+    fn real_shm_across_processes() {
+        use std::process::{Child, Command};
+
+        use rustc_hash::FxHashSet;
+        use subprocess_test::command_for_fn;
+
+        const CHILD_COUNT: usize = 12;
+        const FRAME_COUNT_EACH_CHILD: usize = 100;
+        const SHM_SIZE: usize = 1024 * 1024;
+
+        let (keeper, handle) = fspy_shm::create(SHM_SIZE).unwrap();
+        let shm_id = keeper.id().to_str().expect("test temp dir is UTF-8").to_owned();
+        let mapping = handle.map().unwrap();
+        // SAFETY: the backing file was just created zero-initialized, the
+        // mapping stays valid while the receiver holds it, and only this
+        // protocol reaches it.
+        let receiver = unsafe { GatedShmReceiver::new(mapping) };
+
+        let children: Vec<Child> = (0..CHILD_COUNT)
+            .map(|child_index| {
+                let cmd = command_for_fn!((shm_id.clone(), child_index), |(
+                    shm_id,
+                    child_index,
+                ): (
+                    String,
+                    usize
+                )| {
+                    let mapping =
+                        fspy_shm::open(std::ffi::OsStr::new(&shm_id)).unwrap().map().unwrap();
+                    // SAFETY: the mapping was created under the same
+                    // contract and only this protocol reaches it.
+                    let writer = unsafe { GatedShmWriter::new(mapping) };
+                    for i in 0..FRAME_COUNT_EACH_CHILD {
+                        let frame_data = format!("{child_index} {i}");
+                        let size = NonZeroUsize::new(frame_data.len()).unwrap();
+                        writer.claim_frame(size).unwrap().copy_from_slice(frame_data.as_bytes());
+                    }
+                });
+                Command::from(cmd).spawn().unwrap()
+            })
+            .collect();
+
+        for mut child in children {
+            assert!(child.wait().unwrap().success());
+        }
+
+        let reader = receiver.close().unwrap();
+        let frames: FxHashSet<&str> =
+            reader.iter_frames().map(|frame| from_utf8(frame).unwrap()).collect();
+        assert_eq!(frames.len(), CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
+        for child_index in 0..CHILD_COUNT {
+            for i in 0..FRAME_COUNT_EACH_CHILD {
+                assert!(frames.contains(format!("{child_index} {i}").as_str()));
+            }
+        }
     }
 }

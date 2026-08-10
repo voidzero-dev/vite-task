@@ -21,7 +21,6 @@ bytemuck = { workspace = true }
 winapi = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-assert2 = { workspace = true }
 ctor = { workspace = true }
 rustc-hash = { workspace = true }
 subprocess_test = { workspace = true }

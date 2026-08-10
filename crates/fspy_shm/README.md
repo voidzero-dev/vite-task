@@ -8,17 +8,16 @@
 
 The public API is defined in [`src/lib.rs`](src/lib.rs).
 
-| API                   | Contract                                                                                |
-| --------------------- | --------------------------------------------------------------------------------------- |
-| `create(size)`        | Creates a zero-initialized backing file and returns its `ShmKeeper` and an `ShmHandle`. |
-| `open(id)`            | Opens an `ShmHandle` on the shared memory identified by `id`.                           |
-| `ShmKeeper::id()`     | Returns the identifier another process passes to `open`.                                |
-| `ShmHandle::map()`    | Maps the shared bytes. Callable more than once.                                         |
-| `Mapping::len()`      | Returns the mapped size.                                                                |
-| `Mapping::as_ptr()`   | Returns a mutable raw pointer to the first byte.                                        |
-| `Mapping::as_slice()` | Returns the bytes as a shared slice. The caller must prevent mutation for its lifetime. |
+| API                 | Contract                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| `create(size)`      | Creates a zero-initialized backing file and returns its `ShmKeeper` and an `ShmHandle`. |
+| `open(id)`          | Opens an `ShmHandle` on the shared memory identified by `id`.                           |
+| `ShmKeeper::id()`   | Returns the identifier another process passes to `open`.                                |
+| `ShmHandle::map()`  | Maps the shared bytes. Callable more than once.                                         |
+| `Mapping::len()`    | Returns the mapped size.                                                                |
+| `Mapping::as_ptr()` | Returns a mutable raw pointer to the first byte.                                        |
 
-`ShmKeeper` is the name: while it lives, `open` succeeds, and dropping it removes the backing file. `ShmHandle` is the opened file: `create` returns one so the creator never looks its own file up by name, and `open` returns one to everybody else. `Mapping` is the bytes: it keeps them alive until dropped and can do nothing else. None of the three synchronizes memory access. The fspy channel adds that on top with atomic frame headers and a close gate stored in the mapping itself: every writer holds a gate guard while it writes, and the receiver closes the gate with one atomic operation, which refuses every later writer and reports whether any write was still in flight.
+`ShmKeeper` is the name: while it lives, `open` succeeds, and dropping it removes the backing file. `ShmHandle` is the opened file: `create` returns one so the creator never looks its own file up by name, and `open` returns one to everybody else. `Mapping` is the bytes: it keeps them alive until dropped and can do nothing else. None of the three synchronizes memory access or dereferences the mapping, so the crate has no safety conditions of its own. All access rules live one layer up, in the fspy channel: a single atomic end-offset word hands every writer a frame range of its own, and a close gate stored in the same mapping tracks writers. Every writer holds a gate guard while it writes. The receiver closes the gate with one atomic operation, which refuses every later writer and reports whether any write was still in flight.
 
 Every byte in a mapping returned by `create` is initially zero. `open` exposes the mapping's current contents and does not reinitialize them.
 

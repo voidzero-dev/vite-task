@@ -186,19 +186,6 @@ impl Mapping {
     pub fn as_ptr(&self) -> *mut u8 {
         self.raw.as_mut_ptr()
     }
-
-    /// Returns the mapped bytes as a shared slice.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that no process or thread mutates the mapping for
-    /// the lifetime of the returned slice.
-    #[must_use]
-    pub unsafe fn as_slice(&self) -> &[u8] {
-        // SAFETY: The mapping is valid for its full length, and the caller
-        // guarantees that it is not mutated while the slice is borrowed.
-        unsafe { std::slice::from_raw_parts(self.as_ptr().cast_const(), self.len()) }
-    }
 }
 
 #[cfg(test)]
