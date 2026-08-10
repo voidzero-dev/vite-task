@@ -229,11 +229,6 @@ opt-level = 3
 codegen-units = 1
 strip = "symbols"
 
-[profile.release.package.fspy_client_unix]
-opt-level = 3
-codegen-units = 1
-strip = "symbols"
-
 [profile.release.package.fspy_preload_windows]
 opt-level = 3
 codegen-units = 1
