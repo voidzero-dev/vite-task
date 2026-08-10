@@ -19,7 +19,7 @@ pub mod fs;
 pub mod mm;
 pub mod param;
 
-pub use c_str::{CStr, Fat, Thin};
+pub use c_str::{Bytes, CStr, Fat, Thin};
 pub use rustix::{
     fd::{AsRawFd, BorrowedFd},
     fs::CWD,
