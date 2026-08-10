@@ -75,6 +75,11 @@ pub trait ToAbsolutePath {
     /// [`as_bytes`] gives the path without the NUL.
     ///
     /// [`as_bytes`]: sigsafe::CStr::as_bytes
+    ///
+    /// # Errors
+    ///
+    /// Returns the error reported while resolving a descriptor or the current
+    /// working directory.
     fn to_absolute_path<'a, A: Allocator>(
         self,
         allocator: &'a A,
@@ -111,6 +116,7 @@ impl PathAt<'_, '_> {
     ///
     /// `fd` must remain valid while the returned value is used, and `path`
     /// must point to a valid NUL-terminated string.
+    #[must_use]
     pub const unsafe fn borrow_raw(fd: c_int, path: *const c_char) -> Self {
         // SAFETY: both invariants are upheld by the caller.
         Self(unsafe { BorrowedFd::borrow_raw(fd) }, unsafe { sigsafe::CStr::from_ptr(path) })
@@ -164,6 +170,12 @@ impl ToAbsolutePath for sigsafe::CStr<'_, sigsafe::Thin> {
 }
 
 pub trait ToAccessMode {
+    /// Converts the intercepted operation's mode into an access mode.
+    ///
+    /// # Safety
+    ///
+    /// Implementations backed by raw process pointers require those pointers
+    /// to remain valid for the conversion.
     unsafe fn to_access_mode(self) -> AccessMode;
 }
 
@@ -187,7 +199,8 @@ impl ToAccessMode for OpenFlags {
 pub struct ModeStr(pub *const c_char);
 impl ToAccessMode for ModeStr {
     unsafe fn to_access_mode(self) -> AccessMode {
-        // SAFETY: self.0 is a non-null pointer to a valid null-terminated C string, as guaranteed by the libc calling convention
+        // SAFETY: self.0 is a non-null pointer to a valid null-terminated C
+        // string, as guaranteed by the libc calling convention.
         let mode_str = unsafe { CStr::from_ptr(self.0) }.to_bytes().as_bstr();
         let has_read = mode_str.contains(&b'r');
         let has_write = mode_str.contains(&b'w') || mode_str.contains(&b'a');

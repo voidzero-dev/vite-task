@@ -1,0 +1,27 @@
+[package]
+name = "fspy_client_unix"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[target.'cfg(all(unix, not(target_env = "musl")))'.dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
+anyhow = { workspace = true }
+bstr = { workspace = true, features = ["alloc", "std"] }
+fspy_shared = { workspace = true }
+fspy_shared_unix = { workspace = true }
+libc = { workspace = true }
+nix = { workspace = true, features = ["fs"] }
+sigsafe = { workspace = true }
+sigsafe_alloc = { workspace = true }
+wincode = { workspace = true }
+
+[target.'cfg(all(target_os = "linux", not(target_env = "musl")))'.dependencies]
+itoa = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+test = false
