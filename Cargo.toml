@@ -54,6 +54,7 @@ bstr = { version = "1.12.0", default-features = false }
 bump-scope = { version = "2", default-features = false, features = ["allocator-api2-02"] }
 bumpalo = { version = "3.17.0", features = ["collections"] }
 bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
+cargo-platform = "=0.3.2"
 cc = "1.2.39"
 clap = "4.5.53"
 color-eyre = "0.6.5"

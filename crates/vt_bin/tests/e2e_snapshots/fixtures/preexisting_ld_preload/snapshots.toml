@@ -4,7 +4,7 @@ name = "preexisting_ld_preload"
 # glibc-Linux. On musl fspy uses seccomp-unotify instead and strips
 # LD_PRELOAD from spawned children, so the fixture's interposer-chain
 # assumptions don't hold.
-platform = "linux-gnu"
+cfg = 'all(target_os = "linux", target_env = "gnu")'
 comment = """
 Reproduces #340 and verifies that fspy tolerates a user-supplied `LD_PRELOAD` by appending its shim instead of rejecting the spawn. Appending (not prepending) also preserves symbol-interposition order: the user's preload runs first, so short-circuited calls remain invisible to fspy — what the OS actually executed is what fspy records.
 

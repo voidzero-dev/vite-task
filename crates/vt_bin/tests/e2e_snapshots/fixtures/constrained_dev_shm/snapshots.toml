@@ -3,6 +3,6 @@ name = "constrained_dev_shm"
 comment = """
 With fspy's shared-memory backing moved to memfd, file-access tracking succeeds without consuming a one-page `/dev/shm` mount.
 """
-platform = "linux-gnu"
+cfg = 'all(target_os = "linux", target_env = "gnu")'
 ignore = true
 steps = [["vtt", "small_dev_shm", "vt", "run", "stress"]]

@@ -221,6 +221,16 @@ impl WriteKey {
     }
 }
 
+fn deserialize_cfg_expr<'de, D>(
+    deserializer: D,
+) -> Result<Option<cargo_platform::CfgExpr>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Str as serde::Deserialize>::deserialize(deserializer)?;
+    value.parse().map(Some).map_err(serde::de::Error::custom)
+}
+
 #[derive(serde::Deserialize, Debug)]
 struct E2e {
     pub name: Str,
@@ -230,10 +240,10 @@ struct E2e {
     #[serde(default)]
     pub cwd: RelativePathBuf,
     pub steps: Vec<Step>,
-    /// Optional platform filter: "unix", "linux", "linux-gnu", "non-musl",
-    /// "macos", or "windows". If set, test only runs on that platform.
-    #[serde(default)]
-    pub platform: Option<Str>,
+    /// Optional Rust cfg expression. The test only runs when it matches the
+    /// current compilation target.
+    #[serde(default, deserialize_with = "deserialize_cfg_expr")]
+    pub cfg: Option<cargo_platform::CfgExpr>,
     /// When true, the generated libtest-mimic trial is marked `#[ignore]`
     /// (skipped by default, runnable with `cargo test -- --ignored`).
     #[serde(default)]
@@ -267,6 +277,28 @@ fn load_snapshots_file(fixture_path: &std::path::Path) -> SnapshotsFile {
             panic!("Failed to read cases.toml for fixture {fixture_name}: {err}");
         }
     }
+}
+
+fn cfg_ident(name: &str) -> cargo_platform::Ident {
+    cargo_platform::Ident { name: name.to_owned(), raw: false }
+}
+
+fn compile_time_cfgs() -> Vec<cargo_platform::Cfg> {
+    let target_env = if cfg!(target_env = "gnu") {
+        "gnu"
+    } else if cfg!(target_env = "msvc") {
+        "msvc"
+    } else if cfg!(target_env = "musl") {
+        "musl"
+    } else {
+        ""
+    };
+
+    vec![
+        cargo_platform::Cfg::Name(cfg_ident(std::env::consts::FAMILY)),
+        cargo_platform::Cfg::KeyPair(cfg_ident("target_os"), std::env::consts::OS.to_owned()),
+        cargo_platform::Cfg::KeyPair(cfg_ident("target_env"), target_env.to_owned()),
+    ]
 }
 
 enum TerminationState {
@@ -647,9 +679,12 @@ fn main() {
         args.test_threads = Some(1);
     }
 
+    let compile_time_cfgs = compile_time_cfgs();
+
     let tests: Vec<libtest_mimic::Trial> = fixture_paths
         .into_iter()
         .flat_map(|fixture_path| {
+            let compile_time_cfgs = compile_time_cfgs.clone();
             let fixture_path = Arc::<std::path::Path>::from(fixture_path);
             let fixture_name: Arc<str> =
                 Arc::from(fixture_path.file_name().unwrap().to_str().unwrap());
@@ -661,27 +696,9 @@ fn main() {
                 let tmp_dir_path = tmp_dir_path.clone();
                 move |(case_index, e2e)| {
                     assert_identifier_like("e2e case name", e2e.name.as_str());
-                    // Skip cases whose platform filter doesn't match this build.
-                    if let Some(platform) = &e2e.platform {
-                        let should_run = match platform.as_str() {
-                            "unix" => cfg!(unix),
-                            "windows" => cfg!(windows),
-                            "linux" => cfg!(target_os = "linux"),
-                            "macos" => cfg!(target_os = "macos"),
-                            // fspy's LD_PRELOAD injection path is only active
-                            // on glibc-Linux; on musl, fspy switches to
-                            // seccomp-unotify and strips LD_PRELOAD from
-                            // spawned children, which breaks fixtures that
-                            // depend on interposer ordering.
-                            "linux-gnu" => cfg!(target_os = "linux") && !cfg!(target_env = "musl"),
-                            // Playwright's bundled browser binaries do not
-                            // support musl targets.
-                            "non-musl" => !cfg!(target_env = "musl"),
-                            other => panic!("Unknown platform '{}' in test '{}'", other, e2e.name),
-                        };
-                        if !should_run {
-                            return None;
-                        }
+                    // Skip cases whose cfg filter doesn't match this build.
+                    if e2e.cfg.as_ref().is_some_and(|cfg| !cfg.matches(&compile_time_cfgs)) {
+                        return None;
                     }
                     let trial_name = vt_str::format!("{fixture_name}::{}", e2e.name);
                     let ignored = e2e.ignore;

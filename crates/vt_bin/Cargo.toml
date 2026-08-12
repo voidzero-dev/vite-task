@@ -35,6 +35,7 @@ which = { workspace = true }
 nix = { workspace = true, features = ["mount", "sched", "user"] }
 
 [dev-dependencies]
+cargo-platform = { workspace = true }
 cow-utils = { workspace = true }
 cp_r = { workspace = true }
 libtest-mimic = { workspace = true }

@@ -5,7 +5,7 @@ Runs `vt run inner` under Codex CLI's built-in `:workspace` permission profile, 
 
 The nested `vt` enables fspy for automatic input inference; changing the file read inside the sandbox checks whether it invalidates the cache.
 """
-platform = "macos"
+cfg = 'target_os = "macos"'
 ignore = true
 steps = [
   [
@@ -44,7 +44,7 @@ Claude Code normally creates the writable session temp before invoking Sandbox R
 
 The nested `vt` enables fspy for automatic input inference; changing the file read inside the sandbox checks whether it invalidates the cache.
 """
-platform = "macos"
+cfg = 'target_os = "macos"'
 ignore = true
 steps = [
   { argv = [
