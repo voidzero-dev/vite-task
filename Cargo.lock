@@ -1340,6 +1340,7 @@ dependencies = [
  "libc",
  "rustix",
  "syscalls",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1371,6 +1372,7 @@ version = "0.1.0"
 dependencies = [
  "constcat",
  "fspy_detours_sys",
+ "fspy_nostd",
  "fspy_shared",
  "ntapi",
  "smallvec 2.0.0-alpha.12",

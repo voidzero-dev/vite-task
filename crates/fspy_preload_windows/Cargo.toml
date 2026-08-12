@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 wincode = { workspace = true }
 constcat = { workspace = true }
 fspy_detours_sys = { workspace = true }
+fspy_nostd = { workspace = true }
 fspy_shared = { workspace = true }
 ntapi = { workspace = true }
 smallvec = { workspace = true }

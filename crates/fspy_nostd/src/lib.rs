@@ -1,26 +1,70 @@
-//! Unix syscall wrappers that are safe to call where libc is not: in signal
-//! handlers, in the child of `fork()` in a multithreaded process, and before
-//! libc has finished initializing.
+//! Low-level operations for fspy code that cannot use the normal process
+//! runtime.
 //!
-//! The fspy preload library interposes libc functions that POSIX declares
-//! async-signal-safe (`open`, `stat`, `execve`, ...), so its code runs in all
-//! of those places, where libc's own machinery — locks, lazy initialization,
-//! malloc — is off limits. Everything this crate exposes follows three rules:
-//! kernel calls bypass libc on Linux, operations use no locks or hidden state,
-//! and nothing allocates globally. See README.md for the full approach.
+//! This includes Unix signal handlers and post-`fork()` children, Windows
+//! loader callbacks, process startup, and the injected Linux runtime. See
+//! README.md for the platform-specific guarantees.
 
-// Compile as an empty crate on non-unix targets: the crate backs the unix
-// preload library.
-#![cfg(unix)]
 #![cfg_attr(not(test), no_std)]
 
 mod c_str;
+#[cfg(windows)]
+mod windows;
+
+#[cfg(unix)]
 pub mod env;
+#[cfg(unix)]
 pub mod fs;
+#[cfg(unix)]
 pub mod mm;
+#[cfg(unix)]
 pub mod param;
 
-pub use c_str::{Bytes, CStr, Fat, Thin};
+pub use c_str::{Bytes, CStr, CStrUnit, Fat, Thin, Units, WideCStr};
+#[cfg(windows)]
+pub use windows::{ModuleHandle, get_module_name};
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct Error(u32);
+
+#[cfg(windows)]
+impl Error {
+    /// Creates an error from a raw Windows error code.
+    #[must_use]
+    pub const fn from_raw_os_error(code: u32) -> Self {
+        Self(code)
+    }
+
+    /// Returns the raw Windows error code.
+    #[must_use]
+    pub const fn raw_os_error(self) -> u32 {
+        self.0
+    }
+}
+
+#[cfg(windows)]
+pub type Result<T> = core::result::Result<T, Error>;
+
+#[cfg(windows)]
+#[doc(hidden)]
+pub use windows_sys::w as __wide_cstr_literal;
+
+/// Creates a static [`WideCStr`] from a UTF-8 string literal.
+#[cfg(windows)]
+#[macro_export]
+macro_rules! wide_cstr {
+    ($literal:literal) => {{
+        // SAFETY: `windows-sys` transcodes the literal into static UTF-16
+        // storage and appends its NUL terminator.
+        unsafe {
+            $crate::WideCStr::<$crate::Thin>::from_units_ptr($crate::__wide_cstr_literal!($literal))
+        }
+    }};
+}
+
+#[cfg(unix)]
 pub use rustix::{
     fd::{AsRawFd, BorrowedFd},
     fs::CWD,

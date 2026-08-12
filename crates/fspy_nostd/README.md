@@ -2,7 +2,7 @@
 
 Low-level operations for fspy code that runs before a process runtime is ready or in a context where normal runtime code can deadlock.
 
-The current implementation supports Linux and macOS. The crate has no Windows backend yet.
+The current implementation supports Linux, macOS, and Windows.
 
 ## Execution contexts
 
@@ -58,3 +58,4 @@ Code that needs allocation uses an explicit allocator. [`fspy_nostd_alloc`](../f
 - `env`: allocation-free process argument and environment iteration.
 - `fs`: filesystem operations with caller-owned buffers.
 - `param`: page-size access.
+- `get_module_name`: allocation-free lookup of an already-loaded Windows module.

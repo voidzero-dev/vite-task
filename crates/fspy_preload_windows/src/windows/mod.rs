@@ -49,7 +49,10 @@ fn dll_main(_hinstance: HINSTANCE, reason: u32) -> winsafe::SysResult<()> {
             // SAFETY: setting the global client during single-threaded DLL_PROCESS_ATTACH
             unsafe { set_global_client(client) };
 
-            let ctx = AttachContext::new();
+            let ctx = AttachContext::new().map_err(|error| {
+                // SAFETY: every raw Windows error code is a valid `ERROR` value.
+                unsafe { winsafe::co::ERROR::from_raw(error.raw_os_error()) }
+            })?;
 
             // SAFETY: FFI call to begin a Detours transaction
             ck_long(unsafe { DetourTransactionBegin() })?;

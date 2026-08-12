@@ -31,6 +31,9 @@ atoi = { version = "3.1.0", default-features = false }
 rustix = { workspace = true, features = ["runtime"] }
 syscalls = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
+
 # Cross-validates the page-size probe against rustix's auxv-based answer.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rustix = { workspace = true, features = ["param"] }
