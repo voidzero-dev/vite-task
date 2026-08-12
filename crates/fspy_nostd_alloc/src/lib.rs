@@ -4,7 +4,7 @@
 //! traced program (see the crate docs), so the preload library allocates
 //! through this module instead. It stacks three layers and exposes only the
 //! top one, [`arena`]. `MmapAllocator` is the bottom: a stateless allocator
-//! where every allocation is a fresh anonymous mapping from [`sigsafe::mm`].
+//! where every allocation is a fresh anonymous mapping from [`fspy_nostd::mm`].
 //! `ChunkPool` sits on top of it and caches fixed-size chunks, so that
 //! frequent short tracing calls can reuse memory instead of paying two
 //! syscalls per call. [`arena`] creates one `bump_scope::Bump` per

@@ -44,6 +44,6 @@ pub unsafe fn handle_open(path: impl ToAbsolutePath, mode: impl ToAccessMode) {
 fn init_client() {
     // SAFETY: the ctor only reads the process environment while constructing
     // the client and does not retain borrowed environment views.
-    let current = unsafe { sigsafe::env::current() }.unwrap();
+    let current = unsafe { fspy_nostd::env::current() }.unwrap();
     CLIENT.set(Client::from_env(current.envs())).unwrap();
 }

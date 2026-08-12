@@ -1,5 +1,5 @@
 [package]
-name = "sigsafe_alloc"
+name = "fspy_nostd_alloc"
 edition = "2024"
 license.workspace = true
 publish = false
@@ -10,7 +10,7 @@ doctest = false
 [target.'cfg(unix)'.dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bump-scope = { workspace = true }
-sigsafe = { workspace = true }
+fspy_nostd = { workspace = true }
 
 [lints]
 workspace = true

@@ -133,8 +133,8 @@ serde_json = "1.0.140"
 serde_norway = "0.9.42"
 sha2 = "0.11.0"
 shell-escape = "0.1.5"
-sigsafe = { path = "crates/sigsafe" }
-sigsafe_alloc = { path = "crates/sigsafe_alloc" }
+fspy_nostd = { path = "crates/fspy_nostd" }
+fspy_nostd_alloc = { path = "crates/fspy_nostd_alloc" }
 similar = "3.0.0"
 smallvec = { version = "2.0.0-alpha.12", features = ["std"] }
 snapshot_test = { path = "crates/snapshot_test" }

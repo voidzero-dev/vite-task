@@ -1,6 +1,6 @@
+use fspy_nostd::BorrowedFd;
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int, c_long};
-use sigsafe::BorrowedFd;
 
 use crate::{
     client::{convert::PathAt, handle_open},

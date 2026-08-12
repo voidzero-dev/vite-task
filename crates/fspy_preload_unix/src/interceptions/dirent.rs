@@ -1,6 +1,6 @@
+use fspy_nostd::BorrowedFd;
 use fspy_shared::ipc::AccessMode;
 use libc::{DIR, c_char, c_int, c_long, c_void};
-use sigsafe::BorrowedFd;
 
 use crate::{client::handle_open, macros::intercept};
 
@@ -17,7 +17,7 @@ unsafe extern "C" fn scandir(
     compar: *const c_void,
 ) -> c_int {
     // SAFETY: dirname is a valid C string pointer provided by the caller of the interposed function
-    unsafe { handle_open(sigsafe::CStr::from_ptr(dirname), AccessMode::READ_DIR) }
+    unsafe { handle_open(fspy_nostd::CStr::from_ptr(dirname), AccessMode::READ_DIR) }
     // SAFETY: calling the original libc scandir() with the same arguments forwarded from the interposed function
     unsafe { scandir::original()(dirname, namelist, select, compar) }
 }
@@ -39,7 +39,7 @@ mod macos_only {
         compar: *const c_void,
     ) -> c_int {
         // SAFETY: dirname is a valid C string pointer provided by the caller of the interposed function
-        unsafe { handle_open(sigsafe::CStr::from_ptr(dirname), AccessMode::READ_DIR) };
+        unsafe { handle_open(fspy_nostd::CStr::from_ptr(dirname), AccessMode::READ_DIR) };
         // SAFETY: calling the original libc scandir_b() with the same arguments forwarded from the interposed function
         unsafe { scandir_b::original()(dirname, namelist, select, compar) }
     }
@@ -82,7 +82,7 @@ unsafe extern "C" fn fdopendir(fd: c_int) -> *mut DIR {
 intercept!(opendir(64): unsafe extern "C" fn (*const c_char) -> *mut DIR);
 unsafe extern "C" fn opendir(dir_name: *const c_char) -> *mut DIR {
     // SAFETY: dir_name is a valid C string pointer provided by the caller of the interposed function
-    unsafe { handle_open(sigsafe::CStr::from_ptr(dir_name), AccessMode::READ_DIR) };
+    unsafe { handle_open(fspy_nostd::CStr::from_ptr(dir_name), AccessMode::READ_DIR) };
     // SAFETY: calling the original libc opendir() with the same arguments forwarded from the interposed function
     unsafe { opendir::original()(dir_name) }
 }

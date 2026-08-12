@@ -4,10 +4,10 @@
 use allocator_api2::boxed::Box;
 use allocator_api2::{alloc::Allocator, vec::Vec};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use sigsafe::Thin;
+use fspy_nostd::Thin;
 #[cfg(target_os = "linux")]
-use sigsafe::{BorrowedFd, CStr};
-use sigsafe::{Errno, Fat, Result};
+use fspy_nostd::{BorrowedFd, CStr};
+use fspy_nostd::{Errno, Fat, Result};
 
 use crate::CString;
 
@@ -17,12 +17,12 @@ use crate::CString;
 /// # Errors
 ///
 /// Returns [`Errno::NOMEM`] if storage cannot be allocated, or the error from
-/// [`sigsafe::fs::getcwd`].
+/// [`fspy_nostd::fs::getcwd`].
 pub fn getcwd<A: Allocator>(allocator: A) -> Result<CString<Fat, A>> {
     let mut bytes = Vec::new_in(allocator);
-    bytes.try_reserve_exact(sigsafe::fs::PATH_MAX).map_err(|_| Errno::NOMEM)?;
+    bytes.try_reserve_exact(fspy_nostd::fs::PATH_MAX).map_err(|_| Errno::NOMEM)?;
     let initialized =
-        sigsafe::fs::getcwd(&mut bytes.spare_capacity_mut()[..sigsafe::fs::PATH_MAX])?
+        fspy_nostd::fs::getcwd(&mut bytes.spare_capacity_mut()[..fspy_nostd::fs::PATH_MAX])?
             .len_with_nul();
 
     // SAFETY: `getcwd` initialized this prefix.
@@ -42,7 +42,7 @@ pub fn getcwd<A: Allocator>(allocator: A) -> Result<CString<Fat, A>> {
 /// # Errors
 ///
 /// Returns [`Errno::NOMEM`] if storage cannot be allocated, or the error from
-/// [`sigsafe::fs::readlinkat`].
+/// [`fspy_nostd::fs::readlinkat`].
 #[cfg(target_os = "linux")]
 pub fn readlinkat<A: Allocator>(
     allocator: A,
@@ -50,11 +50,12 @@ pub fn readlinkat<A: Allocator>(
     path: CStr<'_, Thin>,
 ) -> Result<Vec<u8, A>> {
     let mut bytes = Vec::new_in(allocator);
-    bytes.try_reserve_exact(sigsafe::fs::PATH_MAX).map_err(|_| Errno::NOMEM)?;
+    bytes.try_reserve_exact(fspy_nostd::fs::PATH_MAX).map_err(|_| Errno::NOMEM)?;
 
     loop {
         let capacity = bytes.capacity();
-        let initialized = sigsafe::fs::readlinkat(dirfd, path, bytes.spare_capacity_mut())?.len();
+        let initialized =
+            fspy_nostd::fs::readlinkat(dirfd, path, bytes.spare_capacity_mut())?.len();
         if initialized < capacity {
             // SAFETY: `readlinkat` initialized this prefix.
             unsafe { bytes.set_len(initialized) };
@@ -74,14 +75,14 @@ pub fn readlinkat<A: Allocator>(
 /// # Errors
 ///
 /// Returns [`Errno::NOMEM`] if storage cannot be allocated, or the error from
-/// [`sigsafe::fs::fcntl_getpath`].
+/// [`fspy_nostd::fs::fcntl_getpath`].
 #[cfg(target_os = "macos")]
 pub fn fcntl_getpath<A: Allocator>(
     allocator: A,
-    fd: sigsafe::BorrowedFd<'_>,
+    fd: fspy_nostd::BorrowedFd<'_>,
 ) -> Result<CString<Thin, A>> {
     let mut bytes = path_buffer(allocator)?;
-    sigsafe::fs::fcntl_getpath(fd, &mut bytes)?;
+    fspy_nostd::fs::fcntl_getpath(fd, &mut bytes)?;
 
     // SAFETY: `fcntl_getpath` initialized a NUL-terminated string at the start
     // of `bytes`.
@@ -91,10 +92,12 @@ pub fn fcntl_getpath<A: Allocator>(
 #[cfg(target_os = "macos")]
 fn path_buffer<A: Allocator>(
     allocator: A,
-) -> Result<Box<[core::mem::MaybeUninit<u8>; sigsafe::fs::PATH_MAX], A>> {
+) -> Result<Box<[core::mem::MaybeUninit<u8>; fspy_nostd::fs::PATH_MAX], A>> {
     let bytes =
-        Box::<[core::mem::MaybeUninit<u8>; sigsafe::fs::PATH_MAX], A>::try_new_uninit_in(allocator)
-            .map_err(|_| Errno::NOMEM)?;
+        Box::<[core::mem::MaybeUninit<u8>; fspy_nostd::fs::PATH_MAX], A>::try_new_uninit_in(
+            allocator,
+        )
+        .map_err(|_| Errno::NOMEM)?;
 
     // SAFETY: an array of `MaybeUninit<u8>` requires no initialization.
     Ok(unsafe { bytes.assume_init() })
@@ -107,8 +110,8 @@ mod tests {
     #[test]
     fn getcwd_allocates_a_c_string() {
         let path = super::getcwd(Global).unwrap();
-        let mut buffer = [core::mem::MaybeUninit::uninit(); sigsafe::fs::PATH_MAX];
-        let expected = sigsafe::fs::getcwd(&mut buffer).unwrap();
+        let mut buffer = [core::mem::MaybeUninit::uninit(); fspy_nostd::fs::PATH_MAX];
+        let expected = fspy_nostd::fs::getcwd(&mut buffer).unwrap();
         let expected = expected.as_bytes_with_nul();
 
         assert_eq!(path.as_c_str().as_bytes_with_nul(), expected);
@@ -127,7 +130,7 @@ mod tests {
 
         let root = File::open("/").unwrap();
         // SAFETY: `root` remains open for the call.
-        let root = unsafe { sigsafe::BorrowedFd::borrow_raw(root.as_raw_fd()) };
+        let root = unsafe { fspy_nostd::BorrowedFd::borrow_raw(root.as_raw_fd()) };
         let path = super::fcntl_getpath(Global, root).unwrap();
 
         assert_eq!(path.as_c_str().count().as_bytes_with_nul(), b"/\0");
@@ -137,8 +140,9 @@ mod tests {
     #[test]
     fn readlinkat_allocates_the_complete_target() {
         // SAFETY: the literal is NUL-terminated and lives for the call.
-        let path = unsafe { sigsafe::CStr::<sigsafe::Thin>::from_ptr(c"/proc/self/exe".as_ptr()) };
-        let target = super::readlinkat(Global, sigsafe::CWD, path).unwrap();
+        let path =
+            unsafe { fspy_nostd::CStr::<fspy_nostd::Thin>::from_ptr(c"/proc/self/exe".as_ptr()) };
+        let target = super::readlinkat(Global, fspy_nostd::CWD, path).unwrap();
 
         assert_eq!(
             target.as_slice(),

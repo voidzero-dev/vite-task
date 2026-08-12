@@ -12,8 +12,8 @@ fspy_shared = { workspace = true }
 fspy_shared_unix = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
-sigsafe = { workspace = true }
-sigsafe_alloc = { workspace = true }
+fspy_nostd = { workspace = true }
+fspy_nostd_alloc = { workspace = true }
 wincode = { workspace = true }
 
 [target.'cfg(all(target_os = "linux", not(target_env = "musl")))'.dependencies]

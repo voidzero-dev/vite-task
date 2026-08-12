@@ -12,7 +12,7 @@ wincode = { workspace = true, features = ["derive"] }
 bstr = { workspace = true, features = ["alloc", "std"] }
 fspy_shared = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
-sigsafe = { workspace = true }
+fspy_nostd = { workspace = true }
 stackalloc = { workspace = true }
 
 [dev-dependencies]

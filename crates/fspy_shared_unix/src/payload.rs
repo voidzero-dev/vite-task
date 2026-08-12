@@ -58,7 +58,7 @@ pub fn encode_payload(payload: Payload) -> EncodedPayload {
 /// Returns an error if the payload environment variable is missing, base64
 /// decoding fails, or deserialization fails.
 pub fn decode_payload_from_env(
-    mut envs: impl Iterator<Item = sigsafe::env::Entry>,
+    mut envs: impl Iterator<Item = fspy_nostd::env::Entry>,
 ) -> anyhow::Result<EncodedPayload> {
     let Some(encoded_string) = envs.find_map(|(name, value)| {
         if AsRef::<[u8]>::as_ref(name) == PAYLOAD_ENV_NAME.as_bytes() {

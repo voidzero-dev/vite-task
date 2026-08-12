@@ -50,7 +50,7 @@ impl Client {
         clippy::print_stderr,
         reason = "the client intentionally reports an unavailable supervisor channel"
     )]
-    pub fn from_env(envs: impl Iterator<Item = sigsafe::env::Entry>) -> Self {
+    pub fn from_env(envs: impl Iterator<Item = fspy_nostd::env::Entry>) -> Self {
         let encoded_payload = decode_payload_from_env(envs).unwrap();
 
         let ipc_sender = match encoded_payload.payload.ipc_channel_conf.sender() {
@@ -143,7 +143,7 @@ impl Client {
         // SAFETY: mode contains a valid pointer (if ModeStr) or a plain value,
         // as provided by the caller.
         let mode = unsafe { mode.to_access_mode() };
-        let arena = sigsafe_alloc::arena();
+        let arena = fspy_nostd_alloc::arena();
         let Some(abs_path) = path.to_absolute_path(&arena)? else {
             return Ok(());
         };

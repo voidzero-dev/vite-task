@@ -1,7 +1,7 @@
 use core::{mem::MaybeUninit, ptr, slice};
 
 use allocator_api2::{alloc::Allocator, boxed::Box, vec::Vec};
-use sigsafe::{CStr, Fat, Thin};
+use fspy_nostd::{CStr, Fat, Thin};
 
 /// An allocator-backed owned C string.
 pub struct CString<R, A: Allocator> {

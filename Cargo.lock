@@ -1299,13 +1299,13 @@ dependencies = [
  "allocator-api2",
  "anyhow",
  "bstr",
+ "fspy_nostd",
+ "fspy_nostd_alloc",
  "fspy_shared",
  "fspy_shared_unix",
  "itoa",
  "libc",
  "nix 0.31.2",
- "sigsafe",
- "sigsafe_alloc",
  "wincode",
 ]
 
@@ -1332,17 +1332,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "fspy_nostd"
+version = "0.0.0"
+dependencies = [
+ "atoi",
+ "bstr",
+ "libc",
+ "rustix",
+ "syscalls",
+]
+
+[[package]]
+name = "fspy_nostd_alloc"
+version = "0.0.0"
+dependencies = [
+ "allocator-api2",
+ "bump-scope",
+ "fspy_nostd",
+]
+
+[[package]]
 name = "fspy_preload_unix"
 version = "0.0.0"
 dependencies = [
  "ctor",
  "fspy_client_unix",
+ "fspy_nostd",
+ "fspy_nostd_alloc",
  "fspy_shared",
  "fspy_shared_unix",
  "libc",
  "nix 0.31.2",
- "sigsafe",
- "sigsafe_alloc",
 ]
 
 [[package]]
@@ -1411,12 +1431,12 @@ dependencies = [
  "base64",
  "bstr",
  "elf",
+ "fspy_nostd",
  "fspy_seccomp_unotify",
  "fspy_shared",
  "memmap2",
  "nix 0.31.2",
  "phf 0.13.1",
- "sigsafe",
  "stackalloc",
  "wincode",
 ]
@@ -3453,26 +3473,6 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
  "libc",
-]
-
-[[package]]
-name = "sigsafe"
-version = "0.0.0"
-dependencies = [
- "atoi",
- "bstr",
- "libc",
- "rustix",
- "syscalls",
-]
-
-[[package]]
-name = "sigsafe_alloc"
-version = "0.0.0"
-dependencies = [
- "allocator-api2",
- "bump-scope",
- "sigsafe",
 ]
 
 [[package]]

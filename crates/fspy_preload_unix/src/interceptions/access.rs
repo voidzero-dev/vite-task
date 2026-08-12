@@ -10,7 +10,7 @@ intercept!(access(64): unsafe extern "C" fn(pathname: *const c_char, mode: c_int
 unsafe extern "C" fn access(pathname: *const c_char, mode: c_int) -> c_int {
     // SAFETY: pathname is a valid C string pointer provided by the caller of the interposed function
     unsafe {
-        handle_open(sigsafe::CStr::from_ptr(pathname), AccessMode::READ);
+        handle_open(fspy_nostd::CStr::from_ptr(pathname), AccessMode::READ);
     }
     // SAFETY: calling the original libc access() with the same arguments forwarded from the interposed function
     unsafe { access::original()(pathname, mode) }

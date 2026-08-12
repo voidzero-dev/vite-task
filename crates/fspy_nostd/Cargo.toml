@@ -1,5 +1,5 @@
 [package]
-name = "sigsafe"
+name = "fspy_nostd"
 edition = "2024"
 license.workspace = true
 publish = false

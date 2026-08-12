@@ -2,23 +2,23 @@ use std::ffi::CStr;
 
 use allocator_api2::{alloc::Allocator, vec::Vec};
 use bstr::ByteSlice;
+use fspy_nostd::{AsRawFd as _, BorrowedFd, CWD};
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int};
-use sigsafe::{AsRawFd as _, BorrowedFd, CWD};
 
 #[cfg(target_os = "linux")]
 fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Option<Vec<u8, A>>> {
     if fd.as_raw_fd() == CWD.as_raw_fd() {
-        let path = sigsafe_alloc::fs::getcwd(allocator)
+        let path = fspy_nostd_alloc::fs::getcwd(allocator)
             .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
             .into_bytes();
         return Ok(Some(path));
     }
     let mut path = [0; PROC_FD_PATH_CAPACITY];
     let path = proc_fd_path(fd, &mut path);
-    match sigsafe_alloc::fs::readlinkat(allocator, CWD, path) {
+    match fspy_nostd_alloc::fs::readlinkat(allocator, CWD, path) {
         Ok(path) => Ok(Some(path)),
-        Err(sigsafe::Errno::BADF | sigsafe::Errno::NOENT) => Ok(None),
+        Err(fspy_nostd::Errno::BADF | fspy_nostd::Errno::NOENT) => Ok(None),
         Err(errno) => Err(nix::errno::Errno::from_raw(errno.raw_os_error())),
     }
 }
@@ -31,7 +31,7 @@ const PROC_FD_PATH_CAPACITY: usize =
 fn proc_fd_path<'buf>(
     fd: BorrowedFd<'_>,
     buf: &'buf mut [u8; PROC_FD_PATH_CAPACITY],
-) -> sigsafe::CStr<'buf, sigsafe::Thin> {
+) -> fspy_nostd::CStr<'buf, fspy_nostd::Thin> {
     const PREFIX: &[u8] = b"/proc/self/fd/";
 
     let mut formatted = itoa::Buffer::new();
@@ -43,25 +43,25 @@ fn proc_fd_path<'buf>(
     buf[end] = 0;
 
     // SAFETY: the initialized prefix ends in NUL and lives as long as `buf`.
-    unsafe { sigsafe::CStr::from_ptr(buf.as_ptr().cast()) }
+    unsafe { fspy_nostd::CStr::from_ptr(buf.as_ptr().cast()) }
 }
 
 #[cfg(target_os = "macos")]
 fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Option<Vec<u8, A>>> {
     if fd.as_raw_fd() == CWD.as_raw_fd() {
-        let path = sigsafe_alloc::fs::getcwd(allocator)
+        let path = fspy_nostd_alloc::fs::getcwd(allocator)
             .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
             .into_bytes();
         return Ok(Some(path));
     }
 
-    match sigsafe_alloc::fs::fcntl_getpath(allocator, fd) {
+    match fspy_nostd_alloc::fs::fcntl_getpath(allocator, fd) {
         Ok(path) => {
             // `F_GETPATH` does not return a length. Count at this caller before
             // converting its allocation into the returned path.
             Ok(Some(path.count().into_bytes()))
         }
-        Err(sigsafe::Errno::BADF | sigsafe::Errno::NOENT) => Ok(None),
+        Err(fspy_nostd::Errno::BADF | fspy_nostd::Errno::NOENT) => Ok(None),
         Err(errno) => Err(nix::errno::Errno::from_raw(errno.raw_os_error())),
     }
 }
@@ -74,7 +74,7 @@ pub trait ToAbsolutePath {
     /// which needs a terminator — cannot be handed unterminated bytes;
     /// [`as_bytes`] gives the path without the NUL.
     ///
-    /// [`as_bytes`]: sigsafe::CStr::as_bytes
+    /// [`as_bytes`]: fspy_nostd::CStr::as_bytes
     ///
     /// # Errors
     ///
@@ -83,7 +83,7 @@ pub trait ToAbsolutePath {
     fn to_absolute_path<'a, A: Allocator>(
         self,
         allocator: &'a A,
-    ) -> nix::Result<Option<sigsafe::CStr<'a, sigsafe::Fat>>>
+    ) -> nix::Result<Option<fspy_nostd::CStr<'a, fspy_nostd::Fat>>>
     where
         Self: 'a;
 }
@@ -92,7 +92,7 @@ impl ToAbsolutePath for BorrowedFd<'_> {
     fn to_absolute_path<'a, A: Allocator>(
         self,
         allocator: &'a A,
-    ) -> nix::Result<Option<sigsafe::CStr<'a, sigsafe::Fat>>>
+    ) -> nix::Result<Option<fspy_nostd::CStr<'a, fspy_nostd::Fat>>>
     where
         Self: 'a,
     {
@@ -103,11 +103,11 @@ impl ToAbsolutePath for BorrowedFd<'_> {
         // SAFETY: a resolved descriptor path carries no interior NUL, and
         // exactly one was appended above. The storage stays in `allocator`
         // until it is dropped, which for a per-call arena ends the call.
-        Ok(Some(unsafe { sigsafe::CStr::from_bytes_with_nul_unchecked(path.leak()) }))
+        Ok(Some(unsafe { fspy_nostd::CStr::from_bytes_with_nul_unchecked(path.leak()) }))
     }
 }
 
-pub struct PathAt<'fd, 'path>(pub BorrowedFd<'fd>, pub sigsafe::CStr<'path, sigsafe::Thin>);
+pub struct PathAt<'fd, 'path>(pub BorrowedFd<'fd>, pub fspy_nostd::CStr<'path, fspy_nostd::Thin>);
 
 impl PathAt<'_, '_> {
     /// Borrows raw directory-descriptor and pathname arguments.
@@ -119,7 +119,7 @@ impl PathAt<'_, '_> {
     #[must_use]
     pub const unsafe fn borrow_raw(fd: c_int, path: *const c_char) -> Self {
         // SAFETY: both invariants are upheld by the caller.
-        Self(unsafe { BorrowedFd::borrow_raw(fd) }, unsafe { sigsafe::CStr::from_ptr(path) })
+        Self(unsafe { BorrowedFd::borrow_raw(fd) }, unsafe { fspy_nostd::CStr::from_ptr(path) })
     }
 }
 
@@ -127,7 +127,7 @@ impl ToAbsolutePath for PathAt<'_, '_> {
     fn to_absolute_path<'a, A: Allocator>(
         self,
         allocator: &'a A,
-    ) -> nix::Result<Option<sigsafe::CStr<'a, sigsafe::Fat>>>
+    ) -> nix::Result<Option<fspy_nostd::CStr<'a, fspy_nostd::Fat>>>
     where
         Self: 'a,
     {
@@ -152,16 +152,16 @@ impl ToAbsolutePath for PathAt<'_, '_> {
             // interior NUL — both come from C strings or the kernel — and
             // exactly one was appended above. The storage stays in
             // `allocator` until it is dropped.
-            Ok(Some(unsafe { sigsafe::CStr::from_bytes_with_nul_unchecked(base.leak()) }))
+            Ok(Some(unsafe { fspy_nostd::CStr::from_bytes_with_nul_unchecked(base.leak()) }))
         }
     }
 }
 
-impl ToAbsolutePath for sigsafe::CStr<'_, sigsafe::Thin> {
+impl ToAbsolutePath for fspy_nostd::CStr<'_, fspy_nostd::Thin> {
     fn to_absolute_path<'a, A: Allocator>(
         self,
         allocator: &'a A,
-    ) -> nix::Result<Option<sigsafe::CStr<'a, sigsafe::Fat>>>
+    ) -> nix::Result<Option<fspy_nostd::CStr<'a, fspy_nostd::Fat>>>
     where
         Self: 'a,
     {

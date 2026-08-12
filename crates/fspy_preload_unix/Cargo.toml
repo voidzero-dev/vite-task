@@ -14,8 +14,8 @@ fspy_shared = { workspace = true }
 fspy_shared_unix = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true, features = ["signal", "fs", "socket", "mman", "time"] }
-sigsafe = { workspace = true }
-sigsafe_alloc = { workspace = true }
+fspy_nostd = { workspace = true }
+fspy_nostd_alloc = { workspace = true }
 
 [lints]
 workspace = true
