@@ -1,0 +1,69 @@
+[[e2e]]
+name = "tracks_inputs_on_linux_and_windows"
+comment = """
+TypeScript 7's native compiler reads source files through system calls that fspy can observe on Linux and Windows. Changing a source file should therefore invalidate the automatically inferred input fingerprint.
+"""
+cfg = 'not(target_os = "macos")'
+ignore = true
+steps = [
+  [
+    "tsc",
+    "--version",
+  ],
+  [
+    "vt",
+    "run",
+    "typecheck",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "src/main.ts",
+    "initial",
+    "modified",
+  ],
+  [
+    "vt",
+    "run",
+    "typecheck",
+  ],
+]
+
+[[e2e]]
+name = "does_not_track_inputs_on_macos"
+comment = """
+TypeScript 7's native compiler bypasses the library calls fspy interposes when running in Codex's workspace sandbox on macOS. This documents the current limitation: changing a source file is not detected, so the cached typecheck is replayed.
+"""
+cfg = 'target_os = "macos"'
+ignore = true
+steps = [
+  [
+    "tsc",
+    "--version",
+  ],
+  [
+    "codex",
+    "sandbox",
+    "-P",
+    ":workspace",
+    "vt",
+    "run",
+    "typecheck",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "src/main.ts",
+    "initial",
+    "modified",
+  ],
+  [
+    "codex",
+    "sandbox",
+    "-P",
+    ":workspace",
+    "vt",
+    "run",
+    "typecheck",
+  ],
+]

@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "typecheck": {
+      "command": "tsc --noEmit",
+      "input": [
+        {
+          "auto": true
+        }
+      ],
+      "cache": true
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true
+  },
+  "files": ["src/main.ts"]
+}
