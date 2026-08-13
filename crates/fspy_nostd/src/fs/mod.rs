@@ -1,10 +1,20 @@
 //! Filesystem calls with caller-owned storage.
 
+#[cfg(unix)]
 use core::mem::MaybeUninit;
 
+#[cfg(unix)]
 pub use rustix::fs::{AtFlags, Mode, OFlags, fstat, ftruncate};
 
+#[cfg(unix)]
 use crate::{BorrowedFd, CStr, Fat, OwnedFd, Result};
+
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::{
+    Access, CreationDisposition, OpenFlags, ShareMode, file_size, open, remove, set_len, set_sparse,
+};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -21,6 +31,7 @@ use mac as imp;
 pub use mac::fcntl_getpath;
 
 /// The platform's maximum pathname size, including the terminating NUL.
+#[cfg(unix)]
 pub const PATH_MAX: usize = imp::PATH_MAX;
 
 /// Opens `path` relative to `dirfd` and returns its owned descriptor.
@@ -28,6 +39,7 @@ pub const PATH_MAX: usize = imp::PATH_MAX;
 /// # Errors
 ///
 /// Returns the error reported by `openat`.
+#[cfg(unix)]
 pub fn openat<R>(
     dirfd: BorrowedFd<'_>,
     path: CStr<'_, R>,
@@ -42,6 +54,7 @@ pub fn openat<R>(
 /// # Errors
 ///
 /// Returns the error reported by `unlinkat`.
+#[cfg(unix)]
 pub fn unlinkat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFlags) -> Result<()> {
     imp::unlinkat(dirfd, path, flags)
 }
@@ -59,9 +72,10 @@ pub fn unlinkat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFlags) -> 
 /// # Errors
 ///
 /// Returns the error reported while resolving the current working directory.
+#[cfg(unix)]
 pub fn getcwd(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
     imp::getcwd(buf)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;

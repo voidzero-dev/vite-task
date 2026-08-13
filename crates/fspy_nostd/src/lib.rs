@@ -13,16 +13,16 @@ mod windows;
 
 #[cfg(unix)]
 pub mod env;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub mod fs;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub mod mm;
 #[cfg(unix)]
 pub mod param;
 
 pub use c_str::{CStr, CStrUnit, Fat, Thin, Units, WideCStr};
 #[cfg(windows)]
-pub use windows::get_module_handle;
+pub use windows::{OwnedHandle, get_module_handle};
 
 #[cfg(windows)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

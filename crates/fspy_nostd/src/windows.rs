@@ -4,6 +4,50 @@ use windows_sys::Win32::{Foundation::GetLastError, System::LibraryLoader::GetMod
 
 use crate::{Result, WideCStr};
 
+/// An owned Windows kernel handle.
+pub struct OwnedHandle(NonNull<c_void>);
+
+impl OwnedHandle {
+    /// Creates an owned handle after the caller has validated the raw value.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be a valid, non-null, uniquely owned handle that may be
+    /// closed with `CloseHandle`.
+    pub(crate) const unsafe fn from_raw(handle: *mut c_void) -> Self {
+        // SAFETY: the caller guarantees that the handle is non-null.
+        Self(unsafe { NonNull::new_unchecked(handle) })
+    }
+
+    /// Returns the raw Windows handle without transferring ownership.
+    pub(crate) const fn as_raw(&self) -> *mut c_void {
+        self.0.as_ptr()
+    }
+}
+
+// SAFETY: Windows kernel handles are not thread-affine. The operations exposed
+// by this crate provide their own synchronization or do not mutate the handle.
+unsafe impl Send for OwnedHandle {}
+// SAFETY: as above; sharing the value does not itself access the referenced
+// kernel object.
+unsafe impl Sync for OwnedHandle {}
+
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        // SAFETY: this type owns a valid handle and closes it exactly once.
+        let _ = unsafe { windows_sys::Win32::Foundation::CloseHandle(self.as_raw()) };
+    }
+}
+
+pub fn last_error() -> crate::Error {
+    // SAFETY: `GetLastError` reads thread-local error state.
+    crate::Error::from_raw_os_error(unsafe { GetLastError() })
+}
+
+pub fn bool_result(result: i32) -> Result<()> {
+    if result == 0 { Err(last_error()) } else { Ok(()) }
+}
+
 /// Returns a handle to the loaded module named by `name`.
 ///
 /// This does not load the module or increment its loader reference count. The

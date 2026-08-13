@@ -1345,6 +1345,7 @@ name = "fspy_nostd"
 version = "0.0.0"
 dependencies = [
  "atoi",
+ "bitflags 2.10.0",
  "bstr",
  "libc",
  "rustix",
@@ -1458,7 +1459,6 @@ version = "0.0.0"
 dependencies = [
  "ctor",
  "fspy_nostd",
- "memmap2",
  "subprocess_test",
  "uuid",
  "windows-sys 0.61.2",
