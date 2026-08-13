@@ -1,6 +1,7 @@
 //! Windows shared memory backed by a sparse temporary file and identified by
 //! its path.
 
+use core::{ffi::c_void, mem::size_of, ptr};
 use std::{
     env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, os::windows::ffi::OsStrExt as _,
     path::PathBuf,
@@ -13,12 +14,26 @@ use uuid::Uuid;
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx,
 };
+use windows_sys::Win32::{
+    Foundation::{ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, GetLastError},
+    Storage::FileSystem::{
+        CREATE_NEW, DELETE, FILE_ATTRIBUTE_TEMPORARY, FILE_CREATION_DISPOSITION,
+        FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+        FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_END_OF_FILE_INFO,
+        FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FileDispositionInfoEx, FileEndOfFileInfo, OPEN_EXISTING, SetFileInformationByHandle,
+    },
+    System::{
+        IO::DeviceIoControl,
+        Ioctl::FSCTL_SET_SPARSE,
+        Memory::{FILE_MAP_READ, FILE_MAP_WRITE, PAGE_READWRITE},
+    },
+};
 
 use crate::BACKING_PREFIX;
 
-const SHARE_ALL: fspy_nostd::fs::FILE_SHARE_MODE = fspy_nostd::fs::FILE_SHARE_READ
-    | fspy_nostd::fs::FILE_SHARE_WRITE
-    | fspy_nostd::fs::FILE_SHARE_DELETE;
+const SHARE_ALL: FILE_SHARE_MODE = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 
 /// Keeps the shared memory's identifier alive and removes it on drop.
 ///
@@ -73,10 +88,10 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
         .join(format!("{BACKING_PREFIX}{}.shm", Uuid::new_v4().simple()));
     let file = open_file(
         path.as_os_str(),
-        fspy_nostd::fs::GENERIC_READ | fspy_nostd::fs::GENERIC_WRITE,
-        fspy_nostd::fs::CREATE_NEW,
+        GENERIC_READ | GENERIC_WRITE,
+        CREATE_NEW,
         // Ask Windows to keep the data in memory when it can.
-        fspy_nostd::fs::FILE_ATTRIBUTE_TEMPORARY,
+        FILE_ATTRIBUTE_TEMPORARY,
     )?;
     // The keeper exists from here on, so every error path below cleans up.
     let keeper = ShmKeeper { path };
@@ -84,24 +99,9 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
     // NTFS allocates clusters for the whole logical size unless the file is
     // marked sparse first, which would turn the capacity into real disk usage.
     // Volumes without sparse-file support fail here.
-    let mut bytes_returned = 0;
-    fspy_nostd::fs::device_io_control(
-        &file,
-        fspy_nostd::fs::FSCTL_SET_SPARSE,
-        None,
-        None,
-        &mut bytes_returned,
-        None,
-    )
-    .map_err(error_to_io)?;
+    set_sparse(&file).map_err(error_to_io)?;
     // Every byte reads as zero because the file is all holes.
-    let end_of_file = fspy_nostd::fs::FILE_END_OF_FILE_INFO { EndOfFile: size_i64 };
-    fspy_nostd::fs::set_file_information_by_handle(
-        &file,
-        fspy_nostd::fs::FileEndOfFileInfo,
-        &end_of_file,
-    )
-    .map_err(error_to_io)?;
+    set_end_of_file(&file, size_i64).map_err(error_to_io)?;
 
     Ok((keeper, ShmHandle { file, size }))
 }
@@ -116,18 +116,11 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
 /// Returns an error if the shared memory is unavailable, which is the common
 /// case once its keeper has been dropped.
 pub fn open(id: &OsStr) -> io::Result<ShmHandle> {
-    let file = open_file(
-        id,
-        fspy_nostd::fs::GENERIC_READ | fspy_nostd::fs::GENERIC_WRITE,
-        fspy_nostd::fs::OPEN_EXISTING,
-        0,
-    )?;
+    let file = open_file(id, GENERIC_READ | GENERIC_WRITE, OPEN_EXISTING, 0)?;
     // If another process shrinks the file before `map`, mapping fails. If it
     // resizes afterwards, nothing here touches the mapped pages. A concurrent
     // resize cannot make a mapping access invalid memory.
-    let mut size = 0;
-    fspy_nostd::fs::get_file_size(&file, &mut size).map_err(error_to_io)?;
-    let size = usize::try_from(size)
+    let size = usize::try_from(fspy_nostd::fs::get_file_size(&file).map_err(error_to_io)?)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory size"))?;
     let size = NonZeroUsize::new(size)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "shared-memory size is zero"))?;
@@ -137,8 +130,8 @@ pub fn open(id: &OsStr) -> io::Result<ShmHandle> {
 fn open_file(
     path: &OsStr,
     desired_access: u32,
-    creation_disposition: fspy_nostd::fs::FILE_CREATION_DISPOSITION,
-    flags_and_attributes: fspy_nostd::fs::FILE_FLAGS_AND_ATTRIBUTES,
+    creation_disposition: FILE_CREATION_DISPOSITION,
+    flags_and_attributes: FILE_FLAGS_AND_ATTRIBUTES,
 ) -> io::Result<fspy_nostd::OwnedHandle> {
     let path = copy_path(path)?;
     fspy_nostd::fs::create_file(
@@ -171,19 +164,65 @@ fn error_to_io(error: fspy_nostd::Error) -> io::Error {
     io::Error::from_raw_os_error(error.raw_os_error().cast_signed())
 }
 
+fn bool_result(result: i32) -> fspy_nostd::Result<()> {
+    if result == 0 {
+        // SAFETY: the failing Win32 call immediately precedes this read of the
+        // thread-local error code.
+        Err(fspy_nostd::Error::from_raw_os_error(unsafe { GetLastError() }))
+    } else {
+        Ok(())
+    }
+}
+
+fn set_sparse(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
+    let mut bytes_returned = 0;
+    // SAFETY: `file` is valid and synchronous. `FSCTL_SET_SPARSE` accepts null
+    // input and output buffers to mark the file sparse, and `bytes_returned`
+    // is writable for the call.
+    bool_result(unsafe {
+        DeviceIoControl(
+            file.as_raw(),
+            FSCTL_SET_SPARSE,
+            ptr::null(),
+            0,
+            ptr::null_mut(),
+            0,
+            &raw mut bytes_returned,
+            ptr::null_mut(),
+        )
+    })
+}
+
+fn set_end_of_file(file: &fspy_nostd::OwnedHandle, len: i64) -> fspy_nostd::Result<()> {
+    const INFO_SIZE: u32 = 8;
+    const _: [(); 8] = [(); size_of::<FILE_END_OF_FILE_INFO>()];
+
+    let info = FILE_END_OF_FILE_INFO { EndOfFile: len };
+    // SAFETY: `file` is valid and `info` has the type and exact size required
+    // by `FileEndOfFileInfo`.
+    bool_result(unsafe {
+        SetFileInformationByHandle(
+            file.as_raw(),
+            FileEndOfFileInfo,
+            (&raw const info).cast::<c_void>(),
+            INFO_SIZE,
+        )
+    })
+}
+
 fn remove_file(path: fspy_nostd::WideCStr<'_, fspy_nostd::Fat>) -> fspy_nostd::Result<()> {
     let error = match fspy_nostd::fs::delete_file(path) {
         Ok(()) => return Ok(()),
         Err(error) => error,
     };
-    if error.raw_os_error() == fspy_nostd::fs::ERROR_ACCESS_DENIED
+    if error.raw_os_error() == ERROR_ACCESS_DENIED
         && let Ok(file) = fspy_nostd::fs::create_file(
             path,
-            fspy_nostd::fs::DELETE,
+            DELETE,
             SHARE_ALL,
             None,
-            fspy_nostd::fs::OPEN_EXISTING,
-            fspy_nostd::fs::FILE_FLAG_OPEN_REPARSE_POINT,
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT,
             None,
         )
         && set_posix_delete(&file).is_ok()
@@ -197,16 +236,24 @@ fn remove_file(path: fspy_nostd::WideCStr<'_, fspy_nostd::Fat>) -> fspy_nostd::R
 }
 
 fn set_posix_delete(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
-    let info = fspy_nostd::fs::FILE_DISPOSITION_INFO_EX {
-        Flags: fspy_nostd::fs::FILE_DISPOSITION_FLAG_DELETE
-            | fspy_nostd::fs::FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
-            | fspy_nostd::fs::FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    const INFO_SIZE: u32 = 4;
+    const _: [(); 4] = [(); size_of::<FILE_DISPOSITION_INFO_EX>()];
+
+    let info = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE
+            | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
+            | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     };
-    fspy_nostd::fs::set_file_information_by_handle(
-        file,
-        fspy_nostd::fs::FileDispositionInfoEx,
-        &info,
-    )
+    // SAFETY: `file` is valid and `info` has the type and exact size required
+    // by `FileDispositionInfoEx`.
+    bool_result(unsafe {
+        SetFileInformationByHandle(
+            file.as_raw(),
+            FileDispositionInfoEx,
+            (&raw const info).cast::<c_void>(),
+            INFO_SIZE,
+        )
+    })
 }
 
 impl Drop for ShmKeeper {
@@ -221,11 +268,11 @@ impl Drop for ShmKeeper {
         if remove_file(as_nostd_path(&path)).is_err() {
             let _ = fspy_nostd::fs::create_file(
                 as_nostd_path(&path),
-                fspy_nostd::fs::DELETE,
+                DELETE,
                 SHARE_ALL,
                 None,
-                fspy_nostd::fs::OPEN_EXISTING,
-                fspy_nostd::fs::FILE_FLAG_DELETE_ON_CLOSE,
+                OPEN_EXISTING,
+                FILE_FLAG_DELETE_ON_CLOSE,
                 None,
             );
         }
@@ -257,7 +304,7 @@ impl ShmHandle {
         let mapping = fspy_nostd::mm::create_file_mapping::<fspy_nostd::Thin>(
             &self.file,
             None,
-            fspy_nostd::mm::PAGE_READWRITE,
+            PAGE_READWRITE,
             0,
             0,
             None,
@@ -265,7 +312,7 @@ impl ShmHandle {
         .map_err(error_to_io)?;
         let view = fspy_nostd::mm::map_view_of_file(
             &mapping,
-            fspy_nostd::mm::FILE_MAP_READ | fspy_nostd::mm::FILE_MAP_WRITE,
+            FILE_MAP_READ | FILE_MAP_WRITE,
             0,
             0,
             self.size.get(),

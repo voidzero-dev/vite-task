@@ -1,9 +1,8 @@
 use core::{ffi::c_void, ptr::NonNull};
 
 use windows_sys::Win32::{
-    Foundation::GetLastError,
-    Security::SECURITY_ATTRIBUTES,
-    System::{IO::OVERLAPPED, LibraryLoader::GetModuleHandleW},
+    Foundation::GetLastError, Security::SECURITY_ATTRIBUTES,
+    System::LibraryLoader::GetModuleHandleW,
 };
 
 use crate::{Result, WideCStr};
@@ -25,19 +24,6 @@ impl SecurityAttributes {
     }
 }
 
-/// Opaque state for overlapped Win32 I/O.
-///
-/// This type has no public constructor because an asynchronous operation must
-/// tie its lifetime to the state and every borrowed buffer.
-#[repr(transparent)]
-pub struct Overlapped(OVERLAPPED);
-
-impl Overlapped {
-    pub(crate) const fn as_raw_mut(&mut self) -> *mut OVERLAPPED {
-        &raw mut self.0
-    }
-}
-
 impl OwnedHandle {
     /// Creates an owned handle after the caller has validated the raw value.
     ///
@@ -51,7 +37,8 @@ impl OwnedHandle {
     }
 
     /// Returns the raw Windows handle without transferring ownership.
-    pub(crate) const fn as_raw(&self) -> *mut c_void {
+    #[must_use]
+    pub const fn as_raw(&self) -> *mut c_void {
         self.0.as_ptr()
     }
 }

@@ -16,10 +16,8 @@ mod windows {
     use core::{ffi::c_void, ptr};
 
     use windows_sys::Win32::System::Memory::{
-        CreateFileMappingW, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, UnmapViewOfFile,
-    };
-    pub use windows_sys::Win32::System::Memory::{
-        FILE_MAP, FILE_MAP_READ, FILE_MAP_WRITE, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
+        CreateFileMappingW, FILE_MAP, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
+        PAGE_PROTECTION_FLAGS, UnmapViewOfFile,
     };
 
     use crate::{OwnedHandle, Result, SecurityAttributes, WideCStr};
@@ -118,7 +116,4 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub use windows::{
-    FILE_MAP, FILE_MAP_READ, FILE_MAP_WRITE, MappingView, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
-    create_file_mapping, map_view_of_file,
-};
+pub use windows::{MappingView, create_file_mapping, map_view_of_file};
