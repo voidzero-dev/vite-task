@@ -1,7 +1,7 @@
 //! Windows shared memory backed by a sparse temporary file and identified by
 //! its path.
 
-use core::{ffi::c_void, mem::size_of, ptr};
+use core::{ffi::c_void, mem::size_of};
 use std::{
     env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, os::windows::ffi::OsStrExt as _,
     path::PathBuf,
@@ -231,19 +231,17 @@ impl ShmHandle {
         let _slice_len = isize::try_from(self.size.get()).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidData, "shared-memory size exceeds isize")
         })?;
-        // SAFETY: null attributes create a non-inheritable mapping object and
-        // a null name creates an unnamed one. Both maximum-size halves are
+        // Default security attributes create a non-inheritable mapping object
+        // and no name creates an unnamed one. Both maximum-size halves are
         // zero, so Windows uses the current file size.
-        let mapping = unsafe {
-            fspy_nostd::mm::create_file_mapping(
-                &self.file,
-                ptr::null(),
-                fspy_nostd::mm::PAGE_READWRITE,
-                0,
-                0,
-                ptr::null(),
-            )
-        }
+        let mapping = fspy_nostd::mm::create_file_mapping::<fspy_nostd::Thin>(
+            &self.file,
+            None,
+            fspy_nostd::mm::PAGE_READWRITE,
+            0,
+            0,
+            None,
+        )
         .map_err(error_to_io)?;
         let view = fspy_nostd::mm::map_view_of_file(
             &mapping,

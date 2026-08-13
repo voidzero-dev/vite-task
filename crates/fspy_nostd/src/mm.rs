@@ -13,19 +13,27 @@ pub use rustix::mm::{MapFlags, MprotectFlags, ProtFlags, mmap, mmap_anonymous, m
 
 #[cfg(windows)]
 mod windows {
-    use core::ffi::c_void;
+    use core::{ffi::c_void, ptr};
 
-    use windows_sys::Win32::System::Memory::{
-        CreateFileMappingW, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, UnmapViewOfFile,
+    pub use windows_sys::Win32::System::Memory::{
+        FILE_MAP, FILE_MAP_READ, FILE_MAP_WRITE, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
     };
-    pub use windows_sys::Win32::{
-        Security::SECURITY_ATTRIBUTES as SecurityAttributes,
+    use windows_sys::Win32::{
+        Security::SECURITY_ATTRIBUTES,
         System::Memory::{
-            FILE_MAP, FILE_MAP_READ, FILE_MAP_WRITE, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
+            CreateFileMappingW, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, UnmapViewOfFile,
         },
     };
 
-    use crate::{OwnedHandle, Result};
+    use crate::{OwnedHandle, Result, WideCStr};
+
+    /// Opaque security attributes accepted by `CreateFileMappingW`.
+    ///
+    /// This type cannot be constructed outside `fspy_nostd`. No constructor
+    /// is exposed until a caller needs non-default security attributes and
+    /// their embedded security descriptor can be represented safely.
+    #[repr(transparent)]
+    pub struct SecurityAttributes(SECURITY_ATTRIBUTES);
 
     /// An owned view of a file-mapping object.
     pub struct MappingView {
@@ -64,21 +72,22 @@ mod windows {
     ///
     /// Returns the error reported by `CreateFileMappingW`.
     ///
-    /// # Safety
-    ///
-    /// `mapping_attributes` must be null or point to a valid
-    /// [`SecurityAttributes`] value for the duration of the call. `name` must
-    /// be null or point to a valid NUL-terminated UTF-16 string.
-    pub unsafe fn create_file_mapping(
+    pub fn create_file_mapping<R>(
         file: &OwnedHandle,
-        mapping_attributes: *const SecurityAttributes,
+        mapping_attributes: Option<&SecurityAttributes>,
         protection: PAGE_PROTECTION_FLAGS,
         maximum_size_high: u32,
         maximum_size_low: u32,
-        name: *const u16,
+        name: Option<WideCStr<'_, R>>,
     ) -> Result<OwnedHandle> {
-        // SAFETY: `file` is valid and the caller upholds both pointer
-        // contracts. The remaining values are passed through unchanged.
+        let mapping_attributes =
+            mapping_attributes.map_or(ptr::null(), |attributes| ptr::from_ref(&attributes.0));
+        let name = name.map_or(ptr::null(), |name| name.as_ptr());
+
+        // SAFETY: `file` is valid. Security attributes are either null or a
+        // valid opaque value owned by this module, and `name` is either null
+        // or backed by a valid borrowed wide C string. The remaining values
+        // are passed through unchanged.
         let mapping = unsafe {
             CreateFileMappingW(
                 file.as_raw(),
