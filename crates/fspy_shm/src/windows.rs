@@ -1,6 +1,7 @@
 //! Windows shared memory backed by a sparse temporary file and identified by
 //! its path.
 
+use core::ptr;
 use std::{
     env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, os::windows::ffi::OsStrExt as _,
     path::PathBuf,
@@ -43,7 +44,7 @@ pub struct ShmHandle {
 /// A `Mapping` keeps the bytes alive until it is dropped and cannot affect the
 /// shared memory's identifier.
 pub struct Mapping {
-    raw: fspy_nostd::mm::MappedView,
+    view: fspy_nostd::mm::MappingView,
     len: NonZeroUsize,
 }
 
@@ -186,8 +187,30 @@ impl ShmHandle {
         let _slice_len = isize::try_from(self.size.get()).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidData, "shared-memory size exceeds isize")
         })?;
-        let raw = fspy_nostd::mm::map_file(&self.file, self.size).map_err(error_to_io)?;
-        Ok(Mapping { raw, len: self.size })
+        // SAFETY: null attributes create a non-inheritable mapping object and
+        // a null name creates an unnamed one. Both maximum-size halves are
+        // zero, so Windows uses the current file size.
+        let mapping = unsafe {
+            fspy_nostd::mm::create_file_mapping(
+                &self.file,
+                ptr::null(),
+                fspy_nostd::mm::PAGE_READWRITE,
+                0,
+                0,
+                ptr::null(),
+            )
+        }
+        .map_err(error_to_io)?;
+        let view = fspy_nostd::mm::map_view_of_file(
+            &mapping,
+            fspy_nostd::mm::FILE_MAP_READ | fspy_nostd::mm::FILE_MAP_WRITE,
+            0,
+            0,
+            self.size.get(),
+        )
+        .map_err(error_to_io)?;
+        // The view remains valid after its mapping-object handle closes.
+        Ok(Mapping { view, len: self.size })
     }
 }
 
@@ -202,7 +225,7 @@ impl Mapping {
     /// Returns a raw pointer to the first mapped byte.
     #[must_use]
     pub const fn as_ptr(&self) -> *mut u8 {
-        self.raw.as_ptr()
+        self.view.as_ptr()
     }
 
     /// Returns the mapped bytes as a shared slice.

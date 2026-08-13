@@ -13,27 +13,32 @@ pub use rustix::mm::{MapFlags, MprotectFlags, ProtFlags, mmap, mmap_anonymous, m
 
 #[cfg(windows)]
 mod windows {
-    use core::{ffi::c_void, num::NonZeroUsize, ptr};
+    use core::ffi::c_void;
 
     use windows_sys::Win32::System::Memory::{
-        CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS,
-        MapViewOfFile, PAGE_READWRITE, UnmapViewOfFile,
+        CreateFileMappingW, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, UnmapViewOfFile,
+    };
+    pub use windows_sys::Win32::{
+        Security::SECURITY_ATTRIBUTES as SecurityAttributes,
+        System::Memory::{
+            FILE_MAP, FILE_MAP_READ, FILE_MAP_WRITE, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
+        },
     };
 
     use crate::{OwnedHandle, Result};
 
-    /// An owned writable view of a shared file mapping.
-    pub struct MappedView {
+    /// An owned view of a file-mapping object.
+    pub struct MappingView {
         ptr: core::ptr::NonNull<u8>,
     }
 
     // SAFETY: a view owns no thread-affine state. Synchronization of accesses
     // to its shared bytes is the caller's responsibility.
-    unsafe impl Send for MappedView {}
+    unsafe impl Send for MappingView {}
     // SAFETY: sharing the view does not itself access the mapped bytes.
-    unsafe impl Sync for MappedView {}
+    unsafe impl Sync for MappingView {}
 
-    impl MappedView {
+    impl MappingView {
         /// Returns a raw pointer to the first mapped byte.
         #[must_use]
         pub const fn as_ptr(&self) -> *mut u8 {
@@ -41,7 +46,7 @@ mod windows {
         }
     }
 
-    impl Drop for MappedView {
+    impl Drop for MappingView {
         fn drop(&mut self) {
             // SAFETY: this is the complete view owned by `self` and is
             // unmapped exactly once.
@@ -53,38 +58,70 @@ mod windows {
         }
     }
 
-    /// Maps the first `len` bytes of `file` as shared readable and writable
-    /// memory.
+    /// Calls `CreateFileMappingW` and returns the new mapping-object handle.
     ///
     /// # Errors
     ///
-    /// Returns the error reported while creating or mapping the view.
-    pub fn map_file(file: &OwnedHandle, len: NonZeroUsize) -> Result<MappedView> {
-        // SAFETY: `file` is valid. Null security attributes and name request
-        // an unnamed, non-inheritable mapping object backed by the file's
-        // current size.
+    /// Returns the error reported by `CreateFileMappingW`.
+    ///
+    /// # Safety
+    ///
+    /// `mapping_attributes` must be null or point to a valid
+    /// [`SecurityAttributes`] value for the duration of the call. `name` must
+    /// be null or point to a valid NUL-terminated UTF-16 string.
+    pub unsafe fn create_file_mapping(
+        file: &OwnedHandle,
+        mapping_attributes: *const SecurityAttributes,
+        protection: PAGE_PROTECTION_FLAGS,
+        maximum_size_high: u32,
+        maximum_size_low: u32,
+        name: *const u16,
+    ) -> Result<OwnedHandle> {
+        // SAFETY: `file` is valid and the caller upholds both pointer
+        // contracts. The remaining values are passed through unchanged.
         let mapping = unsafe {
-            CreateFileMappingW(file.as_raw(), ptr::null(), PAGE_READWRITE, 0, 0, ptr::null())
+            CreateFileMappingW(
+                file.as_raw(),
+                mapping_attributes,
+                protection,
+                maximum_size_high,
+                maximum_size_low,
+                name,
+            )
         };
         let Some(mapping) = core::ptr::NonNull::new(mapping) else {
             return Err(crate::windows::last_error());
         };
         // SAFETY: `CreateFileMappingW` returned a valid, newly owned handle.
-        let mapping = unsafe { OwnedHandle::from_raw(mapping.as_ptr()) };
+        Ok(unsafe { OwnedHandle::from_raw(mapping.as_ptr()) })
+    }
 
-        // SAFETY: `mapping` is a valid file-mapping object, the requested
-        // access matches its protection, and `len` is nonzero.
+    /// Calls `MapViewOfFile` and returns the new owned view.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error reported by `MapViewOfFile`.
+    pub fn map_view_of_file(
+        mapping: &OwnedHandle,
+        access: FILE_MAP,
+        file_offset_high: u32,
+        file_offset_low: u32,
+        bytes_to_map: usize,
+    ) -> Result<MappingView> {
+        // SAFETY: `mapping` is a valid file-mapping object. Windows validates
+        // the requested access, offset, and size against that object.
         let view = unsafe {
-            MapViewOfFile(mapping.as_raw(), FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, len.get())
+            MapViewOfFile(mapping.as_raw(), access, file_offset_high, file_offset_low, bytes_to_map)
         };
         let Some(ptr) = core::ptr::NonNull::new(view.Value.cast::<u8>()) else {
             return Err(crate::windows::last_error());
         };
-
-        // A mapped view remains valid after its mapping-object handle closes.
-        Ok(MappedView { ptr })
+        Ok(MappingView { ptr })
     }
 }
 
 #[cfg(windows)]
-pub use windows::{MappedView, map_file};
+pub use windows::{
+    FILE_MAP, FILE_MAP_READ, FILE_MAP_WRITE, MappingView, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
+    SecurityAttributes, create_file_mapping, map_view_of_file,
+};
