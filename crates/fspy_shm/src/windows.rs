@@ -9,31 +9,28 @@ use std::{
 #[cfg(test)]
 use std::{fs::File, os::windows::io::AsRawHandle as _};
 
+use fspy_nostd::{
+    fs::{CreationDisposition, FileAccess, FileOptions, FileShare},
+    mm::{MappingAccess, PageProtection},
+};
 use uuid::Uuid;
 #[cfg(test)]
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx,
 };
 use windows_sys::Win32::{
-    Foundation::{ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, GetLastError},
+    Foundation::{ERROR_ACCESS_DENIED, GetLastError},
     Storage::FileSystem::{
-        CREATE_NEW, DELETE, FILE_ATTRIBUTE_TEMPORARY, FILE_CREATION_DISPOSITION,
         FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
         FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_END_OF_FILE_INFO,
-        FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES,
-        FILE_SHARE_DELETE, FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-        FileDispositionInfoEx, FileEndOfFileInfo, OPEN_EXISTING, SetFileInformationByHandle,
+        FileDispositionInfoEx, FileEndOfFileInfo, SetFileInformationByHandle,
     },
-    System::{
-        IO::DeviceIoControl,
-        Ioctl::FSCTL_SET_SPARSE,
-        Memory::{FILE_MAP_READ, FILE_MAP_WRITE, PAGE_READWRITE},
-    },
+    System::{IO::DeviceIoControl, Ioctl::FSCTL_SET_SPARSE},
 };
 
 use crate::BACKING_PREFIX;
 
-const SHARE_ALL: FILE_SHARE_MODE = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+const SHARE_ALL: FileShare = FileShare::READ.union(FileShare::WRITE).union(FileShare::DELETE);
 
 /// Keeps the shared memory's identifier alive and removes it on drop.
 ///
@@ -88,10 +85,10 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
         .join(format!("{BACKING_PREFIX}{}.shm", Uuid::new_v4().simple()));
     let file = open_file(
         path.as_os_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        CREATE_NEW,
+        FileAccess::GENERIC_READ | FileAccess::GENERIC_WRITE,
+        CreationDisposition::CreateNew,
         // Ask Windows to keep the data in memory when it can.
-        FILE_ATTRIBUTE_TEMPORARY,
+        FileOptions::TEMPORARY,
     )?;
     // The keeper exists from here on, so every error path below cleans up.
     let keeper = ShmKeeper { path };
@@ -116,7 +113,12 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
 /// Returns an error if the shared memory is unavailable, which is the common
 /// case once its keeper has been dropped.
 pub fn open(id: &OsStr) -> io::Result<ShmHandle> {
-    let file = open_file(id, GENERIC_READ | GENERIC_WRITE, OPEN_EXISTING, 0)?;
+    let file = open_file(
+        id,
+        FileAccess::GENERIC_READ | FileAccess::GENERIC_WRITE,
+        CreationDisposition::OpenExisting,
+        FileOptions::empty(),
+    )?;
     // If another process shrinks the file before `map`, mapping fails. If it
     // resizes afterwards, nothing here touches the mapped pages. A concurrent
     // resize cannot make a mapping access invalid memory.
@@ -129,18 +131,18 @@ pub fn open(id: &OsStr) -> io::Result<ShmHandle> {
 
 fn open_file(
     path: &OsStr,
-    desired_access: u32,
-    creation_disposition: FILE_CREATION_DISPOSITION,
-    flags_and_attributes: FILE_FLAGS_AND_ATTRIBUTES,
+    access: FileAccess,
+    disposition: CreationDisposition,
+    options: FileOptions,
 ) -> io::Result<fspy_nostd::OwnedHandle> {
     let path = copy_path(path)?;
     fspy_nostd::fs::create_file(
         as_nostd_path(&path),
-        desired_access,
+        access,
         SHARE_ALL,
         None,
-        creation_disposition,
-        flags_and_attributes,
+        disposition,
+        options,
         None,
     )
     .map_err(error_to_io)
@@ -218,11 +220,11 @@ fn remove_file(path: fspy_nostd::WideCStr<'_, fspy_nostd::Fat>) -> fspy_nostd::R
     if error.raw_os_error() == ERROR_ACCESS_DENIED
         && let Ok(file) = fspy_nostd::fs::create_file(
             path,
-            DELETE,
+            FileAccess::DELETE,
             SHARE_ALL,
             None,
-            OPEN_EXISTING,
-            FILE_FLAG_OPEN_REPARSE_POINT,
+            CreationDisposition::OpenExisting,
+            FileOptions::OPEN_REPARSE_POINT,
             None,
         )
         && set_posix_delete(&file).is_ok()
@@ -268,11 +270,11 @@ impl Drop for ShmKeeper {
         if remove_file(as_nostd_path(&path)).is_err() {
             let _ = fspy_nostd::fs::create_file(
                 as_nostd_path(&path),
-                DELETE,
+                FileAccess::DELETE,
                 SHARE_ALL,
                 None,
-                OPEN_EXISTING,
-                FILE_FLAG_DELETE_ON_CLOSE,
+                CreationDisposition::OpenExisting,
+                FileOptions::DELETE_ON_CLOSE,
                 None,
             );
         }
@@ -304,7 +306,7 @@ impl ShmHandle {
         let mapping = fspy_nostd::mm::create_file_mapping::<fspy_nostd::Thin>(
             &self.file,
             None,
-            PAGE_READWRITE,
+            PageProtection::READ_WRITE,
             0,
             0,
             None,
@@ -312,7 +314,7 @@ impl ShmHandle {
         .map_err(error_to_io)?;
         let view = fspy_nostd::mm::map_view_of_file(
             &mapping,
-            FILE_MAP_READ | FILE_MAP_WRITE,
+            MappingAccess::READ | MappingAccess::WRITE,
             0,
             0,
             self.size.get(),

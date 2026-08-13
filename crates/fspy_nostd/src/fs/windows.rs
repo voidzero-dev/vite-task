@@ -1,14 +1,79 @@
 use core::ptr;
 
+use bitflags::bitflags;
 use windows_sys::Win32::{
-    Foundation::INVALID_HANDLE_VALUE,
+    Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::{
-        CreateFileW, DeleteFileW, FILE_CREATION_DISPOSITION, FILE_FLAGS_AND_ATTRIBUTES,
-        FILE_SHARE_MODE, GetFileSizeEx,
+        CREATE_ALWAYS, CREATE_NEW, CreateFileW, DELETE, DeleteFileW, FILE_ATTRIBUTE_TEMPORARY,
+        FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileSizeEx, OPEN_ALWAYS, OPEN_EXISTING,
+        TRUNCATE_EXISTING,
     },
 };
 
 use crate::{OwnedHandle, Result, SecurityAttributes, WideCStr};
+
+bitflags! {
+    /// Access rights requested for a file handle.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct FileAccess: u32 {
+        /// Generic read access.
+        const GENERIC_READ = GENERIC_READ;
+        /// Generic write access.
+        const GENERIC_WRITE = GENERIC_WRITE;
+        /// Permission to delete the file.
+        const DELETE = DELETE;
+    }
+
+    /// Operations that other handles may perform while a file is open.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct FileShare: u32 {
+        /// Permit subsequent opens for reading.
+        const READ = FILE_SHARE_READ;
+        /// Permit subsequent opens for writing.
+        const WRITE = FILE_SHARE_WRITE;
+        /// Permit subsequent opens for deletion.
+        const DELETE = FILE_SHARE_DELETE;
+    }
+
+    /// File attributes and creation options accepted by `CreateFileW`.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct FileOptions: u32 {
+        /// Hint that the file should be kept in memory when possible.
+        const TEMPORARY = FILE_ATTRIBUTE_TEMPORARY;
+        /// Delete the file after its last handle closes.
+        const DELETE_ON_CLOSE = FILE_FLAG_DELETE_ON_CLOSE;
+        /// Open a reparse point rather than its target.
+        const OPEN_REPARSE_POINT = FILE_FLAG_OPEN_REPARSE_POINT;
+    }
+}
+
+/// How `CreateFileW` handles an existing or missing file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CreationDisposition {
+    /// Create a new file and fail if it already exists.
+    CreateNew,
+    /// Create a new file or replace an existing file.
+    CreateAlways,
+    /// Open an existing file and fail if it does not exist.
+    OpenExisting,
+    /// Open an existing file or create a new file.
+    OpenAlways,
+    /// Open and truncate an existing file.
+    TruncateExisting,
+}
+
+impl CreationDisposition {
+    const fn into_raw(self) -> u32 {
+        match self {
+            Self::CreateNew => CREATE_NEW,
+            Self::CreateAlways => CREATE_ALWAYS,
+            Self::OpenExisting => OPEN_EXISTING,
+            Self::OpenAlways => OPEN_ALWAYS,
+            Self::TruncateExisting => TRUNCATE_EXISTING,
+        }
+    }
+}
 
 /// Calls `CreateFileW` and returns the new owned handle.
 ///
@@ -18,11 +83,11 @@ use crate::{OwnedHandle, Result, SecurityAttributes, WideCStr};
 #[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
 pub fn create_file<R>(
     path: WideCStr<'_, R>,
-    desired_access: u32,
-    share_mode: FILE_SHARE_MODE,
+    access: FileAccess,
+    share: FileShare,
     security_attributes: Option<&SecurityAttributes>,
-    creation_disposition: FILE_CREATION_DISPOSITION,
-    flags_and_attributes: FILE_FLAGS_AND_ATTRIBUTES,
+    disposition: CreationDisposition,
+    options: FileOptions,
     template_file: Option<&OwnedHandle>,
 ) -> Result<OwnedHandle> {
     let security_attributes = security_attributes.map_or(ptr::null(), SecurityAttributes::as_raw);
@@ -34,11 +99,11 @@ pub fn create_file<R>(
     let handle = unsafe {
         CreateFileW(
             path.as_ptr(),
-            desired_access,
-            share_mode,
+            access.bits(),
+            share.bits(),
             security_attributes,
-            creation_disposition,
-            flags_and_attributes,
+            disposition.into_raw(),
+            options.bits(),
             template_file,
         )
     };
