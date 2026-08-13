@@ -140,16 +140,16 @@ fn open_file(
     options: FileOptions,
 ) -> io::Result<fspy_nostd::OwnedHandle> {
     let path = copy_path(path)?;
-    fspy_nostd::fs::create_file(
-        as_nostd_path(&path),
-        access,
-        SHARE_ALL,
-        None,
-        disposition,
-        options,
-        None,
-    )
-    .map_err(error_to_io)
+    open_file_wide(as_nostd_path(&path), access, disposition, options).map_err(error_to_io)
+}
+
+fn open_file_wide(
+    path: fspy_nostd::WideCStr<'_, fspy_nostd::Fat>,
+    access: FileAccess,
+    disposition: CreationDisposition,
+    options: FileOptions,
+) -> fspy_nostd::Result<fspy_nostd::OwnedHandle> {
+    fspy_nostd::fs::create_file(path, access, SHARE_ALL, None, disposition, options, None)
 }
 
 fn copy_path(path: &OsStr) -> io::Result<Vec<u16>> {
@@ -218,29 +218,41 @@ fn set_end_of_file(file: BorrowedHandle<'_>, len: i64) -> fspy_nostd::Result<()>
     })
 }
 
-fn remove_file(path: fspy_nostd::WideCStr<'_, fspy_nostd::Fat>) -> fspy_nostd::Result<()> {
+fn remove_file(path: &OsStr) -> io::Result<()> {
+    let path = copy_path(path)?;
+    let path = as_nostd_path(&path);
     let error = match fspy_nostd::fs::delete_file(path) {
         Ok(()) => return Ok(()),
         Err(error) => error,
     };
     if error.raw_os_error() == ERROR_ACCESS_DENIED
-        && let Ok(file) = fspy_nostd::fs::create_file(
+        && let Ok(file) = open_file_wide(
             path,
             FileAccess::DELETE,
-            SHARE_ALL,
-            None,
             CreationDisposition::OpenExisting,
             FileOptions::OPEN_REPARSE_POINT,
-            None,
         )
         && set_posix_delete(file.as_handle()).is_ok()
     {
         return Ok(());
     }
 
+    // Windows versions without POSIX delete refuse to remove the name of a
+    // mapped file. Opening with `FILE_FLAG_DELETE_ON_CLOSE` and immediately
+    // closing that handle arms deletion once every other handle is closed.
+    if let Ok(file) = open_file_wide(
+        path,
+        FileAccess::DELETE,
+        CreationDisposition::OpenExisting,
+        FileOptions::DELETE_ON_CLOSE,
+    ) {
+        drop(file);
+        return Ok(());
+    }
+
     // Preserve the original `DeleteFileW` error when POSIX deletion is not
-    // available.
-    Err(error)
+    // available and deferred deletion cannot be armed.
+    Err(error_to_io(error))
 }
 
 fn set_posix_delete(file: BorrowedHandle<'_>) -> fspy_nostd::Result<()> {
@@ -267,24 +279,7 @@ fn set_posix_delete(file: BorrowedHandle<'_>) -> fspy_nostd::Result<()> {
 
 impl Drop for ShmKeeper {
     fn drop(&mut self) {
-        // Windows versions without POSIX delete refuse to remove the name of a
-        // mapped file. Arm the deferred delete instead: a handle opened with
-        // `FILE_FLAG_DELETE_ON_CLOSE` deletes the file once every handle to it
-        // is closed.
-        let Ok(path) = copy_path(self.path.as_os_str()) else {
-            return;
-        };
-        if remove_file(as_nostd_path(&path)).is_err() {
-            let _ = fspy_nostd::fs::create_file(
-                as_nostd_path(&path),
-                FileAccess::DELETE,
-                SHARE_ALL,
-                None,
-                CreationDisposition::OpenExisting,
-                FileOptions::DELETE_ON_CLOSE,
-                None,
-            );
-        }
+        let _ = remove_file(self.path.as_os_str());
     }
 }
 
