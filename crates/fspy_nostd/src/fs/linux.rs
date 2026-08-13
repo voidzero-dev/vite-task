@@ -10,11 +10,6 @@ use crate::{
 // Linux UAPI `PATH_MAX`.
 pub(super) const PATH_MAX: usize = 4096;
 
-fn syscall_fd(fd: BorrowedFd<'_>) -> Result<usize> {
-    let fd = isize::try_from(fd.as_raw_fd()).map_err(|_| Error::OVERFLOW)?;
-    Ok(fd.cast_unsigned())
-}
-
 #[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
 pub(super) fn openat<R>(
     dirfd: BorrowedFd<'_>,
@@ -25,16 +20,22 @@ pub(super) fn openat<R>(
     // SAFETY: `dirfd` remains borrowed and `path` is NUL-terminated. The
     // kernel receives all four syscall arguments explicitly.
     let fd = unsafe {
-        syscalls::syscall4(
+        syscalls::syscall!(
             syscalls::Sysno::openat,
-            syscall_fd(dirfd)?,
-            path.as_ptr().addr(),
-            usize::try_from(flags.bits()).map_err(|_| Error::INVAL)?,
-            usize::try_from(mode.bits()).map_err(|_| Error::INVAL)?,
+            dirfd.as_raw_fd(),
+            path.as_ptr(),
+            flags.bits(),
+            mode.bits()
         )
     }
     .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
-    let fd = i32::try_from(fd).map_err(|_| Error::OVERFLOW)?;
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        reason = "a successful openat returns a nonnegative c_int file descriptor"
+    )]
+    let fd = fd as i32;
 
     // SAFETY: a successful `openat` returns a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
@@ -45,11 +46,11 @@ pub(super) fn unlinkat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFla
     // SAFETY: `dirfd` remains borrowed and `path` is NUL-terminated for the
     // syscall.
     unsafe {
-        syscalls::syscall3(
+        syscalls::syscall!(
             syscalls::Sysno::unlinkat,
-            syscall_fd(dirfd)?,
-            path.as_ptr().addr(),
-            usize::try_from(flags.bits()).map_err(|_| Error::INVAL)?,
+            dirfd.as_raw_fd(),
+            path.as_ptr(),
+            flags.bits()
         )
     }
     .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
@@ -76,12 +77,12 @@ pub fn readlinkat<'buf>(
     // is writable for `buf.len()` bytes. `readlinkat` returns the initialized
     // byte count.
     let initialized = unsafe {
-        syscalls::syscall4(
+        syscalls::syscall!(
             syscalls::Sysno::readlinkat,
-            syscall_fd(dirfd)?,
-            path.as_ptr().addr(),
-            buf.as_mut_ptr().addr(),
-            buf.len(),
+            dirfd.as_raw_fd(),
+            path.as_ptr(),
+            buf.as_mut_ptr(),
+            buf.len()
         )
     }
     .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
@@ -97,7 +98,7 @@ pub(super) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
     // writes no more than that and returns the initialized length including
     // its terminating NUL.
     let initialized =
-        unsafe { syscalls::syscall2(syscalls::Sysno::getcwd, buf.as_mut_ptr().addr(), buf.len()) }
+        unsafe { syscalls::syscall!(syscalls::Sysno::getcwd, buf.as_mut_ptr(), buf.len()) }
             .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
 
     // SAFETY: the syscall initialized this prefix through its terminating NUL.
