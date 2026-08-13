@@ -15,25 +15,14 @@ pub use rustix::mm::{MapFlags, MprotectFlags, ProtFlags, mmap, mmap_anonymous, m
 mod windows {
     use core::{ffi::c_void, ptr};
 
+    use windows_sys::Win32::System::Memory::{
+        CreateFileMappingW, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, UnmapViewOfFile,
+    };
     pub use windows_sys::Win32::System::Memory::{
         FILE_MAP, FILE_MAP_READ, FILE_MAP_WRITE, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
     };
-    use windows_sys::Win32::{
-        Security::SECURITY_ATTRIBUTES,
-        System::Memory::{
-            CreateFileMappingW, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, UnmapViewOfFile,
-        },
-    };
 
-    use crate::{OwnedHandle, Result, WideCStr};
-
-    /// Opaque security attributes accepted by `CreateFileMappingW`.
-    ///
-    /// This type cannot be constructed outside `fspy_nostd`. No constructor
-    /// is exposed until a caller needs non-default security attributes and
-    /// their embedded security descriptor can be represented safely.
-    #[repr(transparent)]
-    pub struct SecurityAttributes(SECURITY_ATTRIBUTES);
+    use crate::{OwnedHandle, Result, SecurityAttributes, WideCStr};
 
     /// An owned view of a file-mapping object.
     pub struct MappingView {
@@ -80,8 +69,7 @@ mod windows {
         maximum_size_low: u32,
         name: Option<WideCStr<'_, R>>,
     ) -> Result<OwnedHandle> {
-        let mapping_attributes =
-            mapping_attributes.map_or(ptr::null(), |attributes| ptr::from_ref(&attributes.0));
+        let mapping_attributes = mapping_attributes.map_or(ptr::null(), SecurityAttributes::as_raw);
         let name = name.map_or(ptr::null(), |name| name.as_ptr());
 
         // SAFETY: `file` is valid. Security attributes are either null or a
@@ -132,5 +120,5 @@ mod windows {
 #[cfg(windows)]
 pub use windows::{
     FILE_MAP, FILE_MAP_READ, FILE_MAP_WRITE, MappingView, PAGE_PROTECTION_FLAGS, PAGE_READWRITE,
-    SecurityAttributes, create_file_mapping, map_view_of_file,
+    create_file_mapping, map_view_of_file,
 };

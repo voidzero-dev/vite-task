@@ -1,11 +1,42 @@
 use core::{ffi::c_void, ptr::NonNull};
 
-use windows_sys::Win32::{Foundation::GetLastError, System::LibraryLoader::GetModuleHandleW};
+use windows_sys::Win32::{
+    Foundation::GetLastError,
+    Security::SECURITY_ATTRIBUTES,
+    System::{IO::OVERLAPPED, LibraryLoader::GetModuleHandleW},
+};
 
 use crate::{Result, WideCStr};
 
 /// An owned Windows kernel handle.
 pub struct OwnedHandle(NonNull<c_void>);
+
+/// Opaque security attributes accepted by Win32 creation functions.
+///
+/// This type has no public constructor. Non-default security attributes will
+/// remain unavailable to safe callers until their embedded security
+/// descriptor can be represented safely.
+#[repr(transparent)]
+pub struct SecurityAttributes(SECURITY_ATTRIBUTES);
+
+impl SecurityAttributes {
+    pub(crate) const fn as_raw(&self) -> *const SECURITY_ATTRIBUTES {
+        &raw const self.0
+    }
+}
+
+/// Opaque state for overlapped Win32 I/O.
+///
+/// This type has no public constructor because an asynchronous operation must
+/// tie its lifetime to the state and every borrowed buffer.
+#[repr(transparent)]
+pub struct Overlapped(OVERLAPPED);
+
+impl Overlapped {
+    pub(crate) const fn as_raw_mut(&mut self) -> *mut OVERLAPPED {
+        &raw mut self.0
+    }
+}
 
 impl OwnedHandle {
     /// Creates an owned handle after the caller has validated the raw value.

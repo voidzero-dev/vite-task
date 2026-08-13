@@ -1345,7 +1345,6 @@ name = "fspy_nostd"
 version = "0.0.0"
 dependencies = [
  "atoi",
- "bitflags 2.10.0",
  "bstr",
  "libc",
  "rustix",

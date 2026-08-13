@@ -13,10 +13,15 @@ use crate::{BorrowedFd, CStr, Fat, OwnedFd, Result};
 mod windows;
 #[cfg(windows)]
 pub use windows::{
-    Access, CreationDisposition, ERROR_ACCESS_DENIED, FILE_DISPOSITION_FLAG_DELETE,
+    CREATE_NEW, DELETE, DeviceIoControlCode, ERROR_ACCESS_DENIED, FILE_ATTRIBUTE_TEMPORARY,
+    FILE_CREATION_DISPOSITION, FILE_DISPOSITION_FLAG_DELETE,
     FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
-    FILE_DISPOSITION_INFO_EX, FILE_INFO_BY_HANDLE_CLASS, FileDispositionInfoEx, OpenFlags,
-    ShareMode, delete_file, file_size, open, set_file_information_by_handle, set_len, set_sparse,
+    FILE_DISPOSITION_INFO_EX, FILE_END_OF_FILE_INFO, FILE_FLAG_DELETE_ON_CLOSE,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_INFO_BY_HANDLE_CLASS,
+    FILE_SET_SPARSE_BUFFER, FILE_SHARE_DELETE, FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FSCTL_SET_SPARSE, FileDispositionInfoEx, FileEndOfFileInfo, FileInformationClass, GENERIC_READ,
+    GENERIC_WRITE, OPEN_EXISTING, create_file, delete_file, device_io_control, get_file_size,
+    set_file_information_by_handle,
 };
 
 #[cfg(target_os = "linux")]
