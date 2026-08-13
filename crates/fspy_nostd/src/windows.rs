@@ -13,16 +13,21 @@ pub type RawHandle = *mut c_void;
 /// A borrowed Windows kernel handle.
 ///
 /// Its lifetime is tied to the value that keeps the handle open.
+/// `NULL` and `-1` are permitted because their validity is API-specific.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct BorrowedHandle<'handle> {
-    handle: NonNull<c_void>,
+    handle: RawHandle,
     lifetime: PhantomData<&'handle OwnedHandle>,
 }
 
 /// An owned Windows kernel handle.
+///
+/// `NULL` and `-1` are permitted because their validity is API-specific.
 #[repr(transparent)]
-pub struct OwnedHandle(NonNull<c_void>);
+pub struct OwnedHandle {
+    handle: RawHandle,
+}
 
 /// A type that can lend a Windows kernel handle.
 pub trait AsHandle {
@@ -55,12 +60,10 @@ impl BorrowedHandle<'_> {
     ///
     /// # Safety
     ///
-    /// `handle` must be a valid, non-null, open handle and remain open for the
-    /// lifetime of the returned value.
+    /// `handle` must be a valid open handle and remain open for the lifetime of
+    /// the returned value.
     #[must_use]
     pub const unsafe fn borrow_raw(handle: RawHandle) -> Self {
-        // SAFETY: the caller guarantees that the handle is non-null.
-        let handle = unsafe { NonNull::new_unchecked(handle) };
         Self { handle, lifetime: PhantomData }
     }
 }
@@ -70,11 +73,10 @@ impl OwnedHandle {
     ///
     /// # Safety
     ///
-    /// `handle` must be a valid, non-null, uniquely owned handle that may be
-    /// closed with `CloseHandle`.
+    /// `handle` must be a valid, uniquely owned handle that may be closed with
+    /// `CloseHandle`.
     pub(crate) const unsafe fn from_raw_handle(handle: RawHandle) -> Self {
-        // SAFETY: the caller guarantees that the handle is non-null.
-        Self(unsafe { NonNull::new_unchecked(handle) })
+        Self { handle }
     }
 }
 
@@ -106,13 +108,13 @@ impl<T: AsHandle + ?Sized> AsHandle for &mut T {
 
 impl AsRawHandle for BorrowedHandle<'_> {
     fn as_raw_handle(&self) -> RawHandle {
-        self.handle.as_ptr()
+        self.handle
     }
 }
 
 impl AsRawHandle for OwnedHandle {
     fn as_raw_handle(&self) -> RawHandle {
-        self.0.as_ptr()
+        self.handle
     }
 }
 

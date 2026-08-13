@@ -86,11 +86,11 @@ pub fn create_file_mapping<R>(
             name,
         )
     };
-    let Some(mapping) = core::ptr::NonNull::new(mapping) else {
+    if mapping.is_null() {
         return Err(crate::windows::last_error());
-    };
+    }
     // SAFETY: `CreateFileMappingW` returned a valid, newly owned handle.
-    Ok(unsafe { OwnedHandle::from_raw_handle(mapping.as_ptr()) })
+    Ok(unsafe { OwnedHandle::from_raw_handle(mapping) })
 }
 
 /// Calls `MapViewOfFile` and returns the new owned view.

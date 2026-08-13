@@ -96,7 +96,7 @@ pub fn create_file<R>(
             template_file,
         )
     };
-    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+    if handle == INVALID_HANDLE_VALUE {
         Err(crate::windows::last_error())
     } else {
         // SAFETY: `CreateFileW` returned a valid, newly owned handle.
