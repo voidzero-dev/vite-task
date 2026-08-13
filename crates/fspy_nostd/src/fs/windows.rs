@@ -2,12 +2,14 @@ use core::{ffi::c_void, mem::size_of, ptr};
 
 use bitflags::bitflags;
 use windows_sys::Win32::{
-    Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
+    Foundation::{ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::{
         CREATE_NEW, CreateFileW, DELETE, DeleteFileW, FILE_ATTRIBUTE_TEMPORARY,
-        FILE_END_OF_FILE_INFO, FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE, FILE_SHARE_READ,
-        FILE_SHARE_WRITE, FileEndOfFileInfo, GetFileSizeEx, OPEN_EXISTING,
-        SetFileInformationByHandle,
+        FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+        FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_END_OF_FILE_INFO,
+        FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfoEx, FileEndOfFileInfo, GetFileSizeEx,
+        OPEN_EXISTING, SetFileInformationByHandle,
     },
     System::{IO::DeviceIoControl, Ioctl::FSCTL_SET_SPARSE},
 };
@@ -36,6 +38,7 @@ bitflags! {
     pub struct OpenFlags: u32 {
         const TEMPORARY = FILE_ATTRIBUTE_TEMPORARY;
         const DELETE_ON_CLOSE = FILE_FLAG_DELETE_ON_CLOSE;
+        const OPEN_REPARSE_POINT = FILE_FLAG_OPEN_REPARSE_POINT;
     }
 }
 
@@ -89,11 +92,53 @@ pub fn open<R>(
 ///
 /// # Errors
 ///
-/// Returns the error reported by `DeleteFileW`.
-#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
+/// Returns the error reported while removing the file.
 pub fn remove<R>(path: WideCStr<'_, R>) -> Result<()> {
     // SAFETY: `path` is a valid NUL-terminated wide string.
-    crate::windows::bool_result(unsafe { DeleteFileW(path.as_ptr()) })
+    if unsafe { DeleteFileW(path.as_ptr()) } != 0 {
+        return Ok(());
+    }
+
+    let error = crate::windows::last_error();
+    if error.raw_os_error() == ERROR_ACCESS_DENIED {
+        const SHARE_ALL: ShareMode =
+            ShareMode::READ.union(ShareMode::WRITE).union(ShareMode::DELETE);
+        if let Ok(file) = open(
+            path,
+            Access::DELETE,
+            SHARE_ALL,
+            CreationDisposition::OPEN_EXISTING,
+            OpenFlags::OPEN_REPARSE_POINT,
+        ) && set_posix_delete(&file).is_ok()
+        {
+            return Ok(());
+        }
+    }
+
+    // Match `std::fs::remove_file`: if the POSIX fallback is unavailable,
+    // preserve the original `DeleteFileW` error.
+    Err(error)
+}
+
+fn set_posix_delete(file: &OwnedHandle) -> Result<()> {
+    const INFO_SIZE: u32 = 4;
+    const _: [(); 4] = [(); size_of::<FILE_DISPOSITION_INFO_EX>()];
+
+    let info = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE
+            | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
+            | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    };
+    // SAFETY: `file` is valid and `info` has the type and exact size required
+    // by `FileDispositionInfoEx`.
+    crate::windows::bool_result(unsafe {
+        SetFileInformationByHandle(
+            file.as_raw(),
+            FileDispositionInfoEx,
+            (&raw const info).cast::<c_void>(),
+            INFO_SIZE,
+        )
+    })
 }
 
 /// Returns a file's logical length.
