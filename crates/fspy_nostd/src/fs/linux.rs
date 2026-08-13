@@ -30,12 +30,9 @@ pub(super) fn openat<R>(
     }
     .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_possible_wrap,
-        reason = "a successful openat returns a nonnegative c_int file descriptor"
-    )]
-    let fd = fd as i32;
+    // This should not fail with a well-behaved kernel: `openat` returns a
+    // nonnegative `c_int` file descriptor.
+    let fd = i32::try_from(fd).map_err(|_| Error::OVERFLOW)?;
 
     // SAFETY: a successful `openat` returns a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
