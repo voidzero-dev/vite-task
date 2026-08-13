@@ -1,4 +1,4 @@
-use core::{ffi::c_void, ptr::NonNull};
+use core::{ffi::c_void, marker::PhantomData, ptr::NonNull};
 
 use windows_sys::Win32::{
     Foundation::GetLastError, Security::SECURITY_ATTRIBUTES,
@@ -7,8 +7,34 @@ use windows_sys::Win32::{
 
 use crate::{Result, WideCStr};
 
+/// A raw Windows kernel handle.
+pub type RawHandle = *mut c_void;
+
+/// A borrowed Windows kernel handle.
+///
+/// Its lifetime is tied to the value that keeps the handle open.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct BorrowedHandle<'handle> {
+    handle: NonNull<c_void>,
+    lifetime: PhantomData<&'handle OwnedHandle>,
+}
+
 /// An owned Windows kernel handle.
+#[repr(transparent)]
 pub struct OwnedHandle(NonNull<c_void>);
+
+/// A type that can lend a Windows kernel handle.
+pub trait AsHandle {
+    /// Borrows the handle.
+    fn as_handle(&self) -> BorrowedHandle<'_>;
+}
+
+/// A type that exposes a raw Windows kernel handle.
+pub trait AsRawHandle {
+    /// Returns the raw handle without transferring ownership.
+    fn as_raw_handle(&self) -> RawHandle;
+}
 
 /// Opaque security attributes accepted by Win32 creation functions.
 ///
@@ -24,6 +50,21 @@ impl SecurityAttributes {
     }
 }
 
+impl BorrowedHandle<'_> {
+    /// Borrows a raw handle.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be a valid, non-null, open handle and remain open for the
+    /// lifetime of the returned value.
+    #[must_use]
+    pub const unsafe fn borrow_raw(handle: RawHandle) -> Self {
+        // SAFETY: the caller guarantees that the handle is non-null.
+        let handle = unsafe { NonNull::new_unchecked(handle) };
+        Self { handle, lifetime: PhantomData }
+    }
+}
+
 impl OwnedHandle {
     /// Creates an owned handle after the caller has validated the raw value.
     ///
@@ -31,14 +72,46 @@ impl OwnedHandle {
     ///
     /// `handle` must be a valid, non-null, uniquely owned handle that may be
     /// closed with `CloseHandle`.
-    pub(crate) const unsafe fn from_raw(handle: *mut c_void) -> Self {
+    pub(crate) const unsafe fn from_raw_handle(handle: RawHandle) -> Self {
         // SAFETY: the caller guarantees that the handle is non-null.
         Self(unsafe { NonNull::new_unchecked(handle) })
     }
+}
 
-    /// Returns the raw Windows handle without transferring ownership.
-    #[must_use]
-    pub const fn as_raw(&self) -> *mut c_void {
+impl AsHandle for BorrowedHandle<'_> {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        *self
+    }
+}
+
+impl AsHandle for OwnedHandle {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        // SAFETY: `self` keeps the same valid handle open for the returned
+        // borrow's lifetime.
+        unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
+    }
+}
+
+impl<T: AsHandle + ?Sized> AsHandle for &T {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        T::as_handle(self)
+    }
+}
+
+impl<T: AsHandle + ?Sized> AsHandle for &mut T {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        T::as_handle(self)
+    }
+}
+
+impl AsRawHandle for BorrowedHandle<'_> {
+    fn as_raw_handle(&self) -> RawHandle {
+        self.handle.as_ptr()
+    }
+}
+
+impl AsRawHandle for OwnedHandle {
+    fn as_raw_handle(&self) -> RawHandle {
         self.0.as_ptr()
     }
 }
@@ -46,14 +119,18 @@ impl OwnedHandle {
 // SAFETY: Windows kernel handles are process-scoped and may be moved between
 // threads. Moving this value does not access the referenced kernel object.
 unsafe impl Send for OwnedHandle {}
+// SAFETY: as above; the borrow does not add thread affinity.
+unsafe impl Send for BorrowedHandle<'_> {}
 // SAFETY: sharing a handle value does not access the kernel object. Each
 // operation is responsible for the synchronization required by that object.
 unsafe impl Sync for OwnedHandle {}
+// SAFETY: as above; sharing the borrowed value does not access the object.
+unsafe impl Sync for BorrowedHandle<'_> {}
 
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
         // SAFETY: this type owns a valid handle and closes it exactly once.
-        let _ = unsafe { windows_sys::Win32::Foundation::CloseHandle(self.as_raw()) };
+        let _ = unsafe { windows_sys::Win32::Foundation::CloseHandle(self.as_raw_handle()) };
     }
 }
 

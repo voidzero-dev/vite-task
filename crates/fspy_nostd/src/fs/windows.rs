@@ -11,7 +11,7 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::{OwnedHandle, Result, SecurityAttributes, WideCStr};
+use crate::{AsRawHandle as _, BorrowedHandle, OwnedHandle, Result, SecurityAttributes, WideCStr};
 
 bitflags! {
     /// Access rights requested for a file handle.
@@ -77,10 +77,10 @@ pub fn create_file<R>(
     security_attributes: Option<&SecurityAttributes>,
     disposition: CreationDisposition,
     options: FileOptions,
-    template_file: Option<&OwnedHandle>,
+    template_file: Option<BorrowedHandle<'_>>,
 ) -> Result<OwnedHandle> {
     let security_attributes = security_attributes.map_or(ptr::null(), SecurityAttributes::as_raw);
-    let template_file = template_file.map_or(ptr::null_mut(), OwnedHandle::as_raw);
+    let template_file = template_file.map_or(ptr::null_mut(), |file| file.as_raw_handle());
 
     // SAFETY: `path` and the optional security-attributes pointer remain
     // readable for the call, and the optional template handle remains open.
@@ -100,7 +100,7 @@ pub fn create_file<R>(
         Err(crate::windows::last_error())
     } else {
         // SAFETY: `CreateFileW` returned a valid, newly owned handle.
-        Ok(unsafe { OwnedHandle::from_raw(handle) })
+        Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
     }
 }
 
@@ -120,10 +120,10 @@ pub fn delete_file<R>(path: WideCStr<'_, R>) -> Result<()> {
 /// # Errors
 ///
 /// Returns the error reported by `GetFileSizeEx`.
-pub fn get_file_size(file: &OwnedHandle) -> Result<i64> {
+pub fn get_file_size(file: BorrowedHandle<'_>) -> Result<i64> {
     let mut size = 0;
     // SAFETY: `file` keeps the opaque handle open and `size` is writable for
     // the call. Windows rejects handles that do not support a size query.
-    crate::windows::bool_result(unsafe { GetFileSizeEx(file.as_raw(), &raw mut size) })?;
+    crate::windows::bool_result(unsafe { GetFileSizeEx(file.as_raw_handle(), &raw mut size) })?;
     Ok(size)
 }

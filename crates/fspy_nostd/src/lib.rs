@@ -22,7 +22,10 @@ pub mod param;
 
 pub use c_str::{CStr, CStrUnit, Fat, Thin, Units, WideCStr};
 #[cfg(windows)]
-pub use windows::{OwnedHandle, SecurityAttributes, get_module_handle};
+pub use windows::{
+    AsHandle, AsRawHandle, BorrowedHandle, OwnedHandle, RawHandle, SecurityAttributes,
+    get_module_handle,
+};
 
 #[cfg(windows)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -6,7 +6,7 @@ use windows_sys::Win32::System::Memory::{
     PAGE_READWRITE, UnmapViewOfFile,
 };
 
-use crate::{OwnedHandle, Result, SecurityAttributes, WideCStr};
+use crate::{AsRawHandle as _, BorrowedHandle, OwnedHandle, Result, SecurityAttributes, WideCStr};
 
 bitflags! {
     /// Page protection for a file mapping.
@@ -63,7 +63,7 @@ impl Drop for MappingView {
 ///
 /// Returns the error reported by `CreateFileMappingW`.
 pub fn create_file_mapping<R>(
-    file: &OwnedHandle,
+    file: BorrowedHandle<'_>,
     mapping_attributes: Option<&SecurityAttributes>,
     protection: PageProtection,
     maximum_size_high: u32,
@@ -78,7 +78,7 @@ pub fn create_file_mapping<R>(
     // validates the handle's object type, protection, and sizes.
     let mapping = unsafe {
         CreateFileMappingW(
-            file.as_raw(),
+            file.as_raw_handle(),
             mapping_attributes,
             protection.bits(),
             maximum_size_high,
@@ -90,7 +90,7 @@ pub fn create_file_mapping<R>(
         return Err(crate::windows::last_error());
     };
     // SAFETY: `CreateFileMappingW` returned a valid, newly owned handle.
-    Ok(unsafe { OwnedHandle::from_raw(mapping.as_ptr()) })
+    Ok(unsafe { OwnedHandle::from_raw_handle(mapping.as_ptr()) })
 }
 
 /// Calls `MapViewOfFile` and returns the new owned view.
@@ -99,7 +99,7 @@ pub fn create_file_mapping<R>(
 ///
 /// Returns the error reported by `MapViewOfFile`.
 pub fn map_view_of_file(
-    mapping: &OwnedHandle,
+    mapping: BorrowedHandle<'_>,
     access: MappingAccess,
     file_offset_high: u32,
     file_offset_low: u32,
@@ -110,7 +110,7 @@ pub fn map_view_of_file(
     // offset, and size; any mismatch is reported as a null result.
     let view = unsafe {
         MapViewOfFile(
-            mapping.as_raw(),
+            mapping.as_raw_handle(),
             access.bits(),
             file_offset_high,
             file_offset_low,

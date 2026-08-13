@@ -10,6 +10,7 @@ use std::{
 use std::{fs::File, os::windows::io::AsRawHandle as _};
 
 use fspy_nostd::{
+    AsHandle as _, AsRawHandle as _, BorrowedHandle,
     fs::{CreationDisposition, FileAccess, FileOptions, FileShare},
     mm::{MappingAccess, PageProtection},
 };
@@ -96,9 +97,9 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
     // NTFS allocates clusters for the whole logical size unless the file is
     // marked sparse first, which would turn the capacity into real disk usage.
     // Volumes without sparse-file support fail here.
-    set_sparse(&file).map_err(error_to_io)?;
+    set_sparse(file.as_handle()).map_err(error_to_io)?;
     // Every byte reads as zero because the file is all holes.
-    set_end_of_file(&file, size_i64).map_err(error_to_io)?;
+    set_end_of_file(file.as_handle(), size_i64).map_err(error_to_io)?;
 
     Ok((keeper, ShmHandle { file, size }))
 }
@@ -122,8 +123,11 @@ pub fn open(id: &OsStr) -> io::Result<ShmHandle> {
     // If another process shrinks the file before `map`, mapping fails. If it
     // resizes afterwards, nothing here touches the mapped pages. A concurrent
     // resize cannot make a mapping access invalid memory.
-    let size = usize::try_from(fspy_nostd::fs::get_file_size(&file).map_err(error_to_io)?)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory size"))?;
+    let size =
+        usize::try_from(fspy_nostd::fs::get_file_size(file.as_handle()).map_err(error_to_io)?)
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory size")
+            })?;
     let size = NonZeroUsize::new(size)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "shared-memory size is zero"))?;
     Ok(ShmHandle { file, size })
@@ -176,7 +180,7 @@ fn bool_result(result: i32) -> fspy_nostd::Result<()> {
     }
 }
 
-fn set_sparse(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
+fn set_sparse(file: BorrowedHandle<'_>) -> fspy_nostd::Result<()> {
     let mut bytes_returned = 0;
     // SAFETY: `file` keeps the handle open, and every caller supplies a file
     // opened without `FILE_FLAG_OVERLAPPED`. `FSCTL_SET_SPARSE` accepts null
@@ -184,7 +188,7 @@ fn set_sparse(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
     // validates that the handle supports this control code.
     bool_result(unsafe {
         DeviceIoControl(
-            file.as_raw(),
+            file.as_raw_handle(),
             FSCTL_SET_SPARSE,
             ptr::null(),
             0,
@@ -196,7 +200,7 @@ fn set_sparse(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
     })
 }
 
-fn set_end_of_file(file: &fspy_nostd::OwnedHandle, len: i64) -> fspy_nostd::Result<()> {
+fn set_end_of_file(file: BorrowedHandle<'_>, len: i64) -> fspy_nostd::Result<()> {
     const INFO_SIZE: u32 = 8;
     const _: [(); 8] = [(); size_of::<FILE_END_OF_FILE_INFO>()];
 
@@ -206,7 +210,7 @@ fn set_end_of_file(file: &fspy_nostd::OwnedHandle, len: i64) -> fspy_nostd::Resu
     // validates the handle type and access rights.
     bool_result(unsafe {
         SetFileInformationByHandle(
-            file.as_raw(),
+            file.as_raw_handle(),
             FileEndOfFileInfo,
             (&raw const info).cast::<c_void>(),
             INFO_SIZE,
@@ -229,7 +233,7 @@ fn remove_file(path: fspy_nostd::WideCStr<'_, fspy_nostd::Fat>) -> fspy_nostd::R
             FileOptions::OPEN_REPARSE_POINT,
             None,
         )
-        && set_posix_delete(&file).is_ok()
+        && set_posix_delete(file.as_handle()).is_ok()
     {
         return Ok(());
     }
@@ -239,7 +243,7 @@ fn remove_file(path: fspy_nostd::WideCStr<'_, fspy_nostd::Fat>) -> fspy_nostd::R
     Err(error)
 }
 
-fn set_posix_delete(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
+fn set_posix_delete(file: BorrowedHandle<'_>) -> fspy_nostd::Result<()> {
     const INFO_SIZE: u32 = 4;
     const _: [(); 4] = [(); size_of::<FILE_DISPOSITION_INFO_EX>()];
 
@@ -253,7 +257,7 @@ fn set_posix_delete(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
     // validates the handle type, access rights, and supported flags.
     bool_result(unsafe {
         SetFileInformationByHandle(
-            file.as_raw(),
+            file.as_raw_handle(),
             FileDispositionInfoEx,
             (&raw const info).cast::<c_void>(),
             INFO_SIZE,
@@ -307,7 +311,7 @@ impl ShmHandle {
         // and no name creates an unnamed one. Both maximum-size halves are
         // zero, so Windows uses the current file size.
         let mapping = fspy_nostd::mm::create_file_mapping::<fspy_nostd::Thin>(
-            &self.file,
+            self.file.as_handle(),
             None,
             PageProtection::READ_WRITE,
             0,
@@ -316,7 +320,7 @@ impl ShmHandle {
         )
         .map_err(error_to_io)?;
         let view = fspy_nostd::mm::map_view_of_file(
-            &mapping,
+            mapping.as_handle(),
             MappingAccess::READ | MappingAccess::WRITE,
             0,
             0,
