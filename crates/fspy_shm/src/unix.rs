@@ -186,8 +186,10 @@ impl ShmHandle {
         }
         .map_err(error_to_io)?;
         let Some(ptr) = NonNull::new(mapped.cast()) else {
-            // Rust references cannot represent a mapping at address zero.
-            // SAFETY: release the successful mapping before rejecting it.
+            // `mmap` reports failure with `MAP_FAILED`, not null, so this is a
+            // successful mapping at address zero. Rust references cannot
+            // represent it.
+            // SAFETY: release that complete mapping before returning an error.
             let _ = unsafe { fspy_nostd::mm::munmap(mapped, self.size.get()) };
             return Err(io::Error::other("mmap returned address zero"));
         };
