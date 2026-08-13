@@ -11,13 +11,13 @@ use tracing::debug;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
-use super::NativeStr;
+use super::IpcStr;
 
 /// Serializable configuration to create channel senders.
 #[derive(SchemaWrite, SchemaRead, Clone, Debug)]
 pub struct ChannelConf {
-    lock_file_path: Box<NativeStr>,
-    shm_id: Box<NativeStr>,
+    lock_file_path: Box<IpcStr>,
+    shm_id: Box<IpcStr>,
 }
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders
@@ -61,7 +61,7 @@ impl ChannelConf {
 
 pub struct Sender {
     writer: ShmWriter<Mapping>,
-    lock_file_path: Box<NativeStr>,
+    lock_file_path: Box<IpcStr>,
     lock_file: File,
 }
 

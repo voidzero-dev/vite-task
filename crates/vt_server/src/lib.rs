@@ -5,8 +5,8 @@ use std::{
     sync::Arc,
 };
 
+use fspy_ipc_str::IpcStr;
 use futures::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
-use native_str::NativeStr;
 use rustc_hash::{FxHashMap, FxHashSet};
 use socket_ipc::{Server as TransportServer, ServerConnection as Stream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -361,11 +361,11 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
         // the rationale.
         match request {
             Request::IgnoreInput(ns) => {
-                let path = native_str_to_abs_path(ns)?;
+                let path = ipc_str_to_abs_path(ns)?;
                 handler.borrow_mut().ignore_input(&path);
             }
             Request::IgnoreOutput(ns) => {
-                let path = native_str_to_abs_path(ns)?;
+                let path = ipc_str_to_abs_path(ns)?;
                 handler.borrow_mut().ignore_output(&path);
             }
             Request::DisableCache => {
@@ -417,7 +417,7 @@ fn is_client_gone(err: &io::Error) -> bool {
     matches!(err.kind(), io::ErrorKind::UnexpectedEof | io::ErrorKind::BrokenPipe)
 }
 
-fn native_str_to_abs_path(ns: &NativeStr) -> Result<Arc<AbsolutePath>, Error> {
+fn ipc_str_to_abs_path(ns: &IpcStr) -> Result<Arc<AbsolutePath>, Error> {
     let os_str = ns.to_cow_os_str();
     AbsolutePath::new(&*os_str)
         .map(Arc::from)

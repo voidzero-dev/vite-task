@@ -5,7 +5,7 @@ use std::{
     thread,
 };
 
-use native_str::NativeStr;
+use fspy_ipc_str::IpcStr;
 use rustc_hash::FxHashMap;
 use socket_ipc::Client as RawStream;
 use tokio::runtime::Builder;
@@ -113,7 +113,7 @@ fn raw_disable_cache_request_disables_cache() {
         let name = &envs[0].1;
         let mut stream = connect_raw(name);
         send_frame(&mut stream, &Request::DisableCache);
-        let flush_name: Box<NativeStr> = OsStr::new("__VP_TEST_FLUSH__").into();
+        let flush_name: Box<IpcStr> = OsStr::new("__VP_TEST_FLUSH__").into();
         send_frame(&mut stream, &Request::GetEnv { name: &flush_name, tracked: false });
         let _ = recv_get_env_response(&mut stream);
     })
@@ -244,7 +244,7 @@ fn server_returns_error_on_non_absolute_path() {
         let name = &envs[0].1;
         let mut stream = connect_raw(name);
 
-        let ns: Box<NativeStr> = OsStr::new("relative/path").into();
+        let ns: Box<IpcStr> = OsStr::new("relative/path").into();
         send_frame(&mut stream, &Request::IgnoreInput(&ns));
 
         let mut buf = [0u8; 1];

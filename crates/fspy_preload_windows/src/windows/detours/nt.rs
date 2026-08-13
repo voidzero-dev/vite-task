@@ -1,6 +1,6 @@
 use std::mem::{offset_of, size_of};
 
-use fspy_shared::ipc::{AccessMode, NativePath, PathAccess};
+use fspy_shared::ipc::{AccessMode, IpcPath, PathAccess};
 use ntapi::{
     ntioapi::{
         FILE_INFORMATION_CLASS, NtQueryDirectoryFile, NtQueryFullAttributesFile,
@@ -96,11 +96,11 @@ static DETOUR_NT_CREATE_USER_PROCESS: Detour<
 unsafe fn handle_process_image(attribute_list: PPS_ATTRIBUTE_LIST) {
     // SAFETY: NtCreateUserProcess requires its attribute list to remain valid for this call.
     if let Some(image_path) = unsafe { read_process_image_attribute(attribute_list) } {
-        // Sender serialization completes before this call returns, so NativePath does not retain
+        // Sender serialization completes before this call returns, so IpcPath does not retain
         // the borrowed PS_ATTRIBUTE_IMAGE_NAME buffer past the NtCreateUserProcess call.
         // SAFETY: accessing the global client which was initialized during DLL_PROCESS_ATTACH
         unsafe { global_client() }
-            .send(PathAccess { mode: AccessMode::READ, path: NativePath::from_wide(image_path) });
+            .send(PathAccess { mode: AccessMode::READ, path: IpcPath::from_wide(image_path) });
     }
 }
 
@@ -296,7 +296,7 @@ unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath)
                     // SAFETY: converting access mask to AccessMode via FFI-aware trait
                     PathAccess {
                         mode: access_mode.to_access_mode(),
-                        path: NativePath::from_wide(path),
+                        path: IpcPath::from_wide(path),
                     }
                 },
                 |wildcard_pos| {
@@ -307,7 +307,7 @@ unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath)
                         .unwrap_or(0);
                     PathAccess {
                         mode: AccessMode::READ_DIR,
-                        path: NativePath::from_wide(&path[..slash_pos]),
+                        path: IpcPath::from_wide(&path[..slash_pos]),
                     }
                 },
             );

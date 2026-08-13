@@ -35,18 +35,18 @@ use wincode::{
 /// # Limitations
 ///
 /// **Not portable across platforms.** The binary representation is platform-specific.
-/// Deserializing a `NativeStr` serialized on a different platform leads to unspecified
+/// Deserializing an `IpcStr` serialized on a different platform leads to unspecified
 /// behavior (garbage data), but is not unsafe. Designed for same-platform IPC only.
 #[derive(TransparentWrapper, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct NativeStr {
+pub struct IpcStr {
     // On unix, this is the raw bytes of the OsStr.
-    // On windows, this is safely transmuted from `&[u16]` in `NativeStr::from_wide`. We don't declare it as `&[u16]` to allow zero-copy read.
+    // On windows, this is safely transmuted from `&[u16]` in `IpcStr::from_wide`. We don't declare it as `&[u16]` to allow zero-copy read.
     // Transmuting back to `&[u16]` would be unsafe because of different alignments between `u8` and `u16` (See `to_os_string`).
     data: [u8],
 }
 
-impl NativeStr {
+impl IpcStr {
     #[cfg(unix)]
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> &Self {
@@ -92,15 +92,15 @@ impl NativeStr {
     }
 }
 
-impl Debug for NativeStr {
+impl Debug for IpcStr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         <OsStr as Debug>::fmt(self.to_cow_os_str().as_ref(), f)
     }
 }
 
-// Manual impl: wincode derive requires Sized, but NativeStr wraps unsized [u8].
+// Manual impl: wincode derive requires Sized, but IpcStr wraps unsized [u8].
 // SAFETY: Delegates to `[u8]`'s SchemaWrite impl, preserving its size/write invariants.
-unsafe impl<C: Config> SchemaWrite<C> for NativeStr {
+unsafe impl<C: Config> SchemaWrite<C> for IpcStr {
     type Src = Self;
 
     fn size_of(src: &Self::Src) -> WriteResult<usize> {
@@ -112,67 +112,67 @@ unsafe impl<C: Config> SchemaWrite<C> for NativeStr {
     }
 }
 
-// SchemaRead for &NativeStr: zero-copy borrow from input bytes
+// SchemaRead for &IpcStr: zero-copy borrow from input bytes
 // SAFETY: Delegates to `&[u8]`'s SchemaRead impl; dst is initialized on Ok.
-unsafe impl<'de, C: Config> SchemaRead<'de, C> for &'de NativeStr {
-    type Dst = &'de NativeStr;
+unsafe impl<'de, C: Config> SchemaRead<'de, C> for &'de IpcStr {
+    type Dst = &'de IpcStr;
 
     fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
         let data: &'de [u8] = <&[u8] as SchemaRead<'de, C>>::get(&mut reader)?;
-        dst.write(NativeStr::wrap_ref(data));
+        dst.write(IpcStr::wrap_ref(data));
         Ok(())
     }
 }
 
-// SAFETY: Delegates to `NativeStr`'s SchemaWrite impl, preserving its invariants.
-unsafe impl<C: Config> SchemaWrite<C> for Box<NativeStr> {
+// SAFETY: Delegates to `IpcStr`'s SchemaWrite impl, preserving its invariants.
+unsafe impl<C: Config> SchemaWrite<C> for Box<IpcStr> {
     type Src = Self;
 
     fn size_of(src: &Self::Src) -> WriteResult<usize> {
-        <NativeStr as SchemaWrite<C>>::size_of(src)
+        <IpcStr as SchemaWrite<C>>::size_of(src)
     }
 
     fn write(writer: impl Writer, src: &Self::Src) -> WriteResult<()> {
-        <NativeStr as SchemaWrite<C>>::write(writer, src)
+        <IpcStr as SchemaWrite<C>>::write(writer, src)
     }
 }
 
-// SchemaRead for Box<NativeStr>: owned decode
+// SchemaRead for Box<IpcStr>: owned decode
 // SAFETY: Delegates to `&[u8]`'s SchemaRead impl; dst is initialized on Ok.
-unsafe impl<'de, C: Config> SchemaRead<'de, C> for Box<NativeStr> {
+unsafe impl<'de, C: Config> SchemaRead<'de, C> for Box<IpcStr> {
     type Dst = Self;
 
     fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
         let data: &[u8] = <&[u8] as SchemaRead<'de, C>>::get(&mut reader)?;
-        dst.write(NativeStr::wrap_box(data.into()));
+        dst.write(IpcStr::wrap_box(data.into()));
         Ok(())
     }
 }
 
 #[cfg(unix)]
-impl<'a, S: AsRef<OsStr> + ?Sized> From<&'a S> for &'a NativeStr {
+impl<'a, S: AsRef<OsStr> + ?Sized> From<&'a S> for &'a IpcStr {
     fn from(value: &'a S) -> Self {
-        NativeStr::from_bytes(value.as_ref().as_bytes())
+        IpcStr::from_bytes(value.as_ref().as_bytes())
     }
 }
 
-impl Clone for Box<NativeStr> {
+impl Clone for Box<IpcStr> {
     fn clone(&self) -> Self {
-        NativeStr::wrap_box(self.data.into())
+        IpcStr::wrap_box(self.data.into())
     }
 }
 
-impl<S: AsRef<OsStr>> From<S> for Box<NativeStr> {
+impl<S: AsRef<OsStr>> From<S> for Box<IpcStr> {
     #[cfg(unix)]
     fn from(value: S) -> Self {
-        NativeStr::wrap_box(value.as_ref().as_bytes().into())
+        IpcStr::wrap_box(value.as_ref().as_bytes().into())
     }
 
     #[cfg(windows)]
     fn from(value: S) -> Self {
         let wide: Vec<u16> = value.as_ref().encode_wide().collect();
         let data: &[u8] = must_cast_slice(&wide);
-        NativeStr::wrap_box(data.into())
+        IpcStr::wrap_box(data.into())
     }
 }
 
@@ -187,11 +187,11 @@ mod tests {
         use std::os::windows::ffi::OsStrExt;
 
         let wide_str: &[u16] = &[528, 491];
-        let native_str = NativeStr::from_wide(wide_str);
+        let ipc_str = IpcStr::from_wide(wide_str);
 
-        let mut encoded = wincode::serialize(native_str).unwrap();
+        let mut encoded = wincode::serialize(ipc_str).unwrap();
 
-        let decoded: &NativeStr = wincode::deserialize(&encoded).unwrap();
+        let decoded: &IpcStr = wincode::deserialize(&encoded).unwrap();
         let decoded_wide = decoded.to_os_string().encode_wide().collect::<Vec<u16>>();
         assert_eq!(decoded_wide, wide_str);
 
@@ -199,7 +199,7 @@ mod tests {
         encoded.push(0);
         encoded.copy_within(..encoded_len, 1);
 
-        let decoded: &NativeStr = wincode::deserialize(&encoded[1..]).unwrap();
+        let decoded: &IpcStr = wincode::deserialize(&encoded[1..]).unwrap();
         let decoded_wide = decoded.to_os_string().encode_wide().collect::<Vec<u16>>();
         assert_eq!(decoded_wide, wide_str);
     }

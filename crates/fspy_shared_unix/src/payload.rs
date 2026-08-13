@@ -1,7 +1,7 @@
 use base64::{Engine as _, prelude::BASE64_STANDARD_NO_PAD};
 use bstr::BString;
 #[cfg(not(target_env = "musl"))]
-use fspy_shared::ipc::NativeStr;
+use fspy_shared::ipc::IpcStr;
 #[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::channel::ChannelConf;
 use wincode::{SchemaRead, SchemaWrite};
@@ -12,7 +12,7 @@ pub struct Payload {
     pub ipc_channel_conf: ChannelConf,
 
     #[cfg(not(target_env = "musl"))]
-    pub preload_path: Box<NativeStr>,
+    pub preload_path: Box<IpcStr>,
 
     #[cfg(target_os = "macos")]
     pub artifacts: Artifacts,
@@ -28,8 +28,8 @@ pub struct Payload {
 #[cfg(target_os = "macos")]
 #[derive(Debug, SchemaWrite, SchemaRead, Clone)]
 pub struct Artifacts {
-    pub bash_path: Box<NativeStr>,
-    pub coreutils_path: Box<NativeStr>,
+    pub bash_path: Box<IpcStr>,
+    pub coreutils_path: Box<IpcStr>,
 }
 
 pub(crate) const PAYLOAD_ENV_NAME: &str = "FSPY_PAYLOAD";

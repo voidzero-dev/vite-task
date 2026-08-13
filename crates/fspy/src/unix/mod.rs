@@ -10,7 +10,7 @@ use std::{io, path::Path};
 use fspy_seccomp_unotify::supervisor::supervise;
 use fspy_shared::ipc::PathAccess;
 #[cfg(not(target_env = "musl"))]
-use fspy_shared::ipc::{NativeStr, channel::channel};
+use fspy_shared::ipc::{IpcStr, channel::channel};
 #[cfg(target_os = "macos")]
 use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
@@ -34,7 +34,7 @@ pub struct SpyImpl {
     artifacts: Artifacts,
 
     #[cfg(not(target_env = "musl"))]
-    preload_path: Box<NativeStr>,
+    preload_path: Box<IpcStr>,
 }
 
 impl SpyImpl {

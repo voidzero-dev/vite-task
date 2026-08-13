@@ -1332,6 +1332,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fspy_ipc_str"
+version = "0.0.0"
+dependencies = [
+ "bumpalo",
+ "bytemuck",
+ "wincode",
+]
+
+[[package]]
 name = "fspy_nostd"
 version = "0.0.0"
 dependencies = [
@@ -1412,8 +1421,8 @@ dependencies = [
  "bumpalo",
  "bytemuck",
  "ctor",
+ "fspy_ipc_str",
  "fspy_shm",
- "native_str",
  "rustc-hash",
  "subprocess_test",
  "thiserror 2.0.18",
@@ -2187,15 +2196,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8eb602b84d7c1edae45e50bbf1374696548f36ae179dfa667f577e384bb90c2b"
 dependencies = [
  "libloading 0.9.0",
-]
-
-[[package]]
-name = "native_str"
-version = "0.0.0"
-dependencies = [
- "bumpalo",
- "bytemuck",
- "wincode",
 ]
 
 [[package]]
@@ -4298,7 +4298,7 @@ dependencies = [
 name = "vt_client"
 version = "0.0.0"
 dependencies = [
- "native_str",
+ "fspy_ipc_str",
  "rustc-hash",
  "socket_ipc",
  "vt_ipc_shared",
@@ -4363,7 +4363,7 @@ dependencies = [
 name = "vt_ipc_shared"
 version = "0.0.0"
 dependencies = [
- "native_str",
+ "fspy_ipc_str",
  "rustc-hash",
  "wincode",
 ]
@@ -4446,8 +4446,8 @@ dependencies = [
 name = "vt_server"
 version = "0.0.0"
 dependencies = [
+ "fspy_ipc_str",
  "futures",
- "native_str",
  "rustc-hash",
  "socket_ipc",
  "thiserror 2.0.18",

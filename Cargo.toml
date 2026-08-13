@@ -98,7 +98,7 @@ monostate = "1.0.2"
 napi = "3"
 napi-build = "2"
 napi-derive = "3"
-native_str = { path = "crates/native_str" }
+fspy_ipc_str = { path = "crates/fspy_ipc_str" }
 nix = { version = "0.31.2", features = ["dir", "signal"] }
 ntapi = "0.4.1"
 nucleo-matcher = "0.3.1"

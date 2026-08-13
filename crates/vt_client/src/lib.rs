@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use native_str::NativeStr;
+use fspy_ipc_str::IpcStr;
 use rustc_hash::FxHashMap;
 use socket_ipc::Client as Stream;
 use vt_ipc_shared::{
@@ -107,7 +107,7 @@ impl Client {
     ///
     /// Returns an error if the request or response fails.
     pub fn get_env(&self, name: &OsStr, tracked: bool) -> io::Result<Option<Arc<OsStr>>> {
-        let name = Box::<NativeStr>::from(name);
+        let name = Box::<IpcStr>::from(name);
 
         self.send(&Request::GetEnv { name: &name, tracked })?;
         let response: GetEnvResponse = self.recv()?;
@@ -175,12 +175,12 @@ impl Client {
     }
 }
 
-fn resolve_path(path: &OsStr) -> io::Result<Box<NativeStr>> {
+fn resolve_path(path: &OsStr) -> io::Result<Box<IpcStr>> {
     if let Some(abs) = AbsolutePath::new(path) {
-        return Ok(Box::<NativeStr>::from(abs.as_path().as_os_str()));
+        return Ok(Box::<IpcStr>::from(abs.as_path().as_os_str()));
     }
 
     let mut absolute = vt_path::current_dir()?;
     absolute.push(path);
-    Ok(Box::<NativeStr>::from(absolute.as_absolute_path().as_path().as_os_str()))
+    Ok(Box::<IpcStr>::from(absolute.as_absolute_path().as_path().as_os_str()))
 }

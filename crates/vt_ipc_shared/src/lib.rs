@@ -1,4 +1,4 @@
-use native_str::NativeStr;
+use fspy_ipc_str::IpcStr;
 use rustc_hash::FxHashMap;
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -28,9 +28,9 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 /// will still consume every buffered frame.
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub enum Request<'a> {
-    IgnoreInput(&'a NativeStr),
-    IgnoreOutput(&'a NativeStr),
-    GetEnv { name: &'a NativeStr, tracked: bool },
+    IgnoreInput(&'a IpcStr),
+    IgnoreOutput(&'a IpcStr),
+    GetEnv { name: &'a IpcStr, tracked: bool },
     GetEnvs { query: EnvQuery<'a>, tracked: bool },
     DisableCache,
 }
@@ -43,12 +43,12 @@ pub enum EnvQuery<'a> {
 
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub struct GetEnvResponse {
-    pub env_value: Option<Box<NativeStr>>,
+    pub env_value: Option<Box<IpcStr>>,
 }
 
 #[derive(Debug, SchemaWrite, SchemaRead)]
 pub struct GetEnvsResponse {
     /// Match snapshot for the glob pattern. Keys/values are byte-faithful
-    /// (`NativeStr`) so non-UTF-8 env values are preserved over the wire.
-    pub entries: FxHashMap<Box<NativeStr>, Box<NativeStr>>,
+    /// (`IpcStr`) so non-UTF-8 env values are preserved over the wire.
+    pub entries: FxHashMap<Box<IpcStr>, Box<IpcStr>>,
 }

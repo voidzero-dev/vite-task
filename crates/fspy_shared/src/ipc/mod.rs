@@ -1,11 +1,11 @@
 #[cfg(not(target_env = "musl"))]
 pub mod channel;
-mod native_path;
+mod ipc_path;
 use std::fmt::Debug;
 
 use bitflags::bitflags;
-pub use native_path::NativePath;
-pub use native_str::NativeStr;
+pub use fspy_ipc_str::IpcStr;
+pub use ipc_path::IpcPath;
 use wincode::{SchemaRead, SchemaWrite};
 
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
@@ -34,16 +34,16 @@ impl Debug for AccessMode {
 #[derive(SchemaWrite, SchemaRead, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathAccess<'a> {
     pub mode: AccessMode,
-    pub path: &'a NativePath,
+    pub path: &'a IpcPath,
     // TODO: add follow_symlinks (O_NOFOLLOW)
 }
 
 impl<'a> PathAccess<'a> {
-    pub fn read(path: impl Into<&'a NativePath>) -> Self {
+    pub fn read(path: impl Into<&'a IpcPath>) -> Self {
         Self { mode: AccessMode::READ, path: path.into() }
     }
 
-    pub fn read_dir(path: impl Into<&'a NativePath>) -> Self {
+    pub fn read_dir(path: impl Into<&'a IpcPath>) -> Self {
         Self { mode: AccessMode::READ_DIR, path: path.into() }
     }
 }
