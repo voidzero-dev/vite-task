@@ -1459,6 +1459,7 @@ version = "0.0.0"
 dependencies = [
  "ctor",
  "fspy_nostd",
+ "omnipath",
  "subprocess_test",
  "uuid",
  "windows-sys 0.61.2",
@@ -2463,6 +2464,12 @@ checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "omnipath"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80adb31078122c880307e9cdfd4e3361e6545c319f9b9dcafcb03acd3b51a575"
 
 [[package]]
 name = "once_cell"

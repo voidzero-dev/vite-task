@@ -3,8 +3,12 @@
 
 use core::{ffi::c_void, mem::size_of, ptr};
 use std::{
-    env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, os::windows::ffi::OsStrExt as _,
-    path::PathBuf,
+    env::temp_dir,
+    ffi::OsStr,
+    io,
+    num::NonZeroUsize,
+    os::windows::ffi::OsStrExt as _,
+    path::{Path, PathBuf},
 };
 #[cfg(test)]
 use std::{fs::File, os::windows::io::AsRawHandle as _};
@@ -14,6 +18,7 @@ use fspy_nostd::{
     fs::{CreationDisposition, FileAccess, FileOptions, FileShare},
     mm::{MappingAccess, PageProtection},
 };
+use omnipath::windows::WinPathExt as _;
 use uuid::Uuid;
 #[cfg(test)]
 use windows_sys::Win32::Storage::FileSystem::{
@@ -161,17 +166,6 @@ fn open_file_wide(
 /// verbatim path.
 const VERBATIM_THRESHOLD: usize = 248;
 
-const SEP: u16 = b'\\' as u16;
-const COLON: u16 = b':' as u16;
-/// `\\?\`
-const VERBATIM_PREFIX: [u16; 4] = [SEP, SEP, b'?' as u16, SEP];
-/// `\??\`
-const NT_PREFIX: [u16; 4] = [SEP, b'?' as u16, b'?' as u16, SEP];
-/// `\\.\`
-const DEVICE_PREFIX: [u16; 4] = [SEP, SEP, b'.' as u16, SEP];
-/// `UNC\`
-const UNC_INFIX: [u16; 4] = [b'U' as u16, b'N' as u16, b'C' as u16, SEP];
-
 fn copy_path(path: &OsStr) -> io::Result<Vec<u16>> {
     let mut units: Vec<_> = path.encode_wide().collect();
     if units.contains(&0) {
@@ -182,28 +176,10 @@ fn copy_path(path: &OsStr) -> io::Result<Vec<u16>> {
     // regardless of the system's long-path opt-in, which the arbitrary
     // processes opening shared memory could not rely on anyway.
     if units.len() >= VERBATIM_THRESHOLD {
-        add_verbatim_prefix(&mut units);
+        units = Path::new(path).to_verbatim()?.as_os_str().encode_wide().collect();
     }
     units.push(0);
     Ok(units)
-}
-
-fn add_verbatim_prefix(units: &mut Vec<u16>) {
-    if units.starts_with(&VERBATIM_PREFIX)
-        || units.starts_with(&NT_PREFIX)
-        || units.starts_with(&DEVICE_PREFIX)
-    {
-        return;
-    }
-    if units.starts_with(&[SEP, SEP]) {
-        // `\\server\share\...` becomes `\\?\UNC\server\share\...`.
-        drop(units.splice(0..2, VERBATIM_PREFIX.into_iter().chain(UNC_INFIX)));
-    } else if units.get(1) == Some(&COLON) && units.get(2) == Some(&SEP) {
-        // `C:\...` becomes `\\?\C:\...`.
-        drop(units.splice(0..0, VERBATIM_PREFIX));
-    }
-    // Every other shape is left alone: the backing paths this crate produces
-    // are always fully qualified.
 }
 
 fn as_nostd_path(path: &[u16]) -> fspy_nostd::WideCStr<'_, fspy_nostd::Fat> {

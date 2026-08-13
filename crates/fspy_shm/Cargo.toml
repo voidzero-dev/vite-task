@@ -14,6 +14,7 @@ uuid = { workspace = true, features = ["v4"] }
 fspy_nostd = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+omnipath = { workspace = true }
 windows-sys = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Storage_FileSystem",
