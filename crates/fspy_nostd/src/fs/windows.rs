@@ -11,7 +11,7 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::{AsRawHandle as _, BorrowedHandle, OwnedHandle, Result, SecurityAttributes, WideCStr};
+use crate::{BorrowedHandle, OwnedHandle, Result, SecurityAttributes, WideCStr};
 
 bitflags! {
     /// Access rights requested for a file handle.

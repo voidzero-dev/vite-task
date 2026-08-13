@@ -10,7 +10,7 @@ use std::{
 use std::{fs::File, os::windows::io::AsRawHandle as _};
 
 use fspy_nostd::{
-    AsHandle as _, AsRawHandle as _, BorrowedHandle,
+    BorrowedHandle,
     fs::{CreationDisposition, FileAccess, FileOptions, FileShare},
     mm::{MappingAccess, PageProtection},
 };

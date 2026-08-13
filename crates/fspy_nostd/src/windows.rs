@@ -29,18 +29,6 @@ pub struct OwnedHandle {
     handle: RawHandle,
 }
 
-/// A type that can lend a Windows kernel handle.
-pub trait AsHandle {
-    /// Borrows the handle.
-    fn as_handle(&self) -> BorrowedHandle<'_>;
-}
-
-/// A type that exposes a raw Windows kernel handle.
-pub trait AsRawHandle {
-    /// Returns the raw handle without transferring ownership.
-    fn as_raw_handle(&self) -> RawHandle;
-}
-
 /// Opaque security attributes accepted by Win32 creation functions.
 ///
 /// This type has no public constructor. Non-default security attributes will
@@ -66,6 +54,12 @@ impl BorrowedHandle<'_> {
     pub const unsafe fn borrow_raw(handle: RawHandle) -> Self {
         Self { handle, lifetime: PhantomData }
     }
+
+    /// Returns the raw handle without transferring ownership.
+    #[must_use]
+    pub const fn as_raw_handle(&self) -> RawHandle {
+        self.handle
+    }
 }
 
 impl OwnedHandle {
@@ -78,43 +72,13 @@ impl OwnedHandle {
     pub(crate) const unsafe fn from_raw_handle(handle: RawHandle) -> Self {
         Self { handle }
     }
-}
 
-impl AsHandle for BorrowedHandle<'_> {
-    fn as_handle(&self) -> BorrowedHandle<'_> {
-        *self
-    }
-}
-
-impl AsHandle for OwnedHandle {
-    fn as_handle(&self) -> BorrowedHandle<'_> {
+    /// Borrows this handle.
+    #[must_use]
+    pub const fn as_handle(&self) -> BorrowedHandle<'_> {
         // SAFETY: `self` keeps the same valid handle open for the returned
         // borrow's lifetime.
-        unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
-    }
-}
-
-impl<T: AsHandle + ?Sized> AsHandle for &T {
-    fn as_handle(&self) -> BorrowedHandle<'_> {
-        T::as_handle(self)
-    }
-}
-
-impl<T: AsHandle + ?Sized> AsHandle for &mut T {
-    fn as_handle(&self) -> BorrowedHandle<'_> {
-        T::as_handle(self)
-    }
-}
-
-impl AsRawHandle for BorrowedHandle<'_> {
-    fn as_raw_handle(&self) -> RawHandle {
-        self.handle
-    }
-}
-
-impl AsRawHandle for OwnedHandle {
-    fn as_raw_handle(&self) -> RawHandle {
-        self.handle
+        unsafe { BorrowedHandle::borrow_raw(self.handle) }
     }
 }
 
@@ -132,7 +96,7 @@ unsafe impl Sync for BorrowedHandle<'_> {}
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
         // SAFETY: this type owns a valid handle and closes it exactly once.
-        let _ = unsafe { windows_sys::Win32::Foundation::CloseHandle(self.as_raw_handle()) };
+        let _ = unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
     }
 }
 

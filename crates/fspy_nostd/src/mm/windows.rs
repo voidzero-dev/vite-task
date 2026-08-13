@@ -6,7 +6,7 @@ use windows_sys::Win32::System::Memory::{
     PAGE_READWRITE, UnmapViewOfFile,
 };
 
-use crate::{AsRawHandle as _, BorrowedHandle, OwnedHandle, Result, SecurityAttributes, WideCStr};
+use crate::{BorrowedHandle, OwnedHandle, Result, SecurityAttributes, WideCStr};
 
 bitflags! {
     /// Page protection for a file mapping.
