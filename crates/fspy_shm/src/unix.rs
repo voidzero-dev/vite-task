@@ -3,7 +3,7 @@
 
 use std::{
     env::temp_dir,
-    ffi::OsStr,
+    ffi::{CString, OsStr},
     io,
     num::NonZeroUsize,
     os::unix::ffi::OsStrExt as _,
@@ -122,37 +122,24 @@ fn open_file(
     flags: fspy_nostd::fs::OFlags,
     mode: fspy_nostd::fs::Mode,
 ) -> io::Result<fspy_nostd::OwnedFd> {
-    let mut buf = [0_u8; fspy_nostd::fs::PATH_MAX];
-    let path = copy_path(path, &mut buf)?;
-    fspy_nostd::fs::openat(fspy_nostd::CWD, path, flags, mode).map_err(error_to_io)
+    let path = CString::new(path.as_bytes())?;
+    fspy_nostd::fs::openat(fspy_nostd::CWD, as_nostd_path(&path), flags, mode).map_err(error_to_io)
 }
 
 fn remove_file(path: &OsStr) -> io::Result<()> {
-    let mut buf = [0_u8; fspy_nostd::fs::PATH_MAX];
-    let path = copy_path(path, &mut buf)?;
-    fspy_nostd::fs::unlinkat(fspy_nostd::CWD, path, fspy_nostd::fs::AtFlags::empty())
-        .map_err(error_to_io)
+    let path = CString::new(path.as_bytes())?;
+    fspy_nostd::fs::unlinkat(
+        fspy_nostd::CWD,
+        as_nostd_path(&path),
+        fspy_nostd::fs::AtFlags::empty(),
+    )
+    .map_err(error_to_io)
 }
 
-fn copy_path<'buf>(
-    path: &OsStr,
-    buf: &'buf mut [u8; fspy_nostd::fs::PATH_MAX],
-) -> io::Result<fspy_nostd::CStr<'buf, fspy_nostd::Fat>> {
-    let bytes = path.as_bytes();
-    if bytes.contains(&0) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"));
-    }
-
-    let len_with_nul = bytes.len().checked_add(1).ok_or(io::ErrorKind::InvalidInput)?;
-    let initialized = buf.get_mut(..len_with_nul).ok_or_else(|| {
-        io::Error::from_raw_os_error(fspy_nostd::Error::NAMETOOLONG.raw_os_error())
-    })?;
-    initialized[..bytes.len()].copy_from_slice(bytes);
-    initialized[bytes.len()] = 0;
-
-    // SAFETY: the copied path contains no NUL, followed by the terminator set
-    // above, and the returned view borrows the initialized buffer prefix.
-    Ok(unsafe { fspy_nostd::CStr::from_units_with_nul_unchecked(initialized) })
+fn as_nostd_path(path: &CString) -> fspy_nostd::CStr<'_, fspy_nostd::Fat> {
+    // SAFETY: `CString` contains no interior NUL and includes one terminating
+    // NUL; the returned view borrows it.
+    unsafe { fspy_nostd::CStr::from_units_with_nul_unchecked(path.as_bytes_with_nul()) }
 }
 
 fn error_to_io(error: fspy_nostd::Error) -> io::Error {
