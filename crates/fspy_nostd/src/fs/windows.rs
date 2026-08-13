@@ -4,10 +4,9 @@ use bitflags::bitflags;
 use windows_sys::Win32::{
     Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::{
-        CREATE_ALWAYS, CREATE_NEW, CreateFileW, DELETE, DeleteFileW, FILE_ATTRIBUTE_TEMPORARY,
+        CREATE_NEW, CreateFileW, DELETE, DeleteFileW, FILE_ATTRIBUTE_TEMPORARY,
         FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileSizeEx, OPEN_ALWAYS, OPEN_EXISTING,
-        TRUNCATE_EXISTING,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileSizeEx, OPEN_EXISTING, TRUNCATE_EXISTING,
     },
 };
 
@@ -49,17 +48,17 @@ bitflags! {
 }
 
 /// How `CreateFileW` handles an existing or missing file.
+///
+/// `CREATE_ALWAYS` and `OPEN_ALWAYS` are omitted: their success reports
+/// whether the file already existed only through `GetLastError`, which
+/// [`create_file`] does not surface.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum CreationDisposition {
     /// Create a new file and fail if it already exists.
     CreateNew = CREATE_NEW,
-    /// Create a new file or replace an existing file.
-    CreateAlways = CREATE_ALWAYS,
     /// Open an existing file and fail if it does not exist.
     OpenExisting = OPEN_EXISTING,
-    /// Open an existing file or create a new file.
-    OpenAlways = OPEN_ALWAYS,
     /// Open and truncate an existing file.
     TruncateExisting = TRUNCATE_EXISTING,
 }

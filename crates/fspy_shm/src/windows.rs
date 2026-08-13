@@ -10,7 +10,7 @@ use std::{
 use std::{fs::File, os::windows::io::AsRawHandle as _};
 
 use fspy_nostd::{
-    BorrowedHandle,
+    BorrowedHandle, bool_result,
     fs::{CreationDisposition, FileAccess, FileOptions, FileShare},
     mm::{MappingAccess, PageProtection},
 };
@@ -20,7 +20,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx,
 };
 use windows_sys::Win32::{
-    Foundation::{ERROR_ACCESS_DENIED, GetLastError},
+    Foundation::ERROR_ACCESS_DENIED,
     Storage::FileSystem::{
         FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
         FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_END_OF_FILE_INFO,
@@ -56,8 +56,13 @@ pub struct ShmHandle {
 /// A `Mapping` keeps the bytes alive until it is dropped and cannot affect the
 /// shared memory's identifier.
 pub struct Mapping {
+    // Field order matters: the view must unmap before `_file` closes.
     view: fspy_nostd::mm::MappingView,
     len: NonZeroUsize,
+    /// Keeps a file handle open until the view above is unmapped, so that a
+    /// deferred `FILE_FLAG_DELETE_ON_CLOSE` removal armed by [`ShmKeeper`]
+    /// fires once the last view is gone.
+    _file: fspy_nostd::OwnedHandle,
 }
 
 /// Creates `size` bytes of zero-initialized shared memory.
@@ -88,8 +93,10 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
         path.as_os_str(),
         FileAccess::GENERIC_READ | FileAccess::GENERIC_WRITE,
         CreationDisposition::CreateNew,
-        // Ask Windows to keep the data in memory when it can.
-        FileOptions::TEMPORARY,
+        // Ask Windows to keep the data in memory when it can. Opening the
+        // reparse point itself makes a link planted at the fresh path fail
+        // instead of redirecting the file, as std does for `create_new`.
+        FileOptions::TEMPORARY | FileOptions::OPEN_REPARSE_POINT,
     )?;
     // The keeper exists from here on, so every error path below cleans up.
     let keeper = ShmKeeper { path };
@@ -152,32 +159,62 @@ fn open_file_wide(
     fspy_nostd::fs::create_file(path, access, SHARE_ALL, None, disposition, options, None)
 }
 
+/// The length at which std's own Windows path conversion switches to a
+/// verbatim path.
+const VERBATIM_THRESHOLD: usize = 248;
+
+const SEP: u16 = b'\\' as u16;
+const COLON: u16 = b':' as u16;
+/// `\\?\`
+const VERBATIM_PREFIX: [u16; 4] = [SEP, SEP, b'?' as u16, SEP];
+/// `\??\`
+const NT_PREFIX: [u16; 4] = [SEP, b'?' as u16, b'?' as u16, SEP];
+/// `\\.\`
+const DEVICE_PREFIX: [u16; 4] = [SEP, SEP, b'.' as u16, SEP];
+/// `UNC\`
+const UNC_INFIX: [u16; 4] = [b'U' as u16, b'N' as u16, b'C' as u16, SEP];
+
 fn copy_path(path: &OsStr) -> io::Result<Vec<u16>> {
     let mut units: Vec<_> = path.encode_wide().collect();
     if units.contains(&0) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"));
     }
+    // std converts long paths to verbatim form before every `CreateFileW`;
+    // without that, paths at or beyond the legacy `MAX_PATH` limit fail
+    // regardless of the system's long-path opt-in, which the arbitrary
+    // processes opening shared memory could not rely on anyway.
+    if units.len() >= VERBATIM_THRESHOLD {
+        add_verbatim_prefix(&mut units);
+    }
     units.push(0);
     Ok(units)
 }
 
-const fn as_nostd_path(path: &[u16]) -> fspy_nostd::WideCStr<'_, fspy_nostd::Fat> {
-    // SAFETY: `copy_path` rejects interior NUL and appends one terminator.
-    unsafe { fspy_nostd::WideCStr::from_units_with_nul_unchecked(path) }
+fn add_verbatim_prefix(units: &mut Vec<u16>) {
+    if units.starts_with(&VERBATIM_PREFIX)
+        || units.starts_with(&NT_PREFIX)
+        || units.starts_with(&DEVICE_PREFIX)
+    {
+        return;
+    }
+    if units.starts_with(&[SEP, SEP]) {
+        // `\\server\share\...` becomes `\\?\UNC\server\share\...`.
+        drop(units.splice(0..2, VERBATIM_PREFIX.into_iter().chain(UNC_INFIX)));
+    } else if units.get(1) == Some(&COLON) && units.get(2) == Some(&SEP) {
+        // `C:\...` becomes `\\?\C:\...`.
+        drop(units.splice(0..0, VERBATIM_PREFIX));
+    }
+    // Every other shape is left alone: the backing paths this crate produces
+    // are always fully qualified.
+}
+
+fn as_nostd_path(path: &[u16]) -> fspy_nostd::WideCStr<'_, fspy_nostd::Fat> {
+    fspy_nostd::WideCStr::from_units_with_nul(path)
+        .expect("copy_path rejects interior NUL and appends one terminator")
 }
 
 fn error_to_io(error: fspy_nostd::Error) -> io::Error {
     io::Error::from_raw_os_error(error.raw_os_error().cast_signed())
-}
-
-fn bool_result(result: i32) -> fspy_nostd::Result<()> {
-    if result == 0 {
-        // SAFETY: the failing Win32 call immediately precedes this read of the
-        // thread-local error code.
-        Err(fspy_nostd::Error::from_raw_os_error(unsafe { GetLastError() }))
-    } else {
-        Ok(())
-    }
 }
 
 fn set_sparse(file: BorrowedHandle<'_>) -> fspy_nostd::Result<()> {
@@ -239,12 +276,14 @@ fn remove_file(path: &OsStr) -> io::Result<()> {
 
     // Windows versions without POSIX delete refuse to remove the name of a
     // mapped file. Opening with `FILE_FLAG_DELETE_ON_CLOSE` and immediately
-    // closing that handle arms deletion once every other handle is closed.
+    // closing that handle arms deletion once every other handle is closed;
+    // every [`Mapping`] holds a file handle until its view unmaps, so the
+    // deletion fires once the last view is gone.
     if let Ok(file) = open_file_wide(
         path,
         FileAccess::DELETE,
         CreationDisposition::OpenExisting,
-        FileOptions::DELETE_ON_CLOSE,
+        FileOptions::DELETE_ON_CLOSE | FileOptions::OPEN_REPARSE_POINT,
     ) {
         drop(file);
         return Ok(());
@@ -302,16 +341,21 @@ impl ShmHandle {
         let _slice_len = isize::try_from(self.size.get()).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidData, "shared-memory size exceeds isize")
         })?;
-        // Default security attributes create a non-inheritable mapping object
-        // and no name creates an unnamed one. Both maximum-size halves are
-        // zero, so Windows uses the current file size.
-        let mapping = fspy_nostd::mm::create_file_mapping::<fspy_nostd::Thin>(
+        // A deferred `FILE_FLAG_DELETE_ON_CLOSE` removal is processed when the
+        // last file handle closes and is silently discarded while mapped views
+        // remain. Give every mapping its own handle, closed only after its
+        // view unmaps, so [`ShmKeeper`]'s fallback removal fires once the last
+        // view is gone.
+        let file = self.file.as_handle().try_clone_to_owned().map_err(error_to_io)?;
+        // Default security attributes create a non-inheritable mapping object.
+        // Both maximum-size halves are zero, so Windows uses the current file
+        // size.
+        let mapping = fspy_nostd::mm::create_file_mapping(
             self.file.as_handle(),
             None,
-            PageProtection::READ_WRITE,
+            PageProtection::ReadWrite,
             0,
             0,
-            None,
         )
         .map_err(error_to_io)?;
         let view = fspy_nostd::mm::map_view_of_file(
@@ -323,7 +367,7 @@ impl ShmHandle {
         )
         .map_err(error_to_io)?;
         // The view remains valid after its mapping-object handle closes.
-        Ok(Mapping { view, len: self.size })
+        Ok(Mapping { view, len: self.size, _file: file })
     }
 }
 
@@ -381,4 +425,54 @@ pub fn file_sizes(file: &File) -> io::Result<(u64, u64)> {
     let allocated_size = u64::try_from(info.AllocationSize)
         .map_err(|_| io::Error::other("file has a negative allocated size"))?;
     Ok((logical_size, allocated_size))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    use super::copy_path;
+
+    fn units_with_nul(path: &str) -> Vec<u16> {
+        let mut units: Vec<u16> = path.encode_utf16().collect();
+        units.push(0);
+        units
+    }
+
+    #[test]
+    fn short_paths_stay_unprefixed() {
+        let path = r"C:\Temp\file.shm";
+
+        assert_eq!(copy_path(OsStr::new(path)).unwrap(), units_with_nul(path));
+    }
+
+    #[test]
+    fn long_drive_paths_gain_the_verbatim_prefix() {
+        let path = format!(r"C:\{}\file.shm", "a".repeat(300));
+
+        let converted = copy_path(OsStr::new(&path)).unwrap();
+
+        assert_eq!(converted, units_with_nul(&format!(r"\\?\{path}")));
+    }
+
+    #[test]
+    fn long_unc_paths_gain_the_unc_verbatim_prefix() {
+        let path = format!(r"\\server\share\{}\file.shm", "a".repeat(300));
+
+        let converted = copy_path(OsStr::new(&path)).unwrap();
+
+        assert_eq!(converted, units_with_nul(&format!(r"\\?\UNC\{}", &path[2..])));
+    }
+
+    #[test]
+    fn long_verbatim_paths_are_left_alone() {
+        let path = format!(r"\\?\C:\{}\file.shm", "a".repeat(300));
+
+        assert_eq!(copy_path(OsStr::new(&path)).unwrap(), units_with_nul(&path));
+    }
+
+    #[test]
+    fn interior_nul_is_rejected() {
+        assert!(copy_path(OsStr::new("a\0b")).is_err());
+    }
 }

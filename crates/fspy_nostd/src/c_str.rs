@@ -152,6 +152,22 @@ impl<'a, U: CStrUnit> CStr<'a, Thin, U> {
 }
 
 impl<'a, U: CStrUnit> CStr<'a, Fat, U> {
+    /// Creates a length-retaining C string from code units that end with the
+    /// single NUL terminator.
+    ///
+    /// Returns [`None`] when `units` is empty, does not end with a NUL code
+    /// unit, or contains an interior NUL code unit.
+    #[must_use]
+    pub fn from_units_with_nul(units: &'a [U]) -> Option<Self> {
+        let (last, rest) = units.split_last()?;
+        if *last != U::NUL || rest.contains(&U::NUL) {
+            return None;
+        }
+        // SAFETY: `units` ends with exactly one NUL code unit and contains no
+        // other NUL code units.
+        Some(unsafe { Self::from_units_with_nul_unchecked(units) })
+    }
+
     /// Creates a length-retaining C string from code units without validation.
     ///
     /// # Safety
@@ -213,6 +229,18 @@ mod tests {
         assert_eq!(fat.as_units(), b"abc");
         assert_eq!(fat.as_units_with_nul(), b"abc\0");
         assert_eq!(counted.as_units_with_nul(), fat.as_units_with_nul());
+    }
+
+    #[test]
+    fn checked_construction_accepts_only_a_single_trailing_nul() {
+        let checked = CStr::<Fat>::from_units_with_nul(b"abc\0").unwrap();
+
+        assert_eq!(checked.as_units(), b"abc");
+        assert_eq!(checked.len_with_nul(), 4);
+        assert!(CStr::<Fat>::from_units_with_nul(b"").is_none());
+        assert!(CStr::<Fat>::from_units_with_nul(b"abc").is_none());
+        assert!(CStr::<Fat>::from_units_with_nul(b"a\0c\0").is_none());
+        assert!(WideCStr::<Fat>::from_units_with_nul(&[0u16]).is_some());
     }
 
     #[test]

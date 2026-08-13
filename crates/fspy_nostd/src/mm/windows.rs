@@ -6,16 +6,20 @@ use windows_sys::Win32::System::Memory::{
     PAGE_READWRITE, UnmapViewOfFile,
 };
 
-use crate::{BorrowedHandle, OwnedHandle, Result, SecurityAttributes, WideCStr};
+use crate::{BorrowedHandle, OwnedHandle, Result, SecurityAttributes};
+
+/// Page protection for a file mapping.
+///
+/// Protection values are mutually exclusive, so they are modeled as an enum
+/// rather than as flags.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum PageProtection {
+    /// Permit pages to be read and written.
+    ReadWrite = PAGE_READWRITE,
+}
 
 bitflags! {
-    /// Page protection for a file mapping.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    pub struct PageProtection: u32 {
-        /// Permit pages to be read and written.
-        const READ_WRITE = PAGE_READWRITE;
-    }
-
     /// Access requested for a mapped view.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct MappingAccess: u32 {
@@ -57,33 +61,36 @@ impl Drop for MappingView {
     }
 }
 
-/// Calls `CreateFileMappingW` and returns the new mapping-object handle.
+/// Calls `CreateFileMappingW` and returns the new unnamed mapping object's
+/// handle.
+///
+/// Named mappings are unsupported: for a name that already exists,
+/// `CreateFileMappingW` reports the pre-existing object only through
+/// `GetLastError`, which this wrapper does not surface.
 ///
 /// # Errors
 ///
 /// Returns the error reported by `CreateFileMappingW`.
-pub fn create_file_mapping<R>(
+pub fn create_file_mapping(
     file: BorrowedHandle<'_>,
     mapping_attributes: Option<&SecurityAttributes>,
     protection: PageProtection,
     maximum_size_high: u32,
     maximum_size_low: u32,
-    name: Option<WideCStr<'_, R>>,
 ) -> Result<OwnedHandle> {
     let mapping_attributes = mapping_attributes.map_or(ptr::null(), SecurityAttributes::as_raw);
-    let name = name.map_or(ptr::null(), |name| name.as_ptr());
 
     // SAFETY: `file` keeps the opaque handle open. The optional security
-    // attributes and name are either null or readable for the call. Windows
-    // validates the handle's object type, protection, and sizes.
+    // attributes are either null or readable for the call. Windows validates
+    // the handle's object type, protection, and sizes.
     let mapping = unsafe {
         CreateFileMappingW(
             file.as_raw_handle(),
             mapping_attributes,
-            protection.bits(),
+            protection as u32,
             maximum_size_high,
             maximum_size_low,
-            name,
+            ptr::null(),
         )
     };
     if mapping.is_null() {
