@@ -20,7 +20,6 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx,
 };
 use windows_sys::Win32::{
-    Foundation::ERROR_ACCESS_DENIED,
     Storage::FileSystem::{
         FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
         FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_END_OF_FILE_INFO,
@@ -34,6 +33,10 @@ use crate::BACKING_PREFIX;
 const SHARE_ALL: FileShare = FileShare::READ.union(FileShare::WRITE).union(FileShare::DELETE);
 
 /// Keeps the shared memory's identifier alive and removes it on drop.
+///
+/// Removal relies on POSIX delete semantics, which requires NTFS on Windows
+/// 10 1607 or newer: the name is unlinked immediately even while views of the
+/// backing file remain mapped.
 ///
 /// Removal is cleanup, not a stop signal: later opens fail, but existing
 /// [`ShmHandle`]s and [`Mapping`]s keep reading and writing. To stop them,
@@ -56,13 +59,8 @@ pub struct ShmHandle {
 /// A `Mapping` keeps the bytes alive until it is dropped and cannot affect the
 /// shared memory's identifier.
 pub struct Mapping {
-    // Field order matters: the view must unmap before `_file` closes.
     view: fspy_nostd::mm::MappingView,
     len: NonZeroUsize,
-    /// Keeps a file handle open until the view above is unmapped, so that a
-    /// deferred `FILE_FLAG_DELETE_ON_CLOSE` removal armed by [`ShmKeeper`]
-    /// fires once the last view is gone.
-    _file: fspy_nostd::OwnedHandle,
 }
 
 /// Creates `size` bytes of zero-initialized shared memory.
@@ -257,41 +255,17 @@ fn set_end_of_file(file: BorrowedHandle<'_>, len: i64) -> fspy_nostd::Result<()>
 
 fn remove_file(path: &OsStr) -> io::Result<()> {
     let path = copy_path(path)?;
-    let path = as_nostd_path(&path);
-    let error = match fspy_nostd::fs::delete_file(path) {
-        Ok(()) => return Ok(()),
-        Err(error) => error,
-    };
-    if error.raw_os_error() == ERROR_ACCESS_DENIED
-        && let Ok(file) = open_file_wide(
-            path,
-            FileAccess::DELETE,
-            CreationDisposition::OpenExisting,
-            FileOptions::OPEN_REPARSE_POINT,
-        )
-        && set_posix_delete(file.as_handle()).is_ok()
-    {
-        return Ok(());
-    }
-
-    // Windows versions without POSIX delete refuse to remove the name of a
-    // mapped file. Opening with `FILE_FLAG_DELETE_ON_CLOSE` and immediately
-    // closing that handle arms deletion once every other handle is closed;
-    // every [`Mapping`] holds a file handle until its view unmaps, so the
-    // deletion fires once the last view is gone.
-    if let Ok(file) = open_file_wide(
-        path,
+    // Opening the reparse point itself removes a link rather than its target.
+    let file = open_file_wide(
+        as_nostd_path(&path),
         FileAccess::DELETE,
         CreationDisposition::OpenExisting,
-        FileOptions::DELETE_ON_CLOSE | FileOptions::OPEN_REPARSE_POINT,
-    ) {
-        drop(file);
-        return Ok(());
-    }
-
-    // Preserve the original `DeleteFileW` error when POSIX deletion is not
-    // available and deferred deletion cannot be armed.
-    Err(error_to_io(error))
+        FileOptions::OPEN_REPARSE_POINT,
+    )
+    .map_err(error_to_io)?;
+    // POSIX delete removes the name as soon as `file` closes below, while
+    // existing handles and mapped views keep working until they are dropped.
+    set_posix_delete(file.as_handle()).map_err(error_to_io)
 }
 
 fn set_posix_delete(file: BorrowedHandle<'_>) -> fspy_nostd::Result<()> {
@@ -341,12 +315,6 @@ impl ShmHandle {
         let _slice_len = isize::try_from(self.size.get()).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidData, "shared-memory size exceeds isize")
         })?;
-        // A deferred `FILE_FLAG_DELETE_ON_CLOSE` removal is processed when the
-        // last file handle closes and is silently discarded while mapped views
-        // remain. Give every mapping its own handle, closed only after its
-        // view unmaps, so [`ShmKeeper`]'s fallback removal fires once the last
-        // view is gone.
-        let file = self.file.as_handle().try_clone_to_owned().map_err(error_to_io)?;
         // Default security attributes create a non-inheritable mapping object.
         // Both maximum-size halves are zero, so Windows uses the current file
         // size.
@@ -367,7 +335,7 @@ impl ShmHandle {
         )
         .map_err(error_to_io)?;
         // The view remains valid after its mapping-object handle closes.
-        Ok(Mapping { view, len: self.size, _file: file })
+        Ok(Mapping { view, len: self.size })
     }
 }
 

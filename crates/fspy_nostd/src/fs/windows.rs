@@ -4,9 +4,9 @@ use bitflags::bitflags;
 use windows_sys::Win32::{
     Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::{
-        CREATE_NEW, CreateFileW, DELETE, DeleteFileW, FILE_ATTRIBUTE_TEMPORARY,
-        FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileSizeEx, OPEN_EXISTING, TRUNCATE_EXISTING,
+        CREATE_NEW, CreateFileW, DELETE, FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileSizeEx, OPEN_EXISTING,
+        TRUNCATE_EXISTING,
     },
 };
 
@@ -40,8 +40,6 @@ bitflags! {
     pub struct FileOptions: u32 {
         /// Hint that the file should be kept in memory when possible.
         const TEMPORARY = FILE_ATTRIBUTE_TEMPORARY;
-        /// Delete the file after its last handle closes.
-        const DELETE_ON_CLOSE = FILE_FLAG_DELETE_ON_CLOSE;
         /// Open a reparse point rather than its target.
         const OPEN_REPARSE_POINT = FILE_FLAG_OPEN_REPARSE_POINT;
     }
@@ -101,17 +99,6 @@ pub fn create_file<R>(
         // SAFETY: `CreateFileW` returned a valid, newly owned handle.
         Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
     }
-}
-
-/// Calls `DeleteFileW`.
-///
-/// # Errors
-///
-/// Returns the error reported by `DeleteFileW`.
-#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
-pub fn delete_file<R>(path: WideCStr<'_, R>) -> Result<()> {
-    // SAFETY: `path` is a valid NUL-terminated wide string.
-    crate::windows::bool_result(unsafe { DeleteFileW(path.as_ptr()) })
 }
 
 /// Calls `GetFileSizeEx`.

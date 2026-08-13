@@ -39,7 +39,6 @@ windows-sys = { workspace = true, features = [
   "Win32_Storage_FileSystem",
   "Win32_System_LibraryLoader",
   "Win32_System_Memory",
-  "Win32_System_Threading",
 ] }
 
 # Cross-validates the page-size probe against rustix's auxv-based answer.

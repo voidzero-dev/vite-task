@@ -1,9 +1,8 @@
-use core::{ffi::c_void, marker::PhantomData, ptr, ptr::NonNull};
+use core::{ffi::c_void, marker::PhantomData, ptr::NonNull};
 
 use windows_sys::Win32::{
-    Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, GetLastError},
-    Security::SECURITY_ATTRIBUTES,
-    System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentProcess},
+    Foundation::GetLastError, Security::SECURITY_ATTRIBUTES,
+    System::LibraryLoader::GetModuleHandleW,
 };
 
 use crate::{Result, WideCStr};
@@ -63,32 +62,6 @@ impl BorrowedHandle<'_> {
     #[must_use]
     pub const fn as_raw_handle(&self) -> RawHandle {
         self.handle
-    }
-
-    /// Duplicates this handle into a new non-inheritable owned handle with the
-    /// same access.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error reported by `DuplicateHandle`.
-    pub fn try_clone_to_owned(&self) -> Result<OwnedHandle> {
-        let mut duplicated = ptr::null_mut();
-        // SAFETY: `self` keeps the source handle open for the call, the
-        // current-process pseudo handle is always valid, and `duplicated` is
-        // writable. Windows validates that the handle can be duplicated.
-        bool_result(unsafe {
-            DuplicateHandle(
-                GetCurrentProcess(),
-                self.handle,
-                GetCurrentProcess(),
-                &raw mut duplicated,
-                0,
-                0,
-                DUPLICATE_SAME_ACCESS,
-            )
-        })?;
-        // SAFETY: `DuplicateHandle` returned a valid, newly owned handle.
-        Ok(unsafe { OwnedHandle::from_raw_handle(duplicated) })
     }
 }
 
