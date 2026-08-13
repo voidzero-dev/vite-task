@@ -50,29 +50,18 @@ bitflags! {
 
 /// How `CreateFileW` handles an existing or missing file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
 pub enum CreationDisposition {
     /// Create a new file and fail if it already exists.
-    CreateNew,
+    CreateNew = CREATE_NEW,
     /// Create a new file or replace an existing file.
-    CreateAlways,
+    CreateAlways = CREATE_ALWAYS,
     /// Open an existing file and fail if it does not exist.
-    OpenExisting,
+    OpenExisting = OPEN_EXISTING,
     /// Open an existing file or create a new file.
-    OpenAlways,
+    OpenAlways = OPEN_ALWAYS,
     /// Open and truncate an existing file.
-    TruncateExisting,
-}
-
-impl CreationDisposition {
-    const fn into_raw(self) -> u32 {
-        match self {
-            Self::CreateNew => CREATE_NEW,
-            Self::CreateAlways => CREATE_ALWAYS,
-            Self::OpenExisting => OPEN_EXISTING,
-            Self::OpenAlways => OPEN_ALWAYS,
-            Self::TruncateExisting => TRUNCATE_EXISTING,
-        }
-    }
+    TruncateExisting = TRUNCATE_EXISTING,
 }
 
 /// Calls `CreateFileW` and returns the new owned handle.
@@ -102,7 +91,7 @@ pub fn create_file<R>(
             access.bits(),
             share.bits(),
             security_attributes,
-            disposition.into_raw(),
+            disposition as u32,
             options.bits(),
             template_file,
         )
