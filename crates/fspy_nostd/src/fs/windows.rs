@@ -93,9 +93,9 @@ pub fn create_file<R>(
     let security_attributes = security_attributes.map_or(ptr::null(), SecurityAttributes::as_raw);
     let template_file = template_file.map_or(ptr::null_mut(), OwnedHandle::as_raw);
 
-    // SAFETY: `path` is NUL-terminated. Both optional pointers are either null
-    // or backed by their valid borrowed wrapper types. Other arguments are
-    // passed through unchanged for Windows to validate.
+    // SAFETY: `path` and the optional security-attributes pointer remain
+    // readable for the call, and the optional template handle remains open.
+    // Windows validates the template's object type and all scalar options.
     let handle = unsafe {
         CreateFileW(
             path.as_ptr(),
@@ -133,7 +133,8 @@ pub fn delete_file<R>(path: WideCStr<'_, R>) -> Result<()> {
 /// Returns the error reported by `GetFileSizeEx`.
 pub fn get_file_size(file: &OwnedHandle) -> Result<i64> {
     let mut size = 0;
-    // SAFETY: `file` is valid and `size` is writable for the call.
+    // SAFETY: `file` keeps the opaque handle open and `size` is writable for
+    // the call. Windows rejects handles that do not support a size query.
     crate::windows::bool_result(unsafe { GetFileSizeEx(file.as_raw(), &raw mut size) })?;
     Ok(size)
 }

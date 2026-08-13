@@ -43,11 +43,11 @@ impl OwnedHandle {
     }
 }
 
-// SAFETY: Windows kernel handles are not thread-affine. The operations exposed
-// by this crate provide their own synchronization or do not mutate the handle.
+// SAFETY: Windows kernel handles are process-scoped and may be moved between
+// threads. Moving this value does not access the referenced kernel object.
 unsafe impl Send for OwnedHandle {}
-// SAFETY: as above; sharing the value does not itself access the referenced
-// kernel object.
+// SAFETY: sharing a handle value does not access the kernel object. Each
+// operation is responsible for the synchronization required by that object.
 unsafe impl Sync for OwnedHandle {}
 
 impl Drop for OwnedHandle {

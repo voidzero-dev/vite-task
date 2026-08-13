@@ -178,9 +178,10 @@ fn bool_result(result: i32) -> fspy_nostd::Result<()> {
 
 fn set_sparse(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
     let mut bytes_returned = 0;
-    // SAFETY: `file` is valid and synchronous. `FSCTL_SET_SPARSE` accepts null
-    // input and output buffers to mark the file sparse, and `bytes_returned`
-    // is writable for the call.
+    // SAFETY: `file` keeps the handle open, and every caller supplies a file
+    // opened without `FILE_FLAG_OVERLAPPED`. `FSCTL_SET_SPARSE` accepts null
+    // input and output buffers, and `bytes_returned` is writable. Windows
+    // validates that the handle supports this control code.
     bool_result(unsafe {
         DeviceIoControl(
             file.as_raw(),
@@ -200,8 +201,9 @@ fn set_end_of_file(file: &fspy_nostd::OwnedHandle, len: i64) -> fspy_nostd::Resu
     const _: [(); 8] = [(); size_of::<FILE_END_OF_FILE_INFO>()];
 
     let info = FILE_END_OF_FILE_INFO { EndOfFile: len };
-    // SAFETY: `file` is valid and `info` has the type and exact size required
-    // by `FileEndOfFileInfo`.
+    // SAFETY: `file` keeps the opaque handle open. `info` is initialized and
+    // has the type and exact size required by `FileEndOfFileInfo`; Windows
+    // validates the handle type and access rights.
     bool_result(unsafe {
         SetFileInformationByHandle(
             file.as_raw(),
@@ -246,8 +248,9 @@ fn set_posix_delete(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
             | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
             | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     };
-    // SAFETY: `file` is valid and `info` has the type and exact size required
-    // by `FileDispositionInfoEx`.
+    // SAFETY: `file` keeps the opaque handle open. `info` is initialized and
+    // has the type and exact size required by `FileDispositionInfoEx`; Windows
+    // validates the handle type, access rights, and supported flags.
     bool_result(unsafe {
         SetFileInformationByHandle(
             file.as_raw(),
@@ -359,8 +362,9 @@ pub fn file_sizes(file: &File) -> io::Result<(u64, u64)> {
     let mut info = FILE_STANDARD_INFO::default();
     let info_size = u32::try_from(std::mem::size_of::<FILE_STANDARD_INFO>())
         .map_err(|_| io::Error::other("file size information is too large"))?;
-    // SAFETY: `file` supplies a valid handle and `info` is a writable
-    // FILE_STANDARD_INFO buffer of exactly `info_size` bytes.
+    // SAFETY: `file` keeps its handle open and `info` is a writable
+    // `FILE_STANDARD_INFO` buffer of exactly `info_size` bytes. Windows
+    // validates that the handle supports this information class.
     let result = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle().cast(),

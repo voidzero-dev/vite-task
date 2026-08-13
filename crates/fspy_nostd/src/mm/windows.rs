@@ -73,10 +73,9 @@ pub fn create_file_mapping<R>(
     let mapping_attributes = mapping_attributes.map_or(ptr::null(), SecurityAttributes::as_raw);
     let name = name.map_or(ptr::null(), |name| name.as_ptr());
 
-    // SAFETY: `file` is valid. Security attributes are either null or a valid
-    // opaque value owned by this module, and `name` is either null or backed
-    // by a valid borrowed wide C string. Windows validates the protection and
-    // size arguments.
+    // SAFETY: `file` keeps the opaque handle open. The optional security
+    // attributes and name are either null or readable for the call. Windows
+    // validates the handle's object type, protection, and sizes.
     let mapping = unsafe {
         CreateFileMappingW(
             file.as_raw(),
@@ -106,8 +105,9 @@ pub fn map_view_of_file(
     file_offset_low: u32,
     bytes_to_map: usize,
 ) -> Result<MappingView> {
-    // SAFETY: `mapping` is a valid file-mapping object. Windows validates the
-    // requested access, offset, and size against that object.
+    // SAFETY: `mapping` keeps the opaque handle open for the call. Windows
+    // verifies that it names a file-mapping object and validates the access,
+    // offset, and size; any mismatch is reported as a null result.
     let view = unsafe {
         MapViewOfFile(
             mapping.as_raw(),
