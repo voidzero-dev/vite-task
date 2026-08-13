@@ -147,6 +147,6 @@ impl Client {
         let Some(abs_path) = path.to_absolute_path(&arena)? else {
             return Ok(());
         };
-        self.send(mode, Path::new(OsStr::from_bytes(abs_path.as_bytes())))
+        self.send(mode, Path::new(OsStr::from_bytes(abs_path.as_units())))
     }
 }

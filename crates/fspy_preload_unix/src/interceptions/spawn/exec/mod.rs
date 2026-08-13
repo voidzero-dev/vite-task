@@ -212,7 +212,7 @@ mod linux_only {
         // pointer by construction rather than by convention.
         handle_exec(
             ExecResolveConfig::search_path_disabled(),
-            abs_path.as_ptr(),
+            abs_path.as_ptr().cast(),
             argv.cast(),
             envp.cast(),
         )

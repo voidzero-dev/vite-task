@@ -1,28 +1,24 @@
-use core::{
-    ffi::c_char, iter::FusedIterator, marker::PhantomData, num::NonZeroUsize, ptr::NonNull, slice,
-};
+use core::{iter::FusedIterator, marker::PhantomData, num::NonZeroUsize, ptr::NonNull, slice};
 
 mod private {
-    pub trait Sealed {}
+    pub trait Sealed {
+        const NUL: Self;
+    }
 
-    impl Sealed for u8 {}
-    impl Sealed for u16 {}
+    impl Sealed for u8 {
+        const NUL: Self = 0;
+    }
+
+    impl Sealed for u16 {
+        const NUL: Self = 0;
+    }
 }
 
 /// A code unit supported by [`CStr`].
-pub trait CStrUnit: private::Sealed + Copy + Eq {
-    /// The terminating code unit.
-    #[doc(hidden)]
-    const NUL: Self;
-}
+pub trait CStrUnit: private::Sealed + Copy + Eq {}
 
-impl CStrUnit for u8 {
-    const NUL: Self = 0;
-}
-
-impl CStrUnit for u16 {
-    const NUL: Self = 0;
-}
+impl CStrUnit for u8 {}
+impl CStrUnit for u16 {}
 
 /// Marks a [`CStr`] whose length is not known.
 #[derive(Clone, Copy)]
@@ -79,13 +75,10 @@ impl<U: CStrUnit> Iterator for Units<'_, U> {
 
 impl<U: CStrUnit> FusedIterator for Units<'_, U> {}
 
-/// An iterator over the non-NUL bytes of a thin byte C string.
-pub type Bytes<'a> = Units<'a, u8>;
-
 impl<R, U: CStrUnit> CStr<'_, R, U> {
     /// Returns a pointer to the first code unit of this C string.
     #[must_use]
-    pub const fn as_units_ptr(&self) -> *const U {
+    pub const fn as_ptr(&self) -> *const U {
         self.ptr.as_ptr()
     }
 
@@ -93,22 +86,6 @@ impl<R, U: CStrUnit> CStr<'_, R, U> {
     #[must_use]
     pub fn into_repr(self) -> R {
         self.repr
-    }
-}
-
-impl<R> CStr<'_, R> {
-    /// Returns a pointer to the first byte of this C string.
-    #[must_use]
-    pub const fn as_ptr(&self) -> *const c_char {
-        self.ptr.as_ptr().cast()
-    }
-}
-
-impl<R> CStr<'_, R, u16> {
-    /// Returns a pointer to the first UTF-16 code unit of this C string.
-    #[must_use]
-    pub const fn as_ptr(&self) -> *const u16 {
-        self.ptr.as_ptr()
     }
 }
 
@@ -129,7 +106,7 @@ impl<'a, U: CStrUnit> CStr<'a, Thin, U> {
     /// `ptr` must point to an immutable NUL-terminated string that remains
     /// valid for the lifetime of the returned view.
     #[must_use]
-    pub const unsafe fn from_units_non_null(ptr: NonNull<U>) -> Self {
+    pub const unsafe fn from_non_null(ptr: NonNull<U>) -> Self {
         Self { ptr, repr: Thin { _private: () }, lifetime: PhantomData }
     }
 
@@ -141,11 +118,11 @@ impl<'a, U: CStrUnit> CStr<'a, Thin, U> {
     /// `ptr` must be non-null and point to an immutable NUL-terminated string
     /// that remains valid for the lifetime of the returned view.
     #[must_use]
-    pub const unsafe fn from_units_ptr(ptr: *const U) -> Self {
+    pub const unsafe fn from_ptr(ptr: *const U) -> Self {
         // SAFETY: the caller guarantees that `ptr` is non-null.
         let ptr = unsafe { NonNull::new_unchecked(ptr.cast_mut()) };
         // SAFETY: the caller guarantees the remaining C string invariants.
-        unsafe { Self::from_units_non_null(ptr) }
+        unsafe { Self::from_non_null(ptr) }
     }
 
     /// Returns an iterator over the code units before the terminating NUL.
@@ -171,42 +148,6 @@ impl<'a, U: CStrUnit> CStr<'a, Thin, U> {
             },
             lifetime: PhantomData,
         }
-    }
-}
-
-impl<'a> CStr<'a, Thin> {
-    /// Creates a thin C string view from a non-null pointer without finding
-    /// its length.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point to an immutable NUL-terminated string that remains
-    /// valid for the lifetime of the returned view.
-    #[must_use]
-    pub const unsafe fn from_non_null(ptr: NonNull<c_char>) -> Self {
-        // SAFETY: the caller guarantees the C string invariants.
-        unsafe { Self::from_units_non_null(ptr.cast()) }
-    }
-
-    /// Creates a thin C string view without finding its length.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be non-null and point to an immutable NUL-terminated string
-    /// that remains valid for the lifetime of the returned view.
-    #[must_use]
-    pub const unsafe fn from_ptr(ptr: *const c_char) -> Self {
-        // SAFETY: the caller guarantees that `ptr` is non-null.
-        let ptr = unsafe { NonNull::new_unchecked(ptr.cast_mut()) };
-        // SAFETY: the caller guarantees the remaining C string invariants.
-        unsafe { Self::from_non_null(ptr) }
-    }
-
-    /// Returns an iterator over the bytes before the terminating NUL.
-    #[inline]
-    #[must_use]
-    pub const fn bytes(self) -> Bytes<'a> {
-        self.units()
     }
 }
 
@@ -251,32 +192,6 @@ impl<'a, U: CStrUnit> CStr<'a, Fat, U> {
     }
 }
 
-impl<'a> CStr<'a, Fat> {
-    /// Creates a length-retaining C string from bytes without validation.
-    ///
-    /// # Safety
-    ///
-    /// `bytes` must end with exactly one NUL byte and contain no other NUL
-    /// bytes.
-    #[must_use]
-    pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &'a [u8]) -> Self {
-        // SAFETY: the caller guarantees the generic C string invariants.
-        unsafe { Self::from_units_with_nul_unchecked(bytes) }
-    }
-
-    /// Returns the string's bytes without the terminating NUL.
-    #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.as_units()
-    }
-
-    /// Returns the string's bytes, including the terminating NUL.
-    #[must_use]
-    pub const fn as_bytes_with_nul(&self) -> &'a [u8] {
-        self.as_units_with_nul()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use core::{mem::size_of, ptr::NonNull};
@@ -286,40 +201,40 @@ mod tests {
     #[test]
     fn representations_retain_the_expected_metadata() {
         // SAFETY: the input contains one trailing NUL.
-        let fat = unsafe { CStr::<Fat>::from_bytes_with_nul_unchecked(b"abc\0") };
+        let fat = unsafe { CStr::<Fat>::from_units_with_nul_unchecked(b"abc\0") };
         // SAFETY: the input contains one trailing NUL.
-        let counted = unsafe { CStr::<Thin>::from_ptr(c"abc".as_ptr()) }.count();
+        let counted = unsafe { CStr::<Thin>::from_ptr(c"abc".as_ptr().cast()) }.count();
 
         assert_eq!(size_of::<CStr<'_, Thin>>(), size_of::<*const u8>());
         assert_eq!(size_of::<CStr<'_, Fat>>(), size_of::<(*const u8, usize)>());
         assert_eq!(size_of::<WideCStr<'_, Thin>>(), size_of::<*const u16>());
         assert_eq!(size_of::<WideCStr<'_, Fat>>(), size_of::<(*const u16, usize)>());
         assert_eq!(fat.len_with_nul(), 4);
-        assert_eq!(fat.as_bytes(), b"abc");
-        assert_eq!(fat.as_bytes_with_nul(), b"abc\0");
-        assert_eq!(counted.as_bytes_with_nul(), fat.as_bytes_with_nul());
+        assert_eq!(fat.as_units(), b"abc");
+        assert_eq!(fat.as_units_with_nul(), b"abc\0");
+        assert_eq!(counted.as_units_with_nul(), fat.as_units_with_nul());
     }
 
     #[test]
     fn thin_view_accepts_a_checked_non_null_pointer() {
-        let ptr = NonNull::new(c"abc".as_ptr().cast_mut()).unwrap();
+        let ptr = NonNull::new(c"abc".as_ptr().cast_mut().cast()).unwrap();
         // SAFETY: the literal is an immutable NUL-terminated string.
         let thin = unsafe { CStr::<Thin>::from_non_null(ptr) };
 
-        assert!(thin.bytes().eq(b"abc".iter().copied()));
+        assert!(thin.units().eq(b"abc".iter().copied()));
     }
 
     #[test]
-    fn thin_bytes_exclude_the_nul_and_remain_fused() {
-        let mut bytes = {
+    fn thin_units_exclude_the_nul_and_remain_fused() {
+        let mut units = {
             // SAFETY: the literal is NUL-terminated and outlives the iterator.
-            let thin = unsafe { CStr::<Thin>::from_ptr(c"abc".as_ptr()) };
-            thin.bytes()
+            let thin = unsafe { CStr::<Thin>::from_ptr(c"abc".as_ptr().cast()) };
+            thin.units()
         };
 
-        assert_eq!(bytes.by_ref().collect::<Vec<_>>(), b"abc");
-        assert_eq!(bytes.next(), None);
-        assert_eq!(bytes.next(), None);
+        assert_eq!(units.by_ref().collect::<Vec<_>>(), b"abc");
+        assert_eq!(units.next(), None);
+        assert_eq!(units.next(), None);
     }
 
     #[test]
@@ -328,7 +243,7 @@ mod tests {
         // SAFETY: the input contains one trailing NUL.
         let fat = unsafe { WideCStr::<Fat>::from_units_with_nul_unchecked(&units) };
         // SAFETY: the same input is immutable and NUL-terminated.
-        let thin = unsafe { WideCStr::<Thin>::from_units_ptr(units.as_ptr()) };
+        let thin = unsafe { WideCStr::<Thin>::from_ptr(units.as_ptr()) };
 
         assert!(thin.units().eq([u16::from(b'a'), u16::from(b'b')]));
         assert_eq!(thin.count().as_units_with_nul(), units);

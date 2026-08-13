@@ -62,7 +62,7 @@ pub fn decode_payload_from_env(
 ) -> anyhow::Result<EncodedPayload> {
     let Some(encoded_string) = envs.find_map(|(name, value)| {
         if AsRef::<[u8]>::as_ref(name) == PAYLOAD_ENV_NAME.as_bytes() {
-            value.map(|value| BString::from(value.as_bytes()))
+            value.map(|value| BString::from(value.as_units()))
         } else {
             None
         }

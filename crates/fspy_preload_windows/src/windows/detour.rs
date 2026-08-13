@@ -1,7 +1,12 @@
-use std::{cell::UnsafeCell, ffi::CStr, mem::transmute_copy, os::raw::c_void, ptr::null_mut};
+use std::{
+    cell::UnsafeCell,
+    ffi::{CStr, c_void},
+    mem::transmute_copy,
+    ptr::{NonNull, null_mut},
+};
 
 use fspy_detours_sys::{DetourAttach, DetourDetach};
-use fspy_nostd::{ModuleHandle, get_module_name, wide_cstr};
+use fspy_nostd::{get_module_handle, wide_cstr};
 use winapi::um::libloaderapi::GetProcAddress;
 use winsafe::SysResult;
 
@@ -51,16 +56,16 @@ pub struct DetourAny {
 }
 
 pub struct AttachContext {
-    kernelbase: Option<ModuleHandle>,
-    kernel32: ModuleHandle,
-    ntdll: ModuleHandle,
+    kernelbase: Option<NonNull<c_void>>,
+    kernel32: NonNull<c_void>,
+    ntdll: NonNull<c_void>,
 }
 
 impl AttachContext {
     pub fn new() -> fspy_nostd::Result<Self> {
-        let kernelbase = get_module_name(wide_cstr!("kernelbase.dll")).ok();
-        let kernel32 = get_module_name(wide_cstr!("kernel32.dll"))?;
-        let ntdll = get_module_name(wide_cstr!("ntdll.dll"))?;
+        let kernelbase = get_module_handle(wide_cstr!("kernelbase.dll")).ok();
+        let kernel32 = get_module_handle(wide_cstr!("kernel32.dll"))?;
+        let ntdll = get_module_handle(wide_cstr!("ntdll.dll"))?;
         Ok(Self { kernelbase, kernel32, ntdll })
     }
 }

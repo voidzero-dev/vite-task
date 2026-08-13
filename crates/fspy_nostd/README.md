@@ -58,4 +58,4 @@ Code that needs allocation uses an explicit allocator. [`fspy_nostd_alloc`](../f
 - `env`: allocation-free process argument and environment iteration.
 - `fs`: filesystem operations with caller-owned buffers.
 - `param`: page-size access.
-- `get_module_name`: allocation-free lookup of an already-loaded Windows module.
+- `get_module_handle`: allocation-free lookup of an already-loaded Windows module.

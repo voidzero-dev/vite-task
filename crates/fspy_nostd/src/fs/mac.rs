@@ -5,7 +5,7 @@ use rustix::{
     fs::{Mode, OFlags},
 };
 
-use crate::{BorrowedFd, CStr, CWD, Errno, Fat, Result, Thin};
+use crate::{BorrowedFd, CStr, CWD, Error, Fat, Result, Thin};
 
 pub(super) const PATH_MAX: usize = libc::PATH_MAX as usize;
 
@@ -21,14 +21,14 @@ fn openat<R>(
     let fd = unsafe {
         libc::openat(
             dirfd.as_raw_fd(),
-            path.as_ptr(),
+            path.as_ptr().cast(),
             flags.bits().cast_signed(),
             libc::c_uint::from(mode.bits()),
         )
     };
     if fd == -1 {
         // SAFETY: libSystem stored this call's error before returning -1.
-        return Err(Errno::from_raw_os_error(unsafe { *libc::__error() }));
+        return Err(Error::from_raw_os_error(unsafe { *libc::__error() }));
     }
 
     // SAFETY: ownership of the newly opened descriptor transfers here.
@@ -59,7 +59,7 @@ pub fn fcntl_getpath<'buf>(
     };
     if result == -1 {
         // SAFETY: libSystem stored this call's error before returning -1.
-        return Err(Errno::from_raw_os_error(unsafe { *libc::__error() }));
+        return Err(Error::from_raw_os_error(unsafe { *libc::__error() }));
     }
 
     // SAFETY: `F_GETPATH` wrote a NUL-terminated pathname into `buf`.
@@ -81,13 +81,13 @@ pub(super) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
 fn getcwd_small(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
     let mut scratch = [MaybeUninit::uninit(); PATH_MAX];
     let initialized = getcwd_full(&mut scratch)?.len_with_nul();
-    let buf = buf.get_mut(..initialized).ok_or(Errno::RANGE)?;
+    let buf = buf.get_mut(..initialized).ok_or(Error::RANGE)?;
 
     buf.copy_from_slice(&scratch[..initialized]);
     // SAFETY: `getcwd_full` initialized this copied C string prefix.
     let bytes = unsafe { slice::from_raw_parts(buf.as_ptr().cast(), buf.len()) };
     // SAFETY: upheld by the initialized prefix above.
-    Ok(unsafe { CStr::from_bytes_with_nul_unchecked(bytes) })
+    Ok(unsafe { CStr::from_units_with_nul_unchecked(bytes) })
 }
 
 /// The allocation-free fast path from Apple's [`getcwd`]: ask an open `.`
@@ -106,7 +106,7 @@ fn getcwd_small(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
 /// [`getcwd`]: https://github.com/apple-oss-distributions/Libc/blob/Libc-1752.120.2/gen/FreeBSD/getcwd.c#L62-L138
 fn getcwd_full(buf: &mut [MaybeUninit<u8>; PATH_MAX]) -> Result<CStr<'_, Fat>> {
     // SAFETY: the byte string contains one trailing NUL.
-    let dot_path = unsafe { CStr::<Fat>::from_bytes_with_nul_unchecked(b".\0") };
+    let dot_path = unsafe { CStr::<Fat>::from_units_with_nul_unchecked(b".\0") };
     let fd = openat(CWD, dot_path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())?;
 
     let path = fcntl_getpath(fd.as_fd(), buf)?;

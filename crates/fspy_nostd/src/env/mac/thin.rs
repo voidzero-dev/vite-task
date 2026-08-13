@@ -22,7 +22,7 @@ impl Iterator for PointerIter {
         self.current = unsafe { self.current.add(1) };
         // SAFETY: every non-null pointer in these arrays names an immutable,
         // NUL-terminated string under the constructor's caller contract.
-        Some(unsafe { CStr::<Thin>::from_non_null(entry) })
+        Some(unsafe { CStr::<Thin>::from_non_null(entry.cast()) })
     }
 }
 
@@ -59,7 +59,7 @@ fn split_thin(entry: CStr<'static, Thin>) -> Entry<Thin> {
     let start = entry.as_ptr().cast::<u8>();
     let mut len = 0usize;
 
-    for byte in entry.bytes() {
+    for byte in entry.units() {
         match byte {
             b'=' => {
                 // SAFETY: the scan established the name prefix.
@@ -75,7 +75,7 @@ fn split_thin(entry: CStr<'static, Thin>) -> Entry<Thin> {
         }
     }
 
-    // SAFETY: `Bytes` stopped at the NUL after this prefix.
+    // SAFETY: `Units` stopped at the NUL after this prefix.
     let name: &'static [u8] = unsafe { slice::from_raw_parts(start, len) };
     (BStr::new(name), None)
 }
@@ -131,9 +131,9 @@ mod tests {
     #[test]
     fn thin_entries_distinguish_missing_and_empty_values() {
         // SAFETY: both literals are NUL-terminated and live for the views.
-        let missing = unsafe { CStr::<Thin>::from_ptr(c"INVALID".as_ptr()) };
+        let missing = unsafe { CStr::<Thin>::from_ptr(c"INVALID".as_ptr().cast()) };
         // SAFETY: as above.
-        let empty = unsafe { CStr::<Thin>::from_ptr(c"EMPTY=".as_ptr()) };
+        let empty = unsafe { CStr::<Thin>::from_ptr(c"EMPTY=".as_ptr().cast()) };
 
         let (name, value) = split_thin(missing);
         assert_eq!(name.as_bytes(), b"INVALID");
@@ -141,7 +141,7 @@ mod tests {
 
         let (name, value) = split_thin(empty);
         assert_eq!(name.as_bytes(), b"EMPTY");
-        assert_eq!(value.unwrap().count().as_bytes(), b"");
+        assert_eq!(value.unwrap().count().as_units(), b"");
     }
 
     #[test]
@@ -149,7 +149,7 @@ mod tests {
         // SAFETY: this test does not mutate the argument or environment arrays
         // while their iterators or borrowed entries are live.
         let argv_zero = unsafe { args() }.next().unwrap().count();
-        assert_eq!(argv_zero.as_bytes(), std::env::args_os().next().unwrap().as_encoded_bytes());
+        assert_eq!(argv_zero.as_units(), std::env::args_os().next().unwrap().as_encoded_bytes());
 
         // SAFETY: as above.
         let path = unsafe { envs() }
@@ -158,6 +158,6 @@ mod tests {
             .1
             .unwrap()
             .count();
-        assert_eq!(path.as_bytes(), std::env::var_os("PATH").unwrap().as_encoded_bytes());
+        assert_eq!(path.as_units(), std::env::var_os("PATH").unwrap().as_encoded_bytes());
     }
 }

@@ -12,7 +12,7 @@ intercept!(stat(64): unsafe extern "C" fn(path: *const c_char, buf: *mut stat_st
 unsafe extern "C" fn stat(path: *const c_char, buf: *mut stat_struct) -> c_int {
     // SAFETY: path is a valid C string pointer provided by the caller of the interposed function
     unsafe {
-        handle_open(fspy_nostd::CStr::from_ptr(path), AccessMode::READ);
+        handle_open(fspy_nostd::CStr::from_ptr(path.cast()), AccessMode::READ);
     }
     // SAFETY: calling the original libc stat() with the same arguments forwarded from the interposed function
     unsafe { stat::original()(path, buf) }
@@ -23,7 +23,7 @@ unsafe extern "C" fn lstat(path: *const c_char, buf: *mut stat_struct) -> c_int 
     // TODO: add accessmode ReadNoFollow
     // SAFETY: path is a valid C string pointer provided by the caller of the interposed function
     unsafe {
-        handle_open(fspy_nostd::CStr::from_ptr(path), AccessMode::READ);
+        handle_open(fspy_nostd::CStr::from_ptr(path.cast()), AccessMode::READ);
     }
     // SAFETY: calling the original libc lstat() with the same arguments forwarded from the interposed function
     unsafe { lstat::original()(path, buf) }

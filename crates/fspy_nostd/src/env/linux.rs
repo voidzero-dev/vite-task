@@ -5,7 +5,7 @@ use bstr::{BStr, ByteSlice as _};
 use rustix::fs::{Mode, OFlags};
 
 use super::Entry;
-use crate::{CStr, CWD, Errno, Fat, Result};
+use crate::{CStr, CWD, Error, Fat, Result};
 
 #[derive(Clone, Copy)]
 struct Bounds {
@@ -39,17 +39,17 @@ impl<'a> Iterator for RangeIter<'a> {
 
         // SAFETY: splitting at the first NUL produces a nonempty slice with
         // exactly one trailing NUL.
-        Some(unsafe { CStr::from_bytes_with_nul_unchecked(entry) })
+        Some(unsafe { CStr::from_units_with_nul_unchecked(entry) })
     }
 }
 
 fn split_fat(entry: CStr<'static, Fat>) -> Entry {
-    let Some((name, value)) = entry.as_bytes_with_nul().split_once_str(b"=") else {
-        return (BStr::new(entry.as_bytes()), None);
+    let Some((name, value)) = entry.as_units_with_nul().split_once_str(b"=") else {
+        return (BStr::new(entry.as_units()), None);
     };
 
     // SAFETY: splitting preserves the single trailing NUL.
-    let value = unsafe { CStr::from_bytes_with_nul_unchecked(value) };
+    let value = unsafe { CStr::from_units_with_nul_unchecked(value) };
     (BStr::new(name), Some(value))
 }
 
@@ -102,13 +102,13 @@ impl Current {
 const unsafe fn slice_from_range<'a>(start: usize, end: usize) -> Result<&'a [u8]> {
     let len = match end.checked_sub(start) {
         Some(len) if len <= isize::MAX.cast_unsigned() => len,
-        _ => return Err(Errno::INVAL),
+        _ => return Err(Error::INVAL),
     };
     let Some(len) = NonZeroUsize::new(len) else {
         return Ok(&[]);
     };
     let Some(start) = NonZeroUsize::new(start) else {
-        return Err(Errno::INVAL);
+        return Err(Error::INVAL);
     };
 
     let start = ptr::with_exposed_provenance::<u8>(start.get());
@@ -180,16 +180,16 @@ fn read_bounds() -> Result<Bounds> {
 
     loop {
         let Some(remaining) = stat.get_mut(initialized..) else {
-            return Err(Errno::OVERFLOW);
+            return Err(Error::OVERFLOW);
         };
         if remaining.is_empty() {
-            return Err(Errno::OVERFLOW);
+            return Err(Error::OVERFLOW);
         }
 
         let Some(read) = NonZeroUsize::new(rustix::io::read(&fd, remaining)?) else {
             break;
         };
-        initialized = initialized.checked_add(read.get()).ok_or(Errno::OVERFLOW)?;
+        initialized = initialized.checked_add(read.get()).ok_or(Error::OVERFLOW)?;
     }
 
     parse_bounds(&stat[..initialized])
@@ -199,17 +199,17 @@ fn parse_bounds(stat: &[u8]) -> Result<Bounds> {
     // `comm` (field 2) may itself contain spaces, newlines, and `)`. The
     // kernel-added delimiter is the last `)` because every later field is
     // numeric except for the one-byte process state.
-    let comm_end = stat.iter().rposition(|byte| *byte == b')').ok_or(Errno::INVAL)?;
-    let (_, comm_and_fields) = stat.split_at_checked(comm_end).ok_or(Errno::INVAL)?;
-    let (_, fields) = comm_and_fields.split_first().ok_or(Errno::INVAL)?;
+    let comm_end = stat.iter().rposition(|byte| *byte == b')').ok_or(Error::INVAL)?;
+    let (_, comm_and_fields) = stat.split_at_checked(comm_end).ok_or(Error::INVAL)?;
+    let (_, fields) = comm_and_fields.split_first().ok_or(Error::INVAL)?;
     let mut fields = fields.split(u8::is_ascii_whitespace).filter(|field| !field.is_empty());
 
     // With field 3 at index zero, arg_start (field 48) is index 45, followed
     // by arg_end, env_start, and env_end.
-    let arg_start = fields.nth(45).ok_or(Errno::INVAL)?;
-    let arg_end = fields.next().ok_or(Errno::INVAL)?;
-    let env_start = fields.next().ok_or(Errno::INVAL)?;
-    let env_end = fields.next().ok_or(Errno::INVAL)?;
+    let arg_start = fields.nth(45).ok_or(Error::INVAL)?;
+    let arg_end = fields.next().ok_or(Error::INVAL)?;
+    let env_start = fields.next().ok_or(Error::INVAL)?;
+    let env_end = fields.next().ok_or(Error::INVAL)?;
     Ok(Bounds {
         arg_start: parse_usize(arg_start)?,
         arg_end: parse_usize(arg_end)?,
@@ -220,10 +220,10 @@ fn parse_bounds(stat: &[u8]) -> Result<Bounds> {
 
 fn parse_usize(bytes: &[u8]) -> Result<usize> {
     let (value, used) = usize::from_radix_10_checked(bytes);
-    let value = value.ok_or(Errno::OVERFLOW)?;
-    let used = NonZeroUsize::new(used).ok_or(Errno::INVAL)?;
+    let value = value.ok_or(Error::OVERFLOW)?;
+    let used = NonZeroUsize::new(used).ok_or(Error::INVAL)?;
     if used.get() != bytes.len() {
-        return Err(Errno::INVAL);
+        return Err(Error::INVAL);
     }
     Ok(value)
 }
@@ -239,14 +239,14 @@ mod tests {
         let current = Current { args: ARGS, envs: ENVS };
 
         let mut args = current.args();
-        assert_eq!(args.next().unwrap().as_bytes(), b"program");
-        assert_eq!(args.next().unwrap().as_bytes(), b"--flag");
+        assert_eq!(args.next().unwrap().as_units(), b"program");
+        assert_eq!(args.next().unwrap().as_units(), b"--flag");
         assert!(args.next().is_none());
 
         let mut envs = current.envs();
         let (name, value) = envs.next().unwrap();
         assert_eq!(name.as_bytes(), b"FIRST");
-        assert_eq!(value.unwrap().as_bytes(), b"one");
+        assert_eq!(value.unwrap().as_units(), b"one");
 
         let (name, value) = envs.next().unwrap();
         assert_eq!(name.as_bytes(), b"INVALID");
@@ -254,41 +254,41 @@ mod tests {
 
         let (name, value) = envs.next().unwrap();
         assert_eq!(name.as_bytes(), b"EMPTY");
-        assert_eq!(value.unwrap().as_bytes(), b"");
+        assert_eq!(value.unwrap().as_units(), b"");
 
         let (name, value) = envs.next().unwrap();
         assert_eq!(name.as_bytes(), b"LAST");
-        assert_eq!(value.unwrap().as_bytes(), b"a=b");
+        assert_eq!(value.unwrap().as_units(), b"a=b");
         assert!(envs.next().is_none());
     }
 
     #[test]
     fn entry_splits_only_at_the_first_equals() {
         // SAFETY: this static byte string contains exactly one trailing NUL.
-        let entry = unsafe { CStr::<Fat>::from_bytes_with_nul_unchecked(b"NAME=a=b\0") };
+        let entry = unsafe { CStr::<Fat>::from_units_with_nul_unchecked(b"NAME=a=b\0") };
         let (name, value) = split_fat(entry);
         let value = value.unwrap();
 
         assert_eq!(name.as_bytes(), b"NAME");
-        assert_eq!(value.as_bytes(), b"a=b");
-        assert_eq!(value.as_bytes_with_nul(), b"a=b\0");
+        assert_eq!(value.as_units(), b"a=b");
+        assert_eq!(value.as_units_with_nul(), b"a=b\0");
     }
 
     #[test]
     fn entry_accepts_an_empty_value() {
         // SAFETY: this static byte string contains exactly one trailing NUL.
-        let entry = unsafe { CStr::<Fat>::from_bytes_with_nul_unchecked(b"EMPTY=\0") };
+        let entry = unsafe { CStr::<Fat>::from_units_with_nul_unchecked(b"EMPTY=\0") };
         let (name, value) = split_fat(entry);
         let value = value.unwrap();
 
         assert_eq!(name.as_bytes(), b"EMPTY");
-        assert_eq!(value.as_bytes_with_nul(), b"\0");
+        assert_eq!(value.as_units_with_nul(), b"\0");
     }
 
     #[test]
     fn entry_without_equals_has_no_value() {
         // SAFETY: this static byte string contains exactly one trailing NUL.
-        let entry = unsafe { CStr::<Fat>::from_bytes_with_nul_unchecked(b"INVALID\0") };
+        let entry = unsafe { CStr::<Fat>::from_units_with_nul_unchecked(b"INVALID\0") };
         let (name, value) = split_fat(entry);
 
         assert_eq!(name.as_bytes(), b"INVALID");
@@ -318,11 +318,11 @@ mod tests {
     #[test]
     fn parses_only_complete_in_range_decimal_fields() {
         assert_eq!(parse_usize(b"42"), Ok(42));
-        assert_eq!(parse_usize(b""), Err(Errno::INVAL));
-        assert_eq!(parse_usize(b"42x"), Err(Errno::INVAL));
+        assert_eq!(parse_usize(b""), Err(Error::INVAL));
+        assert_eq!(parse_usize(b"42x"), Err(Error::INVAL));
         assert_eq!(
             parse_usize(b"9999999999999999999999999999999999999999999"),
-            Err(Errno::OVERFLOW)
+            Err(Error::OVERFLOW)
         );
     }
 
@@ -333,10 +333,10 @@ mod tests {
         let current = unsafe { current().unwrap() };
 
         let argv_zero = current.args().next().unwrap();
-        assert_eq!(argv_zero.as_bytes(), std::env::args_os().next().unwrap().as_encoded_bytes());
+        assert_eq!(argv_zero.as_units(), std::env::args_os().next().unwrap().as_encoded_bytes());
 
         let path = current.envs().find(|(name, _)| name.as_bytes() == b"PATH").unwrap().1.unwrap();
-        assert_eq!(path.as_bytes(), std::env::var_os("PATH").unwrap().as_encoded_bytes());
+        assert_eq!(path.as_units(), std::env::var_os("PATH").unwrap().as_encoded_bytes());
     }
 
     #[test]

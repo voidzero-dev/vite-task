@@ -88,9 +88,9 @@ mod tests {
         let current = unsafe { current().unwrap() };
 
         let argv_zero = current.args().next().unwrap();
-        assert_eq!(argv_zero.as_bytes(), std::env::args_os().next().unwrap().as_encoded_bytes());
+        assert_eq!(argv_zero.as_units(), std::env::args_os().next().unwrap().as_encoded_bytes());
 
         let path = current.envs().find(|(name, _)| name.as_bytes() == b"PATH").unwrap().1.unwrap();
-        assert_eq!(path.as_bytes(), std::env::var_os("PATH").unwrap().as_encoded_bytes());
+        assert_eq!(path.as_units(), std::env::var_os("PATH").unwrap().as_encoded_bytes());
     }
 }

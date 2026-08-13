@@ -20,9 +20,9 @@ pub mod mm;
 #[cfg(unix)]
 pub mod param;
 
-pub use c_str::{Bytes, CStr, CStrUnit, Fat, Thin, Units, WideCStr};
+pub use c_str::{CStr, CStrUnit, Fat, Thin, Units, WideCStr};
 #[cfg(windows)]
-pub use windows::{ModuleHandle, get_module_name};
+pub use windows::get_module_handle;
 
 #[cfg(windows)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,7 +44,6 @@ impl Error {
     }
 }
 
-#[cfg(windows)]
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[cfg(windows)]
@@ -59,7 +58,7 @@ macro_rules! wide_cstr {
         // SAFETY: `windows-sys` transcodes the literal into static UTF-16
         // storage and appends its NUL terminator.
         unsafe {
-            $crate::WideCStr::<$crate::Thin>::from_units_ptr($crate::__wide_cstr_literal!($literal))
+            $crate::WideCStr::<$crate::Thin>::from_ptr($crate::__wide_cstr_literal!($literal))
         }
     }};
 }
@@ -68,7 +67,7 @@ macro_rules! wide_cstr {
 pub use rustix::{
     fd::{AsRawFd, BorrowedFd},
     fs::CWD,
-    io::{Errno, Errno as Error, Result},
+    io::Errno as Error,
 };
 
 // Compile-time proof that rustix uses its raw-syscall backend (`linux_raw`)

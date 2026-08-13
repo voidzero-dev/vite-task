@@ -19,7 +19,7 @@ impl<A: Allocator> CString<Fat, A> {
     #[must_use]
     pub unsafe fn from_vec_with_nul_unchecked(bytes: Vec<u8, A>) -> Self {
         // SAFETY: upheld by the caller.
-        let repr = unsafe { CStr::<Fat>::from_bytes_with_nul_unchecked(&bytes) }.into_repr();
+        let repr = unsafe { CStr::<Fat>::from_units_with_nul_unchecked(&bytes) }.into_repr();
         let (bytes, _len, capacity, allocator) = bytes.into_raw_parts_with_alloc();
         let bytes = ptr::slice_from_raw_parts_mut(bytes.cast::<MaybeUninit<u8>>(), capacity);
 
@@ -70,7 +70,7 @@ impl<A: Allocator> CString<Fat, A> {
     #[must_use]
     pub fn as_c_str(&self) -> CStr<'_, Fat> {
         // SAFETY: the initialized prefix described by `repr` is a C string.
-        unsafe { CStr::from_bytes_with_nul_unchecked(self.as_bytes_with_nul()) }
+        unsafe { CStr::from_units_with_nul_unchecked(self.as_bytes_with_nul()) }
     }
 
     /// Returns the contents of this C string without the terminating NUL.
