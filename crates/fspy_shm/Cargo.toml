@@ -8,8 +8,13 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-memmap2 = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+fspy_nostd = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+memmap2 = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = [

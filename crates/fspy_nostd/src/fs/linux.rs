@@ -1,9 +1,60 @@
 use core::{mem::MaybeUninit, slice};
 
-use crate::{AsRawFd as _, BorrowedFd, CStr, Error, Fat, Result, Thin};
+use rustix::fd::FromRawFd as _;
+
+use crate::{
+    AsRawFd as _, BorrowedFd, CStr, Error, Fat, OwnedFd, Result, Thin,
+    fs::{AtFlags, Mode, OFlags},
+};
 
 // Linux UAPI `PATH_MAX`.
 pub(super) const PATH_MAX: usize = 4096;
+
+fn syscall_fd(fd: BorrowedFd<'_>) -> Result<usize> {
+    let fd = isize::try_from(fd.as_raw_fd()).map_err(|_| Error::OVERFLOW)?;
+    Ok(fd.cast_unsigned())
+}
+
+#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
+pub(super) fn openat<R>(
+    dirfd: BorrowedFd<'_>,
+    path: CStr<'_, R>,
+    flags: OFlags,
+    mode: Mode,
+) -> Result<OwnedFd> {
+    // SAFETY: `dirfd` remains borrowed and `path` is NUL-terminated. The
+    // kernel receives all four syscall arguments explicitly.
+    let fd = unsafe {
+        syscalls::syscall4(
+            syscalls::Sysno::openat,
+            syscall_fd(dirfd)?,
+            path.as_ptr().addr(),
+            usize::try_from(flags.bits()).map_err(|_| Error::INVAL)?,
+            usize::try_from(mode.bits()).map_err(|_| Error::INVAL)?,
+        )
+    }
+    .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
+    let fd = i32::try_from(fd).map_err(|_| Error::OVERFLOW)?;
+
+    // SAFETY: a successful `openat` returns a new owned descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
+pub(super) fn unlinkat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFlags) -> Result<()> {
+    // SAFETY: `dirfd` remains borrowed and `path` is NUL-terminated for the
+    // syscall.
+    unsafe {
+        syscalls::syscall3(
+            syscalls::Sysno::unlinkat,
+            syscall_fd(dirfd)?,
+            path.as_ptr().addr(),
+            usize::try_from(flags.bits()).map_err(|_| Error::INVAL)?,
+        )
+    }
+    .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
+    Ok(())
+}
 
 /// Reads the target of `path` relative to `dirfd` into `buf`.
 ///
@@ -27,7 +78,7 @@ pub fn readlinkat<'buf>(
     let initialized = unsafe {
         syscalls::syscall4(
             syscalls::Sysno::readlinkat,
-            (dirfd.as_raw_fd() as isize).cast_unsigned(),
+            syscall_fd(dirfd)?,
             path.as_ptr().addr(),
             buf.as_mut_ptr().addr(),
             buf.len(),

@@ -65,7 +65,7 @@ macro_rules! wide_cstr {
 
 #[cfg(unix)]
 pub use rustix::{
-    fd::{AsRawFd, BorrowedFd},
+    fd::{AsRawFd, BorrowedFd, OwnedFd},
     fs::CWD,
     io::Errno as Error,
 };

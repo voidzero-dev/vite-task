@@ -2,7 +2,9 @@
 
 use core::mem::MaybeUninit;
 
-use crate::{CStr, Fat, Result};
+pub use rustix::fs::{AtFlags, Mode, OFlags, fstat, ftruncate};
+
+use crate::{BorrowedFd, CStr, Fat, OwnedFd, Result};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -20,6 +22,29 @@ pub use mac::fcntl_getpath;
 
 /// The platform's maximum pathname size, including the terminating NUL.
 pub const PATH_MAX: usize = imp::PATH_MAX;
+
+/// Opens `path` relative to `dirfd` and returns its owned descriptor.
+///
+/// # Errors
+///
+/// Returns the error reported by `openat`.
+pub fn openat<R>(
+    dirfd: BorrowedFd<'_>,
+    path: CStr<'_, R>,
+    flags: OFlags,
+    mode: Mode,
+) -> Result<OwnedFd> {
+    imp::openat(dirfd, path, flags, mode)
+}
+
+/// Removes `path` relative to `dirfd`.
+///
+/// # Errors
+///
+/// Returns the error reported by `unlinkat`.
+pub fn unlinkat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFlags) -> Result<()> {
+    imp::unlinkat(dirfd, path, flags)
+}
 
 /// Writes the absolute pathname of the current working directory into `buf`.
 ///

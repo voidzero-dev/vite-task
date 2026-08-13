@@ -8,4 +8,4 @@
 //! pre-libc startup) and the crate-level backend check, which guarantees
 //! they cannot silently turn into libc calls on Linux.
 
-pub use rustix::mm::{MapFlags, MprotectFlags, ProtFlags, mmap_anonymous, mprotect, munmap};
+pub use rustix::mm::{MapFlags, MprotectFlags, ProtFlags, mmap, mmap_anonymous, mprotect, munmap};
