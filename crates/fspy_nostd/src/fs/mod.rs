@@ -13,7 +13,10 @@ use crate::{BorrowedFd, CStr, Fat, OwnedFd, Result};
 mod windows;
 #[cfg(windows)]
 pub use windows::{
-    Access, CreationDisposition, OpenFlags, ShareMode, file_size, open, remove, set_len, set_sparse,
+    Access, CreationDisposition, ERROR_ACCESS_DENIED, FILE_DISPOSITION_FLAG_DELETE,
+    FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    FILE_DISPOSITION_INFO_EX, FILE_INFO_BY_HANDLE_CLASS, FileDispositionInfoEx, OpenFlags,
+    ShareMode, delete_file, file_size, open, set_file_information_by_handle, set_len, set_sparse,
 };
 
 #[cfg(target_os = "linux")]

@@ -1,14 +1,20 @@
 use core::{ffi::c_void, mem::size_of, ptr};
 
 use bitflags::bitflags;
+pub use windows_sys::Win32::{
+    Foundation::ERROR_ACCESS_DENIED,
+    Storage::FileSystem::{
+        FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+        FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_INFO_BY_HANDLE_CLASS,
+        FileDispositionInfoEx,
+    },
+};
 use windows_sys::Win32::{
-    Foundation::{ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
+    Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::{
         CREATE_NEW, CreateFileW, DELETE, DeleteFileW, FILE_ATTRIBUTE_TEMPORARY,
-        FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
-        FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX, FILE_END_OF_FILE_INFO,
-        FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfoEx, FileEndOfFileInfo, GetFileSizeEx,
+        FILE_END_OF_FILE_INFO, FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileEndOfFileInfo, GetFileSizeEx,
         OPEN_EXISTING, SetFileInformationByHandle,
     },
     System::{IO::DeviceIoControl, Ioctl::FSCTL_SET_SPARSE},
@@ -88,55 +94,41 @@ pub fn open<R>(
     }
 }
 
-/// Removes a file name.
+/// Calls `DeleteFileW`.
 ///
 /// # Errors
 ///
-/// Returns the error reported while removing the file.
-pub fn remove<R>(path: WideCStr<'_, R>) -> Result<()> {
+/// Returns the error reported by `DeleteFileW`.
+#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
+pub fn delete_file<R>(path: WideCStr<'_, R>) -> Result<()> {
     // SAFETY: `path` is a valid NUL-terminated wide string.
-    if unsafe { DeleteFileW(path.as_ptr()) } != 0 {
-        return Ok(());
-    }
-
-    let error = crate::windows::last_error();
-    if error.raw_os_error() == ERROR_ACCESS_DENIED {
-        const SHARE_ALL: ShareMode =
-            ShareMode::READ.union(ShareMode::WRITE).union(ShareMode::DELETE);
-        if let Ok(file) = open(
-            path,
-            Access::DELETE,
-            SHARE_ALL,
-            CreationDisposition::OPEN_EXISTING,
-            OpenFlags::OPEN_REPARSE_POINT,
-        ) && set_posix_delete(&file).is_ok()
-        {
-            return Ok(());
-        }
-    }
-
-    // Match `std::fs::remove_file`: if the POSIX fallback is unavailable,
-    // preserve the original `DeleteFileW` error.
-    Err(error)
+    crate::windows::bool_result(unsafe { DeleteFileW(path.as_ptr()) })
 }
 
-fn set_posix_delete(file: &OwnedHandle) -> Result<()> {
-    const INFO_SIZE: u32 = 4;
-    const _: [(); 4] = [(); size_of::<FILE_DISPOSITION_INFO_EX>()];
-
-    let info = FILE_DISPOSITION_INFO_EX {
-        Flags: FILE_DISPOSITION_FLAG_DELETE
-            | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
-            | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
-    };
-    // SAFETY: `file` is valid and `info` has the type and exact size required
-    // by `FileDispositionInfoEx`.
+/// Calls `SetFileInformationByHandle`.
+///
+/// # Errors
+///
+/// Returns the error reported by `SetFileInformationByHandle`.
+///
+/// # Safety
+///
+/// `file_information` must point to an initialized buffer whose type and size
+/// match `file_information_class`, and it must remain valid for the call.
+pub unsafe fn set_file_information_by_handle(
+    file: &OwnedHandle,
+    file_information_class: FILE_INFO_BY_HANDLE_CLASS,
+    file_information: *const c_void,
+    buffer_size: u32,
+) -> Result<()> {
+    // SAFETY: `file` is valid and the caller upholds the information-buffer
+    // contract. The remaining values are passed through unchanged.
     crate::windows::bool_result(unsafe {
         SetFileInformationByHandle(
             file.as_raw(),
-            FileDispositionInfoEx,
-            (&raw const info).cast::<c_void>(),
-            INFO_SIZE,
+            file_information_class,
+            file_information,
+            buffer_size,
         )
     })
 }
@@ -163,16 +155,16 @@ pub fn set_len(file: &OwnedHandle, len: i64) -> Result<()> {
     const _: [(); 8] = [(); size_of::<FILE_END_OF_FILE_INFO>()];
 
     let info = FILE_END_OF_FILE_INFO { EndOfFile: len };
-    // SAFETY: `file` is valid and `info` has the type and exact size required
-    // by `FileEndOfFileInfo`.
-    crate::windows::bool_result(unsafe {
-        SetFileInformationByHandle(
-            file.as_raw(),
+    // SAFETY: `info` has the type and exact size required by
+    // `FileEndOfFileInfo`.
+    unsafe {
+        set_file_information_by_handle(
+            file,
             FileEndOfFileInfo,
             (&raw const info).cast::<c_void>(),
             INFO_SIZE,
         )
-    })
+    }
 }
 
 /// Marks a file sparse.

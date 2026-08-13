@@ -1,7 +1,7 @@
 //! Windows shared memory backed by a sparse temporary file and identified by
 //! its path.
 
-use core::ptr;
+use core::{ffi::c_void, mem::size_of, ptr};
 use std::{
     env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, os::windows::ffi::OsStrExt as _,
     path::PathBuf,
@@ -147,6 +147,50 @@ fn error_to_io(error: fspy_nostd::Error) -> io::Error {
     io::Error::from_raw_os_error(error.raw_os_error().cast_signed())
 }
 
+fn remove_file(path: fspy_nostd::WideCStr<'_, fspy_nostd::Fat>) -> fspy_nostd::Result<()> {
+    let error = match fspy_nostd::fs::delete_file(path) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    if error.raw_os_error() == fspy_nostd::fs::ERROR_ACCESS_DENIED
+        && let Ok(file) = fspy_nostd::fs::open(
+            path,
+            fspy_nostd::fs::Access::DELETE,
+            SHARE_ALL,
+            fspy_nostd::fs::CreationDisposition::OPEN_EXISTING,
+            fspy_nostd::fs::OpenFlags::OPEN_REPARSE_POINT,
+        )
+        && set_posix_delete(&file).is_ok()
+    {
+        return Ok(());
+    }
+
+    // Preserve the original `DeleteFileW` error when POSIX deletion is not
+    // available.
+    Err(error)
+}
+
+fn set_posix_delete(file: &fspy_nostd::OwnedHandle) -> fspy_nostd::Result<()> {
+    const INFO_SIZE: u32 = 4;
+    const _: [(); 4] = [(); size_of::<fspy_nostd::fs::FILE_DISPOSITION_INFO_EX>()];
+
+    let info = fspy_nostd::fs::FILE_DISPOSITION_INFO_EX {
+        Flags: fspy_nostd::fs::FILE_DISPOSITION_FLAG_DELETE
+            | fspy_nostd::fs::FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
+            | fspy_nostd::fs::FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    };
+    // SAFETY: `info` has the type and exact size required by
+    // `FileDispositionInfoEx`.
+    unsafe {
+        fspy_nostd::fs::set_file_information_by_handle(
+            file,
+            fspy_nostd::fs::FileDispositionInfoEx,
+            (&raw const info).cast::<c_void>(),
+            INFO_SIZE,
+        )
+    }
+}
+
 impl Drop for ShmKeeper {
     fn drop(&mut self) {
         // Windows versions without POSIX delete refuse to remove the name of a
@@ -156,7 +200,7 @@ impl Drop for ShmKeeper {
         let Ok(path) = copy_path(self.path.as_os_str()) else {
             return;
         };
-        if fspy_nostd::fs::remove(as_nostd_path(&path)).is_err() {
+        if remove_file(as_nostd_path(&path)).is_err() {
             let _ = fspy_nostd::fs::open(
                 as_nostd_path(&path),
                 fspy_nostd::fs::Access::DELETE,
