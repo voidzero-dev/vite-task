@@ -250,7 +250,7 @@ mod tests {
     fn inline_tracked_env_mismatch_preserves_kind() {
         let added = CacheStatus::Miss(CacheMiss::FingerprintMismatch(
             FingerprintMismatch::TrackedEnvQueryChanged {
-                query: crate::session::execute::fingerprint::TrackedEnvQuery::Glob(Str::from(
+                query: crate::session::execute::post_run::TrackedEnvQuery::Glob(Str::from(
                     "PROBE_*",
                 )),
                 mismatch: EnvMismatch::Added { name: Str::from("PROBE_C") },

@@ -24,7 +24,7 @@ use crate::session::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError,
     },
-    execute::fingerprint::TrackedEnvQuery,
+    execute::post_run::TrackedEnvQuery,
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

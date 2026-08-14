@@ -11,8 +11,9 @@ use vt_str::Str;
 
 use super::{
     CacheState,
-    fingerprint::{PathRead, PostRunFingerprint, TrackedEnvQuery},
+    fingerprint::{InputFingerprints, PathRead, fingerprint_discovered},
     glob,
+    post_run::{TrackedEnvFingerprints, TrackedEnvQuery},
     spawn::ChildOutcome,
 };
 use crate::{
@@ -132,19 +133,13 @@ pub(super) async fn update_cache(
         }
     };
 
-    // Paths already in globbed_inputs are skipped: the overlap check above
-    // guarantees no input modification, so the prerun hash is the correct
-    // post-exec hash.
+    // Fingerprint the discovered inputs (traced reads not already in the
+    // globbed snapshot: the overlap check above guarantees no input
+    // modification, so the prerun hash is the correct post-exec hash).
     let empty_path_reads = HashMap::default();
     let path_reads = fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
-    let post_run_fingerprint = match PostRunFingerprint::create(
-        path_reads,
-        workspace_root,
-        &globbed_inputs,
-        tracked_envs,
-        tracked_env_queries,
-    ) {
-        Ok(fingerprint) => fingerprint,
+    let discovered = match fingerprint_discovered(path_reads, workspace_root, &globbed_inputs) {
+        Ok(discovered) => discovered,
         Err(err) => {
             return (
                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
@@ -169,10 +164,10 @@ pub(super) async fn update_cache(
     };
 
     let new_cache_value = CacheEntryValue {
-        post_run_fingerprint,
+        input_fingerprints: InputFingerprints::new(globbed_inputs, discovered),
+        tracked_env_fingerprints: TrackedEnvFingerprints { tracked_envs, tracked_env_queries },
         std_outputs: std_outputs.into(),
         duration,
-        globbed_inputs,
         output_archive,
     };
     match cache.update(metadata, new_cache_value, cache_dir).await {
