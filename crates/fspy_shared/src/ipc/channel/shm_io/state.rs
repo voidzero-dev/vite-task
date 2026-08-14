@@ -246,17 +246,6 @@ impl<'m> SharedState<'m> {
             Ordering::Relaxed,
             Ordering::Relaxed,
         );
-
-        // Also materialize the page where the first payloads land, through
-        // the protocol-owned warm word so no writer's payload bytes are ever
-        // raced. Skipped when a tiny region has no room for it.
-        let warm_offset = layout::payload_warm_offset(self.len);
-        if warm_offset + layout::SLOT_LEN <= self.len {
-            // SAFETY: in bounds (just checked) and word-aligned (the table
-            // length is word-rounded after the aligned header).
-            let warm_word = unsafe { AtomicU64::from_ptr(self.base.add(warm_offset).cast()) };
-            let _ = warm_word.compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
-        }
     }
 
     /// Sets the CLOSED gate so stragglers stop claiming.

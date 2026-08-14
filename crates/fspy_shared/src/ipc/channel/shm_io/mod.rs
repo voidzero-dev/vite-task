@@ -105,13 +105,11 @@ pub unsafe fn close(mem: &impl AsRawSlice) -> Result<Frames, ProtocolError> {
     unsafe { reader::close(mem.as_raw_slice()) }
 }
 
-/// Materializes the two pages every trace touches first — the header page
-/// and the start of the payload region — without changing protocol state,
-/// so that neither a writer's first record nor [`close`]'s snapshot pays
-/// the first-touch cost of each area: a millisecond-scale fault on some
-/// filesystems, for reads of holes as well as writes (and, empirically, not
-/// avoidable by preallocating blocks — only a real touch helps). Run it off
-/// any latency-sensitive path.
+/// Materializes the page backing the protocol header without changing
+/// protocol state, so that neither a writer's first claim nor [`close`]'s
+/// snapshot pays for the backing file's first block allocation — a
+/// millisecond-scale cost on some journalling filesystems, for reads of
+/// holes as well as writes. Run it off any latency-sensitive path.
 ///
 /// # Safety
 ///

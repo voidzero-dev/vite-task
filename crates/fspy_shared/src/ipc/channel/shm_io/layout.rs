@@ -78,30 +78,15 @@ pub(super) const fn max_slots(mapping_len: usize) -> usize {
     table_len(mapping_len) / SLOT_LEN
 }
 
-/// Byte offset of the payload warm word: one protocol-owned word between the
-/// table and the payload data, written only by the creator's pre-fault (and
-/// only ever with zero). Touching it materializes the page where the first
-/// payloads land without racing any writer's payload bytes. Word-aligned.
-pub(super) const fn payload_warm_offset(mapping_len: usize) -> usize {
-    HEADER_LEN + table_len(mapping_len)
-}
-
 /// Byte offset where the payload region starts. Word-aligned.
-///
-/// May exceed a tiny mapping; [`payload_region_len`] is zero then and no
-/// payload is ever placed.
 pub(super) const fn payload_base(mapping_len: usize) -> usize {
-    payload_warm_offset(mapping_len) + SLOT_LEN
+    HEADER_LEN + table_len(mapping_len)
 }
 
 /// Byte size of the payload region. A multiple of the word size, so a
 /// word-aligned reservation inside it never reaches past `mapping_len`.
 pub(super) const fn payload_region_len(mapping_len: usize) -> usize {
-    let base = payload_base(mapping_len);
-    if base >= mapping_len {
-        return 0;
-    }
-    let len = mapping_len - base;
+    let len = mapping_len - payload_base(mapping_len);
     len - len % SLOT_LEN
 }
 
@@ -175,9 +160,8 @@ mod tests {
             assert!(table % SLOT_LEN == 0);
             assert!(base % SLOT_LEN == 0);
             assert!(region % SLOT_LEN == 0);
-            assert!(payload_warm_offset(mapping_len) == HEADER_LEN + table);
-            assert!(base == HEADER_LEN + table + SLOT_LEN);
-            assert!(region == 0 || base + region <= mapping_len);
+            assert!(base == HEADER_LEN + table);
+            assert!(base + region <= mapping_len);
         }
     }
 
