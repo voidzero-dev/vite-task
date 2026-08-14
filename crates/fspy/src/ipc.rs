@@ -27,11 +27,8 @@ impl CollectedAccesses {
     /// was lost before close, or the shared memory was corrupted. Failing
     /// here — instead of returning a silently short trace — keeps the
     /// tracking result trustworthy for caching.
-    #[expect(clippy::print_stderr, reason = "temporary benchmark phase instrumentation")]
     pub fn collect(receiver: Receiver) -> io::Result<Self> {
-        let phase_start = std::time::Instant::now();
         let frames = receiver.close()?;
-        eprintln!("fspy-collect close={}", phase_start.elapsed().as_nanos());
         if !frames.is_complete() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

@@ -224,28 +224,16 @@ impl Receiver {
     ///
     /// Fails only when the shared-memory metadata was corrupted (a protocol
     /// impossibility for correct senders); the trace is then unusable.
-    #[expect(clippy::print_stderr, reason = "temporary benchmark phase instrumentation")]
     pub fn close(self) -> io::Result<Frames> {
         let Self { _keeper: keeper, mapping } = self;
-        let phase_start = std::time::Instant::now();
         // Remove the backing file first so no new process attaches while the
         // channel closes.
         drop(keeper);
-        let keeper_ns = phase_start.elapsed().as_nanos();
-        let phase_start = std::time::Instant::now();
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable, and all attached processes access it only
         // through the `shm_io` protocol.
-        let frames = unsafe { shm_io::close(&mapping) }
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
-        let shm_ns = phase_start.elapsed().as_nanos();
-        let phase_start = std::time::Instant::now();
-        drop(mapping);
-        eprintln!(
-            "fspy-close keeper={keeper_ns} shm={shm_ns} munmap={}",
-            phase_start.elapsed().as_nanos()
-        );
-        frames
+        unsafe { shm_io::close(&mapping) }
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
 }
 
