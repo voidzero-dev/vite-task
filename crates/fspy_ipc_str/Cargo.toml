@@ -7,8 +7,11 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
 bumpalo = { workspace = true }
 bytemuck = { workspace = true, features = ["must_cast", "derive"] }
+fspy_nostd = { workspace = true }
+fspy_nostd_alloc = { workspace = true }
 wincode = { workspace = true }
 
 [lints]

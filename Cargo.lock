@@ -1335,8 +1335,11 @@ dependencies = [
 name = "fspy_ipc_str"
 version = "0.0.0"
 dependencies = [
+ "allocator-api2",
  "bumpalo",
  "bytemuck",
+ "fspy_nostd",
+ "fspy_nostd_alloc",
  "wincode",
 ]
 
