@@ -95,6 +95,19 @@ pub unsafe fn close(mem: &impl AsRawSlice) -> Result<Frames, ProtocolError> {
     unsafe { reader::close(mem.as_raw_slice()) }
 }
 
+/// Materializes the page backing the protocol header without changing
+/// protocol state, so that the first claim and [`close`] never pay for the
+/// backing file's first block allocation — a millisecond-scale cost on some
+/// journalling filesystems. Run it off any latency-sensitive path.
+///
+/// # Safety
+///
+/// Same contract as [`ShmWriter::new`].
+pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
+    // SAFETY: forwarded from this function's contract.
+    unsafe { state::SharedState::borrow(mem.as_raw_slice()) }.pre_fault();
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -332,6 +345,29 @@ mod tests {
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next() == None);
         assert!(!frames.is_complete());
+    }
+
+    #[test]
+    fn pre_fault_does_not_disturb_protocol_state() {
+        let shm = MockedShm::alloc(1024);
+        // SAFETY: see `single_thread_basic`.
+        let writer = unsafe { ShmWriter::new(shm.clone()) };
+
+        // On the untouched region, before any claim.
+        // SAFETY: see `collect_frames`.
+        unsafe { pre_fault(&shm) };
+        assert!(writer.try_write_frame(b"foo"));
+        // Racing an already claimed region must change nothing either.
+        // SAFETY: see `collect_frames`.
+        unsafe { pre_fault(&shm) };
+        assert!(writer.try_write_frame(b"bar"));
+
+        let frames = collect_frames(&shm);
+        let mut iter = frames.iter();
+        assert!(iter.next().unwrap() == b"foo");
+        assert!(iter.next().unwrap() == b"bar");
+        assert!(iter.next() == None);
+        assert!(frames.is_complete());
     }
 
     #[test]

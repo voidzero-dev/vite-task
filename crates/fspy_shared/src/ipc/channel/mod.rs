@@ -44,6 +44,19 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     let keeper = ShmKeeper { path: shm_c_path };
     let mapping = handle.map().map_err(shm_error_to_io)?;
 
+    // Allocating the first block of the sparse backing file can cost
+    // milliseconds on journalling filesystems. Touch the header page through
+    // a second view concurrently with process startup, so neither a sender's
+    // first record nor `Receiver::close` pays that latency. Best-effort: a
+    // channel without the pre-fault is merely slower.
+    if let Ok(prefault_mapping) = handle.map() {
+        let _ = std::thread::Builder::new().name("fspy-shm-prefault".into()).spawn(move || {
+            // SAFETY: the mapping views the region created zero-initialized
+            // above, which is only accessed through the `shm_io` protocol.
+            unsafe { shm_io::pre_fault(&prefault_mapping) };
+        });
+    }
+
     let conf = ChannelConf { shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed() };
 
     Ok((conf, Receiver { _keeper: keeper, mapping }))
@@ -232,8 +245,15 @@ impl Receiver {
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable, and all attached processes access it only
         // through the `shm_io` protocol.
-        unsafe { shm_io::close(&mapping) }
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+        let frames = unsafe { shm_io::close(&mapping) }
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
+        // Unmapping a multi-gigabyte view can cost a millisecond or more.
+        // The frames are already copied out and nothing reads the mapping
+        // again, so release it off the caller's path. Best-effort: if the
+        // thread cannot spawn, its dropped closure unmaps inline instead.
+        let _ =
+            std::thread::Builder::new().name("fspy-shm-unmap".into()).spawn(move || drop(mapping));
+        frames
     }
 }
 
