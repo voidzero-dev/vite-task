@@ -1,9 +1,13 @@
-use core::{ffi::c_void, ptr};
+use core::{
+    ffi::c_void,
+    ptr::{self, NonNull},
+};
 
 use bitflags::bitflags;
 use windows_sys::Win32::System::Memory::{
-    CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
-    PAGE_READWRITE, UnmapViewOfFile,
+    CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
+    MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READWRITE, UnmapViewOfFile, VirtualAlloc,
+    VirtualFree,
 };
 
 use crate::{BorrowedHandle, OwnedHandle, Result, SecurityAttributes};
@@ -28,6 +32,51 @@ bitflags! {
         /// Permit writes to the view.
         const WRITE = FILE_MAP_WRITE;
     }
+
+    /// How `VirtualAlloc` claims address space.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct AllocationType: u32 {
+        /// Reserve address space.
+        const RESERVE = MEM_RESERVE;
+        /// Commit pages within reserved address space.
+        const COMMIT = MEM_COMMIT;
+    }
+}
+
+/// Calls `VirtualAlloc` at a system-chosen address and returns the new
+/// region's base.
+///
+/// Committed pages read as zero until written.
+///
+/// # Errors
+///
+/// Returns the error reported by `VirtualAlloc`.
+pub fn virtual_alloc(
+    size: usize,
+    allocation_type: AllocationType,
+    protection: PageProtection,
+) -> Result<NonNull<c_void>> {
+    // SAFETY: a system-chosen address cannot alias an existing allocation,
+    // and Windows validates the size, allocation type, and protection.
+    let address =
+        unsafe { VirtualAlloc(ptr::null(), size, allocation_type.bits(), protection as u32) };
+    NonNull::new(address).ok_or_else(crate::windows::last_error)
+}
+
+/// Calls `VirtualFree` with `MEM_RELEASE`, releasing the whole region.
+///
+/// # Errors
+///
+/// Returns the error reported by `VirtualFree`.
+///
+/// # Safety
+///
+/// `address` must be the base of a region returned by [`virtual_alloc`] that
+/// has not been released, with no live references into it.
+pub unsafe fn virtual_free(address: NonNull<c_void>) -> Result<()> {
+    // SAFETY: the caller guarantees that `address` is an unreleased region
+    // base; releasing passes zero as the size.
+    crate::windows::bool_result(unsafe { VirtualFree(address.as_ptr(), 0, MEM_RELEASE) })
 }
 
 /// An owned view of a file-mapping object.
