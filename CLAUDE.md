@@ -9,6 +9,7 @@ A monorepo task runner (like Nx/Turbo) with intelligent caching and dependency r
 - `crates/vt_graph` — Task dependency graph construction and config loading
 - `crates/vt_plan` — Execution planning (resolves env vars, working dirs, commands)
 - `crates/vt_workspace` — Workspace detection and package dependency graph
+- `crates/vt_fs_fingerprint` — Filesystem fingerprinting for task caching (pre-run snapshot, traced-access judgment, cache-entry validation)
 - `crates/fspy*` — File system access tracing (9 crates: supervisor, preload libs, platform backends)
 - `crates/pty_terminal*` — Cross-platform headless terminal emulator (3 crates)
 - `crates/vt_path` — Type-safe absolute/relative path system

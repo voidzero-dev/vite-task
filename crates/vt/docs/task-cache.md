@@ -567,18 +567,19 @@ Each `&&` separated command is cached independently. If only terser config chang
 ### Core Cache Components
 
 ```
+crates/vt_fs_fingerprint/src/  # The run's filesystem story (own crate)
+├── task_run.rs           # TaskFs (pre_run/post_run), Conclusion
+├── fingerprint.rs        # InputFingerprints, PathFingerprint, InputChange
+├── tracked_accesses.rs   # fspy access normalization
+├── glob.rs               # Glob walking + input hashing
+└── hash.rs               # Content hashing
+
 crates/vt/src/session/
 ├── cache/
 │   ├── mod.rs            # ExecutionCache, CacheEntryKey/Value, FingerprintMismatch
 │   └── display.rs        # Cache status display formatting
 ├── execute/
 │   ├── mod.rs            # execute_spawn, SpawnOutcome
-│   ├── task_fs/          # The run's filesystem story
-│   │   ├── task_run.rs   # TaskFs (pre_run/post_run), Conclusion
-│   │   ├── fingerprint.rs # InputFingerprints, PathFingerprint, InputChange
-│   │   ├── tracked_accesses.rs # fspy access normalization
-│   │   ├── glob.rs       # Glob walking + input hashing
-│   │   └── hash.rs       # Content hashing
 │   ├── cache_update.rs   # Post-run cache update decision
 │   ├── post_run.rs       # TrackedEnvFingerprints (tracked env validation)
 │   └── spawn.rs          # spawn_with_tracking, fspy integration

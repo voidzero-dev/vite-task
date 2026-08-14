@@ -1,0 +1,36 @@
+[package]
+name = "vt_fs_fingerprint"
+version = "0.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+fspy_shared = { workspace = true }
+rayon = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+twox-hash = { workspace = true }
+vt_glob = { workspace = true }
+vt_graph = { workspace = true }
+vt_path = { workspace = true }
+vt_str = { workspace = true }
+wax = { workspace = true }
+wincode = { workspace = true, features = ["derive"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

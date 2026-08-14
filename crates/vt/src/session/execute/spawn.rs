@@ -2,7 +2,7 @@
 //!
 //! [`spawn`] does one thing: hand back the child's stdio pipes plus a
 //! cancellation-aware `wait` future. Draining the pipes is [`super::pipe`]'s
-//! job; the raw path accesses are judged by [`super::task_fs`] during the
+//! job; the raw path accesses are judged by [`vt_fs_fingerprint`] during the
 //! cache update.
 
 use std::{ffi::OsStr, io, process::Stdio};

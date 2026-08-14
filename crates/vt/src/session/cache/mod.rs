@@ -14,6 +14,8 @@ pub use display::{
 use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+pub use vt_fs_fingerprint::InputChangeKind;
+use vt_fs_fingerprint::{InputChange, InputFingerprints};
 use vt_graph::config::ResolvedGlobConfig;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
@@ -25,11 +27,9 @@ use wincode::{
     io::{Reader, Writer},
 };
 
-pub use super::execute::task_fs::InputChangeKind;
 use super::execute::{
     pipe::StdOutput,
     post_run::{PostRunMismatch, TrackedEnvFingerprints, TrackedEnvQuery},
-    task_fs::{InputChange, InputFingerprints},
 };
 
 const TASK_CACHE_PREALLOCATION_SIZE_LIMIT: usize = 256 * 1024 * 1024;

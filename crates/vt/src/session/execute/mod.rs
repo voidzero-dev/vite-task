@@ -3,7 +3,6 @@ pub mod pipe;
 pub mod post_run;
 mod scheduler;
 pub mod spawn;
-pub mod task_fs;
 #[cfg(windows)]
 mod win_job;
 
@@ -15,6 +14,7 @@ use std::{
 
 use futures_util::future::LocalBoxFuture;
 use tokio_util::sync::CancellationToken;
+use vt_fs_fingerprint::TaskFs;
 use vt_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
 use vt_path::AbsolutePath;
 use vt_plan::{SpawnExecution, cache_metadata::CacheMetadata};
@@ -23,7 +23,6 @@ use vt_server::{Recorder, Reports, ServerHandle, StopAccepting, serve};
 use self::{
     pipe::{PipeSinks, StdOutput, pipe_stdio},
     spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
-    task_fs::TaskFs,
 };
 use super::{
     cache::{CacheEntryValue, CacheMiss, ExecutionCache, archive},

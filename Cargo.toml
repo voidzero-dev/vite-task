@@ -160,6 +160,7 @@ tui-term = "0.3.1"
 twox-hash = "2.1.1"
 uuid = "1.18.1"
 vec1 = "1.12.1"
+vt_fs_fingerprint = { path = "crates/vt_fs_fingerprint" }
 vt_glob = { path = "crates/vt_glob" }
 vt_graph_ser = { path = "crates/vt_graph_ser" }
 vt_path = { path = "crates/vt_path" }

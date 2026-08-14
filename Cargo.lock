@@ -4232,7 +4232,6 @@ dependencies = [
  "owo-colors",
  "petgraph",
  "pty_terminal_test_client",
- "rayon",
  "rusqlite",
  "rustc-hash",
  "serde",
@@ -4244,9 +4243,9 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "twox-hash",
  "uuid",
  "vt_client_napi",
+ "vt_fs_fingerprint",
  "vt_glob",
  "vt_graph",
  "vt_ipc_shared",
@@ -4256,7 +4255,6 @@ dependencies = [
  "vt_server",
  "vt_str",
  "vt_workspace",
- "wax",
  "winapi",
  "wincode",
  "zstd",
@@ -4330,6 +4328,28 @@ dependencies = [
  "napi-derive",
  "vt_client",
  "vt_str",
+]
+
+[[package]]
+name = "vt_fs_fingerprint"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "fspy_shared",
+ "nix 0.31.2",
+ "rayon",
+ "rustc-hash",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "twox-hash",
+ "vt_glob",
+ "vt_graph",
+ "vt_path",
+ "vt_str",
+ "wax",
+ "wincode",
 ]
 
 [[package]]

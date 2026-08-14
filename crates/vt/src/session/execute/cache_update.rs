@@ -4,6 +4,7 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use rustc_hash::FxHashSet;
+use vt_fs_fingerprint::{Conclusion, PostRunError};
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::cache_metadata::{CacheMetadata, EnvValueHash};
 use vt_server::Reports;
@@ -13,7 +14,6 @@ use super::{
     CacheState,
     post_run::{TrackedEnvFingerprints, TrackedEnvQuery},
     spawn::ChildOutcome,
-    task_fs::{Conclusion, PostRunError},
 };
 use crate::session::{
     cache::{CacheEntryValue, ExecutionCache, archive},
