@@ -1,5 +1,4 @@
 mod cli;
-mod collections;
 mod napi_client;
 pub mod session;
 

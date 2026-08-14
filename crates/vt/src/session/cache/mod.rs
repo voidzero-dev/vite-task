@@ -3,7 +3,7 @@
 pub mod archive;
 pub mod display;
 
-use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
+use std::{fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
 
 // Re-export display functions for convenience
 pub use display::format_cache_status_inline;
@@ -25,11 +25,11 @@ use wincode::{
     io::{Reader, Writer},
 };
 
-pub use super::execute::fingerprint::InputChangeKind;
+pub use super::execute::task_fs::InputChangeKind;
 use super::execute::{
-    fingerprint::{InputChange, InputFingerprints},
     pipe::StdOutput,
     post_run::{PostRunMismatch, TrackedEnvFingerprints, TrackedEnvQuery},
+    task_fs::{InputChange, InputFingerprints},
 };
 
 const TASK_CACHE_PREALLOCATION_SIZE_LIMIT: usize = 256 * 1024 * 1024;
@@ -314,73 +314,81 @@ impl ExecutionCache {
         Ok(())
     }
 
-    /// Try to hit cache by looking up the cache entry key and validating inputs.
-    /// Returns `Ok(Ok(cache_value))` on cache hit, `Ok(Err(cache_miss))` on miss.
+    /// Fetch the stored entry for this task's exact cache key, or the reason
+    /// the key missed: the task ran before under a different key (command/env,
+    /// input config, or output config changed — checked in that priority
+    /// order), or it never ran at all. The old entry's value is never reused,
+    /// only its key is compared.
+    ///
+    /// Whether a fetched entry is still valid is the caller's question.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "lock guard cannot be dropped earlier because the transaction borrows the connection"
+    )]
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn try_hit(
+    pub(crate) async fn fetch_entry(
         &self,
         cache_metadata: &CacheMetadata,
-        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        workspace_root: &AbsolutePath,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
-        let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
-        let execution_cache_key = &cache_metadata.execution_cache_key;
-
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
-        // Try to find the cache entry by key (spawn fingerprint + input config)
-        if let Some(cache_value) = self.get_by_cache_key(&cache_key).await? {
-            // Validate the stored input fingerprints against the filesystem:
-            // the listed-inputs snapshot against the fresh one, then each
-            // discovered input against the disk.
-            if let Some(change) =
-                cache_value.input_fingerprints.find_change(globbed_inputs, workspace_root)?
-            {
-                return Ok(Err(CacheMiss::FingerprintMismatch(change.into())));
-            }
-
-            // Validate the tracked env state against the current env context.
-            if let Some(mismatch) = cache_value
-                .tracked_env_fingerprints
-                .validate_envs(&cache_metadata.unfiltered_envs)?
-            {
-                return Ok(Err(CacheMiss::FingerprintMismatch(mismatch.into())));
-            }
-            // Associate the execution key to the cache entry key if not already,
-            // so that next time we can find it and report what changed
-            self.upsert_task_fingerprint(execution_cache_key, &cache_key).await?;
-            return Ok(Ok(cache_value));
-        }
-
-        // No cache found with the current cache entry key,
-        // check if execution key maps to a different cache entry key
-        if let Some(old_cache_key) =
-            self.get_cache_key_by_execution_key(execution_cache_key).await?
-        {
-            // Destructure to ensure we handle all fields when new ones are added.
-            // `get_by_cache_key` above returned None for the *current* cache key,
-            // so at least one field on `old_cache_key` must differ from the
-            // current metadata — checked in priority order (spawn → input → output).
-            let CacheEntryKey {
-                spawn_fingerprint: old_spawn_fingerprint,
-                input_config: old_input_config,
-                output_config: old_output_config,
-            } = old_cache_key;
-            let mismatch = if old_spawn_fingerprint != *spawn_fingerprint {
-                FingerprintMismatch::SpawnFingerprint {
-                    old: old_spawn_fingerprint,
-                    new: spawn_fingerprint.clone(),
-                }
-            } else if old_input_config != cache_metadata.input_config {
-                FingerprintMismatch::InputConfig
+        let (entry, old_cache_key) = {
+            let mut conn = self.conn.lock().await;
+            // Both reads run in one deferred read transaction, so they see a
+            // single database snapshot: the miss classification below may rely
+            // on the entry fetch having missed even while a concurrent run of
+            // the same task writes the cache.
+            let tx = conn.transaction()?;
+            let entry: Option<CacheEntryValue> = get_value(&tx, "cache_entries", &cache_key)?;
+            let old_cache_key: Option<CacheEntryKey> = if entry.is_some() {
+                None
             } else {
-                debug_assert_ne!(old_output_config, cache_metadata.output_config);
-                FingerprintMismatch::OutputConfig
+                get_value(&tx, "task_fingerprints", &cache_metadata.execution_cache_key)?
             };
-            return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
+            // Read-only: dropping `tx` (a rollback) is equivalent to a commit.
+            (entry, old_cache_key)
+        };
+
+        if let Some(entry) = entry {
+            return Ok(Ok(entry));
         }
 
-        Ok(Err(CacheMiss::NotFound))
+        let Some(old_cache_key) = old_cache_key else {
+            return Ok(Err(CacheMiss::NotFound));
+        };
+
+        // Destructure to ensure we handle all fields when new ones are added.
+        // The current cache key found no entry in the same snapshot, so at
+        // least one field on `old_cache_key` must differ from the current
+        // metadata.
+        let CacheEntryKey {
+            spawn_fingerprint: old_spawn_fingerprint,
+            input_config: old_input_config,
+            output_config: old_output_config,
+        } = old_cache_key;
+        let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
+        let mismatch = if old_spawn_fingerprint != *spawn_fingerprint {
+            FingerprintMismatch::SpawnFingerprint {
+                old: old_spawn_fingerprint,
+                new: spawn_fingerprint.clone(),
+            }
+        } else if old_input_config != cache_metadata.input_config {
+            FingerprintMismatch::InputConfig
+        } else {
+            debug_assert_ne!(old_output_config, cache_metadata.output_config);
+            FingerprintMismatch::OutputConfig
+        };
+        Ok(Err(CacheMiss::FingerprintMismatch(mismatch)))
+    }
+
+    /// Associate the task's execution key with the entry key that served a
+    /// hit, so a later key-level miss can report what changed.
+    pub(crate) async fn record_hit(&self, cache_metadata: &CacheMetadata) -> anyhow::Result<()> {
+        self.upsert_task_fingerprint(
+            &cache_metadata.execution_cache_key,
+            &CacheEntryKey::from_metadata(cache_metadata),
+        )
+        .await
     }
 
     /// Update cache after successful execution.
@@ -417,52 +425,34 @@ impl ExecutionCache {
     }
 }
 
+/// Fetch and deserialize one value by key from `table` on an already-held
+/// connection (or transaction), so callers control how many reads share a
+/// snapshot.
+fn get_value<K, V>(conn: &Connection, table: &str, key: &K) -> anyhow::Result<Option<V>>
+where
+    K: SchemaWrite<TaskCacheConfig, Src = K>,
+    V: SchemaReadOwned<TaskCacheConfig, Dst = V>,
+{
+    let key_blob = serialize_cache(key)?;
+    #[expect(clippy::disallowed_macros, reason = "SQL query string for rusqlite requires String")]
+    let mut select_stmt = conn.prepare_cached(&format!("SELECT value FROM {table} WHERE key=?"))?;
+    let value_blob: Option<Vec<u8>> =
+        select_stmt.query_row::<Vec<u8>, _, _>([key_blob], |row| row.get(0)).optional()?;
+    let Some(value_blob) = value_blob else {
+        return Ok(None);
+    };
+    let value: V = deserialize_cache(&value_blob)?;
+    Ok(Some(value))
+}
+
 // Basic database operations
 impl ExecutionCache {
-    #[expect(
-        clippy::significant_drop_tightening,
-        reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
-    )]
-    async fn get_key_by_value<
-        K: SchemaWrite<TaskCacheConfig, Src = K>,
-        V: SchemaReadOwned<TaskCacheConfig, Dst = V>,
-    >(
-        &self,
-        table: &str,
-        key: &K,
-    ) -> anyhow::Result<Option<V>> {
-        let key_blob = serialize_cache(key)?;
-        let value_blob = {
-            let conn = self.conn.lock().await;
-            #[expect(
-                clippy::disallowed_macros,
-                reason = "SQL query string for rusqlite requires String"
-            )]
-            let mut select_stmt =
-                conn.prepare_cached(&format!("SELECT value FROM {table} WHERE key=?"))?;
-            let value_blob: Option<Vec<u8>> =
-                select_stmt.query_row::<Vec<u8>, _, _>([key_blob], |row| row.get(0)).optional()?;
-            value_blob
-        };
-        let Some(value_blob) = value_blob else {
-            return Ok(None);
-        };
-        let value: V = deserialize_cache(&value_blob)?;
-        Ok(Some(value))
-    }
-
     async fn get_by_cache_key(
         &self,
         cache_key: &CacheEntryKey,
     ) -> anyhow::Result<Option<CacheEntryValue>> {
-        self.get_key_by_value("cache_entries", cache_key).await
-    }
-
-    async fn get_cache_key_by_execution_key(
-        &self,
-        execution_cache_key: &ExecutionCacheKey,
-    ) -> anyhow::Result<Option<CacheEntryKey>> {
-        self.get_key_by_value("task_fingerprints", execution_cache_key).await
+        let conn = self.conn.lock().await;
+        get_value(&conn, "cache_entries", cache_key)
     }
 
     #[expect(

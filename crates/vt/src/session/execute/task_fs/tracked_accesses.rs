@@ -3,16 +3,14 @@
 //! User-configured negative globs are NOT applied here. They are applied later,
 //! separately for reads (input config) and writes (output config), since those
 //! two configs are independent.
-#![cfg(fspy)]
 
 use std::collections::hash_map::Entry;
 
-use fspy::{AccessMode, PathAccessIterable};
+use fspy_shared::ipc::{AccessMode, PathAccess};
 use rustc_hash::FxHashSet;
 use vt_path::{AbsolutePath, RelativePathBuf};
 
-use super::fingerprint::PathRead;
-use crate::collections::HashMap;
+use super::{collections::HashMap, fingerprint::PathRead};
 
 /// Tracked file accesses from fspy, normalized to workspace-relative paths.
 #[derive(Default, Debug)]
@@ -25,12 +23,15 @@ pub struct TrackedPathAccesses {
 }
 
 impl TrackedPathAccesses {
-    /// Build from fspy's raw iterable by stripping the workspace prefix and
+    /// Build from raw accesses by stripping the workspace prefix and
     /// normalizing `..` components. `.git/*` paths are skipped. User-configured
     /// negatives are applied by the caller (see module docs).
-    pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
+    pub fn from_raw<'a>(
+        raw: impl IntoIterator<Item = PathAccess<'a>>,
+        workspace_root: &AbsolutePath,
+    ) -> Self {
         let mut accesses = Self::default();
-        for access in raw.iter() {
+        for access in raw {
             // Strip workspace root and clean `..` components in one pass.
             // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
             let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {

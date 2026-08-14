@@ -13,7 +13,7 @@ use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::collections::HashMap;
+use super::collections::HashMap;
 
 /// Path read access info
 #[derive(Debug, Clone, Copy)]

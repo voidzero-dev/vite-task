@@ -1,18 +1,13 @@
 mod cache_update;
-pub mod fingerprint;
-pub mod glob;
-mod hash;
 pub mod pipe;
 pub mod post_run;
 mod scheduler;
 pub mod spawn;
-#[cfg(fspy)]
-pub mod tracked_accesses;
+pub mod task_fs;
 #[cfg(windows)]
 mod win_job;
 
 use std::{
-    collections::BTreeMap,
     ffi::{OsStr, OsString},
     sync::Arc,
     time::Instant,
@@ -20,16 +15,15 @@ use std::{
 
 use futures_util::future::LocalBoxFuture;
 use tokio_util::sync::CancellationToken;
-use vt_glob::path::PathGlobSet;
 use vt_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
-use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_path::AbsolutePath;
 use vt_plan::{SpawnExecution, cache_metadata::CacheMetadata};
 use vt_server::{Recorder, Reports, ServerHandle, StopAccepting, serve};
 
 use self::{
-    glob::compute_globbed_inputs,
     pipe::{PipeSinks, StdOutput, pipe_stdio},
     spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
+    task_fs::TaskFs,
 };
 use super::{
     cache::{CacheEntryValue, CacheMiss, ExecutionCache, archive},
@@ -64,6 +58,10 @@ pub enum SpawnOutcome {
 ///   `includes_auto`, which only lives on cache metadata).
 /// - Cached execution always owns [`PipeWriters`] (piped stdio is forced so
 ///   that output can be captured for replay).
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one short-lived value per task execution; boxing the cached state would only add indirection"
+)]
 enum ExecutionMode<'a> {
     Cached {
         /// Borrowed by [`PipeSinks`] during drain; dropped at end of function.
@@ -86,7 +84,9 @@ enum ExecutionMode<'a> {
 /// a borrow inside [`PipeSinks::capture`].
 struct CacheState<'a> {
     metadata: &'a CacheMetadata,
-    globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    /// The run's filesystem story, begun at cache lookup; concluded by the
+    /// cache-update phase after the child exits.
+    task_fs: TaskFs<'a>,
     /// Captured stdout/stderr for cache replay. Written in place during drain;
     /// always present (possibly empty) once we reach the cache-update phase.
     std_outputs: Vec<StdOutput>,
@@ -94,24 +94,19 @@ struct CacheState<'a> {
     /// available, and fspy path tracing is attached only when auto input or
     /// output inference needs it. Parts are borrowed in place during the
     /// wait/join; the struct is never moved out.
-    tracking: Tracking<'a>,
+    tracking: Tracking,
 }
 
 /// The IPC server's driver future: resolves with the recorded reports after
 /// [`StopAccepting::signal`] fires and all in-flight clients drain.
 type IpcDriver = LocalBoxFuture<'static, Result<Recorder, vt_server::Error>>;
 
-/// fspy path-tracking state, present only when a cached task needs automatic
-/// input or output inference.
-struct FspyTracking<'a> {
-    input_negative_globs: PathGlobSet<'a>,
-    output_negative_globs: PathGlobSet<'a>,
-}
-
-/// Per-task runner-aware tracking: IPC server handle plus optional fspy state.
-/// Lifetime-tied to a single `execute_spawn` call.
-struct Tracking<'a> {
-    fspy: Option<FspyTracking<'a>>,
+/// Per-task runner-aware tracking: IPC server handle plus whether fspy path
+/// tracing is attached. Tied to a single `execute_spawn` call.
+struct Tracking {
+    /// fspy path tracing is attached iff a cached task needs automatic input
+    /// or output inference (`includes_auto` on either side).
+    fspy: bool,
     ipc_envs: Vec<(&'static OsStr, OsString)>,
     ipc_server_fut: IpcDriver,
     stop_accepting: StopAccepting,
@@ -156,28 +151,19 @@ impl<'a> ExecutionMode<'a> {
     ///  `cache_metadata.is_some_and(_)`) at every downstream use site.
     /// ─────────────────────────────────────────────────────────────────────
     fn build(
-        cache_metadata: Option<&'a CacheMetadata>,
+        cached: Option<(&'a CacheMetadata, TaskFs<'a>)>,
         stdio_config: StdioConfig,
-        globbed_inputs: BTreeMap<RelativePathBuf, u64>,
     ) -> Result<Self, ExecutionError> {
-        let Some(metadata) = cache_metadata else {
+        let Some((metadata, task_fs)) = cached else {
             return Ok(Self::Uncached {
                 pipe_writers: (stdio_config.suggestion == StdioSuggestion::Piped)
                     .then_some(stdio_config.writers),
             });
         };
 
-        let fspy = if metadata.input_config.includes_auto || metadata.output_config.includes_auto {
-            // Resolve negative globs for fspy path filtering (already
-            // workspace-root-relative).
-            let input_negative_globs = PathGlobSet::new(&metadata.input_config.negative_globs)
-                .map_err(|err| ExecutionError::PostRunFingerprint(err.into()))?;
-            let output_negative_globs = PathGlobSet::new(&metadata.output_config.negative_globs)
-                .map_err(|err| ExecutionError::PostRunFingerprint(err.into()))?;
-            Some(FspyTracking { input_negative_globs, output_negative_globs })
-        } else {
-            None
-        };
+        // fspy path tracing is attached iff auto input or output inference
+        // needs it.
+        let fspy = metadata.input_config.includes_auto || metadata.output_config.includes_auto;
 
         // Bind runner IPC for every cached task. The merged cache-control API
         // (`disableCache`) must work even when a task uses explicit inputs and
@@ -190,7 +176,7 @@ impl<'a> ExecutionMode<'a> {
 
         Ok(Self::Cached {
             pipe_writers: stdio_config.writers,
-            state: CacheState { metadata, globbed_inputs, std_outputs: Vec::new(), tracking },
+            state: CacheState { metadata, task_fs, std_outputs: Vec::new(), tracking },
         })
     }
 
@@ -216,7 +202,7 @@ impl<'a> ExecutionMode<'a> {
     /// whether fspy tracking is on.
     const fn spawn_config(&self) -> (SpawnStdio, bool) {
         match self {
-            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.fspy.is_some()),
+            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.fspy),
             Self::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
             Self::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
         }
@@ -383,8 +369,9 @@ async fn run(
 
     // 2. Report execution start with the looked-up cache status (`start()`
     //    runs exactly once on every arm) and either replay the hit — no need
-    //    to execute the command — or carry the globbed inputs into the run.
-    let (stdio_config, globbed_inputs) = match lookup {
+    //    to execute the command — or carry the run's filesystem story into
+    //    the cache-update phase.
+    let (stdio_config, cached) = match lookup {
         CacheLookup::Hit(cached) => {
             let mut stdio_config =
                 reporter.start(CacheStatus::Hit { replayed_duration: cached.duration });
@@ -396,18 +383,16 @@ async fn run(
                 program_name,
             ));
         }
-        CacheLookup::Miss { miss, globbed_inputs } => {
-            (reporter.start(CacheStatus::Miss(miss)), globbed_inputs)
+        CacheLookup::Miss { miss, metadata, task_fs } => {
+            (reporter.start(CacheStatus::Miss(miss)), Some((metadata, task_fs)))
         }
-        CacheLookup::Disabled => (
-            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)),
-            BTreeMap::new(),
-        ),
+        CacheLookup::Disabled => {
+            (reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)), None)
+        }
     };
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
-    let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
-        .map_err(Report::failed)?;
+    let mut mode = ExecutionMode::build(cached, stdio_config).map_err(Report::failed)?;
 
     // Measure end-to-end duration here — spawn() doesn't track time.
     let start = Instant::now();
@@ -499,45 +484,77 @@ async fn run(
 
 /// Outcome of the cache-lookup phase. Each variant carries exactly what that
 /// outcome provides: a hit owns the cached entry to replay, a miss keeps the
-/// reason plus the globbed inputs (reused by the cache-update phase after the
-/// run), and disabled has neither.
-enum CacheLookup {
+/// reason plus the begun run (concluded by the cache-update phase after the
+/// child exits), and disabled has neither.
+enum CacheLookup<'a> {
     /// Cache hit — the cached entry to replay.
     Hit(CacheEntryValue),
     /// Cache miss — the detailed reason (`NotFound` or `FingerprintMismatch`).
-    Miss { miss: CacheMiss, globbed_inputs: BTreeMap<RelativePathBuf, u64> },
+    Miss { miss: CacheMiss, metadata: &'a CacheMetadata, task_fs: TaskFs<'a> },
     /// Caching is disabled for this task (no cache metadata).
     Disabled,
 }
 
-/// Phase 1: compute the globbed inputs and try to hit the cache.
-async fn lookup_cache(
-    cache_metadata: Option<&CacheMetadata>,
+/// A cache-lookup failure, reported as an infrastructure error.
+const fn lookup_error(source: anyhow::Error) -> Report {
+    Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source })
+}
+
+/// Phase 1: fetch the stored entry, begin the run's filesystem story, and
+/// decide hit or miss.
+///
+/// The fetch comes first — the entry's key does not depend on filesystem
+/// state, and `pre_run` wants the stored fingerprints to compare against.
+/// A key-level miss arrives already classified (atomically with the fetch).
+/// The checks then run in order: input changes (filesystem), tracked envs.
+async fn lookup_cache<'a>(
+    cache_metadata: Option<&'a CacheMetadata>,
     cache: &ExecutionCache,
-    workspace_root: &Arc<AbsolutePath>,
-) -> Result<CacheLookup, Report> {
-    let Some(cache_metadata) = cache_metadata else {
+    workspace_root: &'a Arc<AbsolutePath>,
+) -> Result<CacheLookup<'a>, Report> {
+    let Some(metadata) = cache_metadata else {
         return Ok(CacheLookup::Disabled);
     };
 
-    // Compute globbed inputs from positive globs at execution time.
-    // Globs are already workspace-root-relative (resolved at task graph stage).
-    let globbed_inputs = compute_globbed_inputs(
-        workspace_root,
-        &cache_metadata.input_config.positive_globs,
-        &cache_metadata.input_config.negative_globs,
-    )
-    .map_err(|err| {
-        Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
-    })?;
+    let entry = cache.fetch_entry(metadata).await.map_err(lookup_error)?;
 
-    match cache.try_hit(cache_metadata, &globbed_inputs, workspace_root).await {
-        Ok(Ok(cached)) => Ok(CacheLookup::Hit(cached)),
-        Ok(Err(miss)) => Ok(CacheLookup::Miss { miss, globbed_inputs }),
-        Err(err) => {
-            Err(Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }))
-        }
+    let (task_fs, change) = TaskFs::pre_run(
+        workspace_root,
+        &metadata.input_config,
+        &metadata.output_config,
+        entry.as_ref().ok().map(|entry| &entry.input_fingerprints),
+    )
+    .map_err(lookup_error)?;
+
+    let cached = match entry {
+        Ok(cached) => cached,
+        Err(miss) => return Ok(CacheLookup::Miss { miss, metadata, task_fs }),
+    };
+
+    if let Some(change) = change {
+        return Ok(CacheLookup::Miss {
+            miss: CacheMiss::FingerprintMismatch(change.into()),
+            metadata,
+            task_fs,
+        });
     }
+
+    if let Some(mismatch) = cached
+        .tracked_env_fingerprints
+        .validate_envs(&metadata.unfiltered_envs)
+        .map_err(lookup_error)?
+    {
+        return Ok(CacheLookup::Miss {
+            miss: CacheMiss::FingerprintMismatch(mismatch.into()),
+            metadata,
+            task_fs,
+        });
+    }
+
+    // Remember which entry key served this task so a later key-level miss can
+    // report what changed.
+    cache.record_hit(metadata).await.map_err(lookup_error)?;
+    Ok(CacheLookup::Hit(cached))
 }
 
 /// Phase 3 (cache hit): replay the captured stdout/stderr and restore the

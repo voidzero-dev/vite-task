@@ -2,8 +2,8 @@
 //!
 //! [`spawn`] does one thing: hand back the child's stdio pipes plus a
 //! cancellation-aware `wait` future. Draining the pipes is [`super::pipe`]'s
-//! job; normalizing fspy path accesses is [`super::tracked_accesses`]'s (only
-//! compiled when `cfg(fspy)` is on).
+//! job; the raw path accesses are judged by [`super::task_fs`] during the
+//! cache update.
 
 use std::{ffi::OsStr, io, process::Stdio};
 

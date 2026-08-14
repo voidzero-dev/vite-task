@@ -1,7 +1,7 @@
 //! Post-run environment fingerprinting: env values and bulk env queries
 //! observed by runner-aware tools during execution, validated again at cache
 //! lookup. The filesystem half of post-run fingerprinting lives in
-//! [`super::fingerprint`].
+//! [`super::task_fs`].
 
 use std::{collections::BTreeMap, ffi::OsStr, sync::Arc};
 

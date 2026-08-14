@@ -4224,6 +4224,7 @@ dependencies = [
  "ctrlc",
  "derive_more",
  "fspy",
+ "fspy_shared",
  "futures-util",
  "materialized_artifact",
  "nix 0.31.2",
