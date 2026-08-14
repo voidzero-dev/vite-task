@@ -70,17 +70,25 @@ impl SpyImpl {
         })
     }
 
+    #[expect(clippy::print_stderr, reason = "temporary benchmark phase instrumentation")]
     pub(crate) async fn spawn(
         &self,
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
+        let phase_start = std::time::Instant::now();
         #[cfg(target_os = "linux")]
         let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
+        let supervise_ns = phase_start.elapsed().as_nanos();
 
+        let phase_start = std::time::Instant::now();
         #[cfg(not(target_env = "musl"))]
         let (ipc_channel_conf, ipc_receiver) =
             channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+        eprintln!(
+            "fspy-spawn supervise={supervise_ns} channel={}",
+            phase_start.elapsed().as_nanos()
+        );
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]
@@ -139,6 +147,7 @@ impl SpyImpl {
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
             // because we need to stop the supervisor and close the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
+                let phase_start = std::time::Instant::now();
                 let status = tokio::select! {
                     status = child.wait() => status?,
                     () = cancellation_token.cancelled() => {
@@ -146,7 +155,9 @@ impl SpyImpl {
                         child.wait().await?
                     }
                 };
+                let child_ns = phase_start.elapsed().as_nanos();
 
+                let phase_start = std::time::Instant::now();
                 let arenas = std::iter::once(exec_resolve_accesses);
                 // Stop the supervisor and collect path accesses from it.
                 #[cfg(target_os = "linux")]
@@ -158,11 +169,17 @@ impl SpyImpl {
                         .map(syscall_handler::SyscallHandler::into_arena),
                 );
                 let arenas = arenas.collect::<Vec<_>>();
+                let stop_ns = phase_start.elapsed().as_nanos();
 
+                let phase_start = std::time::Instant::now();
                 // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
                 #[cfg(not(target_env = "musl"))]
                 let ipc_accesses = CollectedAccesses::collect_async(ipc_receiver).await?;
+                eprintln!(
+                    "fspy-phase child={child_ns} stop={stop_ns} collect={}",
+                    phase_start.elapsed().as_nanos()
+                );
                 let path_accesses = PathAccessIterable {
                     arenas,
                     #[cfg(not(target_env = "musl"))]
