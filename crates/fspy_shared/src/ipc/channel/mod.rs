@@ -37,8 +37,7 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
 
-    let shm_path = shm_backing_path()?;
-    let shm_c_path = os_c_string(shm_path.as_os_str())?;
+    let shm_c_path = os_c_string(shm_backing_path()?.as_os_str())?;
     let handle =
         fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
     // The keeper exists from here on, so every error path below cleans up.
@@ -47,7 +46,7 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
 
     let conf = ChannelConf {
         lock_file_path: lock_file_path.as_os_str().into(),
-        shm_id: shm_path.as_os_str().into(),
+        shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed(),
     };
 
     let receiver = Receiver::new(lock_file_path, keeper, mapping)?;
@@ -151,7 +150,13 @@ impl ChannelConf {
         let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
         lock_file.try_lock_shared()?;
 
-        let shm_path = os_c_string(&self.shm_id.to_cow_os_str())?;
+        // The arena never touches the process heap, so this stays safe in
+        // the preload contexts that create senders (pre-`main` constructors,
+        // the Windows loader lock).
+        let arena = fspy_nostd_alloc::arena();
+        let shm_path = self.shm_id.to_os_c_string_in(&arena).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory path")
+        })?;
         let mapping = fspy_shm::open(shm_path.as_c_str().as_thin())
             .map_err(shm_error_to_io)?
             .map()
