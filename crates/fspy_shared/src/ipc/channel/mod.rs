@@ -44,19 +44,6 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     let keeper = ShmKeeper { path: shm_c_path };
     let mapping = handle.map().map_err(shm_error_to_io)?;
 
-    // Allocating the first block of the sparse backing file can cost
-    // milliseconds on journalling filesystems. Touch the header page through
-    // a second view concurrently with process startup, so neither a sender's
-    // first record nor `Receiver::close` pays that latency. Best-effort: a
-    // channel without the pre-fault is merely slower.
-    if let Ok(prefault_mapping) = handle.map() {
-        let _ = std::thread::Builder::new().name("fspy-shm-prefault".into()).spawn(move || {
-            // SAFETY: the mapping views the region created zero-initialized
-            // above, which is only accessed through the `shm_io` protocol.
-            unsafe { shm_io::pre_fault(&prefault_mapping) };
-        });
-    }
-
     let conf = ChannelConf { shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed() };
 
     Ok((conf, Receiver { _keeper: keeper, mapping }))
@@ -247,13 +234,32 @@ impl Receiver {
         // through the `shm_io` protocol.
         let frames = unsafe { shm_io::close(&mapping) }
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
-        // Unmapping a multi-gigabyte view can cost a millisecond or more.
-        // The frames are already copied out and nothing reads the mapping
-        // again, so release it off the caller's path. Best-effort: if the
-        // thread cannot spawn, its dropped closure unmaps inline instead.
+        // Two millisecond-scale teardown steps run off the caller's path:
+        // setting the claim gate (which write-faults the counter page — a
+        // first-block allocation on an otherwise-untouched region) and
+        // unmapping the multi-gigabyte view. Claims racing the gate land
+        // beyond the close snapshot and are never observed. Dropping the
+        // teardown performs both steps, so a failed thread spawn falls back
+        // to paying the latency here rather than leaving the gate unset.
+        let teardown = ChannelTeardown { mapping };
         let _ =
-            std::thread::Builder::new().name("fspy-shm-unmap".into()).spawn(move || drop(mapping));
+            std::thread::Builder::new().name("fspy-shm-close".into()).spawn(move || drop(teardown));
         frames
+    }
+}
+
+/// Deferred channel teardown: sets the claim gate, then unmaps.
+struct ChannelTeardown {
+    mapping: Mapping,
+}
+
+impl Drop for ChannelTeardown {
+    fn drop(&mut self) {
+        // SAFETY: `mapping` is the receiver's view of the region created
+        // zero-initialized by `channel` and accessed only through the
+        // `shm_io` protocol; it stays mapped until this struct's fields
+        // drop below.
+        unsafe { shm_io::close_claims(&self.mapping) };
     }
 }
 
@@ -272,7 +278,7 @@ mod tests {
     /// must still attach.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sender_ignores_changed_temp_and_working_directory() {
-        let (conf, receiver) = channel(100).unwrap();
+        let (conf, receiver) = channel(4096).unwrap();
         let changed_cwd = temp_dir().join(format!("fspy-ipc-changed-cwd-{}", Uuid::new_v4()));
         fs::create_dir(&changed_cwd).unwrap();
 
@@ -298,7 +304,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn smoke() {
-        let (conf, receiver) = channel(100).unwrap();
+        // A deliberately odd, small capacity: the fixed partition must
+        // still yield a usable channel.
+        let (conf, receiver) = channel(1000).unwrap();
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
             let sender = conf.sender().unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
@@ -344,11 +352,12 @@ mod tests {
         assert!(B(&output.stdout) == B("false"));
     }
 
-    /// A sender that attached before close keeps its mapping but cannot
-    /// claim any new frame afterwards.
+    /// A sender that attached before close keeps its mapping; its claims
+    /// after close are either gated (once the deferred CLOSED gate lands)
+    /// or dropped without ever appearing in the collected frames.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn attached_sender_cannot_claim_after_close() {
-        let (conf, receiver) = channel(4096).unwrap();
+    async fn attached_sender_is_gated_after_close() {
+        let (conf, receiver) = channel(1024 * 1024).unwrap();
         let sender = conf.sender().unwrap();
 
         let mut frame = sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
@@ -359,14 +368,29 @@ mod tests {
         assert!(frames.iter().next().unwrap() == &[4, 2]);
         assert!(frames.is_complete());
 
-        assert!(
-            sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap_err() == ClaimError::Closed
-        );
+        // The gate is set on the deferred teardown thread; a 1 MiB channel
+        // holds thousands of slots, far more claims than the gate needs
+        // scheduling opportunities to land, so exhausting capacity first
+        // would mean the gate never fired.
+        loop {
+            match sender.claim_frame(NonZeroUsize::new(2).unwrap()) {
+                Err(ClaimError::Closed) => break,
+                Err(ClaimError::Capacity) => panic!("claim gate never landed"),
+                Ok(frame) => {
+                    // Dropped claims land beyond the close snapshot; the
+                    // collected frames stay as they were.
+                    frame.finish();
+                    assert!(frames.iter().count() == 1);
+                    std::thread::yield_now();
+                }
+            }
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_senders() {
-        let (conf, receiver) = channel(8192).unwrap();
+        // 64 KiB: a 1023-slot table for the 200 frames sent below.
+        let (conf, receiver) = channel(64 * 1024).unwrap();
         for i in 0u16..200 {
             let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
                 let sender = conf.sender().unwrap();

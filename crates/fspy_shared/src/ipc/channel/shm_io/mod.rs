@@ -8,18 +8,22 @@
 //! # Region layout
 //!
 //! ```text
-//! low addresses                                              high addresses
-//! +--------+--------+--------+-------+------+-----------+-----------+
-//! | header | slot 0 | slot 1 | ...   | free | payload 1 | payload 0 |
-//! +--------+--------+--------+-------+------+-----------+-----------+
-//!            descriptor table grows ->     <- payloads grow
+//! low addresses                                            high addresses
+//! +--------+--------+--------+---------+-----------+-----------+------+
+//! | header | slot 0 | slot 1 | ...     | payload 0 | payload 1 | ...  |
+//! +--------+--------+--------+---------+-----------+-----------+------+
+//!            fixed descriptor table      payloads grow up ->
 //! ```
 //!
-//! The header holds one allocator word ([`alloc_word`]) that admits claims,
-//! closes the channel, and records lost frames. Each frame owns one atomic
-//! descriptor slot ([`slot`]) and one payload span; a claim reserves both
-//! with a single compare-and-swap, so the two regions never overlap and an
-//! unfinished frame can never hide a later one.
+//! The header holds three monotonic words ([`state`]): a claim counter
+//! carrying the CLOSED gate bit, a payload counter, and an incomplete flag.
+//! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
+//! reserves a descriptor slot — validated against the fixed region bounds
+//! from the returned old values. Failed claims overshoot the counters
+//! harmlessly: readers clamp to the region capacities, and committed
+//! descriptors are self-describing ([`slot`]), so the counters never locate
+//! data. Every slot has a fixed location, so an unfinished frame can never
+//! hide a later one.
 //!
 //! # Frame lifecycle
 //!
@@ -39,19 +43,25 @@
 //!
 //! # Close boundary
 //!
-//! [`close`] admits no further claims; an already admitted writer races the
-//! freeze pass per slot and its frame is either included (commit won) or
-//! ignored (abort won) — never torn. Ignoring unfinished frames is sound
-//! because writers publish a record *before* performing the recorded
-//! operation: a process that died mid-frame never performed the operation,
-//! and one that lost the close race performs it outside the run's tracking
+//! [`close`]'s boundary is a snapshot of the claim counter. A writer
+//! admitted before the snapshot races the freeze pass per slot and its
+//! frame is either included (commit won) or ignored (abort won) — never
+//! torn; a claim after the snapshot lands in a slot the receiver never
+//! visits and is dropped. Both drops are sound because writers publish a
+//! record *before* performing the recorded operation: a process that died
+//! mid-frame never performed the operation, and one that claimed or
+//! committed after the snapshot performs it outside the run's tracking
 //! boundary. A live writer that loses a record *before* close (capacity,
 //! abandonment) flags the trace incomplete ([`Frames::is_complete`]).
+//!
+//! [`close_claims`] sets the CLOSED gate afterwards, off the
+//! latency-sensitive path, so straggler processes eventually stop claiming
+//! (and stop materializing pages of the region) rather than writing into
+//! the void forever.
 //!
 //! Correctness never depends on writer-side cleanup: no exit hooks, PID
 //! checks, heartbeats, or timeouts.
 
-mod alloc_word;
 mod layout;
 mod reader;
 mod slot;
@@ -95,17 +105,21 @@ pub unsafe fn close(mem: &impl AsRawSlice) -> Result<Frames, ProtocolError> {
     unsafe { reader::close(mem.as_raw_slice()) }
 }
 
-/// Materializes the page backing the protocol header without changing
-/// protocol state, so that the first claim and [`close`] never pay for the
-/// backing file's first block allocation — a millisecond-scale cost on some
-/// journalling filesystems. Run it off any latency-sensitive path.
+/// Sets the CLOSED gate so writers stop claiming once they observe it.
+///
+/// Deliberately separate from [`close`]: the boundary is [`close`]'s
+/// snapshot, and this write — which materializes the counter page, a
+/// millisecond-scale first-block allocation on some journalling
+/// filesystems when the trace is empty — belongs off the latency-sensitive
+/// path. Claims landing between the snapshot and the gate are dropped
+/// soundly (see the module docs).
 ///
 /// # Safety
 ///
 /// Same contract as [`ShmWriter::new`].
-pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
+pub unsafe fn close_claims(mem: &impl AsRawSlice) {
     // SAFETY: forwarded from this function's contract.
-    unsafe { state::SharedState::borrow(mem.as_raw_slice()) }.pre_fault();
+    unsafe { reader::close_claims(mem.as_raw_slice()) }
 }
 
 #[cfg(test)]
@@ -238,16 +252,17 @@ mod tests {
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
 
-        // Larger than the mapping, and larger than the absolute frame limit:
-        // both fail the claim without touching the frontiers.
+        assert!(writer.try_write_frame(b"test"));
+
+        // Larger than the payload region, and larger than the absolute frame
+        // limit: both fail the claim. The failed reservation stays counted —
+        // harmless, because the failure already made the trace incomplete
+        // and therefore uncacheable.
         assert!(!writer.try_write_frame(&vec![0u8; 2048]));
         assert!(
             writer.claim_frame(((i32::MAX as usize) + 1).try_into().unwrap()).unwrap_err()
                 == ClaimError::Capacity
         );
-
-        // Small frames still fit afterwards.
-        assert!(writer.try_write_frame(b"test"));
 
         let frames = collect_frames(&shm);
         let mut iter = frames.iter();
@@ -348,30 +363,24 @@ mod tests {
     }
 
     #[test]
-    fn pre_fault_does_not_disturb_protocol_state() {
+    fn slot_capacity_failure_marks_incomplete() {
+        // A 1024-byte region has a 15-slot table; the 16th claim must fail
+        // on the slot side while payload space remains.
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
-
-        // On the untouched region, before any claim.
-        // SAFETY: see `collect_frames`.
-        unsafe { pre_fault(&shm) };
-        assert!(writer.try_write_frame(b"foo"));
-        // Racing an already claimed region must change nothing either.
-        // SAFETY: see `collect_frames`.
-        unsafe { pre_fault(&shm) };
-        assert!(writer.try_write_frame(b"bar"));
+        for _ in 0..15 {
+            assert!(writer.try_write_frame(b"x"));
+        }
+        assert!(writer.claim_frame(1.try_into().unwrap()).unwrap_err() == ClaimError::Capacity);
 
         let frames = collect_frames(&shm);
-        let mut iter = frames.iter();
-        assert!(iter.next().unwrap() == b"foo");
-        assert!(iter.next().unwrap() == b"bar");
-        assert!(iter.next() == None);
-        assert!(frames.is_complete());
+        assert!(frames.iter().count() == 15);
+        assert!(!frames.is_complete());
     }
 
     #[test]
-    fn claim_after_close_fails_without_poisoning() {
+    fn claims_between_snapshot_and_gate_are_dropped() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
@@ -379,16 +388,25 @@ mod tests {
 
         assert!(!writer.is_closed());
         let frames = collect_frames(&shm);
-        assert!(frames.iter().count() == 1);
+        let mut iter = frames.iter();
+        assert!(iter.next().unwrap() == b"foo");
+        assert!(iter.next() == None);
         assert!(frames.is_complete());
 
-        // Claims of an admitted-but-late writer fail cleanly and do not mark
+        // The gate is not set yet: a straggler's claim is admitted, lands
+        // beyond the snapshot, and commits into a slot the receiver never
+        // read — the record is dropped, not torn, and not incomplete.
+        let mut late = writer.claim_frame(5.try_into().unwrap()).unwrap();
+        late.copy_from_slice(b"late!");
+        late.finish();
+        assert!(frames.iter().count() == 1);
+
+        // Once the gate lands, claims fail cleanly and still do not mark
         // the trace incomplete: the access is outside the closed boundary.
+        // SAFETY: see `collect_frames`.
+        unsafe { close_claims(&shm) };
         assert!(writer.is_closed());
         assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
-
-        let frames = collect_frames(&shm);
-        assert!(frames.iter().count() == 1);
         assert!(frames.is_complete());
     }
 
@@ -417,7 +435,8 @@ mod tests {
 
     #[test]
     fn concurrent() {
-        let shm = MockedShm::alloc(1024 * 4);
+        // 16 KiB: a 255-slot table for the 120 frames written below.
+        let shm = MockedShm::alloc(1024 * 16);
 
         thread::scope(|s| {
             for _ in 0..4 {
@@ -470,9 +489,9 @@ mod tests {
             let frame = BStr::new(frame);
             assert!(frame == b"hello" || frame == b"foo" || frame == b"this is a test");
         }
-        // Some writes must have succeeded, some must have failed on capacity;
-        // the failures poison completeness.
-        assert!(count > 20);
+        // Some writes must have succeeded (the table holds 15 slots), some
+        // must have failed on capacity; the failures poison completeness.
+        assert!(count > 5);
         assert!(count < 120);
         assert!(!frames.is_complete());
     }
@@ -562,14 +581,22 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_allocator_word_is_a_protocol_error() {
+    fn overshot_claim_counter_clamps_to_the_table() {
         let shm = MockedShm::alloc(1024);
-        // A slot count whose table exceeds the mapping.
-        shm.poke_word(0, ((1u64 << 30) - 1) << 32);
+        // SAFETY: see `single_thread_basic`.
+        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        assert!(writer.try_write_frame(b"hello"));
 
-        // SAFETY: see `collect_frames`.
-        let result = unsafe { close(&shm) };
-        assert!(result.unwrap_err() == ProtocolError::CorruptAllocator);
+        // A wildly inflated claim counter — mass claim failures or a foreign
+        // scribble — degrades to a full-table sweep, never out-of-bounds
+        // slot access: the committed frame survives, the untouched slots
+        // freeze as aborted.
+        shm.poke_word(0, (1 << 40) | 1);
+
+        let frames = collect_frames(&shm);
+        let mut iter = frames.iter();
+        assert!(iter.next().unwrap() == b"hello");
+        assert!(iter.next() == None);
     }
 
     #[test]

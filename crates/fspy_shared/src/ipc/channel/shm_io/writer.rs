@@ -8,7 +8,10 @@ use std::{
 
 use wincode::{SchemaWrite, Serialize as _, config::DefaultConfig};
 
-use super::{AsRawSlice, alloc_word::ReserveError, slot, state::SharedState};
+use super::{
+    AsRawSlice, slot,
+    state::{ReserveError, SharedState},
+};
 
 /// A concurrent shared-memory frame writer.
 ///
@@ -76,7 +79,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
 
     /// Whether the receiver has closed the channel.
     pub fn is_closed(&self) -> bool {
-        self.state().load_word().is_closed()
+        self.state().is_closed()
     }
 
     /// Claims a frame of exactly `frame_size` bytes.

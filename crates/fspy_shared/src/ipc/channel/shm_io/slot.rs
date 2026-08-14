@@ -15,7 +15,7 @@
 //! committed value is always nonzero and the three states are disjoint.
 //! Committed and aborted are terminal: no protocol operation overwrites them.
 //!
-//! Like [`super::alloc_word`], this module is pure; the compare-and-swap
+//! Like [`super::layout`], this module is pure; the compare-and-swap
 //! transitions live in [`super::state`].
 
 pub(super) const UNFINISHED: u64 = 0;

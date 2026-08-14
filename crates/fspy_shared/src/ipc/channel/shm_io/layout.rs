@@ -1,26 +1,40 @@
 //! Pure geometry of the shared-memory region.
 //!
-//! The mapping is divided into three areas:
+//! The mapping is divided into three fixed areas:
 //!
 //! ```text
-//! low addresses                                              high addresses
-//! | header | descriptor table (grows up) | free | payloads (grow down) |
+//! | header | descriptor table (fixed capacity) | payloads (grow up) |
 //! ```
 //!
+//! The table gets an eighth of the space after the header (with a small
+//! floor so tiny regions stay usable). An eighth is generous slack for
+//! typical record shapes — one 8-byte descriptor per payload of a few
+//! hundred bytes — and the region is sparse, so an oversized table costs
+//! address space, not memory.
+//!
 //! Everything in this module is arithmetic on plain integers — no atomics,
-//! no pointers, no shared state. Overflow safety follows from two bounds
-//! enforced at construction time and re-validated on every value read back
-//! from shared memory: the mapping length never exceeds [`MAX_MAPPING_LEN`]
-//! (so all offsets fit in the 32-bit descriptor fields) and all region
-//! arithmetic is performed in `usize` on 64-bit targets (asserted in the
-//! parent module), where sums of 32-bit-bounded quantities cannot overflow.
+//! no pointers, no shared state. Overflow safety follows from one bound
+//! enforced at construction time: the mapping length never exceeds
+//! [`MAX_MAPPING_LEN`], so all offsets fit the 32-bit descriptor fields and
+//! all sums fit `usize` on the 64-bit targets the parent module asserts.
 
-/// Byte size of the region header.
-///
-/// Only the first 8 bytes (the allocator word) are used; the rest keeps the
-/// descriptor table off the allocator word's cache line and leaves room for
-/// future header fields, which must start zeroed.
+/// Byte size of the region header: the slot counter, the incomplete flag,
+/// and the payload counter, padded so the descriptor table starts off the
+/// counters' cache line and there is room for future header fields, which
+/// must start zeroed.
 pub(super) const HEADER_LEN: usize = 64;
+
+/// Byte offset of the claim counter (one `u64`: the CLOSED gate bit and the
+/// number of claims attempted).
+pub(super) const SLOT_COUNTER_OFFSET: usize = 0;
+
+/// Byte offset of the incomplete flag word (nonzero once a live writer lost
+/// a record).
+pub(super) const INCOMPLETE_OFFSET: usize = 8;
+
+/// Byte offset of the payload counter (one `u64`: payload bytes reserved,
+/// including by failed claims — monotonic, never read by the receiver).
+pub(super) const PAYLOAD_COUNTER_OFFSET: usize = 16;
 
 /// Byte size of one descriptor slot.
 pub(super) const SLOT_LEN: usize = size_of::<u64>();
@@ -34,47 +48,50 @@ pub(super) const MAX_PAYLOAD_LEN: usize = i32::MAX as usize;
 
 /// Maximum supported mapping size.
 ///
-/// Payload offsets and the reserved-payload counter are stored in 32 bits, so
-/// every byte offset into the mapping must fit in `u32` arithmetic; a mapping
-/// of exactly 4 GiB works because no payload can start at the very end.
+/// Payload offsets are stored in 32 bits, so every byte offset into the
+/// mapping must fit `u32` arithmetic.
 pub(super) const MAX_MAPPING_LEN: usize = 1 << 32;
 
 /// Rounds a payload length up to a multiple of the word size.
 ///
 /// Payload reservations are word-aligned — combined with the word-aligned
-/// [`usable_len`] they grow down from, this keeps every payload offset
-/// word-aligned so the receiver can copy payloads with aligned 64-bit atomic
-/// loads, and the sub-word padding stays inside the frame's own reservation.
+/// region base they grow from, this keeps every payload offset word-aligned
+/// so the receiver can copy payloads with aligned 64-bit atomic loads, and
+/// the sub-word padding stays inside the frame's own reservation.
 pub(super) const fn reserved_payload_len(payload_len: usize) -> usize {
     payload_len.next_multiple_of(SLOT_LEN)
 }
 
-/// The protocol-usable prefix of a mapping: its length rounded down to word
-/// alignment, so payload spans growing from the end stay word-aligned even
-/// when the creator requested an odd capacity.
-pub(super) const fn usable_len(mapping_len: usize) -> usize {
-    mapping_len - mapping_len % SLOT_LEN
+/// Byte size of the descriptor table in a mapping of `mapping_len` bytes.
+pub(super) const fn table_len(mapping_len: usize) -> usize {
+    let available = mapping_len - HEADER_LEN;
+    // An eighth for descriptors, floored at eight slots so small (test)
+    // regions hold a few frames, and never more than the available space.
+    let len = available / 8;
+    let len = if len < 8 * SLOT_LEN { 8 * SLOT_LEN } else { len };
+    let len = if len > available { available } else { len };
+    len - len % SLOT_LEN
 }
 
-/// First byte offset after a descriptor table of `slot_count` slots.
-pub(super) const fn table_end(slot_count: usize) -> usize {
-    HEADER_LEN + slot_count * SLOT_LEN
+/// Number of descriptor slots in a mapping of `mapping_len` bytes.
+pub(super) const fn max_slots(mapping_len: usize) -> usize {
+    table_len(mapping_len) / SLOT_LEN
 }
 
-/// Whether a mapping of `mapping_len` bytes can hold `slot_count` descriptors
-/// and `payload_bytes` reserved payload bytes without the regions meeting.
-///
-/// Also the validity check for an allocator word read back from shared
-/// memory: any word this function accepts yields in-bounds table and payload
-/// regions.
-pub(super) const fn fits(mapping_len: usize, slot_count: usize, payload_bytes: usize) -> bool {
-    // Both operands are bounded by their allocator-word field widths (30 and
-    // 32 bits), so the sum cannot overflow 64-bit `usize` arithmetic.
-    table_end(slot_count) + payload_bytes <= mapping_len
+/// Byte offset where the payload region starts. Word-aligned.
+pub(super) const fn payload_base(mapping_len: usize) -> usize {
+    HEADER_LEN + table_len(mapping_len)
+}
+
+/// Byte size of the payload region. A multiple of the word size, so a
+/// word-aligned reservation inside it never reaches past `mapping_len`.
+pub(super) const fn payload_region_len(mapping_len: usize) -> usize {
+    let len = mapping_len - payload_base(mapping_len);
+    len - len % SLOT_LEN
 }
 
 /// A validated payload byte range: the witness that offset arithmetic on this
-/// span cannot leave the mapping or touch the descriptor table.
+/// span cannot leave the payload region.
 ///
 /// Constructing a `PayloadSpan` through [`PayloadSpan::validate`] is the
 /// single validation point for descriptor metadata read back from shared
@@ -89,27 +106,25 @@ pub(super) struct PayloadSpan {
 }
 
 impl PayloadSpan {
-    /// Validates a committed descriptor's payload range against the final
-    /// region layout. Returns `None` if the range could not have been
-    /// produced by a correct writer.
-    pub(super) const fn validate(
-        mapping_len: usize,
-        table_end: usize,
-        offset: usize,
-        len: usize,
-    ) -> Option<Self> {
+    /// Validates a committed descriptor's payload range against the payload
+    /// region of a `mapping_len`-byte mapping. Returns `None` if the range
+    /// could not have been produced by a correct writer.
+    pub(super) const fn validate(mapping_len: usize, offset: usize, len: usize) -> Option<Self> {
         if len == 0 || len > MAX_PAYLOAD_LEN {
             return None;
         }
-        // Writers reserve word-aligned spans from the word-aligned mapping
-        // end, so a valid offset is word-aligned and its padded length stays
-        // inside the mapping.
+        // Writers reserve word-aligned spans from the word-aligned region
+        // base, so a valid offset is word-aligned and its padded length stays
+        // inside the region.
         if !offset.is_multiple_of(SLOT_LEN) {
             return None;
         }
-        // `offset` and `len` come from 32-bit descriptor fields, so this sum
-        // cannot overflow `usize`.
-        if offset < table_end || offset + reserved_payload_len(len) > mapping_len {
+        let base = payload_base(mapping_len);
+        // `offset` and `len` come from 32-bit descriptor fields, so these
+        // sums cannot overflow `usize`.
+        if offset < base
+            || offset + reserved_payload_len(len) > base + payload_region_len(mapping_len)
+        {
             return None;
         }
         Some(Self { offset, len })
@@ -137,55 +152,59 @@ mod tests {
     }
 
     #[test]
-    fn usable_len_rounds_down_to_words() {
-        assert!(usable_len(100) == 96);
-        assert!(usable_len(96) == 96);
-        assert!(usable_len(MAX_MAPPING_LEN) == MAX_MAPPING_LEN);
+    fn partition_is_aligned_and_disjoint() {
+        for mapping_len in [64, 100, 128, 1024, 4096, 1 << 20, MAX_MAPPING_LEN] {
+            let table = table_len(mapping_len);
+            let base = payload_base(mapping_len);
+            let region = payload_region_len(mapping_len);
+            assert!(table % SLOT_LEN == 0);
+            assert!(base % SLOT_LEN == 0);
+            assert!(region % SLOT_LEN == 0);
+            assert!(base == HEADER_LEN + table);
+            assert!(base + region <= mapping_len);
+        }
     }
 
     #[test]
-    fn table_end_starts_after_header() {
-        assert!(table_end(0) == HEADER_LEN);
-        assert!(table_end(3) == HEADER_LEN + 24);
+    fn partition_gives_an_eighth_to_the_table() {
+        assert!(table_len(1 << 20) == (1 << 20) / 8 - 8);
+        assert!(max_slots(1 << 20) == 16383);
+        // The 4 GiB production mapping: ~67M slots, ~3.4 GiB of payloads.
+        assert!(max_slots(MAX_MAPPING_LEN) == ((MAX_MAPPING_LEN - HEADER_LEN) / 8) / 8);
     }
 
     #[test]
-    fn fits_detects_frontier_collision() {
-        // 64-byte header + 1 slot + 8 payload bytes exactly fill 80 bytes.
-        assert!(fits(80, 1, 8));
-        assert!(!fits(80, 1, 16));
-        assert!(!fits(80, 2, 8));
-        assert!(!fits(72, 1, 8));
-    }
-
-    #[test]
-    fn fits_handles_the_4_gib_mapping() {
-        let max_payload = MAX_MAPPING_LEN - HEADER_LEN - SLOT_LEN;
-        assert!(fits(MAX_MAPPING_LEN, 1, max_payload));
-        assert!(!fits(MAX_MAPPING_LEN, 1, max_payload + 8));
-        // The largest admissible slot count leaves no payload space.
-        let max_slots = (MAX_MAPPING_LEN - HEADER_LEN) / SLOT_LEN;
-        assert!(fits(MAX_MAPPING_LEN, max_slots, 0));
-        assert!(!fits(MAX_MAPPING_LEN, max_slots + 1, 0));
+    fn tiny_regions_floor_the_table_at_eight_slots() {
+        // Enough space: eight slots, remainder to payloads.
+        assert!(max_slots(1024) == 15);
+        assert!(max_slots(256) == 8);
+        // Not enough space for the floor: the table takes what exists and
+        // payload capacity degrades to zero; claims fail gracefully.
+        assert!(table_len(100) == 32);
+        assert!(payload_region_len(100) == 0);
+        assert!(table_len(64) == 0);
+        assert!(max_slots(64) == 0);
     }
 
     #[test]
     fn payload_span_validates_bounds() {
-        let table_end = table_end(2);
-        // A word-aligned span inside the payload region.
-        assert!(PayloadSpan::validate(1024, table_end, 1016, 8).is_some());
-        // Exact end of the mapping.
-        assert!(PayloadSpan::validate(1024, table_end, 1016, 5).is_some());
+        let mapping_len = 1024;
+        let base = payload_base(mapping_len);
+        let region = payload_region_len(mapping_len);
+        // A word-aligned span at the region start.
+        assert!(PayloadSpan::validate(mapping_len, base, 8).is_some());
+        // Exact end of the region, with padding inside it.
+        assert!(PayloadSpan::validate(mapping_len, base + region - 8, 5).is_some());
         // Zero length is never committed.
-        assert!(PayloadSpan::validate(1024, table_end, 512, 0).is_none());
-        // Padded length may not cross the end of the mapping.
-        assert!(PayloadSpan::validate(1024, table_end, 1020, 8).is_none());
-        assert!(PayloadSpan::validate(1024, table_end, 1016, 9).is_none());
+        assert!(PayloadSpan::validate(mapping_len, base, 0).is_none());
+        // Padded length may not cross the end of the region.
+        assert!(PayloadSpan::validate(mapping_len, base + region - 8, 9).is_none());
         // Payloads may not reach into the descriptor table.
-        assert!(PayloadSpan::validate(1024, table_end, table_end - 8, 8).is_none());
+        assert!(PayloadSpan::validate(mapping_len, base - 8, 8).is_none());
+        assert!(PayloadSpan::validate(mapping_len, HEADER_LEN, 8).is_none());
         // Unaligned offsets cannot come from a correct writer.
-        assert!(PayloadSpan::validate(1024, table_end, 1017, 7).is_none());
+        assert!(PayloadSpan::validate(mapping_len, base + 4, 4).is_none());
         // Oversized lengths are rejected before any arithmetic.
-        assert!(PayloadSpan::validate(1024, table_end, 512, MAX_PAYLOAD_LEN + 1).is_none());
+        assert!(PayloadSpan::validate(mapping_len, base, MAX_PAYLOAD_LEN + 1).is_none());
     }
 }

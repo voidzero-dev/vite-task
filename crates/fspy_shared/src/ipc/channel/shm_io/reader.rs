@@ -1,8 +1,13 @@
 //! The receiver side: closing the channel and collecting committed frames.
 //!
-//! Closing never waits for writers. It prevents new claims, atomically
-//! freezes every slot that never committed, validates the committed
-//! descriptors, and copies their payloads out of the shared mapping.
+//! Closing never waits for writers, and never writes shared memory beyond
+//! freezing claimed slots: the close boundary is a snapshot load of the
+//! claim counter, unfinished slots inside the snapshot are atomically
+//! frozen, committed descriptors are validated, and their payloads are
+//! copied out of the shared mapping. Claims that arrive after the snapshot
+//! receive slot indices this pass never visits — the CLOSED gate that
+//! eventually stops them is set separately, off the latency-sensitive path
+//! (see [`super::state`]'s rule 1).
 //!
 //! The copy is deliberate: the mapping stays writable in every traced
 //! process, so this module never creates a reference into shared memory
@@ -13,7 +18,7 @@
 use std::ops::Range;
 
 use super::{
-    layout::{self, PayloadSpan},
+    layout::PayloadSpan,
     slot::{self, SlotState},
     state::SharedState,
 };
@@ -47,17 +52,15 @@ impl Frames {
 /// protocol. The mapping was corrupted; the trace is unusable.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProtocolError {
-    #[error("corrupt shared-memory allocator word")]
-    CorruptAllocator,
     #[error("corrupt shared-memory frame descriptor at slot {slot_index}")]
     CorruptDescriptor { slot_index: usize },
 }
 
 /// Closes the channel and collects the committed frames.
 ///
-/// Never blocks on writers: writers admitted before the close race per slot,
-/// and each raced slot independently ends up committed (included) or aborted
-/// (excluded). See the crate-level protocol docs in [`super`].
+/// Never blocks on writers: writers admitted before the snapshot race per
+/// slot, and each raced slot independently ends up committed (included) or
+/// aborted (excluded). See the crate-level protocol docs in [`super`].
 ///
 /// # Safety
 ///
@@ -74,32 +77,24 @@ pub(super) unsafe fn close(mem: *mut [u8]) -> Result<Frames, ProtocolError> {
     // SAFETY: forwarded from this function's contract.
     let state = unsafe { SharedState::borrow(mem) };
 
-    // Snapshot the admitted slots and stop admitting new ones. Claims and
-    // close totally order on the allocator word: every claim admitted before
-    // this operation is counted, every later one fails with `Closed`.
-    let snapshot = state.close();
-    if !snapshot.is_valid_for(state.mapping_len()) {
-        return Err(ProtocolError::CorruptAllocator);
-    }
-    let slot_count = snapshot.slot_count();
-    let table_end = layout::table_end(slot_count);
+    // The close boundary: claims at or before this snapshot are inside it,
+    // later ones land in slots this pass never visits. The count is clamped
+    // to the table capacity, so a counter inflated by failed claims (or by a
+    // foreign scribble) degrades to a full-table sweep, not an error.
+    let slot_count = state.snapshot_claims();
 
     // Freeze pass: drive every admitted slot to a terminal state and collect
-    // the committed spans. After this loop the descriptor table can no
-    // longer change — late writers lose their commit race against `ABORTED`.
+    // the committed spans. After this loop the snapshot's slice of the
+    // descriptor table can no longer change — late writers lose their commit
+    // race against `ABORTED`.
     let mut spans = Vec::new();
     let mut payload_total = 0usize;
     for slot_index in 0..slot_count {
         match slot::decode(state.freeze(slot_index)) {
             SlotState::Aborted => {}
             SlotState::Committed { payload_offset, payload_len } => {
-                let span = PayloadSpan::validate(
-                    state.mapping_len(),
-                    table_end,
-                    payload_offset,
-                    payload_len,
-                )
-                .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
+                let span = PayloadSpan::validate(state.mapping_len(), payload_offset, payload_len)
+                    .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
                 spans.push(span);
                 payload_total += span.len;
             }
@@ -120,11 +115,24 @@ pub(super) unsafe fn close(mem: *mut [u8]) -> Result<Frames, ProtocolError> {
         bounds.push(start..bytes.len());
     }
 
-    // Re-read the incomplete flag only after freezing: a writer sets it
-    // before performing an operation whose record was lost, so any flag this
-    // load misses belongs to an operation performed after close — outside
-    // the tracking boundary (rule 1 in `state`'s ordering contract).
-    let complete = !state.reload().is_incomplete();
+    // Read the incomplete flag only after freezing: a writer sets it before
+    // performing an operation whose record was lost, so any flag this load
+    // misses belongs to an operation performed after the boundary (rule 1 in
+    // `state`'s ordering contract).
+    let complete = !state.is_incomplete();
 
     Ok(Frames { bytes, bounds, complete })
+}
+
+/// Sets the CLOSED gate so writers stop claiming (and stop allocating pages
+/// of the region) once they observe it. See [`SharedState::close_claims`]:
+/// deliberately separate from [`close`] so the gate's page-materializing
+/// write can run off the latency-sensitive path.
+///
+/// # Safety
+///
+/// Same contract as [`close`].
+pub(super) unsafe fn close_claims(mem: *mut [u8]) {
+    // SAFETY: forwarded from this function's contract.
+    unsafe { SharedState::borrow(mem) }.close_claims();
 }
