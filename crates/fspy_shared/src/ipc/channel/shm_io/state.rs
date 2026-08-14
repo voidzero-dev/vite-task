@@ -224,30 +224,6 @@ impl<'m> SharedState<'m> {
         usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(self.max_slots())
     }
 
-    /// Forces the page holding the header counters to be materialized by
-    /// the operating system before anyone touches it on a latency-sensitive
-    /// path.
-    ///
-    /// A compare-exchange of zero with zero on the claim counter: on an
-    /// untouched region it performs a real write — allocating the first
-    /// block of a sparse backing file, which can cost milliseconds on
-    /// journalling filesystems — without changing protocol state. If a
-    /// claim got there first, the page is already backed and the failed
-    /// exchange changes nothing. (An `or` of zero would not do: the
-    /// compiler may lower it to a plain load, which materializes only a
-    /// hole page without allocating the block.)
-    ///
-    /// Only Linux channels use this: elsewhere the first touch is cheap.
-    #[cfg(target_os = "linux")]
-    pub(super) fn pre_fault(self) {
-        let _ = self.header_word(layout::SLOT_COUNTER_OFFSET).compare_exchange(
-            0,
-            0,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        );
-    }
-
     /// Sets the CLOSED gate so stragglers stop claiming.
     ///
     /// Not part of the close boundary (rule 1): run it after collection,

@@ -111,6 +111,31 @@ pub fn remove(path: OsCStr<'_, Thin>) -> Result<()> {
 }
 
 impl ShmHandle {
+    /// Reserves the disk blocks backing `[offset, offset + len)` without
+    /// writing data or changing the file size.
+    ///
+    /// On journalling filesystems, materializing a new area of a sparse file
+    /// on first touch can cost milliseconds; reserving the blocks up front
+    /// moves that work to creation time, where it is a cheap metadata-only
+    /// operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error reported by the filesystem — some (e.g. network
+    /// filesystems) do not support preallocation.
+    #[cfg(target_os = "linux")]
+    pub fn preallocate(&self, offset: u64, len: u64) -> Result<()> {
+        // KEEP_SIZE: allocation must never grow the file — other processes
+        // size their mappings from the file size, and the protocol requires
+        // every process to see the same region layout.
+        fspy_nostd::fs::fallocate(
+            &self.file,
+            fspy_nostd::fs::FallocateFlags::KEEP_SIZE,
+            offset,
+            len,
+        )
+    }
+
     /// Maps the shared bytes.
     ///
     /// # Errors

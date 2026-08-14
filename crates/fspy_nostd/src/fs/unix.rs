@@ -1,6 +1,8 @@
 use core::mem::MaybeUninit;
 
 pub use rustix::fs::{AtFlags, Mode, OFlags, fstat, ftruncate};
+#[cfg(target_os = "linux")]
+pub use rustix::fs::{FallocateFlags, fallocate};
 
 #[cfg(target_os = "linux")]
 use super::linux as imp;

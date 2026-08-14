@@ -105,19 +105,22 @@ pub unsafe fn close(mem: &impl AsRawSlice) -> Result<Frames, ProtocolError> {
     unsafe { reader::close(mem.as_raw_slice()) }
 }
 
-/// Materializes the page backing the protocol header without changing
-/// protocol state, so that neither a writer's first claim nor [`close`]'s
-/// snapshot pays for the backing file's first block allocation — a
-/// millisecond-scale cost on some journalling filesystems, for reads of
-/// holes as well as writes. Run it off any latency-sensitive path.
-///
-/// # Safety
-///
-/// Same contract as [`ShmWriter::new`].
+/// The byte ranges of a `mapping_len`-byte region whose backing blocks the
+/// creator should preallocate: the header page (counters plus the first
+/// slots) and the start of the payload region. Every trace writes both
+/// areas first; on filesystems where materializing a new area of the sparse
+/// backing file costs milliseconds, reserving one block per area up front
+/// keeps that cost out of a writer's first record and out of [`close`] —
+/// growing an already-materialized area is cheap.
 #[cfg(target_os = "linux")]
-pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
-    // SAFETY: forwarded from this function's contract.
-    unsafe { state::SharedState::borrow(mem.as_raw_slice()) }.pre_fault();
+pub fn preallocation_spans(mapping_len: usize) -> impl Iterator<Item = (u64, u64)> {
+    // One filesystem block suffices to start an area; clamp inside the
+    // mapping so tiny (test) regions never reserve past their end.
+    const SPAN_LEN: usize = 4096;
+    [0, layout::payload_base(mapping_len)]
+        .into_iter()
+        .filter(move |&offset| offset < mapping_len)
+        .map(move |offset| (offset as u64, SPAN_LEN.min(mapping_len - offset) as u64))
 }
 
 /// Sets the CLOSED gate so writers stop claiming once they observe it.
@@ -379,26 +382,21 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn pre_fault_does_not_disturb_protocol_state() {
-        let shm = MockedShm::alloc(1024);
-        // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+    fn preallocation_spans_cover_both_first_touch_areas() {
+        // The production mapping: one block at the header, one at the start
+        // of the payload region, both inside the mapping.
+        let spans: Vec<_> = preallocation_spans(layout::MAX_MAPPING_LEN).collect();
+        assert!(
+            spans == vec![(0, 4096), (layout::payload_base(layout::MAX_MAPPING_LEN) as u64, 4096)]
+        );
 
-        // On the untouched region, before any claim.
-        // SAFETY: see `collect_frames`.
-        unsafe { pre_fault(&shm) };
-        assert!(writer.try_write_frame(b"foo"));
-        // Racing an already claimed region must change nothing either.
-        // SAFETY: see `collect_frames`.
-        unsafe { pre_fault(&shm) };
-        assert!(writer.try_write_frame(b"bar"));
-
-        let frames = collect_frames(&shm);
-        let mut iter = frames.iter();
-        assert!(iter.next().unwrap() == b"foo");
-        assert!(iter.next().unwrap() == b"bar");
-        assert!(iter.next() == None);
-        assert!(frames.is_complete());
+        // A tiny region: spans clamp to the mapping instead of reserving
+        // past its end (which would desynchronize mapping sizes across
+        // processes if the reservation grew the file).
+        for (offset, len) in preallocation_spans(1024) {
+            assert!(offset + len <= 1024);
+            assert!(len > 0);
+        }
     }
 
     #[test]
