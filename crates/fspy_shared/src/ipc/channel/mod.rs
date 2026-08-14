@@ -1,16 +1,20 @@
 //! Fast mpsc IPC channel implementation based on shared memory.
+//!
+//! The channel is crash-tolerant and nonblocking on both ends: any sender
+//! process may die (or keep running) at any point without preventing the
+//! receiver from closing the channel and reading every committed frame. See
+//! the `shm_io` module for the underlying protocol.
 
 mod shm_io;
 
-use std::{env::temp_dir, ffi::OsStr, fs::File, io, ops::Deref, path::PathBuf};
+use std::{env::temp_dir, ffi::OsStr, io, ops::Deref, path::PathBuf};
 
 use allocator_api2::alloc::Global;
 use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
-pub use shm_io::FrameMut;
-use shm_io::{ShmReader, ShmWriter};
-use tracing::debug;
+use shm_io::ShmWriter;
+pub use shm_io::{ClaimError, FrameMut, Frames, WriteEncodedError};
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -27,16 +31,12 @@ const SHM_BACKING_PREFIX: &str = "vite-task-fspy-";
 /// Serializable configuration to create channel senders.
 #[derive(SchemaWrite, SchemaRead, Clone, Debug)]
 pub struct ChannelConf {
-    lock_file_path: Box<IpcStr>,
     shm_id: Box<IpcStr>,
 }
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
-    // Initialize the lock file with a unique name.
-    let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
-
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str())?;
     let handle =
         fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
@@ -44,13 +44,9 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     let keeper = ShmKeeper { path: shm_c_path };
     let mapping = handle.map().map_err(shm_error_to_io)?;
 
-    let conf = ChannelConf {
-        lock_file_path: lock_file_path.as_os_str().into(),
-        shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed(),
-    };
+    let conf = ChannelConf { shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed() };
 
-    let receiver = Receiver::new(lock_file_path, keeper, mapping)?;
-    Ok((conf, receiver))
+    Ok((conf, Receiver { _keeper: keeper, mapping }))
 }
 
 /// Encodes `path` as an owned NUL-terminated platform C string.
@@ -141,15 +137,14 @@ impl Drop for ShmKeeper {
 impl ChannelConf {
     /// Creates a sender.
     ///
-    /// This doesn't block on the file lock. Instead it returns immediately with error if the receiver is locked or dropped.
+    /// Never blocks. Fails when the receiver has already closed the channel
+    /// or dropped: the backing file is then removed (and, for the removal
+    /// failure edge, the region itself is marked closed).
     #[expect(
         clippy::missing_errors_doc,
         reason = "error conditions are self-evident from return type"
     )]
     pub fn sender(&self) -> io::Result<Sender> {
-        let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
-        lock_file.try_lock_shared()?;
-
         // The arena never touches the process heap, so this stays safe in
         // the preload contexts that create senders (pre-`main` constructors,
         // the Windows loader lock).
@@ -161,27 +156,22 @@ impl ChannelConf {
             .map_err(shm_error_to_io)?
             .map()
             .map_err(shm_error_to_io)?;
-        // SAFETY: `mapping` is a freshly mapped shared memory region with valid
-        // pointer and size. Exclusive write access is ensured by the shared
-        // file lock held by this sender.
+        // SAFETY: `mapping` is a freshly mapped shared memory region created
+        // zero-initialized by `channel` and accessed only through the
+        // `shm_io` protocol by every attached process.
         let writer = unsafe { ShmWriter::new(mapping) };
-        Ok(Sender { writer, lock_file, lock_file_path: self.lock_file_path.clone() })
+        if writer.is_closed() {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "the channel has been closed by the receiver",
+            ));
+        }
+        Ok(Sender { writer })
     }
 }
 
 pub struct Sender {
     writer: ShmWriter<Mapping>,
-    lock_file_path: Box<IpcStr>,
-    lock_file: File,
-}
-
-impl Drop for Sender {
-    fn drop(&mut self) {
-        if let Err(err) = self.lock_file.unlock() {
-            let lock_file_path = self.lock_file_path.to_cow_os_str();
-            debug!("Failed to unlock the shared IPC lock {}: {}", lock_file_path.display(), err);
-        }
-    }
 }
 
 impl Deref for Sender {
@@ -192,76 +182,58 @@ impl Deref for Sender {
     }
 }
 
-/// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
+// SAFETY: `Sender` only accesses the shared mapping through the `shm_io`
+// protocol, which synchronizes concurrent writers and the receiver with
+// atomic operations; the mapping's address is stable and independently owned.
 unsafe impl Send for Sender {}
 
-/// SAFETY: `Sender` holds a shared file lock that ensures there's no reader, so `shm` can be safely written to.
+// SAFETY: see the `Send` impl; `ShmWriter`'s shared-reference API is
+// internally synchronized by the protocol.
 unsafe impl Sync for Sender {}
 
 /// The unique receiver side of an IPC channel.
-/// Owns the lock file and removes it on drop.
+///
+/// Holds the shared memory and its backing file alive for as long as senders
+/// may attach; [`Receiver::close`] (or dropping) removes the backing file.
 pub struct Receiver {
-    lock_file_path: PathBuf,
-    lock_file: File,
     /// Keeps the shared memory's backing file alive for as long as senders
     /// may attach.
     _keeper: ShmKeeper,
     mapping: Mapping,
 }
 
-/// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
+// SAFETY: `Receiver` only holds the mapping; it accesses it exclusively
+// through the `shm_io` protocol in `close`, which synchronizes with senders
+// via atomic operations. The mapping's address is stable and independently
+// owned.
 unsafe impl Send for Receiver {}
 
-/// SAFETY: `Receiver` doesn't read or write `shm`. It only passes it to `ReceiverLockGuard` under the lock.
+// SAFETY: see the `Send` impl.
 unsafe impl Sync for Receiver {}
 
-impl Drop for Receiver {
-    fn drop(&mut self) {
-        if let Err(err) = std::fs::remove_file(&self.lock_file_path) {
-            debug!("Failed to remove IPC lock file {}: {}", self.lock_file_path.display(), err);
-        }
-    }
-}
-
 impl Receiver {
-    fn new(lock_file_path: PathBuf, keeper: ShmKeeper, mapping: Mapping) -> io::Result<Self> {
-        let lock_file = File::create(&lock_file_path)?;
-        Ok(Self { lock_file_path, lock_file, _keeper: keeper, mapping })
-    }
-
-    /// Lock the shared memory for unique read access.
-    /// Blocks until all the senders have dropped (or processes owning them have all exited) so the shared memory can be safely read.
-    /// During the lifetime of returned `ReceiverReadGuard`, no new senders can be created (`ChannelConf::sender` would fail).
-    #[expect(
-        clippy::missing_errors_doc,
-        reason = "error conditions are self-evident from return type"
-    )]
-    pub fn lock(&self) -> io::Result<ReceiverLockGuard<'_>> {
-        self.lock_file.lock()?;
-        // SAFETY: The exclusive file lock is held, so no writers can access the shared memory.
-        // The lock ensures all prior writes are visible to this thread.
-        let reader = ShmReader::new(unsafe { self.mapping.as_slice() });
-        Ok(ReceiverLockGuard { reader, lock_file: &self.lock_file })
-    }
-}
-
-pub struct ReceiverLockGuard<'a> {
-    reader: ShmReader<&'a [u8]>,
-    lock_file: &'a File,
-}
-
-impl Drop for ReceiverLockGuard<'_> {
-    fn drop(&mut self) {
-        if let Err(err) = self.lock_file.unlock() {
-            debug!("Failed to unlock IPC lock file: {}", err);
-        }
-    }
-}
-impl<'a> Deref for ReceiverLockGuard<'a> {
-    type Target = ShmReader<&'a [u8]>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.reader
+    /// Closes the channel and collects every committed frame.
+    ///
+    /// Never blocks on senders: new claims are rejected from this point on,
+    /// unfinished frames are atomically aborted, and committed frames are
+    /// copied out and returned. A sender process that is still alive keeps
+    /// running; anything it reports after this point is outside the
+    /// channel's boundary by design.
+    ///
+    /// # Errors
+    ///
+    /// Fails only when the shared-memory metadata was corrupted (a protocol
+    /// impossibility for correct senders); the trace is then unusable.
+    pub fn close(self) -> io::Result<Frames> {
+        let Self { _keeper: keeper, mapping } = self;
+        // Remove the backing file first so no new process attaches while the
+        // channel closes.
+        drop(keeper);
+        // SAFETY: `mapping` was created zero-initialized by `channel`, its
+        // address is stable, and all attached processes access it only
+        // through the `shm_io` protocol.
+        unsafe { shm_io::close(&mapping) }
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
 }
 
@@ -269,6 +241,7 @@ impl<'a> Deref for ReceiverLockGuard<'a> {
 mod tests {
     use std::{ffi::OsString, fs, num::NonZeroUsize, str::from_utf8};
 
+    use assert2::assert;
     use bstr::B;
     use subprocess_test::command_for_fn;
 
@@ -288,6 +261,7 @@ mod tests {
             let frame_size = NonZeroUsize::new(2).unwrap();
             let mut frame = sender.claim_frame(frame_size).unwrap();
             frame.copy_from_slice(&[4, 2]);
+            frame.finish();
         });
         command.cwd = changed_cwd.clone();
         for name in ["TMPDIR", "TMP", "TEMP"] {
@@ -297,8 +271,9 @@ mod tests {
         fs::remove_dir(changed_cwd).unwrap();
         assert!(succeeded);
 
-        let lock = receiver.lock().unwrap();
-        assert_eq!(lock.iter_frames().next().unwrap(), &[4, 2]);
+        let frames = receiver.close().unwrap();
+        assert!(frames.iter().next().unwrap() == &[4, 2]);
+        assert!(frames.is_complete());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -309,42 +284,64 @@ mod tests {
             let frame_size = NonZeroUsize::new(2).unwrap();
             let mut frame = sender.claim_frame(frame_size).unwrap();
             frame.copy_from_slice(&[4, 2]);
+            frame.finish();
         });
         assert!(std::process::Command::from(cmd).status().unwrap().success());
 
-        let lock = receiver.lock().unwrap();
-        let mut frames = lock.iter_frames();
+        let frames = receiver.close().unwrap();
+        let mut iter = frames.iter();
 
-        let received_frame = frames.next().unwrap();
-        assert_eq!(received_frame, &[4, 2]);
+        let received_frame = iter.next().unwrap();
+        assert!(received_frame == &[4, 2]);
 
-        assert!(frames.next().is_none());
+        assert!(iter.next().is_none());
+        assert!(frames.is_complete());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
-    async fn forbid_new_senders_after_locked() {
-        let (conf, receiver) = channel(42).unwrap();
-        let _lock = receiver.lock().unwrap();
+    async fn forbid_new_senders_after_close() {
+        let (conf, receiver) = channel(4096).unwrap();
+        let _frames = receiver.close().unwrap();
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
             print!("{}", conf.sender().is_ok());
         });
         let output = std::process::Command::from(cmd).output().unwrap();
-        assert_eq!(B(&output.stdout), B("false"));
+        assert!(B(&output.stdout) == B("false"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_receiver_dropped() {
-        let (conf, receiver) = channel(42).unwrap();
+        let (conf, receiver) = channel(4096).unwrap();
         drop(receiver);
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
             print!("{}", conf.sender().is_ok());
         });
         let output = std::process::Command::from(cmd).output().unwrap();
-        assert_eq!(B(&output.stdout), B("false"));
+        assert!(B(&output.stdout) == B("false"));
+    }
+
+    /// A sender that attached before close keeps its mapping but cannot
+    /// claim any new frame afterwards.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn attached_sender_cannot_claim_after_close() {
+        let (conf, receiver) = channel(4096).unwrap();
+        let sender = conf.sender().unwrap();
+
+        let mut frame = sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
+        frame.copy_from_slice(&[4, 2]);
+        frame.finish();
+
+        let frames = receiver.close().unwrap();
+        assert!(frames.iter().next().unwrap() == &[4, 2]);
+        assert!(frames.is_complete());
+
+        assert!(
+            sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap_err() == ClaimError::Closed
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -354,10 +351,10 @@ mod tests {
             let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
                 let sender = conf.sender().unwrap();
                 let data_to_send = i.to_string();
-                sender
-                    .claim_frame(NonZeroUsize::new(data_to_send.len()).unwrap())
-                    .unwrap()
-                    .copy_from_slice(data_to_send.as_bytes());
+                let mut frame =
+                    sender.claim_frame(NonZeroUsize::new(data_to_send.len()).unwrap()).unwrap();
+                frame.copy_from_slice(data_to_send.as_bytes());
+                frame.finish();
             });
             let output = std::process::Command::from(cmd).output().unwrap();
             assert!(
@@ -367,12 +364,11 @@ mod tests {
                 B(&output.stderr)
             );
         }
-        let lock = receiver.lock().unwrap();
-        let mut received_values: Vec<u16> = lock
-            .iter_frames()
-            .map(|frame| from_utf8(frame).unwrap().parse::<u16>().unwrap())
-            .collect();
+        let frames = receiver.close().unwrap();
+        let mut received_values: Vec<u16> =
+            frames.iter().map(|frame| from_utf8(frame).unwrap().parse::<u16>().unwrap()).collect();
         received_values.sort_unstable();
-        assert_eq!(received_values, (0u16..200).collect::<Vec<u16>>());
+        assert!(received_values == (0u16..200).collect::<Vec<u16>>());
+        assert!(frames.is_complete());
     }
 }

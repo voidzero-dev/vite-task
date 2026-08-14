@@ -24,19 +24,19 @@ use crate::{
     ChildTermination, TrackedChild,
     command::Command,
     error::SpawnError,
-    ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
+    ipc::{CollectedAccesses, SHM_CAPACITY},
 };
 
 const INTERPOSE_CDYLIB: Artifact =
     artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_WINDOWS");
 
 pub struct PathAccessIterable {
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
+    ipc_accesses: CollectedAccesses,
 }
 
 impl PathAccessIterable {
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        self.ipc_receiver_lock_guard.iter_path_accesses()
+        self.ipc_accesses.iter_path_accesses()
     }
 }
 
@@ -158,7 +158,7 @@ impl SpyImpl {
             stderr: child.stderr.take(),
             process_handle,
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
-            // because we need to stop the supervisor and lock the channel as soon as the child exits.
+            // because we need to stop the supervisor and close the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
                 let status = tokio::select! {
                     status = child.wait() => status?,
@@ -167,10 +167,10 @@ impl SpyImpl {
                         child.wait().await?
                     }
                 };
-                // Lock the ipc channel after the child has exited.
+                // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
-                let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;
-                let path_accesses = PathAccessIterable { ipc_receiver_lock_guard };
+                let ipc_accesses = CollectedAccesses::collect_async(receiver).await?;
+                let path_accesses = PathAccessIterable { ipc_accesses };
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })

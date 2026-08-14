@@ -40,7 +40,11 @@ impl<'a> Client<'a> {
         let Some(sender) = &self.ipc_sender else {
             return;
         };
-        sender.write_encoded(&access).expect("failed to send path access");
+        // A failed write means the receiver closed the channel (this process
+        // outlived the run's tracking boundary) or the record was lost — the
+        // latter already marked the trace incomplete. The intercepted call
+        // must proceed either way; a detours DLL can never panic its host.
+        let _ = sender.write_encoded(&access);
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {

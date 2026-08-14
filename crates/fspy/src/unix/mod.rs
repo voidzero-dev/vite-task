@@ -25,7 +25,7 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
-use crate::ipc::{OwnedReceiverLockGuard, SHM_CAPACITY};
+use crate::ipc::{CollectedAccesses, SHM_CAPACITY};
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
 
 #[derive(Debug)]
@@ -137,7 +137,7 @@ impl SpyImpl {
             stdout: child.stdout.take(),
             stderr: child.stderr.take(),
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
-            // because we need to stop the supervisor and lock the channel as soon as the child exits.
+            // because we need to stop the supervisor and close the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
                 let status = tokio::select! {
                     status = child.wait() => status?,
@@ -159,15 +159,14 @@ impl SpyImpl {
                 );
                 let arenas = arenas.collect::<Vec<_>>();
 
-                // Lock the ipc channel after the child has exited.
+                // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
                 #[cfg(not(target_env = "musl"))]
-                let ipc_receiver_lock_guard =
-                    OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
+                let ipc_accesses = CollectedAccesses::collect_async(ipc_receiver).await?;
                 let path_accesses = PathAccessIterable {
                     arenas,
                     #[cfg(not(target_env = "musl"))]
-                    ipc_receiver_lock_guard,
+                    ipc_accesses,
                 };
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
@@ -181,7 +180,7 @@ impl SpyImpl {
 pub struct PathAccessIterable {
     arenas: Vec<PathAccessArena>,
     #[cfg(not(target_env = "musl"))]
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
+    ipc_accesses: CollectedAccesses,
 }
 
 impl PathAccessIterable {
@@ -191,7 +190,7 @@ impl PathAccessIterable {
 
         #[cfg(not(target_env = "musl"))]
         {
-            let accesses_in_shm = self.ipc_receiver_lock_guard.iter_path_accesses();
+            let accesses_in_shm = self.ipc_accesses.iter_path_accesses();
             accesses_in_shm.chain(accesses_in_arena)
         }
         #[cfg(target_env = "musl")]
