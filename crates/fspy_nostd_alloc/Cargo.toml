@@ -9,10 +9,8 @@ doctest = false
 
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
-fspy_nostd = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
 bump-scope = { workspace = true }
+fspy_nostd = { workspace = true }
 
 [lints]
 workspace = true

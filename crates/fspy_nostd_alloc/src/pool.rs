@@ -8,19 +8,19 @@ use core::{
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
-use super::mmap::MmapAllocator;
+use super::PageAllocator;
 
 /// A fixed-size cache of memory chunks.
 ///
 /// Sits between the bump arenas and the underlying allocator `A` —
-/// [`MmapAllocator`] in real use, any allocator in tests — so the chunks
+/// the platform `PageAllocator` in real use, any allocator in tests — so the chunks
 /// that a finished arena gives back reach the next arena without going back
 /// to the kernel.
 ///
 /// The parameters are chosen by the layer above (the arena layer): every
 /// cached chunk is exactly `CHUNK_SIZE` bytes and allocated with
 /// `CHUNK_ALIGN`, which is also the strictest alignment the pool accepts
-/// (`bump_scope::Bump` requests 16 — see [`MmapAllocator`]'s docs for the
+/// (`bump_scope::Bump` requests 16 — see `MmapAllocator`'s docs for the
 /// links). The cache holds at most `SLOTS` chunks, so at most
 /// `SLOTS * CHUNK_SIZE` bytes stay retained.
 ///
@@ -45,7 +45,7 @@ use super::mmap::MmapAllocator;
 /// lists to leave half-linked, so a thread that disappears mid-operation
 /// (`fork`, a signal) can strand at most the one chunk it was holding,
 /// never the pool. (The underlying allocator must give the same guarantee;
-/// [`MmapAllocator`] does.)
+/// both platform page allocators do.)
 ///
 /// The pool is `const`-constructible, so it can live in a `static` and
 /// work before anything else has run.
@@ -60,11 +60,11 @@ pub struct ChunkPool<
 }
 
 impl<const CHUNK_SIZE: usize, const CHUNK_ALIGN: usize, const SLOTS: usize>
-    ChunkPool<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS>
+    ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS>
 {
     #[must_use]
     pub const fn new() -> Self {
-        Self::new_in(MmapAllocator)
+        Self::new_in(PageAllocator)
     }
 }
 
@@ -346,8 +346,8 @@ mod tests {
     /// runs against `Global` so Miri can check it.
     #[test]
     #[cfg(not(miri))]
-    fn mmap_backed_pool_smoke() {
-        let pool = ChunkPool::<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, 64>::new();
+    fn kernel_backed_pool_smoke() {
+        let pool = ChunkPool::<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, 64>::new();
         let block = pool.allocate(layout(100)).unwrap();
         assert_eq!(block.len(), CHUNK_SIZE);
         let addr = block.cast::<u8>().as_ptr().addr();
