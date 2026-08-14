@@ -2,15 +2,14 @@
 //!
 //! Taking malloc's lock is the classic way for interposed code to deadlock a
 //! traced program (see the crate docs), so the preload library allocates
-//! through this module instead. It stacks three layers and exposes only the
-//! top one, [`arena`]. A stateless page allocator is the bottom: every
-//! allocation is fresh pages from [`fspy_nostd::mm`] — an anonymous mapping
-//! on Unix, a `VirtualAlloc` region on Windows.
-//! `ChunkPool` sits on top of it and caches fixed-size chunks, so that
-//! frequent short tracing calls can reuse memory instead of paying two
-//! syscalls per call. [`arena`] creates one `bump_scope::Bump` per
-//! intercepted call, drawing its chunks from the process-wide pool and
-//! returning them on drop.
+//! through this crate instead. It stacks three layers: a stateless page
+//! allocator at the bottom, where every allocation is fresh pages from
+//! [`fspy_nostd::mm`] — an anonymous mapping on Unix, a `VirtualAlloc`
+//! region on Windows; a process-wide `ChunkPool` above it that caches
+//! fixed-size chunks; and `bump_scope::Bump`s on top. [`pooled_bump`]
+//! creates a bump that draws its chunks from the pool and returns them on
+//! drop, so frequent short-lived bumps reuse memory instead of paying two
+//! syscalls each.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -24,6 +23,10 @@ mod pool;
 mod virtual_alloc;
 
 use allocator_api2::alloc::Allocator;
+/// The bump interface [`pooled_bump`] returns, re-exported so callers can
+/// name the bound and call its methods without a direct bump-scope
+/// dependency.
+pub use bump_scope::traits::BumpAllocator;
 use bump_scope::{
     Bump,
     alloc::compat::AllocatorApi2V02Compat,
@@ -38,8 +41,8 @@ pub(crate) use virtual_alloc::VirtualAllocator as PageAllocator;
 
 /// Every cached chunk is 64 KiB: a whole multiple of the page size on all
 /// supported targets, and big enough that most intercepted calls fit their
-/// allocations into a single chunk. [`ArenaSettings`] pins the arenas' own
-/// chunk sizing to this same value.
+/// allocations into a single chunk. [`PooledBumpSettings`] pins the bumps'
+/// own chunk sizing to this same value.
 const CHUNK_SIZE: usize = 64 * 1024;
 /// The alignment chunks are allocated with. Must be at least the alignment
 /// `bump_scope::Bump` uses for its chunk requests — 16 (see
@@ -56,11 +59,12 @@ const SLOTS: usize = 64;
 /// first allocation on — even before any constructor has run.
 static CHUNK_POOL: ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS> = ChunkPool::new();
 
-/// The `Bump` settings the arenas use — the defaults, with two changes:
+/// The `Bump` settings [`pooled_bump`] uses — the defaults, with two
+/// changes:
 ///
-/// - `WithGuaranteedAllocated<false>`: an arena starts life without a chunk,
+/// - `WithGuaranteedAllocated<false>`: a bump starts life without a chunk,
 ///   so creating one allocates nothing.
-/// - `WithMinimumChunkSize<CHUNK_SIZE>`: the arena's first chunk request is
+/// - `WithMinimumChunkSize<CHUNK_SIZE>`: the bump's first chunk request is
 ///   sized to the pool's chunks, making the coupling explicit — rather than
 ///   relying on the pool rounding the default 512-byte first request up to a
 ///   whole chunk. (Both end up serving the same memory: the pool answers any
@@ -70,10 +74,10 @@ static CHUNK_POOL: ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS> = Ch
 ///   minimum — which is exactly what keeps a minimum-sized request within
 ///   the pool's `size <= CHUNK_SIZE` gate; the
 ///   `bump_chunk_requests_fit_the_pool_gates` test pins that fit.
-type ArenaSettings = <<BumpSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<false> as BumpAllocatorSettings>::WithMinimumChunkSize<CHUNK_SIZE>;
+type PooledBumpSettings = <<BumpSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<false> as BumpAllocatorSettings>::WithMinimumChunkSize<CHUNK_SIZE>;
 
 /// `Bump::unallocated` requires its base allocator to implement `Default`
-/// (an arena without chunks has nowhere to store an allocator value, so it
+/// (a bump without chunks has nowhere to store an allocator value, so it
 /// conjures one on first use). Point defaulted references at the
 /// process-wide pool. As an allocator, `&ChunkPool` already works through
 /// allocator-api2's blanket `impl Allocator for &A`.
@@ -83,25 +87,24 @@ impl Default for &'static ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOT
     }
 }
 
-/// Creates a fresh bump arena for one intercepted call, backed by the
-/// process-wide chunk pool.
+/// Creates a fresh bump backed by the process-wide chunk pool.
 ///
-/// Creating the arena allocates nothing; the first allocation grabs a whole
-/// chunk — usually a recycled one, so most calls touch no syscalls at all.
-/// Deallocation only takes back the most recent allocation (bump-arena
-/// semantics); everything is freed at once when the arena is dropped, and
+/// Creating the bump allocates nothing; the first allocation grabs a whole
+/// chunk — usually a recycled one, so most uses touch no syscalls at all.
+/// Deallocation only takes back the most recent allocation (bump
+/// semantics); everything is freed at once when the bump is dropped, and
 /// its chunks go back to the pool.
 ///
-/// The arena itself is single-owner — use one per call, do not share it
-/// across threads. Creating one is safe anywhere, any time: the pool
-/// underneath works in signal handlers, in the child of `fork()`, and under
-/// the Windows loader lock (see `ChunkPool` and the platform page allocators
-/// in this crate's source for why).
+/// The bump is single-owner — do not share it across threads. Creating one
+/// is safe anywhere, any time: the pool underneath works in signal
+/// handlers, in the child of `fork()`, and under the Windows loader lock
+/// (see `ChunkPool` and the platform page allocators in this crate's source
+/// for why).
 #[must_use]
-pub fn arena() -> impl Allocator {
+pub fn pooled_bump() -> impl BumpAllocator + Allocator {
     Bump::<
         AllocatorApi2V02Compat<&'static ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS>>,
-        ArenaSettings,
+        PooledBumpSettings,
     >::unallocated()
 }
 
@@ -115,16 +118,17 @@ mod tests {
 
     /// Pins the fit between `Bump`'s chunk requests and the pool's gates
     /// (alignment at most [`CHUNK_ALIGN`], size at most [`CHUNK_SIZE`]),
-    /// under the same [`ArenaSettings`] the arenas use — including that a
-    /// request under `WithMinimumChunkSize<CHUNK_SIZE>` still fits the
+    /// under the same [`PooledBumpSettings`] the bumps use — including that
+    /// a request under `WithMinimumChunkSize<CHUNK_SIZE>` still fits the
     /// `size <= CHUNK_SIZE` gate. bump-scope keeps its request parameters
     /// private, so this test is the enforcement: it fails if an upgrade
     /// ever changes them.
-    /// [`ArenaSettings`] with `GuaranteedAllocated` flipped back on: without
-    /// it, `Bump` demands a `Default` base allocator, and a reference to the
-    /// test's stack-local pool cannot provide one. Chunk request sizing —
-    /// what the test pins — is unaffected by that flag.
-    type TestSettings = <ArenaSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<true>;
+    /// [`PooledBumpSettings`] with `GuaranteedAllocated` flipped back on:
+    /// without it, `Bump` demands a `Default` base allocator, and a
+    /// reference to the test's stack-local pool cannot provide one. Chunk
+    /// request sizing — what the test pins — is unaffected by that flag.
+    type TestSettings =
+        <PooledBumpSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<true>;
 
     #[test]
     fn bump_chunk_requests_fit_the_pool_gates() {
@@ -153,25 +157,25 @@ mod tests {
 
     #[test]
     #[cfg(not(miri))]
-    fn arena_allocates_and_returns_chunks_to_the_pool() {
+    fn pooled_bump_allocates_and_returns_chunks_to_the_pool() {
         let layout = Layout::from_size_align(100, 8).unwrap();
 
-        let first_arena = arena();
-        let first = first_arena.allocate(layout).unwrap();
+        let first_bump = pooled_bump();
+        let first = first_bump.allocate(layout).unwrap();
         assert!(first.len() >= 100);
         // SAFETY: fresh exclusive block of at least 100 bytes.
         unsafe { first.cast::<u8>().as_ptr().write_bytes(0x5A, 100) };
-        let second = first_arena.allocate(layout).unwrap();
+        let second = first_bump.allocate(layout).unwrap();
         assert_ne!(first.cast::<u8>().as_ptr().addr(), second.cast::<u8>().as_ptr().addr());
         let first_addr = first.cast::<u8>().as_ptr().addr();
         // Everything dies at once; the chunk goes back to the pool.
-        drop(first_arena);
+        drop(first_bump);
 
-        // No other test touches the process-wide pool, so a new arena draws
+        // No other test touches the process-wide pool, so a new bump draws
         // the same chunk back and its first allocation lands at the same
         // address.
-        let second_arena = arena();
-        let again = second_arena.allocate(layout).unwrap();
+        let second_bump = pooled_bump();
+        let again = second_bump.allocate(layout).unwrap();
         assert_eq!(again.cast::<u8>().as_ptr().addr(), first_addr);
     }
 }

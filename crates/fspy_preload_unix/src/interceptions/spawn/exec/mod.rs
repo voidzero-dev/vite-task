@@ -192,7 +192,7 @@ mod linux_only {
             reason = "suppresses unused warning on *::original"
         )]
         let _unused = execveat::original;
-        let arena = fspy_nostd_alloc::arena();
+        let arena = fspy_nostd_alloc::pooled_bump();
 
         // SAFETY: dirfd and pathname are valid arguments from the interposed execveat call.
         let path = unsafe { PathAt::borrow_raw(dirfd, pathname) };

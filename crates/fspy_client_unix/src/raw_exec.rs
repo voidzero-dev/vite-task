@@ -53,7 +53,7 @@ impl RawExec {
         // execs), where malloc's lock may be held by a thread that no longer
         // exists. A per-call arena has exactly this lifetime, and hands back
         // the memory when the call ends.
-        let arena = fspy_nostd_alloc::arena();
+        let arena = fspy_nostd_alloc::pooled_bump();
         let mut ptr_vec = allocator_api2::vec::Vec::with_capacity_in(strs.len() + 1, &arena);
         for s in &mut strs {
             s.push(0);

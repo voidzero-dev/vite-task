@@ -178,7 +178,7 @@ impl ChannelConf {
         // The arena never touches the process heap, so this stays safe in
         // the preload contexts that create senders (pre-`main` constructors,
         // the Windows loader lock).
-        let arena = fspy_nostd_alloc::arena();
+        let arena = fspy_nostd_alloc::pooled_bump();
         let shm_path = self
             .shm_id
             .to_os_c_string_in(&arena)
