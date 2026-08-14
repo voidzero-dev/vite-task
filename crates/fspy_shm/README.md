@@ -28,7 +28,7 @@ One implementation serves every platform: a sparse file at the caller's path. An
 
 Only written pages ever occupy memory or disk. The multi-gigabyte capacity fspy asks for therefore costs about as much as the data a run actually records.
 
-Every operation goes through [`fspy_nostd`](../fspy_nostd) wrappers or direct Win32 calls. The platform-specific parts are three short passages:
+The crate is `no_std`: paths arrive as platform C strings and errors are raw OS error codes, so it stays usable from the preload contexts described in [`fspy_nostd`](../fspy_nostd)'s README. Every operation goes through `fspy_nostd` wrappers or direct Win32 calls. The platform-specific parts are three short passages:
 
 | Concern          | Unix                                     | Windows                                                                     |
 | ---------------- | ---------------------------------------- | --------------------------------------------------------------------------- |

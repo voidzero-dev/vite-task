@@ -7,10 +7,13 @@ publish = false
 
 [dependencies]
 wincode = { workspace = true, features = ["derive"] }
+allocator-api2 = { workspace = true, features = ["alloc"] }
 bitflags = { workspace = true }
 bumpalo = { workspace = true }
 bstr = { workspace = true, features = ["alloc", "std"] }
 bytemuck = { workspace = true, features = ["must_cast", "derive"] }
+fspy_nostd = { workspace = true }
+fspy_nostd_alloc = { workspace = true }
 fspy_shm = { workspace = true }
 fspy_ipc_str = { workspace = true }
 thiserror = { workspace = true }

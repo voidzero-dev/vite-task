@@ -1,13 +1,9 @@
 //! Unix shared memory backed by a sparse temporary file and identified by its
 //! path.
 
-use std::{
-    ffi::{CString, OsStr},
-    io,
-    num::NonZeroUsize,
-    os::unix::ffi::OsStrExt as _,
-    ptr::{self, NonNull},
-};
+use core::ptr::{self, NonNull};
+
+use fspy_nostd::{OsCStr, Result, Thin};
 
 /// Opened shared memory that is not mapped yet.
 ///
@@ -15,7 +11,7 @@ use std::{
 /// view of the same bytes. Drop the handle once the mappings exist.
 pub struct ShmHandle {
     file: fspy_nostd::OwnedFd,
-    size: NonZeroUsize,
+    size: usize,
 }
 
 /// The mapped shared bytes.
@@ -24,7 +20,7 @@ pub struct ShmHandle {
 /// shared memory's identifier.
 pub struct Mapping {
     ptr: NonNull<u8>,
-    len: NonZeroUsize,
+    len: usize,
 }
 
 // SAFETY: a mapping owns no thread-affine state; access synchronization is
@@ -47,19 +43,16 @@ unsafe impl Sync for Mapping {}
 /// Only pages that are actually written occupy memory or disk, so a large
 /// capacity is cheap.
 ///
+/// A `size` of zero is not rejected here: mapping the empty file fails with
+/// the OS's own error.
+///
 /// # Errors
 ///
-/// Returns an error if the shared memory cannot be created or sized. A file
-/// created by the failing call is removed before it returns.
-pub fn create(path: &OsStr, size: usize) -> io::Result<ShmHandle> {
-    let size = NonZeroUsize::new(size).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size must be nonzero")
-    })?;
-    let size_u64 = u64::try_from(size.get()).map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64")
-    })?;
-
-    let file = open_file(
+/// Returns the error reported while creating or sizing the shared memory. A
+/// file created by the failing call is removed before it returns.
+pub fn create(path: OsCStr<'_, Thin>, size: usize) -> Result<ShmHandle> {
+    let file = fspy_nostd::fs::openat(
+        fspy_nostd::CWD,
         path,
         fspy_nostd::fs::OFlags::RDWR
             | fspy_nostd::fs::OFlags::CREATE
@@ -70,10 +63,10 @@ pub fn create(path: &OsStr, size: usize) -> io::Result<ShmHandle> {
     )?;
 
     // Every byte reads as zero because the file is all holes.
-    if let Err(error) = fspy_nostd::fs::ftruncate(&file, size_u64) {
+    if let Err(error) = fspy_nostd::fs::ftruncate(&file, size as u64) {
         // Do not hand the caller an unusable partial file to clean up.
         let _ = remove(path);
-        return Err(error_to_io(error));
+        return Err(error);
     }
 
     Ok(ShmHandle { file, size })
@@ -81,12 +74,16 @@ pub fn create(path: &OsStr, size: usize) -> io::Result<ShmHandle> {
 
 /// Opens the shared memory backed by the file at `path`.
 ///
+/// The file's size is read here but validated by [`map`](ShmHandle::map):
+/// mapping an empty or oversized file fails there with the OS's own error.
+///
 /// # Errors
 ///
-/// Returns an error if the shared memory is unavailable, which is the common
+/// Returns the error reported while opening the file, which is the common
 /// case once the backing file has been removed.
-pub fn open(path: &OsStr) -> io::Result<ShmHandle> {
-    let file = open_file(
+pub fn open(path: OsCStr<'_, Thin>) -> Result<ShmHandle> {
+    let file = fspy_nostd::fs::openat(
+        fspy_nostd::CWD,
         path,
         fspy_nostd::fs::OFlags::RDWR | fspy_nostd::fs::OFlags::CLOEXEC,
         fspy_nostd::fs::Mode::empty(),
@@ -94,20 +91,10 @@ pub fn open(path: &OsStr) -> io::Result<ShmHandle> {
     // If another process shrinks the file before `map`, mapping fails. If it
     // resizes afterwards, nothing here touches the mapped pages. A concurrent
     // resize cannot make a mapping access invalid memory.
-    let size = usize::try_from(fspy_nostd::fs::fstat(&file).map_err(error_to_io)?.st_size)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory size"))?;
-    let size = NonZeroUsize::new(size)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "shared-memory size is zero"))?;
+    //
+    // A regular file's size is never negative.
+    let size = crate::file_size_to_len(fspy_nostd::fs::fstat(&file)?.st_size.cast_unsigned());
     Ok(ShmHandle { file, size })
-}
-
-fn open_file(
-    path: &OsStr,
-    flags: fspy_nostd::fs::OFlags,
-    mode: fspy_nostd::fs::Mode,
-) -> io::Result<fspy_nostd::OwnedFd> {
-    let path = CString::new(path.as_bytes())?;
-    fspy_nostd::fs::openat(fspy_nostd::CWD, as_nostd_path(&path), flags, mode).map_err(error_to_io)
 }
 
 /// Removes the shared memory at `path`.
@@ -119,24 +106,8 @@ fn open_file(
 /// # Errors
 ///
 /// Returns the error reported while unlinking the path.
-pub fn remove(path: &OsStr) -> io::Result<()> {
-    let path = CString::new(path.as_bytes())?;
-    fspy_nostd::fs::unlinkat(
-        fspy_nostd::CWD,
-        as_nostd_path(&path),
-        fspy_nostd::fs::AtFlags::empty(),
-    )
-    .map_err(error_to_io)
-}
-
-fn as_nostd_path(path: &CString) -> fspy_nostd::CStr<'_, fspy_nostd::Fat> {
-    // SAFETY: `CString` contains no interior NUL and includes one terminating
-    // NUL; the returned view borrows it.
-    unsafe { fspy_nostd::CStr::from_units_with_nul_unchecked(path.as_bytes_with_nul()) }
-}
-
-fn error_to_io(error: fspy_nostd::Error) -> io::Error {
-    io::Error::from_raw_os_error(error.raw_os_error())
+pub fn remove(path: OsCStr<'_, Thin>) -> Result<()> {
+    fspy_nostd::fs::unlinkat(fspy_nostd::CWD, path, fspy_nostd::fs::AtFlags::empty())
 }
 
 impl ShmHandle {
@@ -145,33 +116,30 @@ impl ShmHandle {
     /// # Errors
     ///
     /// Returns an error if the mapping cannot be established.
-    pub fn map(&self) -> io::Result<Mapping> {
-        let _slice_len = isize::try_from(self.size.get()).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "shared-memory size exceeds isize")
-        })?;
-        // SAFETY: the address is only a hint, the validated nonzero length is
-        // representable as a Rust slice, the descriptor remains borrowed, and
-        // the resulting shared mapping is owned by `Mapping`.
+    pub fn map(&self) -> Result<Mapping> {
+        let len = self.size;
+        // SAFETY: the address is only a hint, the descriptor remains
+        // borrowed, and the resulting shared mapping is owned by `Mapping`.
+        // The kernel rejects zero and address-space-exceeding lengths.
         let mapped = unsafe {
             fspy_nostd::mm::mmap(
                 ptr::null_mut(),
-                self.size.get(),
+                len,
                 fspy_nostd::mm::ProtFlags::READ | fspy_nostd::mm::ProtFlags::WRITE,
                 fspy_nostd::mm::MapFlags::SHARED,
                 &self.file,
                 0,
             )
-        }
-        .map_err(error_to_io)?;
+        }?;
         let Some(ptr) = NonNull::new(mapped.cast()) else {
             // `mmap` reports failure with `MAP_FAILED`, not null, so this is a
             // successful mapping at address zero. Rust references cannot
             // represent it.
             // SAFETY: release that complete mapping before returning an error.
-            let _ = unsafe { fspy_nostd::mm::munmap(mapped, self.size.get()) };
-            return Err(io::Error::other("mmap returned address zero"));
+            let _ = unsafe { fspy_nostd::mm::munmap(mapped, len) };
+            return Err(fspy_nostd::Error::INVAL);
         };
-        Ok(Mapping { ptr, len: self.size })
+        Ok(Mapping { ptr, len })
     }
 }
 
@@ -179,7 +147,7 @@ impl Drop for Mapping {
     fn drop(&mut self) {
         // SAFETY: this is the complete mapping owned by `self`, and dropping
         // it proves that no safe borrow through `self` remains.
-        let _ = unsafe { fspy_nostd::mm::munmap(self.ptr.as_ptr().cast(), self.len.get()) };
+        let _ = unsafe { fspy_nostd::mm::munmap(self.ptr.as_ptr().cast(), self.len) };
     }
 }
 
@@ -188,7 +156,7 @@ impl Mapping {
     /// Returns the mapped length in bytes.
     #[must_use]
     pub const fn len(&self) -> usize {
-        self.len.get()
+        self.len
     }
 
     /// Returns a raw pointer to the first mapped byte.
@@ -205,8 +173,10 @@ impl Mapping {
     /// the lifetime of the returned slice.
     #[must_use]
     pub const unsafe fn as_slice(&self) -> &[u8] {
-        // SAFETY: The mapping is valid for its full length, and the caller
+        // SAFETY: The mapping is valid for its full length, which fits the
+        // virtual address space and is therefore far below the `isize::MAX`
+        // slice bound on every supported 64-bit target, and the caller
         // guarantees that it is not mutated while the slice is borrowed.
-        unsafe { std::slice::from_raw_parts(self.as_ptr().cast_const(), self.len()) }
+        unsafe { core::slice::from_raw_parts(self.as_ptr().cast_const(), self.len()) }
     }
 }

@@ -2,8 +2,11 @@
 
 mod shm_io;
 
-use std::{env::temp_dir, fs::File, io, ops::Deref, path::PathBuf};
+use std::{env::temp_dir, ffi::OsStr, fs::File, io, ops::Deref, path::PathBuf};
 
+use allocator_api2::alloc::Global;
+use fspy_nostd::Fat;
+use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
 pub use shm_io::FrameMut;
 use shm_io::{ShmReader, ShmWriter};
@@ -35,18 +38,58 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
 
     let shm_path = shm_backing_path()?;
-    let handle = fspy_shm::create(shm_path.as_os_str(), capacity)?;
+    let shm_c_path = os_c_string(shm_path.as_os_str())?;
+    let handle =
+        fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
     // The keeper exists from here on, so every error path below cleans up.
-    let keeper = ShmKeeper { path: shm_path };
-    let mapping = handle.map()?;
+    let keeper = ShmKeeper { path: shm_c_path };
+    let mapping = handle.map().map_err(shm_error_to_io)?;
 
     let conf = ChannelConf {
         lock_file_path: lock_file_path.as_os_str().into(),
-        shm_id: keeper.path.as_os_str().into(),
+        shm_id: shm_path.as_os_str().into(),
     };
 
     let receiver = Receiver::new(lock_file_path, keeper, mapping)?;
     Ok((conf, receiver))
+}
+
+/// Encodes `path` as an owned NUL-terminated platform C string.
+fn os_c_string(path: &OsStr) -> io::Result<OsCString<Fat, Global>> {
+    let mut units = os_units(path);
+    units.push(0);
+    OsCString::from_vec_with_nul(units)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))
+}
+
+#[cfg(unix)]
+fn os_units(path: &OsStr) -> allocator_api2::vec::Vec<u8> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let mut units = allocator_api2::vec::Vec::with_capacity(path.len() + 1);
+    units.extend_from_slice(path.as_bytes());
+    units
+}
+
+#[cfg(windows)]
+fn os_units(path: &OsStr) -> allocator_api2::vec::Vec<u16> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let mut units = allocator_api2::vec::Vec::with_capacity(path.len() + 1);
+    for unit in path.encode_wide() {
+        units.push(unit);
+    }
+    units
+}
+
+#[cfg(unix)]
+fn shm_error_to_io(error: fspy_nostd::Error) -> io::Error {
+    io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+#[cfg(windows)]
+fn shm_error_to_io(error: fspy_nostd::Error) -> io::Error {
+    io::Error::from_raw_os_error(error.raw_os_error().cast_signed())
 }
 
 /// Returns a fresh absolute path for a shared-memory backing file.
@@ -87,12 +130,12 @@ fn to_verbatim_if_long(path: PathBuf) -> io::Result<PathBuf> {
 /// Removal is cleanup, not a stop signal: later opens fail, but existing
 /// handles and mappings keep reading and writing; see [`fspy_shm::remove`].
 struct ShmKeeper {
-    path: PathBuf,
+    path: OsCString<Fat, Global>,
 }
 
 impl Drop for ShmKeeper {
     fn drop(&mut self) {
-        let _ = fspy_shm::remove(self.path.as_os_str());
+        let _ = fspy_shm::remove(self.path.as_c_str().as_thin());
     }
 }
 
@@ -108,7 +151,11 @@ impl ChannelConf {
         let lock_file = File::open(self.lock_file_path.to_cow_os_str())?;
         lock_file.try_lock_shared()?;
 
-        let mapping = fspy_shm::open(&self.shm_id.to_cow_os_str())?.map()?;
+        let shm_path = os_c_string(&self.shm_id.to_cow_os_str())?;
+        let mapping = fspy_shm::open(shm_path.as_c_str().as_thin())
+            .map_err(shm_error_to_io)?
+            .map()
+            .map_err(shm_error_to_io)?;
         // SAFETY: `mapping` is a freshly mapped shared memory region with valid
         // pointer and size. Exclusive write access is ensured by the shared
         // file lock held by this sender.

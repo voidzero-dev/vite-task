@@ -7,10 +7,12 @@ publish = false
 [lib]
 doctest = false
 
-[target.'cfg(unix)'.dependencies]
+[dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
-bump-scope = { workspace = true }
 fspy_nostd = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+bump-scope = { workspace = true }
 
 [lints]
 workspace = true

@@ -115,12 +115,12 @@ mod tests {
         let expected = expected.as_units_with_nul();
 
         assert_eq!(path.as_c_str().as_units_with_nul(), expected);
-        assert_eq!(path.as_bytes(), &expected[..expected.len() - 1]);
-        assert_eq!(path.as_bytes_with_nul(), expected);
-        assert_eq!(path.into_bytes().as_slice(), &expected[..expected.len() - 1]);
+        assert_eq!(path.as_units(), &expected[..expected.len() - 1]);
+        assert_eq!(path.as_units_with_nul(), expected);
+        assert_eq!(path.into_units().as_slice(), &expected[..expected.len() - 1]);
 
         let path = super::getcwd(Global).unwrap();
-        assert_eq!(path.into_bytes_with_nul().as_slice(), expected);
+        assert_eq!(path.into_units_with_nul().as_slice(), expected);
     }
 
     #[cfg(target_os = "macos")]

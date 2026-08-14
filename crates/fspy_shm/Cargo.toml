@@ -21,7 +21,7 @@ windows-sys = { workspace = true, features = [
 [dev-dependencies]
 ctor = { workspace = true }
 subprocess_test = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

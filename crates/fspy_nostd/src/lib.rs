@@ -20,7 +20,7 @@ pub mod mm;
 #[cfg(unix)]
 pub mod param;
 
-pub use c_str::{CStr, CStrUnit, Fat, Thin, Units, WideCStr};
+pub use c_str::{CStr, CStrUnit, Fat, OsCStr, Thin, Units, WideCStr};
 #[cfg(windows)]
 pub use windows::{
     BorrowedHandle, OwnedHandle, RawHandle, SecurityAttributes, bool_result, get_module_handle,

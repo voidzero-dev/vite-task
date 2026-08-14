@@ -673,9 +673,10 @@ mod tests {
         const SHM_SIZE: usize = 1024 * 1024;
 
         let shm_path = crate::ipc::channel::shm_backing_path().unwrap();
-        let handle = fspy_shm::create(shm_path.as_os_str(), SHM_SIZE).unwrap();
-        let _keeper = crate::ipc::channel::ShmKeeper { path: shm_path.clone() };
         let shm_name = shm_path.to_str().expect("test temp dir is UTF-8").to_owned();
+        let c_path = crate::ipc::channel::os_c_string(shm_path.as_os_str()).unwrap();
+        let handle = fspy_shm::create(c_path.as_c_str().as_thin(), SHM_SIZE).unwrap();
+        let _keeper = crate::ipc::channel::ShmKeeper { path: c_path };
         // Map before the children run. Windows keeps views coherent while they
         // exist at the same time; a view created after every writer exited can
         // observe the file before the writers' dirty pages reach it.
@@ -686,8 +687,11 @@ mod tests {
                 let cmd = command_for_fn!(
                     (shm_name.clone(), child_index),
                     |(shm_name, child_index): (String, usize)| {
+                        let c_path =
+                            crate::ipc::channel::os_c_string(std::ffi::OsStr::new(&shm_name))
+                                .unwrap();
                         let mapping =
-                            fspy_shm::open(std::ffi::OsStr::new(&shm_name)).unwrap().map().unwrap();
+                            fspy_shm::open(c_path.as_c_str().as_thin()).unwrap().map().unwrap();
                         // SAFETY: `mapping` is a freshly mapped shared memory region with a
                         // valid pointer and size. Concurrent write access is safe because
                         // `ShmWriter` uses atomic operations.

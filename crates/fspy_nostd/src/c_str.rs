@@ -46,6 +46,15 @@ pub struct CStr<'a, R, U: CStrUnit = u8> {
 /// A borrowed NUL-terminated string of `u16` code units.
 pub type WideCStr<'a, R> = CStr<'a, R, u16>;
 
+/// A borrowed NUL-terminated string of the platform's native path code
+/// units: bytes on Unix and wide (`u16`) code units on Windows.
+#[cfg(unix)]
+pub type OsCStr<'a, R> = CStr<'a, R>;
+/// A borrowed NUL-terminated string of the platform's native path code
+/// units: bytes on Unix and wide (`u16`) code units on Windows.
+#[cfg(windows)]
+pub type OsCStr<'a, R> = WideCStr<'a, R>;
+
 /// An iterator over the non-NUL code units of a thin C string.
 #[derive(Clone)]
 pub struct Units<'a, U: CStrUnit> {
@@ -185,6 +194,13 @@ impl<'a, U: CStrUnit> CStr<'a, Fat, U> {
             },
             lifetime: PhantomData,
         }
+    }
+
+    /// Discards the retained length and returns a thin view of the same
+    /// string.
+    #[must_use]
+    pub const fn as_thin(self) -> CStr<'a, Thin, U> {
+        CStr { ptr: self.ptr, repr: Thin { _private: () }, lifetime: PhantomData }
     }
 
     /// Returns the string's code units without the terminating NUL.

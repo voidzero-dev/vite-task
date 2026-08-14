@@ -11,7 +11,7 @@ fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Op
     if fd.as_raw_fd() == CWD.as_raw_fd() {
         let path = fspy_nostd_alloc::fs::getcwd(allocator)
             .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
-            .into_bytes();
+            .into_units();
         return Ok(Some(path));
     }
     let mut path = [0; PROC_FD_PATH_CAPACITY];
@@ -51,7 +51,7 @@ fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Op
     if fd.as_raw_fd() == CWD.as_raw_fd() {
         let path = fspy_nostd_alloc::fs::getcwd(allocator)
             .map_err(|errno| nix::errno::Errno::from_raw(errno.raw_os_error()))?
-            .into_bytes();
+            .into_units();
         return Ok(Some(path));
     }
 
@@ -59,7 +59,7 @@ fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Op
         Ok(path) => {
             // `F_GETPATH` does not return a length. Count at this caller before
             // converting its allocation into the returned path.
-            Ok(Some(path.count().into_bytes()))
+            Ok(Some(path.count().into_units()))
         }
         Err(fspy_nostd::Error::BADF | fspy_nostd::Error::NOENT) => Ok(None),
         Err(errno) => Err(nix::errno::Errno::from_raw(errno.raw_os_error())),

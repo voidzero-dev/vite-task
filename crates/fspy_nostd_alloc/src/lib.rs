@@ -11,28 +11,35 @@
 //! intercepted call, drawing its chunks from the process-wide pool and
 //! returning them on drop.
 
-#![cfg(unix)]
 #![cfg_attr(not(test), no_std)]
 
 mod c_string;
+#[cfg(unix)]
 pub mod fs;
+#[cfg(unix)]
 mod mmap;
+#[cfg(unix)]
 mod pool;
 
+#[cfg(unix)]
 use allocator_api2::alloc::Allocator;
+#[cfg(unix)]
 use bump_scope::{
     Bump,
     alloc::compat::AllocatorApi2V02Compat,
     settings::{BumpAllocatorSettings, BumpSettings},
 };
-pub use c_string::CString;
+pub use c_string::{CString, OsCString};
+#[cfg(unix)]
 use mmap::MmapAllocator;
+#[cfg(unix)]
 use pool::ChunkPool;
 
 /// Every cached chunk is 64 KiB: a whole multiple of the page size on all
 /// supported targets, and big enough that most intercepted calls fit their
 /// allocations into a single chunk. [`ArenaSettings`] pins the arenas' own
 /// chunk sizing to this same value.
+#[cfg(unix)]
 const CHUNK_SIZE: usize = 64 * 1024;
 /// The alignment chunks are allocated with. Must be at least the alignment
 /// `bump_scope::Bump` uses for its chunk requests — 16 (see
@@ -40,13 +47,16 @@ const CHUNK_SIZE: usize = 64 * 1024;
 /// constant, so the `bump_chunk_requests_fit_the_pool_gates` test pins the
 /// fit instead: it fails if a bump-scope upgrade ever requests chunks the
 /// pool would refuse.
+#[cfg(unix)]
 const CHUNK_ALIGN: usize = 16;
 /// At most this many chunks stay cached, capping retained memory at
 /// `SLOTS * CHUNK_SIZE` = 4 MiB.
+#[cfg(unix)]
 const SLOTS: usize = 64;
 
 /// The process-wide chunk pool. `const`-initialized, so it works from the
 /// first allocation on — even before any constructor has run.
+#[cfg(unix)]
 static CHUNK_POOL: ChunkPool<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS> = ChunkPool::new();
 
 /// The `Bump` settings the arenas use — the defaults, with two changes:
@@ -63,6 +73,7 @@ static CHUNK_POOL: ChunkPool<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS> = Ch
 ///   minimum — which is exactly what keeps a minimum-sized request within
 ///   the pool's `size <= CHUNK_SIZE` gate; the
 ///   `bump_chunk_requests_fit_the_pool_gates` test pins that fit.
+#[cfg(unix)]
 type ArenaSettings = <<BumpSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<false> as BumpAllocatorSettings>::WithMinimumChunkSize<CHUNK_SIZE>;
 
 /// `Bump::unallocated` requires its base allocator to implement `Default`
@@ -70,6 +81,7 @@ type ArenaSettings = <<BumpSettings as BumpAllocatorSettings>::WithGuaranteedAll
 /// conjures one on first use). Point defaulted references at the
 /// process-wide pool. As an allocator, `&ChunkPool` already works through
 /// allocator-api2's blanket `impl Allocator for &A`.
+#[cfg(unix)]
 impl Default for &'static ChunkPool<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS> {
     fn default() -> Self {
         &CHUNK_POOL
@@ -89,6 +101,7 @@ impl Default for &'static ChunkPool<MmapAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOT
 /// across threads. Creating one is safe anywhere, any time: the pool
 /// underneath works in signal handlers and in the child of `fork()` (see
 /// `ChunkPool` and `MmapAllocator` in this crate's source for why).
+#[cfg(unix)]
 #[must_use]
 pub fn arena() -> impl Allocator {
     Bump::<
@@ -97,7 +110,7 @@ pub fn arena() -> impl Allocator {
     >::unallocated()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use core::alloc::Layout;
 

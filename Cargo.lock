@@ -1416,6 +1416,7 @@ dependencies = [
 name = "fspy_shared"
 version = "0.0.0"
 dependencies = [
+ "allocator-api2",
  "assert2",
  "bitflags 2.10.0",
  "bstr",
@@ -1423,6 +1424,8 @@ dependencies = [
  "bytemuck",
  "ctor",
  "fspy_ipc_str",
+ "fspy_nostd",
+ "fspy_nostd_alloc",
  "fspy_shm",
  "omnipath",
  "rustc-hash",
@@ -1461,7 +1464,7 @@ dependencies = [
  "ctor",
  "fspy_nostd",
  "subprocess_test",
- "uuid",
+ "tempfile",
  "windows-sys 0.61.2",
 ]
 
