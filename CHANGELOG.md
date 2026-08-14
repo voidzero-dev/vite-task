@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Automatic file-access tracking no longer panics or blocks task completion when a tracked process crashes mid-record, closes inherited file descriptors, or keeps running after the task exits; such runs now finish immediately with every completed record intact ([#544](https://github.com/voidzero-dev/vite-task/issues/544), [#675](https://github.com/voidzero-dev/vite-task/pull/675)).
 - **Fixed** Vite+ diagnostics now display individual paths and working directories without Rust debug formatting such as quoted paths or escaped Windows backslashes ([#534](https://github.com/voidzero-dev/vite-task/pull/534)).
 - **Fixed** Automatic file-access tracking now works inside the default Codex CLI and Claude Code sandboxes ([#562](https://github.com/voidzero-dev/vite-task/issues/562), [#563](https://github.com/voidzero-dev/vite-task/issues/563), [#576](https://github.com/voidzero-dev/vite-task/pull/576), [#569](https://github.com/voidzero-dev/vite-task/pull/569)).
 - **Fixed** Broad workspace globs no longer discover and run package scripts inside `node_modules` ([#539](https://github.com/voidzero-dev/vite-task/pull/539)).
