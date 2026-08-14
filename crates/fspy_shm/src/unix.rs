@@ -2,27 +2,12 @@
 //! path.
 
 use std::{
-    env::temp_dir,
     ffi::{CString, OsStr},
     io,
     num::NonZeroUsize,
     os::unix::ffi::OsStrExt as _,
-    path::PathBuf,
     ptr::{self, NonNull},
 };
-
-use uuid::Uuid;
-
-use crate::BACKING_PREFIX;
-
-/// Keeps the shared memory's identifier alive and removes it on drop.
-///
-/// Removal is cleanup, not a stop signal: later opens fail, but existing
-/// [`ShmHandle`]s and [`Mapping`]s keep reading and writing. To stop them,
-/// store a flag in the shared bytes, as the fspy channel's close gate does.
-pub struct ShmKeeper {
-    path: PathBuf,
-}
 
 /// Opened shared memory that is not mapped yet.
 ///
@@ -49,18 +34,24 @@ unsafe impl Send for Mapping {}
 // concurrent access is synchronized by the fspy channel.
 unsafe impl Sync for Mapping {}
 
-/// Creates `size` bytes of zero-initialized shared memory.
+/// Creates `size` bytes of zero-initialized shared memory backed by the file
+/// at `path`.
 ///
-/// Returns its [`ShmKeeper`] and an already opened [`ShmHandle`], so the
-/// creating process never has to go through [`open`].
+/// The file must not exist yet and is created with mode `0o600`. The path is
+/// how other processes reach the shared memory, so the caller should supply
+/// an absolute path that keeps working across working-directory changes.
+///
+/// Returns an already opened [`ShmHandle`], so the creating process never has
+/// to look its own file up by path.
 ///
 /// Only pages that are actually written occupy memory or disk, so a large
 /// capacity is cheap.
 ///
 /// # Errors
 ///
-/// Returns an error if the shared memory cannot be created or sized.
-pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
+/// Returns an error if the shared memory cannot be created or sized. A file
+/// created by the failing call is removed before it returns.
+pub fn create(path: &OsStr, size: usize) -> io::Result<ShmHandle> {
     let size = NonZeroUsize::new(size).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size must be nonzero")
     })?;
@@ -68,14 +59,8 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
         io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds u64")
     })?;
 
-    // `temp_dir` reflects `TMPDIR` verbatim, which may be relative. The
-    // identifier travels to processes with other working directories, so
-    // resolve it against the creator's current directory first.
-    let path = std::path::absolute(temp_dir())?
-        .join(format!("{BACKING_PREFIX}{}.shm", Uuid::new_v4().simple()));
-
     let file = open_file(
-        path.as_os_str(),
+        path,
         fspy_nostd::fs::OFlags::RDWR
             | fspy_nostd::fs::OFlags::CREATE
             | fspy_nostd::fs::OFlags::EXCL
@@ -83,27 +68,26 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
         // Only the creating user may open the mapping.
         fspy_nostd::fs::Mode::RUSR | fspy_nostd::fs::Mode::WUSR,
     )?;
-    // The keeper exists from here on, so every error path below cleans up.
-    let keeper = ShmKeeper { path };
 
     // Every byte reads as zero because the file is all holes.
-    fspy_nostd::fs::ftruncate(&file, size_u64).map_err(error_to_io)?;
+    if let Err(error) = fspy_nostd::fs::ftruncate(&file, size_u64) {
+        // Do not hand the caller an unusable partial file to clean up.
+        let _ = remove(path);
+        return Err(error_to_io(error));
+    }
 
-    Ok((keeper, ShmHandle { file, size }))
+    Ok(ShmHandle { file, size })
 }
 
-/// Opens the shared memory identified by `id`.
-///
-/// The identifier works from any process, regardless of the process's working
-/// directory or environment.
+/// Opens the shared memory backed by the file at `path`.
 ///
 /// # Errors
 ///
 /// Returns an error if the shared memory is unavailable, which is the common
-/// case once its keeper has been dropped.
-pub fn open(id: &OsStr) -> io::Result<ShmHandle> {
+/// case once the backing file has been removed.
+pub fn open(path: &OsStr) -> io::Result<ShmHandle> {
     let file = open_file(
-        id,
+        path,
         fspy_nostd::fs::OFlags::RDWR | fspy_nostd::fs::OFlags::CLOEXEC,
         fspy_nostd::fs::Mode::empty(),
     )?;
@@ -126,7 +110,16 @@ fn open_file(
     fspy_nostd::fs::openat(fspy_nostd::CWD, as_nostd_path(&path), flags, mode).map_err(error_to_io)
 }
 
-fn remove_file(path: &OsStr) -> io::Result<()> {
+/// Removes the shared memory at `path`.
+///
+/// Removal is cleanup, not a stop signal: later opens fail, but existing
+/// [`ShmHandle`]s and [`Mapping`]s keep reading and writing. To stop them,
+/// store a flag in the shared bytes, as the fspy channel's close gate does.
+///
+/// # Errors
+///
+/// Returns the error reported while unlinking the path.
+pub fn remove(path: &OsStr) -> io::Result<()> {
     let path = CString::new(path.as_bytes())?;
     fspy_nostd::fs::unlinkat(
         fspy_nostd::CWD,
@@ -144,21 +137,6 @@ fn as_nostd_path(path: &CString) -> fspy_nostd::CStr<'_, fspy_nostd::Fat> {
 
 fn error_to_io(error: fspy_nostd::Error) -> io::Error {
     io::Error::from_raw_os_error(error.raw_os_error())
-}
-
-impl Drop for ShmKeeper {
-    fn drop(&mut self) {
-        let _ = remove_file(self.path.as_os_str());
-    }
-}
-
-impl ShmKeeper {
-    /// Returns the shared memory's opaque identifier, which any process passes
-    /// to [`open`].
-    #[must_use]
-    pub fn id(&self) -> &OsStr {
-        self.path.as_os_str()
-    }
 }
 
 impl ShmHandle {

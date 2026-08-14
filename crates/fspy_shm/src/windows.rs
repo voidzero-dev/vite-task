@@ -2,14 +2,7 @@
 //! its path.
 
 use core::{ffi::c_void, mem::size_of, ptr};
-use std::{
-    env::temp_dir,
-    ffi::OsStr,
-    io,
-    num::NonZeroUsize,
-    os::windows::ffi::OsStrExt as _,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsStr, io, num::NonZeroUsize, os::windows::ffi::OsStrExt as _};
 #[cfg(test)]
 use std::{fs::File, os::windows::io::AsRawHandle as _};
 
@@ -18,8 +11,6 @@ use fspy_nostd::{
     fs::{CreationDisposition, FileAccess, FileOptions, FileShare},
     mm::{MappingAccess, PageProtection},
 };
-use omnipath::windows::WinPathExt as _;
-use uuid::Uuid;
 #[cfg(test)]
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx,
@@ -33,22 +24,7 @@ use windows_sys::Win32::{
     System::{IO::DeviceIoControl, Ioctl::FSCTL_SET_SPARSE},
 };
 
-use crate::BACKING_PREFIX;
-
 const SHARE_ALL: FileShare = FileShare::READ.union(FileShare::WRITE).union(FileShare::DELETE);
-
-/// Keeps the shared memory's identifier alive and removes it on drop.
-///
-/// Removal relies on POSIX delete semantics, which requires NTFS on Windows
-/// 10 1607 or newer: the name is unlinked immediately even while views of the
-/// backing file remain mapped.
-///
-/// Removal is cleanup, not a stop signal: later opens fail, but existing
-/// [`ShmHandle`]s and [`Mapping`]s keep reading and writing. To stop them,
-/// store a flag in the shared bytes, as the fspy channel's close gate does.
-pub struct ShmKeeper {
-    path: PathBuf,
-}
 
 /// Opened shared memory that is not mapped yet.
 ///
@@ -68,10 +44,18 @@ pub struct Mapping {
     len: NonZeroUsize,
 }
 
-/// Creates `size` bytes of zero-initialized shared memory.
+/// Creates `size` bytes of zero-initialized shared memory backed by the file
+/// at `path`.
 ///
-/// Returns its [`ShmKeeper`] and an already opened [`ShmHandle`], so the
-/// creating process never has to go through [`open`].
+/// The file must not exist yet; the per-user `%TEMP%` ACL provides same-user
+/// gating when `path` sits in the temporary directory. The path is how other
+/// processes reach the shared memory, so the caller should supply an absolute
+/// path that keeps working across working-directory changes. Paths at or
+/// beyond the legacy `MAX_PATH` limit must already be in verbatim (`\\?\`)
+/// form: this crate passes paths to the OS unchanged.
+///
+/// Returns an already opened [`ShmHandle`], so the creating process never has
+/// to look its own file up by path.
 ///
 /// Only pages that are actually written occupy memory or disk, so a large
 /// capacity is cheap.
@@ -79,8 +63,9 @@ pub struct Mapping {
 /// # Errors
 ///
 /// Returns an error if the shared memory cannot be created or sized. Creation
-/// fails on volumes without sparse-file support.
-pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
+/// fails on volumes without sparse-file support. A file created by the
+/// failing call is removed before it returns.
+pub fn create(path: &OsStr, size: usize) -> io::Result<ShmHandle> {
     let size = NonZeroUsize::new(size).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size must be nonzero")
     })?;
@@ -88,12 +73,8 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
         io::Error::new(io::ErrorKind::InvalidInput, "shared-memory size exceeds i64")
     })?;
 
-    // The per-user `%TEMP%` ACL provides same-user gating. The identifier is
-    // absolute so it keeps working after a working-directory change.
-    let path = std::path::absolute(temp_dir())?
-        .join(format!("{BACKING_PREFIX}{}.shm", Uuid::new_v4().simple()));
     let file = open_file(
-        path.as_os_str(),
+        path,
         FileAccess::GENERIC_READ | FileAccess::GENERIC_WRITE,
         CreationDisposition::CreateNew,
         // Ask Windows to keep the data in memory when it can. Opening the
@@ -101,31 +82,34 @@ pub fn create(size: usize) -> io::Result<(ShmKeeper, ShmHandle)> {
         // instead of redirecting the file, as std does for `create_new`.
         FileOptions::TEMPORARY | FileOptions::OPEN_REPARSE_POINT,
     )?;
-    // The keeper exists from here on, so every error path below cleans up.
-    let keeper = ShmKeeper { path };
 
+    if let Err(error) = size_backing_file(file.as_handle(), size_i64) {
+        // Do not hand the caller an unusable partial file to clean up.
+        let _ = remove(path);
+        return Err(error_to_io(error));
+    }
+
+    Ok(ShmHandle { file, size })
+}
+
+fn size_backing_file(file: BorrowedHandle<'_>, len: i64) -> fspy_nostd::Result<()> {
     // NTFS allocates clusters for the whole logical size unless the file is
     // marked sparse first, which would turn the capacity into real disk usage.
     // Volumes without sparse-file support fail here.
-    set_sparse(file.as_handle()).map_err(error_to_io)?;
+    set_sparse(file)?;
     // Every byte reads as zero because the file is all holes.
-    set_end_of_file(file.as_handle(), size_i64).map_err(error_to_io)?;
-
-    Ok((keeper, ShmHandle { file, size }))
+    set_end_of_file(file, len)
 }
 
-/// Opens the shared memory identified by `id`.
-///
-/// The identifier works from any process, regardless of the process's working
-/// directory or environment.
+/// Opens the shared memory backed by the file at `path`.
 ///
 /// # Errors
 ///
 /// Returns an error if the shared memory is unavailable, which is the common
-/// case once its keeper has been dropped.
-pub fn open(id: &OsStr) -> io::Result<ShmHandle> {
+/// case once the backing file has been removed.
+pub fn open(path: &OsStr) -> io::Result<ShmHandle> {
     let file = open_file(
-        id,
+        path,
         FileAccess::GENERIC_READ | FileAccess::GENERIC_WRITE,
         CreationDisposition::OpenExisting,
         FileOptions::empty(),
@@ -162,21 +146,10 @@ fn open_file_wide(
     fspy_nostd::fs::create_file(path, access, SHARE_ALL, None, disposition, options, None)
 }
 
-/// The length at which std's own Windows path conversion switches to a
-/// verbatim path.
-const VERBATIM_THRESHOLD: usize = 248;
-
 fn copy_path(path: &OsStr) -> io::Result<Vec<u16>> {
     let mut units: Vec<_> = path.encode_wide().collect();
     if units.contains(&0) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"));
-    }
-    // std converts long paths to verbatim form before every `CreateFileW`;
-    // without that, paths at or beyond the legacy `MAX_PATH` limit fail
-    // regardless of the system's long-path opt-in, which the arbitrary
-    // processes opening shared memory could not rely on anyway.
-    if units.len() >= VERBATIM_THRESHOLD {
-        units = Path::new(path).to_verbatim()?.as_os_str().encode_wide().collect();
     }
     units.push(0);
     Ok(units)
@@ -229,7 +202,20 @@ fn set_end_of_file(file: BorrowedHandle<'_>, len: i64) -> fspy_nostd::Result<()>
     })
 }
 
-fn remove_file(path: &OsStr) -> io::Result<()> {
+/// Removes the shared memory at `path`.
+///
+/// Removal relies on POSIX delete semantics, which requires NTFS on Windows
+/// 10 1607 or newer: the name is unlinked immediately even while views of the
+/// backing file remain mapped.
+///
+/// Removal is cleanup, not a stop signal: later opens fail, but existing
+/// [`ShmHandle`]s and [`Mapping`]s keep reading and writing. To stop them,
+/// store a flag in the shared bytes, as the fspy channel's close gate does.
+///
+/// # Errors
+///
+/// Returns the error reported while unlinking the path.
+pub fn remove(path: &OsStr) -> io::Result<()> {
     let path = copy_path(path)?;
     // Opening the reparse point itself removes a link rather than its target.
     let file = open_file_wide(
@@ -264,21 +250,6 @@ fn set_posix_delete(file: BorrowedHandle<'_>) -> fspy_nostd::Result<()> {
             INFO_SIZE,
         )
     })
-}
-
-impl Drop for ShmKeeper {
-    fn drop(&mut self) {
-        let _ = remove_file(self.path.as_os_str());
-    }
-}
-
-impl ShmKeeper {
-    /// Returns the shared memory's opaque identifier, which any process passes
-    /// to [`open`].
-    #[must_use]
-    pub fn id(&self) -> &OsStr {
-        self.path.as_os_str()
-    }
 }
 
 impl ShmHandle {

@@ -672,8 +672,10 @@ mod tests {
 
         const SHM_SIZE: usize = 1024 * 1024;
 
-        let (keeper, handle) = fspy_shm::create(SHM_SIZE).unwrap();
-        let shm_name = keeper.id().to_str().expect("test temp dir is UTF-8").to_owned();
+        let shm_path = crate::ipc::channel::shm_backing_path().unwrap();
+        let handle = fspy_shm::create(shm_path.as_os_str(), SHM_SIZE).unwrap();
+        let _keeper = crate::ipc::channel::ShmKeeper { path: shm_path.clone() };
+        let shm_name = shm_path.to_str().expect("test temp dir is UTF-8").to_owned();
         // Map before the children run. Windows keeps views coherent while they
         // exist at the same time; a view created after every writer exited can
         // observe the file before the writers' dirty pages reach it.

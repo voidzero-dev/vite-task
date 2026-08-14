@@ -1424,6 +1424,7 @@ dependencies = [
  "ctor",
  "fspy_ipc_str",
  "fspy_shm",
+ "omnipath",
  "rustc-hash",
  "subprocess_test",
  "thiserror 2.0.18",
@@ -1459,7 +1460,6 @@ version = "0.0.0"
 dependencies = [
  "ctor",
  "fspy_nostd",
- "omnipath",
  "subprocess_test",
  "uuid",
  "windows-sys 0.61.2",

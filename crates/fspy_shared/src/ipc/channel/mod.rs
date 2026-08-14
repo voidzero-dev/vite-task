@@ -4,7 +4,7 @@ mod shm_io;
 
 use std::{env::temp_dir, fs::File, io, ops::Deref, path::PathBuf};
 
-use fspy_shm::{Mapping, ShmKeeper};
+use fspy_shm::Mapping;
 pub use shm_io::FrameMut;
 use shm_io::{ShmReader, ShmWriter};
 use tracing::debug;
@@ -12,6 +12,14 @@ use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
 use super::IpcStr;
+
+/// Prefix of shared-memory backing file names inside the system temporary
+/// directory.
+///
+/// The files sit directly in the temporary directory. A shared subdirectory
+/// would belong to whichever user created it first and block everyone else;
+/// uniquely named `0o600` files in the sticky-bit temp directory avoid that.
+const SHM_BACKING_PREFIX: &str = "vite-task-fspy-";
 
 /// Serializable configuration to create channel senders.
 #[derive(SchemaWrite, SchemaRead, Clone, Debug)]
@@ -26,16 +34,66 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     // Initialize the lock file with a unique name.
     let lock_file_path = temp_dir().join(format!("fspy_ipc_{}.lock", Uuid::new_v4()));
 
-    let (keeper, handle) = fspy_shm::create(capacity)?;
+    let shm_path = shm_backing_path()?;
+    let handle = fspy_shm::create(shm_path.as_os_str(), capacity)?;
+    // The keeper exists from here on, so every error path below cleans up.
+    let keeper = ShmKeeper { path: shm_path };
     let mapping = handle.map()?;
 
     let conf = ChannelConf {
         lock_file_path: lock_file_path.as_os_str().into(),
-        shm_id: keeper.id().into(),
+        shm_id: keeper.path.as_os_str().into(),
     };
 
     let receiver = Receiver::new(lock_file_path, keeper, mapping)?;
     Ok((conf, receiver))
+}
+
+/// Returns a fresh absolute path for a shared-memory backing file.
+fn shm_backing_path() -> io::Result<PathBuf> {
+    // `temp_dir` reflects `TMPDIR` verbatim, which may be relative. The path
+    // travels to processes with other working directories, so resolve it
+    // against the creator's current directory first.
+    let path = std::path::absolute(temp_dir())?
+        .join(format!("{SHM_BACKING_PREFIX}{}.shm", Uuid::new_v4().simple()));
+    #[cfg(windows)]
+    let path = to_verbatim_if_long(path)?;
+    Ok(path)
+}
+
+/// Converts long paths to verbatim (`\\?\`) form up front, so every later use
+/// of the path — creation here, opening in any process, removal — stays clear
+/// of the legacy `MAX_PATH` limit without relying on the system's long-path
+/// opt-in, which the arbitrary processes opening shared memory could not
+/// count on anyway.
+#[cfg(windows)]
+fn to_verbatim_if_long(path: PathBuf) -> io::Result<PathBuf> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    use omnipath::windows::WinPathExt as _;
+
+    // The length at which std's own Windows path conversion switches to a
+    // verbatim path.
+    const VERBATIM_THRESHOLD: usize = 248;
+
+    if path.as_os_str().encode_wide().count() >= VERBATIM_THRESHOLD {
+        return path.to_verbatim();
+    }
+    Ok(path)
+}
+
+/// Keeps the shared memory's backing path alive and removes it on drop.
+///
+/// Removal is cleanup, not a stop signal: later opens fail, but existing
+/// handles and mappings keep reading and writing; see [`fspy_shm::remove`].
+struct ShmKeeper {
+    path: PathBuf,
+}
+
+impl Drop for ShmKeeper {
+    fn drop(&mut self) {
+        let _ = fspy_shm::remove(self.path.as_os_str());
+    }
 }
 
 impl ChannelConf {
@@ -93,7 +151,8 @@ unsafe impl Sync for Sender {}
 pub struct Receiver {
     lock_file_path: PathBuf,
     lock_file: File,
-    /// Keeps the backing file's name alive for as long as senders may attach.
+    /// Keeps the shared memory's backing file alive for as long as senders
+    /// may attach.
     _keeper: ShmKeeper,
     mapping: Mapping,
 }
@@ -156,12 +215,39 @@ impl<'a> Deref for ReceiverLockGuard<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroUsize, str::from_utf8};
+    use std::{ffi::OsString, fs, num::NonZeroUsize, str::from_utf8};
 
     use bstr::B;
     use subprocess_test::command_for_fn;
 
     use super::*;
+
+    /// The shared-memory path is generated absolute, so a sender in a process
+    /// with a different working directory and a relative temporary directory
+    /// must still attach.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sender_ignores_changed_temp_and_working_directory() {
+        let (conf, receiver) = channel(100).unwrap();
+        let changed_cwd = temp_dir().join(format!("fspy-ipc-changed-cwd-{}", Uuid::new_v4()));
+        fs::create_dir(&changed_cwd).unwrap();
+
+        let mut command = command_for_fn!(conf, |conf: ChannelConf| {
+            let sender = conf.sender().unwrap();
+            let frame_size = NonZeroUsize::new(2).unwrap();
+            let mut frame = sender.claim_frame(frame_size).unwrap();
+            frame.copy_from_slice(&[4, 2]);
+        });
+        command.cwd = changed_cwd.clone();
+        for name in ["TMPDIR", "TMP", "TEMP"] {
+            command.envs.insert(OsString::from(name), OsString::from("changed-relative-tmp"));
+        }
+        let succeeded = std::process::Command::from(command).status().unwrap().success();
+        fs::remove_dir(changed_cwd).unwrap();
+        assert!(succeeded);
+
+        let lock = receiver.lock().unwrap();
+        assert_eq!(lock.iter_frames().next().unwrap(), &[4, 2]);
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn smoke() {

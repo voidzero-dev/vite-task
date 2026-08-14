@@ -20,6 +20,7 @@ vt_path = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 bytemuck = { workspace = true }
+omnipath = { workspace = true }
 winapi = { workspace = true, features = ["std"] }
 
 [dev-dependencies]

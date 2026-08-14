@@ -1,8 +1,8 @@
 # `fspy_shm`
 
-`fspy_shm` is the private shared-memory layer used by fspy IPC channels. It gives the channel one API for creating a mapping, passing its identifier to another process, and opening additional views of the same bytes.
+`fspy_shm` is the private shared-memory layer used by fspy IPC channels. It gives the channel one API for creating a mapping at a caller-chosen path, opening additional views of the same bytes from any process that knows the path, and removing the backing file.
 
-`fspy_shm` exposes only the operations used by fspy. Treat an identifier as an opaque `OsStr`; do not depend on how it is built.
+`fspy_shm` exposes only the operations used by fspy. The caller owns the path: it decides where the backing file lives, passes the same path to every process that opens the shared memory, and removes it when the shared memory is no longer needed. The fspy channel generates an absolute uniquely-named path in the system temporary directory and holds it in a keeper that removes it on drop.
 
 ## API
 
@@ -10,36 +10,35 @@ The public API is defined in [`src/lib.rs`](src/lib.rs).
 
 | API                   | Contract                                                                                |
 | --------------------- | --------------------------------------------------------------------------------------- |
-| `create(size)`        | Creates a zero-initialized backing file and returns its `ShmKeeper` and an `ShmHandle`. |
-| `open(id)`            | Opens an `ShmHandle` on the shared memory identified by `id`.                           |
-| `ShmKeeper::id()`     | Returns the identifier another process passes to `open`.                                |
+| `create(path, size)`  | Creates a zero-initialized backing file at `path` and returns an opened `ShmHandle`.    |
+| `open(path)`          | Opens an `ShmHandle` on the shared memory backed by the file at `path`.                 |
+| `remove(path)`        | Removes the backing file. Later opens fail; existing handles and mappings keep working. |
 | `ShmHandle::map()`    | Maps the shared bytes. Callable more than once.                                         |
 | `Mapping::len()`      | Returns the mapped size.                                                                |
 | `Mapping::as_ptr()`   | Returns a mutable raw pointer to the first byte.                                        |
 | `Mapping::as_slice()` | Returns the bytes as a shared slice. The caller must prevent mutation for its lifetime. |
 
-`ShmKeeper` is the name: while it lives, `open` succeeds, and dropping it removes the backing file. `ShmHandle` is the opened file: `create` returns one so the creator never looks its own file up by name, and `open` returns one to everybody else. `Mapping` is the bytes: it keeps them alive until dropped and can do nothing else. None of the three synchronizes memory access. The fspy channel adds that on top with atomic frame headers and a lock file: senders hold a shared file lock while writing, and the receiver takes the exclusive lock before reading, which waits for existing senders and rejects new ones.
+`ShmHandle` is the opened file: `create` returns one so the creator never looks its own file up by path, and `open` returns one to everybody else. `Mapping` is the bytes: it keeps them alive until dropped and can do nothing else. Neither synchronizes memory access. The fspy channel adds that on top with atomic frame headers and a lock file: senders hold a shared file lock while writing, and the receiver takes the exclusive lock before reading, which waits for existing senders and rejects new ones.
 
 Every byte in a mapping returned by `create` is initially zero. `open` exposes the mapping's current contents and does not reinitialize them.
 
 ## Implementation
 
-One implementation serves every platform: a sparse file named `vite-task-fspy-<uuid>.shm` directly in the system temporary directory. The identifier is the file's absolute path, so another process opens the mapping by opening that path. There is no broker, no global object name, and no asynchronous runtime. The files sit in the temporary directory itself rather than a shared subdirectory: a subdirectory would belong to whichever user created it first and block everyone else, while uniquely named `0o600` files in a sticky-bit directory work for all users.
+One implementation serves every platform: a sparse file at the caller's path. Another process opens the mapping by opening that path. There is no broker, no global object name, and no asynchronous runtime.
 
 Only written pages ever occupy memory or disk. The multi-gigabyte capacity fspy asks for therefore costs about as much as the data a run actually records.
 
-Mapping goes through `memmap2` on every platform. The remaining platform-specific parts are three short passages:
+Every operation goes through [`fspy_nostd`](../fspy_nostd) wrappers or direct Win32 calls. The platform-specific parts are three short passages:
 
-| Concern           | Unix                                     | Windows                                                                     |
-| ----------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
-| Same-user access  | `mode(0o600)` on the backing file        | the per-user `%TEMP%` ACL                                                   |
-| Sparseness        | file holes, produced by setting a length | `FSCTL_SET_SPARSE` before setting a length, or NTFS allocates every cluster |
-| Keeper cleanup    | unlink the path                          | unlink the path; see the fallback below                                     |
-| Descriptor safety | `O_CLOEXEC`, the Rust standard default   | non-inheritable handles, the Rust standard default                          |
+| Concern          | Unix                                     | Windows                                                                     |
+| ---------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
+| Same-user access | `mode(0o600)` on the backing file        | the per-user `%TEMP%` ACL of the caller's chosen directory                  |
+| Sparseness       | file holes, produced by setting a length | `FSCTL_SET_SPARSE` before setting a length, or NTFS allocates every cluster |
+| Removal          | unlink the path                          | POSIX delete via `FileDispositionInfoEx`; see below                         |
 
 `FILE_ATTRIBUTE_TEMPORARY` asks Windows to keep the data in memory when it can. Creation fails on a volume without sparse-file support.
 
-The keeper removes the name with `remove_file` on every platform. Modern Windows deletes with POSIX semantics: the name goes away at once, while [existing handles keep working](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-_file_disposition_information_ex) and [mapped views keep the data alive](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-createfilemappingw) until the last one goes away. The first page also reserves the right to fail the delete while a mapped view exists, and Windows versions without POSIX delete do fail it. The keeper then falls back to reopening the file with `FILE_FLAG_DELETE_ON_CLOSE` and closing it, which deletes the file once every handle to it is closed.
+`remove` unlinks the path on Unix. On Windows it relies on [POSIX delete semantics](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-_file_disposition_information_ex), which requires NTFS on Windows 10 1607 or newer: the name goes away at once, while existing handles keep working and [mapped views keep the data alive](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-createfilemappingw) until the last one goes away.
 
 ## Options considered
 
@@ -61,12 +60,10 @@ Earlier revisions rejected temporary files because dirty pages can reach disk. O
 
 ## Lifetime semantics
 
-`create` returns the only keeper. `open` returns `ShmHandle`s.
+- While the backing file exists, a process that knows the path can open the shared memory.
+- `remove` deletes the backing file's name, so later opens fail. This is cleanup, not a stop signal: processes that already opened the shared memory keep reading and writing. The fspy channel stops writers with the close gate it stores in the shared bytes.
+- An `ShmHandle` and its `Mapping`s stay usable after the backing file is removed. They keep the bytes alive and cannot restore the path.
 
-- While the keeper is alive, a process that knows the identifier can open the shared memory.
-- Dropping the keeper removes the backing file's name, so later opens fail. This is cleanup, not a stop signal: processes that already opened the shared memory keep reading and writing. The fspy channel stops writers with the close gate it stores in the shared bytes.
-- An `ShmHandle` and its `Mapping`s stay usable after the keeper is gone. They keep the bytes alive and cannot extend the identifier's validity.
+The channel guards the same window from its own side: [`ChannelConf::sender`](../fspy_shared/src/ipc/channel/mod.rs) opens and locks the receiver's exact lock-file path before it calls `fspy_shm::open`, and the receiver removes that path before removing the backing file, so a sender that starts later fails before opening shared memory.
 
-The channel guards the same window from its own side: [`ChannelConf::sender`](../fspy_shared/src/ipc/channel/mod.rs) opens and locks the receiver's exact lock-file path before it calls `fspy_shm::open`, and the receiver removes that path before dropping the keeper, so a sender that starts later fails before opening shared memory.
-
-If the keeper's process is killed, its `Drop` never runs and the file stays behind: on Unix for the system's temporary-file reaper, on Windows until a cleanup tool runs. The file costs about as much disk as the run wrote into it.
+If the process that owns the path is killed before it calls `remove`, the file stays behind: on Unix for the system's temporary-file reaper, on Windows until a cleanup tool runs. The file costs about as much disk as the run wrote into it.
