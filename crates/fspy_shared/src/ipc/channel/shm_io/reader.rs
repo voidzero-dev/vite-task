@@ -93,7 +93,7 @@ pub enum ProtocolError {
 ///
 /// # Panics
 ///
-/// Panics when the region is not word-aligned or its size is outside the
+/// Panics when the region is not `u64`-aligned or its size is outside the
 /// supported range (see [`SharedState::borrow`]) — a broken caller, not
 /// corrupt shared data, which is reported as [`ProtocolError`] instead.
 pub(super) unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {

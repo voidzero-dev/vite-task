@@ -5,9 +5,9 @@
 //! construction contract of [`SharedState::borrow`]; no other module reads or
 //! writes the mapping directly.
 //!
-//! # Shared words
+//! # Shared atomics
 //!
-//! The header holds three independent monotonic words (offsets in
+//! The header holds three independent monotonic `AtomicU64`s (offsets in
 //! [`layout`]):
 //!
 //! - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
@@ -71,7 +71,7 @@ pub(super) enum ReserveError {
 pub(super) struct Reservation {
     /// Index of the reserved descriptor slot.
     pub(super) slot_index: usize,
-    /// Byte offset of the reserved payload span. Word-aligned.
+    /// Byte offset of the reserved payload span. `u64`-aligned.
     pub(super) payload_offset: usize,
 }
 
@@ -98,7 +98,7 @@ impl<'m> SharedState<'m> {
     /// # Panics
     ///
     /// Panics when the mapping cannot host the protocol at all: base not
-    /// word-aligned, or length outside
+    /// `u64`-aligned, or length outside
     /// `[layout::HEADER_LEN, layout::MAX_MAPPING_LEN]`. These indicate a
     /// broken caller, not runtime data.
     pub(super) unsafe fn borrow(mem: *mut [u8]) -> Self {
@@ -118,11 +118,11 @@ impl<'m> SharedState<'m> {
         layout::max_slots(self.len)
     }
 
-    /// A header word. `offset` must be one of the `layout` header offsets.
-    fn header_word(self, offset: usize) -> &'m AtomicU64 {
+    /// A header atomic. `offset` must be one of the `layout` header offsets.
+    fn header_atomic(self, offset: usize) -> &'m AtomicU64 {
         debug_assert!(offset < layout::HEADER_LEN);
-        // SAFETY: `borrow` checked that the mapping is word-aligned and at
-        // least `HEADER_LEN` bytes, so every word-aligned header offset is a
+        // SAFETY: `borrow` checked that the mapping is `u64`-aligned and at
+        // least `HEADER_LEN` bytes, so every `u64`-aligned header offset is a
         // valid, aligned `AtomicU64` for `'m`.
         unsafe { AtomicU64::from_ptr(self.base.add(offset).cast()) }
     }
@@ -138,7 +138,7 @@ impl<'m> SharedState<'m> {
     fn slot_atomic(self, index: usize) -> &'m AtomicU64 {
         assert!(index < self.max_slots());
         // SAFETY: the assertion keeps the slot inside the fixed table, which
-        // consists of word-aligned 8-byte slots after the aligned header.
+        // consists of `u64`-aligned slots after the aligned header.
         unsafe {
             AtomicU64::from_ptr(self.base.add(layout::HEADER_LEN + index * layout::SLOT_LEN).cast())
         }
@@ -146,7 +146,7 @@ impl<'m> SharedState<'m> {
 
     /// Whether the CLOSED gate has been set.
     pub(super) fn is_closed(self) -> bool {
-        self.header_word(layout::SLOT_COUNTER_OFFSET).load(Ordering::Relaxed) & CLOSED != 0
+        self.header_atomic(layout::SLOT_COUNTER_OFFSET).load(Ordering::Relaxed) & CLOSED != 0
     }
 
     /// Atomically reserves one descriptor slot and one payload span.
@@ -163,7 +163,7 @@ impl<'m> SharedState<'m> {
         // because the counter is not what locates payloads (descriptors are)
         // and a `u64` cannot realistically wrap.
         let payload_start = self
-            .header_word(layout::PAYLOAD_COUNTER_OFFSET)
+            .header_atomic(layout::PAYLOAD_COUNTER_OFFSET)
             .fetch_add(reserved_len as u64, Ordering::Relaxed);
         // Checked: a foreign scribble of the counter must fail the claim,
         // not wrap the bound into an out-of-bounds reservation.
@@ -172,7 +172,8 @@ impl<'m> SharedState<'m> {
             return Err(ReserveError::Capacity);
         }
 
-        let claims = self.header_word(layout::SLOT_COUNTER_OFFSET).fetch_add(1, Ordering::Relaxed);
+        let claims =
+            self.header_atomic(layout::SLOT_COUNTER_OFFSET).fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
             return Err(ReserveError::Closed);
         }
@@ -197,20 +198,20 @@ impl<'m> SharedState<'m> {
     /// Must be called before the operation whose record was lost is
     /// performed (rule 1).
     pub(super) fn flag_incomplete(self) {
-        self.header_word(layout::INCOMPLETE_OFFSET).fetch_or(1, Ordering::Relaxed);
+        self.header_atomic(layout::INCOMPLETE_OFFSET).fetch_or(1, Ordering::Relaxed);
     }
 
     /// Whether any live writer lost a record. Read after the freeze pass
     /// (rule 1).
     pub(super) fn is_incomplete(self) -> bool {
-        self.header_word(layout::INCOMPLETE_OFFSET).load(Ordering::Relaxed) != 0
+        self.header_atomic(layout::INCOMPLETE_OFFSET).load(Ordering::Relaxed) != 0
     }
 
     /// Snapshots the number of admitted claims: the receiver's close
     /// boundary (rule 1). Clamped to the table capacity because failed
     /// claims overshoot the counter.
     pub(super) fn snapshot_claims(self) -> usize {
-        let claims = self.header_word(layout::SLOT_COUNTER_OFFSET).load(Ordering::Relaxed);
+        let claims = self.header_atomic(layout::SLOT_COUNTER_OFFSET).load(Ordering::Relaxed);
         usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(self.max_slots())
     }
 
@@ -230,7 +231,7 @@ impl<'m> SharedState<'m> {
     /// Only Linux channels use this: elsewhere the first touch is cheap.
     #[cfg(target_os = "linux")]
     pub(super) fn pre_fault(self) {
-        let _ = self.header_word(layout::SLOT_COUNTER_OFFSET).compare_exchange(
+        let _ = self.header_atomic(layout::SLOT_COUNTER_OFFSET).compare_exchange(
             0,
             0,
             Ordering::Relaxed,
@@ -245,7 +246,7 @@ impl<'m> SharedState<'m> {
     /// this write materializes the counter page, which can cost
     /// milliseconds of first-block allocation on journalling filesystems.
     pub(super) fn close_claims(self) {
-        self.header_word(layout::SLOT_COUNTER_OFFSET).fetch_or(CLOSED, Ordering::Relaxed);
+        self.header_atomic(layout::SLOT_COUNTER_OFFSET).fetch_or(CLOSED, Ordering::Relaxed);
     }
 
     /// Publishes a committed descriptor into an unfinished slot.

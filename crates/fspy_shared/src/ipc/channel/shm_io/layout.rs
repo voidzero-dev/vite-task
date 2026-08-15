@@ -28,8 +28,8 @@ pub(super) const HEADER_LEN: usize = 64;
 /// number of claims attempted).
 pub(super) const SLOT_COUNTER_OFFSET: usize = 0;
 
-/// Byte offset of the incomplete flag word (nonzero once a live writer lost
-/// a record).
+/// Byte offset of the incomplete flag (one `u64`: nonzero once a live
+/// writer lost a record).
 pub(super) const INCOMPLETE_OFFSET: usize = 8;
 
 /// Byte offset of the payload counter (one `u64`: payload bytes reserved,
@@ -52,12 +52,13 @@ pub(super) const MAX_PAYLOAD_LEN: usize = i32::MAX as usize;
 /// mapping must fit `u32` arithmetic.
 pub(super) const MAX_MAPPING_LEN: usize = 1 << 32;
 
-/// Rounds a payload length up to a multiple of the word size.
+/// Rounds a payload length up to a multiple of `size_of::<u64>()`.
 ///
-/// Payload reservations are word-aligned — combined with the word-aligned
-/// region base they grow from, this keeps every payload offset word-aligned
-/// so the receiver can copy payloads with aligned 64-bit atomic loads, and
-/// the sub-word padding stays inside the frame's own reservation.
+/// Payload reservations are whole `u64`s — combined with the `u64`-aligned
+/// region base they grow from, every payload offset stays `u64`-aligned, an
+/// invariant [`PayloadSpan::validate`] uses to reject descriptors no correct
+/// writer produces. The sub-`u64` padding stays inside the frame's own
+/// reservation.
 pub(super) const fn reserved_payload_len(payload_len: usize) -> usize {
     payload_len.next_multiple_of(SLOT_LEN)
 }
@@ -78,13 +79,13 @@ pub(super) const fn max_slots(mapping_len: usize) -> usize {
     table_len(mapping_len) / SLOT_LEN
 }
 
-/// Byte offset where the payload region starts. Word-aligned.
+/// Byte offset where the payload region starts. `u64`-aligned.
 pub(super) const fn payload_base(mapping_len: usize) -> usize {
     HEADER_LEN + table_len(mapping_len)
 }
 
-/// Byte size of the payload region. A multiple of the word size, so a
-/// word-aligned reservation inside it never reaches past `mapping_len`.
+/// Byte size of the payload region. A multiple of `size_of::<u64>()`, so a
+/// reservation of whole `u64`s inside it never reaches past `mapping_len`.
 pub(super) const fn payload_region_len(mapping_len: usize) -> usize {
     let len = mapping_len - payload_base(mapping_len);
     len - len % SLOT_LEN
@@ -99,7 +100,7 @@ pub(super) const fn payload_region_len(mapping_len: usize) -> usize {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PayloadSpan {
     /// Byte offset of the payload from the start of the mapping.
-    /// Always word-aligned.
+    /// Always `u64`-aligned.
     pub(super) offset: usize,
     /// Exact (unpadded) byte length of the payload.
     pub(super) len: usize,
@@ -113,9 +114,9 @@ impl PayloadSpan {
         if len == 0 || len > MAX_PAYLOAD_LEN {
             return None;
         }
-        // Writers reserve word-aligned spans from the word-aligned region
-        // base, so a valid offset is word-aligned and its padded length stays
-        // inside the region.
+        // Writers reserve whole-`u64` spans from the `u64`-aligned region
+        // base, so a valid offset is `u64`-aligned and its padded length
+        // stays inside the region.
         if !offset.is_multiple_of(SLOT_LEN) {
             return None;
         }
@@ -138,7 +139,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reserved_payload_len_rounds_up_to_words() {
+    fn reserved_payload_len_rounds_up_to_u64s() {
         assert!(reserved_payload_len(1) == 8);
         assert!(reserved_payload_len(7) == 8);
         assert!(reserved_payload_len(8) == 8);
@@ -186,7 +187,7 @@ mod tests {
         let mapping_len = 1024;
         let base = payload_base(mapping_len);
         let region = payload_region_len(mapping_len);
-        // A word-aligned span at the region start.
+        // A `u64`-aligned span at the region start.
         assert!(PayloadSpan::validate(mapping_len, base, 8).is_some());
         // Exact end of the region, with padding inside it.
         assert!(PayloadSpan::validate(mapping_len, base + region - 8, 5).is_some());

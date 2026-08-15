@@ -18,7 +18,7 @@
 //!            fixed descriptor table      payloads grow up ->
 //! ```
 //!
-//! The header holds three monotonic words ([`state`]): a claim counter
+//! The header holds three monotonic `AtomicU64`s ([`state`]): a claim counter
 //! carrying the CLOSED gate bit, a payload counter, and an incomplete flag.
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
 //! reserves a descriptor slot — validated against the fixed region bounds
@@ -175,12 +175,12 @@ mod tests {
             Self { mem: Arc::new(mem), len }
         }
 
-        /// Overwrites a raw word of the region, simulating foreign-process
+        /// Overwrites one raw `u64` of the region, simulating foreign-process
         /// corruption of protocol metadata.
-        fn poke_word(&self, byte_offset: usize, value: u64) {
+        fn poke_u64(&self, byte_offset: usize, value: u64) {
             // SAFETY: the offsets used by tests lie within the allocation and
-            // are word-aligned; the atomic store synchronizes with the
-            // protocol's atomic accesses of the same word.
+            // are `u64`-aligned; the atomic store synchronizes with the
+            // protocol's atomic accesses of the same `u64`.
             let atomic = unsafe {
                 AtomicU64::from_ptr(self.as_raw_slice().cast::<u8>().add(byte_offset).cast())
             };
@@ -234,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_word_frame_roundtrips_exactly() {
+    fn frame_spanning_many_u64s_roundtrips_exactly() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
@@ -573,7 +573,7 @@ mod tests {
         // Point slot 0 at a span escaping the mapping.
         let bogus_len = 8u64;
         let bogus_offset = 1020u64;
-        shm.poke_word(64, (bogus_len << 32) | bogus_offset);
+        shm.poke_u64(64, (bogus_len << 32) | bogus_offset);
 
         // SAFETY: see `collect_frames`.
         let result = unsafe { close(shm) };
@@ -589,7 +589,7 @@ mod tests {
 
         // The aborted bit combined with payload bits is a value no protocol
         // operation produces.
-        shm.poke_word(64, (1 << 63) | (8u64 << 32) | 8);
+        shm.poke_u64(64, (1 << 63) | (8u64 << 32) | 8);
 
         // SAFETY: see `collect_frames`.
         let result = unsafe { close(shm) };
@@ -607,7 +607,7 @@ mod tests {
         // scribble — degrades to a full-table sweep, never out-of-bounds
         // slot access: the committed frame survives, the untouched slots
         // freeze as aborted.
-        shm.poke_word(0, (1 << 40) | 1);
+        shm.poke_u64(0, (1 << 40) | 1);
 
         let frames = collect_frames(&shm);
         let mut iter = frames.iter();

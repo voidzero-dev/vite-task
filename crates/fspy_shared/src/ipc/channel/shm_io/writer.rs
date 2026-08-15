@@ -60,7 +60,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
     ///
     /// # Panics
     ///
-    /// Panics when the region is not word-aligned or its size is outside the
+    /// Panics when the region is not `u64`-aligned or its size is outside the
     /// supported range (see [`SharedState::borrow`]).
     pub unsafe fn new(mem: M) -> Self {
         // Validate the region geometry eagerly so misuse fails at

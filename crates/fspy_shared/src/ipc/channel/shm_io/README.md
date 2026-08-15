@@ -30,7 +30,8 @@ space, not memory: only pages that are actually written get backed.
 | header (64 B) | descriptor table (1/8 of the region) | payloads (the rest, grow up) |
 ```
 
-The header holds three words, and every one of them only ever counts up:
+The header holds three `AtomicU64`s, and every one of them only ever
+counts up:
 
 - the **claim counter** — how many frames were ever claimed. Bit 63 is the
   CLOSED gate.
