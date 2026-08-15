@@ -30,8 +30,8 @@ space, not memory: only pages that are actually written get backed.
 | header (64 B) | descriptor table (1/8 of the region) | payloads (the rest, grow up) |
 ```
 
-The header holds three `AtomicU64`s, and every one of them only ever
-counts up:
+The header is a `repr(C)` struct of three `AtomicU64`s, and every one of
+them only ever counts up:
 
 - the **claim counter** — how many frames were ever claimed. Bit 63 is the
   CLOSED gate.
@@ -44,11 +44,13 @@ bound is derived from the mapping length alone, so the region is
 self-describing: writers and the receiver compute the same layout from the
 size of the file they mapped, with nothing else to agree on. For a 4 GiB
 region that is ~67 million slots; the ~3.5 GiB payload region fits ~15–20
-million records of a few hundred bytes, so payload space runs out first. The split is fixed, not a movable frontier,
-because fixed bounds are what make claiming wait-free: each counter is
-checked against its own constant limit using the value `fetch_add`
-returned, and overshooting a limit is harmless because nothing ever
-locates data through a counter — descriptors are self-describing.
+million records of a few hundred bytes, so payload space runs out first.
+
+The split is fixed rather than a movable frontier because fixed bounds are
+what make claiming wait-free: each counter is checked against its region's
+limit using the value `fetch_add` returned, and overshooting is harmless
+because nothing ever locates data through a counter — a committed
+descriptor carries its own offset and length.
 
 ## Writing a frame
 
@@ -133,17 +135,17 @@ CLAIMED (slot 0) ---+
 - Closing costs one pass over the claimed slots. No payload is copied.
 - On Linux, the first touch of the sparse backing file can cost
   milliseconds on journalling filesystems (it is the fault path, not block
-  allocation — `fallocate` does not help). Creators should run
-  [`pre_fault`] off any latency-sensitive path — for example on a
-  background thread, concurrently with spawning the first writer. Windows
-  and macOS fault cheaply and skip this.
+  allocation — `fallocate` does not help). Creators should run `pre_fault`
+  off any latency-sensitive path — for example on a background thread,
+  concurrently with spawning the first writer. Windows and macOS fault
+  cheaply and skip this.
 
 ## Files
 
 | File        | Role                                                                                                                                                                                                                                                 |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mod.rs`    | Public surface (`ShmWriter`, `FrameMut`, `close`, `Frames`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                                  |
-| `layout.rs` | Pure geometry: header offsets, the table/payload split, span validation. Plain integer math, no pointers, no atomics.                                                                                                                                |
+| `layout.rs` | Pure geometry: the sizing rule that turns a mapping length into table and payload bounds, payload rounding, and span validation. Plain integer math, no pointers, no atomics.                                                                        |
 | `slot.rs`   | The descriptor codec: pack and unpack one slot value, classify it as unfinished, aborted, committed, or corrupt. Pure.                                                                                                                               |
 | `state.rs`  | The only module that touches shared memory: one unsafe borrow builds three typed views — the `repr(C)` header struct, the descriptor table as a slice of atomics, and the raw payload area — and the three-rule memory-ordering contract lives here. |
 | `writer.rs` | Claim, fill, finish. Owns the argument for why a claimed payload span is exclusively the writer's.                                                                                                                                                   |
