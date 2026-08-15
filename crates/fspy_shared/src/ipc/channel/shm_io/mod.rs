@@ -53,11 +53,11 @@
 //!
 //! # Close boundary
 //!
-//! [`close`]'s boundary is a snapshot of the claim counter. A writer
-//! admitted before the snapshot races the freeze pass per slot and its
-//! frame is either included (commit won) or ignored (abort won) — never
+//! [`ShmReceiver::close`]'s boundary is a snapshot of the claim counter.
+//! A writer admitted before the snapshot races the freeze pass per slot and
+//! its frame is either included (commit won) or ignored (abort won) — never
 //! torn; a claim after the snapshot lands in a slot the receiver never
-//! visits and is dropped, and the CLOSED gate set before [`close`] returns
+//! visits and is dropped, and the CLOSED gate set before close returns
 //! stops stragglers from claiming (and materializing pages) forever. Both
 //! drops are sound because writers publish a record *before* performing the
 //! recorded operation: a process that died mid-frame never performed the
@@ -81,7 +81,7 @@ pub use shared::pre_fault;
 // name them.
 #[cfg(test)]
 pub use shared::{ClaimError, ProtocolError};
-pub use shared::{Frames, ShmWriter, close};
+pub use shared::{Frames, ShmReceiver, ShmWriter};
 
 // The region arithmetic in `layout` relies on `usize` accommodating sums of
 // 32-bit-bounded quantities, and the descriptor protocol on native 64-bit
@@ -186,7 +186,7 @@ mod tests {
     fn collect_frames(shm: &MockedShm) -> Frames<MockedShm> {
         // SAFETY: `MockedShm` provides a stable, zero-initialized allocation
         // accessed only through the protocol.
-        unsafe { close(shm.clone()) }.unwrap()
+        unsafe { ShmReceiver::new(shm.clone()) }.close().unwrap()
     }
 
     #[test]
@@ -581,7 +581,7 @@ mod tests {
         shm.poke_u64(64, (bogus_len << 32) | bogus_offset);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { close(shm) };
+        let result = unsafe { ShmReceiver::new(shm) }.close();
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -597,7 +597,7 @@ mod tests {
         shm.poke_u64(64, (1 << 63) | (8u64 << 32) | 8);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { close(shm) };
+        let result = unsafe { ShmReceiver::new(shm) }.close();
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -701,7 +701,7 @@ mod tests {
 
         // SAFETY: the mapping is a valid shared-memory region created zeroed
         // and accessed only through the protocol.
-        let frames = unsafe { close(mapping) }.unwrap();
+        let frames = unsafe { ShmReceiver::new(mapping) }.close().unwrap();
         assert!(frames.is_complete());
         let collected = frames.iter().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert!(collected.len() == CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
@@ -769,7 +769,7 @@ mod tests {
         assert!(writer.try_write_frame(b"alive"));
 
         // SAFETY: see `real_shm_across_processes`.
-        let frames = unsafe { close(writer.into_memory()) }.unwrap();
+        let frames = unsafe { ShmReceiver::new(writer.into_memory()) }.close().unwrap();
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);

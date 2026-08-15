@@ -173,7 +173,7 @@ CLAIMED (slot 0) ---+
 
 | File        | Role                                                                                                                                                                                                                                        |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`    | Public surface (`ShmWriter`, `close`, `Frames`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                                     |
+| `mod.rs`    | Public surface (`ShmWriter`, `ShmReceiver`, `Frames`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                               |
 | `shared.rs` | Everything that touches the mapping, in reading order: the typed views of the region and the ordering contract, then the writer side (claim, fill, finish), then the receiver side (close and `Frames`) with the reasoning for its borrows. |
 | `layout.rs` | The region's shape: the header struct, the sizing rule that turns a mapping length into table and payload bounds, payload rounding, span validation, and the descriptor codec. Describes memory, never touches it.                          |
 

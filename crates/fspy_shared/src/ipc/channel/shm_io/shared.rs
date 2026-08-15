@@ -493,60 +493,90 @@ pub enum ProtocolError {
     CorruptDescriptor { slot_index: usize },
 }
 
-/// Closes the channel and returns the committed frames as borrows of the
-/// mapping, which moves into the returned [`Frames`].
+/// The receiver end of a channel.
 ///
-/// Never blocks on writers: writers admitted before the snapshot race per
-/// slot, and each raced slot independently ends up committed (included) or
-/// aborted (excluded). Claims after the snapshot land in slots this pass
-/// never visits until the CLOSED gate — set before returning — stops them.
-/// See the crate-level protocol docs in [`super`].
-///
-/// # Safety
-///
-/// Same contract as [`ShmWriter::new`]: `mem` must be a stable, valid
-/// pointer to the whole region, zero-initialized at creation and accessed
-/// only through this protocol.
-///
-/// # Panics
-///
-/// Panics when the region is not `u64`-aligned or its size is outside the
-/// supported range (see [`SharedState::borrow`]) — a broken caller, not
-/// corrupt shared data, which is reported as [`ProtocolError`] instead.
-pub unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {
-    let spans;
-    let complete;
-    {
-        // SAFETY: forwarded from this function's contract; the raw slice
-        // stays valid while `mem` is borrowed here and beyond, since `mem`
-        // moves into the returned `Frames`.
-        let state = unsafe { SharedState::borrow(mem.as_raw_slice()) };
+/// Attaching to the region is the one unsafe step, sharing
+/// [`ShmWriter::new`]'s contract; closing is safe.
+pub struct ShmReceiver<M> {
+    mem: M,
+}
 
-        // The close boundary: claims at or before this snapshot are inside
-        // it, later ones land in slots this pass never visits. The count is
-        // clamped to the table capacity, so a counter inflated by failed
-        // claims (or by a foreign scribble) degrades to a full-table sweep,
-        // not an error. The snapshot also reads the loss flag: its one
-        // read either sees a loss, or the loss belongs to an operation
-        // performed after this boundary (rule 1 in the ordering contract
-        // above).
-        let (slot_count, is_complete) = state.snapshot();
-
-        // Gate further claims. Cheap: the creator pre-faulted this page
-        // where first touches are expensive. Claims racing between the
-        // snapshot and this gate are dropped soundly (see the module docs
-        // in `super`).
-        state.close_claims();
-
-        // Freeze pass: drive every admitted slot to a terminal state and
-        // collect the committed spans. After this loop the snapshot's slice
-        // of the descriptor table can no longer change — late writers lose
-        // their commit race against `ABORTED`.
-        spans = freeze_committed_spans(state, slot_count)?;
-        complete = is_complete;
+impl<M: AsRawSlice> ShmReceiver<M> {
+    /// Creates the receiver backed by a shared-memory region.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`ShmWriter::new`]:
+    ///
+    /// - `mem.as_raw_slice()` must return a stable, valid pointer to the
+    ///   whole region for the lifetime of the receiver and of the
+    ///   [`Frames`] it closes into.
+    /// - The region must have been zero-initialized when it was created and
+    ///   accessed only through this protocol since.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the region is not `u64`-aligned or its size is outside
+    /// the supported range (see [`SharedState::borrow`]).
+    pub unsafe fn new(mem: M) -> Self {
+        // Validate the region geometry eagerly so misuse fails at
+        // construction, not at close.
+        // SAFETY: forwarded from this function's contract.
+        let _ = unsafe { SharedState::borrow(mem.as_raw_slice()) };
+        Self { mem }
     }
 
-    Ok(Frames { mem, spans, complete })
+    /// Closes the channel and returns the committed frames as borrows of
+    /// the mapping, which moves into the returned [`Frames`].
+    ///
+    /// Never blocks on writers: writers admitted before the snapshot race
+    /// per slot, and each raced slot independently ends up committed
+    /// (included) or aborted (excluded). Claims after the snapshot land in
+    /// slots this pass never visits until the CLOSED gate — set before
+    /// this returns — stops them. See the crate-level protocol docs in
+    /// [`super`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProtocolError`] when the shared-memory metadata could not have
+    /// been produced by a correct writer; the region was corrupted and its
+    /// frames are unusable.
+    pub fn close(self) -> Result<Frames<M>, ProtocolError> {
+        let spans;
+        let complete;
+        {
+            // SAFETY: `new` requires the region to stay valid and
+            // protocol-governed, and it validated the geometry; the raw
+            // slice stays valid while `self.mem` is borrowed here and
+            // beyond, since it moves into the returned `Frames`.
+            let state = unsafe { SharedState::borrow(self.mem.as_raw_slice()) };
+
+            // The close boundary: claims at or before this snapshot are
+            // inside it, later ones land in slots this pass never visits.
+            // The count is clamped to the table capacity, so a counter
+            // inflated by failed claims (or by a foreign scribble) degrades
+            // to a full-table sweep, not an error. The snapshot also reads
+            // the loss flag: its one read either sees a loss, or the loss
+            // belongs to an operation performed after this boundary (rule 1
+            // in the ordering contract above).
+            let (slot_count, is_complete) = state.snapshot();
+
+            // Gate further claims. Cheap: the creator pre-faulted this page
+            // where first touches are expensive. Claims racing between the
+            // snapshot and this gate are dropped soundly (see the module
+            // docs in `super`).
+            state.close_claims();
+
+            // Freeze pass: drive every admitted slot to a terminal state
+            // and collect the committed spans. After this loop the
+            // snapshot's slice of the descriptor table can no longer change
+            // — late writers lose their commit race against `ABORTED`.
+            spans = freeze_committed_spans(state, slot_count)?;
+            complete = is_complete;
+        }
+
+        Ok(Frames { mem: self.mem, spans, complete })
+    }
 }
 
 fn freeze_committed_spans(
@@ -570,7 +600,8 @@ fn freeze_committed_spans(
 }
 
 /// Materializes the page backing the protocol header without changing
-/// protocol state, so that neither a writer's first claim nor [`close`]'s
+/// protocol state, so that neither a writer's first claim nor
+/// [`ShmReceiver::close`]'s
 /// snapshot pays for the backing file's first block allocation — a
 /// millisecond-scale cost on some journalling filesystems, for reads of
 /// holes as well as writes. Run it off any latency-sensitive path. See
