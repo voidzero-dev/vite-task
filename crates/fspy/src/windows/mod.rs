@@ -8,7 +8,7 @@ use std::{
 
 use fspy_detours_sys::{DetourCopyPayloadToProcess, DetourUpdateProcessWithDll};
 use fspy_shared::{
-    ipc::{PathAccess, channel::channel},
+    ipc::{PathAccess, SHM_SLOTS, channel::channel},
     windows::{PAYLOAD_ID, Payload},
 };
 use futures_util::FutureExt;
@@ -21,10 +21,7 @@ use winapi::{
 use winsafe::co::{CP, WC};
 
 use crate::{
-    ChildTermination, TrackedChild,
-    command::Command,
-    error::SpawnError,
-    ipc::{ChannelAccesses, SHM_CAPACITY},
+    ChildTermination, TrackedChild, command::Command, error::SpawnError, ipc::ChannelAccesses,
 };
 
 const INTERPOSE_CDYLIB: Artifact =
@@ -87,7 +84,7 @@ impl SpyImpl {
         command.creation_flags(CREATE_SUSPENDED);
 
         let (channel_conf, receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+            channel::<SHM_SLOTS>().map_err(SpawnError::ChannelCreation)?;
 
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;

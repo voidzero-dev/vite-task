@@ -1,14 +1,16 @@
 //! The only module that touches shared-memory bytes.
 //!
 //! [`SharedState`] wraps the raw mapping and exposes the protocol's atomic
-//! operations. Every unsafe pointer derivation lives here, justified by the
-//! construction contract of [`SharedState::borrow`]; no other module reads or
-//! writes the mapping directly.
+//! operations. The header and descriptor table are one `repr(C)` struct,
+//! [`Region`], borrowed from the mapping base with a single unsafe cast in
+//! [`SharedState::borrow`]; every access after that is a plain field access
+//! or an index into the slot array. Only the untyped payload area — which
+//! must stay outside the [`Region`] referent so writers' exclusive `&mut`
+//! payload spans never alias it — is still reached through raw pointers.
 //!
 //! # Shared atomics
 //!
-//! The header holds three independent monotonic `AtomicU64`s (offsets in
-//! [`layout`]):
+//! The header holds three independent monotonic `AtomicU64`s:
 //!
 //! - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
 //!   claims ever attempted. Claiming is one wait-free `fetch_add`; the
@@ -30,14 +32,13 @@
 //!    value it reads (in the counter's modification order) are in the
 //!    snapshot; later ones receive slot indices the receiver never visits.
 //!    Claims publish no payload data, so `Relaxed` suffices throughout.
-//!    The CLOSED gate is set *after* collection (off the latency-sensitive
-//!    path): it only stops stragglers from working and allocating pages
-//!    forever; any claim admitted between the snapshot and the gate lands
-//!    beyond the snapshot and is never observed. The incomplete flag rides
-//!    the same rule: a writer sets it (`Relaxed` RMW) before performing the
-//!    operation whose record was lost, and the receiver re-reads it after
-//!    freezing; a flag the receiver misses therefore belongs to an operation
-//!    performed after the boundary.
+//!    The CLOSED gate only stops stragglers from claiming (and allocating
+//!    pages) forever; any claim admitted between the snapshot and the gate
+//!    lands beyond the snapshot and is never observed. The incomplete flag
+//!    rides the same rule: a writer sets it (`Relaxed` RMW) before
+//!    performing the operation whose record was lost, and the receiver
+//!    re-reads it after freezing; a flag the receiver misses therefore
+//!    belongs to an operation performed after the boundary.
 //! 2. **Writer commit** — the slot compare-and-swap uses `Release`
 //!    ([`SharedState::commit`]): every payload write happens-before the
 //!    committed descriptor becomes visible.
@@ -56,6 +57,33 @@ use super::{layout, slot};
 /// The CLOSED gate bit of the claim counter. The low 63 bits count claims,
 /// so no realistic claim volume can carry into the gate.
 const CLOSED: u64 = 1 << 63;
+
+/// The region header: three protocol atomics, padded so the descriptor
+/// table starts off their cache line and there is room for future header
+/// fields, which must start zeroed.
+#[repr(C)]
+struct Header {
+    /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
+    claims: AtomicU64,
+    /// Nonzero once a live writer lost a record.
+    incomplete: AtomicU64,
+    /// Payload bytes ever reserved, including by failed claims.
+    payload_reserved: AtomicU64,
+    _reserved: [u64; 5],
+}
+
+const _: () = assert!(size_of::<Header>() == layout::HEADER_LEN);
+const _: () = assert!(align_of::<Header>() == align_of::<AtomicU64>());
+
+/// The compile-time-laid-out prefix of the region: the header and the
+/// descriptor table. The payload area follows it in the mapping but is
+/// deliberately not a field — writers hold exclusive `&mut` borrows into
+/// it, which must not alias the shared `&Region` borrow.
+#[repr(C)]
+struct Region<const SLOTS: usize> {
+    header: Header,
+    slots: [AtomicU64; SLOTS],
+}
 
 /// Why a claim was not admitted.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -77,13 +105,21 @@ pub(super) struct Reservation {
 
 /// A borrowed view of the shared mapping with protocol-level operations.
 #[derive(Clone, Copy)]
-pub(super) struct SharedState<'m> {
+pub(super) struct SharedState<'m, const SLOTS: usize> {
+    region: &'m Region<SLOTS>,
     base: *mut u8,
     len: usize,
     _mapping: PhantomData<&'m ()>,
 }
 
-impl<'m> SharedState<'m> {
+impl<const SLOTS: usize> SharedState<'_, SLOTS> {
+    /// Byte offset where the payload region starts: right after the
+    /// descriptor table. `u64`-aligned by construction.
+    const PAYLOAD_BASE: usize = {
+        assert!(size_of::<Region<SLOTS>>() == layout::payload_base_for_slots(SLOTS));
+        size_of::<Region<SLOTS>>()
+    };
+
     /// Borrows a shared mapping.
     ///
     /// # Safety
@@ -91,62 +127,45 @@ impl<'m> SharedState<'m> {
     /// - `mem` must be valid for reads and writes for the lifetime `'m` and
     ///   its address must be stable.
     /// - The memory must have been zero-initialized when the region was
-    ///   created, and accessed only through this protocol since.
-    /// - Other processes may access the region concurrently, but only through
-    ///   this protocol.
+    ///   created, and accessed only through this protocol since,
+    ///   instantiated with the same `SLOTS` by every process.
     ///
     /// # Panics
     ///
     /// Panics when the mapping cannot host the protocol at all: base not
-    /// `u64`-aligned, or length outside
-    /// `[layout::HEADER_LEN, layout::MAX_MAPPING_LEN]`. These indicate a
-    /// broken caller, not runtime data.
+    /// `u64`-aligned, too small for the header and table, or larger than
+    /// [`layout::MAX_MAPPING_LEN`]. These indicate a broken caller, not
+    /// runtime data.
     pub(super) unsafe fn borrow(mem: *mut [u8]) -> Self {
         let base = mem.cast::<u8>();
         let len = mem.len();
-        assert!(base.addr().is_multiple_of(align_of::<AtomicU64>()));
-        assert!((layout::HEADER_LEN..=layout::MAX_MAPPING_LEN).contains(&len));
-        Self { base, len, _mapping: PhantomData }
+        assert!(base.addr().is_multiple_of(align_of::<Region<SLOTS>>()));
+        assert!((Self::PAYLOAD_BASE..=layout::MAX_MAPPING_LEN).contains(&len));
+        // SAFETY: the region prefix `[base, base + size_of::<Region>())` is
+        // in bounds and aligned (both asserted above) and consists entirely
+        // of atomics zero-initialized at creation, so a shared borrow for
+        // `'m` is valid even while other threads and processes access the
+        // same memory — they do so through these same atomics.
+        let region = unsafe { &*base.cast::<Region<SLOTS>>() };
+        Self { region, base, len, _mapping: PhantomData }
     }
 
     pub(super) const fn mapping_len(self) -> usize {
         self.len
     }
 
-    /// Number of descriptor slots the fixed table holds.
-    pub(super) const fn max_slots(self) -> usize {
-        layout::max_slots(self.len)
-    }
-
-    /// A header atomic. `offset` must be one of the `layout` header offsets.
-    fn header_atomic(self, offset: usize) -> &'m AtomicU64 {
-        debug_assert!(offset < layout::HEADER_LEN);
-        // SAFETY: `borrow` checked that the mapping is `u64`-aligned and at
-        // least `HEADER_LEN` bytes, so every `u64`-aligned header offset is a
-        // valid, aligned `AtomicU64` for `'m`.
-        unsafe { AtomicU64::from_ptr(self.base.add(offset).cast()) }
-    }
-
-    /// The descriptor slot at `index`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the slot lies outside the fixed table. Callers only pass
-    /// indices below an admitted (writer) or clamped (receiver) slot count,
-    /// so the assertion documents an invariant rather than guarding runtime
-    /// data.
-    fn slot_atomic(self, index: usize) -> &'m AtomicU64 {
-        assert!(index < self.max_slots());
-        // SAFETY: the assertion keeps the slot inside the fixed table, which
-        // consists of `u64`-aligned slots after the aligned header.
-        unsafe {
-            AtomicU64::from_ptr(self.base.add(layout::HEADER_LEN + index * layout::SLOT_LEN).cast())
-        }
+    /// Byte offset where the payload region starts.
+    #[expect(
+        clippy::unused_self,
+        reason = "reads an associated const; instance syntax keeps call sites uniform"
+    )]
+    pub(super) const fn payload_base(self) -> usize {
+        Self::PAYLOAD_BASE
     }
 
     /// Whether the CLOSED gate has been set.
     pub(super) fn is_closed(self) -> bool {
-        self.header_atomic(layout::SLOT_COUNTER_OFFSET).load(Ordering::Relaxed) & CLOSED != 0
+        self.region.header.claims.load(Ordering::Relaxed) & CLOSED != 0
     }
 
     /// Atomically reserves one descriptor slot and one payload span.
@@ -162,34 +181,31 @@ impl<'m> SharedState<'m> {
         // slot. A failed reservation stays counted — overshoot is harmless
         // because the counter is not what locates payloads (descriptors are)
         // and a `u64` cannot realistically wrap.
-        let payload_start = self
-            .header_atomic(layout::PAYLOAD_COUNTER_OFFSET)
-            .fetch_add(reserved_len as u64, Ordering::Relaxed);
+        let payload_start =
+            self.region.header.payload_reserved.fetch_add(reserved_len as u64, Ordering::Relaxed);
         // Checked: a foreign scribble of the counter must fail the claim,
         // not wrap the bound into an out-of-bounds reservation.
         let payload_end = payload_start.checked_add(reserved_len as u64);
-        if payload_end.is_none_or(|end| end > layout::payload_region_len(self.len) as u64) {
+        let payload_region_len = layout::payload_region_len(self.len, Self::PAYLOAD_BASE);
+        if payload_end.is_none_or(|end| end > payload_region_len as u64) {
             return Err(ReserveError::Capacity);
         }
 
-        let claims =
-            self.header_atomic(layout::SLOT_COUNTER_OFFSET).fetch_add(1, Ordering::Relaxed);
+        let claims = self.region.header.claims.fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
             return Err(ReserveError::Closed);
         }
         let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
-        if slot_index >= self.max_slots() {
+        if slot_index >= SLOTS {
             return Err(ReserveError::Capacity);
         }
 
-        // The capacity check bounded `payload_start` by the region length,
-        // which fits `usize`.
-        let payload_start = usize::try_from(payload_start).expect("bounded by the payload region");
         Ok(Reservation {
             slot_index,
-            // In bounds: `payload_start + reserved_len` fits the region, and
-            // the region ends within the mapping (`layout`).
-            payload_offset: layout::payload_base(self.len) + payload_start,
+            // In bounds: `payload_start + reserved_len` fits the payload
+            // region, which ends within the mapping (`layout`).
+            payload_offset: Self::PAYLOAD_BASE
+                + usize::try_from(payload_start).expect("bounded by the payload region"),
         })
     }
 
@@ -198,26 +214,31 @@ impl<'m> SharedState<'m> {
     /// Must be called before the operation whose record was lost is
     /// performed (rule 1).
     pub(super) fn flag_incomplete(self) {
-        self.header_atomic(layout::INCOMPLETE_OFFSET).fetch_or(1, Ordering::Relaxed);
+        self.region.header.incomplete.fetch_or(1, Ordering::Relaxed);
     }
 
     /// Whether any live writer lost a record. Read after the freeze pass
     /// (rule 1).
     pub(super) fn is_incomplete(self) -> bool {
-        self.header_atomic(layout::INCOMPLETE_OFFSET).load(Ordering::Relaxed) != 0
+        self.region.header.incomplete.load(Ordering::Relaxed) != 0
     }
 
     /// Snapshots the number of admitted claims: the receiver's close
     /// boundary (rule 1). Clamped to the table capacity because failed
     /// claims overshoot the counter.
     pub(super) fn snapshot_claims(self) -> usize {
-        let claims = self.header_atomic(layout::SLOT_COUNTER_OFFSET).load(Ordering::Relaxed);
-        usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(self.max_slots())
+        let claims = self.region.header.claims.load(Ordering::Relaxed);
+        usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(SLOTS)
     }
 
-    /// Forces the page holding the header counters to be materialized by
-    /// the operating system before anyone touches it on a latency-sensitive
-    /// path.
+    /// Sets the CLOSED gate so stragglers stop claiming.
+    pub(super) fn close_claims(self) {
+        self.region.header.claims.fetch_or(CLOSED, Ordering::Relaxed);
+    }
+
+    /// Forces the page backing the header (and the table's first slots) to
+    /// be materialized by the operating system before anyone touches it on
+    /// a latency-sensitive path.
     ///
     /// A compare-exchange of zero with zero on the claim counter: on an
     /// untouched region it performs a real write — allocating the first
@@ -231,22 +252,8 @@ impl<'m> SharedState<'m> {
     /// Only Linux channels use this: elsewhere the first touch is cheap.
     #[cfg(target_os = "linux")]
     pub(super) fn pre_fault(self) {
-        let _ = self.header_atomic(layout::SLOT_COUNTER_OFFSET).compare_exchange(
-            0,
-            0,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        );
-    }
-
-    /// Sets the CLOSED gate so stragglers stop claiming.
-    ///
-    /// Not part of the close boundary (rule 1): run it after collection,
-    /// off the latency-sensitive path — on an otherwise-untouched region
-    /// this write materializes the counter page, which can cost
-    /// milliseconds of first-block allocation on journalling filesystems.
-    pub(super) fn close_claims(self) {
-        self.header_atomic(layout::SLOT_COUNTER_OFFSET).fetch_or(CLOSED, Ordering::Relaxed);
+        let _ =
+            self.region.header.claims.compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
     }
 
     /// Publishes a committed descriptor into an unfinished slot.
@@ -254,18 +261,28 @@ impl<'m> SharedState<'m> {
     /// Returns false when the receiver aborted the slot first; the payload is
     /// then permanently unreachable and the writer must not touch it again
     /// either way.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `slot_index` lies outside the table; callers only pass
+    /// indices of admitted reservations.
     pub(super) fn commit(self, slot_index: usize, descriptor: u64) -> bool {
         // Rule 2: `Release` orders every payload write before the descriptor.
-        self.slot_atomic(slot_index)
+        self.region.slots[slot_index]
             .compare_exchange(slot::UNFINISHED, descriptor, Ordering::Release, Ordering::Relaxed)
             .is_ok()
     }
 
     /// Freezes one slot during close and returns its terminal value: `ABORTED`
     /// when the receiver won the race, the committed descriptor otherwise.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `slot_index` lies outside the table; the receiver only
+    /// passes indices below its clamped snapshot.
     pub(super) fn freeze(self, slot_index: usize) -> u64 {
         // Rule 3: `Acquire` on failure makes a committed payload visible.
-        match self.slot_atomic(slot_index).compare_exchange(
+        match self.region.slots[slot_index].compare_exchange(
             slot::UNFINISHED,
             slot::ABORTED,
             Ordering::AcqRel,

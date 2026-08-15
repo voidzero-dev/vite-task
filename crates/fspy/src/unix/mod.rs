@@ -10,7 +10,7 @@ use std::{io, path::Path};
 use fspy_seccomp_unotify::supervisor::supervise;
 use fspy_shared::ipc::PathAccess;
 #[cfg(not(target_env = "musl"))]
-use fspy_shared::ipc::{IpcStr, channel::channel};
+use fspy_shared::ipc::{IpcStr, SHM_SLOTS, channel::channel};
 #[cfg(target_os = "macos")]
 use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
@@ -25,7 +25,7 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
-use crate::ipc::{ChannelAccesses, SHM_CAPACITY};
+use crate::ipc::ChannelAccesses;
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
 
 #[derive(Debug)]
@@ -80,7 +80,7 @@ impl SpyImpl {
 
         #[cfg(not(target_env = "musl"))]
         let (ipc_channel_conf, ipc_receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+            channel::<SHM_SLOTS>().map_err(SpawnError::ChannelCreation)?;
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]
