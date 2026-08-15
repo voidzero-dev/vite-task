@@ -2,21 +2,21 @@ use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
 
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
-    ipc::{PathAccess, SHM_SLOTS, channel::Sender},
+    ipc::{PathAccess, channel::Sender},
     windows::{PAYLOAD_ID, Payload},
 };
 use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
 
 pub struct Client<'a> {
     payload: Payload<'a>,
-    ipc_sender: Option<Sender<SHM_SLOTS>>,
+    ipc_sender: Option<Sender>,
 }
 
 impl<'a> Client<'a> {
     pub fn from_payload_bytes(payload_bytes: &'a [u8]) -> Self {
         let payload: Payload<'a> = wincode::deserialize_exact(payload_bytes).unwrap();
 
-        let ipc_sender = match payload.channel_conf.sender::<SHM_SLOTS>() {
+        let ipc_sender = match payload.channel_conf.sender() {
             Ok(sender) => Some(sender),
             Err(err) => {
                 // this can happen if the process is started after the root target process has exited.

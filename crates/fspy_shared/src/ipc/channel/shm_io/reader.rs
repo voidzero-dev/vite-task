@@ -28,13 +28,13 @@ use super::{
 /// The committed frames of a closed channel: validated spans borrowed from
 /// the mapping, which stays alive inside this value. Dropping it releases
 /// the mapping.
-pub struct Frames<M, const SLOTS: usize> {
+pub struct Frames<M> {
     mem: M,
     spans: Vec<PayloadSpan>,
     complete: bool,
 }
 
-impl<M: AsRawSlice, const SLOTS: usize> Frames<M, SLOTS> {
+impl<M: AsRawSlice> Frames<M> {
     /// Iterates over the committed frames in claim order.
     pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
         let base = self.mem.as_raw_slice().cast::<u8>().cast_const();
@@ -59,7 +59,7 @@ impl<M: AsRawSlice, const SLOTS: usize> Frames<M, SLOTS> {
     }
 }
 
-impl<M, const SLOTS: usize> fmt::Debug for Frames<M, SLOTS> {
+impl<M> fmt::Debug for Frames<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Frames")
             .field("frames", &self.spans.len())
@@ -96,16 +96,14 @@ pub enum ProtocolError {
 /// Panics when the region is not `u64`-aligned or its size is outside the
 /// supported range (see [`SharedState::borrow`]) — a broken caller, not
 /// corrupt shared data, which is reported as [`ProtocolError`] instead.
-pub(super) unsafe fn close<M: AsRawSlice, const SLOTS: usize>(
-    mem: M,
-) -> Result<Frames<M, SLOTS>, ProtocolError> {
+pub(super) unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {
     let spans;
     let complete;
     {
         // SAFETY: forwarded from this function's contract; the raw slice
         // stays valid while `mem` is borrowed here and beyond, since `mem`
         // moves into the returned `Frames`.
-        let state = unsafe { SharedState::<SLOTS>::borrow(mem.as_raw_slice()) };
+        let state = unsafe { SharedState::borrow(mem.as_raw_slice()) };
 
         // The close boundary: claims at or before this snapshot are inside
         // it, later ones land in slots this pass never visits. The count is
@@ -136,8 +134,8 @@ pub(super) unsafe fn close<M: AsRawSlice, const SLOTS: usize>(
     Ok(Frames { mem, spans, complete })
 }
 
-fn freeze_committed_spans<const SLOTS: usize>(
-    state: SharedState<'_, SLOTS>,
+fn freeze_committed_spans(
+    state: SharedState<'_>,
     slot_count: usize,
 ) -> Result<Vec<PayloadSpan>, ProtocolError> {
     let mut spans = Vec::new();
@@ -145,13 +143,8 @@ fn freeze_committed_spans<const SLOTS: usize>(
         match slot::decode(state.freeze(slot_index)) {
             SlotState::Aborted => {}
             SlotState::Committed { payload_offset, payload_len } => {
-                let span = PayloadSpan::validate(
-                    state.mapping_len(),
-                    state.payload_base(),
-                    payload_offset,
-                    payload_len,
-                )
-                .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
+                let span = PayloadSpan::validate(state.mapping_len(), payload_offset, payload_len)
+                    .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
                 spans.push(span);
             }
             // `freeze` only returns terminal values, so `Unfinished` is

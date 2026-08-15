@@ -11,7 +11,7 @@ pub mod raw_exec;
 use std::{ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _, path::Path};
 
 use convert::{ToAbsolutePath, ToAccessMode};
-use fspy_shared::ipc::{PathAccess, SHM_SLOTS, channel::Sender};
+use fspy_shared::ipc::{PathAccess, channel::Sender};
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{EncodedPayload, decode_payload_from_env},
@@ -22,7 +22,7 @@ use wincode::Serialize as _;
 
 pub struct Client {
     encoded_payload: EncodedPayload,
-    ipc_sender: Option<Sender<SHM_SLOTS>>,
+    ipc_sender: Option<Sender>,
 }
 
 // SAFETY: construction owns every field, later methods borrow them immutably,
@@ -53,7 +53,7 @@ impl Client {
     pub fn from_env(envs: impl Iterator<Item = fspy_nostd::env::Entry>) -> Self {
         let encoded_payload = decode_payload_from_env(envs).unwrap();
 
-        let ipc_sender = match encoded_payload.payload.ipc_channel_conf.sender::<SHM_SLOTS>() {
+        let ipc_sender = match encoded_payload.payload.ipc_channel_conf.sender() {
             Ok(sender) => Some(sender),
             Err(err) => {
                 // This can happen if the process starts after the root target

@@ -3,16 +3,6 @@ pub mod channel;
 mod ipc_path;
 use std::fmt::Debug;
 
-/// Descriptor-table size of the path-access channel, sized from a 4 GiB
-/// region.
-///
-/// Large enough to store path accesses in almost any realistic scenario,
-/// and sparse, so no physical memory is used until it is actually written.
-/// Every process on the channel — supervisor and preload clients — must
-/// name this same table size.
-#[cfg(not(target_env = "musl"))]
-pub const SHM_SLOTS: usize = channel::slots_for_capacity(4 * 1024 * 1024 * 1024);
-
 use bitflags::bitflags;
 pub use fspy_ipc_str::IpcStr;
 pub use ipc_path::IpcPath;

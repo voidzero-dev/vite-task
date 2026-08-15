@@ -39,13 +39,12 @@ counts up:
 - the **payload counter** — how many payload bytes were ever reserved,
   including by failed claims. Only writers read it.
 
-The table has one 8-byte slot per frame, and its length is the protocol's
-const-generic parameter (`SLOTS`): the header and table are one `repr(C)`
-struct, and a creator sizes the backing region to `capacity_for_slots(SLOTS)`
-(`slots_for_capacity` derives the parameter from a byte budget — an eighth
-of the space). For a 4 GiB region that is ~67 million slots; the ~3.5 GiB
-payload region fits ~15–20 million records of a few hundred bytes, so
-payload space runs out first. The split is fixed, not a movable frontier,
+The table has one 8-byte slot per frame — an eighth of the region. Every
+bound is derived from the mapping length alone, so the region is
+self-describing: writers and the receiver compute the same layout from the
+size of the file they mapped, with nothing else to agree on. For a 4 GiB
+region that is ~67 million slots; the ~3.5 GiB payload region fits ~15–20
+million records of a few hundred bytes, so payload space runs out first. The split is fixed, not a movable frontier,
 because fixed bounds are what make claiming wait-free: each counter is
 checked against its own constant limit using the value `fetch_add`
 returned, and overshooting a limit is harmless because nothing ever
@@ -141,14 +140,14 @@ CLAIMED (slot 0) ---+
 
 ## Files
 
-| File        | Role                                                                                                                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`    | Public surface (`ShmWriter`, `FrameMut`, `close`, `Frames`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`). |
-| `layout.rs` | Pure geometry: header offsets, the table/payload split, span validation. Plain integer math, no pointers, no atomics.                                                                                               |
-| `slot.rs`   | The descriptor codec: pack and unpack one slot value, classify it as unfinished, aborted, committed, or corrupt. Pure.                                                                                              |
-| `state.rs`  | The only module that touches shared memory: the `repr(C)` region struct (header plus slot array), the single unsafe borrow of it, the raw payload pointer, and the three-rule memory-ordering contract.             |
-| `writer.rs` | Claim, fill, finish. Owns the argument for why a claimed payload span is exclusively the writer's.                                                                                                                  |
-| `reader.rs` | Close (snapshot, gate, freeze, validate) and `Frames`. Owns the argument for why borrowing committed spans is sound.                                                                                                |
+| File        | Role                                                                                                                                                                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`    | Public surface (`ShmWriter`, `FrameMut`, `close`, `Frames`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                                  |
+| `layout.rs` | Pure geometry: header offsets, the table/payload split, span validation. Plain integer math, no pointers, no atomics.                                                                                                                                |
+| `slot.rs`   | The descriptor codec: pack and unpack one slot value, classify it as unfinished, aborted, committed, or corrupt. Pure.                                                                                                                               |
+| `state.rs`  | The only module that touches shared memory: one unsafe borrow builds three typed views — the `repr(C)` header struct, the descriptor table as a slice of atomics, and the raw payload area — and the three-rule memory-ordering contract lives here. |
+| `writer.rs` | Claim, fill, finish. Owns the argument for why a claimed payload span is exclusively the writer's.                                                                                                                                                   |
+| `reader.rs` | Close (snapshot, gate, freeze, validate) and `Frames`. Owns the argument for why borrowing committed spans is sound.                                                                                                                                 |
 
 Each file carries one self-contained argument, so the protocol can be
 reviewed module by module: the pure math first, then the atomics, then the

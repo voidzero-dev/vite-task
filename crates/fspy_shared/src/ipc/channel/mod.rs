@@ -14,11 +14,11 @@ use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
 use shm_io::ShmWriter;
-pub use shm_io::{ClaimError, FrameMut, WriteEncodedError, capacity_for_slots, slots_for_capacity};
+pub use shm_io::{ClaimError, FrameMut, WriteEncodedError};
 
 /// The committed frames of a closed channel; borrows the shared mapping,
 /// which stays alive (and mapped) until this value drops.
-pub type Frames<const SLOTS: usize> = shm_io::Frames<Mapping, SLOTS>;
+pub type Frames = shm_io::Frames<Mapping>;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -40,15 +40,13 @@ pub struct ChannelConf {
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders.
 ///
-/// The channel's layout is fixed at compile time by `SLOTS`, the descriptor
-/// table size (see [`slots_for_capacity`] to derive it from a byte budget);
-/// the backing region is sized to [`capacity_for_slots`] of `SLOTS`. Every
-/// process must name the same `SLOTS`.
+/// The channel's layout is derived from `capacity` alone, on both ends, so
+/// senders need no configuration beyond the `ChannelConf`.
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
-pub fn channel<const SLOTS: usize>() -> io::Result<(ChannelConf, Receiver<SLOTS>)> {
+pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str())?;
-    let handle = fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity_for_slots(SLOTS))
-        .map_err(shm_error_to_io)?;
+    let handle =
+        fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
     // The keeper exists from here on, so every error path below cleans up.
     let keeper = ShmKeeper { path: shm_c_path };
     let mapping = handle.map().map_err(shm_error_to_io)?;
@@ -65,7 +63,7 @@ pub fn channel<const SLOTS: usize>() -> io::Result<(ChannelConf, Receiver<SLOTS>
         let _ = std::thread::Builder::new().name("fspy-shm-prefault".into()).spawn(move || {
             // SAFETY: the mapping views the region created zero-initialized
             // above, which is only accessed through the `shm_io` protocol.
-            unsafe { shm_io::pre_fault::<SLOTS>(&prefault_mapping) };
+            unsafe { shm_io::pre_fault(&prefault_mapping) };
         });
     }
 
@@ -169,7 +167,7 @@ impl ChannelConf {
         clippy::missing_errors_doc,
         reason = "error conditions are self-evident from return type"
     )]
-    pub fn sender<const SLOTS: usize>(&self) -> io::Result<Sender<SLOTS>> {
+    pub fn sender(&self) -> io::Result<Sender> {
         // The arena never touches the process heap, so this stays safe in
         // the preload contexts that create senders (pre-`main` constructors,
         // the Windows loader lock).
@@ -183,16 +181,16 @@ impl ChannelConf {
             .map_err(shm_error_to_io)?;
         // A truncated or foreign file must fail here, not panic the host
         // process inside the protocol's geometry assertions.
-        if mapping.len() != capacity_for_slots(SLOTS) {
+        if !shm_io::is_supported_region_len(mapping.len()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "shared-memory region size does not match the channel layout",
+                "shared-memory region size cannot host the channel",
             ));
         }
         // SAFETY: `mapping` is a freshly mapped shared memory region created
         // zero-initialized by `channel` and accessed only through the
-        // `shm_io` protocol by every attached process, which names the same
-        // `SLOTS` via this method.
+        // `shm_io` protocol by every attached process; the protocol derives
+        // one layout from the mapped size on every side.
         let writer = unsafe { ShmWriter::new(mapping) };
         if writer.is_closed() {
             return Err(io::Error::new(
@@ -204,12 +202,12 @@ impl ChannelConf {
     }
 }
 
-pub struct Sender<const SLOTS: usize> {
-    writer: ShmWriter<Mapping, SLOTS>,
+pub struct Sender {
+    writer: ShmWriter<Mapping>,
 }
 
-impl<const SLOTS: usize> Deref for Sender<SLOTS> {
-    type Target = ShmWriter<Mapping, SLOTS>;
+impl Deref for Sender {
+    type Target = ShmWriter<Mapping>;
 
     fn deref(&self) -> &Self::Target {
         &self.writer
@@ -219,17 +217,17 @@ impl<const SLOTS: usize> Deref for Sender<SLOTS> {
 // SAFETY: `Sender` only accesses the shared mapping through the `shm_io`
 // protocol, which synchronizes concurrent writers and the receiver with
 // atomic operations; the mapping's address is stable and independently owned.
-unsafe impl<const SLOTS: usize> Send for Sender<SLOTS> {}
+unsafe impl Send for Sender {}
 
 // SAFETY: see the `Send` impl; `ShmWriter`'s shared-reference API is
 // internally synchronized by the protocol.
-unsafe impl<const SLOTS: usize> Sync for Sender<SLOTS> {}
+unsafe impl Sync for Sender {}
 
 /// The unique receiver side of an IPC channel.
 ///
 /// Holds the shared memory and its backing file alive for as long as senders
 /// may attach; [`Receiver::close`] (or dropping) removes the backing file.
-pub struct Receiver<const SLOTS: usize> {
+pub struct Receiver {
     /// Keeps the shared memory's backing file alive for as long as senders
     /// may attach.
     _keeper: ShmKeeper,
@@ -240,12 +238,12 @@ pub struct Receiver<const SLOTS: usize> {
 // through the `shm_io` protocol in `close`, which synchronizes with senders
 // via atomic operations. The mapping's address is stable and independently
 // owned.
-unsafe impl<const SLOTS: usize> Send for Receiver<SLOTS> {}
+unsafe impl Send for Receiver {}
 
 // SAFETY: see the `Send` impl.
-unsafe impl<const SLOTS: usize> Sync for Receiver<SLOTS> {}
+unsafe impl Sync for Receiver {}
 
-impl<const SLOTS: usize> Receiver<SLOTS> {
+impl Receiver {
     /// Closes the channel and returns every committed frame, borrowed from
     /// the shared mapping that moves into the returned [`Frames`].
     ///
@@ -260,7 +258,7 @@ impl<const SLOTS: usize> Receiver<SLOTS> {
     ///
     /// Fails only when the shared-memory metadata was corrupted (a protocol
     /// impossibility for correct senders); the trace is then unusable.
-    pub fn close(self) -> io::Result<Frames<SLOTS>> {
+    pub fn close(self) -> io::Result<Frames> {
         let Self { _keeper: keeper, mapping } = self;
         // Remove the backing file first so no new process attaches while the
         // channel closes.
@@ -283,21 +281,17 @@ mod tests {
 
     use super::*;
 
-    // Table sizes for the test channels: ~4 KiB and ~64 KiB regions.
-    const S_4K: usize = slots_for_capacity(4096);
-    const S_64K: usize = slots_for_capacity(64 * 1024);
-
     /// The shared-memory path is generated absolute, so a sender in a process
     /// with a different working directory and a relative temporary directory
     /// must still attach.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sender_ignores_changed_temp_and_working_directory() {
-        let (conf, receiver) = channel::<S_4K>().unwrap();
+        let (conf, receiver) = channel(4096).unwrap();
         let changed_cwd = temp_dir().join(format!("fspy-ipc-changed-cwd-{}", Uuid::new_v4()));
         fs::create_dir(&changed_cwd).unwrap();
 
         let mut command = command_for_fn!(conf, |conf: ChannelConf| {
-            let sender = conf.sender::<S_4K>().unwrap();
+            let sender = conf.sender().unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
             let mut frame = sender.claim_frame(frame_size).unwrap();
             frame.copy_from_slice(&[4, 2]);
@@ -318,9 +312,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn smoke() {
-        let (conf, receiver) = channel::<S_4K>().unwrap();
+        let (conf, receiver) = channel(4096).unwrap();
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
-            let sender = conf.sender::<S_4K>().unwrap();
+            let sender = conf.sender().unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
             let mut frame = sender.claim_frame(frame_size).unwrap();
             frame.copy_from_slice(&[4, 2]);
@@ -341,11 +335,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_close() {
-        let (conf, receiver) = channel::<S_4K>().unwrap();
+        let (conf, receiver) = channel(4096).unwrap();
         let _frames = receiver.close().unwrap();
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
-            print!("{}", conf.sender::<S_4K>().is_ok());
+            print!("{}", conf.sender().is_ok());
         });
         let output = std::process::Command::from(cmd).output().unwrap();
         assert!(B(&output.stdout) == B("false"));
@@ -354,11 +348,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_receiver_dropped() {
-        let (conf, receiver) = channel::<S_4K>().unwrap();
+        let (conf, receiver) = channel(4096).unwrap();
         drop(receiver);
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
-            print!("{}", conf.sender::<S_4K>().is_ok());
+            print!("{}", conf.sender().is_ok());
         });
         let output = std::process::Command::from(cmd).output().unwrap();
         assert!(B(&output.stdout) == B("false"));
@@ -368,8 +362,8 @@ mod tests {
     /// claim any new frame afterwards.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn attached_sender_cannot_claim_after_close() {
-        let (conf, receiver) = channel::<S_4K>().unwrap();
-        let sender = conf.sender::<S_4K>().unwrap();
+        let (conf, receiver) = channel(4096).unwrap();
+        let sender = conf.sender().unwrap();
 
         let mut frame = sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
         frame.copy_from_slice(&[4, 2]);
@@ -387,10 +381,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_senders() {
         // 64 KiB: a 1023-slot table for the 200 frames sent below.
-        let (conf, receiver) = channel::<S_64K>().unwrap();
+        let (conf, receiver) = channel(64 * 1024).unwrap();
         for i in 0u16..200 {
             let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
-                let sender = conf.sender::<S_64K>().unwrap();
+                let sender = conf.sender().unwrap();
                 let data_to_send = i.to_string();
                 let mut frame =
                     sender.claim_frame(NonZeroUsize::new(data_to_send.len()).unwrap()).unwrap();

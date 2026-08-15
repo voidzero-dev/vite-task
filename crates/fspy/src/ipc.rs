@@ -1,16 +1,21 @@
 use std::io;
 
 use fspy_shared::ipc::{
-    PathAccess, SHM_SLOTS,
+    PathAccess,
     channel::{Frames, Receiver},
 };
 
+// Shared memory size for storing path accesses.
+// 4 GiB is large enough to store path accesses in almost any realistic scenario.
+// This doesn't allocate physical memory until it's actually used.
+pub const SHM_CAPACITY: usize = 4 * 1024 * 1024 * 1024;
+
 /// The path accesses a run reported through the IPC channel.
 pub struct ChannelAccesses {
-    frames: Frames<SHM_SLOTS>,
+    frames: Frames,
 }
 
-impl TryFrom<Receiver<SHM_SLOTS>> for ChannelAccesses {
+impl TryFrom<Receiver> for ChannelAccesses {
     type Error = io::Error;
 
     /// Closes the channel and rejects traces that cannot back the run's
@@ -25,7 +30,7 @@ impl TryFrom<Receiver<SHM_SLOTS>> for ChannelAccesses {
     /// metadata was corrupted. Failing here — instead of returning a
     /// silently short trace — keeps the tracking result trustworthy for
     /// caching.
-    fn try_from(receiver: Receiver<SHM_SLOTS>) -> io::Result<Self> {
+    fn try_from(receiver: Receiver) -> io::Result<Self> {
         let frames = receiver.close()?;
         if !frames.is_complete() {
             return Err(io::Error::new(

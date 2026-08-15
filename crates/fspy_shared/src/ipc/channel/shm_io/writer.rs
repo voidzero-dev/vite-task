@@ -19,7 +19,7 @@ use super::{
 /// reserved with atomic operations, filled in uniquely owned payload spans,
 /// and published with an atomic commit (see the module docs of
 /// [`super::state`]).
-pub struct ShmWriter<M, const SLOTS: usize> {
+pub struct ShmWriter<M> {
     mem: M,
 }
 
@@ -48,7 +48,7 @@ pub enum WriteEncodedError {
     Claim(#[from] ClaimError),
 }
 
-impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
+impl<M: AsRawSlice> ShmWriter<M> {
     /// Creates a writer backed by a shared-memory region.
     ///
     /// # Safety
@@ -66,11 +66,11 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // Validate the region geometry eagerly so misuse fails at
         // construction, not at the first claim.
         // SAFETY: forwarded from this function's contract.
-        let _ = unsafe { SharedState::<SLOTS>::borrow(mem.as_raw_slice()) };
+        let _ = unsafe { SharedState::borrow(mem.as_raw_slice()) };
         Self { mem }
     }
 
-    fn state(&self) -> SharedState<'_, SLOTS> {
+    fn state(&self) -> SharedState<'_> {
         // SAFETY: `new` requires the region to stay valid and
         // protocol-governed for the writer's lifetime, and it validated the
         // geometry.
@@ -87,7 +87,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// The frame is invisible to the receiver until [`FrameMut::finish`]
     /// commits it. Dropping the frame without finishing abandons the claim
     /// and marks the channel incomplete.
-    pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_, SLOTS>, ClaimError> {
+    pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let state = self.state();
         let reservation = state.try_claim(frame_size.get()).map_err(|err| match err {
             ReserveError::Closed => ClaimError::Closed,
@@ -184,14 +184,14 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
 /// to perform the operation this record was meant to describe. A process
 /// that dies mid-frame runs no drop code and marks nothing — correctly so,
 /// since records are published before the recorded operation is performed.
-pub struct FrameMut<'a, const SLOTS: usize> {
-    state: SharedState<'a, SLOTS>,
+pub struct FrameMut<'a> {
+    state: SharedState<'a>,
     slot_index: usize,
     descriptor: u64,
     content: &'a mut [u8],
 }
 
-impl<const SLOTS: usize> std::fmt::Debug for FrameMut<'_, SLOTS> {
+impl std::fmt::Debug for FrameMut<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FrameMut")
             .field("slot_index", &self.slot_index)
@@ -200,7 +200,7 @@ impl<const SLOTS: usize> std::fmt::Debug for FrameMut<'_, SLOTS> {
     }
 }
 
-impl<const SLOTS: usize> Deref for FrameMut<'_, SLOTS> {
+impl Deref for FrameMut<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -208,13 +208,13 @@ impl<const SLOTS: usize> Deref for FrameMut<'_, SLOTS> {
     }
 }
 
-impl<const SLOTS: usize> DerefMut for FrameMut<'_, SLOTS> {
+impl DerefMut for FrameMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.content
     }
 }
 
-impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
+impl FrameMut<'_> {
     /// Commits the frame, making it visible to the receiver.
     ///
     /// If the receiver closed the channel and aborted this frame's slot
@@ -226,7 +226,7 @@ impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
     }
 }
 
-impl<const SLOTS: usize> Drop for FrameMut<'_, SLOTS> {
+impl Drop for FrameMut<'_> {
     fn drop(&mut self) {
         self.state.flag_incomplete();
     }
