@@ -5,8 +5,6 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use wincode::{SchemaWrite, Serialize as _, config::DefaultConfig};
-
 use super::{
     AsRawSlice, slot,
     state::{ReserveError, SharedState},
@@ -33,18 +31,6 @@ pub enum ClaimError {
     /// loss, so the channel will report itself incomplete.
     #[error("no space left in the shared-memory region")]
     Capacity,
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum WriteEncodedError {
-    #[error("failed to encode value into shared memory")]
-    EncodeError(#[from] wincode::error::WriteError),
-    #[error("tried to write a frame of zero size into shared memory")]
-    ZeroSizedFrame,
-    #[error("encoded size diverged from the declared serialized size")]
-    SizeMismatch,
-    #[error(transparent)]
-    Claim(#[from] ClaimError),
 }
 
 impl<M: AsRawSlice> ShmWriter<M> {
@@ -111,30 +97,6 @@ impl<M: AsRawSlice> ShmWriter<M> {
             descriptor: slot::committed(reservation.payload_offset, frame_size.get()),
             content,
         })
-    }
-
-    /// Writes one encoded value as a committed frame.
-    pub fn write_encoded<T: SchemaWrite<DefaultConfig, Src = T>>(
-        &self,
-        value: &T,
-    ) -> Result<(), WriteEncodedError> {
-        let serialized_size =
-            usize::try_from(T::serialized_size(value)?).expect("serialized size exceeds usize");
-
-        let Some(frame_size) = NonZeroUsize::new(serialized_size) else {
-            return Err(WriteEncodedError::ZeroSizedFrame);
-        };
-        let mut frame = self.claim_frame(frame_size)?;
-
-        let mut writer: &mut [u8] = &mut frame;
-        T::serialize_into(&mut writer, value)?;
-        if !writer.is_empty() {
-            // Dropping the partially filled frame leaves it unpublished.
-            return Err(WriteEncodedError::SizeMismatch);
-        }
-
-        frame.finish();
-        Ok(())
     }
 
     // Unwrap `self` and return the underlying memory.

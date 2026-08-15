@@ -86,6 +86,25 @@ after the channel closed — both safe to ignore. A writer that records
 _after_ acting, or that abandons a frame and performs the action anyway,
 steps outside this rule and loses records silently.
 
+## When the region fills up
+
+The region is large — the payload area of a 4 GiB region holds tens of
+millions of records — but it is not endless. When a claim asks for more
+room than is left, in the payload area or in the table, the claim fails.
+The writer skips that one record and carries on: recording must never
+stop or crash the program doing the work.
+
+The loss is not silent. The failed claim still moved a counter, and
+counters never move backwards, so from that moment on the counter stands
+past its limit. When the receiver closes the channel it compares both
+counters against their limits; if either went past, `is_complete` returns
+false, and a reader that needs the full picture knows to throw the result
+away.
+
+One limit is different: a single frame holds at most 2 GiB. Asking for
+more is a mistake in the calling code, so it panics instead of counting
+as overflow.
+
 ## Closing and reading
 
 The receiver closes once:
@@ -157,6 +176,22 @@ CLAIMED (slot 0) ---+
 | `writer.rs` | Claim, fill, finish. Explains why a claimed payload span belongs to its writer alone.                                                                                                                                                                |
 | `reader.rs` | Close (snapshot, gate, freeze, validate) and `Frames`. Explains why handing out references to committed spans is safe.                                                                                                                               |
 
-Each file explains itself without the others, so the protocol can be
-reviewed module by module: the pure math first, then the atomics, then the
-two modules that say who may touch which bytes.
+Arrows point at what a file depends on:
+
+```mermaid
+graph TD
+    mod["mod.rs<br>public surface"] --> writer["writer.rs"]
+    mod --> reader["reader.rs"]
+    writer --> state["state.rs<br>shared atomics"]
+    writer --> slot["slot.rs"]
+    reader --> state
+    reader --> slot
+    reader --> layout["layout.rs<br>pure math"]
+    state --> slot
+    state --> layout
+    slot --> layout
+```
+
+Read from the bottom up — `layout.rs` and `slot.rs` first, then
+`state.rs`, then `writer.rs` and `reader.rs`, then `mod.rs` — and each
+file only needs the ones below it.

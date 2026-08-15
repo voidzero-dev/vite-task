@@ -40,11 +40,9 @@ impl<'a> Client<'a> {
         let Some(sender) = &self.ipc_sender else {
             return;
         };
-        // A failed write means the receiver closed the channel (this process
-        // outlived the run's tracking boundary) or the region was full — a
-        // loss the receiver sees as counter overshoot. The intercepted call
-        // must proceed either way; a detours DLL can never panic its host.
-        let _ = sender.write_encoded(&access);
+        // The intercepted call proceeds whether or not the record could be
+        // sent; a detours DLL can never panic its host.
+        sender.send(&access);
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {

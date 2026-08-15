@@ -79,7 +79,7 @@ use std::ptr::slice_from_raw_parts_mut;
 
 use fspy_shm::Mapping;
 pub use reader::{Frames, ProtocolError};
-pub use writer::{ClaimError, FrameMut, ShmWriter, WriteEncodedError};
+pub use writer::{ClaimError, FrameMut, ShmWriter};
 
 // The region arithmetic in `layout` relies on `usize` accommodating sums of
 // 32-bit-bounded quantities, and the descriptor protocol on native 64-bit

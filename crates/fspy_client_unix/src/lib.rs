@@ -8,7 +8,7 @@
 pub mod convert;
 pub mod raw_exec;
 
-use std::{ffi::OsStr, fmt::Debug, num::NonZeroUsize, os::unix::ffi::OsStrExt as _, path::Path};
+use std::{ffi::OsStr, fmt::Debug, os::unix::ffi::OsStrExt as _, path::Path};
 
 use convert::{ToAbsolutePath, ToAccessMode};
 use fspy_shared::ipc::{PathAccess, channel::Sender};
@@ -18,7 +18,6 @@ use fspy_shared_unix::{
     spawn::{PreExec, handle_exec},
 };
 use raw_exec::RawExec;
-use wincode::Serialize as _;
 
 pub struct Client {
     encoded_payload: EncodedPayload,
@@ -66,43 +65,20 @@ impl Client {
         Self { encoded_payload, ipc_sender }
     }
 
-    fn send(&self, mode: fspy_shared::ipc::AccessMode, path: &Path) -> anyhow::Result<()> {
+    fn send(&self, mode: fspy_shared::ipc::AccessMode, path: &Path) {
         let Some(ipc_sender) = &self.ipc_sender else {
-            return Ok(());
+            return;
         };
         let path_bytes = path.as_os_str().as_bytes();
         if path_bytes.starts_with(b"/dev/")
             || (cfg!(target_os = "linux")
                 && (path_bytes.starts_with(b"/proc/") || path_bytes.starts_with(b"/sys/")))
         {
-            return Ok(());
+            return;
         }
-        let path_access = PathAccess { mode, path: path.into() };
-        let serialized_size = usize::try_from(PathAccess::serialized_size(&path_access)?)
-            .expect("serialized size exceeds usize");
-
-        let frame_size = NonZeroUsize::new(serialized_size)
-            .expect("fspy: encoded PathAccess should never be empty");
-
-        let Ok(mut frame) = ipc_sender.claim_frame(frame_size) else {
-            // The receiver has closed the channel (this process outlived the
-            // run's tracking boundary) or the region is full (a loss the
-            // receiver sees as counter overshoot). Either way the
-            // interception must proceed without a record — a preload library
-            // can never panic its host process.
-            return Ok(());
-        };
-        let mut writer: &mut [u8] = &mut frame;
-        // A serialization failure drops `frame` unfinished; the receiver
-        // ignores the abandoned slot.
-        PathAccess::serialize_into(&mut writer, &path_access)?;
-        debug_assert_eq!(writer.len(), 0);
-        if !writer.is_empty() {
-            return Ok(());
-        }
-        frame.finish();
-
-        Ok(())
+        // The interception proceeds whether or not the record could be
+        // sent — a preload library can never panic its host process.
+        ipc_sender.send(&PathAccess { mode, path: path.into() });
     }
 
     /// Resolves and reports an exec before forwarding its transformed arguments.
@@ -127,9 +103,7 @@ impl Client {
         // null-terminated arrays, as provided by the caller.
         let mut exec = unsafe { raw_exec.to_exec() };
         let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |mode, path| {
-            // A failure here is a post-close skip, a full region, or an
-            // fspy bug; the exec itself must proceed regardless.
-            let _ = self.send(mode, path);
+            self.send(mode, path);
         })?;
         RawExec::from_exec(exec, |raw_command| f(raw_command, pre_exec))
     }
@@ -156,6 +130,7 @@ impl Client {
         let Some(abs_path) = path.to_absolute_path(&arena)? else {
             return Ok(());
         };
-        self.send(mode, Path::new(OsStr::from_bytes(abs_path.as_units())))
+        self.send(mode, Path::new(OsStr::from_bytes(abs_path.as_units())));
+        Ok(())
     }
 }

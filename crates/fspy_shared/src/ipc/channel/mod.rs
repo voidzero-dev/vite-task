@@ -7,20 +7,20 @@
 
 mod shm_io;
 
-use std::{env::temp_dir, ffi::OsStr, io, ops::Deref, path::PathBuf};
+use std::{env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, ops::Deref, path::PathBuf};
 
 use allocator_api2::alloc::Global;
 use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
 use shm_io::ShmWriter;
-pub use shm_io::{ClaimError, FrameMut, WriteEncodedError};
+pub use shm_io::{ClaimError, FrameMut};
 
 /// The committed frames of a closed channel; borrows the shared mapping,
 /// which stays alive (and mapped) until this value drops.
 pub type Frames = shm_io::Frames<Mapping>;
 use uuid::Uuid;
-use wincode::{SchemaRead, SchemaWrite};
+use wincode::{SchemaRead, SchemaWrite, Serialize as _, config::DefaultConfig};
 
 use super::IpcStr;
 
@@ -204,6 +204,33 @@ impl ChannelConf {
 
 pub struct Sender {
     writer: ShmWriter<Mapping>,
+}
+
+impl Sender {
+    /// Serializes one record into a committed frame.
+    ///
+    /// A record that cannot be sent is skipped, because that is all a
+    /// sender inside an intercepted call can do: the channel may have
+    /// closed (the record belongs past its boundary), or the region may be
+    /// full (a loss the receiver sees as counter overshoot and reports via
+    /// incompleteness).
+    pub fn send<T: SchemaWrite<DefaultConfig, Src = T>>(&self, value: &T) {
+        let Ok(serialized_size) = T::serialized_size(value) else {
+            return;
+        };
+        let Ok(Some(frame_size)) = usize::try_from(serialized_size).map(NonZeroUsize::new) else {
+            return;
+        };
+        let Ok(mut frame) = self.writer.claim_frame(frame_size) else {
+            return;
+        };
+        let mut buf: &mut [u8] = &mut frame;
+        if T::serialize_into(&mut buf, value).is_err() || !buf.is_empty() {
+            // An abandoned frame; the receiver ignores its slot.
+            return;
+        }
+        frame.finish();
+    }
 }
 
 impl Deref for Sender {
