@@ -645,7 +645,7 @@ mod tests {
 
         // SAFETY: see `collect_frames`.
         let result = unsafe { ShmReader::<_, S>::seal(shm) };
-        assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
+        assert!(result.unwrap_err() == ProtocolError { slot_index: 0 });
     }
 
     #[test]
@@ -661,7 +661,7 @@ mod tests {
 
         // SAFETY: see `collect_frames`.
         let result = unsafe { ShmReader::<_, S>::seal(shm) };
-        assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
+        assert!(result.unwrap_err() == ProtocolError { slot_index: 0 });
     }
 
     #[test]

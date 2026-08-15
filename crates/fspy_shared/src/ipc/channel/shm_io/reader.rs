@@ -35,7 +35,6 @@ const ABORTED: u64 = 1 << 63;
 #[derive(Clone, Copy, Debug)]
 struct PayloadSpan {
     /// Byte offset of the payload from the start of the payload region.
-    /// Always `u64`-aligned.
     offset: usize,
     /// Exact (unpadded) byte length of the payload.
     len: usize,
@@ -49,15 +48,9 @@ impl PayloadSpan {
         if len == 0 || len > layout::MAX_PAYLOAD_LEN {
             return None;
         }
-        // Writers reserve whole-`u64` spans from the start of the region,
-        // so a valid offset is `u64`-aligned and its padded length stays
-        // inside the region.
-        if !offset.is_multiple_of(layout::SLOT_LEN) {
-            return None;
-        }
         // `offset` and `len` come from 32-bit descriptor fields, so this
         // sum cannot overflow `usize`.
-        if offset + layout::reserved_payload_len(len) > payload_region_len {
+        if offset + len > payload_region_len {
             return None;
         }
         Some(Self { offset, len })
@@ -78,12 +71,12 @@ const fn decode(payload_region_len: usize, bits: u64) -> Option<PayloadSpan> {
     )
 }
 
-/// Shared-memory metadata that could not have been produced by this
-/// protocol. The region was corrupted; its frames are unusable.
+/// A descriptor that no correct writer could have committed: the region
+/// was corrupted, and its frames are unusable.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ProtocolError {
-    #[error("corrupt shared-memory frame descriptor at slot {slot_index}")]
-    CorruptDescriptor { slot_index: usize },
+#[error("corrupt shared-memory frame descriptor at slot {slot_index}")]
+pub struct ProtocolError {
+    pub slot_index: usize,
 }
 
 /// A reader over the committed frames of a sealed channel, serving them
@@ -196,7 +189,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
                 // Any other terminal value must be a committed descriptor
                 // with a valid span; a foreign scribble fails the decode.
                 if decode(mapped.payloads.len(), bits).is_none() {
-                    return Err(ProtocolError::CorruptDescriptor { slot_index });
+                    return Err(ProtocolError { slot_index });
                 }
                 frames += 1;
             }
@@ -300,16 +293,15 @@ mod tests {
     #[test]
     fn payload_span_validates_bounds() {
         let region = 1024;
-        // A `u64`-aligned span at the region start.
+        // Any byte range inside the region, at any offset.
         assert!(PayloadSpan::validate(region, 0, 8).is_some());
-        // Exact end of the region, with padding inside it.
-        assert!(PayloadSpan::validate(region, region - 8, 5).is_some());
+        assert!(PayloadSpan::validate(region, 3, 5).is_some());
+        // A span ending exactly at the region end.
+        assert!(PayloadSpan::validate(region, region - 5, 5).is_some());
         // Zero length is never committed.
         assert!(PayloadSpan::validate(region, 0, 0).is_none());
-        // Padded length may not cross the end of the region.
+        // The span may not cross the end of the region.
         assert!(PayloadSpan::validate(region, region - 8, 9).is_none());
-        // Unaligned offsets cannot come from a correct writer.
-        assert!(PayloadSpan::validate(region, 4, 4).is_none());
         // Oversized lengths are rejected before any arithmetic.
         assert!(PayloadSpan::validate(region, 0, layout::MAX_PAYLOAD_LEN + 1).is_none());
     }

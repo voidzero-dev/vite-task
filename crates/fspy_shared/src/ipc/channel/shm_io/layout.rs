@@ -10,8 +10,8 @@
 //! [`Meta`] struct whose table length is a const parameter the channel
 //! specifies. The payload area is simply the rest of the mapping, so the
 //! whole geometry reduces to that struct's size. This module holds the
-//! struct, the descriptor-slot wire format, payload rounding, and
-//! [`MappedLayout`]: the views bound to one concrete mapping, built once
+//! struct, the descriptor-slot wire format, and [`MappedLayout`]: the
+//! views bound to one concrete mapping, built once
 //! when an endpoint attaches. The sides themselves live in
 //! [`super::writer`] and [`super::reader`].
 //!
@@ -55,9 +55,6 @@ pub(super) struct Meta<const SLOTS: usize> {
     pub(super) table: [AtomicU64; SLOTS],
 }
 
-/// Byte size of one descriptor slot.
-pub(super) const SLOT_LEN: usize = size_of::<u64>();
-
 /// Maximum payload size of a single frame.
 ///
 /// Committed lengths are stored in the 31-bit length field of a descriptor,
@@ -69,16 +66,6 @@ pub(super) const MAX_PAYLOAD_LEN: usize = i32::MAX as usize;
 /// Descriptors store payload offsets in 32 bits, so the payload region
 /// must fit `u32` arithmetic.
 pub(super) const MAX_PAYLOAD_REGION_LEN: usize = 1 << 32;
-
-/// Rounds a payload length up to a multiple of `size_of::<u64>()`.
-///
-/// Payload reservations are whole `u64`s, so every payload offset stays
-/// `u64`-aligned — an invariant the reader's validation uses to reject
-/// descriptors no correct writer produces. The sub-`u64` padding stays
-/// inside the frame's own reservation.
-pub(super) const fn reserved_payload_len(payload_len: usize) -> usize {
-    payload_len.next_multiple_of(SLOT_LEN)
-}
 
 // --- The descriptor slot codec ---------------------------------------------
 //
@@ -250,17 +237,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reserved_payload_len_rounds_up_to_u64s() {
-        assert!(reserved_payload_len(1) == 8);
-        assert!(reserved_payload_len(7) == 8);
-        assert!(reserved_payload_len(8) == 8);
-        assert!(reserved_payload_len(9) == 16);
-        assert!(reserved_payload_len(MAX_PAYLOAD_LEN) == MAX_PAYLOAD_LEN + 1);
-    }
-
-    #[test]
     fn meta_is_the_header_then_the_table() {
-        assert!(size_of::<Meta<15>>() == 64 + 15 * SLOT_LEN);
+        assert!(size_of::<Meta<15>>() == 64 + 15 * size_of::<AtomicU64>());
         assert!(align_of::<Meta<15>>() == align_of::<AtomicU64>());
     }
 }

@@ -110,17 +110,15 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         if payload_len > layout::MAX_PAYLOAD_LEN {
             return Err(report_loss());
         }
-        let reserved_len = layout::reserved_payload_len(payload_len);
-
         // Payload bytes first, so a payload-capacity failure does not burn a
         // slot. A failed reservation stays counted — overshoot is harmless
         // because the counter is not what locates payloads (descriptors are)
         // and a `u64` cannot realistically wrap.
         let payload_start =
-            mapped.header().payload_reserved.fetch_add(reserved_len as u64, Ordering::Relaxed);
+            mapped.header().payload_reserved.fetch_add(payload_len as u64, Ordering::Relaxed);
         // Checked: a foreign scribble of the counter must fail the claim,
         // not wrap the bound into an out-of-bounds reservation.
-        let payload_end = payload_start.checked_add(reserved_len as u64);
+        let payload_end = payload_start.checked_add(payload_len as u64);
         if payload_end.is_none_or(|end| end > mapped.payloads.len() as u64) {
             return Err(report_loss());
         }
@@ -138,11 +136,12 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         }
 
         // SAFETY: the claim reserved
-        // `[payload_start, payload_start + reserved_len)` — inside the
+        // `[payload_start, payload_start + payload_len)` — inside the
         // payload region by the capacity check above — exclusively for this
-        // frame: other writers reserve disjoint spans, and the receiver
-        // never reads a payload before observing its committed descriptor,
-        // which `finish` publishes only when it consumes this borrow.
+        // frame: other writers reserve disjoint (if byte-adjacent) spans,
+        // and the receiver never reads a payload before observing its
+        // committed descriptor, which `finish` publishes only when it
+        // consumes this borrow.
         let content = unsafe {
             slice::from_raw_parts_mut(mapped.payloads.cast::<u8>().add(payload_start), payload_len)
         };
