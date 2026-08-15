@@ -19,10 +19,11 @@ use super::{
 /// reserved with atomic operations, filled in uniquely owned payload spans,
 /// and published with an atomic commit (see the ordering contract above).
 pub struct ShmWriter<M, const SLOTS: usize> {
-    /// Owns the region the views point into; dropped with the writer.
+    mapped: MappedLayout<SLOTS>,
+    /// Owns the region the views point into. Declared after them: fields
+    /// drop in order, and what borrows must die before what is borrowed.
     #[cfg_attr(any(not(test), miri), expect(dead_code, reason = "held to keep the region alive"))]
     mem: M,
-    mapped: MappedLayout<SLOTS>,
 }
 
 // SAFETY: the writer touches the region only through the protocol's
@@ -71,7 +72,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // and so for every use of the views, which are stored in and
         // dropped with the writer.
         let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) };
-        Self { mem, mapped }
+        Self { mapped, mem }
     }
 
     /// Whether the CLOSED gate is set: the receiver sealed the channel,
