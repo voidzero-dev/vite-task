@@ -305,7 +305,7 @@ mod tests {
         // No descriptor can describe a frame this long: the claim is
         // refused and sets the gate, condemning later claims — their
         // records would ride a result the receiver must already reject.
-        let oversized = ((i32::MAX as usize) + 1).try_into().unwrap();
+        let oversized = ((u32::MAX as usize) + 1).try_into().unwrap();
         assert!(matches!(writer.claim_frame(oversized), Err(ClaimError::Capacity)));
         assert!(writer.is_closed());
         assert!(!writer.try_write_frame(b"refused"));
@@ -637,16 +637,15 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_aborted_descriptor_is_a_protocol_error() {
+    fn corrupt_oversized_descriptor_is_a_protocol_error() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"hello"));
 
-        // The aborted bit combined with payload bits is a value no protocol
-        // operation produces.
+        // A length field far beyond anything this region can hold.
         // Slot 0 sits right after the two counters.
-        shm.poke_u64(16, (1 << 63) | (8u64 << 32) | 8);
+        shm.poke_u64(16, (1 << 62) | (8u64 << 32) | 8);
 
         // SAFETY: see `collect_frames`.
         let result = unsafe { ShmReader::<_, S>::seal(shm) };

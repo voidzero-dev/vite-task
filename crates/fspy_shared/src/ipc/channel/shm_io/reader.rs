@@ -23,8 +23,9 @@ use super::{
 };
 
 /// The terminal value the freeze pass installs in an unfinished slot: the
-/// aborted bit of the slot codec ([`layout`]).
-const ABORTED: u64 = 1 << 63;
+/// aborted value of the slot codec ([`layout`]): a zero length field
+/// with offset `1`, which no writer ever commits.
+const ABORTED: u64 = 1;
 
 /// A validated payload byte range: the witness that offset arithmetic on this
 /// span cannot leave the payload region.
@@ -34,28 +35,26 @@ const ABORTED: u64 = 1 << 63;
 #[derive(Clone, Copy, Debug)]
 struct PayloadSpan {
     /// Byte offset of the payload from the start of the payload region.
-    offset: usize,
-    /// Exact (unpadded) byte length of the payload.
-    len: usize,
+    offset: u32,
+    /// Byte length of the payload.
+    len: u32,
 }
 
 /// Decodes a slot value read back from shared memory as a committed
 /// descriptor (the slot codec in [`layout`]). Returns `None` for any value
 /// that is not one a correct writer could have committed for a payload
 /// region of `payload_region_len` bytes.
-fn decode(payload_region_len: usize, bits: u64) -> Option<PayloadSpan> {
-    // Reverse the writer's conversions: the length field is a nonzero
-    // 31-bit value — `i32::try_from` refuses the aborted bit, an
-    // unfinished `0`'s zero length, and oversize alike — and the offset
-    // field is the low 32 bits.
-    let len = i32::try_from(bits >> layout::LEN_SHIFT).ok()?;
+const fn decode(payload_region_len: usize, bits: u64) -> Option<PayloadSpan> {
+    // Reverse the writer's conversions: the fields are the value's two
+    // halves, and a zero length — an unfinished or aborted slot — is
+    // never a committed descriptor.
+    let len = (bits >> layout::LEN_SHIFT) as u32;
     if len == 0 {
         return None;
     }
-    let len = len.cast_unsigned() as usize;
-    let offset = (bits & layout::OFFSET_MAX) as usize;
+    let offset = (bits & layout::OFFSET_MAX) as u32;
     // Both fields are 32 bits wide, so this sum cannot overflow `usize`.
-    if offset + len > payload_region_len {
+    if offset as usize + len as usize > payload_region_len {
         return None;
     }
     Some(PayloadSpan { offset, len })
@@ -248,8 +247,8 @@ impl<'a, const SLOTS: usize> Iterator for Iter<'a, SLOTS> {
             // for `'a` keeps the mapping alive and mapped.
             return Some(unsafe {
                 slice::from_raw_parts(
-                    self.mapped.payloads.cast::<u8>().cast_const().add(span.offset),
-                    span.len,
+                    self.mapped.payloads.cast::<u8>().cast_const().add(span.offset as usize),
+                    span.len as usize,
                 )
             });
         }
@@ -300,13 +299,14 @@ mod tests {
         assert!(span.offset == 0 && span.len == 5);
 
         // The extremes of the descriptor fields on the largest region: the
-        // 31-bit length limit, and a span ending exactly at the region end.
+        // full-width length limit, and a span ending exactly at the region
+        // end.
         let region = layout::MAX_PAYLOAD_REGION_LEN;
-        let span = decode(region, committed(0, i32::MAX.cast_unsigned())).unwrap();
-        assert!(span.offset == 0 && span.len == i32::MAX as usize);
+        let span = decode(region, committed(0, u32::MAX)).unwrap();
+        assert!(span.offset == 0 && span.len == u32::MAX);
         let last = u32::try_from(region - 8).unwrap();
         let span = decode(region, committed(last, 8)).unwrap();
-        assert!(span.offset == region - 8 && span.len == 8);
+        assert!(span.offset == last && span.len == 8);
     }
 
     #[test]
@@ -315,11 +315,9 @@ mod tests {
         // The non-committed slot states.
         assert!(decode(region, layout::UNFINISHED).is_none());
         assert!(decode(region, ABORTED).is_none());
-        // The aborted bit combined with other bits: the length field then
-        // fails `i32::try_from` — as does any oversized length.
-        assert!(decode(region, ABORTED | 1).is_none());
-        assert!(decode(region, ABORTED | (1 << 62)).is_none());
         // A zero length with a nonzero offset.
         assert!(decode(region, 42).is_none());
+        // A length no region this size can hold.
+        assert!(decode(region, (2048 << 32) | 16).is_none());
     }
 }

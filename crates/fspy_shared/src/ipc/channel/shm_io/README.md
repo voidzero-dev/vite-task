@@ -113,9 +113,9 @@ channel: every later claim is refused. That refusal costs nothing —
 `is_complete` is already false, so the result must be thrown away, and
 any further records would ride a result nobody can use.
 
-One more limit: a single frame holds at most 2 GiB, because a descriptor
-cannot describe more. Such a claim is refused — and reported — the same
-way.
+One more limit: a single frame holds at most `u32::MAX` bytes, because a
+descriptor cannot describe more. Such a claim is refused — and reported —
+the same way.
 
 ## Sealing and reading
 

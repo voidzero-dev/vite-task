@@ -57,19 +57,20 @@ pub(super) const MAX_PAYLOAD_REGION_LEN: usize = 1 << 32;
 // One slot is a 64-bit value that publishes a frame:
 //
 // ```text
-// bit 63     bits 32..=62               bits 0..=31
-// ABORTED    payload length (31)        payload offset (32)
+// bits 32..=63           bits 0..=31
+// payload length (32)    payload offset (32)
 // ```
 //
 // | Value                 | State                                           |
 // | --------------------- | ----------------------------------------------- |
 // | `0`                   | Unfinished: slot reserved, nothing published    |
-// | `1 << 63`             | Aborted: the receiver froze the unfinished slot |
-// | nonzero, bit 63 clear | Committed: offset and length of the payload     |
+// | `1`                   | Aborted: the receiver froze the unfinished slot |
+// | length field nonzero  | Committed: offset and length of the payload     |
 //
-// Committed lengths are nonzero (a zero-length frame is never claimed), so a
-// committed value is always nonzero and the three states are disjoint. Once
-// a slot is committed or aborted, nothing ever changes it again.
+// Committed lengths are nonzero (a zero-length frame is never claimed), so
+// a committed value's length field is nonzero and the three states are
+// disjoint: `1` is a zero length with offset `1`, which no writer commits.
+// Once a slot is committed or aborted, nothing ever changes it again.
 //
 // Offsets are measured from the start of the payload area, so no
 // descriptor can even name the header or the table.

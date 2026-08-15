@@ -44,7 +44,7 @@ pub enum ClaimError {
     #[error("the channel has been closed")]
     Closed,
     /// The claim was refused for space: the region was full, or the frame
-    /// was larger than the `i32::MAX`-byte frame limit. The loss is
+    /// was larger than the `u32::MAX`-byte frame limit. The loss is
     /// already recorded — this claim set the CLOSED gate — so the channel
     /// will report itself incomplete and refuse further claims.
     #[error("no space left in the shared-memory region")]
@@ -85,7 +85,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// The frame is invisible to the receiver until [`FrameMut::finish`]
     /// commits it. Dropping the frame without finishing abandons the claim:
     /// the receiver ignores the slot, exactly as if the writer had died.
-    /// Frames larger than `i32::MAX` bytes are refused as
+    /// Frames larger than `u32::MAX` bytes are refused as
     /// [`ClaimError::Capacity`].
     ///
     /// Wait-free: two `fetch_add`s, no retry loop (rule 1). A claim that
@@ -104,10 +104,10 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
             ClaimError::Capacity
         };
 
-        // The descriptor's 31-bit length field is the oversize check:
+        // The descriptor's 32-bit length field is the oversize check:
         // refuse, before touching the counters, a frame it cannot
         // describe — the channel keeps working for every record after it.
-        let Ok(encoded_len) = i32::try_from(payload_len) else {
+        let Ok(encoded_len) = u32::try_from(payload_len) else {
             return Err(report_loss());
         };
         // Payload bytes first, so a payload-capacity failure does not burn a
@@ -151,7 +151,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         Ok(FrameMut {
             mapped,
             slot_index,
-            descriptor: committed(payload_offset, encoded_len.cast_unsigned()),
+            descriptor: committed(payload_offset, encoded_len),
             content,
         })
     }
@@ -233,9 +233,8 @@ impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
     }
 }
 
-/// Encodes a committed descriptor (the slot codec in [`layout`]). The
-/// argument types are the field widths; the length came through
-/// `i32::try_from`, so bit 63 stays clear.
+/// Encodes a committed descriptor (the slot codec in [`layout`]): the
+/// argument types are exactly the field widths.
 pub(super) fn committed(payload_offset: u32, payload_len: u32) -> u64 {
     (u64::from(payload_len) << layout::LEN_SHIFT) | u64::from(payload_offset)
 }
