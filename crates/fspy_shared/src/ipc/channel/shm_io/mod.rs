@@ -23,14 +23,14 @@
 //! and payload bounds from the mapped size. One borrow constructs typed
 //! views of the header (a `repr(C)` struct of two monotonic `AtomicU64`
 //! counters — claims, carrying the CLOSED gate bit, and payload bytes
-//! reserved — plus a loss flag) and of the descriptor table (a slice of
-//! atomics); the payload area stays untyped bytes.
+//! reserved) and of the descriptor table (a slice of atomics); the
+//! payload area stays untyped bytes.
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
 //! reserves a descriptor slot — validated against the fixed region bounds
-//! from the returned old values. A failed claim sets the loss flag and
-//! leaves the counters bumped, harmlessly: readers clamp to the region
-//! capacities, and committed descriptors are self-describing ([`layout`]),
-//! so the counters never locate data. Every slot has a fixed location, so
+//! from the returned old values. A failed claim sets the CLOSED gate as
+//! its loss report and leaves the counters bumped, harmlessly: readers
+//! clamp to the region capacities, and committed descriptors are
+//! self-describing ([`layout`]), so the counters never locate data. Every slot has a fixed location, so
 //! an unfinished frame can never hide a later one.
 //!
 //! # Frame lifecycle
@@ -63,8 +63,10 @@
 //! recorded operation: a process that died mid-frame never performed the
 //! operation, and one that claimed or committed after the snapshot performs
 //! it outside the channel's boundary. A record refused *before* close — a
-//! full region, an oversized frame — sets the loss flag first, and the
-//! channel reports itself incomplete ([`ShmReader::is_complete`]).
+//! full region, an oversized frame — sets the CLOSED gate first, so the
+//! channel reports itself incomplete ([`ShmReader::is_complete`]) and
+//! refuses every later claim: once one record is lost the receiver must
+//! reject the result, and further records would be wasted work.
 //!
 //! Correctness never depends on writer-side cleanup: no exit hooks, PID
 //! checks, heartbeats, or timeouts.
@@ -123,22 +125,25 @@ pub fn is_supported_region_len(len: usize) -> bool {
 //
 // # Shared atomics
 //
-// The header holds two independent monotonic `AtomicU64` counters and a
-// loss flag:
+// The header holds two independent monotonic `AtomicU64` counters:
 //
 // - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
 //   claims ever attempted. Claiming is one wait-free `fetch_add`; the
 //   returned old value carries the claim's slot index, the gate, and — by
 //   comparison against the fixed table capacity — the capacity verdict.
+//   The gate is set by the receiver at close and by every failed claim:
+//   one bit is both the loss report completeness derives from and the
+//   valve that stops writers spending work on a channel whose result the
+//   receiver must already reject.
 // - the **payload counter**: payload bytes ever reserved, bumped by another
 //   wait-free `fetch_add`.
-// - the **loss flag**: set by every failed claim before the writer moves
-//   on. The receiver derives completeness from it alone.
 //
 // Failed claims leave the counters bumped; that is harmless, because the
 // receiver clamps instead of trusting the counts, and committed
 // descriptors carry their own offset and length, so the counters never
-// locate data.
+// locate data. The payload counter can even wrap on a long-condemned
+// channel — still harmless: wrapping requires prior failures, failures
+// set the gate, and the gate refuses every claim before a span is built.
 //
 // # Memory-ordering contract
 //
@@ -149,15 +154,18 @@ pub fn is_supported_region_len(len: usize) -> bool {
 //    value it reads (in the counter's modification order) are in the
 //    snapshot; later ones receive slot indices the receiver never visits.
 //    Claims publish no payload data, so `Relaxed` suffices throughout.
-//    The CLOSED gate only stops stragglers from claiming (and allocating
-//    pages) forever; any claim admitted between the snapshot and the gate
-//    lands beyond the snapshot and is never observed. Completeness rides
-//    the same style of argument: a failed claim sets the loss flag before
-//    the writer performs the operation whose record was lost — so the
-//    receiver's one read of the flag either sees the loss, or the loss
-//    belongs to an operation performed after the boundary. A writer that
-//    dies before setting the flag never performed its operation, so
-//    nothing was actually lost.
+//    The CLOSED gate is not itself the boundary — it stops stragglers
+//    from claiming (and allocating pages) forever; any claim admitted
+//    between the snapshot and the gate lands beyond the snapshot and is
+//    never observed. Completeness rides the same modification order: a
+//    failed claim sets the gate as its loss report before the writer
+//    performs the operation whose record was lost — so the snapshot
+//    either sees the bit, or the loss belongs to an operation performed
+//    after the boundary. A writer that skipped because it saw the bit is
+//    covered the same way: the bit that made it skip either reaches the
+//    snapshot or postdates the boundary. A writer that dies before
+//    setting the bit never performed its operation, so nothing was
+//    actually lost.
 // 2. **Writer commit** — the slot compare-and-swap in `FrameMut::finish`
 //    uses `Release`: every payload write happens-before the committed
 //    descriptor becomes visible.
@@ -242,13 +250,16 @@ pub struct ShmWriter<M> {
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimError {
-    /// The receiver closed the channel; anything after this point is
-    /// outside the channel's boundary.
-    #[error("the channel has been closed by the receiver")]
+    /// The CLOSED gate was set: the receiver closed the channel, or an
+    /// earlier failed claim condemned it. Skipping the record is sound
+    /// either way — it is outside the receiver's boundary, or the same
+    /// bit already makes the receiver report the channel incomplete.
+    #[error("the channel has been closed")]
     Closed,
     /// The claim was refused for space: the region was full, or the frame
     /// was larger than the `i32::MAX`-byte frame limit. The loss is
-    /// already recorded, so the channel will report itself incomplete.
+    /// already recorded — this claim set the CLOSED gate — so the channel
+    /// will report itself incomplete and refuse further claims.
     #[error("no space left in the shared-memory region")]
     Capacity,
 }
@@ -282,7 +293,8 @@ impl<M: AsRawSlice> ShmWriter<M> {
         unsafe { SharedState::borrow(self.mem.as_raw_slice()) }
     }
 
-    /// Whether the receiver has closed the channel.
+    /// Whether the CLOSED gate is set: the receiver closed the channel,
+    /// or an earlier failed claim condemned it.
     pub fn is_closed(&self) -> bool {
         self.state().header.claims.load(Ordering::Relaxed) & CLOSED != 0
     }
@@ -296,16 +308,18 @@ impl<M: AsRawSlice> ShmWriter<M> {
     /// [`ClaimError::Capacity`].
     ///
     /// Wait-free: two `fetch_add`s, no retry loop (rule 1). A claim that
-    /// does not fit fails after setting the loss flag, which is what tells
-    /// the receiver a record was lost.
+    /// does not fit fails after setting the CLOSED gate: the receiver
+    /// learns a record was lost, and later claims are refused — their
+    /// records would ride a result the receiver must already reject.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let state = self.state();
         let payload_len = frame_size.get();
 
-        // Records that a claim failed and its record was lost, before the
-        // writer moves on (rule 1).
+        // Reports that this claim's record was lost, before the writer
+        // moves on (rule 1): the gate makes the receiver report the
+        // channel incomplete, and condemns further claims.
         let report_loss = || {
-            state.header.lost.store(1, Ordering::Relaxed);
+            state.header.claims.fetch_or(CLOSED, Ordering::Relaxed);
             ClaimError::Capacity
         };
 
@@ -513,11 +527,14 @@ impl<M: AsRawSlice> ShmReader<M> {
             // never visits. The count is clamped to the table capacity, so
             // a counter inflated by failed claims (or by a foreign
             // scribble) degrades to a full-table sweep, not an error.
-            let claims = state.header.claims.load(Ordering::Relaxed) & !CLOSED;
-            let slot_count = usize::try_from(claims).unwrap_or(usize::MAX).min(state.table.len());
-            // One read of the loss flag: it either sees a loss, or the loss
-            // belongs to an operation performed after the boundary (rule 1).
-            complete = state.header.lost.load(Ordering::Relaxed) == 0;
+            let claims = state.header.claims.load(Ordering::Relaxed);
+            let slot_count =
+                usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(state.table.len());
+            // The same load carries the completeness verdict: a gate set
+            // before this boundary is a failed claim's loss report — or an
+            // earlier close, and a re-close cannot vouch for records
+            // refused since then (rule 1).
+            complete = claims & CLOSED == 0;
 
             // Gate further claims, so stragglers stop claiming (and
             // materializing pages) forever. Cheap: the creator pre-faulted
@@ -776,7 +793,7 @@ mod tests {
         assert!(writer.try_write_frame(b"test"));
 
         // Larger than the payload region: the claim fails and sets the
-        // loss flag, which is what tells the receiver a record was lost.
+        // gate, which is what tells the receiver a record was lost.
         assert!(!writer.try_write_frame(&vec![0u8; 2048]));
 
         let frames = collect_frames(&shm);
@@ -791,17 +808,19 @@ mod tests {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
+        assert!(writer.try_write_frame(b"kept"));
 
         // No descriptor can describe a frame this long: the claim is
-        // refused without touching the counters, so later records still
-        // flow — but the loss flag marks the channel incomplete.
+        // refused and sets the gate, condemning later claims — their
+        // records would ride a result the receiver must already reject.
         let oversized = ((i32::MAX as usize) + 1).try_into().unwrap();
         assert!(matches!(writer.claim_frame(oversized), Err(ClaimError::Capacity)));
-        assert!(writer.try_write_frame(b"still open"));
+        assert!(writer.is_closed());
+        assert!(!writer.try_write_frame(b"refused"));
 
         let frames = collect_frames(&shm);
         let mut iter = frames.iter();
-        assert!(iter.next().unwrap() == b"still open");
+        assert!(iter.next().unwrap() == b"kept");
         assert!(iter.next() == None);
         assert!(!frames.is_complete());
     }
@@ -976,13 +995,15 @@ mod tests {
         assert!(frames.iter().count() == 0);
         assert!(frames.is_complete());
 
-        // The late commit loses the race silently; the abandoned-frame flag
-        // must not fire either, because the frame *was* explicitly finished.
+        // The late commit loses the race silently.
         frame.finish();
 
+        // A second close still reads no frames — and reports incomplete:
+        // the gate was set by the first close, and a re-close cannot vouch
+        // for records refused since then.
         let frames = collect_frames(&shm);
         assert!(frames.iter().count() == 0);
-        assert!(frames.is_complete());
+        assert!(!frames.is_complete());
     }
 
     #[test]

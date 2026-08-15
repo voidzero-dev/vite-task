@@ -19,24 +19,23 @@
 
 use std::sync::atomic::AtomicU64;
 
-/// The CLOSED gate bit of the claim counter. The low 63 bits count claims,
-/// so no realistic claim volume can carry into the gate.
+/// The CLOSED gate bit of the claim counter, set by the receiver when it
+/// closes the channel and by any writer whose claim failed — the loss
+/// report that also condemns the channel (the parent module's rule 1).
+/// The low 63 bits count claims, so no realistic claim volume can carry
+/// into the gate.
 pub(super) const CLOSED: u64 = 1 << 63;
 
-/// The region header: two protocol counters and the loss flag, padded so
-/// the descriptor table starts off their cache line and there is room for
-/// future header fields, which must start zeroed.
+/// The region header: two protocol counters, padded so the descriptor
+/// table starts off their cache line and there is room for future header
+/// fields, which must start zeroed.
 #[repr(C)]
 pub(super) struct Header {
     /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
     pub(super) claims: AtomicU64,
     /// Payload bytes ever reserved, including by failed claims.
     pub(super) payload_reserved: AtomicU64,
-    /// Nonzero once a claim failed: a record was lost and the channel is
-    /// incomplete. Semantically a flag; a whole `u64` keeps the header a
-    /// plain row of `u64` words.
-    pub(super) lost: AtomicU64,
-    _reserved: [u64; 5],
+    _reserved: [u64; 6],
 }
 
 // One cache line: shrink `_reserved` when adding a field. The alignment is

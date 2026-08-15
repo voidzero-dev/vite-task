@@ -31,13 +31,13 @@ space, not memory: only pages that are actually written get backed.
 ```
 
 The header is a `repr(C)` struct of two `AtomicU64` counters, which only
-ever count up, and one flag:
+ever count up:
 
-- the **claim counter** — how many frames were ever claimed. Bit 63 is the
-  CLOSED gate.
+- the **claim counter** — how many frames were ever claimed. Bit 63 is
+  the CLOSED gate, set by the receiver when it closes the channel — and
+  by any writer whose claim failed, which is how the receiver learns
+  that a record was lost.
 - the **payload counter** — how many payload bytes were ever reserved.
-- the **loss flag** — set by a writer whose claim failed, so the receiver
-  knows a record was lost and the frames are incomplete.
 
 The table has one 8-byte slot per frame — an eighth of the region. Every
 bound is derived from the mapping length alone, so the region is
@@ -58,7 +58,7 @@ Three steps:
 
 1. **Claim.** Two `fetch_add`s — one reserves payload bytes, one reserves a
    slot. No retry loop, no lock. A claim that does not fit fails after the
-   fact and sets the loss flag before the writer moves on.
+   fact and sets the CLOSED gate before the writer moves on.
 2. **Fill.** The writer serializes into its payload span. The span is
    exclusively its own; nobody else knows it exists yet.
 3. **Commit.** One compare-and-swap flips the frame's slot from zero to a
@@ -92,22 +92,27 @@ room than is left, in the payload area or in the table, the claim fails.
 The writer skips that one record and carries on: recording must never
 stop or crash the program doing the work.
 
-The loss is not silent. Before moving on, the failed claim sets the loss
-flag in the header. When the receiver closes the channel it reads the
-flag once; if it is set, `is_complete` returns false, and a reader that
-needs the full picture knows to throw the result away.
+The loss is not silent. Before moving on, the failed claim sets the
+CLOSED gate — the same bit the receiver sets when it closes. When the
+receiver closes the channel it reads the bit once; if it was already
+set, `is_complete` returns false, and a reader that needs the full
+picture knows to throw the result away.
 
-Setting the flag before moving on matters for the same reason committing
-a record before acting does. If the receiver's read misses the flag, the
-flag was set after close — so the skipped record describes an action
+Setting the bit before moving on matters for the same reason committing
+a record before acting does. If the receiver's read misses the bit, the
+bit was set after close — so the skipped record describes an action
 performed after the channel closed, which the receiver never promised to
-include. And a writer that dies before setting the flag never performed
+include. And a writer that dies before setting the bit never performed
 its action, so nothing was actually lost.
 
+Because the bit is also the gate, the first lost record closes the
+channel: every later claim is refused. That refusal costs nothing —
+`is_complete` is already false, so the result must be thrown away, and
+any further records would ride a result nobody can use.
+
 One more limit: a single frame holds at most 2 GiB, because a descriptor
-cannot describe more. Such a claim is refused the same way — the record
-is skipped and the flag is set — and the channel stays usable for every
-record after it.
+cannot describe more. Such a claim is refused — and reported — the same
+way.
 
 ## Closing and reading
 
@@ -148,8 +153,9 @@ CLAIMED (slot 0) ---+
 - Once a slot is committed or aborted, nothing ever changes it again.
 - Counters only grow. The receiver clamps them to the fixed capacities —
   an inflated counter degrades into extra aborted slots, not corruption.
-  Loss is reported separately: a failed claim sets the loss flag before
-  the writer carries on.
+  Loss is reported through the CLOSED gate: a failed claim sets it before
+  the writer carries on, which both marks the result incomplete and
+  refuses every later claim.
 - The bounds checks on descriptors are what make the `unsafe` reference
   construction correct: whether the receiver stays memory-safe never
   depends on another process behaving.
