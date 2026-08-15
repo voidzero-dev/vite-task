@@ -158,17 +158,17 @@ pub fn is_supported_region_len(len: usize) -> bool {
 //    belongs to an operation performed after the boundary. A writer that
 //    dies before setting the flag never performed its operation, so
 //    nothing was actually lost.
-// 2. **Writer commit** — the slot compare-and-swap uses `Release`
-//    (`SharedState::commit`): every payload write happens-before the
-//    committed descriptor becomes visible.
-// 3. **Receiver observation** — the freeze compare-and-swap uses `Acquire`
-//    on failure (`SharedState::freeze`): observing a committed descriptor
-//    also makes the payload writes it published visible, so the borrows
-//    `Frames` later hands out read settled bytes.
+// 2. **Writer commit** — the slot compare-and-swap in `FrameMut::finish`
+//    uses `Release`: every payload write happens-before the committed
+//    descriptor becomes visible.
+// 3. **Receiver observation** — the freeze compare-and-swap in
+//    `ShmReceiver::close` uses `Acquire` on failure: observing a committed
+//    descriptor also makes the payload writes it published visible, so the
+//    borrows `Frames` later hands out read settled bytes.
 
-/// A borrowed view of the shared mapping with protocol-level operations:
-/// the typed header, the descriptor table sized from the mapping length,
-/// and the raw payload area.
+/// A borrowed view of the shared mapping: the typed header, the
+/// descriptor table sized from the mapping length, and the raw payload
+/// area.
 #[derive(Clone, Copy)]
 struct SharedState<'m> {
     header: &'m Header,
@@ -225,151 +225,6 @@ impl SharedState<'_> {
                 len,
             }
         }
-    }
-
-    /// Byte offset where the payload region starts.
-    const fn payload_base(self) -> usize {
-        layout::payload_base(self.len)
-    }
-
-    /// Whether the CLOSED gate has been set.
-    fn is_closed(self) -> bool {
-        self.header.claims.load(Ordering::Relaxed) & CLOSED != 0
-    }
-
-    /// Atomically reserves one descriptor slot and one payload span,
-    /// returning the slot index and the payload's byte offset in the
-    /// mapping.
-    ///
-    /// Wait-free: two `fetch_add`s, no retry loop (rule 1). A claim that
-    /// does not fit fails after setting the loss flag, which is what tells
-    /// the receiver a record was lost.
-    fn try_claim(self, payload_len: usize) -> Result<(usize, usize), ClaimError> {
-        // No descriptor can describe a payload this long; refuse it before
-        // touching the counters, so the channel keeps working for every
-        // record after it.
-        if payload_len > layout::MAX_PAYLOAD_LEN {
-            return Err(self.report_loss());
-        }
-        let reserved_len = layout::reserved_payload_len(payload_len);
-
-        // Payload bytes first, so a payload-capacity failure does not burn a
-        // slot. A failed reservation stays counted — overshoot is harmless
-        // because the counter is not what locates payloads (descriptors are)
-        // and a `u64` cannot realistically wrap.
-        let payload_start =
-            self.header.payload_reserved.fetch_add(reserved_len as u64, Ordering::Relaxed);
-        // Checked: a foreign scribble of the counter must fail the claim,
-        // not wrap the bound into an out-of-bounds reservation.
-        let payload_end = payload_start.checked_add(reserved_len as u64);
-        if payload_end.is_none_or(|end| end > self.payloads.len() as u64) {
-            return Err(self.report_loss());
-        }
-
-        let claims = self.header.claims.fetch_add(1, Ordering::Relaxed);
-        if claims & CLOSED != 0 {
-            // Not a loss: a record refused after close describes an
-            // operation performed outside the channel's boundary.
-            return Err(ClaimError::Closed);
-        }
-        let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
-        if slot_index >= self.table.len() {
-            return Err(self.report_loss());
-        }
-
-        // In bounds: `payload_start + reserved_len` fits the payload
-        // region, which ends within the mapping (`layout`).
-        let payload_offset = self.payload_base()
-            + usize::try_from(payload_start).expect("bounded by the payload region");
-        Ok((slot_index, payload_offset))
-    }
-
-    /// Records that a claim failed and its record was lost, before the
-    /// caller moves on (rule 1). Returns the error the failed claim
-    /// reports.
-    fn report_loss(self) -> ClaimError {
-        self.header.lost.store(1, Ordering::Relaxed);
-        ClaimError::Capacity
-    }
-
-    /// Snapshots the claim counter and the loss flag; the counter load is
-    /// the receiver's close boundary (rule 1). Returns the admitted slot
-    /// count, clamped to the table capacity, and whether every record made
-    /// it: false once any claim failed and set the flag.
-    fn snapshot(self) -> (usize, bool) {
-        let claims = self.header.claims.load(Ordering::Relaxed) & !CLOSED;
-        let complete = self.header.lost.load(Ordering::Relaxed) == 0;
-        (usize::try_from(claims).unwrap_or(usize::MAX).min(self.table.len()), complete)
-    }
-
-    /// Sets the CLOSED gate so stragglers stop claiming.
-    fn close_claims(self) {
-        self.header.claims.fetch_or(CLOSED, Ordering::Relaxed);
-    }
-
-    /// Forces the page backing the header (and the table's first slots) to
-    /// be materialized by the operating system before anyone touches it on
-    /// a latency-sensitive path.
-    ///
-    /// A compare-exchange of zero with zero on the claim counter: on an
-    /// untouched region it performs a real write — allocating the first
-    /// block of a sparse backing file, which can cost milliseconds on
-    /// journalling filesystems — without changing protocol state. If a
-    /// claim got there first, the page is already backed and the failed
-    /// exchange changes nothing. (An `or` of zero would not do: the
-    /// compiler may lower it to a plain load, which materializes only a
-    /// hole page without allocating the block.)
-    ///
-    /// Only Linux channels use this: elsewhere the first touch is cheap.
-    #[cfg(target_os = "linux")]
-    fn pre_fault(self) {
-        let _ = self.header.claims.compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
-    }
-
-    /// Publishes a committed descriptor into an unfinished slot.
-    ///
-    /// Returns false when the receiver aborted the slot first; the payload is
-    /// then permanently unreachable and the writer must not touch it again
-    /// either way.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `slot_index` lies outside the table; callers only pass
-    /// indices of admitted reservations.
-    fn commit(self, slot_index: usize, descriptor: u64) -> bool {
-        // Rule 2: `Release` orders every payload write before the descriptor.
-        self.table[slot_index]
-            .compare_exchange(layout::UNFINISHED, descriptor, Ordering::Release, Ordering::Relaxed)
-            .is_ok()
-    }
-
-    /// Freezes one slot during close and returns its terminal value: `ABORTED`
-    /// when the receiver won the race, the committed descriptor otherwise.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `slot_index` lies outside the table; the receiver only
-    /// passes indices below its clamped snapshot.
-    fn freeze(self, slot_index: usize) -> u64 {
-        // Rule 3: `Acquire` on failure makes a committed payload visible.
-        match self.table[slot_index].compare_exchange(
-            layout::UNFINISHED,
-            layout::ABORTED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => layout::ABORTED,
-            Err(terminal) => terminal,
-        }
-    }
-
-    /// Pointer to a reserved payload span. The caller owns the span's
-    /// exclusivity argument.
-    fn payload_ptr(self, offset: usize) -> *mut u8 {
-        debug_assert!((self.payload_base()..=self.len).contains(&offset));
-        // SAFETY: callers pass offsets of admitted reservations, which
-        // `layout` keeps inside the payload area.
-        unsafe { self.payloads.cast::<u8>().add(offset - self.payload_base()) }
     }
 }
 
@@ -429,7 +284,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
 
     /// Whether the receiver has closed the channel.
     pub fn is_closed(&self) -> bool {
-        self.state().is_closed()
+        self.state().header.claims.load(Ordering::Relaxed) & CLOSED != 0
     }
 
     /// Claims a frame of exactly `frame_size` bytes.
@@ -439,21 +294,70 @@ impl<M: AsRawSlice> ShmWriter<M> {
     /// the receiver ignores the slot, exactly as if the writer had died.
     /// Frames larger than `i32::MAX` bytes are refused as
     /// [`ClaimError::Capacity`].
+    ///
+    /// Wait-free: two `fetch_add`s, no retry loop (rule 1). A claim that
+    /// does not fit fails after setting the loss flag, which is what tells
+    /// the receiver a record was lost.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let state = self.state();
-        let (slot_index, payload_offset) = state.try_claim(frame_size.get())?;
+        let payload_len = frame_size.get();
 
-        let content_ptr = state.payload_ptr(payload_offset);
+        // Records that a claim failed and its record was lost, before the
+        // writer moves on (rule 1).
+        let report_loss = || {
+            state.header.lost.store(1, Ordering::Relaxed);
+            ClaimError::Capacity
+        };
+
+        // No descriptor can describe a payload this long; refuse it before
+        // touching the counters, so the channel keeps working for every
+        // record after it.
+        if payload_len > layout::MAX_PAYLOAD_LEN {
+            return Err(report_loss());
+        }
+        let reserved_len = layout::reserved_payload_len(payload_len);
+
+        // Payload bytes first, so a payload-capacity failure does not burn a
+        // slot. A failed reservation stays counted — overshoot is harmless
+        // because the counter is not what locates payloads (descriptors are)
+        // and a `u64` cannot realistically wrap.
+        let payload_start =
+            state.header.payload_reserved.fetch_add(reserved_len as u64, Ordering::Relaxed);
+        // Checked: a foreign scribble of the counter must fail the claim,
+        // not wrap the bound into an out-of-bounds reservation.
+        let payload_end = payload_start.checked_add(reserved_len as u64);
+        if payload_end.is_none_or(|end| end > state.payloads.len() as u64) {
+            return Err(report_loss());
+        }
+        let payload_start = usize::try_from(payload_start).expect("bounded by the payload region");
+
+        let claims = state.header.claims.fetch_add(1, Ordering::Relaxed);
+        if claims & CLOSED != 0 {
+            // Not a loss: a record refused after close describes an
+            // operation performed outside the channel's boundary.
+            return Err(ClaimError::Closed);
+        }
+        let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
+        if slot_index >= state.table.len() {
+            return Err(report_loss());
+        }
+
         // SAFETY: the claim reserved
-        // `[payload_offset, payload_offset + frame_size)` exclusively for
-        // this frame: other writers reserve disjoint spans, and the receiver
-        // never reads a payload before observing its committed descriptor —
+        // `[payload_start, payload_start + reserved_len)` — inside the
+        // payload region by the capacity check above — exclusively for this
+        // frame: other writers reserve disjoint spans, and the receiver
+        // never reads a payload before observing its committed descriptor,
         // which `finish` publishes only when it consumes this borrow.
-        let content = unsafe { slice::from_raw_parts_mut(content_ptr, frame_size.get()) };
+        let content = unsafe {
+            slice::from_raw_parts_mut(state.payloads.cast::<u8>().add(payload_start), payload_len)
+        };
         Ok(FrameMut {
             state,
             slot_index,
-            descriptor: layout::committed(payload_offset, frame_size.get()),
+            descriptor: layout::committed(
+                layout::payload_base(state.len) + payload_start,
+                payload_len,
+            ),
             content,
         })
     }
@@ -520,10 +424,18 @@ impl FrameMut<'_> {
     /// Commits the frame, making it visible to the receiver.
     ///
     /// If the receiver closed the channel and aborted this frame's slot
-    /// first, the frame is silently discarded: the record belongs to the
-    /// close race and is intentionally excluded either way.
+    /// first, the swap fails and the frame is silently discarded: the
+    /// record belongs to the close race and is intentionally excluded
+    /// either way.
     pub fn finish(self) {
-        self.state.commit(self.slot_index, self.descriptor);
+        // Rule 2: `Release` orders every payload write before the
+        // descriptor.
+        let _ = self.state.table[self.slot_index].compare_exchange(
+            layout::UNFINISHED,
+            self.descriptor,
+            Ordering::Release,
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -640,7 +552,7 @@ impl<M: AsRawSlice> ShmReceiver<M> {
     /// been produced by a correct writer; the region was corrupted and its
     /// frames are unusable.
     pub fn close(self) -> Result<Frames<M>, ProtocolError> {
-        let spans;
+        let mut spans = Vec::new();
         let complete;
         {
             // SAFETY: `new` requires the region to stay valid and
@@ -649,61 +561,65 @@ impl<M: AsRawSlice> ShmReceiver<M> {
             // beyond, since it moves into the returned `Frames`.
             let state = unsafe { SharedState::borrow(self.mem.as_raw_slice()) };
 
-            // The close boundary: claims at or before this snapshot are
-            // inside it, later ones land in slots this pass never visits.
-            // The count is clamped to the table capacity, so a counter
-            // inflated by failed claims (or by a foreign scribble) degrades
-            // to a full-table sweep, not an error. The snapshot also reads
-            // the loss flag: its one read either sees a loss, or the loss
-            // belongs to an operation performed after this boundary (rule 1
-            // in the ordering contract above).
-            let (slot_count, is_complete) = state.snapshot();
+            // The close boundary (rule 1): claims at or before this
+            // snapshot are inside it, later ones land in slots this pass
+            // never visits. The count is clamped to the table capacity, so
+            // a counter inflated by failed claims (or by a foreign
+            // scribble) degrades to a full-table sweep, not an error.
+            let claims = state.header.claims.load(Ordering::Relaxed) & !CLOSED;
+            let slot_count = usize::try_from(claims).unwrap_or(usize::MAX).min(state.table.len());
+            // One read of the loss flag: it either sees a loss, or the loss
+            // belongs to an operation performed after the boundary (rule 1).
+            complete = state.header.lost.load(Ordering::Relaxed) == 0;
 
-            // Gate further claims. Cheap: the creator pre-faulted this page
-            // where first touches are expensive. Claims racing between the
-            // snapshot and this gate are dropped soundly (see the module
-            // docs above).
-            state.close_claims();
+            // Gate further claims, so stragglers stop claiming (and
+            // materializing pages) forever. Cheap: the creator pre-faulted
+            // this page where first touches are expensive. Claims racing
+            // between the snapshot and this gate are dropped soundly (see
+            // the module docs above).
+            state.header.claims.fetch_or(CLOSED, Ordering::Relaxed);
 
             // Freeze pass: drive every admitted slot to a terminal state
             // and collect the committed spans. After this loop the
             // snapshot's slice of the descriptor table can no longer change
             // — late writers lose their commit race against `ABORTED`.
-            spans = freeze_committed_spans(state, slot_count)?;
-            complete = is_complete;
+            for slot_index in 0..slot_count {
+                // Rule 3: `Acquire` on failure makes a committed payload
+                // visible.
+                let Err(bits) = state.table[slot_index].compare_exchange(
+                    layout::UNFINISHED,
+                    layout::ABORTED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) else {
+                    // The receiver won the race: the unfinished slot is now
+                    // aborted and stays ignored.
+                    continue;
+                };
+                if bits == layout::ABORTED {
+                    // Aborted by an earlier close over the same region;
+                    // still ignored.
+                    continue;
+                }
+                // Any other terminal value must be a committed descriptor
+                // with a valid span; a foreign scribble fails the decode.
+                let span = layout::decode(state.len, bits)
+                    .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
+                spans.push(span);
+            }
         }
 
         Ok(Frames { mem: self.mem, spans, complete })
     }
 }
 
-fn freeze_committed_spans(
-    state: SharedState<'_>,
-    slot_count: usize,
-) -> Result<Vec<PayloadSpan>, ProtocolError> {
-    let mut spans = Vec::new();
-    for slot_index in 0..slot_count {
-        let bits = state.freeze(slot_index);
-        if bits == layout::ABORTED {
-            continue;
-        }
-        // Freeze only returns terminal values, so anything else must be a
-        // committed descriptor with a valid span; a foreign scribble fails
-        // the decode.
-        let span = layout::decode(state.len, bits)
-            .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
-        spans.push(span);
-    }
-    Ok(spans)
-}
-
 /// Materializes the page backing the protocol header without changing
 /// protocol state, so that neither a writer's first claim nor
-/// [`ShmReceiver::close`]'s
-/// snapshot pays for the backing file's first block allocation — a
-/// millisecond-scale cost on some journalling filesystems, for reads of
-/// holes as well as writes. Run it off any latency-sensitive path. See
-/// [`SharedState::pre_fault`] for the mechanism.
+/// [`ShmReceiver::close`]'s snapshot pays for the backing file's first
+/// block allocation — a millisecond-scale cost on some journalling
+/// filesystems, for reads of holes as well as writes. Run it off any
+/// latency-sensitive path. Only Linux channels use this: elsewhere the
+/// first touch is cheap.
 ///
 /// # Safety
 ///
@@ -711,7 +627,15 @@ fn freeze_committed_spans(
 #[cfg(target_os = "linux")]
 pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
     // SAFETY: forwarded from this function's contract.
-    unsafe { SharedState::borrow(mem.as_raw_slice()) }.pre_fault();
+    let state = unsafe { SharedState::borrow(mem.as_raw_slice()) };
+    // A compare-exchange of zero with zero on the claim counter: on an
+    // untouched region it performs a real write — allocating the first
+    // block of a sparse backing file — without changing protocol state. If
+    // a claim got there first, the page is already backed and the failed
+    // exchange changes nothing. (An `or` of zero would not do: the
+    // compiler may lower it to a plain load, which materializes only a
+    // hole page without allocating the block.)
+    let _ = state.header.claims.compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
 }
 
 #[cfg(test)]
