@@ -3,10 +3,10 @@
 //! The region is divided into three fixed areas:
 //!
 //! ```text
-//! | header | descriptor table | payloads (grow up) |
+//! | counters | descriptor table | payloads (grow up) |
 //! ```
 //!
-//! The header and the table have compile-time shape: one `repr(C)`
+//! The counters and the table have compile-time shape: one `repr(C)`
 //! [`Meta`] struct whose table length is a const parameter the channel
 //! specifies. The payload area is simply the rest of the mapping, so the
 //! whole geometry reduces to that struct's size. This module holds the
@@ -29,31 +29,22 @@ use std::{ptr::NonNull, sync::atomic::AtomicU64};
 /// into the gate.
 pub(super) const CLOSED: u64 = 1 << 63;
 
-/// The region header: two protocol counters, padded so the descriptor
-/// table starts off their cache line and there is room for future header
-/// fields, which must start zeroed.
+/// The region's fixed-location part — the protocol counters and the
+/// descriptor table — as one `repr(C)` struct, which must start zeroed.
+/// The payload area is simply the rest of the mapping.
 #[repr(C)]
-pub(super) struct Header {
+pub(super) struct Meta<const SLOTS: usize> {
     /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
     pub(super) claims: AtomicU64,
     /// Payload bytes ever reserved, including by failed claims.
     pub(super) payload_reserved: AtomicU64,
-    _reserved: [u64; 6],
-}
-
-// One cache line: shrink `_reserved` when adding a field. The alignment is
-// what lets a `u64`-aligned mapping base be cast to `&Meta`.
-const _: () = assert!(size_of::<Header>() == 64);
-const _: () = assert!(align_of::<Header>() == align_of::<AtomicU64>());
-
-/// The region's fixed-location part — the header and the descriptor
-/// table — as one `repr(C)` struct. The payload area is simply the rest
-/// of the mapping.
-#[repr(C)]
-pub(super) struct Meta<const SLOTS: usize> {
-    pub(super) header: Header,
+    /// One descriptor slot per frame.
     pub(super) table: [AtomicU64; SLOTS],
 }
+
+// The `u64`-aligned mapping base is cast to `&Meta`; nothing in it may
+// raise the alignment.
+const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
 
 /// Maximum payload size of a single frame.
 ///
@@ -99,7 +90,7 @@ pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 
 // --- The mapped layout and the ordering contract ---------------------------
 // `MappedLayout::new` builds two typed views of the region — the
-// `repr(C)` `Meta` struct (header and descriptor table) and the untyped
+// `repr(C)` `Meta` struct (counters and descriptor table) and the untyped
 // payload area as a raw slice — once, when an endpoint attaches; the
 // endpoint stores them beside the mapping they point into. Every access
 // after that is a plain field access or a bounds-checked index. The
@@ -108,7 +99,7 @@ pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 //
 // # Shared atomics
 //
-// The header holds two independent monotonic `AtomicU64` counters:
+// The region starts with two independent monotonic `AtomicU64` counters:
 //
 // - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
 //   claims ever attempted. Claiming is one wait-free `fetch_add`; the
@@ -213,15 +204,20 @@ impl<const SLOTS: usize> MappedLayout<SLOTS> {
     /// The fixed-location part of the region.
     const fn meta(&self) -> &Meta<SLOTS> {
         // SAFETY: `new`'s contract keeps the target valid while any view
-        // is used, and `Meta` consists of atomics, so the shared borrow
-        // is valid even while other threads and processes access the same
-        // memory through them.
+        // is used, and `Meta` consists entirely of atomics, so the shared
+        // borrow is valid even while other threads and processes access
+        // the same memory through them.
         unsafe { self.meta.as_ref() }
     }
 
-    /// The protocol header.
-    pub(super) const fn header(&self) -> &Header {
-        &self.meta().header
+    /// The claim counter.
+    pub(super) const fn claims(&self) -> &AtomicU64 {
+        &self.meta().claims
+    }
+
+    /// The payload counter.
+    pub(super) const fn payload_reserved(&self) -> &AtomicU64 {
+        &self.meta().payload_reserved
     }
 
     /// The descriptor table.
@@ -237,8 +233,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn meta_is_the_header_then_the_table() {
-        assert!(size_of::<Meta<15>>() == 64 + 15 * size_of::<AtomicU64>());
+    fn meta_is_the_counters_then_the_table() {
+        assert!(size_of::<Meta<15>>() == (2 + 15) * size_of::<AtomicU64>());
         assert!(align_of::<Meta<15>>() == align_of::<AtomicU64>());
     }
 }

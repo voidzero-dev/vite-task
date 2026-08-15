@@ -12,19 +12,19 @@
 //!
 //! ```text
 //! low addresses                                            high addresses
-//! +--------+--------+--------+---------+-----------+-----------+------+
-//! | header | slot 0 | slot 1 | ...     | payload 0 | payload 1 | ...  |
-//! +--------+--------+--------+---------+-----------+-----------+------+
-//!            fixed descriptor table      payloads grow up ->
+//! +----------+--------+--------+---------+-----------+-----------+------+
+//! | counters | slot 0 | slot 1 | ...     | payload 0 | payload 1 | ...  |
+//! +----------+--------+--------+---------+-----------+-----------+------+
+//!              fixed descriptor table      payloads grow up ->
 //! ```
 //!
-//! The header and the descriptor table form one `repr(C)` struct whose
+//! The counters and the descriptor table form one `repr(C)` struct whose
 //! table length is a compile-time constant every endpoint shares (the
 //! channel specifies it); the payload area is simply the rest of the
 //! mapping ([`layout`]). Attaching constructs typed views of that struct
-//! — the header is two monotonic `AtomicU64` counters: claims, carrying
-//! the CLOSED gate bit, and payload bytes reserved — while the payload
-//! area stays untyped bytes.
+//! — two monotonic `AtomicU64` counters: claims, carrying the CLOSED
+//! gate bit, and payload bytes reserved — while the payload area stays
+//! untyped bytes.
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
 //! reserves a descriptor slot — validated against the fixed region bounds
 //! from the returned old values. A failed claim sets the CLOSED gate as
@@ -124,8 +124,8 @@ pub const fn is_supported_region_len<const SLOTS: usize>(len: usize) -> bool {
         && len - size_of::<layout::Meta<SLOTS>>() <= layout::MAX_PAYLOAD_REGION_LEN
 }
 
-/// Materializes the page backing the protocol header without changing
-/// protocol state, so that neither a writer's first claim nor
+/// Materializes the region's first page without changing protocol
+/// state, so that neither a writer's first claim nor
 /// [`ShmReader::seal`]'s snapshot pays for the backing file's first
 /// block allocation — a millisecond-scale cost on some journalling
 /// filesystems, for reads of holes as well as writes. Run it off any
@@ -146,7 +146,7 @@ pub unsafe fn pre_fault<const SLOTS: usize>(mem: &impl AsRawSlice) {
     // exchange changes nothing. (An `or` of zero would not do: the
     // compiler may lower it to a plain load, which materializes only a
     // hole page without allocating the block.)
-    let _ = mapped.header().claims.compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
+    let _ = mapped.claims().compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
 }
 
 #[cfg(test)]
@@ -628,7 +628,8 @@ mod tests {
         // Point slot 0 at a span escaping the payload region.
         let bogus_len = 8u64;
         let bogus_offset = 1020u64;
-        shm.poke_u64(64, (bogus_len << 32) | bogus_offset);
+        // Slot 0 sits right after the two counters.
+        shm.poke_u64(16, (bogus_len << 32) | bogus_offset);
 
         // SAFETY: see `collect_frames`.
         let result = unsafe { ShmReader::<_, S>::seal(shm) };
@@ -644,7 +645,8 @@ mod tests {
 
         // The aborted bit combined with payload bits is a value no protocol
         // operation produces.
-        shm.poke_u64(64, (1 << 63) | (8u64 << 32) | 8);
+        // Slot 0 sits right after the two counters.
+        shm.poke_u64(16, (1 << 63) | (8u64 << 32) | 8);
 
         // SAFETY: see `collect_frames`.
         let result = unsafe { ShmReader::<_, S>::seal(shm) };

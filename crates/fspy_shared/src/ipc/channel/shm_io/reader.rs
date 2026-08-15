@@ -147,7 +147,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
             // never visits. The count is clamped to the table capacity, so
             // a counter inflated by failed claims (or by a foreign
             // scribble) degrades to a full-table sweep, not an error.
-            let claims = mapped.header().claims.load(Ordering::Relaxed);
+            let claims = mapped.claims().load(Ordering::Relaxed);
             slot_count = usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(SLOTS);
             // The same load carries the completeness verdict: a gate set
             // before this boundary is a failed claim's loss report — or an
@@ -160,7 +160,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
             // this page where first touches are expensive. Claims racing
             // between the snapshot and this gate are dropped soundly (see
             // the module docs above).
-            mapped.header().claims.fetch_or(CLOSED, Ordering::Relaxed);
+            mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
 
             // Freeze pass: drive every admitted slot to a terminal state
             // and validate the committed descriptors. After this loop the

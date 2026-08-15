@@ -77,7 +77,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// Whether the CLOSED gate is set: the receiver sealed the channel,
     /// or an earlier failed claim condemned it.
     pub fn is_closed(&self) -> bool {
-        self.mapped.header().claims.load(Ordering::Relaxed) & CLOSED != 0
+        self.mapped.claims().load(Ordering::Relaxed) & CLOSED != 0
     }
 
     /// Claims a frame of exactly `frame_size` bytes.
@@ -100,7 +100,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // moves on (rule 1): the gate makes the receiver report the
         // channel incomplete, and condemns further claims.
         let report_loss = || {
-            mapped.header().claims.fetch_or(CLOSED, Ordering::Relaxed);
+            mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
             ClaimError::Capacity
         };
 
@@ -115,7 +115,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // because the counter is not what locates payloads (descriptors are)
         // and a `u64` cannot realistically wrap.
         let payload_start =
-            mapped.header().payload_reserved.fetch_add(payload_len as u64, Ordering::Relaxed);
+            mapped.payload_reserved().fetch_add(payload_len as u64, Ordering::Relaxed);
         // Checked: a foreign scribble of the counter must fail the claim,
         // not wrap the bound into an out-of-bounds reservation.
         let payload_end = payload_start.checked_add(payload_len as u64);
@@ -124,7 +124,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         }
         let payload_start = usize::try_from(payload_start).expect("bounded by the payload region");
 
-        let claims = mapped.header().claims.fetch_add(1, Ordering::Relaxed);
+        let claims = mapped.claims().fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
             // Not a loss: a record refused after the seal describes an
             // operation performed outside the channel's boundary.

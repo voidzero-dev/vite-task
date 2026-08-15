@@ -27,13 +27,13 @@ file mapped into every participating process. A sparse mapping is address
 space, not memory: only pages that are actually written get backed.
 
 ```text
-| header (64 B) | descriptor table (SLOTS slots) | payloads (the rest, grow up) |
+| counters | descriptor table (SLOTS slots) | payloads (the rest, grow up) |
 ```
 
-The header and the table together are one `repr(C)` struct: the header —
-two `AtomicU64` counters, which only ever count up — followed by one
-8-byte descriptor slot per frame. The table length is a compile-time
-constant the channel picks once for both ends:
+The region starts with one `repr(C)` struct: two `AtomicU64` counters,
+which only ever count up, followed by one 8-byte descriptor slot per
+frame. The table length is a compile-time constant the channel picks
+once for both ends:
 
 - the **claim counter** — how many frames were ever claimed. Bit 63 is
   the CLOSED gate, set by the receiver when it closes the channel — and
@@ -182,12 +182,12 @@ CLAIMED (slot 0) ---+
 
 ## Files
 
-| File        | Role                                                                                                                                                                                                                       |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`    | Public surface (`ShmWriter`, `ShmReader`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                          |
-| `writer.rs` | The writer side: claim a frame, fill it, finish it.                                                                                                                                                                        |
-| `reader.rs` | The reader side: seal the channel, then iterate the committed frames — with the argument for why its borrows are sound.                                                                                                    |
-| `layout.rs` | Only what both sides share: the region's shape and sizing math, the header, the descriptor format, and `MappedLayout` — the shape bound to one concrete mapping. Encoding lives with the writer, decoding with the reader. |
+| File        | Role                                                                                                                                                                                                                             |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`    | Public surface (`ShmWriter`, `ShmReader`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                                |
+| `writer.rs` | The writer side: claim a frame, fill it, finish it.                                                                                                                                                                              |
+| `reader.rs` | The reader side: seal the channel, then iterate the committed frames — with the argument for why its borrows are sound.                                                                                                          |
+| `layout.rs` | Only what both sides share: the region's `repr(C)` shape — counters, then slots — the descriptor format, and `MappedLayout`, that shape bound to one concrete mapping. Encoding lives with the writer, decoding with the reader. |
 
 Arrows point at what a file depends on:
 
