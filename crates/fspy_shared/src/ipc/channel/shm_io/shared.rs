@@ -68,24 +68,6 @@ use super::{
     layout::{self, CLOSED, Header, PayloadSpan, SlotState},
 };
 
-/// Why a claim was not admitted.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum ReserveError {
-    /// The receiver has closed the channel.
-    Closed,
-    /// The region is out of capacity.
-    Capacity,
-}
-
-/// A successful reservation of one descriptor slot and one payload span.
-#[derive(Debug)]
-struct Reservation {
-    /// Index of the reserved descriptor slot.
-    slot_index: usize,
-    /// Byte offset of the reserved payload span. `u64`-aligned.
-    payload_offset: usize,
-}
-
 /// A borrowed view of the shared mapping with protocol-level operations:
 /// the typed header, the descriptor table sized from the mapping length,
 /// and the raw payload area.
@@ -147,10 +129,6 @@ impl SharedState<'_> {
         }
     }
 
-    const fn mapping_len(self) -> usize {
-        self.len
-    }
-
     /// Byte offset where the payload region starts.
     const fn payload_base(self) -> usize {
         layout::payload_base(self.len)
@@ -161,12 +139,14 @@ impl SharedState<'_> {
         self.header.claims.load(Ordering::Relaxed) & CLOSED != 0
     }
 
-    /// Atomically reserves one descriptor slot and one payload span.
+    /// Atomically reserves one descriptor slot and one payload span,
+    /// returning the slot index and the payload's byte offset in the
+    /// mapping.
     ///
     /// Wait-free: two `fetch_add`s, no retry loop (rule 1). A claim that
     /// does not fit fails after setting the loss flag, which is what tells
     /// the receiver a record was lost.
-    fn try_claim(self, payload_len: usize) -> Result<Reservation, ReserveError> {
+    fn try_claim(self, payload_len: usize) -> Result<(usize, usize), ClaimError> {
         // No descriptor can describe a payload this long; refuse it before
         // touching the counters, so the channel keeps working for every
         // record after it.
@@ -192,28 +172,26 @@ impl SharedState<'_> {
         if claims & CLOSED != 0 {
             // Not a loss: a record refused after close describes an
             // operation performed outside the channel's boundary.
-            return Err(ReserveError::Closed);
+            return Err(ClaimError::Closed);
         }
         let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
         if slot_index >= self.table.len() {
             return Err(self.report_loss());
         }
 
-        Ok(Reservation {
-            slot_index,
-            // In bounds: `payload_start + reserved_len` fits the payload
-            // region, which ends within the mapping (`layout`).
-            payload_offset: self.payload_base()
-                + usize::try_from(payload_start).expect("bounded by the payload region"),
-        })
+        // In bounds: `payload_start + reserved_len` fits the payload
+        // region, which ends within the mapping (`layout`).
+        let payload_offset = self.payload_base()
+            + usize::try_from(payload_start).expect("bounded by the payload region");
+        Ok((slot_index, payload_offset))
     }
 
     /// Records that a claim failed and its record was lost, before the
     /// caller moves on (rule 1). Returns the error the failed claim
     /// reports.
-    fn report_loss(self) -> ReserveError {
+    fn report_loss(self) -> ClaimError {
         self.header.lost.store(1, Ordering::Relaxed);
-        ReserveError::Capacity
+        ClaimError::Capacity
     }
 
     /// Snapshots the claim counter and the loss flag; the counter load is
@@ -365,12 +343,9 @@ impl<M: AsRawSlice> ShmWriter<M> {
     /// [`ClaimError::Capacity`].
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let state = self.state();
-        let reservation = state.try_claim(frame_size.get()).map_err(|err| match err {
-            ReserveError::Closed => ClaimError::Closed,
-            ReserveError::Capacity => ClaimError::Capacity,
-        })?;
+        let (slot_index, payload_offset) = state.try_claim(frame_size.get())?;
 
-        let content_ptr = state.payload_ptr(reservation.payload_offset);
+        let content_ptr = state.payload_ptr(payload_offset);
         // SAFETY: the claim reserved
         // `[payload_offset, payload_offset + frame_size)` exclusively for
         // this frame: other writers reserve disjoint spans, and the receiver
@@ -379,14 +354,14 @@ impl<M: AsRawSlice> ShmWriter<M> {
         let content = unsafe { slice::from_raw_parts_mut(content_ptr, frame_size.get()) };
         Ok(FrameMut {
             state,
-            slot_index: reservation.slot_index,
-            descriptor: layout::committed(reservation.payload_offset, frame_size.get()),
+            slot_index,
+            descriptor: layout::committed(payload_offset, frame_size.get()),
             content,
         })
     }
 
     // Unwrap `self` and return the underlying memory.
-    #[cfg(test)]
+    #[cfg(all(test, not(miri)))]
     pub fn into_memory(self) -> M {
         self.mem
     }
@@ -538,7 +513,7 @@ pub enum ProtocolError {
 /// Panics when the region is not `u64`-aligned or its size is outside the
 /// supported range (see [`SharedState::borrow`]) — a broken caller, not
 /// corrupt shared data, which is reported as [`ProtocolError`] instead.
-pub(super) unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {
+pub unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {
     let spans;
     let complete;
     {
@@ -583,7 +558,7 @@ fn freeze_committed_spans(
         match layout::decode(state.freeze(slot_index)) {
             SlotState::Aborted => {}
             SlotState::Committed { payload_offset, payload_len } => {
-                let span = PayloadSpan::validate(state.mapping_len(), payload_offset, payload_len)
+                let span = PayloadSpan::validate(state.len, payload_offset, payload_len)
                     .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
                 spans.push(span);
             }
@@ -597,14 +572,18 @@ fn freeze_committed_spans(
     Ok(spans)
 }
 
-/// Materializes the pages every region touch starts with — see
-/// [`SharedState::pre_fault`].
+/// Materializes the page backing the protocol header without changing
+/// protocol state, so that neither a writer's first claim nor [`close`]'s
+/// snapshot pays for the backing file's first block allocation — a
+/// millisecond-scale cost on some journalling filesystems, for reads of
+/// holes as well as writes. Run it off any latency-sensitive path. See
+/// [`SharedState::pre_fault`] for the mechanism.
 ///
 /// # Safety
 ///
 /// Same contract as [`ShmWriter::new`].
 #[cfg(target_os = "linux")]
-pub(super) unsafe fn pre_fault(mem: &impl AsRawSlice) {
+pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
     // SAFETY: forwarded from this function's contract.
     unsafe { SharedState::borrow(mem.as_raw_slice()) }.pre_fault();
 }

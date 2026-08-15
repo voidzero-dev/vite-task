@@ -7,14 +7,13 @@
 
 mod shm_io;
 
-use std::{env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, ops::Deref, path::PathBuf};
+use std::{env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, path::PathBuf};
 
 use allocator_api2::alloc::Global;
 use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
 use shm_io::ShmWriter;
-pub use shm_io::{ClaimError, FrameMut};
 
 /// The committed frames of a closed channel; borrows the shared mapping,
 /// which stays alive (and mapped) until this value drops.
@@ -233,14 +232,6 @@ impl Sender {
     }
 }
 
-impl Deref for Sender {
-    type Target = ShmWriter<Mapping>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.writer
-    }
-}
-
 // SAFETY: `Sender` only accesses the shared mapping through the `shm_io`
 // protocol, which synchronizes concurrent writers and the receiver with
 // atomic operations; the mapping's address is stable and independently owned.
@@ -320,7 +311,7 @@ mod tests {
         let mut command = command_for_fn!(conf, |conf: ChannelConf| {
             let sender = conf.sender().unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
-            let mut frame = sender.claim_frame(frame_size).unwrap();
+            let mut frame = sender.writer.claim_frame(frame_size).unwrap();
             frame.copy_from_slice(&[4, 2]);
             frame.finish();
         });
@@ -343,7 +334,7 @@ mod tests {
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
             let sender = conf.sender().unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
-            let mut frame = sender.claim_frame(frame_size).unwrap();
+            let mut frame = sender.writer.claim_frame(frame_size).unwrap();
             frame.copy_from_slice(&[4, 2]);
             frame.finish();
         });
@@ -392,7 +383,7 @@ mod tests {
         let (conf, receiver) = channel(4096).unwrap();
         let sender = conf.sender().unwrap();
 
-        let mut frame = sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
+        let mut frame = sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
         frame.copy_from_slice(&[4, 2]);
         frame.finish();
 
@@ -401,7 +392,8 @@ mod tests {
         assert!(frames.is_complete());
 
         assert!(
-            sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap_err() == ClaimError::Closed
+            sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap_err()
+                == shm_io::ClaimError::Closed
         );
     }
 
@@ -413,8 +405,10 @@ mod tests {
             let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
                 let sender = conf.sender().unwrap();
                 let data_to_send = i.to_string();
-                let mut frame =
-                    sender.claim_frame(NonZeroUsize::new(data_to_send.len()).unwrap()).unwrap();
+                let mut frame = sender
+                    .writer
+                    .claim_frame(NonZeroUsize::new(data_to_send.len()).unwrap())
+                    .unwrap();
                 frame.copy_from_slice(data_to_send.as_bytes());
                 frame.finish();
             });

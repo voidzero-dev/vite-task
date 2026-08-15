@@ -75,7 +75,13 @@ mod shared;
 use std::ptr::slice_from_raw_parts_mut;
 
 use fspy_shm::Mapping;
-pub use shared::{ClaimError, FrameMut, Frames, ProtocolError, ShmWriter};
+#[cfg(target_os = "linux")]
+pub use shared::pre_fault;
+// The error types appear in return values either way; only tests need to
+// name them.
+#[cfg(test)]
+pub use shared::{ClaimError, ProtocolError};
+pub use shared::{Frames, ShmWriter, close};
 
 // The region arithmetic in `layout` relies on `usize` accommodating sums of
 // 32-bit-bounded quantities, and the descriptor protocol on native 64-bit
@@ -94,34 +100,6 @@ impl AsRawSlice for Mapping {
     fn as_raw_slice(&self) -> *mut [u8] {
         slice_from_raw_parts_mut(self.as_ptr(), self.len())
     }
-}
-
-/// Closes the channel without waiting for writers and returns the committed
-/// frames as borrows of the region, which moves into the returned
-/// [`Frames`]. See [`shared::close`].
-///
-/// # Safety
-///
-/// Same contract as [`ShmWriter::new`]: the region must be stable and valid,
-/// zero-initialized at creation, and accessed only through this protocol.
-pub unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {
-    // SAFETY: forwarded from this function's contract.
-    unsafe { shared::close(mem) }
-}
-
-/// Materializes the page backing the protocol header without changing
-/// protocol state, so that neither a writer's first claim nor [`close`]'s
-/// snapshot pays for the backing file's first block allocation — a
-/// millisecond-scale cost on some journalling filesystems, for reads of
-/// holes as well as writes. Run it off any latency-sensitive path.
-///
-/// # Safety
-///
-/// Same contract as [`ShmWriter::new`].
-#[cfg(target_os = "linux")]
-pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
-    // SAFETY: forwarded from this function's contract.
-    unsafe { shared::pre_fault(mem) }
 }
 
 /// Whether a mapping of `len` bytes can host the protocol at all.
