@@ -140,7 +140,7 @@ impl<M: AsRawSlice> ShmReader<M> {
                 }
                 // Any other terminal value must be a committed descriptor
                 // with a valid span; a foreign scribble fails the decode.
-                if layout::decode(mapped.len, bits).is_none() {
+                if mapped.decode(bits).is_none() {
                     return Err(ProtocolError::CorruptDescriptor { slot_index });
                 }
                 frames += 1;
@@ -178,12 +178,10 @@ impl<M> fmt::Debug for ShmReader<M> {
 
 /// Iterator over a [`ShmReader`]'s committed frames, in claim order.
 pub struct Iter<'a> {
-    /// Base address of the mapping the descriptors' spans point into.
-    base: *const u8,
+    /// The layout the spans decode against and point into.
+    mapped: MappedLayout,
     /// The not-yet-visited part of the table's frozen prefix.
     table: &'a [AtomicU64],
-    /// Mapping length, which decoding validates descriptors against.
-    mapping_len: usize,
     /// Committed frames not yet yielded.
     remaining: usize,
 }
@@ -202,7 +200,7 @@ impl<'a> Iterator for Iter<'a> {
             // `None` is an aborted slot: nothing was published. Corrupt
             // values cannot appear — `close` already failed the channel on
             // them — so every decoded span is one `close` validated.
-            let Some(span) = layout::decode(self.mapping_len, bits) else {
+            let Some(span) = self.mapped.decode(bits) else {
                 continue;
             };
             self.remaining -= 1;
@@ -210,7 +208,9 @@ impl<'a> Iterator for Iter<'a> {
             // layout, and a committed span is immutable for the mapping's
             // lifetime (see the section comment above); the reader
             // borrowed for `'a` keeps the mapping alive and mapped.
-            return Some(unsafe { slice::from_raw_parts(self.base.add(span.offset), span.len) });
+            return Some(unsafe {
+                slice::from_raw_parts(self.mapped.base().add(span.offset), span.len)
+            });
         }
         None
     }
@@ -226,9 +226,8 @@ impl<'a, M: AsRawSlice> IntoIterator for &'a ShmReader<M> {
 
     fn into_iter(self) -> Iter<'a> {
         Iter {
-            base: self.mapped.base(),
+            mapped: self.mapped,
             table: &self.mapped.table()[..self.slot_count],
-            mapping_len: self.mapped.len,
             remaining: self.frames,
         }
     }

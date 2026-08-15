@@ -149,10 +149,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
         Ok(FrameMut {
             mapped,
             slot_index,
-            descriptor: layout::committed(
-                layout::payload_base(mapped.len) + payload_start,
-                payload_len,
-            ),
+            descriptor: layout::committed(mapped.payload_base() + payload_start, payload_len),
             content,
         })
     }
