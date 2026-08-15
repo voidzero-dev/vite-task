@@ -43,25 +43,15 @@
 //!    committed descriptor becomes visible.
 //! 3. **Receiver observation** — the freeze compare-and-swap uses `Acquire`
 //!    on failure ([`SharedState::freeze`]): observing a committed descriptor
-//!    also makes the payload writes it published visible, so the copy in
-//!    [`SharedState::read_payload`] reads settled bytes.
-//!
-//! Payload reads use `Relaxed` atomic loads rather than plain loads: committed
-//! payloads are immutable under the protocol, but the mapping is writable in
-//! every traced process, so a buggy foreign process can scribble concurrently.
-//! Atomic loads keep such races from being undefined behavior in this
-//! process — each load returns *some* value, and torn garbage surfaces as a
-//! frame-decoding error instead of a crash.
+//!    also makes the payload writes it published visible, so the borrows the
+//!    receiver later hands out (see `reader`) read settled bytes.
 
 use std::{
     marker::PhantomData,
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use super::{
-    layout::{self, PayloadSpan},
-    slot,
-};
+use super::{layout, slot};
 
 /// The CLOSED gate bit of the claim counter. The low 63 bits count claims,
 /// so no realistic claim volume can carry into the gate.
@@ -292,24 +282,5 @@ impl<'m> SharedState<'m> {
         // SAFETY: callers pass offsets of admitted reservations, which
         // `layout` keeps inside the mapping.
         unsafe { self.base.add(offset) }
-    }
-
-    /// Appends the payload bytes of a validated span to `out`.
-    ///
-    /// Reads the span's word-aligned reservation with `Relaxed` atomic loads
-    /// (see the module docs) and appends exactly `span.len` bytes.
-    pub(super) fn read_payload(self, span: PayloadSpan, out: &mut Vec<u8>) {
-        let keep = out.len() + span.len;
-        for word_index in 0..span.reserved_len() / layout::SLOT_LEN {
-            let offset = span.offset + word_index * layout::SLOT_LEN;
-            // SAFETY: `PayloadSpan::validate` checked that the word-aligned
-            // reservation `[span.offset, span.offset + span.reserved_len())`
-            // lies inside the payload region, and `span.offset` is
-            // word-aligned.
-            let word = unsafe { AtomicU64::from_ptr(self.base.add(offset).cast()) };
-            out.extend_from_slice(&word.load(Ordering::Relaxed).to_ne_bytes());
-        }
-        // Drop the sub-word padding bytes of the final word.
-        out.truncate(keep);
     }
 }

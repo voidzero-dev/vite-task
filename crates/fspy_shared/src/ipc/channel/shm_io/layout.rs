@@ -129,11 +129,6 @@ impl PayloadSpan {
         }
         Some(Self { offset, len })
     }
-
-    /// The word-aligned length of the reservation containing this payload.
-    pub(super) const fn reserved_len(self) -> usize {
-        reserved_payload_len(self.len)
-    }
 }
 
 #[cfg(test)]

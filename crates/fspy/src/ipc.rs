@@ -24,9 +24,9 @@ impl CollectedAccesses {
     /// [`fspy_shared::ipc::channel::Receiver::close`]).
     ///
     /// Fails when the trace cannot back the run's file accesses: a record
-    /// was lost before close, or the shared memory was corrupted. Failing
-    /// here — instead of returning a silently short trace — keeps the
-    /// tracking result trustworthy for caching.
+    /// was lost before close, or the shared-memory metadata was corrupted.
+    /// Failing here — instead of returning a silently short trace — keeps
+    /// the tracking result trustworthy for caching.
     pub fn collect(receiver: Receiver) -> io::Result<Self> {
         let frames = receiver.close()?;
         if !frames.is_complete() {
@@ -34,15 +34,6 @@ impl CollectedAccesses {
                 io::ErrorKind::InvalidData,
                 "file-access trace is incomplete: a tracked process lost a record",
             ));
-        }
-        // Validate every frame once so iteration is infallible.
-        for frame in frames.iter() {
-            let _: PathAccess<'_> = wincode::deserialize_exact(frame).map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("corrupt file-access record: {err}"),
-                )
-            })?;
         }
         Ok(Self { frames })
     }
@@ -52,8 +43,9 @@ impl CollectedAccesses {
     }
 
     pub fn iter_path_accesses(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        self.frames
-            .iter()
-            .map(|frame| wincode::deserialize_exact(frame).expect("frames validated in collect"))
+        self.frames.iter().map(|frame| {
+            wincode::deserialize_exact(frame)
+                .expect("committed frames are complete under the channel protocol")
+        })
     }
 }

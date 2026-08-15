@@ -38,8 +38,10 @@
 //! A payload becomes reachable only through its committed descriptor, and a
 //! descriptor is committed only after the payload is fully written
 //! ([`state`]'s ordering contract). The receiver never derives frame
-//! locations from payload bytes and never references memory a live writer
-//! may still mutate — committed payloads are copied out with atomic loads.
+//! locations from payload bytes, and the borrows [`Frames`] hands out cover
+//! exactly the validated committed spans — immutable under the protocol,
+//! and disjoint from everything a live writer may still touch (see
+//! [`reader`]'s trust argument).
 //!
 //! # Close boundary
 //!
@@ -47,17 +49,14 @@
 //! admitted before the snapshot races the freeze pass per slot and its
 //! frame is either included (commit won) or ignored (abort won) — never
 //! torn; a claim after the snapshot lands in a slot the receiver never
-//! visits and is dropped. Both drops are sound because writers publish a
-//! record *before* performing the recorded operation: a process that died
-//! mid-frame never performed the operation, and one that claimed or
-//! committed after the snapshot performs it outside the run's tracking
-//! boundary. A live writer that loses a record *before* close (capacity,
-//! abandonment) flags the trace incomplete ([`Frames::is_complete`]).
-//!
-//! [`close_claims`] sets the CLOSED gate afterwards, off the
-//! latency-sensitive path, so straggler processes eventually stop claiming
-//! (and stop materializing pages of the region) rather than writing into
-//! the void forever.
+//! visits and is dropped, and the CLOSED gate set before [`close`] returns
+//! stops stragglers from claiming (and materializing pages) forever. Both
+//! drops are sound because writers publish a record *before* performing the
+//! recorded operation: a process that died mid-frame never performed the
+//! operation, and one that claimed or committed after the snapshot performs
+//! it outside the run's tracking boundary. A live writer that loses a
+//! record *before* close (capacity, abandonment) flags the trace incomplete
+//! ([`Frames::is_complete`]).
 //!
 //! Correctness never depends on writer-side cleanup: no exit hooks, PID
 //! checks, heartbeats, or timeouts.
@@ -93,16 +92,17 @@ impl AsRawSlice for Mapping {
     }
 }
 
-/// Closes the channel and collects the committed frames without waiting for
-/// writers. See [`reader::close`].
+/// Closes the channel without waiting for writers and returns the committed
+/// frames as borrows of the region, which moves into the returned
+/// [`Frames`]. See [`reader::close`].
 ///
 /// # Safety
 ///
 /// Same contract as [`ShmWriter::new`]: the region must be stable and valid,
 /// zero-initialized at creation, and accessed only through this protocol.
-pub unsafe fn close(mem: &impl AsRawSlice) -> Result<Frames, ProtocolError> {
+pub unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {
     // SAFETY: forwarded from this function's contract.
-    unsafe { reader::close(mem.as_raw_slice()) }
+    unsafe { reader::close(mem) }
 }
 
 /// Materializes the page backing the protocol header without changing
@@ -118,23 +118,6 @@ pub unsafe fn close(mem: &impl AsRawSlice) -> Result<Frames, ProtocolError> {
 pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
     // SAFETY: forwarded from this function's contract.
     unsafe { state::SharedState::borrow(mem.as_raw_slice()) }.pre_fault();
-}
-
-/// Sets the CLOSED gate so writers stop claiming once they observe it.
-///
-/// Deliberately separate from [`close`]: the boundary is [`close`]'s
-/// snapshot, and this write — which materializes the counter page, a
-/// millisecond-scale first-block allocation on some journalling
-/// filesystems when the trace is empty — belongs off the latency-sensitive
-/// path. Claims landing between the snapshot and the gate are dropped
-/// soundly (see the module docs).
-///
-/// # Safety
-///
-/// Same contract as [`ShmWriter::new`].
-pub unsafe fn close_claims(mem: &impl AsRawSlice) {
-    // SAFETY: forwarded from this function's contract.
-    unsafe { reader::close_claims(mem.as_raw_slice()) }
 }
 
 #[cfg(test)]
@@ -208,10 +191,10 @@ mod tests {
         }
     }
 
-    fn collect_frames(shm: &MockedShm) -> Frames {
+    fn collect_frames(shm: &MockedShm) -> Frames<MockedShm> {
         // SAFETY: `MockedShm` provides a stable, zero-initialized allocation
         // accessed only through the protocol.
-        unsafe { close(shm) }.unwrap()
+        unsafe { close(shm.clone()) }.unwrap()
     }
 
     #[test]
@@ -419,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn claims_between_snapshot_and_gate_are_dropped() {
+    fn claims_after_close_are_gated_without_poisoning() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
@@ -432,18 +415,9 @@ mod tests {
         assert!(iter.next() == None);
         assert!(frames.is_complete());
 
-        // The gate is not set yet: a straggler's claim is admitted, lands
-        // beyond the snapshot, and commits into a slot the receiver never
-        // read — the record is dropped, not torn, and not incomplete.
-        let mut late = writer.claim_frame(5.try_into().unwrap()).unwrap();
-        late.copy_from_slice(b"late!");
-        late.finish();
-        assert!(frames.iter().count() == 1);
-
-        // Once the gate lands, claims fail cleanly and still do not mark
-        // the trace incomplete: the access is outside the closed boundary.
-        // SAFETY: see `collect_frames`.
-        unsafe { close_claims(&shm) };
+        // Close set the gate: a straggler's claim fails cleanly and does
+        // not mark the trace incomplete — the access is outside the closed
+        // boundary.
         assert!(writer.is_closed());
         assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
         assert!(frames.is_complete());
@@ -599,7 +573,7 @@ mod tests {
         shm.poke_word(64, (bogus_len << 32) | bogus_offset);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { close(&shm) };
+        let result = unsafe { close(shm) };
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -615,7 +589,7 @@ mod tests {
         shm.poke_word(64, (1 << 63) | (8u64 << 32) | 8);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { close(&shm) };
+        let result = unsafe { close(shm) };
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -719,7 +693,7 @@ mod tests {
 
         // SAFETY: the mapping is a valid shared-memory region created zeroed
         // and accessed only through the protocol.
-        let frames = unsafe { close(&mapping) }.unwrap();
+        let frames = unsafe { close(mapping) }.unwrap();
         assert!(frames.is_complete());
         let collected = frames.iter().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert!(collected.len() == CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
@@ -787,7 +761,7 @@ mod tests {
         assert!(writer.try_write_frame(b"alive"));
 
         // SAFETY: see `real_shm_across_processes`.
-        let frames = unsafe { close(&writer.into_memory()) }.unwrap();
+        let frames = unsafe { close(writer.into_memory()) }.unwrap();
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);

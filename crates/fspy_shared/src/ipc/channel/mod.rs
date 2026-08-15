@@ -14,7 +14,11 @@ use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
 use shm_io::ShmWriter;
-pub use shm_io::{ClaimError, FrameMut, Frames, WriteEncodedError};
+pub use shm_io::{ClaimError, FrameMut, WriteEncodedError};
+
+/// The committed frames of a closed channel; borrows the shared mapping,
+/// which stays alive (and mapped) until this value drops.
+pub type Frames = shm_io::Frames<Mapping>;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -228,13 +232,15 @@ unsafe impl Send for Receiver {}
 unsafe impl Sync for Receiver {}
 
 impl Receiver {
-    /// Closes the channel and collects every committed frame.
+    /// Closes the channel and returns every committed frame, borrowed from
+    /// the shared mapping that moves into the returned [`Frames`].
     ///
     /// Never blocks on senders: new claims are rejected from this point on,
-    /// unfinished frames are atomically aborted, and committed frames are
-    /// copied out and returned. A sender process that is still alive keeps
+    /// unfinished frames are atomically aborted, and committed frames become
+    /// readable in place. A sender process that is still alive keeps
     /// running; anything it reports after this point is outside the
-    /// channel's boundary by design.
+    /// channel's boundary by design. The mapping is released when the
+    /// returned [`Frames`] drops.
     ///
     /// # Errors
     ///
@@ -248,34 +254,8 @@ impl Receiver {
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable, and all attached processes access it only
         // through the `shm_io` protocol.
-        let frames = unsafe { shm_io::close(&mapping) }
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
-        // Two millisecond-scale teardown steps run off the caller's path:
-        // setting the claim gate (which write-faults the counter page — a
-        // first-block allocation on an otherwise-untouched region) and
-        // unmapping the multi-gigabyte view. Claims racing the gate land
-        // beyond the close snapshot and are never observed. Dropping the
-        // teardown performs both steps, so a failed thread spawn falls back
-        // to paying the latency here rather than leaving the gate unset.
-        let teardown = ChannelTeardown { mapping };
-        let _ =
-            std::thread::Builder::new().name("fspy-shm-close".into()).spawn(move || drop(teardown));
-        frames
-    }
-}
-
-/// Deferred channel teardown: sets the claim gate, then unmaps.
-struct ChannelTeardown {
-    mapping: Mapping,
-}
-
-impl Drop for ChannelTeardown {
-    fn drop(&mut self) {
-        // SAFETY: `mapping` is the receiver's view of the region created
-        // zero-initialized by `channel` and accessed only through the
-        // `shm_io` protocol; it stays mapped until this struct's fields
-        // drop below.
-        unsafe { shm_io::close_claims(&self.mapping) };
+        unsafe { shm_io::close(mapping) }
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
 }
 
@@ -368,12 +348,11 @@ mod tests {
         assert!(B(&output.stdout) == B("false"));
     }
 
-    /// A sender that attached before close keeps its mapping; its claims
-    /// after close are either gated (once the deferred CLOSED gate lands)
-    /// or dropped without ever appearing in the collected frames.
+    /// A sender that attached before close keeps its mapping but cannot
+    /// claim any new frame afterwards.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn attached_sender_is_gated_after_close() {
-        let (conf, receiver) = channel(1024 * 1024).unwrap();
+    async fn attached_sender_cannot_claim_after_close() {
+        let (conf, receiver) = channel(4096).unwrap();
         let sender = conf.sender().unwrap();
 
         let mut frame = sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
@@ -384,23 +363,9 @@ mod tests {
         assert!(frames.iter().next().unwrap() == &[4, 2]);
         assert!(frames.is_complete());
 
-        // The gate is set on the deferred teardown thread; a 1 MiB channel
-        // holds thousands of slots, far more claims than the gate needs
-        // scheduling opportunities to land, so exhausting capacity first
-        // would mean the gate never fired.
-        loop {
-            match sender.claim_frame(NonZeroUsize::new(2).unwrap()) {
-                Err(ClaimError::Closed) => break,
-                Err(ClaimError::Capacity) => panic!("claim gate never landed"),
-                Ok(frame) => {
-                    // Dropped claims land beyond the close snapshot; the
-                    // collected frames stay as they were.
-                    frame.finish();
-                    assert!(frames.iter().count() == 1);
-                    std::thread::yield_now();
-                }
-            }
-        }
+        assert!(
+            sender.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap_err() == ClaimError::Closed
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
