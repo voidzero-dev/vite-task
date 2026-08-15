@@ -6,19 +6,46 @@
 //! | header | descriptor table (SLOTS slots) | payloads (grow up) |
 //! ```
 //!
-//! This module holds everything about the region that is plain integer
-//! math: the sizing rule that turns a mapping length into table and
-//! payload bounds, payload rounding, payload-span validation, and the
-//! descriptor-slot codec. No pointers, no atomics.
+//! This module holds the region's shape, with no memory access: the
+//! header struct, the sizing rule that turns a mapping length into table
+//! and payload bounds, payload rounding, payload-span validation, and the
+//! descriptor-slot codec. The operations on the region live in
+//! [`super::shared`].
 //!
 //! Overflow safety follows from one bound enforced at construction time:
 //! the mapping length never exceeds [`MAX_MAPPING_LEN`], so all offsets fit
 //! the 32-bit descriptor fields and all sums fit `usize` on the 64-bit
 //! targets the parent module asserts.
 
-/// Byte size of the region header. Kept in this type-free module for the
-/// sizing arithmetic; `state` asserts it equals `size_of::<Header>()`.
-pub(super) const HEADER_LEN: usize = 64;
+use std::sync::atomic::AtomicU64;
+
+/// The CLOSED gate bit of the claim counter. The low 63 bits count claims,
+/// so no realistic claim volume can carry into the gate.
+pub(super) const CLOSED: u64 = 1 << 63;
+
+/// The region header: two protocol counters and the loss flag, padded so
+/// the descriptor table starts off their cache line and there is room for
+/// future header fields, which must start zeroed.
+#[repr(C)]
+pub(super) struct Header {
+    /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
+    pub(super) claims: AtomicU64,
+    /// Payload bytes ever reserved, including by failed claims.
+    pub(super) payload_reserved: AtomicU64,
+    /// Nonzero once a claim failed: a record was lost and the channel is
+    /// incomplete. Semantically a flag; a whole `u64` keeps the header a
+    /// plain row of `u64` words.
+    pub(super) lost: AtomicU64,
+    _reserved: [u64; 5],
+}
+
+// One cache line: shrink `_reserved` when adding a field. The alignment is
+// what lets a `u64`-aligned mapping base be cast to `&Header`.
+const _: () = assert!(size_of::<Header>() == 64);
+const _: () = assert!(align_of::<Header>() == align_of::<AtomicU64>());
+
+/// Byte size of the region header, taken from [`Header`] itself.
+pub(super) const HEADER_LEN: usize = size_of::<Header>();
 
 /// Byte size of one descriptor slot.
 pub(super) const SLOT_LEN: usize = size_of::<u64>();

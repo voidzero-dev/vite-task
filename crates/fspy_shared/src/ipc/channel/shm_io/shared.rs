@@ -65,31 +65,8 @@ use std::{
 
 use super::{
     AsRawSlice,
-    layout::{self, PayloadSpan, SlotState},
+    layout::{self, CLOSED, Header, PayloadSpan, SlotState},
 };
-
-/// The CLOSED gate bit of the claim counter. The low 63 bits count claims,
-/// so no realistic claim volume can carry into the gate.
-const CLOSED: u64 = 1 << 63;
-
-/// The region header: two protocol counters, padded so the descriptor
-/// table starts off their cache line and there is room for future header
-/// fields, which must start zeroed.
-#[repr(C)]
-struct Header {
-    /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
-    claims: AtomicU64,
-    /// Payload bytes ever reserved, including by failed claims.
-    payload_reserved: AtomicU64,
-    /// Nonzero once a claim failed: a record was lost and the channel is
-    /// incomplete. Semantically a flag; a whole `u64` keeps the header a
-    /// plain row of `u64` words.
-    lost: AtomicU64,
-    _reserved: [u64; 5],
-}
-
-const _: () = assert!(size_of::<Header>() == layout::HEADER_LEN);
-const _: () = assert!(align_of::<Header>() == align_of::<AtomicU64>());
 
 /// Why a claim was not admitted.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

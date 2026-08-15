@@ -175,14 +175,14 @@ CLAIMED (slot 0) ---+
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mod.rs`    | Public surface (`ShmWriter`, `FrameMut`, `close`, `Frames`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                         |
 | `shared.rs` | Everything that touches the mapping, in reading order: the typed views of the region and the ordering contract, then the writer side (claim, fill, finish), then the receiver side (close and `Frames`) with the reasoning for its borrows. |
-| `layout.rs` | Everything that is plain integer math: the sizing rule that turns a mapping length into table and payload bounds, payload rounding, span validation, and the descriptor codec. No pointers, no atomics.                                     |
+| `layout.rs` | The region's shape: the header struct, the sizing rule that turns a mapping length into table and payload bounds, payload rounding, span validation, and the descriptor codec. Describes memory, never touches it.                          |
 
 Arrows point at what a file depends on:
 
 ```mermaid
 graph TD
     mod["mod.rs<br>public surface"] --> shared["shared.rs<br>everything touching the mapping"]
-    shared --> layout["layout.rs<br>pure math"]
+    shared --> layout["layout.rs<br>the region's shape"]
 ```
 
 Read from the bottom up — `layout.rs`, then `shared.rs`, then `mod.rs` —
