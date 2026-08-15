@@ -167,31 +167,19 @@ CLAIMED (slot 0) ---+
 
 ## Files
 
-| File        | Role                                                                                                                                                                                                                                                 |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`    | Public surface (`ShmWriter`, `FrameMut`, `close`, `Frames`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                                  |
-| `layout.rs` | Pure geometry: the sizing rule that turns a mapping length into table and payload bounds, payload rounding, and span validation. Plain integer math, no pointers, no atomics.                                                                        |
-| `slot.rs`   | The descriptor codec: pack and unpack one slot value, classify it as unfinished, aborted, committed, or corrupt. Pure.                                                                                                                               |
-| `state.rs`  | The only module that touches shared memory: one unsafe borrow builds three typed views — the `repr(C)` header struct, the descriptor table as a slice of atomics, and the raw payload area — and the three-rule memory-ordering contract lives here. |
-| `writer.rs` | Claim, fill, finish. Explains why a claimed payload span belongs to its writer alone.                                                                                                                                                                |
-| `reader.rs` | Close (snapshot, gate, freeze, validate) and `Frames`. Explains why handing out references to committed spans is safe.                                                                                                                               |
+| File        | Role                                                                                                                                                                                                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`    | Public surface (`ShmWriter`, `FrameMut`, `close`, `Frames`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                         |
+| `shared.rs` | Everything that touches the mapping, in reading order: the typed views of the region and the ordering contract, then the writer side (claim, fill, finish), then the receiver side (close and `Frames`) with the reasoning for its borrows. |
+| `layout.rs` | Everything that is plain integer math: the sizing rule that turns a mapping length into table and payload bounds, payload rounding, span validation, and the descriptor codec. No pointers, no atomics.                                     |
 
 Arrows point at what a file depends on:
 
 ```mermaid
 graph TD
-    mod["mod.rs<br>public surface"] --> writer["writer.rs"]
-    mod --> reader["reader.rs"]
-    writer --> state["state.rs<br>shared atomics"]
-    writer --> slot["slot.rs"]
-    reader --> state
-    reader --> slot
-    reader --> layout["layout.rs<br>pure math"]
-    state --> slot
-    state --> layout
-    slot --> layout
+    mod["mod.rs<br>public surface"] --> shared["shared.rs<br>everything touching the mapping"]
+    shared --> layout["layout.rs<br>pure math"]
 ```
 
-Read from the bottom up — `layout.rs` and `slot.rs` first, then
-`state.rs`, then `writer.rs` and `reader.rs`, then `mod.rs` — and each
-file only needs the ones below it.
+Read from the bottom up — `layout.rs`, then `shared.rs`, then `mod.rs` —
+and each file only needs the ones below it.

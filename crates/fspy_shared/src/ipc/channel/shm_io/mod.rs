@@ -23,13 +23,13 @@
 //! and payload bounds from the mapped size. One borrow constructs typed
 //! views of the header (a `repr(C)` struct of two monotonic `AtomicU64`
 //! counters: claims, carrying the CLOSED gate bit, and payload bytes
-//! reserved) and of the descriptor table (a slice of atomics); the payload
-//! area stays untyped bytes.
+//! reserved) and of the descriptor table (a slice of atomics) — see
+//! [`shared`]; the payload area stays untyped bytes.
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
 //! reserves a descriptor slot — validated against the fixed region bounds
 //! from the returned old values. Failed claims overshoot the counters
 //! harmlessly: readers clamp to the region capacities, and committed
-//! descriptors are self-describing ([`slot`]), so the counters never locate
+//! descriptors are self-describing ([`layout`]), so the counters never locate
 //! data. Every slot has a fixed location, so an unfinished frame can never
 //! hide a later one.
 //!
@@ -45,11 +45,11 @@
 //!
 //! A payload becomes reachable only through its committed descriptor, and a
 //! descriptor is committed only after the payload is fully written
-//! ([`state`]'s ordering contract). The receiver never derives frame
+//! ([`shared`]'s ordering contract). The receiver never derives frame
 //! locations from payload bytes, and the borrows [`Frames`] hands out cover
 //! exactly the validated committed spans — immutable under the protocol,
 //! and disjoint from everything a live writer may still touch (see
-//! [`reader`]'s trust argument).
+//! [`shared`]'s trust argument).
 //!
 //! # Close boundary
 //!
@@ -70,16 +70,12 @@
 //! checks, heartbeats, or timeouts.
 
 mod layout;
-mod reader;
-mod slot;
-mod state;
-mod writer;
+mod shared;
 
 use std::ptr::slice_from_raw_parts_mut;
 
 use fspy_shm::Mapping;
-pub use reader::{Frames, ProtocolError};
-pub use writer::{ClaimError, FrameMut, ShmWriter};
+pub use shared::{ClaimError, FrameMut, Frames, ProtocolError, ShmWriter};
 
 // The region arithmetic in `layout` relies on `usize` accommodating sums of
 // 32-bit-bounded quantities, and the descriptor protocol on native 64-bit
@@ -102,7 +98,7 @@ impl AsRawSlice for Mapping {
 
 /// Closes the channel without waiting for writers and returns the committed
 /// frames as borrows of the region, which moves into the returned
-/// [`Frames`]. See [`reader::close`].
+/// [`Frames`]. See [`shared::close`].
 ///
 /// # Safety
 ///
@@ -110,7 +106,7 @@ impl AsRawSlice for Mapping {
 /// zero-initialized at creation, and accessed only through this protocol.
 pub unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {
     // SAFETY: forwarded from this function's contract.
-    unsafe { reader::close(mem) }
+    unsafe { shared::close(mem) }
 }
 
 /// Materializes the page backing the protocol header without changing
@@ -125,7 +121,7 @@ pub unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolError> {
 #[cfg(target_os = "linux")]
 pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
     // SAFETY: forwarded from this function's contract.
-    unsafe { state::SharedState::borrow(mem.as_raw_slice()) }.pre_fault();
+    unsafe { shared::pre_fault(mem) }
 }
 
 /// Whether a mapping of `len` bytes can host the protocol at all.
