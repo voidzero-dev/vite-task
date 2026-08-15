@@ -90,12 +90,12 @@ pub enum ProtocolError {
 /// straight out of the mapping, which stays alive inside this value and
 /// is released when the reader drops. It holds no buffer: iteration
 /// re-reads the frozen descriptor table, so closing allocates nothing.
-pub struct ShmReader<M> {
+pub struct ShmReader<M, const SLOTS: usize> {
     /// Owns the region the views point into; dropped with the reader.
     #[expect(dead_code, reason = "held to keep the region alive")]
     mem: M,
     /// The layout mapped onto the owned region.
-    mapped: MappedLayout,
+    mapped: MappedLayout<SLOTS>,
     /// Length of the frozen prefix of the descriptor table.
     slot_count: usize,
     /// Committed frames in that prefix.
@@ -106,11 +106,11 @@ pub struct ShmReader<M> {
 // SAFETY: the reader reads only the header atomics, frozen slots, and
 // immutable committed spans; the stored views point into the mapping's
 // stable, independently owned target, not into the reader value itself.
-unsafe impl<M: Send> Send for ShmReader<M> {}
+unsafe impl<M: Send, const SLOTS: usize> Send for ShmReader<M, SLOTS> {}
 // SAFETY: see the `Send` impl.
-unsafe impl<M: Sync> Sync for ShmReader<M> {}
+unsafe impl<M: Sync, const SLOTS: usize> Sync for ShmReader<M, SLOTS> {}
 
-impl<M: AsRawSlice> ShmReader<M> {
+impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
     /// Seals the channel — no further records — and returns the
     /// reader of its committed frames.
     ///
@@ -155,8 +155,7 @@ impl<M: AsRawSlice> ShmReader<M> {
             // a counter inflated by failed claims (or by a foreign
             // scribble) degrades to a full-table sweep, not an error.
             let claims = mapped.header().claims.load(Ordering::Relaxed);
-            slot_count =
-                usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(mapped.table().len());
+            slot_count = usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(SLOTS);
             // The same load carries the completeness verdict: a gate set
             // before this boundary is a failed claim's loss report — or an
             // earlier seal, and a re-seal cannot vouch for records
@@ -207,7 +206,7 @@ impl<M: AsRawSlice> ShmReader<M> {
     }
 
     /// Iterates over the committed frames in claim order.
-    pub fn iter(&self) -> Iter<'_> {
+    pub fn iter(&self) -> Iter<'_, SLOTS> {
         self.into_iter()
     }
 
@@ -223,7 +222,7 @@ impl<M: AsRawSlice> ShmReader<M> {
     }
 }
 
-impl<M> fmt::Debug for ShmReader<M> {
+impl<M, const SLOTS: usize> fmt::Debug for ShmReader<M, SLOTS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ShmReader")
             .field("frames", &self.frames)
@@ -233,16 +232,16 @@ impl<M> fmt::Debug for ShmReader<M> {
 }
 
 /// Iterator over a [`ShmReader`]'s committed frames, in claim order.
-pub struct Iter<'a> {
+pub struct Iter<'a, const SLOTS: usize> {
     /// The layout the spans decode against and point into.
-    mapped: MappedLayout,
+    mapped: MappedLayout<SLOTS>,
     /// The not-yet-visited part of the table's frozen prefix.
     table: &'a [AtomicU64],
     /// Committed frames not yet yielded.
     remaining: usize,
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl<'a, const SLOTS: usize> Iterator for Iter<'a, SLOTS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -279,11 +278,11 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-impl<'a, M: AsRawSlice> IntoIterator for &'a ShmReader<M> {
-    type IntoIter = Iter<'a>;
+impl<'a, M: AsRawSlice, const SLOTS: usize> IntoIterator for &'a ShmReader<M, SLOTS> {
+    type IntoIter = Iter<'a, SLOTS>;
     type Item = &'a [u8];
 
-    fn into_iter(self) -> Iter<'a> {
+    fn into_iter(self) -> Iter<'a, SLOTS> {
         Iter {
             mapped: self.mapped,
             table: &self.mapped.table()[..self.slot_count],
@@ -300,7 +299,7 @@ mod tests {
 
     #[test]
     fn payload_span_validates_bounds() {
-        let region = layout::payload_region_len(1024);
+        let region = 1024;
         // A `u64`-aligned span at the region start.
         assert!(PayloadSpan::validate(region, 0, 8).is_some());
         // Exact end of the region, with padding inside it.
@@ -317,13 +316,13 @@ mod tests {
 
     #[test]
     fn decode_roundtrips_committed_values() {
-        let region = layout::payload_region_len(1024);
+        let region = 1024;
         let span = decode(region, committed(0, 5)).unwrap();
         assert!(span.offset == 0 && span.len == 5);
 
         // The extremes of the descriptor fields on the largest mapping: the
         // 31-bit length limit, and a span ending exactly at the region end.
-        let region = layout::payload_region_len(layout::MAX_MAPPING_LEN);
+        let region = layout::MAX_PAYLOAD_REGION_LEN;
         let span = decode(region, committed(0, layout::MAX_PAYLOAD_LEN)).unwrap();
         assert!(span.offset == 0 && span.len == layout::MAX_PAYLOAD_LEN);
         let span = decode(region, committed(region - 8, 8)).unwrap();
@@ -332,7 +331,7 @@ mod tests {
 
     #[test]
     fn decode_rejects_values_no_writer_commits() {
-        let region = layout::payload_region_len(1024);
+        let region = 1024;
         // The non-committed slot states.
         assert!(decode(region, layout::UNFINISHED).is_none());
         assert!(decode(region, ABORTED).is_none());

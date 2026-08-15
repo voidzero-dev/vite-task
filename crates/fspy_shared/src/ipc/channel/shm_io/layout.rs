@@ -6,17 +6,19 @@
 //! | header | descriptor table | payloads (grow up) |
 //! ```
 //!
-//! This module holds the region's shape — the sizing rule that turns a
-//! mapping length into table and payload bounds, payload rounding, and
-//! payload-span validation — the header type, the descriptor-slot codec
-//! both sides encode and decode, and [`MappedLayout`]: the shape bound to
-//! one concrete mapping, built once when an endpoint attaches. The sides
-//! themselves live in [`super::writer`] and [`super::reader`].
+//! The header and the table have compile-time shape: one `repr(C)`
+//! [`Meta`] struct whose table length is a const parameter the channel
+//! specifies. The payload area is simply the rest of the mapping, so the
+//! whole geometry reduces to that struct's size. This module holds the
+//! struct, the descriptor-slot wire format, payload rounding, and
+//! [`MappedLayout`]: the views bound to one concrete mapping, built once
+//! when an endpoint attaches. The sides themselves live in
+//! [`super::writer`] and [`super::reader`].
 //!
-//! Overflow safety follows from one bound enforced at construction time:
-//! the mapping length never exceeds [`MAX_MAPPING_LEN`], so all offsets fit
-//! the 32-bit descriptor fields and all sums fit `usize` on the 64-bit
-//! targets the parent module asserts.
+//! Overflow safety follows from one bound enforced at attach time: the
+//! payload region never exceeds [`MAX_PAYLOAD_REGION_LEN`], so all
+//! offsets fit the 32-bit descriptor fields and all sums fit `usize` on
+//! the 64-bit targets the parent module asserts.
 
 use std::{ptr::NonNull, sync::atomic::AtomicU64};
 
@@ -40,12 +42,18 @@ pub(super) struct Header {
 }
 
 // One cache line: shrink `_reserved` when adding a field. The alignment is
-// what lets a `u64`-aligned mapping base be cast to `&Header`.
+// what lets a `u64`-aligned mapping base be cast to `&Meta`.
 const _: () = assert!(size_of::<Header>() == 64);
 const _: () = assert!(align_of::<Header>() == align_of::<AtomicU64>());
 
-/// Byte size of the region header, taken from [`Header`] itself.
-pub(super) const HEADER_LEN: usize = size_of::<Header>();
+/// The region's fixed-location part — the header and the descriptor
+/// table — as one `repr(C)` struct. The payload area is simply the rest
+/// of the mapping.
+#[repr(C)]
+pub(super) struct Meta<const SLOTS: usize> {
+    pub(super) header: Header,
+    pub(super) table: [AtomicU64; SLOTS],
+}
 
 /// Byte size of one descriptor slot.
 pub(super) const SLOT_LEN: usize = size_of::<u64>();
@@ -56,55 +64,20 @@ pub(super) const SLOT_LEN: usize = size_of::<u64>();
 /// which caps them at `i32::MAX`.
 pub(super) const MAX_PAYLOAD_LEN: usize = i32::MAX as usize;
 
-/// Maximum supported mapping size.
+/// Maximum payload-region size.
 ///
 /// Descriptors store payload offsets in 32 bits, so the payload region
-/// must fit `u32` arithmetic; capping the whole mapping at 4 GiB keeps
-/// every offset and sum inside it.
-pub(super) const MAX_MAPPING_LEN: usize = 1 << 32;
-
-/// Minimum supported mapping size — a deliberate cutoff, not a derived
-/// one: regions under a KiB are not worth a channel. It keeps every
-/// supported region's shape regular (at least 15 slots and 840 payload
-/// bytes), so the sizing rules below need no small-region special cases.
-pub(super) const MIN_MAPPING_LEN: usize = 1024;
-
-/// Whether `len` is a supported mapping length: a multiple of the slot
-/// size between [`MIN_MAPPING_LEN`] and [`MAX_MAPPING_LEN`]. Everything
-/// below assumes a supported length.
-pub(super) const fn is_supported(len: usize) -> bool {
-    len.is_multiple_of(SLOT_LEN) && len >= MIN_MAPPING_LEN && len <= MAX_MAPPING_LEN
-}
-
-/// The descriptor-table length of a supported `mapping_len`-byte region.
-///
-/// Both endpoints derive the layout from the mapping length alone, so the
-/// region is self-describing: no side channel has to agree on a table
-/// size. An eighth of the space beyond the header goes to descriptors —
-/// generous slack for typical record shapes, one 8-byte descriptor per
-/// payload of a few hundred bytes — and the region is sparse, so an
-/// oversized table costs address space, not memory.
-pub(super) const fn table_slots(mapping_len: usize) -> usize {
-    (mapping_len - HEADER_LEN) / (8 * SLOT_LEN)
-}
+/// must fit `u32` arithmetic.
+pub(super) const MAX_PAYLOAD_REGION_LEN: usize = 1 << 32;
 
 /// Rounds a payload length up to a multiple of `size_of::<u64>()`.
 ///
 /// Payload reservations are whole `u64`s, so every payload offset stays
-/// `u64`-aligned — an invariant [`PayloadSpan::validate`] uses to reject
+/// `u64`-aligned — an invariant the reader's validation uses to reject
 /// descriptors no correct writer produces. The sub-`u64` padding stays
 /// inside the frame's own reservation.
 pub(super) const fn reserved_payload_len(payload_len: usize) -> usize {
     payload_len.next_multiple_of(SLOT_LEN)
-}
-
-/// Byte size of the payload region of a supported `mapping_len`-byte
-/// mapping: everything after the table. A multiple of `size_of::<u64>()`
-/// by construction — supported lengths, the header, and the table all
-/// are — so a reservation of whole `u64`s inside it never reaches past
-/// `mapping_len`.
-pub(super) const fn payload_region_len(mapping_len: usize) -> usize {
-    mapping_len - HEADER_LEN - table_slots(mapping_len) * SLOT_LEN
 }
 
 // --- The descriptor slot codec ---------------------------------------------
@@ -138,14 +111,13 @@ pub(super) const LEN_SHIFT: u32 = 32;
 pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 
 // --- The mapped layout and the ordering contract ---------------------------
-// `MappedLayout::new` builds three typed views of the region — the
-// `repr(C)` `Header`, the descriptor table as a slice of atomics sized by
-// the mapping length, and the untyped payload area as a raw slice — once,
-// when an endpoint attaches; the endpoint stores them beside the mapping
-// they point into. Every access after that is a plain field access or a
-// bounds-checked index. The payload area stays raw because writers hold
-// exclusive `&mut` borrows into it, which must not alias any shared
-// reference.
+// `MappedLayout::new` builds two typed views of the region — the
+// `repr(C)` `Meta` struct (header and descriptor table) and the untyped
+// payload area as a raw slice — once, when an endpoint attaches; the
+// endpoint stores them beside the mapping they point into. Every access
+// after that is a plain field access or a bounds-checked index. The
+// payload area stays raw because writers hold exclusive `&mut` borrows
+// into it, which must not alias any shared reference.
 //
 // # Shared atomics
 //
@@ -198,19 +170,17 @@ pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 //    descriptor also makes the payload writes it published visible, so the
 //    borrows `ShmReader` later hands out read settled bytes.
 
-/// The typed views of the region: the header, the descriptor table
-/// sized from the mapping length, and the raw payload area. Built once
-/// when an endpoint attaches and stored in it; the views stay valid
-/// because they point into the mapping's stable target, not into the
-/// endpoint value.
+/// The typed views of the region: the fixed-location [`Meta`] struct
+/// and the raw payload area. Built once when an endpoint attaches and
+/// stored in it; the views stay valid because they point into the
+/// mapping's stable target, not into the endpoint value.
 #[derive(Clone, Copy)]
-pub(super) struct MappedLayout {
-    header: NonNull<Header>,
-    table: NonNull<[AtomicU64]>,
+pub(super) struct MappedLayout<const SLOTS: usize> {
+    meta: NonNull<Meta<SLOTS>>,
     pub(super) payloads: *mut [u8],
 }
 
-impl MappedLayout {
+impl<const SLOTS: usize> MappedLayout<SLOTS> {
     /// Builds the typed views of a shared mapping.
     ///
     /// # Safety
@@ -224,49 +194,52 @@ impl MappedLayout {
     /// # Panics
     ///
     /// Panics when the mapping cannot host the protocol at all: base not
-    /// `u64`-aligned, or a length that is not supported ([`is_supported`]).
-    /// These indicate a broken caller, not runtime data; senders guard
+    /// `u64`-aligned, [`Meta`] not fitting inside the mapping, or the
+    /// payload area beyond the descriptors' 32-bit offsets. These
+    /// indicate a broken caller, not runtime data; senders guard
     /// untrusted mappings with [`super::is_supported_region_len`] first.
-    #[expect(clippy::cast_ptr_alignment, reason = "the base is asserted `u64`-aligned below")]
     pub(super) unsafe fn new(mem: *mut [u8]) -> Self {
         let base = mem.cast::<u8>();
         let len = mem.len();
         assert!(!base.is_null());
-        assert!(base.addr().is_multiple_of(align_of::<Header>()));
-        assert!(is_supported(len));
-        // SAFETY: the base is non-null (asserted), and the header and the
-        // table lie inside the mapping — the header by the asserts above,
-        // the table by `max_slots` — at `u64`-aligned offsets. The
-        // payload area keeps the rest of the mapping as a raw slice;
-        // `layout` bounds every span carved from it.
+        assert!(base.addr().is_multiple_of(align_of::<Meta<SLOTS>>()));
+        // The whole geometry check: the payload area is everything after
+        // the fixed-location struct, so the struct must fit inside the
+        // mapping, and the rest must fit the descriptors' 32-bit offsets.
+        let payload_base = size_of::<Meta<SLOTS>>();
+        assert!(payload_base <= len);
+        assert!(len - payload_base <= MAX_PAYLOAD_REGION_LEN);
+        // SAFETY: the base is non-null and `u64`-aligned, and `Meta` fits
+        // inside the mapping (all asserted). The payload area keeps the
+        // rest of the mapping as a raw slice.
         unsafe {
             Self {
-                header: NonNull::new_unchecked(base.cast::<Header>()),
-                table: NonNull::slice_from_raw_parts(
-                    NonNull::new_unchecked(base.add(HEADER_LEN).cast::<AtomicU64>()),
-                    table_slots(len),
-                ),
+                meta: NonNull::new_unchecked(base.cast::<Meta<SLOTS>>()),
                 payloads: std::ptr::slice_from_raw_parts_mut(
-                    base.add(HEADER_LEN + table_slots(len) * SLOT_LEN),
-                    payload_region_len(len),
+                    base.add(payload_base),
+                    len - payload_base,
                 ),
             }
         }
     }
 
+    /// The fixed-location part of the region.
+    const fn meta(&self) -> &Meta<SLOTS> {
+        // SAFETY: `new`'s contract keeps the target valid while any view
+        // is used, and `Meta` consists of atomics, so the shared borrow
+        // is valid even while other threads and processes access the same
+        // memory through them.
+        unsafe { self.meta.as_ref() }
+    }
+
     /// The protocol header.
     pub(super) const fn header(&self) -> &Header {
-        // SAFETY: `new`'s contract keeps the target valid while any view
-        // is used, and the header consists of atomics, so the shared
-        // borrow is valid even while other threads and processes access
-        // the same memory through them.
-        unsafe { self.header.as_ref() }
+        &self.meta().header
     }
 
     /// The descriptor table.
     pub(super) const fn table(&self) -> &[AtomicU64] {
-        // SAFETY: as for `header`.
-        unsafe { self.table.as_ref() }
+        &self.meta().table
     }
 }
 
@@ -286,35 +259,8 @@ mod tests {
     }
 
     #[test]
-    fn table_gets_an_eighth_of_the_region() {
-        assert!(table_slots(1 << 20) == 16383);
-        // The 4 GiB production mapping: ~67M slots.
-        assert!(table_slots(MAX_MAPPING_LEN) == ((MAX_MAPPING_LEN - HEADER_LEN) / 8) / 8);
-    }
-
-    #[test]
-    fn unsupported_lengths_are_refused() {
-        assert!(is_supported(MIN_MAPPING_LEN));
-        assert!(is_supported(MAX_MAPPING_LEN));
-        // Too small, even as a multiple of 8.
-        assert!(!is_supported(1000));
-        assert!(!is_supported(0));
-        // Not a multiple of 8.
-        assert!(!is_supported(1025));
-        // Too large.
-        assert!(!is_supported(MAX_MAPPING_LEN + 8));
-    }
-
-    #[test]
-    fn payload_region_fills_the_rest() {
-        assert!(table_slots(1024) == 15);
-        assert!(payload_region_len(1024) == 840);
-        // The three areas cover a supported region exactly.
-        assert!(
-            HEADER_LEN
-                + table_slots(MAX_MAPPING_LEN) * SLOT_LEN
-                + payload_region_len(MAX_MAPPING_LEN)
-                == MAX_MAPPING_LEN
-        );
+    fn meta_is_the_header_then_the_table() {
+        assert!(size_of::<Meta<15>>() == 64 + 15 * SLOT_LEN);
+        assert!(align_of::<Meta<15>>() == align_of::<AtomicU64>());
     }
 }

@@ -18,21 +18,21 @@ use super::{
 /// Safe to use across threads and processes at the same time: frames are
 /// reserved with atomic operations, filled in uniquely owned payload spans,
 /// and published with an atomic commit (see the ordering contract above).
-pub struct ShmWriter<M> {
+pub struct ShmWriter<M, const SLOTS: usize> {
     /// Owns the region the views point into; dropped with the writer.
     #[cfg_attr(any(not(test), miri), expect(dead_code, reason = "held to keep the region alive"))]
     mem: M,
-    mapped: MappedLayout,
+    mapped: MappedLayout<SLOTS>,
 }
 
 // SAFETY: the writer touches the region only through the protocol's
 // atomics, which synchronize access from any thread; the stored views
 // point into the mapping's stable, independently owned target, not into
 // the writer value itself.
-unsafe impl<M: Send> Send for ShmWriter<M> {}
+unsafe impl<M: Send, const SLOTS: usize> Send for ShmWriter<M, SLOTS> {}
 // SAFETY: see the `Send` impl; the writer's shared-reference API is
 // internally synchronized by the protocol.
-unsafe impl<M: Sync> Sync for ShmWriter<M> {}
+unsafe impl<M: Sync, const SLOTS: usize> Sync for ShmWriter<M, SLOTS> {}
 
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
@@ -51,7 +51,7 @@ pub enum ClaimError {
     Capacity,
 }
 
-impl<M: AsRawSlice> ShmWriter<M> {
+impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// Creates a writer backed by a shared-memory region.
     ///
     /// # Safety
@@ -92,7 +92,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
     /// does not fit fails after setting the CLOSED gate: the receiver
     /// learns a record was lost, and later claims are refused — their
     /// records would ride a result the receiver must already reject.
-    pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
+    pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_, SLOTS>, ClaimError> {
         let mapped = self.mapped;
         let payload_len = frame_size.get();
 
@@ -133,7 +133,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
             return Err(ClaimError::Closed);
         }
         let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
-        if slot_index >= mapped.table().len() {
+        if slot_index >= SLOTS {
             return Err(report_loss());
         }
 
@@ -182,14 +182,14 @@ impl<M: AsRawSlice> ShmWriter<M> {
 /// exactly as if the writer had died there. A writer that abandons a frame
 /// and still performs the operation it described steps outside the usage
 /// contract — records are published before the recorded operation.
-pub struct FrameMut<'a> {
-    mapped: MappedLayout,
+pub struct FrameMut<'a, const SLOTS: usize> {
+    mapped: MappedLayout<SLOTS>,
     slot_index: usize,
     descriptor: u64,
     content: &'a mut [u8],
 }
 
-impl fmt::Debug for FrameMut<'_> {
+impl<const SLOTS: usize> fmt::Debug for FrameMut<'_, SLOTS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FrameMut")
             .field("slot_index", &self.slot_index)
@@ -198,7 +198,7 @@ impl fmt::Debug for FrameMut<'_> {
     }
 }
 
-impl Deref for FrameMut<'_> {
+impl<const SLOTS: usize> Deref for FrameMut<'_, SLOTS> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -206,13 +206,13 @@ impl Deref for FrameMut<'_> {
     }
 }
 
-impl DerefMut for FrameMut<'_> {
+impl<const SLOTS: usize> DerefMut for FrameMut<'_, SLOTS> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.content
     }
 }
 
-impl FrameMut<'_> {
+impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
     /// Commits the frame, making it visible to the receiver.
     ///
     /// If the receiver sealed the channel and aborted this frame's slot

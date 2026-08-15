@@ -15,9 +15,17 @@ use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
 use shm_io::{ShmReader, ShmWriter};
 
+/// Descriptor slots per channel — the compile-time half of the region's
+/// shape, shared by the receiver and every sender through this constant.
+/// It matches what the old an-eighth-of-the-region rule gave the 4 GiB
+/// production region: one 8-byte descriptor per ~56 payload bytes at full
+/// capacity, generous slack for record-sized frames. The table is sparse
+/// address space until slots are actually touched.
+const SLOTS: usize = 1 << 26;
+
 /// The committed frames of a closed channel; borrows the shared mapping,
 /// which stays alive (and mapped) until this value drops.
-pub type Frames = shm_io::ShmReader<Mapping>;
+pub type Frames = shm_io::ShmReader<Mapping, SLOTS>;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite, Serialize as _, config::DefaultConfig};
 
@@ -39,13 +47,14 @@ pub struct ChannelConf {
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders.
 ///
-/// The channel's layout is derived from `capacity` alone, on both ends, so
-/// senders need no configuration beyond the `ChannelConf`.
+/// `capacity` is the payload budget: the region is sized to the
+/// compile-time descriptor table plus that many payload bytes. Senders
+/// need no configuration beyond the `ChannelConf` — the layout is the
+/// compile-time table plus whatever the mapped file's size says.
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
-    // The protocol supports multiple-of-8 region lengths from 1 KiB to
-    // 4 GiB; round the requested capacity up into the supported set.
-    let capacity = shm_io::round_up_region_len(capacity);
+    // The region: the compile-time fixed struct plus the payload budget.
+    let capacity = shm_io::region_len::<SLOTS>(capacity);
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str())?;
     let handle =
         fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
@@ -65,7 +74,7 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
         let _ = std::thread::Builder::new().name("fspy-shm-prefault".into()).spawn(move || {
             // SAFETY: the mapping views the region created zero-initialized
             // above, which is only accessed through the `shm_io` protocol.
-            unsafe { shm_io::pre_fault(&prefault_mapping) };
+            unsafe { shm_io::pre_fault::<SLOTS>(&prefault_mapping) };
         });
     }
 
@@ -183,7 +192,7 @@ impl ChannelConf {
             .map_err(shm_error_to_io)?;
         // A truncated or foreign file must fail here, not panic the host
         // process inside the protocol's geometry assertions.
-        if !shm_io::is_supported_region_len(mapping.len()) {
+        if !shm_io::is_supported_region_len::<SLOTS>(mapping.len()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "shared-memory region size cannot host the channel",
@@ -205,7 +214,7 @@ impl ChannelConf {
 }
 
 pub struct Sender {
-    writer: ShmWriter<Mapping>,
+    writer: ShmWriter<Mapping, SLOTS>,
 }
 
 impl Sender {
@@ -287,7 +296,7 @@ impl Receiver {
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable and independently owned, and all attached
         // processes access it only through the `shm_io` protocol.
-        unsafe { ShmReader::seal(mapping) }
+        unsafe { ShmReader::<_, SLOTS>::seal(mapping) }
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
 }
@@ -402,7 +411,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_senders() {
-        // 64 KiB: a 1023-slot table for the 200 frames sent below.
+        // 64 KiB of payload room for the 200 frames sent below.
         let (conf, receiver) = channel(64 * 1024).unwrap();
         for i in 0u16..200 {
             let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {

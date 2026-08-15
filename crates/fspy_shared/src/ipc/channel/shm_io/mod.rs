@@ -18,13 +18,13 @@
 //!            fixed descriptor table      payloads grow up ->
 //! ```
 //!
-//! The layout is derived from the mapping length alone ([`layout`]), so
-//! the region is self-describing: every process computes the same table
-//! and payload bounds from the mapped size. Attaching constructs typed
-//! views of the header (a `repr(C)` struct of two monotonic `AtomicU64`
-//! counters — claims, carrying the CLOSED gate bit, and payload bytes
-//! reserved) and of the descriptor table (a slice of atomics); the
-//! payload area stays untyped bytes.
+//! The header and the descriptor table form one `repr(C)` struct whose
+//! table length is a compile-time constant every endpoint shares (the
+//! channel specifies it); the payload area is simply the rest of the
+//! mapping ([`layout`]). Attaching constructs typed views of that struct
+//! — the header is two monotonic `AtomicU64` counters: claims, carrying
+//! the CLOSED gate bit, and payload bytes reserved — while the payload
+//! area stays untyped bytes.
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
 //! reserves a descriptor slot — validated against the fixed region bounds
 //! from the returned old values. A failed claim sets the CLOSED gate as
@@ -110,25 +110,31 @@ impl AsRawSlice for Mapping {
     }
 }
 
-/// Whether a mapping of `len` bytes can host the protocol at all: a
-/// multiple of 8 bytes, between 1 KiB and 4 GiB.
+/// Whether a mapping of `len` bytes can host a channel with `SLOTS`
+/// descriptor slots: the fixed-location struct must fit inside the
+/// mapping, and the payload area — the rest — must fit the descriptors'
+/// 32-bit offsets.
 ///
 /// Senders opening a file they do not control should refuse unsupported
 /// lengths with an error; the protocol's own constructors treat them as a
-/// broken caller and panic. Creators pick a supported length with
-/// [`round_up_region_len`].
+/// broken caller and panic. Creators size the file with [`region_len`].
 #[must_use]
-pub const fn is_supported_region_len(len: usize) -> bool {
-    layout::is_supported(len)
+pub const fn is_supported_region_len<const SLOTS: usize>(len: usize) -> bool {
+    size_of::<layout::Meta<SLOTS>>() <= len
+        && len - size_of::<layout::Meta<SLOTS>>() <= layout::MAX_PAYLOAD_REGION_LEN
 }
 
-/// Rounds a desired region length up to the nearest supported one.
-/// (Desired lengths beyond the 4 GiB maximum clamp down to it.)
+/// The region length for a channel with `SLOTS` descriptor slots and up
+/// to `payload_capacity` payload bytes (clamped to the payload area's
+/// 32-bit-offset maximum).
 #[must_use]
-pub fn round_up_region_len(desired: usize) -> usize {
-    desired
-        .clamp(layout::MIN_MAPPING_LEN, layout::MAX_MAPPING_LEN)
-        .next_multiple_of(layout::SLOT_LEN)
+pub const fn region_len<const SLOTS: usize>(payload_capacity: usize) -> usize {
+    let payload = if payload_capacity < layout::MAX_PAYLOAD_REGION_LEN {
+        payload_capacity
+    } else {
+        layout::MAX_PAYLOAD_REGION_LEN
+    };
+    size_of::<layout::Meta<SLOTS>>() + payload
 }
 
 /// Materializes the page backing the protocol header without changing
@@ -143,9 +149,9 @@ pub fn round_up_region_len(desired: usize) -> usize {
 ///
 /// Same contract as [`ShmWriter::new`].
 #[cfg(target_os = "linux")]
-pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
+pub unsafe fn pre_fault<const SLOTS: usize>(mem: &impl AsRawSlice) {
     // SAFETY: forwarded from this function's contract.
-    let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) };
+    let mapped = unsafe { MappedLayout::<SLOTS>::new(mem.as_raw_slice()) };
     // A compare-exchange of zero with zero on the claim counter: on an
     // untouched region it performs a real write — allocating the first
     // block of a sparse backing file — without changing protocol state. If
@@ -227,7 +233,10 @@ mod tests {
         }
     }
 
-    fn collect_frames(shm: &MockedShm) -> ShmReader<MockedShm> {
+    /// The table length most tests use; regions add payload room on top.
+    const S: usize = 15;
+
+    fn collect_frames(shm: &MockedShm) -> ShmReader<MockedShm, S> {
         // SAFETY: `MockedShm` provides a stable, zero-initialized allocation
         // accessed only through the protocol.
         unsafe { ShmReader::seal(shm.clone()) }.unwrap()
@@ -238,7 +247,7 @@ mod tests {
         let shm = MockedShm::alloc(1024);
         // SAFETY: `MockedShm::alloc` provides a valid, properly-sized,
         // zero-initialized allocation.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"hello"));
         assert!(writer.try_write_frame(b"world"));
         assert!(writer.try_write_frame(b"this is a test"));
@@ -256,7 +265,7 @@ mod tests {
     fn zero_sized_frames_are_rejected() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"hello"));
         assert!(!writer.try_write_frame(b""));
 
@@ -270,7 +279,7 @@ mod tests {
     fn frame_spanning_many_u64s_roundtrips_exactly() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         let pattern: Vec<u8> = (0..=99).collect();
         assert!(writer.try_write_frame(&pattern));
 
@@ -284,7 +293,7 @@ mod tests {
     fn full_region_marks_the_channel_incomplete() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
 
         assert!(writer.try_write_frame(b"test"));
 
@@ -303,7 +312,7 @@ mod tests {
     fn oversized_frame_is_refused_and_marks_incomplete() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"kept"));
 
         // No descriptor can describe a frame this long: the claim is
@@ -325,7 +334,7 @@ mod tests {
     fn crash_after_claim_is_skipped() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"foo"));
 
         // A crash right after claiming and an abandoned frame leave the
@@ -347,7 +356,7 @@ mod tests {
     fn crash_during_partial_write_is_skipped() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"foo"));
 
         // Simulate a crash during writing: the frame is abandoned
@@ -373,7 +382,7 @@ mod tests {
         // receiver from finding the valid frames around them.
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
 
         assert!(writer.try_write_frame(b"foo"));
 
@@ -400,7 +409,7 @@ mod tests {
     fn abandoned_frame_is_ignored() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"foo"));
 
         // Dropping an unfinished frame abandons it: the receiver ignores
@@ -419,15 +428,15 @@ mod tests {
     fn pre_fault_does_not_disturb_protocol_state() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
 
         // On the untouched region, before any claim.
         // SAFETY: see `collect_frames`.
-        unsafe { pre_fault(&shm) };
+        unsafe { pre_fault::<S>(&shm) };
         assert!(writer.try_write_frame(b"foo"));
         // Racing an already claimed region must change nothing either.
         // SAFETY: see `collect_frames`.
-        unsafe { pre_fault(&shm) };
+        unsafe { pre_fault::<S>(&shm) };
         assert!(writer.try_write_frame(b"bar"));
 
         let frames = collect_frames(&shm);
@@ -444,7 +453,7 @@ mod tests {
         // on the slot side while payload space remains.
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         for _ in 0..15 {
             assert!(writer.try_write_frame(b"x"));
         }
@@ -459,7 +468,7 @@ mod tests {
     fn claims_after_seal_are_gated_without_poisoning() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"foo"));
 
         assert!(!writer.is_closed());
@@ -481,7 +490,7 @@ mod tests {
     fn commit_after_abort_publishes_nothing() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
 
         let mut frame = writer.claim_frame(5.try_into().unwrap()).unwrap();
         frame.copy_from_slice(b"late!");
@@ -504,7 +513,9 @@ mod tests {
 
     #[test]
     fn concurrent() {
-        // 16 KiB: a 255-slot table for the 120 frames written below.
+        // A 255-slot table for the 120 frames written below, with 16 KiB
+        // of room for the fixed struct and the payloads.
+        const S: usize = 255;
         let shm = MockedShm::alloc(1024 * 16);
 
         thread::scope(|s| {
@@ -513,7 +524,7 @@ mod tests {
                     // SAFETY: see `single_thread_basic`. The clone shares the
                     // same backing memory, which is safe because the protocol
                     // synchronizes concurrent access with atomics.
-                    let writer = unsafe { ShmWriter::new(shm.clone()) };
+                    let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
                     for _ in 0..10 {
                         assert!(writer.try_write_frame(b"hello"));
                         assert!(writer.try_write_frame(b"foo"));
@@ -523,7 +534,8 @@ mod tests {
             }
         });
 
-        let frames = collect_frames(&shm);
+        // SAFETY: see `collect_frames`.
+        let frames = unsafe { ShmReader::<_, S>::seal(shm) }.unwrap();
         let mut count = 0;
         for frame in &frames {
             count += 1;
@@ -538,7 +550,7 @@ mod tests {
     fn concurrent_exceeded_size() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         thread::scope(|s| {
             for _ in 0..4 {
                 s.spawn(|| {
@@ -567,6 +579,8 @@ mod tests {
 
     #[test]
     fn seal_races_with_active_writers() {
+        // Plenty of slots and payload room: capacity must never fail here.
+        const S: usize = 1023;
         let shm = MockedShm::alloc(1024 * 64);
         let barrier = Barrier::new(3);
 
@@ -574,7 +588,7 @@ mod tests {
             let writers = [(); 2].map(|()| {
                 s.spawn(|| {
                     // SAFETY: see `concurrent`.
-                    let writer = unsafe { ShmWriter::new(shm.clone()) };
+                    let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
                     barrier.wait();
                     let mut written = 0usize;
                     // Bounded so the test terminates even if the seal is slow;
@@ -595,7 +609,8 @@ mod tests {
             });
 
             barrier.wait();
-            let frames = collect_frames(&shm);
+            // SAFETY: see `collect_frames`.
+            let frames = unsafe { ShmReader::<_, S>::seal(shm.clone()) }.unwrap();
             let results = writers.map(|writer| writer.join().unwrap());
             (frames, results)
         });
@@ -620,7 +635,7 @@ mod tests {
     fn corrupt_committed_descriptor_is_a_protocol_error() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"hello"));
 
         // Point slot 0 at a span escaping the payload region.
@@ -629,7 +644,7 @@ mod tests {
         shm.poke_u64(64, (bogus_len << 32) | bogus_offset);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { ShmReader::seal(shm) };
+        let result = unsafe { ShmReader::<_, S>::seal(shm) };
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -637,7 +652,7 @@ mod tests {
     fn corrupt_aborted_descriptor_is_a_protocol_error() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"hello"));
 
         // The aborted bit combined with payload bits is a value no protocol
@@ -645,7 +660,7 @@ mod tests {
         shm.poke_u64(64, (1 << 63) | (8u64 << 32) | 8);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { ShmReader::seal(shm) };
+        let result = unsafe { ShmReader::<_, S>::seal(shm) };
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -653,7 +668,7 @@ mod tests {
     fn overshot_claim_counter_clamps_to_the_table() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm.clone()) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"hello"));
 
         // A wildly inflated claim counter — mass claim failures or a foreign
@@ -690,7 +705,7 @@ mod tests {
         let result = std::panic::catch_unwind(|| {
             // SAFETY: Intentionally passing a misaligned pointer to test that
             // the geometry assertion correctly panics.
-            unsafe { ShmWriter::new(misaligned_shm) };
+            unsafe { ShmWriter::<_, S>::new(misaligned_shm) };
         });
         assert!(result.is_err(), "should panic on a misaligned region");
     }
@@ -706,6 +721,8 @@ mod tests {
         const CHILD_COUNT: usize = 12;
         const FRAME_COUNT_EACH_CHILD: usize = 100;
 
+        // Room for every child's frames, in slots and in payload bytes.
+        const S: usize = 16383;
         const SHM_SIZE: usize = 1024 * 1024;
 
         let shm_path = crate::ipc::channel::shm_backing_path().unwrap();
@@ -731,7 +748,7 @@ mod tests {
                         // SAFETY: `mapping` is a freshly mapped shared memory
                         // region with a valid pointer and size; the protocol
                         // synchronizes concurrent access.
-                        let writer = unsafe { ShmWriter::new(mapping) };
+                        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(mapping) };
                         for i in 0..FRAME_COUNT_EACH_CHILD {
                             let frame_data = std::format!("{child_index} {i}");
                             assert!(writer.try_write_frame(frame_data.as_bytes()));
@@ -749,7 +766,7 @@ mod tests {
 
         // SAFETY: the mapping is a valid shared-memory region created zeroed
         // and accessed only through the protocol.
-        let frames = unsafe { ShmReader::seal(mapping) }.unwrap();
+        let frames = unsafe { ShmReader::<_, S>::seal(mapping) }.unwrap();
         assert!(frames.is_complete());
         let collected = frames.iter().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert!(collected.len() == CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
@@ -787,7 +804,7 @@ mod tests {
             let c_path = crate::ipc::channel::os_c_string(std::ffi::OsStr::new(&shm_name)).unwrap();
             let child_mapping = fspy_shm::open(c_path.as_c_str().as_thin()).unwrap().map().unwrap();
             // SAFETY: see `real_shm_across_processes`.
-            let writer = unsafe { ShmWriter::new(child_mapping) };
+            let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(child_mapping) };
             let mut frame = writer.claim_frame(5.try_into().unwrap()).unwrap();
             frame[..3].copy_from_slice(b"wor");
             // Signal the parent that the frame is claimed and partially
@@ -813,11 +830,11 @@ mod tests {
 
         // A surviving writer keeps working after the kill.
         // SAFETY: see `real_shm_across_processes`.
-        let writer = unsafe { ShmWriter::new(mapping) };
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(mapping) };
         assert!(writer.try_write_frame(b"alive"));
 
         // SAFETY: see `real_shm_across_processes`.
-        let frames = unsafe { ShmReader::seal(writer.into_memory()) }.unwrap();
+        let frames = unsafe { ShmReader::<_, S>::seal(writer.into_memory()) }.unwrap();
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);

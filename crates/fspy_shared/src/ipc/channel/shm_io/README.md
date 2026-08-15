@@ -27,11 +27,13 @@ file mapped into every participating process. A sparse mapping is address
 space, not memory: only pages that are actually written get backed.
 
 ```text
-| header (64 B) | descriptor table (1/8 of the region) | payloads (the rest, grow up) |
+| header (64 B) | descriptor table (SLOTS slots) | payloads (the rest, grow up) |
 ```
 
-The header is a `repr(C)` struct of two `AtomicU64` counters, which only
-ever count up:
+The header and the table together are one `repr(C)` struct: the header —
+two `AtomicU64` counters, which only ever count up — followed by one
+8-byte descriptor slot per frame. The table length is a compile-time
+constant the channel picks once for both ends:
 
 - the **claim counter** — how many frames were ever claimed. Bit 63 is
   the CLOSED gate, set by the receiver when it closes the channel — and
@@ -39,15 +41,13 @@ ever count up:
   that a record was lost.
 - the **payload counter** — how many payload bytes were ever reserved.
 
-The table has one 8-byte slot per frame — an eighth of the region. Every
-bound is derived from the mapping length alone, so the region is
-self-describing: writers and the receiver compute the same layout from the
-size of the file they mapped, with nothing else to agree on. Supported
-lengths are multiples of 8 bytes between 1 KiB and 4 GiB — the creator
-rounds its requested size up into that set, so the layout rules never
-meet a degenerate region. For a 4 GiB
-region that is ~67 million slots; the ~3.5 GiB payload region fits ~15–20
-million records of a few hundred bytes, so payload space runs out first.
+The payload area is simply the rest of the mapping, so the whole
+geometry reduces to one number — the struct's size — and attaching
+checks a single bound: the struct must fit inside the mapping, leaving a
+payload area the descriptors' 32-bit offsets can address. The production
+channel uses ~67 million slots; a 4 GiB payload budget holds ~15–20
+million records of a few hundred bytes, so payload space runs out
+first.
 
 The line between table space and payload space never moves. That is what
 keeps claiming free of retry loops: each counter is checked against a
