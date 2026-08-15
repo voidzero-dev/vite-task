@@ -623,7 +623,7 @@ mod tests {
         let writer = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"hello"));
 
-        // Point slot 0 at a span escaping the mapping.
+        // Point slot 0 at a span escaping the payload region.
         let bogus_len = 8u64;
         let bogus_offset = 1020u64;
         shm.poke_u64(64, (bogus_len << 32) | bogus_offset);

@@ -149,7 +149,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
         Ok(FrameMut {
             mapped,
             slot_index,
-            descriptor: layout::committed(mapped.payload_base() + payload_start, payload_len),
+            descriptor: committed(payload_start, payload_len),
             content,
         })
     }
@@ -229,4 +229,14 @@ impl FrameMut<'_> {
             Ordering::Relaxed,
         );
     }
+}
+
+/// Encodes a committed descriptor (the slot codec in [`layout`]).
+///
+/// The caller guarantees `payload_len` is `1..=MAX_PAYLOAD_LEN` and
+/// `payload_offset` fits 32 bits; both hold for any admitted reservation.
+pub(super) fn committed(payload_offset: usize, payload_len: usize) -> u64 {
+    debug_assert!(payload_len > 0 && payload_len <= layout::MAX_PAYLOAD_LEN);
+    debug_assert!(payload_offset as u64 <= layout::OFFSET_MAX);
+    ((payload_len as u64) << layout::LEN_SHIFT) | payload_offset as u64
 }

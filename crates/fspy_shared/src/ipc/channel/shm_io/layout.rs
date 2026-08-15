@@ -58,8 +58,9 @@ pub(super) const MAX_PAYLOAD_LEN: usize = i32::MAX as usize;
 
 /// Maximum supported mapping size.
 ///
-/// Payload offsets are stored in 32 bits, so every byte offset into the
-/// mapping must fit `u32` arithmetic.
+/// Descriptors store payload offsets in 32 bits, so the payload region
+/// must fit `u32` arithmetic; capping the whole mapping at 4 GiB keeps
+/// every offset and sum inside it.
 pub(super) const MAX_MAPPING_LEN: usize = 1 << 32;
 
 /// Minimum supported mapping size — a deliberate cutoff, not a derived
@@ -83,23 +84,16 @@ pub(super) const fn is_supported(len: usize) -> bool {
 /// generous slack for typical record shapes, one 8-byte descriptor per
 /// payload of a few hundred bytes — and the region is sparse, so an
 /// oversized table costs address space, not memory.
-pub(super) const fn max_slots(mapping_len: usize) -> usize {
+pub(super) const fn table_slots(mapping_len: usize) -> usize {
     (mapping_len - HEADER_LEN) / (8 * SLOT_LEN)
-}
-
-/// Byte offset where the payload region starts: right after the table.
-/// `u64`-aligned.
-pub(super) const fn payload_base(mapping_len: usize) -> usize {
-    HEADER_LEN + max_slots(mapping_len) * SLOT_LEN
 }
 
 /// Rounds a payload length up to a multiple of `size_of::<u64>()`.
 ///
-/// Payload reservations are whole `u64`s — combined with the `u64`-aligned
-/// region base they grow from, every payload offset stays `u64`-aligned, an
-/// invariant [`PayloadSpan::validate`] uses to reject descriptors no correct
-/// writer produces. The sub-`u64` padding stays inside the frame's own
-/// reservation.
+/// Payload reservations are whole `u64`s, so every payload offset stays
+/// `u64`-aligned — an invariant [`PayloadSpan::validate`] uses to reject
+/// descriptors no correct writer produces. The sub-`u64` padding stays
+/// inside the frame's own reservation.
 pub(super) const fn reserved_payload_len(payload_len: usize) -> usize {
     payload_len.next_multiple_of(SLOT_LEN)
 }
@@ -110,53 +104,7 @@ pub(super) const fn reserved_payload_len(payload_len: usize) -> usize {
 /// are — so a reservation of whole `u64`s inside it never reaches past
 /// `mapping_len`.
 pub(super) const fn payload_region_len(mapping_len: usize) -> usize {
-    mapping_len - payload_base(mapping_len)
-}
-
-/// A validated payload byte range: the witness that offset arithmetic on this
-/// span cannot leave the payload region.
-///
-/// Constructing a `PayloadSpan` through [`PayloadSpan::validate`] is the
-/// single validation point for descriptor metadata read back from shared
-/// memory; code holding a span may rely on its bounds without re-checking.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct PayloadSpan {
-    /// Byte offset of the payload from the start of the mapping.
-    /// Always `u64`-aligned.
-    pub(super) offset: usize,
-    /// Exact (unpadded) byte length of the payload.
-    pub(super) len: usize,
-}
-
-impl PayloadSpan {
-    /// Validates a committed descriptor's payload range against a payload
-    /// region starting at `payload_base` and `payload_region_len` bytes
-    /// long. Returns `None` if the range could not have been produced by a
-    /// correct writer.
-    pub(super) const fn validate(
-        payload_base: usize,
-        payload_region_len: usize,
-        offset: usize,
-        len: usize,
-    ) -> Option<Self> {
-        if len == 0 || len > MAX_PAYLOAD_LEN {
-            return None;
-        }
-        // Writers reserve whole-`u64` spans from the `u64`-aligned region
-        // base, so a valid offset is `u64`-aligned and its padded length
-        // stays inside the region.
-        if !offset.is_multiple_of(SLOT_LEN) {
-            return None;
-        }
-        // `offset` and `len` come from 32-bit descriptor fields, so these
-        // sums cannot overflow `usize`.
-        if offset < payload_base
-            || offset + reserved_payload_len(len) > payload_base + payload_region_len
-        {
-            return None;
-        }
-        Some(Self { offset, len })
-    }
+    mapping_len - HEADER_LEN - table_slots(mapping_len) * SLOT_LEN
 }
 
 // --- The descriptor slot codec ---------------------------------------------
@@ -178,43 +126,16 @@ impl PayloadSpan {
 // committed value is always nonzero and the three states are disjoint. Once
 // a slot is committed or aborted, nothing ever changes it again.
 //
-// The receiver never classifies invalid values: [`decode`] accepts exactly
-// the committed descriptors a correct writer can produce for the mapping,
-// and refuses everything else alike — an unfinished `0` decodes a zero
-// length, and any value carrying the aborted bit decodes a length beyond
-// [`MAX_PAYLOAD_LEN`], so both fail [`PayloadSpan::validate`].
+// Offsets are measured from the start of the payload area, so no
+// descriptor can even name the header or the table.
+//
+// This defines the format both sides must agree on; encoding lives with
+// the writer ([`super::writer`]) and decoding with the reader
+// ([`super::reader`]).
 
 pub(super) const UNFINISHED: u64 = 0;
-pub(super) const ABORTED: u64 = 1 << 63;
-const LEN_SHIFT: u32 = 32;
-const OFFSET_MAX: u64 = u32::MAX as u64;
-
-/// Encodes a committed descriptor.
-///
-/// The caller guarantees `payload_len` is `1..=MAX_PAYLOAD_LEN` and
-/// `payload_offset` fits 32 bits; both hold for any admitted reservation.
-pub(super) fn committed(payload_offset: usize, payload_len: usize) -> u64 {
-    debug_assert!(payload_len > 0 && payload_len <= MAX_PAYLOAD_LEN);
-    debug_assert!(payload_offset as u64 <= OFFSET_MAX);
-    ((payload_len as u64) << LEN_SHIFT) | payload_offset as u64
-}
-
-/// Decodes a slot value read back from shared memory as a committed
-/// descriptor. Returns `None` for any value that is not one a correct
-/// writer could have committed for the payload region described by
-/// `payload_base` and `payload_region_len`.
-pub(super) const fn decode(
-    payload_base: usize,
-    payload_region_len: usize,
-    bits: u64,
-) -> Option<PayloadSpan> {
-    PayloadSpan::validate(
-        payload_base,
-        payload_region_len,
-        (bits & OFFSET_MAX) as usize,
-        (bits >> LEN_SHIFT) as usize,
-    )
-}
+pub(super) const LEN_SHIFT: u32 = 32;
+pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 
 // --- The mapped layout and the ordering contract ---------------------------
 // `MappedLayout::new` builds three typed views of the region — the
@@ -323,10 +244,10 @@ impl MappedLayout {
                 header: NonNull::new_unchecked(base.cast::<Header>()),
                 table: NonNull::slice_from_raw_parts(
                     NonNull::new_unchecked(base.add(HEADER_LEN).cast::<AtomicU64>()),
-                    max_slots(len),
+                    table_slots(len),
                 ),
                 payloads: std::ptr::slice_from_raw_parts_mut(
-                    base.add(payload_base(len)),
+                    base.add(HEADER_LEN + table_slots(len) * SLOT_LEN),
                     payload_region_len(len),
                 ),
             }
@@ -347,22 +268,6 @@ impl MappedLayout {
         // SAFETY: as for `header`.
         unsafe { self.table.as_ref() }
     }
-
-    /// Base address of the region: the header sits at offset zero.
-    pub(super) const fn base(&self) -> *const u8 {
-        self.header.as_ptr().cast()
-    }
-
-    /// Byte offset where the payload region starts: right after the table.
-    pub(super) const fn payload_base(&self) -> usize {
-        HEADER_LEN + self.table().len() * SLOT_LEN
-    }
-
-    /// Decodes a slot value from this mapping's descriptor table. See
-    /// [`decode`].
-    pub(super) const fn decode(&self, bits: u64) -> Option<PayloadSpan> {
-        decode(self.payload_base(), self.payloads.len(), bits)
-    }
 }
 
 #[cfg(test)]
@@ -381,10 +286,10 @@ mod tests {
     }
 
     #[test]
-    fn max_slots_gives_an_eighth_to_the_table() {
-        assert!(max_slots(1 << 20) == 16383);
+    fn table_gets_an_eighth_of_the_region() {
+        assert!(table_slots(1 << 20) == 16383);
         // The 4 GiB production mapping: ~67M slots.
-        assert!(max_slots(MAX_MAPPING_LEN) == ((MAX_MAPPING_LEN - HEADER_LEN) / 8) / 8);
+        assert!(table_slots(MAX_MAPPING_LEN) == ((MAX_MAPPING_LEN - HEADER_LEN) / 8) / 8);
     }
 
     #[test]
@@ -402,70 +307,14 @@ mod tests {
 
     #[test]
     fn payload_region_fills_the_rest() {
-        assert!(max_slots(1024) == 15);
-        assert!(payload_base(1024) == 184);
+        assert!(table_slots(1024) == 15);
         assert!(payload_region_len(1024) == 840);
         // The three areas cover a supported region exactly.
         assert!(
-            payload_base(MAX_MAPPING_LEN) + payload_region_len(MAX_MAPPING_LEN) == MAX_MAPPING_LEN
+            HEADER_LEN
+                + table_slots(MAX_MAPPING_LEN) * SLOT_LEN
+                + payload_region_len(MAX_MAPPING_LEN)
+                == MAX_MAPPING_LEN
         );
-    }
-
-    #[test]
-    fn payload_span_validates_bounds() {
-        let mapping_len = 1024;
-        let base = payload_base(mapping_len);
-        let region = payload_region_len(mapping_len);
-        // A `u64`-aligned span at the region start.
-        assert!(PayloadSpan::validate(base, region, base, 8).is_some());
-        // Exact end of the region, with padding inside it.
-        assert!(PayloadSpan::validate(base, region, base + region - 8, 5).is_some());
-        // Zero length is never committed.
-        assert!(PayloadSpan::validate(base, region, base, 0).is_none());
-        // Padded length may not cross the end of the region.
-        assert!(PayloadSpan::validate(base, region, base + region - 8, 9).is_none());
-        // Payloads may not reach into the descriptor table or header.
-        assert!(PayloadSpan::validate(base, region, base - 8, 8).is_none());
-        assert!(PayloadSpan::validate(base, region, 0, 8).is_none());
-        // Unaligned offsets cannot come from a correct writer.
-        assert!(PayloadSpan::validate(base, region, base + 4, 4).is_none());
-        // Oversized lengths are rejected before any arithmetic.
-        assert!(PayloadSpan::validate(base, region, base, MAX_PAYLOAD_LEN + 1).is_none());
-    }
-
-    #[test]
-    fn decode_roundtrips_committed_values() {
-        let mapping_len = 1024;
-        let base = payload_base(mapping_len);
-        let region = payload_region_len(mapping_len);
-        let span = decode(base, region, committed(base, 5)).unwrap();
-        assert!(span.offset == base && span.len == 5);
-
-        // The extremes of the descriptor fields on the largest mapping: the
-        // 31-bit length limit, and a span ending exactly at the region end.
-        let mapping_len = MAX_MAPPING_LEN;
-        let base = payload_base(mapping_len);
-        let region = payload_region_len(mapping_len);
-        let span = decode(base, region, committed(base, MAX_PAYLOAD_LEN)).unwrap();
-        assert!(span.offset == base && span.len == MAX_PAYLOAD_LEN);
-        let last = base + region - 8;
-        let span = decode(base, region, committed(last, 8)).unwrap();
-        assert!(span.offset == last && span.len == 8);
-    }
-
-    #[test]
-    fn decode_rejects_values_no_writer_commits() {
-        let mapping_len = 1024;
-        let base = payload_base(mapping_len);
-        let region = payload_region_len(mapping_len);
-        // The non-committed slot states.
-        assert!(decode(base, region, UNFINISHED).is_none());
-        assert!(decode(base, region, ABORTED).is_none());
-        // The aborted bit combined with other bits: the length field then
-        // exceeds `MAX_PAYLOAD_LEN`.
-        assert!(decode(base, region, ABORTED | 1).is_none());
-        assert!(decode(base, region, ABORTED | (1 << 62)).is_none());
-        // A zero length with a nonzero offset.
-        assert!(decode(base, region, 42).is_none());
     }
 }

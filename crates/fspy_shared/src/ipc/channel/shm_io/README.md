@@ -182,12 +182,12 @@ CLAIMED (slot 0) ---+
 
 ## Files
 
-| File        | Role                                                                                                                                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`    | Public surface (`ShmWriter`, `ShmReader`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`). |
-| `writer.rs` | The writer side: claim a frame, fill it, finish it.                                                                                                                                               |
-| `reader.rs` | The reader side: close the channel, then iterate the committed frames — with the argument for why its borrows are sound.                                                                          |
-| `layout.rs` | Everything both sides share: the region's shape and sizing math, the header, the descriptor codec, and `MappedLayout` — the shape bound to one concrete mapping.                                  |
+| File        | Role                                                                                                                                                                                                                       |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`    | Public surface (`ShmWriter`, `ShmReader`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                          |
+| `writer.rs` | The writer side: claim a frame, fill it, finish it.                                                                                                                                                                        |
+| `reader.rs` | The reader side: close the channel, then iterate the committed frames — with the argument for why its borrows are sound.                                                                                                   |
+| `layout.rs` | Only what both sides share: the region's shape and sizing math, the header, the descriptor format, and `MappedLayout` — the shape bound to one concrete mapping. Encoding lives with the writer, decoding with the reader. |
 
 Arrows point at what a file depends on:
 
