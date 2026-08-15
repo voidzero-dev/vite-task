@@ -104,12 +104,12 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
             ClaimError::Capacity
         };
 
-        // No descriptor can describe a payload this long; refuse it before
-        // touching the counters, so the channel keeps working for every
-        // record after it.
-        if payload_len > layout::MAX_PAYLOAD_LEN {
+        // The descriptor's 31-bit length field is the oversize check:
+        // refuse, before touching the counters, a frame it cannot
+        // describe — the channel keeps working for every record after it.
+        let Ok(encoded_len) = i32::try_from(payload_len) else {
             return Err(report_loss());
-        }
+        };
         // Payload bytes first, so a payload-capacity failure does not burn a
         // slot. A failed reservation stays counted — overshoot is harmless
         // because the counter is not what locates payloads (descriptors are)
@@ -122,7 +122,10 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         if payload_end.is_none_or(|end| end > mapped.payloads.len() as u64) {
             return Err(report_loss());
         }
-        let payload_start = usize::try_from(payload_start).expect("bounded by the payload region");
+        // Bounded by the capacity check: the payload region fits 32-bit
+        // offsets.
+        let payload_offset = u32::try_from(payload_start).expect("bounded by the payload region");
+        let payload_start = payload_offset as usize;
 
         let claims = mapped.claims().fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
@@ -148,7 +151,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         Ok(FrameMut {
             mapped,
             slot_index,
-            descriptor: committed(payload_start, payload_len),
+            descriptor: committed(payload_offset, encoded_len.cast_unsigned()),
             content,
         })
     }
@@ -230,12 +233,9 @@ impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
     }
 }
 
-/// Encodes a committed descriptor (the slot codec in [`layout`]).
-///
-/// The caller guarantees `payload_len` is `1..=MAX_PAYLOAD_LEN` and
-/// `payload_offset` fits 32 bits; both hold for any admitted reservation.
-pub(super) fn committed(payload_offset: usize, payload_len: usize) -> u64 {
-    debug_assert!(payload_len > 0 && payload_len <= layout::MAX_PAYLOAD_LEN);
-    debug_assert!(payload_offset as u64 <= layout::OFFSET_MAX);
-    ((payload_len as u64) << layout::LEN_SHIFT) | payload_offset as u64
+/// Encodes a committed descriptor (the slot codec in [`layout`]). The
+/// argument types are the field widths; the length came through
+/// `i32::try_from`, so bit 63 stays clear.
+pub(super) fn committed(payload_offset: u32, payload_len: u32) -> u64 {
+    (u64::from(payload_len) << layout::LEN_SHIFT) | u64::from(payload_offset)
 }

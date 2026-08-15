@@ -29,9 +29,8 @@ const ABORTED: u64 = 1 << 63;
 /// A validated payload byte range: the witness that offset arithmetic on this
 /// span cannot leave the payload region.
 ///
-/// Constructing a `PayloadSpan` through [`PayloadSpan::validate`] is the
-/// single validation point for descriptor metadata read back from shared
-/// memory; code holding a span may rely on its bounds without re-checking.
+/// [`decode`] is the only constructor, so code holding a span may rely on
+/// its bounds without re-checking.
 #[derive(Clone, Copy, Debug)]
 struct PayloadSpan {
     /// Byte offset of the payload from the start of the payload region.
@@ -40,35 +39,26 @@ struct PayloadSpan {
     len: usize,
 }
 
-impl PayloadSpan {
-    /// Validates a committed descriptor's payload range against a payload
-    /// region of `payload_region_len` bytes. Returns `None` if the range
-    /// could not have been produced by a correct writer.
-    const fn validate(payload_region_len: usize, offset: usize, len: usize) -> Option<Self> {
-        if len == 0 || len > layout::MAX_PAYLOAD_LEN {
-            return None;
-        }
-        // `offset` and `len` come from 32-bit descriptor fields, so this
-        // sum cannot overflow `usize`.
-        if offset + len > payload_region_len {
-            return None;
-        }
-        Some(Self { offset, len })
-    }
-}
-
 /// Decodes a slot value read back from shared memory as a committed
 /// descriptor (the slot codec in [`layout`]). Returns `None` for any value
 /// that is not one a correct writer could have committed for a payload
-/// region of `payload_region_len` bytes: an unfinished `0` decodes a zero
-/// length, and any value carrying the aborted bit decodes a length beyond
-/// the frame limit, so both fail validation exactly like a scribble.
-const fn decode(payload_region_len: usize, bits: u64) -> Option<PayloadSpan> {
-    PayloadSpan::validate(
-        payload_region_len,
-        (bits & layout::OFFSET_MAX) as usize,
-        (bits >> layout::LEN_SHIFT) as usize,
-    )
+/// region of `payload_region_len` bytes.
+fn decode(payload_region_len: usize, bits: u64) -> Option<PayloadSpan> {
+    // Reverse the writer's conversions: the length field is a nonzero
+    // 31-bit value — `i32::try_from` refuses the aborted bit, an
+    // unfinished `0`'s zero length, and oversize alike — and the offset
+    // field is the low 32 bits.
+    let len = i32::try_from(bits >> layout::LEN_SHIFT).ok()?;
+    if len == 0 {
+        return None;
+    }
+    let len = len.cast_unsigned() as usize;
+    let offset = (bits & layout::OFFSET_MAX) as usize;
+    // Both fields are 32 bits wide, so this sum cannot overflow `usize`.
+    if offset + len > payload_region_len {
+        return None;
+    }
+    Some(PayloadSpan { offset, len })
 }
 
 /// A descriptor that no correct writer could have committed: the region
@@ -291,19 +281,16 @@ mod tests {
     use super::{super::writer::committed, *};
 
     #[test]
-    fn payload_span_validates_bounds() {
+    fn decode_validates_bounds() {
         let region = 1024;
         // Any byte range inside the region, at any offset.
-        assert!(PayloadSpan::validate(region, 0, 8).is_some());
-        assert!(PayloadSpan::validate(region, 3, 5).is_some());
+        assert!(decode(region, committed(0, 8)).is_some());
+        assert!(decode(region, committed(3, 5)).is_some());
         // A span ending exactly at the region end.
-        assert!(PayloadSpan::validate(region, region - 5, 5).is_some());
-        // Zero length is never committed.
-        assert!(PayloadSpan::validate(region, 0, 0).is_none());
+        let span = decode(region, committed(1019, 5)).unwrap();
+        assert!(span.offset == 1019 && span.len == 5);
         // The span may not cross the end of the region.
-        assert!(PayloadSpan::validate(region, region - 8, 9).is_none());
-        // Oversized lengths are rejected before any arithmetic.
-        assert!(PayloadSpan::validate(region, 0, layout::MAX_PAYLOAD_LEN + 1).is_none());
+        assert!(decode(region, committed(1016, 9)).is_none());
     }
 
     #[test]
@@ -312,12 +299,13 @@ mod tests {
         let span = decode(region, committed(0, 5)).unwrap();
         assert!(span.offset == 0 && span.len == 5);
 
-        // The extremes of the descriptor fields on the largest mapping: the
+        // The extremes of the descriptor fields on the largest region: the
         // 31-bit length limit, and a span ending exactly at the region end.
         let region = layout::MAX_PAYLOAD_REGION_LEN;
-        let span = decode(region, committed(0, layout::MAX_PAYLOAD_LEN)).unwrap();
-        assert!(span.offset == 0 && span.len == layout::MAX_PAYLOAD_LEN);
-        let span = decode(region, committed(region - 8, 8)).unwrap();
+        let span = decode(region, committed(0, i32::MAX.cast_unsigned())).unwrap();
+        assert!(span.offset == 0 && span.len == i32::MAX as usize);
+        let last = u32::try_from(region - 8).unwrap();
+        let span = decode(region, committed(last, 8)).unwrap();
         assert!(span.offset == region - 8 && span.len == 8);
     }
 
@@ -328,7 +316,7 @@ mod tests {
         assert!(decode(region, layout::UNFINISHED).is_none());
         assert!(decode(region, ABORTED).is_none());
         // The aborted bit combined with other bits: the length field then
-        // exceeds the frame limit.
+        // fails `i32::try_from` — as does any oversized length.
         assert!(decode(region, ABORTED | 1).is_none());
         assert!(decode(region, ABORTED | (1 << 62)).is_none());
         // A zero length with a nonzero offset.

@@ -46,12 +46,6 @@ pub(super) struct Meta<const SLOTS: usize> {
 // raise the alignment.
 const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
 
-/// Maximum payload size of a single frame.
-///
-/// Committed lengths are stored in the 31-bit length field of a descriptor,
-/// which caps them at `i32::MAX`.
-pub(super) const MAX_PAYLOAD_LEN: usize = i32::MAX as usize;
-
 /// Maximum payload-region size.
 ///
 /// Descriptors store payload offsets in 32 bits, so the payload region
