@@ -117,24 +117,11 @@ impl AsRawSlice for Mapping {
 ///
 /// Senders opening a file they do not control should refuse unsupported
 /// lengths with an error; the protocol's own constructors treat them as a
-/// broken caller and panic. Creators size the file with [`region_len`].
+/// broken caller and panic.
 #[must_use]
 pub const fn is_supported_region_len<const SLOTS: usize>(len: usize) -> bool {
     size_of::<layout::Meta<SLOTS>>() <= len
         && len - size_of::<layout::Meta<SLOTS>>() <= layout::MAX_PAYLOAD_REGION_LEN
-}
-
-/// The region length for a channel with `SLOTS` descriptor slots and up
-/// to `payload_capacity` payload bytes (clamped to the payload area's
-/// 32-bit-offset maximum).
-#[must_use]
-pub const fn region_len<const SLOTS: usize>(payload_capacity: usize) -> usize {
-    let payload = if payload_capacity < layout::MAX_PAYLOAD_REGION_LEN {
-        payload_capacity
-    } else {
-        layout::MAX_PAYLOAD_REGION_LEN
-    };
-    size_of::<layout::Meta<SLOTS>>() + payload
 }
 
 /// Materializes the page backing the protocol header without changing

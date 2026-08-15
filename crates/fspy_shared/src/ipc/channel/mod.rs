@@ -47,14 +47,19 @@ pub struct ChannelConf {
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders.
 ///
-/// `capacity` is the payload budget: the region is sized to the
-/// compile-time descriptor table plus that many payload bytes. Senders
-/// need no configuration beyond the `ChannelConf` — the layout is the
+/// `capacity` is the region size in bytes; it must hold the compile-time
+/// descriptor table, and the rest of it is payload room. Senders need no
+/// configuration beyond the `ChannelConf` — the layout is the
 /// compile-time table plus whatever the mapped file's size says.
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
-    // The region: the compile-time fixed struct plus the payload budget.
-    let capacity = shm_io::region_len::<SLOTS>(capacity);
+    // Fail fast on a capacity the compile-time table cannot fit into.
+    if !shm_io::is_supported_region_len::<SLOTS>(capacity) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "capacity cannot host the channel's descriptor table",
+        ));
+    }
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str())?;
     let handle =
         fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
@@ -311,12 +316,15 @@ mod tests {
 
     use super::*;
 
+    /// Any test region must hold the compile-time table; sparse, so cheap.
+    const GIB: usize = 1 << 30;
+
     /// The shared-memory path is generated absolute, so a sender in a process
     /// with a different working directory and a relative temporary directory
     /// must still attach.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sender_ignores_changed_temp_and_working_directory() {
-        let (conf, receiver) = channel(4096).unwrap();
+        let (conf, receiver) = channel(GIB).unwrap();
         let changed_cwd = temp_dir().join(format!("fspy-ipc-changed-cwd-{}", Uuid::new_v4()));
         fs::create_dir(&changed_cwd).unwrap();
 
@@ -342,7 +350,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn smoke() {
-        let (conf, receiver) = channel(4096).unwrap();
+        let (conf, receiver) = channel(GIB).unwrap();
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
             let sender = conf.sender().unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
@@ -365,7 +373,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_close() {
-        let (conf, receiver) = channel(4096).unwrap();
+        let (conf, receiver) = channel(GIB).unwrap();
         let _frames = receiver.close().unwrap();
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
@@ -378,7 +386,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_receiver_dropped() {
-        let (conf, receiver) = channel(4096).unwrap();
+        let (conf, receiver) = channel(GIB).unwrap();
         drop(receiver);
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
@@ -392,7 +400,7 @@ mod tests {
     /// claim any new frame afterwards.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn attached_sender_cannot_claim_after_close() {
-        let (conf, receiver) = channel(4096).unwrap();
+        let (conf, receiver) = channel(GIB).unwrap();
         let sender = conf.sender().unwrap();
 
         let mut frame = sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
@@ -411,8 +419,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_senders() {
-        // 64 KiB of payload room for the 200 frames sent below.
-        let (conf, receiver) = channel(64 * 1024).unwrap();
+        let (conf, receiver) = channel(GIB).unwrap();
         for i in 0u16..200 {
             let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
                 let sender = conf.sender().unwrap();

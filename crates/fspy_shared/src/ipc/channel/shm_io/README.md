@@ -45,9 +45,9 @@ The payload area is simply the rest of the mapping, so the whole
 geometry reduces to one number — the struct's size — and attaching
 checks a single bound: the struct must fit inside the mapping, leaving a
 payload area the descriptors' 32-bit offsets can address. The production
-channel uses ~67 million slots; a 4 GiB payload budget holds ~15–20
-million records of a few hundred bytes, so payload space runs out
-first.
+channel uses ~67 million slots in a 4 GiB region; the ~3.5 GiB payload
+area holds ~15–20 million records of a few hundred bytes, so payload
+space runs out first.
 
 The line between table space and payload space never moves. That is what
 keeps claiming free of retry loops: each counter is checked against a

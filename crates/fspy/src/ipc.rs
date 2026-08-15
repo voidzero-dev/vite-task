@@ -5,9 +5,9 @@ use fspy_shared::ipc::{
     channel::{Frames, Receiver},
 };
 
-// Payload budget for path-access records; the channel adds its fixed
-// descriptor table on top. 4 GiB is large enough for almost any realistic
-// scenario, and none of it occupies physical memory until actually used.
+// Shared memory region size: the channel's fixed descriptor table plus
+// ~3.5 GiB of payload room — enough path accesses for almost any realistic
+// scenario. None of it occupies physical memory until actually used.
 pub const SHM_CAPACITY: usize = 4 * 1024 * 1024 * 1024;
 
 /// The path accesses a run reported through the IPC channel.
