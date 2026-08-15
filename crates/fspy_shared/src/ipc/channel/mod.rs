@@ -13,11 +13,11 @@ use allocator_api2::alloc::Global;
 use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
-use shm_io::{ShmReceiver, ShmWriter};
+use shm_io::{ShmReader, ShmWriter};
 
 /// The committed frames of a closed channel; borrows the shared mapping,
 /// which stays alive (and mapped) until this value drops.
-pub type Frames = shm_io::Frames<Mapping>;
+pub type Frames = shm_io::ShmReader<Mapping>;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite, Serialize as _, config::DefaultConfig};
 
@@ -68,12 +68,7 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
 
     let conf = ChannelConf { shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed() };
 
-    // SAFETY: the region was created zero-initialized just above, its mapping
-    // address is stable and independently owned, and every attached process
-    // accesses it only through the `shm_io` protocol.
-    let shm = unsafe { ShmReceiver::new(mapping) };
-
-    Ok((conf, Receiver { _keeper: keeper, shm }))
+    Ok((conf, Receiver { _keeper: keeper, mapping }))
 }
 
 /// Encodes `path` as an owned NUL-terminated platform C string.
@@ -254,13 +249,13 @@ pub struct Receiver {
     /// Keeps the shared memory's backing file alive for as long as senders
     /// may attach.
     _keeper: ShmKeeper,
-    shm: ShmReceiver<Mapping>,
+    mapping: Mapping,
 }
 
-// SAFETY: `Receiver` only holds the mapping (inside the protocol receiver);
-// it accesses it exclusively through the `shm_io` protocol in `close`, which
-// synchronizes with senders via atomic operations. The mapping's address is
-// stable and independently owned.
+// SAFETY: `Receiver` only holds the mapping; it accesses it exclusively
+// through the `shm_io` protocol in `close`, which synchronizes with senders
+// via atomic operations. The mapping's address is stable and independently
+// owned.
 unsafe impl Send for Receiver {}
 
 // SAFETY: see the `Send` impl.
@@ -282,11 +277,15 @@ impl Receiver {
     /// Fails only when the shared-memory metadata was corrupted (a protocol
     /// impossibility for correct senders); the trace is then unusable.
     pub fn close(self) -> io::Result<Frames> {
-        let Self { _keeper: keeper, shm } = self;
+        let Self { _keeper: keeper, mapping } = self;
         // Remove the backing file first so no new process attaches while the
         // channel closes.
         drop(keeper);
-        shm.close().map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+        // SAFETY: `mapping` was created zero-initialized by `channel`, its
+        // address is stable and independently owned, and all attached
+        // processes access it only through the `shm_io` protocol.
+        unsafe { ShmReader::close(mapping) }
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
 }
 

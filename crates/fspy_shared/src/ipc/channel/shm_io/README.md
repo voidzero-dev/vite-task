@@ -124,11 +124,11 @@ The receiver closes once:
    writer could produce fails the whole channel — never a panic, never an
    out-of-bounds read.
 
-The result, `Frames`, owns the mapping and lends out one `&[u8]` per
+The result, `ShmReader`, owns the mapping and lends out one `&[u8]` per
 committed span, straight from shared memory — no copy. The borrows are
 sound because a committed span is never written again and is disjoint from
 everything a live straggler may still touch. The mapping is released when
-`Frames` is dropped.
+the reader is dropped.
 
 ```text
                          writer's commit CAS wins
@@ -171,10 +171,10 @@ CLAIMED (slot 0) ---+
 
 ## Files
 
-| File        | Role                                                                                                                                                                                                                                                                         |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`    | The protocol, in reading order: the overview docs, the typed views of the region and the ordering contract, the writer side (claim, fill, finish), the receiver side (close and `Frames`), and the integration tests — miri-clean (`cargo miri test -p fspy_shared shm_io`). |
-| `layout.rs` | The region's shape: the header struct, the sizing rule that turns a mapping length into table and payload bounds, payload rounding, span validation, and the descriptor codec. Describes memory, never touches it.                                                           |
+| File        | Role                                                                                                                                                                                                                                                                        |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`    | The protocol, in reading order: the overview docs, the typed views of the region and the ordering contract, the writer side (claim, fill, finish), the reader side (close and iteration), and the integration tests — miri-clean (`cargo miri test -p fspy_shared shm_io`). |
+| `layout.rs` | The region's shape: the header struct, the sizing rule that turns a mapping length into table and payload bounds, payload rounding, span validation, and the descriptor codec. Describes memory, never touches it.                                                          |
 
 `mod.rs` depends on `layout.rs`; read `layout.rs` first, then `mod.rs` top
 to bottom.

@@ -46,14 +46,14 @@
 //! A payload becomes reachable only through its committed descriptor, and a
 //! descriptor is committed only after the payload is fully written
 //! (the ordering contract below). The receiver never derives frame
-//! locations from payload bytes, and the borrows [`Frames`] hands out cover
+//! locations from payload bytes, and the borrows [`ShmReader`] hands out cover
 //! exactly the validated committed spans — immutable under the protocol,
 //! and disjoint from everything a live writer may still touch (see the
 //! receiver section's trust argument below).
 //!
 //! # Close boundary
 //!
-//! [`ShmReceiver::close`]'s boundary is a snapshot of the claim counter.
+//! [`ShmReader::close`]'s boundary is a snapshot of the claim counter.
 //! A writer admitted before the snapshot races the freeze pass per slot and
 //! its frame is either included (commit won) or ignored (abort won) — never
 //! torn; a claim after the snapshot lands in a slot the receiver never
@@ -64,7 +64,7 @@
 //! operation, and one that claimed or committed after the snapshot performs
 //! it outside the channel's boundary. A record refused *before* close — a
 //! full region, an oversized frame — sets the loss flag first, and the
-//! channel reports itself incomplete ([`Frames::is_complete`]).
+//! channel reports itself incomplete ([`ShmReader::is_complete`]).
 //!
 //! Correctness never depends on writer-side cleanup: no exit hooks, PID
 //! checks, heartbeats, or timeouts.
@@ -162,9 +162,9 @@ pub fn is_supported_region_len(len: usize) -> bool {
 //    uses `Release`: every payload write happens-before the committed
 //    descriptor becomes visible.
 // 3. **Receiver observation** — the freeze compare-and-swap in
-//    `ShmReceiver::close` uses `Acquire` on failure: observing a committed
+//    `ShmReader::close` uses `Acquire` on failure: observing a committed
 //    descriptor also makes the payload writes it published visible, so the
-//    borrows `Frames` later hands out read settled bytes.
+//    borrows `ShmReader` later hands out read settled bytes.
 
 /// A borrowed view of the shared mapping: the typed header, the
 /// descriptor table sized from the mapping length, and the raw payload
@@ -439,10 +439,10 @@ impl FrameMut<'_> {
     }
 }
 
-// --- The receiver side: close and Frames ------------------------------------
+// --- The reader side: close and iterate -------------------------------------
 //
 // Closing never waits for writers, and no payload byte is read or copied:
-// `Frames` keeps the mapping alive and hands out borrows of the validated
+// the reader keeps the mapping alive and hands out borrows of the validated
 // committed spans on demand. Those borrows are sound because of the
 // protocol, not despite it: a committed span is never written again
 // (committing consumes the writer's frame), every borrow covers exactly one
@@ -452,49 +452,6 @@ impl FrameMut<'_> {
 // region is accessed only through this protocol; a process scribbling
 // outside the protocol is outside the trust model.
 
-/// The committed frames of a closed channel: validated spans borrowed from
-/// the mapping, which stays alive inside this value. Dropping it releases
-/// the mapping.
-pub struct Frames<M> {
-    mem: M,
-    spans: Vec<PayloadSpan>,
-    complete: bool,
-}
-
-impl<M: AsRawSlice> Frames<M> {
-    /// Iterates over the committed frames in claim order.
-    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
-        let base = self.mem.as_raw_slice().cast::<u8>().cast_const();
-        self.spans.iter().map(move |span| {
-            // SAFETY: `close` validated the span against this mapping's
-            // layout, and a committed span is immutable for the mapping's
-            // lifetime (see the section comment above), so the shared borrow
-            // is valid for as long as `self` lives.
-            unsafe { slice::from_raw_parts(base.add(span.offset), span.len) }
-        })
-    }
-
-    /// Whether every record a writer published made it in.
-    ///
-    /// False when a claim failed before the channel closed — the region
-    /// was out of space, or a frame exceeded the frame limit: its record
-    /// was lost, and the frames under-report what writers went on to do.
-    /// Consumers that need completeness must reject them.
-    #[must_use]
-    pub const fn is_complete(&self) -> bool {
-        self.complete
-    }
-}
-
-impl<M> fmt::Debug for Frames<M> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Frames")
-            .field("frames", &self.spans.len())
-            .field("complete", &self.complete)
-            .finish_non_exhaustive()
-    }
-}
-
 /// Shared-memory metadata that could not have been produced by this
 /// protocol. The region was corrupted; its frames are unusable.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
@@ -503,63 +460,53 @@ pub enum ProtocolError {
     CorruptDescriptor { slot_index: usize },
 }
 
-/// The receiver end of a channel.
-///
-/// Attaching to the region is the one unsafe step, sharing
-/// [`ShmWriter::new`]'s contract; closing is safe.
-pub struct ShmReceiver<M> {
+/// A reader over the committed frames of a closed channel: validated spans
+/// borrowed from the mapping, which stays alive inside this value and is
+/// released when the reader drops.
+pub struct ShmReader<M> {
     mem: M,
+    spans: Vec<PayloadSpan>,
+    complete: bool,
 }
 
-impl<M: AsRawSlice> ShmReceiver<M> {
-    /// Creates the receiver backed by a shared-memory region.
+impl<M: AsRawSlice> ShmReader<M> {
+    /// Closes the channel over a shared-memory region and returns the
+    /// reader of its committed frames.
+    ///
+    /// Never blocks on writers: writers admitted before the snapshot race
+    /// per slot, and each raced slot independently ends up committed
+    /// (included) or aborted (excluded). Claims after the snapshot land in
+    /// slots this pass never visits until the CLOSED gate — set before
+    /// this returns — stops them. See the protocol docs at the top of this
+    /// module.
     ///
     /// # Safety
     ///
     /// Same contract as [`ShmWriter::new`]:
     ///
     /// - `mem.as_raw_slice()` must return a stable, valid pointer to the
-    ///   whole region for the lifetime of the receiver and of the
-    ///   [`Frames`] it closes into.
+    ///   whole region for the reader's lifetime.
     /// - The region must have been zero-initialized when it was created and
     ///   accessed only through this protocol since.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the region is not `u64`-aligned or its size is outside
-    /// the supported range (see [`SharedState::borrow`]).
-    pub unsafe fn new(mem: M) -> Self {
-        // Validate the region geometry eagerly so misuse fails at
-        // construction, not at close.
-        // SAFETY: forwarded from this function's contract.
-        let _ = unsafe { SharedState::borrow(mem.as_raw_slice()) };
-        Self { mem }
-    }
-
-    /// Closes the channel and returns the committed frames as borrows of
-    /// the mapping, which moves into the returned [`Frames`].
-    ///
-    /// Never blocks on writers: writers admitted before the snapshot race
-    /// per slot, and each raced slot independently ends up committed
-    /// (included) or aborted (excluded). Claims after the snapshot land in
-    /// slots this pass never visits until the CLOSED gate — set before
-    /// this returns — stops them. See the protocol docs at
-    /// the top of this module.
     ///
     /// # Errors
     ///
     /// [`ProtocolError`] when the shared-memory metadata could not have
     /// been produced by a correct writer; the region was corrupted and its
     /// frames are unusable.
-    pub fn close(self) -> Result<Frames<M>, ProtocolError> {
+    ///
+    /// # Panics
+    ///
+    /// Panics when the region is not `u64`-aligned or its size is outside
+    /// the supported range (see [`SharedState::borrow`]).
+    pub unsafe fn close(mem: M) -> Result<Self, ProtocolError> {
         let mut spans = Vec::new();
         let complete;
         {
-            // SAFETY: `new` requires the region to stay valid and
-            // protocol-governed, and it validated the geometry; the raw
-            // slice stays valid while `self.mem` is borrowed here and
-            // beyond, since it moves into the returned `Frames`.
-            let state = unsafe { SharedState::borrow(self.mem.as_raw_slice()) };
+            // SAFETY: forwarded from this function's contract; the raw
+            // slice stays valid while `mem` is borrowed here and beyond,
+            // since it moves into the returned reader.
+            let state = unsafe { SharedState::borrow(mem.as_raw_slice()) };
 
             // The close boundary (rule 1): claims at or before this
             // snapshot are inside it, later ones land in slots this pass
@@ -609,13 +556,71 @@ impl<M: AsRawSlice> ShmReceiver<M> {
             }
         }
 
-        Ok(Frames { mem: self.mem, spans, complete })
+        Ok(Self { mem, spans, complete })
+    }
+
+    /// Iterates over the committed frames in claim order.
+    pub fn iter(&self) -> Iter<'_> {
+        self.into_iter()
+    }
+
+    /// Whether every record a writer published made it in.
+    ///
+    /// False when a claim failed before the channel closed — the region
+    /// was out of space, or a frame exceeded the frame limit: its record
+    /// was lost, and the frames under-report what writers went on to do.
+    /// Consumers that need completeness must reject them.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.complete
+    }
+}
+
+impl<M> fmt::Debug for ShmReader<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShmReader")
+            .field("frames", &self.spans.len())
+            .field("complete", &self.complete)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Iterator over a [`ShmReader`]'s committed frames, in claim order.
+pub struct Iter<'a> {
+    /// Base address of the mapping the spans point into.
+    base: *const u8,
+    spans: slice::Iter<'a, PayloadSpan>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let span = self.spans.next()?;
+        // SAFETY: `ShmReader::close` validated the span against the
+        // mapping's layout, and a committed span is immutable for the
+        // mapping's lifetime (see the section comment above); the reader
+        // borrowed for `'a` keeps the mapping alive and mapped.
+        Some(unsafe { slice::from_raw_parts(self.base.add(span.offset), span.len) })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.spans.size_hint()
+    }
+}
+
+impl<'a, M: AsRawSlice> IntoIterator for &'a ShmReader<M> {
+    type IntoIter = Iter<'a>;
+    type Item = &'a [u8];
+
+    fn into_iter(self) -> Iter<'a> {
+        Iter { base: self.mem.as_raw_slice().cast::<u8>().cast_const(), spans: self.spans.iter() }
     }
 }
 
 /// Materializes the page backing the protocol header without changing
 /// protocol state, so that neither a writer's first claim nor
-/// [`ShmReceiver::close`]'s snapshot pays for the backing file's first
+/// [`ShmReader::close`]'s snapshot pays for the backing file's first
 /// block allocation — a millisecond-scale cost on some journalling
 /// filesystems, for reads of holes as well as writes. Run it off any
 /// latency-sensitive path. Only Linux channels use this: elsewhere the
@@ -709,10 +714,10 @@ mod tests {
         }
     }
 
-    fn collect_frames(shm: &MockedShm) -> Frames<MockedShm> {
+    fn collect_frames(shm: &MockedShm) -> ShmReader<MockedShm> {
         // SAFETY: `MockedShm` provides a stable, zero-initialized allocation
         // accessed only through the protocol.
-        unsafe { ShmReceiver::new(shm.clone()) }.close().unwrap()
+        unsafe { ShmReader::close(shm.clone()) }.unwrap()
     }
 
     #[test]
@@ -1003,7 +1008,7 @@ mod tests {
 
         let frames = collect_frames(&shm);
         let mut count = 0;
-        for frame in frames.iter() {
+        for frame in &frames {
             count += 1;
             let frame = BStr::new(frame);
             assert!(frame == b"hello" || frame == b"foo" || frame == b"this is a test");
@@ -1031,7 +1036,7 @@ mod tests {
 
         let frames = collect_frames(&shm);
         let mut count = 0;
-        for frame in frames.iter() {
+        for frame in &frames {
             count += 1;
             let frame = BStr::new(frame);
             assert!(frame == b"hello" || frame == b"foo" || frame == b"this is a test");
@@ -1081,7 +1086,7 @@ mod tests {
         // Every admitted slot resolved to a whole frame or was aborted:
         // the receiver observed only complete payloads.
         let mut count = 0;
-        for frame in frames.iter() {
+        for frame in &frames {
             count += 1;
             assert!(frame == b"hello");
         }
@@ -1107,7 +1112,7 @@ mod tests {
         shm.poke_u64(64, (bogus_len << 32) | bogus_offset);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { ShmReceiver::new(shm) }.close();
+        let result = unsafe { ShmReader::close(shm) };
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -1123,7 +1128,7 @@ mod tests {
         shm.poke_u64(64, (1 << 63) | (8u64 << 32) | 8);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { ShmReceiver::new(shm) }.close();
+        let result = unsafe { ShmReader::close(shm) };
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -1227,7 +1232,7 @@ mod tests {
 
         // SAFETY: the mapping is a valid shared-memory region created zeroed
         // and accessed only through the protocol.
-        let frames = unsafe { ShmReceiver::new(mapping) }.close().unwrap();
+        let frames = unsafe { ShmReader::close(mapping) }.unwrap();
         assert!(frames.is_complete());
         let collected = frames.iter().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert!(collected.len() == CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
@@ -1295,7 +1300,7 @@ mod tests {
         assert!(writer.try_write_frame(b"alive"));
 
         // SAFETY: see `real_shm_across_processes`.
-        let frames = unsafe { ShmReceiver::new(writer.into_memory()) }.close().unwrap();
+        let frames = unsafe { ShmReader::close(writer.into_memory()) }.unwrap();
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);
