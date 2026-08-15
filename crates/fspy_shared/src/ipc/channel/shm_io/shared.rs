@@ -65,7 +65,7 @@ use std::{
 
 use super::{
     AsRawSlice,
-    layout::{self, CLOSED, Header, PayloadSpan, SlotState},
+    layout::{self, CLOSED, Header, PayloadSpan},
 };
 
 /// A borrowed view of the shared mapping with protocol-level operations:
@@ -555,19 +555,16 @@ fn freeze_committed_spans(
 ) -> Result<Vec<PayloadSpan>, ProtocolError> {
     let mut spans = Vec::new();
     for slot_index in 0..slot_count {
-        match layout::decode(state.freeze(slot_index)) {
-            SlotState::Aborted => {}
-            SlotState::Committed { payload_offset, payload_len } => {
-                let span = PayloadSpan::validate(state.len, payload_offset, payload_len)
-                    .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
-                spans.push(span);
-            }
-            // `freeze` only returns terminal values, so `Unfinished` is
-            // unreachable and grouped with the corrupt case.
-            SlotState::Unfinished | SlotState::Corrupt => {
-                return Err(ProtocolError::CorruptDescriptor { slot_index });
-            }
+        let bits = state.freeze(slot_index);
+        if bits == layout::ABORTED {
+            continue;
         }
+        // Freeze only returns terminal values, so anything else must be a
+        // committed descriptor with a valid span; a foreign scribble fails
+        // the decode.
+        let span = layout::decode(state.len, bits)
+            .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
+        spans.push(span);
     }
     Ok(spans)
 }
