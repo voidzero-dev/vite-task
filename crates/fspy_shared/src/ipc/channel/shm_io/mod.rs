@@ -5,6 +5,9 @@
 //! waiting for any writer. A process may die at any instruction — mid-claim,
 //! mid-write, pre-commit — and only its own unfinished frame is lost.
 //!
+//! `README.md` in this directory tells the whole story in plain words and
+//! indexes the modules.
+//!
 //! # Region layout
 //!
 //! ```text
