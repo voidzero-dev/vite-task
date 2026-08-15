@@ -20,7 +20,7 @@
 //!
 //! The layout is derived from the mapping length alone ([`layout`]), so
 //! the region is self-describing: every process computes the same table
-//! and payload bounds from the mapped size. One borrow constructs typed
+//! and payload bounds from the mapped size. Attaching constructs typed
 //! views of the header (a `repr(C)` struct of two monotonic `AtomicU64`
 //! counters — claims, carrying the CLOSED gate bit, and payload bytes
 //! reserved) and of the descriptor table (a slice of atomics); the
@@ -77,7 +77,7 @@ use std::{
     fmt,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
-    ptr::slice_from_raw_parts_mut,
+    ptr::{NonNull, slice_from_raw_parts_mut},
     slice,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -115,11 +115,12 @@ pub fn is_supported_region_len(len: usize) -> bool {
 }
 
 // --- The region views and the ordering contract ----------------------------
-// One unsafe borrow in `SharedState::borrow` constructs three typed
-// views of the region — the `repr(C)` `Header`, the descriptor table as
-// a slice of atomics sized by the mapping length, and the untyped payload
-// area as a raw slice. Every access after that is a plain field access or
-// a bounds-checked index. The payload area stays raw because writers hold
+// `SharedState::new` builds three typed views of the region — the
+// `repr(C)` `Header`, the descriptor table as a slice of atomics sized by
+// the mapping length, and the untyped payload area as a raw slice — once,
+// when an endpoint attaches; the endpoint stores them beside the mapping
+// they point into. Every access after that is a plain field access or a
+// bounds-checked index. The payload area stays raw because writers hold
 // exclusive `&mut` borrows into it, which must not alias any shared
 // reference.
 //
@@ -174,13 +175,15 @@ pub fn is_supported_region_len(len: usize) -> bool {
 //    descriptor also makes the payload writes it published visible, so the
 //    borrows `ShmReader` later hands out read settled bytes.
 
-/// A borrowed view of the shared mapping: the typed header, the
-/// descriptor table sized from the mapping length, and the raw payload
-/// area.
+/// The typed views of the region: the header, the descriptor table
+/// sized from the mapping length, and the raw payload area. Built once
+/// when an endpoint attaches and stored in it; the views stay valid
+/// because they point into the mapping's stable target, not into the
+/// endpoint value.
 #[derive(Clone, Copy)]
-struct SharedState<'m> {
-    header: &'m Header,
-    table: &'m [AtomicU64],
+struct SharedState {
+    header: NonNull<Header>,
+    table: NonNull<[AtomicU64]>,
     payloads: *mut [u8],
     /// The real mapping length. Not derivable from the parts above: the
     /// payload region rounds down to whole `u64`s, and re-deriving the
@@ -188,13 +191,14 @@ struct SharedState<'m> {
     len: usize,
 }
 
-impl SharedState<'_> {
-    /// Borrows a shared mapping.
+impl SharedState {
+    /// Builds the typed views of a shared mapping.
     ///
     /// # Safety
     ///
-    /// - `mem` must be valid for reads and writes for the lifetime `'m` and
-    ///   its address must be stable.
+    /// - `mem` must be valid for reads and writes, and its address stable,
+    ///   for as long as the returned views (and any copy of them) are
+    ///   used.
     /// - The memory must have been zero-initialized when the region was
     ///   created, and accessed only through this protocol since.
     ///
@@ -206,24 +210,22 @@ impl SharedState<'_> {
     /// runtime data; senders guard untrusted mappings with
     /// [`is_supported_region_len`] first.
     #[expect(clippy::cast_ptr_alignment, reason = "the base is asserted `u64`-aligned below")]
-    unsafe fn borrow(mem: *mut [u8]) -> Self {
+    unsafe fn new(mem: *mut [u8]) -> Self {
         let base = mem.cast::<u8>();
         let len = mem.len();
+        assert!(!base.is_null());
         assert!(base.addr().is_multiple_of(align_of::<Header>()));
         assert!((layout::HEADER_LEN..=layout::MAX_MAPPING_LEN).contains(&len));
-        // SAFETY: the header and the table lie inside the mapping (the
-        // header by the assert above, the table by `layout::max_slots`),
-        // are `u64`-aligned (aligned base, `u64`-multiple offsets), and
-        // consist entirely of atomics zero-initialized at creation — so
-        // shared borrows for `'m` are valid even while other threads and
-        // processes access the same memory through these same atomics. The
+        // SAFETY: the base is non-null (asserted), and the header and the
+        // table lie inside the mapping — the header by the asserts above,
+        // the table by `layout::max_slots` — at `u64`-aligned offsets. The
         // payload area keeps the rest of the mapping as a raw slice;
         // `layout` bounds every span carved from it.
         unsafe {
             Self {
-                header: &*base.cast::<Header>(),
-                table: slice::from_raw_parts(
-                    base.add(layout::HEADER_LEN).cast::<AtomicU64>(),
+                header: NonNull::new_unchecked(base.cast::<Header>()),
+                table: NonNull::slice_from_raw_parts(
+                    NonNull::new_unchecked(base.add(layout::HEADER_LEN).cast::<AtomicU64>()),
                     layout::max_slots(len),
                 ),
                 payloads: std::ptr::slice_from_raw_parts_mut(
@@ -233,6 +235,26 @@ impl SharedState<'_> {
                 len,
             }
         }
+    }
+
+    /// The protocol header.
+    const fn header(&self) -> &Header {
+        // SAFETY: `new`'s contract keeps the target valid while any view
+        // is used, and the header consists of atomics, so the shared
+        // borrow is valid even while other threads and processes access
+        // the same memory through them.
+        unsafe { self.header.as_ref() }
+    }
+
+    /// The descriptor table.
+    const fn table(&self) -> &[AtomicU64] {
+        // SAFETY: as for `header`.
+        unsafe { self.table.as_ref() }
+    }
+
+    /// Base address of the region: the header sits at offset zero.
+    const fn base(&self) -> *const u8 {
+        self.header.as_ptr().cast()
     }
 }
 
@@ -244,8 +266,20 @@ impl SharedState<'_> {
 /// reserved with atomic operations, filled in uniquely owned payload spans,
 /// and published with an atomic commit (see the ordering contract above).
 pub struct ShmWriter<M> {
+    /// Owns the region the views point into; dropped with the writer.
+    #[cfg_attr(any(not(test), miri), expect(dead_code, reason = "held to keep the region alive"))]
     mem: M,
+    state: SharedState,
 }
+
+// SAFETY: the writer touches the region only through the protocol's
+// atomics, which synchronize access from any thread; the stored views
+// point into the mapping's stable, independently owned target, not into
+// the writer value itself.
+unsafe impl<M: Send> Send for ShmWriter<M> {}
+// SAFETY: see the `Send` impl; the writer's shared-reference API is
+// internally synchronized by the protocol.
+unsafe impl<M: Sync> Sync for ShmWriter<M> {}
 
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
@@ -277,26 +311,20 @@ impl<M: AsRawSlice> ShmWriter<M> {
     /// # Panics
     ///
     /// Panics when the region is not `u64`-aligned or its size is outside the
-    /// supported range (see [`SharedState::borrow`]).
+    /// supported range (see [`SharedState::new`]).
     pub unsafe fn new(mem: M) -> Self {
-        // Validate the region geometry eagerly so misuse fails at
-        // construction, not at the first claim.
-        // SAFETY: forwarded from this function's contract.
-        let _ = unsafe { SharedState::borrow(mem.as_raw_slice()) };
-        Self { mem }
-    }
-
-    fn state(&self) -> SharedState<'_> {
-        // SAFETY: `new` requires the region to stay valid and
-        // protocol-governed for the writer's lifetime, and it validated the
-        // geometry.
-        unsafe { SharedState::borrow(self.mem.as_raw_slice()) }
+        // SAFETY: forwarded from this function's contract, which keeps the
+        // region valid and protocol-governed for the writer's lifetime —
+        // and so for every use of the views, which are stored in and
+        // dropped with the writer.
+        let state = unsafe { SharedState::new(mem.as_raw_slice()) };
+        Self { mem, state }
     }
 
     /// Whether the CLOSED gate is set: the receiver closed the channel,
     /// or an earlier failed claim condemned it.
     pub fn is_closed(&self) -> bool {
-        self.state().header.claims.load(Ordering::Relaxed) & CLOSED != 0
+        self.state.header().claims.load(Ordering::Relaxed) & CLOSED != 0
     }
 
     /// Claims a frame of exactly `frame_size` bytes.
@@ -312,14 +340,14 @@ impl<M: AsRawSlice> ShmWriter<M> {
     /// learns a record was lost, and later claims are refused — their
     /// records would ride a result the receiver must already reject.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
-        let state = self.state();
+        let state = self.state;
         let payload_len = frame_size.get();
 
         // Reports that this claim's record was lost, before the writer
         // moves on (rule 1): the gate makes the receiver report the
         // channel incomplete, and condemns further claims.
         let report_loss = || {
-            state.header.claims.fetch_or(CLOSED, Ordering::Relaxed);
+            state.header().claims.fetch_or(CLOSED, Ordering::Relaxed);
             ClaimError::Capacity
         };
 
@@ -336,7 +364,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
         // because the counter is not what locates payloads (descriptors are)
         // and a `u64` cannot realistically wrap.
         let payload_start =
-            state.header.payload_reserved.fetch_add(reserved_len as u64, Ordering::Relaxed);
+            state.header().payload_reserved.fetch_add(reserved_len as u64, Ordering::Relaxed);
         // Checked: a foreign scribble of the counter must fail the claim,
         // not wrap the bound into an out-of-bounds reservation.
         let payload_end = payload_start.checked_add(reserved_len as u64);
@@ -345,14 +373,14 @@ impl<M: AsRawSlice> ShmWriter<M> {
         }
         let payload_start = usize::try_from(payload_start).expect("bounded by the payload region");
 
-        let claims = state.header.claims.fetch_add(1, Ordering::Relaxed);
+        let claims = state.header().claims.fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
             // Not a loss: a record refused after close describes an
             // operation performed outside the channel's boundary.
             return Err(ClaimError::Closed);
         }
         let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
-        if slot_index >= state.table.len() {
+        if slot_index >= state.table().len() {
             return Err(report_loss());
         }
 
@@ -405,7 +433,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
 /// and still performs the operation it described steps outside the usage
 /// contract — records are published before the recorded operation.
 pub struct FrameMut<'a> {
-    state: SharedState<'a>,
+    state: SharedState,
     slot_index: usize,
     descriptor: u64,
     content: &'a mut [u8],
@@ -444,7 +472,7 @@ impl FrameMut<'_> {
     pub fn finish(self) {
         // Rule 2: `Release` orders every payload write before the
         // descriptor.
-        let _ = self.state.table[self.slot_index].compare_exchange(
+        let _ = self.state.table()[self.slot_index].compare_exchange(
             layout::UNFINISHED,
             self.descriptor,
             Ordering::Release,
@@ -479,13 +507,24 @@ pub enum ProtocolError {
 /// is released when the reader drops. It holds no buffer: iteration
 /// re-reads the frozen descriptor table, so closing allocates nothing.
 pub struct ShmReader<M> {
+    /// Owns the region the views point into; dropped with the reader.
+    #[expect(dead_code, reason = "held to keep the region alive")]
     mem: M,
+    /// The region views, pointing into the owned region's stable target.
+    state: SharedState,
     /// Length of the frozen prefix of the descriptor table.
     slot_count: usize,
     /// Committed frames in that prefix.
     frames: usize,
     complete: bool,
 }
+
+// SAFETY: the reader reads only the header atomics, frozen slots, and
+// immutable committed spans; the stored views point into the mapping's
+// stable, independently owned target, not into the reader value itself.
+unsafe impl<M: Send> Send for ShmReader<M> {}
+// SAFETY: see the `Send` impl.
+unsafe impl<M: Sync> Sync for ShmReader<M> {}
 
 impl<M: AsRawSlice> ShmReader<M> {
     /// Closes the channel over a shared-memory region and returns the
@@ -516,25 +555,24 @@ impl<M: AsRawSlice> ShmReader<M> {
     /// # Panics
     ///
     /// Panics when the region is not `u64`-aligned or its size is outside
-    /// the supported range (see [`SharedState::borrow`]).
+    /// the supported range (see [`SharedState::new`]).
     pub unsafe fn close(mem: M) -> Result<Self, ProtocolError> {
+        // SAFETY: forwarded from this function's contract, which keeps the
+        // region valid for the reader's lifetime — and so for every use of
+        // the views, which are stored in and dropped with the reader.
+        let state = unsafe { SharedState::new(mem.as_raw_slice()) };
         let slot_count;
         let mut frames = 0;
         let complete;
         {
-            // SAFETY: forwarded from this function's contract; the raw
-            // slice stays valid while `mem` is borrowed here and beyond,
-            // since it moves into the returned reader.
-            let state = unsafe { SharedState::borrow(mem.as_raw_slice()) };
-
             // The close boundary (rule 1): claims at or before this
             // snapshot are inside it, later ones land in slots this pass
             // never visits. The count is clamped to the table capacity, so
             // a counter inflated by failed claims (or by a foreign
             // scribble) degrades to a full-table sweep, not an error.
-            let claims = state.header.claims.load(Ordering::Relaxed);
+            let claims = state.header().claims.load(Ordering::Relaxed);
             slot_count =
-                usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(state.table.len());
+                usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(state.table().len());
             // The same load carries the completeness verdict: a gate set
             // before this boundary is a failed claim's loss report — or an
             // earlier close, and a re-close cannot vouch for records
@@ -546,7 +584,7 @@ impl<M: AsRawSlice> ShmReader<M> {
             // this page where first touches are expensive. Claims racing
             // between the snapshot and this gate are dropped soundly (see
             // the module docs above).
-            state.header.claims.fetch_or(CLOSED, Ordering::Relaxed);
+            state.header().claims.fetch_or(CLOSED, Ordering::Relaxed);
 
             // Freeze pass: drive every admitted slot to a terminal state
             // and validate the committed descriptors. After this loop the
@@ -557,7 +595,7 @@ impl<M: AsRawSlice> ShmReader<M> {
             for slot_index in 0..slot_count {
                 // Rule 3: `Acquire` on failure makes a committed payload
                 // visible.
-                let Err(bits) = state.table[slot_index].compare_exchange(
+                let Err(bits) = state.table()[slot_index].compare_exchange(
                     layout::UNFINISHED,
                     layout::ABORTED,
                     Ordering::AcqRel,
@@ -581,7 +619,7 @@ impl<M: AsRawSlice> ShmReader<M> {
             }
         }
 
-        Ok(Self { mem, slot_count, frames, complete })
+        Ok(Self { mem, state, slot_count, frames, complete })
     }
 
     /// Iterates over the committed frames in claim order.
@@ -659,14 +697,10 @@ impl<'a, M: AsRawSlice> IntoIterator for &'a ShmReader<M> {
     type Item = &'a [u8];
 
     fn into_iter(self) -> Iter<'a> {
-        // SAFETY: `close` requires the region to stay valid and
-        // protocol-governed for the reader's lifetime, and it validated
-        // the geometry.
-        let state = unsafe { SharedState::borrow(self.mem.as_raw_slice()) };
         Iter {
-            base: self.mem.as_raw_slice().cast::<u8>().cast_const(),
-            table: &state.table[..self.slot_count],
-            mapping_len: state.len,
+            base: self.state.base(),
+            table: &self.state.table()[..self.slot_count],
+            mapping_len: self.state.len,
             remaining: self.frames,
         }
     }
@@ -686,7 +720,7 @@ impl<'a, M: AsRawSlice> IntoIterator for &'a ShmReader<M> {
 #[cfg(target_os = "linux")]
 pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
     // SAFETY: forwarded from this function's contract.
-    let state = unsafe { SharedState::borrow(mem.as_raw_slice()) };
+    let state = unsafe { SharedState::new(mem.as_raw_slice()) };
     // A compare-exchange of zero with zero on the claim counter: on an
     // untouched region it performs a real write — allocating the first
     // block of a sparse backing file — without changing protocol state. If
@@ -694,7 +728,7 @@ pub unsafe fn pre_fault(mem: &impl AsRawSlice) {
     // exchange changes nothing. (An `or` of zero would not do: the
     // compiler may lower it to a plain load, which materializes only a
     // hole page without allocating the block.)
-    let _ = state.header.claims.compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
+    let _ = state.header().claims.compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
 }
 
 #[cfg(test)]
