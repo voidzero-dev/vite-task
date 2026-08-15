@@ -809,13 +809,14 @@ mod tests {
         child.kill().unwrap();
         child.wait().unwrap();
 
-        // A surviving writer keeps working after the kill.
+        // A surviving writer keeps working after the kill. It borrows the
+        // mapping so the seal below can take it over.
         // SAFETY: see `real_shm_across_processes`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(mapping) }.unwrap();
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(&mapping) }.unwrap();
         assert!(writer.try_write_frame(b"alive"));
 
         // SAFETY: see `real_shm_across_processes`.
-        let frames = unsafe { ShmReader::<_, S>::seal(writer.into_memory()) }.unwrap();
+        let frames = unsafe { ShmReader::<_, S>::seal(mapping) }.unwrap();
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);

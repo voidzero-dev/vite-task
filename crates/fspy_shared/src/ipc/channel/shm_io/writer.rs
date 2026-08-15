@@ -22,8 +22,7 @@ pub struct ShmWriter<M, const SLOTS: usize> {
     mapped: MappedLayout<SLOTS>,
     /// Owns the region the views point into. Declared after them: fields
     /// drop in order, and what borrows must die before what is borrowed.
-    #[cfg_attr(any(not(test), miri), expect(dead_code, reason = "held to keep the region alive"))]
-    mem: M,
+    _mem: M,
 }
 
 // SAFETY: the writer touches the region only through the protocol's
@@ -69,7 +68,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // and so for every use of the views, which are stored in and
         // dropped with the writer.
         let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) }?;
-        Some(Self { mapped, mem })
+        Some(Self { mapped, _mem: mem })
     }
 
     /// Whether the CLOSED gate is set: the receiver sealed the channel,
@@ -152,12 +151,6 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
             descriptor: committed(payload_offset, encoded_len),
             content,
         })
-    }
-
-    // Unwrap `self` and return the underlying memory.
-    #[cfg(all(test, not(miri)))]
-    pub fn into_memory(self) -> M {
-        self.mem
     }
 
     #[cfg(test)]

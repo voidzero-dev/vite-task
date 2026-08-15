@@ -82,8 +82,7 @@ pub struct ShmReader<M, const SLOTS: usize> {
     mapped: MappedLayout<SLOTS>,
     /// Owns the region the views point into. Declared after them: fields
     /// drop in order, and what borrows must die before what is borrowed.
-    #[expect(dead_code, reason = "held to keep the region alive")]
-    mem: M,
+    _mem: M,
     /// Length of the frozen prefix of the descriptor table.
     slot_count: usize,
     /// Committed frames in that prefix.
@@ -187,7 +186,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
             }
         }
 
-        Ok(Self { mapped, mem, slot_count, frames, complete })
+        Ok(Self { mapped, _mem: mem, slot_count, frames, complete })
     }
 
     /// Iterates over the committed frames in claim order.
