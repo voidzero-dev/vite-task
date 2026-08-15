@@ -40,7 +40,7 @@
 //!                          writer commit CAS wins
 //!                     +-----------------------------> COMMITTED (readable)
 //! CLAIMED (slot 0) ---+
-//!                     +-----------------------------> ABORTED (ignored)
+//!                     +-----------------------------> FROZEN (ignored)
 //!                          receiver freeze CAS wins
 //! ```
 //!
@@ -598,7 +598,7 @@ mod tests {
             (frames, results)
         });
 
-        // Every admitted slot resolved to a whole frame or was aborted:
+        // Every admitted slot resolved to a whole frame or was frozen:
         // the receiver observed only complete payloads.
         let mut count = 0;
         for frame in &frames {
@@ -658,7 +658,7 @@ mod tests {
         // A wildly inflated claim counter — mass claim failures or a foreign
         // scribble — degrades to a full-table sweep, never out-of-bounds
         // slot access: the committed frame survives, the untouched slots
-        // freeze as aborted.
+        // freeze as unpublishable.
         shm.poke_u64(0, (1 << 40) | 1);
 
         let frames = collect_frames(&shm);

@@ -2,7 +2,7 @@
 
 use std::{
     fmt,
-    num::NonZeroUsize,
+    num::{NonZeroU32, NonZeroUsize},
     ops::{Deref, DerefMut},
     slice,
     sync::atomic::Ordering,
@@ -10,7 +10,7 @@ use std::{
 
 use super::{
     AsRawSlice,
-    layout::{self, CLOSED, MappedLayout},
+    layout::{self, CLOSED, MappedLayout, SlotState},
 };
 
 /// A concurrent shared-memory frame writer.
@@ -101,10 +101,10 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
             ClaimError::Capacity
         };
 
-        // The descriptor's 32-bit length field is the oversize check:
-        // refuse, before touching the counters, a frame it cannot
+        // The descriptor's 32-bit nonzero length field is the oversize
+        // check: refuse, before touching the counters, a frame it cannot
         // describe — the channel keeps working for every record after it.
-        let Ok(encoded_len) = u32::try_from(payload_len) else {
+        let Ok(encoded_len) = NonZeroU32::try_from(frame_size) else {
             return Err(report_loss());
         };
         // Payload bytes first, so a payload-capacity failure does not burn a
@@ -148,7 +148,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         Ok(FrameMut {
             mapped,
             slot_index,
-            descriptor: committed(payload_offset, encoded_len),
+            descriptor: SlotState::Committed { offset: payload_offset, len: encoded_len }.encode(),
             content,
         })
     }
@@ -208,7 +208,7 @@ impl<const SLOTS: usize> DerefMut for FrameMut<'_, SLOTS> {
 impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
     /// Commits the frame, making it visible to the receiver.
     ///
-    /// If the receiver sealed the channel and aborted this frame's slot
+    /// If the receiver sealed the channel and froze this frame's slot
     /// first, the swap fails and the frame is silently discarded: the
     /// record belongs to the seal race and is intentionally excluded
     /// either way.
@@ -222,10 +222,4 @@ impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
             Ordering::Relaxed,
         );
     }
-}
-
-/// Encodes a committed descriptor (the slot codec in [`layout`]): the
-/// argument types are exactly the field widths.
-pub(super) fn committed(payload_offset: u32, payload_len: u32) -> u64 {
-    (u64::from(payload_len) << layout::LEN_SHIFT) | u64::from(payload_offset)
 }

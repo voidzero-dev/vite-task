@@ -125,7 +125,7 @@ The receiver seals the channel once:
    claims at or before it are in, later ones are not.
 2. **Gate** further claims by setting the CLOSED bit, so stragglers stop.
 3. **Freeze** every slot in the snapshot: a compare-and-swap flips zero to
-   ABORTED. If the slot was already committed, the swap fails and the frame
+   FROZEN. If the slot was already committed, the swap fails and the frame
    is kept. Exactly one side wins each slot, and either way the slot
    never changes again.
 4. **Validate** each committed descriptor's bounds. A descriptor no correct
@@ -142,7 +142,7 @@ the reader is dropped.
                          writer's commit CAS wins
                     +------------------------------> COMMITTED (readable)
 CLAIMED (slot 0) ---+
-                    +------------------------------> ABORTED (ignored)
+                    +------------------------------> FROZEN (ignored)
                          receiver's freeze CAS wins
 ```
 
@@ -153,9 +153,9 @@ CLAIMED (slot 0) ---+
 - A payload is reachable only through its committed descriptor. The commit
   is a `Release` write and the receiver's failed freeze is an `Acquire`
   read, so an observed descriptor implies fully visible payload bytes.
-- Once a slot is committed or aborted, nothing ever changes it again.
+- Once a slot is committed or frozen, nothing ever changes it again.
 - Counters only grow. The receiver clamps them to the fixed capacities —
-  an inflated counter degrades into extra aborted slots, not corruption.
+  an inflated counter degrades into extra frozen slots, not corruption.
   Loss is reported through the CLOSED gate: a failed claim sets it before
   the writer carries on, which both marks the result incomplete and
   refuses every later claim.

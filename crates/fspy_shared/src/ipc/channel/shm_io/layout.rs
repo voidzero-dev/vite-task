@@ -16,17 +16,20 @@
 //! [`super::writer`] and [`super::reader`].
 //!
 //! Overflow safety follows from one bound enforced at attach time: the
-//! payload region never exceeds [`MAX_PAYLOAD_REGION_LEN`], so all
-//! offsets fit the 32-bit descriptor fields and all sums fit `usize` on
-//! the 64-bit targets the parent module asserts.
+//! payload region fits `u32`, so all offsets fit the 32-bit descriptor
+//! fields and all sums fit `usize` on the 64-bit targets the parent
+//! module asserts.
 
-use std::{ptr::NonNull, sync::atomic::AtomicU64};
+use std::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
 
 /// The CLOSED gate bit of the claim counter, set when the receiver seals
 /// the channel and by any writer whose claim failed — the loss report
 /// that also condemns the channel (rule 1 below).
-/// The low 63 bits count claims, so no realistic claim volume can carry
-/// into the gate.
+///
+/// The gate must be a bit, not a sentinel value: stragglers keep
+/// `fetch_add`ing the counter after it is set, and an OR-ed bit survives
+/// 2^63 increments, while any exact value would be destroyed by the
+/// first. No realistic claim volume carries into bit 63.
 pub(super) const CLOSED: u64 = 1 << 63;
 
 /// The region's fixed-location part — the protocol counters and the
@@ -46,12 +49,6 @@ pub(super) struct Meta<const SLOTS: usize> {
 // raise the alignment.
 const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
 
-/// Maximum payload-region size.
-///
-/// Descriptors store payload offsets in 32 bits, so the payload region
-/// must fit `u32` arithmetic.
-pub(super) const MAX_PAYLOAD_REGION_LEN: usize = 1 << 32;
-
 // --- The descriptor slot codec ---------------------------------------------
 //
 // One slot is a 64-bit value that publishes a frame:
@@ -64,13 +61,13 @@ pub(super) const MAX_PAYLOAD_REGION_LEN: usize = 1 << 32;
 // | Value                 | State                                           |
 // | --------------------- | ----------------------------------------------- |
 // | `0`                   | Unfinished: slot reserved, nothing published    |
-// | `1`                   | Aborted: the receiver froze the unfinished slot |
+// | `1`                   | Frozen by the seal: never publishable again     |
 // | length field nonzero  | Committed: offset and length of the payload     |
 //
 // Committed lengths are nonzero (a zero-length frame is never claimed), so
 // a committed value's length field is nonzero and the three states are
 // disjoint: `1` is a zero length with offset `1`, which no writer commits.
-// Once a slot is committed or aborted, nothing ever changes it again.
+// Once a slot is committed or frozen, nothing ever changes it again.
 //
 // Offsets are measured from the start of the payload area, so no
 // descriptor can even name the header or the table.
@@ -80,8 +77,11 @@ pub(super) const MAX_PAYLOAD_REGION_LEN: usize = 1 << 32;
 // ([`super::reader`]).
 
 pub(super) const UNFINISHED: u64 = 0;
-pub(super) const LEN_SHIFT: u32 = 32;
-pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
+
+/// The terminal value the seal installs in an unfinished slot: still
+/// nothing published (a zero length field), but no longer zero, so a late
+/// commit's compare-and-swap from [`UNFINISHED`] loses.
+pub(super) const FROZEN: u64 = 1;
 
 // --- The mapped layout and the ordering contract ---------------------------
 // `MappedLayout::new` builds two typed views of the region — the
@@ -148,7 +148,7 @@ pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 /// [`<*mut T>::try_cast_aligned`][std].
 ///
 /// [std]: https://doc.rust-lang.org/std/primitive.pointer.html#method.try_cast_aligned
-fn try_cast_aligned<U>(ptr: *mut u8) -> Option<*mut U> {
+fn try_cast_aligned<T, U>(ptr: *mut T) -> Option<*mut U> {
     if ptr.addr().is_multiple_of(align_of::<U>()) { Some(ptr.cast()) } else { None }
 }
 
@@ -160,6 +160,46 @@ fn try_cast_aligned<U>(ptr: *mut u8) -> Option<*mut U> {
 pub(super) struct MappedLayout<const SLOTS: usize> {
     meta: NonNull<Meta<SLOTS>>,
     pub(super) payloads: *mut [u8],
+}
+
+/// A decoded descriptor slot (the codec above).
+#[derive(Clone, Copy)]
+pub(super) enum SlotState {
+    /// Nothing is published in the slot: the writer has not finished it
+    /// yet, died or abandoned it before finishing, or the seal froze it
+    /// ([`FROZEN`]) so it never can be. The receiver ignores such slots.
+    Unfinished,
+    /// A payload is committed: the receiver may read its span, once
+    /// checked against the payload area's bounds.
+    Committed {
+        /// Byte offset of the payload from the start of the payload region.
+        offset: u32,
+        /// Byte length of the payload. Nonzero, so that a committed value
+        /// can never collide with [`UNFINISHED`] or [`FROZEN`] — the
+        /// offset alone could be zero.
+        len: NonZeroU32,
+    },
+}
+
+impl SlotState {
+    /// Decodes a slot value into its state. The two processes sharing a
+    /// value run on one machine, so native byte order is fine.
+    pub(super) const fn decode(slot_value: u64) -> Self {
+        let [offset, len] = bytemuck::must_cast::<u64, [u32; 2]>(slot_value);
+        let Some(len) = NonZeroU32::new(len) else {
+            return Self::Unfinished;
+        };
+        Self::Committed { offset, len }
+    }
+
+    /// Encodes this state as a slot value; the inverse of [`Self::decode`].
+    pub(super) const fn encode(self) -> u64 {
+        let [offset, len] = match self {
+            Self::Unfinished => [0, 0],
+            Self::Committed { offset, len } => [offset, len.get()],
+        };
+        bytemuck::must_cast([offset, len])
+    }
 }
 
 impl<const SLOTS: usize> MappedLayout<SLOTS> {
@@ -176,25 +216,21 @@ impl<const SLOTS: usize> MappedLayout<SLOTS> {
     /// - The memory must have been zero-initialized when the region was
     ///   created, and accessed only through this protocol since.
     pub(super) unsafe fn new(mem: *mut [u8]) -> Option<Self> {
-        let len = mem.len();
+        let mem_start = mem.cast::<u8>();
+        let mem_len = mem.len();
+        // The mapping must be large enough to hold the fixed-location struct.
+        let payload_len = mem_len.checked_sub(size_of::<Meta<SLOTS>>())?;
+        // Descriptors store payload offsets in 32 bits: the conversion is
+        // the bound on the payload area.
+        u32::try_from(payload_len).ok()?;
         // The pointer conversions are the base checks: aligned, non-null.
-        let meta = NonNull::new(try_cast_aligned::<Meta<SLOTS>>(mem.cast::<u8>())?)?;
-        // The rest of the geometry: the payload area is everything after
-        // the fixed-location struct, so the struct must fit inside the
-        // mapping, and the rest must fit the descriptors' 32-bit offsets.
-        let payload_base = size_of::<Meta<SLOTS>>();
-        if payload_base > len || len - payload_base > MAX_PAYLOAD_REGION_LEN {
-            return None;
-        }
-        // SAFETY: `Meta` fits inside the mapping at its base (checked
-        // above); the payload area keeps the rest of the mapping as a raw
-        // slice.
-        let payloads = unsafe {
-            std::ptr::slice_from_raw_parts_mut(
-                mem.cast::<u8>().add(payload_base),
-                len - payload_base,
-            )
-        };
+        let meta = NonNull::new(try_cast_aligned::<_, Meta<SLOTS>>(mem_start)?)?;
+
+        // The payload area is everything after the fixed-location struct.
+        // SAFETY: the mapping is large enough to hold it (checked above).
+        let payload_start = unsafe { mem_start.add(size_of::<Meta<SLOTS>>()) };
+
+        let payloads = std::ptr::slice_from_raw_parts_mut(payload_start, payload_len);
         Some(Self { meta, payloads })
     }
 
@@ -228,6 +264,22 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+
+    #[test]
+    fn slot_codec_roundtrips() {
+        for (offset, len) in [(0, 5), (3, 5), (u32::MAX, 1), (0, u32::MAX)] {
+            let len = NonZeroU32::new(len).unwrap();
+            let encoded = SlotState::Committed { offset, len }.encode();
+            let SlotState::Committed { offset: o, len: l } = SlotState::decode(encoded) else {
+                panic!("committed value decoded as unfinished");
+            };
+            assert!(o == offset && l == len);
+        }
+        // Zero length fields publish nothing, whatever the offset half says.
+        assert!(matches!(SlotState::decode(UNFINISHED), SlotState::Unfinished));
+        assert!(matches!(SlotState::decode(FROZEN), SlotState::Unfinished));
+        assert!(matches!(SlotState::decode(42), SlotState::Unfinished));
+    }
 
     #[test]
     fn meta_is_the_counters_then_the_table() {
