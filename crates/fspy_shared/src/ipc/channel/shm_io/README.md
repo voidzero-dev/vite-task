@@ -1,32 +1,30 @@
-# shm_io: the fspy frame channel
+# shm_io: a crash-tolerant frame channel over shared memory
 
-One shared-memory region. Many writer processes append records; one
-receiver reads them once, at the end of a run. The writers are traced build
-processes reporting file accesses; the receiver is the runner deciding
-whether the run can be cached.
+One shared-memory region. Many writer processes append variable-length
+records; one receiver collects them once, when the channel's lifetime ends.
 
 Three requirements shaped everything here:
 
-1. **A writer may die at any instruction** — SIGKILL included. This must
-   never corrupt the channel or lose another writer's records.
-2. **A writer may outlive the run** (a daemon). The receiver must never
-   wait for writers; closing is immediate.
-3. **The result must be safe to cache from.** Either the trace holds every
-   record the run reported, or the run is declared uncacheable. Never a
-   silently short trace.
+1. **A writer may die at any instruction** — killed, crashed, anywhere.
+   This must never corrupt the channel or lose another writer's records.
+2. **A writer may outlive the channel.** The receiver must never wait for
+   writers; closing is immediate.
+3. **The receiver must know whether it got everything.** Either the frames
+   hold every record writers published, or they are flagged incomplete.
+   Never a silently short result.
 
-Earlier designs failed these. A file lock proved "no writers left", but a
-process that closes file descriptors it does not recognize releases the
-lock while its memory mapping keeps writing — the reader then parsed
-half-written bytes (issue #544). Waiting for writers hangs forever on
-daemons. Counting active writers breaks because a killed process never
-decrements the count.
+Simpler designs fail these. A lock that writers hold while active proves
+"no writers left" only as long as every writer manages the lock correctly —
+one process dropping it early lets the reader race live writes and parse
+half-written bytes. Waiting for writers to finish hangs forever on a
+writer that never exits. Counting active writers breaks because a killed
+process never decrements the count.
 
 ## The region
 
-The channel is a sparse file in the temp directory, mapped into every
-participating process. It is address space, not memory: only pages that
-are actually written get backed.
+The region is any zero-initialized shared memory — in practice a sparse
+file mapped into every participating process. A sparse mapping is address
+space, not memory: only pages that are actually written get backed.
 
 ```text
 | header (64 B) | descriptor table (1/8 of the region) | payloads (the rest, grow up) |
@@ -40,13 +38,14 @@ The header holds three words, and every one of them only ever counts up:
 - the **payload counter** — how many payload bytes were ever reserved,
   including by failed claims. Only writers read it.
 
-The table has one 8-byte slot per frame. For the production 4 GiB region
-that is ~67 million slots; the ~3.5 GiB payload region fits ~15–20 million
-typical records, so payload space runs out first. The split is fixed, not a
-movable frontier, because fixed bounds are what make claiming wait-free:
-each counter is checked against its own constant limit using the value
-`fetch_add` returned, and overshooting a limit is harmless because nothing
-ever locates data through a counter — descriptors are self-describing.
+The table has one 8-byte slot per frame. For a 4 GiB region that is ~67
+million slots; the ~3.5 GiB payload region fits ~15–20 million records of
+a few hundred bytes, so payload space runs out first. The split is fixed,
+not a movable frontier, because fixed bounds are what make claiming
+wait-free: each counter is checked against its own constant limit using
+the value `fetch_add` returned, and overshooting a limit is harmless
+because nothing ever locates data through a counter — descriptors are
+self-describing.
 
 ## Writing a frame
 
@@ -69,27 +68,29 @@ runs is the heart of the design:
   zero. The receiver ignores it. Nothing else is affected, and no cleanup
   code ever runs or is needed.
 - **The process is alive but abandoned the frame** (dropped it without
-  finishing). The drop sets the incomplete flag, because the process will
-  go on to perform the file operation it just failed to record — the trace
-  now under-reports, so the run must not be cached.
+  finishing). The drop sets the incomplete flag: a live writer that failed
+  to publish a record may still go on to act as if it had, so the channel
+  stops claiming completeness.
 
-The rule that makes ignoring dead writers safe: **a record is committed
-before the recorded operation is performed.** A dead writer's missing
-record is an operation that never happened. A record refused after close
-belongs to an operation performed after the run's boundary.
+This split assumes the intended usage contract: **a writer publishes a
+record before performing the action the record describes.** Under that
+contract, a dead writer's missing record describes an action that never
+happened, and a record refused after close describes an action performed
+after the channel's boundary — both safe to ignore. A writer that records
+_after_ acting must not rely on these semantics.
 
 ## Closing and reading
 
-The receiver closes once, at the end of the run:
+The receiver closes once:
 
 1. **Snapshot** the claim counter with a plain load. This is the boundary:
-   claims at or before it are in the run, later ones are not.
+   claims at or before it are in, later ones are not.
 2. **Gate** further claims by setting the CLOSED bit, so stragglers stop.
 3. **Freeze** every slot in the snapshot: a compare-and-swap flips zero to
    ABORTED. If the slot was already committed, the swap fails and the frame
    is kept. Exactly one side wins each slot; both outcomes are terminal.
 4. **Validate** each committed descriptor's bounds. A descriptor no correct
-   writer could produce fails the whole trace — never a panic, never an
+   writer could produce fails the whole channel — never a panic, never an
    out-of-bounds read.
 
 The result, `Frames`, owns the mapping and lends out one `&[u8]` per
@@ -109,7 +110,7 @@ CLAIMED (slot 0) ---+
 ## Why this is sound, in one list
 
 - Frame traversal never reads payload bytes; every slot has a fixed place.
-  The #544 failure class (payload parsed as metadata) is structurally gone.
+  A half-written payload can never be parsed as metadata.
 - A payload is reachable only through its committed descriptor. The commit
   is a `Release` write and the receiver's failed freeze is an `Acquire`
   read, so an observed descriptor implies fully visible payload bytes.
@@ -127,11 +128,12 @@ CLAIMED (slot 0) ---+
 
 - Claiming is two atomic adds; committing is one CAS. Nothing retries.
 - Closing costs one pass over the claimed slots. No payload is copied.
-- On Linux, the first touch of the sparse file can cost milliseconds on
-  journalling filesystems (it is the fault path, not block allocation —
-  `fallocate` does not help). Channel creation therefore pre-touches the
-  header page on a background thread, concurrently with process startup.
-  Windows and macOS fault cheaply and skip this.
+- On Linux, the first touch of the sparse backing file can cost
+  milliseconds on journalling filesystems (it is the fault path, not block
+  allocation — `fallocate` does not help). Creators should run
+  [`pre_fault`] off any latency-sensitive path — for example on a
+  background thread, concurrently with spawning the first writer. Windows
+  and macOS fault cheaply and skip this.
 
 ## Files
 

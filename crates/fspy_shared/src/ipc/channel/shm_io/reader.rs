@@ -47,11 +47,12 @@ impl<M: AsRawSlice> Frames<M> {
         })
     }
 
-    /// Whether the trace contains every reported access.
+    /// Whether every record a writer published made it in.
     ///
     /// False when a live writer lost a record before the channel closed
-    /// (capacity exhaustion or an abandoned frame): the trace then
-    /// under-reports the run's accesses and must not back a cache entry.
+    /// (capacity exhaustion or an abandoned frame): the frames then
+    /// under-report what writers went on to do, and consumers that need
+    /// completeness must reject them.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         self.complete
@@ -67,8 +68,8 @@ impl<M> fmt::Debug for Frames<M> {
     }
 }
 
-/// A trace whose shared-memory metadata could not have been produced by this
-/// protocol. The mapping was corrupted; the trace is unusable.
+/// Shared-memory metadata that could not have been produced by this
+/// protocol. The region was corrupted; its frames are unusable.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProtocolError {
     #[error("corrupt shared-memory frame descriptor at slot {slot_index}")]

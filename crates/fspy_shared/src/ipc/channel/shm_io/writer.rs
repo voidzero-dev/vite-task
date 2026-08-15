@@ -26,12 +26,12 @@ pub struct ShmWriter<M> {
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimError {
-    /// The receiver closed the channel; the run is over and the access is
-    /// outside its tracking boundary.
+    /// The receiver closed the channel; anything after this point is
+    /// outside the channel's boundary.
     #[error("the channel has been closed by the receiver")]
     Closed,
     /// The frame is oversized or the region is full. The claim has already
-    /// recorded the loss, so the trace will be reported as incomplete.
+    /// recorded the loss, so the channel will report itself incomplete.
     #[error("no space left in the shared-memory region")]
     Capacity,
 }
@@ -86,14 +86,15 @@ impl<M: AsRawSlice> ShmWriter<M> {
     ///
     /// The frame is invisible to the receiver until [`FrameMut::finish`]
     /// commits it. Dropping the frame without finishing abandons the claim
-    /// and marks the trace incomplete.
+    /// and marks the channel incomplete.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let state = self.state();
         let reservation = state.try_claim(frame_size.get()).map_err(|err| match err {
             ReserveError::Closed => ClaimError::Closed,
             ReserveError::Capacity => {
                 // The record is lost but this process lives on to perform the
-                // operation, so poison the trace before the caller proceeds.
+                // operation, so flag the channel incomplete before the caller
+                // proceeds.
                 state.flag_incomplete();
                 ClaimError::Capacity
             }
@@ -179,7 +180,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
 /// [`FrameMut::finish`] commits the frame; it is the only way to make the
 /// payload visible to the receiver. Dropping the frame instead abandons the
 /// claim: the slot stays unfinished (the receiver will abort and ignore it)
-/// and the trace is marked incomplete, because the dropping process is alive
+/// and the channel is marked incomplete, because the dropping process is alive
 /// to perform the operation this record was meant to describe. A process
 /// that dies mid-frame runs no drop code and marks nothing — correctly so,
 /// since records are published before the recorded operation is performed.

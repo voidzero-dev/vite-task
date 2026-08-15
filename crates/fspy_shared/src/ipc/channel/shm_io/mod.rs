@@ -57,8 +57,8 @@
 //! drops are sound because writers publish a record *before* performing the
 //! recorded operation: a process that died mid-frame never performed the
 //! operation, and one that claimed or committed after the snapshot performs
-//! it outside the run's tracking boundary. A live writer that loses a
-//! record *before* close (capacity, abandonment) flags the trace incomplete
+//! it outside the channel's boundary. A live writer that loses a
+//! record *before* close (capacity, abandonment) flags the channel incomplete
 //! ([`Frames::is_complete`]).
 //!
 //! Correctness never depends on writer-side cleanup: no exit hooks, PID
@@ -257,8 +257,8 @@ mod tests {
 
         // Larger than the payload region, and larger than the absolute frame
         // limit: both fail the claim. The failed reservation stays counted —
-        // harmless, because the failure already made the trace incomplete
-        // and therefore uncacheable.
+        // harmless, because the failure already marked the channel
+        // incomplete.
         assert!(!writer.try_write_frame(&vec![0u8; 2048]));
         assert!(
             writer.claim_frame(((i32::MAX as usize) + 1).try_into().unwrap()).unwrap_err()
@@ -291,7 +291,7 @@ mod tests {
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next().unwrap() == b"bar");
         assert!(iter.next() == None);
-        // Death loses no performed operation, so the trace stays complete.
+        // Death loses no performed operation, so the channel stays complete.
         assert!(frames.is_complete());
     }
 
@@ -346,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn abandoned_frame_marks_the_trace_incomplete() {
+    fn abandoned_frame_marks_the_channel_incomplete() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
@@ -419,8 +419,8 @@ mod tests {
         assert!(frames.is_complete());
 
         // Close set the gate: a straggler's claim fails cleanly and does
-        // not mark the trace incomplete — the access is outside the closed
-        // boundary.
+        // not mark the channel incomplete — the operation is outside the
+        // closed boundary.
         assert!(writer.is_closed());
         assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
         assert!(frames.is_complete());
@@ -769,7 +769,7 @@ mod tests {
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);
         // Death runs no drop code, so the killed writer's lost frame does not
-        // mark the trace incomplete.
+        // mark the channel incomplete.
         assert!(frames.is_complete());
     }
 }
