@@ -167,7 +167,9 @@ CLAIMED (slot 0) ---+
 ## Performance notes
 
 - Claiming is two atomic adds; committing is one CAS. Nothing retries.
-- Closing costs one pass over the claimed slots. No payload is copied.
+- Closing costs one pass over the claimed slots. Nothing is copied and
+  nothing is allocated — the whole module is allocation-free; the reader
+  re-reads the frozen table to iterate.
 - On Linux, the first touch of the sparse backing file can cost
   milliseconds on journalling filesystems (it is the fault path, not block
   allocation — `fallocate` does not help). Creators should run `pre_fault`

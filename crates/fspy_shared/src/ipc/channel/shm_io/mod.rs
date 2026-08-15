@@ -83,7 +83,7 @@ use std::{
 };
 
 use fspy_shm::Mapping;
-use layout::{CLOSED, Header, PayloadSpan};
+use layout::{CLOSED, Header};
 
 // The region arithmetic in `layout` relies on `usize` accommodating sums of
 // 32-bit-bounded quantities, and the descriptor protocol on native 64-bit
@@ -474,12 +474,16 @@ pub enum ProtocolError {
     CorruptDescriptor { slot_index: usize },
 }
 
-/// A reader over the committed frames of a closed channel: validated spans
-/// borrowed from the mapping, which stays alive inside this value and is
-/// released when the reader drops.
+/// A reader over the committed frames of a closed channel, serving them
+/// straight out of the mapping, which stays alive inside this value and
+/// is released when the reader drops. It holds no buffer: iteration
+/// re-reads the frozen descriptor table, so closing allocates nothing.
 pub struct ShmReader<M> {
     mem: M,
-    spans: Vec<PayloadSpan>,
+    /// Length of the frozen prefix of the descriptor table.
+    slot_count: usize,
+    /// Committed frames in that prefix.
+    frames: usize,
     complete: bool,
 }
 
@@ -514,7 +518,8 @@ impl<M: AsRawSlice> ShmReader<M> {
     /// Panics when the region is not `u64`-aligned or its size is outside
     /// the supported range (see [`SharedState::borrow`]).
     pub unsafe fn close(mem: M) -> Result<Self, ProtocolError> {
-        let mut spans = Vec::new();
+        let slot_count;
+        let mut frames = 0;
         let complete;
         {
             // SAFETY: forwarded from this function's contract; the raw
@@ -528,7 +533,7 @@ impl<M: AsRawSlice> ShmReader<M> {
             // a counter inflated by failed claims (or by a foreign
             // scribble) degrades to a full-table sweep, not an error.
             let claims = state.header.claims.load(Ordering::Relaxed);
-            let slot_count =
+            slot_count =
                 usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(state.table.len());
             // The same load carries the completeness verdict: a gate set
             // before this boundary is a failed claim's loss report — or an
@@ -544,9 +549,11 @@ impl<M: AsRawSlice> ShmReader<M> {
             state.header.claims.fetch_or(CLOSED, Ordering::Relaxed);
 
             // Freeze pass: drive every admitted slot to a terminal state
-            // and collect the committed spans. After this loop the
+            // and validate the committed descriptors. After this loop the
             // snapshot's slice of the descriptor table can no longer change
-            // — late writers lose their commit race against `ABORTED`.
+            // — late writers lose their commit race against `ABORTED` — so
+            // iteration re-reads the table instead of snapshotting it:
+            // nothing is copied or allocated.
             for slot_index in 0..slot_count {
                 // Rule 3: `Acquire` on failure makes a committed payload
                 // visible.
@@ -567,13 +574,14 @@ impl<M: AsRawSlice> ShmReader<M> {
                 }
                 // Any other terminal value must be a committed descriptor
                 // with a valid span; a foreign scribble fails the decode.
-                let span = layout::decode(state.len, bits)
-                    .ok_or(ProtocolError::CorruptDescriptor { slot_index })?;
-                spans.push(span);
+                if layout::decode(state.len, bits).is_none() {
+                    return Err(ProtocolError::CorruptDescriptor { slot_index });
+                }
+                frames += 1;
             }
         }
 
-        Ok(Self { mem, spans, complete })
+        Ok(Self { mem, slot_count, frames, complete })
     }
 
     /// Iterates over the committed frames in claim order.
@@ -596,7 +604,7 @@ impl<M: AsRawSlice> ShmReader<M> {
 impl<M> fmt::Debug for ShmReader<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ShmReader")
-            .field("frames", &self.spans.len())
+            .field("frames", &self.frames)
             .field("complete", &self.complete)
             .finish_non_exhaustive()
     }
@@ -604,25 +612,45 @@ impl<M> fmt::Debug for ShmReader<M> {
 
 /// Iterator over a [`ShmReader`]'s committed frames, in claim order.
 pub struct Iter<'a> {
-    /// Base address of the mapping the spans point into.
+    /// Base address of the mapping the descriptors' spans point into.
     base: *const u8,
-    spans: slice::Iter<'a, PayloadSpan>,
+    /// The not-yet-visited part of the table's frozen prefix.
+    table: &'a [AtomicU64],
+    /// Mapping length, which decoding validates descriptors against.
+    mapping_len: usize,
+    /// Committed frames not yet yielded.
+    remaining: usize,
 }
 
 impl<'a> Iterator for Iter<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
-        let span = self.spans.next()?;
-        // SAFETY: `ShmReader::close` validated the span against the
-        // mapping's layout, and a committed span is immutable for the
-        // mapping's lifetime (see the section comment above); the reader
-        // borrowed for `'a` keeps the mapping alive and mapped.
-        Some(unsafe { slice::from_raw_parts(self.base.add(span.offset), span.len) })
+        while let Some((slot, rest)) = self.table.split_first() {
+            self.table = rest;
+            // The slot is terminal (`close` froze it), so this plain load
+            // reads the same value the freeze pass saw; the transfer that
+            // carried the reader to this thread carried the freeze pass's
+            // `Acquire` payload visibility with it (rule 3).
+            let bits = slot.load(Ordering::Relaxed);
+            // `None` is an aborted slot: nothing was published. Corrupt
+            // values cannot appear — `close` already failed the channel on
+            // them — so every decoded span is one `close` validated.
+            let Some(span) = layout::decode(self.mapping_len, bits) else {
+                continue;
+            };
+            self.remaining -= 1;
+            // SAFETY: `close` validated the span against the mapping's
+            // layout, and a committed span is immutable for the mapping's
+            // lifetime (see the section comment above); the reader
+            // borrowed for `'a` keeps the mapping alive and mapped.
+            return Some(unsafe { slice::from_raw_parts(self.base.add(span.offset), span.len) });
+        }
+        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.spans.size_hint()
+        (self.remaining, Some(self.remaining))
     }
 }
 
@@ -631,7 +659,16 @@ impl<'a, M: AsRawSlice> IntoIterator for &'a ShmReader<M> {
     type Item = &'a [u8];
 
     fn into_iter(self) -> Iter<'a> {
-        Iter { base: self.mem.as_raw_slice().cast::<u8>().cast_const(), spans: self.spans.iter() }
+        // SAFETY: `close` requires the region to stay valid and
+        // protocol-governed for the reader's lifetime, and it validated
+        // the geometry.
+        let state = unsafe { SharedState::borrow(self.mem.as_raw_slice()) };
+        Iter {
+            base: self.mem.as_raw_slice().cast::<u8>().cast_const(),
+            table: &state.table[..self.slot_count],
+            mapping_len: state.len,
+            remaining: self.frames,
+        }
     }
 }
 
