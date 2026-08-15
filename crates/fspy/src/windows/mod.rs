@@ -24,14 +24,14 @@ use crate::{
     ChildTermination, TrackedChild,
     command::Command,
     error::SpawnError,
-    ipc::{CollectedAccesses, SHM_CAPACITY},
+    ipc::{ChannelAccesses, SHM_CAPACITY},
 };
 
 const INTERPOSE_CDYLIB: Artifact =
     artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_WINDOWS");
 
 pub struct PathAccessIterable {
-    ipc_accesses: CollectedAccesses,
+    ipc_accesses: ChannelAccesses,
 }
 
 impl PathAccessIterable {
@@ -169,7 +169,7 @@ impl SpyImpl {
                 };
                 // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
-                let ipc_accesses = CollectedAccesses::collect_async(receiver).await?;
+                let ipc_accesses = ChannelAccesses::try_from(receiver)?;
                 let path_accesses = PathAccessIterable { ipc_accesses };
 
                 io::Result::Ok(ChildTermination { status, path_accesses })

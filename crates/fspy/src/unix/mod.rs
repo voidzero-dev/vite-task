@@ -25,7 +25,7 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
-use crate::ipc::{CollectedAccesses, SHM_CAPACITY};
+use crate::ipc::{ChannelAccesses, SHM_CAPACITY};
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
 
 #[derive(Debug)]
@@ -162,7 +162,7 @@ impl SpyImpl {
                 // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
                 #[cfg(not(target_env = "musl"))]
-                let ipc_accesses = CollectedAccesses::collect_async(ipc_receiver).await?;
+                let ipc_accesses = ChannelAccesses::try_from(ipc_receiver)?;
                 let path_accesses = PathAccessIterable {
                     arenas,
                     #[cfg(not(target_env = "musl"))]
@@ -180,7 +180,7 @@ impl SpyImpl {
 pub struct PathAccessIterable {
     arenas: Vec<PathAccessArena>,
     #[cfg(not(target_env = "musl"))]
-    ipc_accesses: CollectedAccesses,
+    ipc_accesses: ChannelAccesses,
 }
 
 impl PathAccessIterable {
