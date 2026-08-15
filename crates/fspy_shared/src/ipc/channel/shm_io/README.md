@@ -46,11 +46,11 @@ size of the file they mapped, with nothing else to agree on. For a 4 GiB
 region that is ~67 million slots; the ~3.5 GiB payload region fits ~15–20
 million records of a few hundred bytes, so payload space runs out first.
 
-The split is fixed rather than a movable frontier because fixed bounds are
-what make claiming wait-free: each counter is checked against its region's
-limit using the value `fetch_add` returned, and overshooting is harmless
-because nothing ever locates data through a counter — a committed
-descriptor carries its own offset and length.
+The line between table space and payload space never moves. That is what
+keeps claiming free of retry loops: each counter is checked against a
+limit that never changes, using the value `fetch_add` returned, and
+overshooting a limit is harmless because nothing ever locates data through
+a counter — a committed descriptor carries its own offset and length.
 
 ## Writing a frame
 
@@ -62,9 +62,9 @@ Three steps:
 2. **Fill.** The writer serializes into its payload span. The span is
    exclusively its own; nobody else knows it exists yet.
 3. **Commit.** One compare-and-swap flips the frame's slot from zero to a
-   descriptor holding the payload's offset and length. The CAS is the
-   publication point: before it, the frame does not exist; after it, the
-   payload is immutable.
+   descriptor holding the payload's offset and length. Before this swap the
+   receiver cannot see the frame at all; after it, the frame is visible and
+   its payload never changes again.
 
 Committing is explicit (`FrameMut::finish`). What happens when it never
 runs is the heart of the design:
@@ -77,12 +77,12 @@ runs is the heart of the design:
   to publish a record may still go on to act as if it had, so the channel
   stops claiming completeness.
 
-This split assumes the intended usage contract: **a writer publishes a
-record before performing the action the record describes.** Under that
-contract, a dead writer's missing record describes an action that never
+These rules assume one thing about how the channel is used: **a writer
+publishes a record before performing the action the record describes.**
+Then a dead writer's missing record describes an action that never
 happened, and a record refused after close describes an action performed
-after the channel's boundary — both safe to ignore. A writer that records
-_after_ acting must not rely on these semantics.
+after the channel closed — both safe to ignore. A writer that records
+_after_ acting must not rely on this.
 
 ## Closing and reading
 
@@ -93,7 +93,8 @@ The receiver closes once:
 2. **Gate** further claims by setting the CLOSED bit, so stragglers stop.
 3. **Freeze** every slot in the snapshot: a compare-and-swap flips zero to
    ABORTED. If the slot was already committed, the swap fails and the frame
-   is kept. Exactly one side wins each slot; both outcomes are terminal.
+   is kept. Exactly one side wins each slot, and either way the slot
+   never changes again.
 4. **Validate** each committed descriptor's bounds. A descriptor no correct
    writer could produce fails the whole channel — never a panic, never an
    out-of-bounds read.
@@ -114,20 +115,21 @@ CLAIMED (slot 0) ---+
 
 ## Why this is sound, in one list
 
-- Frame traversal never reads payload bytes; every slot has a fixed place.
-  A half-written payload can never be parsed as metadata.
+- Finding frames never involves reading payload bytes; every slot has a
+  fixed place. A half-written payload can never be mistaken for metadata.
 - A payload is reachable only through its committed descriptor. The commit
   is a `Release` write and the receiver's failed freeze is an `Acquire`
   read, so an observed descriptor implies fully visible payload bytes.
-- Committed and aborted are terminal. No code path changes a terminal slot.
+- Once a slot is committed or aborted, nothing ever changes it again.
 - Counters only grow. The receiver clamps them to the fixed capacities, so
   an inflated counter degrades into extra aborted slots, not corruption.
-- The bounds checks on descriptors are what justify the `unsafe` borrow
-  construction: the receiver's memory safety never depends on another
-  process being correct.
-- Byte _integrity_ does trust protocol compliance — a process scribbling
-  random memory is outside the model. That trust buys the borrow-in-place
-  reader and the absence of checksums.
+- The bounds checks on descriptors are what make the `unsafe` reference
+  construction correct: whether the receiver stays memory-safe never
+  depends on another process behaving.
+- Whether the bytes are _right_ does trust the other processes to follow
+  the protocol — one that scribbles random memory is outside the model.
+  That trust is why the receiver can read frames straight out of shared
+  memory, with no copies and no checksums.
 
 ## Performance notes
 
@@ -148,9 +150,9 @@ CLAIMED (slot 0) ---+
 | `layout.rs` | Pure geometry: the sizing rule that turns a mapping length into table and payload bounds, payload rounding, and span validation. Plain integer math, no pointers, no atomics.                                                                        |
 | `slot.rs`   | The descriptor codec: pack and unpack one slot value, classify it as unfinished, aborted, committed, or corrupt. Pure.                                                                                                                               |
 | `state.rs`  | The only module that touches shared memory: one unsafe borrow builds three typed views — the `repr(C)` header struct, the descriptor table as a slice of atomics, and the raw payload area — and the three-rule memory-ordering contract lives here. |
-| `writer.rs` | Claim, fill, finish. Owns the argument for why a claimed payload span is exclusively the writer's.                                                                                                                                                   |
-| `reader.rs` | Close (snapshot, gate, freeze, validate) and `Frames`. Owns the argument for why borrowing committed spans is sound.                                                                                                                                 |
+| `writer.rs` | Claim, fill, finish. Explains why a claimed payload span belongs to its writer alone.                                                                                                                                                                |
+| `reader.rs` | Close (snapshot, gate, freeze, validate) and `Frames`. Explains why handing out references to committed spans is safe.                                                                                                                               |
 
-Each file carries one self-contained argument, so the protocol can be
+Each file explains itself without the others, so the protocol can be
 reviewed module by module: the pure math first, then the atomics, then the
-two aliasing arguments built on top of them.
+two modules that say who may touch which bytes.

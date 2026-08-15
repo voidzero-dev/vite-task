@@ -1,4 +1,4 @@
-//! Crash-tolerant, nonblocking frame publication in a shared memory region.
+//! A crash-tolerant, nonblocking frame channel in a shared memory region.
 //!
 //! Multiple writer processes append variable-length frames concurrently; one
 //! receiver closes the channel and collects every committed frame without
