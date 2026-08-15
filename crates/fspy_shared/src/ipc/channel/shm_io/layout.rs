@@ -10,7 +10,7 @@
 //! header struct, the sizing rule that turns a mapping length into table
 //! and payload bounds, payload rounding, payload-span validation, and the
 //! descriptor-slot codec. The operations on the region live in
-//! [`super::shared`].
+//! [`super`].
 //!
 //! Overflow safety follows from one bound enforced at construction time:
 //! the mapping length never exceeds [`MAX_MAPPING_LEN`], so all offsets fit
