@@ -179,10 +179,22 @@ CLAIMED (slot 0) ---+
 
 ## Files
 
-| File        | Role                                                                                                                                                                                                                                                                        |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`    | The protocol, in reading order: the overview docs, the typed views of the region and the ordering contract, the writer side (claim, fill, finish), the reader side (close and iteration), and the integration tests — miri-clean (`cargo miri test -p fspy_shared shm_io`). |
-| `layout.rs` | The region's shape: the header struct, the sizing rule that turns a mapping length into table and payload bounds, payload rounding, span validation, and the descriptor codec. Describes memory, never touches it.                                                          |
+| File        | Role                                                                                                                                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`    | Public surface (`ShmWriter`, `ShmReader`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`). |
+| `writer.rs` | The writer side: claim a frame, fill it, finish it.                                                                                                                                               |
+| `reader.rs` | The reader side: close the channel, then iterate the committed frames — with the argument for why its borrows are sound.                                                                          |
+| `layout.rs` | Everything both sides share: the region's shape and sizing math, the header, the descriptor codec, and `MappedLayout` — the shape bound to one concrete mapping.                                  |
 
-`mod.rs` depends on `layout.rs`; read `layout.rs` first, then `mod.rs` top
-to bottom.
+Arrows point at what a file depends on:
+
+```mermaid
+graph TD
+    mod["mod.rs<br>public surface"] --> writer["writer.rs<br>claim, fill, finish"]
+    mod --> reader["reader.rs<br>close and iterate"]
+    writer --> layout["layout.rs<br>what both sides share"]
+    reader --> layout
+```
+
+Read from the bottom up — `layout.rs`, then `writer.rs` and `reader.rs`,
+then `mod.rs` — and each file only needs the ones below it.

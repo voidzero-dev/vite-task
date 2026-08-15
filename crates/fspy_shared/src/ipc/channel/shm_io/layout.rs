@@ -1,23 +1,24 @@
-//! Pure geometry of the shared-memory region.
+//! Everything the writer and the reader sides share.
 //!
 //! The region is divided into three fixed areas:
 //!
 //! ```text
-//! | header | descriptor table (SLOTS slots) | payloads (grow up) |
+//! | header | descriptor table | payloads (grow up) |
 //! ```
 //!
-//! This module holds the region's shape, with no memory access: the
-//! header struct, the sizing rule that turns a mapping length into table
-//! and payload bounds, payload rounding, payload-span validation, and the
-//! descriptor-slot codec. The operations on the region live in
-//! [`super`].
+//! This module holds the region's shape — the sizing rule that turns a
+//! mapping length into table and payload bounds, payload rounding, and
+//! payload-span validation — the header type, the descriptor-slot codec
+//! both sides encode and decode, and [`MappedLayout`]: the shape bound to
+//! one concrete mapping, built once when an endpoint attaches. The sides
+//! themselves live in [`super::writer`] and [`super::reader`].
 //!
 //! Overflow safety follows from one bound enforced at construction time:
 //! the mapping length never exceeds [`MAX_MAPPING_LEN`], so all offsets fit
 //! the 32-bit descriptor fields and all sums fit `usize` on the 64-bit
 //! targets the parent module asserts.
 
-use std::sync::atomic::AtomicU64;
+use std::{ptr::NonNull, sync::atomic::AtomicU64};
 
 /// The CLOSED gate bit of the claim counter, set by the receiver when it
 /// closes the channel and by any writer whose claim failed — the loss
@@ -193,6 +194,150 @@ pub(super) fn committed(payload_offset: usize, payload_len: usize) -> u64 {
 /// writer could have committed for a `mapping_len`-byte mapping.
 pub(super) const fn decode(mapping_len: usize, bits: u64) -> Option<PayloadSpan> {
     PayloadSpan::validate(mapping_len, (bits & OFFSET_MAX) as usize, (bits >> LEN_SHIFT) as usize)
+}
+
+// --- The mapped layout and the ordering contract ---------------------------
+// `MappedLayout::new` builds three typed views of the region — the
+// `repr(C)` `Header`, the descriptor table as a slice of atomics sized by
+// the mapping length, and the untyped payload area as a raw slice — once,
+// when an endpoint attaches; the endpoint stores them beside the mapping
+// they point into. Every access after that is a plain field access or a
+// bounds-checked index. The payload area stays raw because writers hold
+// exclusive `&mut` borrows into it, which must not alias any shared
+// reference.
+//
+// # Shared atomics
+//
+// The header holds two independent monotonic `AtomicU64` counters:
+//
+// - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
+//   claims ever attempted. Claiming is one wait-free `fetch_add`; the
+//   returned old value carries the claim's slot index, the gate, and — by
+//   comparison against the fixed table capacity — the capacity verdict.
+//   The gate is set by the receiver at close and by every failed claim:
+//   one bit is both the loss report completeness derives from and the
+//   valve that stops writers spending work on a channel whose result the
+//   receiver must already reject.
+// - the **payload counter**: payload bytes ever reserved, bumped by another
+//   wait-free `fetch_add`.
+//
+// Failed claims leave the counters bumped; that is harmless, because the
+// receiver clamps instead of trusting the counts, and committed
+// descriptors carry their own offset and length, so the counters never
+// locate data. The payload counter can even wrap on a long-condemned
+// channel — still harmless: wrapping requires prior failures, failures
+// set the gate, and the gate refuses every claim before a span is built.
+//
+// # Memory-ordering contract
+//
+// Three synchronization rules cover the whole protocol:
+//
+// 1. **Claim versus close** — the receiver's close boundary is a plain
+//    snapshot load of the claim counter: claims ordered at or before the
+//    value it reads (in the counter's modification order) are in the
+//    snapshot; later ones receive slot indices the receiver never visits.
+//    Claims publish no payload data, so `Relaxed` suffices throughout.
+//    The CLOSED gate is not itself the boundary — it stops stragglers
+//    from claiming (and allocating pages) forever; any claim admitted
+//    between the snapshot and the gate lands beyond the snapshot and is
+//    never observed. Completeness rides the same modification order: a
+//    failed claim sets the gate as its loss report before the writer
+//    performs the operation whose record was lost — so the snapshot
+//    either sees the bit, or the loss belongs to an operation performed
+//    after the boundary. A writer that skipped because it saw the bit is
+//    covered the same way: the bit that made it skip either reaches the
+//    snapshot or postdates the boundary. A writer that dies before
+//    setting the bit never performed its operation, so nothing was
+//    actually lost.
+// 2. **Writer commit** — the slot compare-and-swap in `FrameMut::finish`
+//    uses `Release`: every payload write happens-before the committed
+//    descriptor becomes visible.
+// 3. **Receiver observation** — the freeze compare-and-swap in
+//    `ShmReader::close` uses `Acquire` on failure: observing a committed
+//    descriptor also makes the payload writes it published visible, so the
+//    borrows `ShmReader` later hands out read settled bytes.
+
+/// The typed views of the region: the header, the descriptor table
+/// sized from the mapping length, and the raw payload area. Built once
+/// when an endpoint attaches and stored in it; the views stay valid
+/// because they point into the mapping's stable target, not into the
+/// endpoint value.
+#[derive(Clone, Copy)]
+pub(super) struct MappedLayout {
+    header: NonNull<Header>,
+    table: NonNull<[AtomicU64]>,
+    pub(super) payloads: *mut [u8],
+    /// The real mapping length. Not derivable from the parts above: the
+    /// payload region rounds down to whole `u64`s, and re-deriving the
+    /// layout from a shortened length could shift the table boundary.
+    pub(super) len: usize,
+}
+
+impl MappedLayout {
+    /// Builds the typed views of a shared mapping.
+    ///
+    /// # Safety
+    ///
+    /// - `mem` must be valid for reads and writes, and its address stable,
+    ///   for as long as the returned views (and any copy of them) are
+    ///   used.
+    /// - The memory must have been zero-initialized when the region was
+    ///   created, and accessed only through this protocol since.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the mapping cannot host the protocol at all: base not
+    /// `u64`-aligned, smaller than the header, or larger than
+    /// [`MAX_MAPPING_LEN`]. These indicate a broken caller, not
+    /// runtime data; senders guard untrusted mappings with
+    /// [`super::is_supported_region_len`] first.
+    #[expect(clippy::cast_ptr_alignment, reason = "the base is asserted `u64`-aligned below")]
+    pub(super) unsafe fn new(mem: *mut [u8]) -> Self {
+        let base = mem.cast::<u8>();
+        let len = mem.len();
+        assert!(!base.is_null());
+        assert!(base.addr().is_multiple_of(align_of::<Header>()));
+        assert!((HEADER_LEN..=MAX_MAPPING_LEN).contains(&len));
+        // SAFETY: the base is non-null (asserted), and the header and the
+        // table lie inside the mapping — the header by the asserts above,
+        // the table by `max_slots` — at `u64`-aligned offsets. The
+        // payload area keeps the rest of the mapping as a raw slice;
+        // `layout` bounds every span carved from it.
+        unsafe {
+            Self {
+                header: NonNull::new_unchecked(base.cast::<Header>()),
+                table: NonNull::slice_from_raw_parts(
+                    NonNull::new_unchecked(base.add(HEADER_LEN).cast::<AtomicU64>()),
+                    max_slots(len),
+                ),
+                payloads: std::ptr::slice_from_raw_parts_mut(
+                    base.add(payload_base(len)),
+                    payload_region_len(len),
+                ),
+                len,
+            }
+        }
+    }
+
+    /// The protocol header.
+    pub(super) const fn header(&self) -> &Header {
+        // SAFETY: `new`'s contract keeps the target valid while any view
+        // is used, and the header consists of atomics, so the shared
+        // borrow is valid even while other threads and processes access
+        // the same memory through them.
+        unsafe { self.header.as_ref() }
+    }
+
+    /// The descriptor table.
+    pub(super) const fn table(&self) -> &[AtomicU64] {
+        // SAFETY: as for `header`.
+        unsafe { self.table.as_ref() }
+    }
+
+    /// Base address of the region: the header sits at offset zero.
+    pub(super) const fn base(&self) -> *const u8 {
+        self.header.as_ptr().cast()
+    }
 }
 
 #[cfg(test)]
