@@ -143,6 +143,15 @@ pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 //    descriptor also makes the payload writes it published visible, so the
 //    borrows `ShmReader` later hands out read settled bytes.
 
+/// Casts to a pointer of another type, returning `None` when the pointer
+/// is not aligned for `U`: a stable stand-in for the still-unstable
+/// [`<*mut T>::try_cast_aligned`][std].
+///
+/// [std]: https://doc.rust-lang.org/std/primitive.pointer.html#method.try_cast_aligned
+fn try_cast_aligned<U>(ptr: *mut u8) -> Option<*mut U> {
+    if ptr.addr().is_multiple_of(align_of::<U>()) { Some(ptr.cast()) } else { None }
+}
+
 /// The typed views of the region: the fixed-location [`Meta`] struct
 /// and the raw payload area. Built once when an endpoint attaches and
 /// stored in it; the views stay valid because they point into the
@@ -154,7 +163,10 @@ pub(super) struct MappedLayout<const SLOTS: usize> {
 }
 
 impl<const SLOTS: usize> MappedLayout<SLOTS> {
-    /// Builds the typed views of a shared mapping.
+    /// Builds the typed views of a shared mapping, or `None` when the
+    /// mapping cannot host the protocol at all: base null or not
+    /// `u64`-aligned, [`Meta`] not fitting inside the mapping, or the
+    /// payload area beyond the descriptors' 32-bit offsets.
     ///
     /// # Safety
     ///
@@ -163,37 +175,27 @@ impl<const SLOTS: usize> MappedLayout<SLOTS> {
     ///   used.
     /// - The memory must have been zero-initialized when the region was
     ///   created, and accessed only through this protocol since.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the mapping cannot host the protocol at all: base not
-    /// `u64`-aligned, [`Meta`] not fitting inside the mapping, or the
-    /// payload area beyond the descriptors' 32-bit offsets. These
-    /// indicate a broken caller, not runtime data; senders guard
-    /// untrusted mappings with [`super::is_supported_region_len`] first.
-    pub(super) unsafe fn new(mem: *mut [u8]) -> Self {
-        let base = mem.cast::<u8>();
+    pub(super) unsafe fn new(mem: *mut [u8]) -> Option<Self> {
         let len = mem.len();
-        assert!(!base.is_null());
-        assert!(base.addr().is_multiple_of(align_of::<Meta<SLOTS>>()));
-        // The whole geometry check: the payload area is everything after
+        // The pointer conversions are the base checks: aligned, non-null.
+        let meta = NonNull::new(try_cast_aligned::<Meta<SLOTS>>(mem.cast::<u8>())?)?;
+        // The rest of the geometry: the payload area is everything after
         // the fixed-location struct, so the struct must fit inside the
         // mapping, and the rest must fit the descriptors' 32-bit offsets.
         let payload_base = size_of::<Meta<SLOTS>>();
-        assert!(payload_base <= len);
-        assert!(len - payload_base <= MAX_PAYLOAD_REGION_LEN);
-        // SAFETY: the base is non-null and `u64`-aligned, and `Meta` fits
-        // inside the mapping (all asserted). The payload area keeps the
-        // rest of the mapping as a raw slice.
-        unsafe {
-            Self {
-                meta: NonNull::new_unchecked(base.cast::<Meta<SLOTS>>()),
-                payloads: std::ptr::slice_from_raw_parts_mut(
-                    base.add(payload_base),
-                    len - payload_base,
-                ),
-            }
+        if payload_base > len || len - payload_base > MAX_PAYLOAD_REGION_LEN {
+            return None;
         }
+        // SAFETY: `Meta` fits inside the mapping at its base (checked
+        // above); the payload area keeps the rest of the mapping as a raw
+        // slice.
+        let payloads = unsafe {
+            std::ptr::slice_from_raw_parts_mut(
+                mem.cast::<u8>().add(payload_base),
+                len - payload_base,
+            )
+        };
+        Some(Self { meta, payloads })
     }
 
     /// The fixed-location part of the region.

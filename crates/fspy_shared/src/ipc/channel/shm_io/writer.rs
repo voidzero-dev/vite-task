@@ -53,7 +53,9 @@ pub enum ClaimError {
 }
 
 impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
-    /// Creates a writer backed by a shared-memory region.
+    /// Creates a writer backed by a shared-memory region, or `None` when
+    /// the region cannot host the protocol (see [`MappedLayout::new`]) —
+    /// a truncated or foreign file, for a sender that did not create it.
     ///
     /// # Safety
     ///
@@ -61,18 +63,13 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     ///   whole region for the writer's lifetime.
     /// - The region must have been zero-initialized when it was created and
     ///   accessed only through this protocol since.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the region is not `u64`-aligned or its size is outside the
-    /// supported range (see [`MappedLayout::new`]).
-    pub unsafe fn new(mem: M) -> Self {
+    pub unsafe fn new(mem: M) -> Option<Self> {
         // SAFETY: forwarded from this function's contract, which keeps the
         // region valid and protocol-governed for the writer's lifetime —
         // and so for every use of the views, which are stored in and
         // dropped with the writer.
-        let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) };
-        Self { mapped, mem }
+        let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) }?;
+        Some(Self { mapped, mem })
     }
 
     /// Whether the CLOSED gate is set: the receiver sealed the channel,

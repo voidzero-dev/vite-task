@@ -53,13 +53,6 @@ pub struct ChannelConf {
 /// compile-time table plus whatever the mapped file's size says.
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
-    // Fail fast on a capacity the compile-time table cannot fit into.
-    if !shm_io::is_supported_region_len::<SLOTS>(capacity) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "capacity cannot host the channel's descriptor table",
-        ));
-    }
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str())?;
     let handle =
         fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
@@ -81,6 +74,18 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
             // above, which is only accessed through the `shm_io` protocol.
             unsafe { shm_io::pre_fault::<SLOTS>(&prefault_mapping) };
         });
+    }
+
+    // Prove the region can host the protocol — the same fallible attach
+    // senders perform — so a bad capacity fails the task now, not at its
+    // first record.
+    // SAFETY: the region was just created zero-initialized and is only
+    // accessed through the `shm_io` protocol.
+    if unsafe { ShmWriter::<_, SLOTS>::new(&mapping) }.is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "capacity cannot host the channel's descriptor table",
+        ));
     }
 
     let conf = ChannelConf { shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed() };
@@ -195,19 +200,17 @@ impl ChannelConf {
             .map_err(shm_error_to_io)?
             .map()
             .map_err(shm_error_to_io)?;
-        // A truncated or foreign file must fail here, not panic the host
-        // process inside the protocol's geometry assertions.
-        if !shm_io::is_supported_region_len::<SLOTS>(mapping.len()) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "shared-memory region size cannot host the channel",
-            ));
-        }
         // SAFETY: `mapping` is a freshly mapped shared memory region created
         // zero-initialized by `channel` and accessed only through the
-        // `shm_io` protocol by every attached process; the protocol derives
-        // one layout from the mapped size on every side.
-        let writer = unsafe { ShmWriter::new(mapping) };
+        // `shm_io` protocol by every attached process.
+        let Some(writer) = (unsafe { ShmWriter::new(mapping) }) else {
+            // A truncated or foreign file fails here — it never panics the
+            // host process.
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "shared-memory region cannot host the channel",
+            ));
+        };
         if writer.is_closed() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,

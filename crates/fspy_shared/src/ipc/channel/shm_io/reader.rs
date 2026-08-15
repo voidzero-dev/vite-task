@@ -60,12 +60,17 @@ const fn decode(payload_region_len: usize, bits: u64) -> Option<PayloadSpan> {
     Some(PayloadSpan { offset, len })
 }
 
-/// A descriptor that no correct writer could have committed: the region
-/// was corrupted, and its frames are unusable.
+/// Why a channel could not be sealed into readable frames.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
-#[error("corrupt shared-memory frame descriptor at slot {slot_index}")]
-pub struct ProtocolError {
-    pub slot_index: usize,
+pub enum ProtocolError {
+    /// The mapping cannot host the protocol at all (see
+    /// [`MappedLayout::new`]).
+    #[error("the shared-memory region cannot host the channel")]
+    UnsupportedRegion,
+    /// A descriptor that no correct writer could have committed: the
+    /// region was corrupted, and its frames are unusable.
+    #[error("corrupt shared-memory frame descriptor at slot {slot_index}")]
+    CorruptDescriptor { slot_index: usize },
 }
 
 /// A reader over the committed frames of a sealed channel, serving them
@@ -115,19 +120,16 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
     ///
     /// # Errors
     ///
-    /// [`ProtocolError`] when the shared-memory metadata could not have
-    /// been produced by a correct writer; the region was corrupted and its
-    /// frames are unusable.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the region is not `u64`-aligned or its size is outside
-    /// the supported range (see [`MappedLayout::new`]).
+    /// [`ProtocolError`]: the mapping cannot host the protocol, or its
+    /// metadata could not have been produced by a correct writer — the
+    /// region was corrupted and its frames are unusable.
     pub unsafe fn seal(mem: M) -> Result<Self, ProtocolError> {
         // SAFETY: forwarded from this function's contract, which keeps the
         // region valid for the reader's lifetime — and so for every use of
         // the views, which are stored in and dropped with the reader.
-        let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) };
+        let Some(mapped) = (unsafe { MappedLayout::new(mem.as_raw_slice()) }) else {
+            return Err(ProtocolError::UnsupportedRegion);
+        };
         let slot_count;
         let mut frames = 0;
         let complete;
@@ -179,7 +181,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
                 // Any other terminal value must be a committed descriptor
                 // with a valid span; a foreign scribble fails the decode.
                 if decode(mapped.payloads.len(), bits).is_none() {
-                    return Err(ProtocolError { slot_index });
+                    return Err(ProtocolError::CorruptDescriptor { slot_index });
                 }
                 frames += 1;
             }
