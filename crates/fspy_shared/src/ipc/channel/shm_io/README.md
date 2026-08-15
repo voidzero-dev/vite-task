@@ -30,16 +30,14 @@ space, not memory: only pages that are actually written get backed.
 | header (64 B) | descriptor table (1/8 of the region) | payloads (the rest, grow up) |
 ```
 
-The header is a `repr(C)` struct of two `AtomicU64` counters, and both
-only ever count up:
+The header is a `repr(C)` struct of two `AtomicU64` counters, which only
+ever count up, and one flag:
 
 - the **claim counter** — how many frames were ever claimed. Bit 63 is the
   CLOSED gate.
 - the **payload counter** — how many payload bytes were ever reserved.
-
-Failed claims count too. That is deliberate: a counter past its limit is
-how the receiver learns that a record was lost and the frames are
-incomplete — no separate flag needed.
+- the **loss flag** — set by a writer whose claim failed, so the receiver
+  knows a record was lost and the frames are incomplete.
 
 The table has one 8-byte slot per frame — an eighth of the region. Every
 bound is derived from the mapping length alone, so the region is
@@ -60,7 +58,7 @@ Three steps:
 
 1. **Claim.** Two `fetch_add`s — one reserves payload bytes, one reserves a
    slot. No retry loop, no lock. A claim that does not fit fails after the
-   fact, and its counter bumps double as the loss report (see above).
+   fact and sets the loss flag before the writer moves on.
 2. **Fill.** The writer serializes into its payload span. The span is
    exclusively its own; nobody else knows it exists yet.
 3. **Commit.** One compare-and-swap flips the frame's slot from zero to a
@@ -94,16 +92,22 @@ room than is left, in the payload area or in the table, the claim fails.
 The writer skips that one record and carries on: recording must never
 stop or crash the program doing the work.
 
-The loss is not silent. The failed claim still moved a counter, and
-counters never move backwards, so from that moment on the counter stands
-past its limit. When the receiver closes the channel it compares both
-counters against their limits; if either went past, `is_complete` returns
-false, and a reader that needs the full picture knows to throw the result
-away.
+The loss is not silent. Before moving on, the failed claim sets the loss
+flag in the header. When the receiver closes the channel it reads the
+flag once; if it is set, `is_complete` returns false, and a reader that
+needs the full picture knows to throw the result away.
 
-One limit is different: a single frame holds at most 2 GiB. Asking for
-more is a mistake in the calling code, so it panics instead of counting
-as overflow.
+Setting the flag before moving on matters for the same reason committing
+a record before acting does. If the receiver's read misses the flag, the
+flag was set after close — so the skipped record describes an action
+performed after the channel closed, which the receiver never promised to
+include. And a writer that dies before setting the flag never performed
+its action, so nothing was actually lost.
+
+One more limit: a single frame holds at most 2 GiB, because a descriptor
+cannot describe more. Such a claim is refused the same way — the record
+is skipped and the flag is set — and the channel stays usable for every
+record after it.
 
 ## Closing and reading
 
@@ -143,9 +147,9 @@ CLAIMED (slot 0) ---+
   read, so an observed descriptor implies fully visible payload bytes.
 - Once a slot is committed or aborted, nothing ever changes it again.
 - Counters only grow. The receiver clamps them to the fixed capacities —
-  an inflated counter degrades into extra aborted slots, not corruption —
-  and a counter past its limit is precisely how it learns that a record
-  was lost.
+  an inflated counter degrades into extra aborted slots, not corruption.
+  Loss is reported separately: a failed claim sets the loss flag before
+  the writer carries on.
 - The bounds checks on descriptors are what make the `unsafe` reference
   construction correct: whether the receiver stays memory-safe never
   depends on another process behaving.

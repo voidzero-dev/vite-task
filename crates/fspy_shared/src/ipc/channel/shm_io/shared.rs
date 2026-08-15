@@ -12,7 +12,8 @@
 //!
 //! # Shared atomics
 //!
-//! The header holds two independent monotonic `AtomicU64` counters:
+//! The header holds two independent monotonic `AtomicU64` counters and a
+//! loss flag:
 //!
 //! - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
 //!   claims ever attempted. Claiming is one wait-free `fetch_add`; the
@@ -20,11 +21,13 @@
 //!   comparison against the fixed table capacity — the capacity verdict.
 //! - the **payload counter**: payload bytes ever reserved, bumped by another
 //!   wait-free `fetch_add`.
+//! - the **loss flag**: set by every failed claim before the writer moves
+//!   on. The receiver derives completeness from it alone.
 //!
-//! Failed claims still count, so a counter past its limit is the record of
-//! a lost frame: the receiver derives completeness from exactly that, and
-//! clamps instead of trusting the counts. Committed descriptors carry
-//! their own offset and length, so the counters never locate data.
+//! Failed claims leave the counters bumped; that is harmless, because the
+//! receiver clamps instead of trusting the counts, and committed
+//! descriptors carry their own offset and length, so the counters never
+//! locate data.
 //!
 //! # Memory-ordering contract
 //!
@@ -38,10 +41,12 @@
 //!    The CLOSED gate only stops stragglers from claiming (and allocating
 //!    pages) forever; any claim admitted between the snapshot and the gate
 //!    lands beyond the snapshot and is never observed. Completeness rides
-//!    the same rule: a failed claim's counter bump is its loss report, made
-//!    before the writer performs the operation whose record was lost — so
-//!    the snapshot either sees the overshoot, or the loss belongs to an
-//!    operation performed after the boundary.
+//!    the same style of argument: a failed claim sets the loss flag before
+//!    the writer performs the operation whose record was lost — so the
+//!    receiver's one read of the flag either sees the loss, or the loss
+//!    belongs to an operation performed after the boundary. A writer that
+//!    dies before setting the flag never performed its operation, so
+//!    nothing was actually lost.
 //! 2. **Writer commit** — the slot compare-and-swap uses `Release`
 //!    ([`SharedState::commit`]): every payload write happens-before the
 //!    committed descriptor becomes visible.
@@ -76,7 +81,11 @@ struct Header {
     claims: AtomicU64,
     /// Payload bytes ever reserved, including by failed claims.
     payload_reserved: AtomicU64,
-    _reserved: [u64; 6],
+    /// Nonzero once a claim failed: a record was lost and the channel is
+    /// incomplete. Semantically a flag; a whole `u64` keeps the header a
+    /// plain row of `u64` words.
+    lost: AtomicU64,
+    _reserved: [u64; 5],
 }
 
 const _: () = assert!(size_of::<Header>() == layout::HEADER_LEN);
@@ -178,16 +187,15 @@ impl SharedState<'_> {
     /// Atomically reserves one descriptor slot and one payload span.
     ///
     /// Wait-free: two `fetch_add`s, no retry loop (rule 1). A claim that
-    /// does not fit fails, and its counter bumps are what tell the
-    /// receiver a record was lost.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `payload_len` exceeds [`layout::MAX_PAYLOAD_LEN`] — a
-    /// caller error, not a capacity condition, and the one loss the
-    /// counters could not record.
+    /// does not fit fails after setting the loss flag, which is what tells
+    /// the receiver a record was lost.
     fn try_claim(self, payload_len: usize) -> Result<Reservation, ReserveError> {
-        assert!(payload_len <= layout::MAX_PAYLOAD_LEN);
+        // No descriptor can describe a payload this long; refuse it before
+        // touching the counters, so the channel keeps working for every
+        // record after it.
+        if payload_len > layout::MAX_PAYLOAD_LEN {
+            return Err(self.report_loss());
+        }
         let reserved_len = layout::reserved_payload_len(payload_len);
 
         // Payload bytes first, so a payload-capacity failure does not burn a
@@ -200,16 +208,18 @@ impl SharedState<'_> {
         // not wrap the bound into an out-of-bounds reservation.
         let payload_end = payload_start.checked_add(reserved_len as u64);
         if payload_end.is_none_or(|end| end > self.payloads.len() as u64) {
-            return Err(ReserveError::Capacity);
+            return Err(self.report_loss());
         }
 
         let claims = self.header.claims.fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
+            // Not a loss: a record refused after close describes an
+            // operation performed outside the channel's boundary.
             return Err(ReserveError::Closed);
         }
         let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
         if slot_index >= self.table.len() {
-            return Err(ReserveError::Capacity);
+            return Err(self.report_loss());
         }
 
         Ok(Reservation {
@@ -221,15 +231,21 @@ impl SharedState<'_> {
         })
     }
 
-    /// Snapshots the claim and payload counters: the receiver's close
-    /// boundary (rule 1). Returns the admitted slot count, clamped to the
-    /// table capacity, and whether every record made it — false once either
-    /// counter overshot its limit, which is how a failed claim reports the
-    /// loss.
+    /// Records that a claim failed and its record was lost, before the
+    /// caller moves on (rule 1). Returns the error the failed claim
+    /// reports.
+    fn report_loss(self) -> ReserveError {
+        self.header.lost.store(1, Ordering::Relaxed);
+        ReserveError::Capacity
+    }
+
+    /// Snapshots the claim counter and the loss flag; the counter load is
+    /// the receiver's close boundary (rule 1). Returns the admitted slot
+    /// count, clamped to the table capacity, and whether every record made
+    /// it: false once any claim failed and set the flag.
     fn snapshot(self) -> (usize, bool) {
         let claims = self.header.claims.load(Ordering::Relaxed) & !CLOSED;
-        let payload = self.header.payload_reserved.load(Ordering::Relaxed);
-        let complete = claims <= self.table.len() as u64 && payload <= self.payloads.len() as u64;
+        let complete = self.header.lost.load(Ordering::Relaxed) == 0;
         (usize::try_from(claims).unwrap_or(usize::MAX).min(self.table.len()), complete)
     }
 
@@ -322,8 +338,9 @@ pub enum ClaimError {
     /// outside the channel's boundary.
     #[error("the channel has been closed by the receiver")]
     Closed,
-    /// The region is full. The claim's counter bumps already recorded the
-    /// loss, so the channel will report itself incomplete.
+    /// The claim was refused for space: the region was full, or the frame
+    /// was larger than the `i32::MAX`-byte frame limit. The loss is
+    /// already recorded, so the channel will report itself incomplete.
     #[error("no space left in the shared-memory region")]
     Capacity,
 }
@@ -367,11 +384,8 @@ impl<M: AsRawSlice> ShmWriter<M> {
     /// The frame is invisible to the receiver until [`FrameMut::finish`]
     /// commits it. Dropping the frame without finishing abandons the claim:
     /// the receiver ignores the slot, exactly as if the writer had died.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `frame_size` exceeds the frame limit of `i32::MAX`
-    /// bytes.
+    /// Frames larger than `i32::MAX` bytes are refused as
+    /// [`ClaimError::Capacity`].
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let state = self.state();
         let reservation = state.try_claim(frame_size.get()).map_err(|err| match err {
@@ -500,10 +514,10 @@ impl<M: AsRawSlice> Frames<M> {
 
     /// Whether every record a writer published made it in.
     ///
-    /// False when the region ran out of space before the channel closed: a
-    /// claim failed, its record was lost, and the frames under-report what
-    /// writers went on to do. Consumers that need completeness must reject
-    /// them.
+    /// False when a claim failed before the channel closed — the region
+    /// was out of space, or a frame exceeded the frame limit: its record
+    /// was lost, and the frames under-report what writers went on to do.
+    /// Consumers that need completeness must reject them.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         self.complete
@@ -560,9 +574,10 @@ pub(super) unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolE
         // it, later ones land in slots this pass never visits. The count is
         // clamped to the table capacity, so a counter inflated by failed
         // claims (or by a foreign scribble) degrades to a full-table sweep,
-        // not an error — and an overshot counter is exactly how the
-        // snapshot learns that a record was lost (rule 1 in the ordering
-        // contract above).
+        // not an error. The snapshot also reads the loss flag: its one
+        // read either sees a loss, or the loss belongs to an operation
+        // performed after this boundary (rule 1 in the ordering contract
+        // above).
         let (slot_count, is_complete) = state.snapshot();
 
         // Gate further claims. Cheap: the creator pre-faulted this page

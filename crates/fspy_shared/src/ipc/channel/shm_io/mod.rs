@@ -22,16 +22,16 @@
 //! the region is self-describing: every process computes the same table
 //! and payload bounds from the mapped size. One borrow constructs typed
 //! views of the header (a `repr(C)` struct of two monotonic `AtomicU64`
-//! counters: claims, carrying the CLOSED gate bit, and payload bytes
-//! reserved) and of the descriptor table (a slice of atomics) — see
-//! [`shared`]; the payload area stays untyped bytes.
+//! counters — claims, carrying the CLOSED gate bit, and payload bytes
+//! reserved — plus a loss flag) and of the descriptor table (a slice of
+//! atomics) — see [`shared`]; the payload area stays untyped bytes.
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
 //! reserves a descriptor slot — validated against the fixed region bounds
-//! from the returned old values. Failed claims overshoot the counters
-//! harmlessly: readers clamp to the region capacities, and committed
-//! descriptors are self-describing ([`layout`]), so the counters never locate
-//! data. Every slot has a fixed location, so an unfinished frame can never
-//! hide a later one.
+//! from the returned old values. A failed claim sets the loss flag and
+//! leaves the counters bumped, harmlessly: readers clamp to the region
+//! capacities, and committed descriptors are self-describing ([`layout`]),
+//! so the counters never locate data. Every slot has a fixed location, so
+//! an unfinished frame can never hide a later one.
 //!
 //! # Frame lifecycle
 //!
@@ -62,9 +62,9 @@
 //! drops are sound because writers publish a record *before* performing the
 //! recorded operation: a process that died mid-frame never performed the
 //! operation, and one that claimed or committed after the snapshot performs
-//! it outside the channel's boundary. A record lost to a full region
-//! *before* close shows up as a counter past its limit, and the channel
-//! reports itself incomplete ([`Frames::is_complete`]).
+//! it outside the channel's boundary. A record refused *before* close — a
+//! full region, an oversized frame — sets the loss flag first, and the
+//! channel reports itself incomplete ([`Frames::is_complete`]).
 //!
 //! Correctness never depends on writer-side cleanup: no exit hooks, PID
 //! checks, heartbeats, or timeouts.
@@ -266,9 +266,8 @@ mod tests {
 
         assert!(writer.try_write_frame(b"test"));
 
-        // Larger than the payload region: the claim fails, and its counter
-        // bump — past the region's limit — is what tells the receiver a
-        // record was lost.
+        // Larger than the payload region: the claim fails and sets the
+        // loss flag, which is what tells the receiver a record was lost.
         assert!(!writer.try_write_frame(&vec![0u8; 2048]));
 
         let frames = collect_frames(&shm);
@@ -279,12 +278,23 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "payload_len <= layout::MAX_PAYLOAD_LEN"]
-    fn oversized_frame_is_a_caller_error() {
+    fn oversized_frame_is_refused_and_marks_incomplete() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer = unsafe { ShmWriter::new(shm) };
-        let _ = writer.claim_frame(((i32::MAX as usize) + 1).try_into().unwrap());
+        let writer = unsafe { ShmWriter::new(shm.clone()) };
+
+        // No descriptor can describe a frame this long: the claim is
+        // refused without touching the counters, so later records still
+        // flow — but the loss flag marks the channel incomplete.
+        let oversized = ((i32::MAX as usize) + 1).try_into().unwrap();
+        assert!(matches!(writer.claim_frame(oversized), Err(ClaimError::Capacity)));
+        assert!(writer.try_write_frame(b"still open"));
+
+        let frames = collect_frames(&shm);
+        let mut iter = frames.iter();
+        assert!(iter.next().unwrap() == b"still open");
+        assert!(iter.next() == None);
+        assert!(!frames.is_complete());
     }
 
     #[test]

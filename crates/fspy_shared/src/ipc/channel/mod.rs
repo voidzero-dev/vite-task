@@ -212,8 +212,8 @@ impl Sender {
     /// A record that cannot be sent is skipped, because that is all a
     /// sender inside an intercepted call can do: the channel may have
     /// closed (the record belongs past its boundary), or the region may be
-    /// full (a loss the receiver sees as counter overshoot and reports via
-    /// incompleteness).
+    /// full (a loss the failed claim flags, so the receiver reports the
+    /// frames incomplete).
     pub fn send<T: SchemaWrite<DefaultConfig, Src = T>>(&self, value: &T) {
         let Ok(serialized_size) = T::serialized_size(value) else {
             return;
