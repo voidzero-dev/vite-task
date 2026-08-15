@@ -42,7 +42,10 @@ ever count up:
 The table has one 8-byte slot per frame — an eighth of the region. Every
 bound is derived from the mapping length alone, so the region is
 self-describing: writers and the receiver compute the same layout from the
-size of the file they mapped, with nothing else to agree on. For a 4 GiB
+size of the file they mapped, with nothing else to agree on. Supported
+lengths are multiples of 8 bytes between 1 KiB and 4 GiB — the creator
+rounds its requested size up into that set, so the layout rules never
+meet a degenerate region. For a 4 GiB
 region that is ~67 million slots; the ~3.5 GiB payload region fits ~15–20
 million records of a few hundred bytes, so payload space runs out first.
 

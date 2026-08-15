@@ -43,6 +43,9 @@ pub struct ChannelConf {
 /// senders need no configuration beyond the `ChannelConf`.
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
 pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
+    // The protocol supports multiple-of-8 region lengths from 1 KiB to
+    // 4 GiB; round the requested capacity up into the supported set.
+    let capacity = shm_io::round_up_region_len(capacity);
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str())?;
     let handle =
         fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;

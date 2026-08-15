@@ -62,21 +62,29 @@ pub(super) const MAX_PAYLOAD_LEN: usize = i32::MAX as usize;
 /// mapping must fit `u32` arithmetic.
 pub(super) const MAX_MAPPING_LEN: usize = 1 << 32;
 
-/// The descriptor-table length of a `mapping_len`-byte region.
+/// Minimum supported mapping size — a deliberate cutoff, not a derived
+/// one: regions under a KiB are not worth a channel. It keeps every
+/// supported region's shape regular (at least 15 slots and 840 payload
+/// bytes), so the sizing rules below need no small-region special cases.
+pub(super) const MIN_MAPPING_LEN: usize = 1024;
+
+/// Whether `len` is a supported mapping length: a multiple of the slot
+/// size between [`MIN_MAPPING_LEN`] and [`MAX_MAPPING_LEN`]. Everything
+/// below assumes a supported length.
+pub(super) const fn is_supported(len: usize) -> bool {
+    len.is_multiple_of(SLOT_LEN) && len >= MIN_MAPPING_LEN && len <= MAX_MAPPING_LEN
+}
+
+/// The descriptor-table length of a supported `mapping_len`-byte region.
 ///
 /// Both endpoints derive the layout from the mapping length alone, so the
 /// region is self-describing: no side channel has to agree on a table
-/// size. An eighth of the space for descriptors (floored at eight slots so
-/// tiny regions stay usable) is generous slack for typical record shapes —
-/// one 8-byte descriptor per payload of a few hundred bytes — and the
-/// region is sparse, so an oversized table costs address space, not
-/// memory.
+/// size. An eighth of the space beyond the header goes to descriptors —
+/// generous slack for typical record shapes, one 8-byte descriptor per
+/// payload of a few hundred bytes — and the region is sparse, so an
+/// oversized table costs address space, not memory.
 pub(super) const fn max_slots(mapping_len: usize) -> usize {
-    let available = mapping_len - HEADER_LEN;
-    let len = available / 8;
-    let len = if len < 8 * SLOT_LEN { 8 * SLOT_LEN } else { len };
-    let len = if len > available { available } else { len };
-    len / SLOT_LEN
+    (mapping_len - HEADER_LEN) / (8 * SLOT_LEN)
 }
 
 /// Byte offset where the payload region starts: right after the table.
@@ -96,16 +104,13 @@ pub(super) const fn reserved_payload_len(payload_len: usize) -> usize {
     payload_len.next_multiple_of(SLOT_LEN)
 }
 
-/// Byte size of the payload region of a `mapping_len`-byte mapping. A
-/// multiple of `size_of::<u64>()`, so a reservation of whole `u64`s inside
-/// it never reaches past `mapping_len`.
+/// Byte size of the payload region of a supported `mapping_len`-byte
+/// mapping: everything after the table. A multiple of `size_of::<u64>()`
+/// by construction — supported lengths, the header, and the table all
+/// are — so a reservation of whole `u64`s inside it never reaches past
+/// `mapping_len`.
 pub(super) const fn payload_region_len(mapping_len: usize) -> usize {
-    let base = payload_base(mapping_len);
-    if base >= mapping_len {
-        return 0;
-    }
-    let len = mapping_len - base;
-    len - len % SLOT_LEN
+    mapping_len - payload_base(mapping_len)
 }
 
 /// A validated payload byte range: the witness that offset arithmetic on this
@@ -298,17 +303,16 @@ impl MappedLayout {
     /// # Panics
     ///
     /// Panics when the mapping cannot host the protocol at all: base not
-    /// `u64`-aligned, smaller than the header, or larger than
-    /// [`MAX_MAPPING_LEN`]. These indicate a broken caller, not
-    /// runtime data; senders guard untrusted mappings with
-    /// [`super::is_supported_region_len`] first.
+    /// `u64`-aligned, or a length that is not supported ([`is_supported`]).
+    /// These indicate a broken caller, not runtime data; senders guard
+    /// untrusted mappings with [`super::is_supported_region_len`] first.
     #[expect(clippy::cast_ptr_alignment, reason = "the base is asserted `u64`-aligned below")]
     pub(super) unsafe fn new(mem: *mut [u8]) -> Self {
         let base = mem.cast::<u8>();
         let len = mem.len();
         assert!(!base.is_null());
         assert!(base.addr().is_multiple_of(align_of::<Header>()));
-        assert!((HEADER_LEN..=MAX_MAPPING_LEN).contains(&len));
+        assert!(is_supported(len));
         // SAFETY: the base is non-null (asserted), and the header and the
         // table lie inside the mapping — the header by the asserts above,
         // the table by `max_slots` — at `u64`-aligned offsets. The
@@ -384,23 +388,27 @@ mod tests {
     }
 
     #[test]
-    fn max_slots_floors_tiny_regions_at_eight_slots() {
-        assert!(max_slots(1024) == 15);
-        assert!(max_slots(256) == 8);
-        // Not enough space for the floor: the table takes what exists and
-        // payload capacity degrades to zero; claims fail gracefully.
-        assert!(max_slots(100) == 4);
-        assert!(max_slots(64) == 0);
+    fn unsupported_lengths_are_refused() {
+        assert!(is_supported(MIN_MAPPING_LEN));
+        assert!(is_supported(MAX_MAPPING_LEN));
+        // Too small, even as a multiple of 8.
+        assert!(!is_supported(1000));
+        assert!(!is_supported(0));
+        // Not a multiple of 8.
+        assert!(!is_supported(1025));
+        // Too large.
+        assert!(!is_supported(MAX_MAPPING_LEN + 8));
     }
 
     #[test]
-    fn payload_region_rounds_down_and_degrades_to_zero() {
+    fn payload_region_fills_the_rest() {
+        assert!(max_slots(1024) == 15);
         assert!(payload_base(1024) == 184);
         assert!(payload_region_len(1024) == 840);
-        assert!(payload_region_len(1000) == 824);
-        // The base at or past the mapping: no payload space at all.
-        assert!(payload_region_len(100) == 0);
-        assert!(payload_region_len(64) == 0);
+        // The three areas cover a supported region exactly.
+        assert!(
+            payload_base(MAX_MAPPING_LEN) + payload_region_len(MAX_MAPPING_LEN) == MAX_MAPPING_LEN
+        );
     }
 
     #[test]

@@ -110,14 +110,25 @@ impl AsRawSlice for Mapping {
     }
 }
 
-/// Whether a mapping of `len` bytes can host the protocol at all.
+/// Whether a mapping of `len` bytes can host the protocol at all: a
+/// multiple of 8 bytes, between 1 KiB and 4 GiB.
 ///
 /// Senders opening a file they do not control should refuse unsupported
 /// lengths with an error; the protocol's own constructors treat them as a
-/// broken caller and panic.
+/// broken caller and panic. Creators pick a supported length with
+/// [`round_up_region_len`].
 #[must_use]
-pub fn is_supported_region_len(len: usize) -> bool {
-    (layout::HEADER_LEN..=layout::MAX_MAPPING_LEN).contains(&len)
+pub const fn is_supported_region_len(len: usize) -> bool {
+    layout::is_supported(len)
+}
+
+/// Rounds a desired region length up to the nearest supported one.
+/// (Desired lengths beyond the 4 GiB maximum clamp down to it.)
+#[must_use]
+pub fn round_up_region_len(desired: usize) -> usize {
+    desired
+        .clamp(layout::MIN_MAPPING_LEN, layout::MAX_MAPPING_LEN)
+        .next_multiple_of(layout::SLOT_LEN)
 }
 
 /// Materializes the page backing the protocol header without changing
