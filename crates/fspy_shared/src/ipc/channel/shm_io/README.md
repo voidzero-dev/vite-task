@@ -8,7 +8,7 @@ Three requirements shaped everything here:
 1. **A writer may die at any instruction** — killed, crashed, anywhere.
    This must never corrupt the channel or lose another writer's records.
 2. **A writer may outlive the channel.** The receiver must never wait for
-   writers; closing is immediate.
+   writers; sealing is immediate.
 3. **The receiver must know whether it got everything.** Either the frames
    hold every record writers published, or they are flagged incomplete.
    Never a silently short result.
@@ -82,7 +82,7 @@ runs is the heart of the design:
 These rules assume one thing about how the channel is used: **a writer
 publishes a record before performing the action the record describes.**
 Then a dead writer's missing record describes an action that never
-happened, and a record refused after close describes an action performed
+happened, and a record refused after the seal describes an action performed
 after the channel closed — both safe to ignore. A writer that records
 _after_ acting, or that abandons a frame and performs the action anyway,
 steps outside this rule and loses records silently.
@@ -96,14 +96,14 @@ The writer skips that one record and carries on: recording must never
 stop or crash the program doing the work.
 
 The loss is not silent. Before moving on, the failed claim sets the
-CLOSED gate — the same bit the receiver sets when it closes. When the
-receiver closes the channel it reads the bit once; if it was already
+CLOSED gate — the same bit the receiver sets when it seals. When the
+receiver seals the channel it reads the bit once; if it was already
 set, `is_complete` returns false, and a reader that needs the full
 picture knows to throw the result away.
 
 Setting the bit before moving on matters for the same reason committing
 a record before acting does. If the receiver's read misses the bit, the
-bit was set after close — so the skipped record describes an action
+bit was set after the seal — so the skipped record describes an action
 performed after the channel closed, which the receiver never promised to
 include. And a writer that dies before setting the bit never performed
 its action, so nothing was actually lost.
@@ -117,9 +117,9 @@ One more limit: a single frame holds at most 2 GiB, because a descriptor
 cannot describe more. Such a claim is refused — and reported — the same
 way.
 
-## Closing and reading
+## Sealing and reading
 
-The receiver closes once:
+The receiver seals the channel once:
 
 1. **Snapshot** the claim counter with a plain load. This is the boundary:
    claims at or before it are in, later ones are not.
@@ -170,7 +170,7 @@ CLAIMED (slot 0) ---+
 ## Performance notes
 
 - Claiming is two atomic adds; committing is one CAS. Nothing retries.
-- Closing costs one pass over the claimed slots. Nothing is copied and
+- Sealing costs one pass over the claimed slots. Nothing is copied and
   nothing is allocated — the whole module is allocation-free; the reader
   re-reads the frozen table to iterate.
 - On Linux, the first touch of the sparse backing file can cost
@@ -186,7 +186,7 @@ CLAIMED (slot 0) ---+
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mod.rs`    | Public surface (`ShmWriter`, `ShmReader`), the protocol overview docs, and the integration tests — they run against a mocked region and are miri-clean (`cargo miri test -p fspy_shared shm_io`).                          |
 | `writer.rs` | The writer side: claim a frame, fill it, finish it.                                                                                                                                                                        |
-| `reader.rs` | The reader side: close the channel, then iterate the committed frames — with the argument for why its borrows are sound.                                                                                                   |
+| `reader.rs` | The reader side: seal the channel, then iterate the committed frames — with the argument for why its borrows are sound.                                                                                                    |
 | `layout.rs` | Only what both sides share: the region's shape and sizing math, the header, the descriptor format, and `MappedLayout` — the shape bound to one concrete mapping. Encoding lives with the writer, decoding with the reader. |
 
 Arrows point at what a file depends on:
@@ -194,7 +194,7 @@ Arrows point at what a file depends on:
 ```mermaid
 graph TD
     mod["mod.rs<br>public surface"] --> writer["writer.rs<br>claim, fill, finish"]
-    mod --> reader["reader.rs<br>close and iterate"]
+    mod --> reader["reader.rs<br>seal and iterate"]
     writer --> layout["layout.rs<br>what both sides share"]
     reader --> layout
 ```

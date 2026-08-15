@@ -37,7 +37,7 @@ unsafe impl<M: Sync> Sync for ShmWriter<M> {}
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimError {
-    /// The CLOSED gate was set: the receiver closed the channel, or an
+    /// The CLOSED gate was set: the receiver sealed the channel, or an
     /// earlier failed claim condemned it. Skipping the record is sound
     /// either way — it is outside the receiver's boundary, or the same
     /// bit already makes the receiver report the channel incomplete.
@@ -74,7 +74,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
         Self { mem, mapped }
     }
 
-    /// Whether the CLOSED gate is set: the receiver closed the channel,
+    /// Whether the CLOSED gate is set: the receiver sealed the channel,
     /// or an earlier failed claim condemned it.
     pub fn is_closed(&self) -> bool {
         self.mapped.header().claims.load(Ordering::Relaxed) & CLOSED != 0
@@ -128,7 +128,7 @@ impl<M: AsRawSlice> ShmWriter<M> {
 
         let claims = mapped.header().claims.fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
-            // Not a loss: a record refused after close describes an
+            // Not a loss: a record refused after the seal describes an
             // operation performed outside the channel's boundary.
             return Err(ClaimError::Closed);
         }
@@ -215,9 +215,9 @@ impl DerefMut for FrameMut<'_> {
 impl FrameMut<'_> {
     /// Commits the frame, making it visible to the receiver.
     ///
-    /// If the receiver closed the channel and aborted this frame's slot
+    /// If the receiver sealed the channel and aborted this frame's slot
     /// first, the swap fails and the frame is silently discarded: the
-    /// record belongs to the close race and is intentionally excluded
+    /// record belongs to the seal race and is intentionally excluded
     /// either way.
     pub fn finish(self) {
         // Rule 2: `Release` orders every payload write before the

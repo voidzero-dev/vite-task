@@ -20,9 +20,9 @@
 
 use std::{ptr::NonNull, sync::atomic::AtomicU64};
 
-/// The CLOSED gate bit of the claim counter, set by the receiver when it
-/// closes the channel and by any writer whose claim failed — the loss
-/// report that also condemns the channel (the parent module's rule 1).
+/// The CLOSED gate bit of the claim counter, set when the receiver seals
+/// the channel and by any writer whose claim failed — the loss report
+/// that also condemns the channel (rule 1 below).
 /// The low 63 bits count claims, so no realistic claim volume can carry
 /// into the gate.
 pub(super) const CLOSED: u64 = 1 << 63;
@@ -155,7 +155,7 @@ pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 //   claims ever attempted. Claiming is one wait-free `fetch_add`; the
 //   returned old value carries the claim's slot index, the gate, and — by
 //   comparison against the fixed table capacity — the capacity verdict.
-//   The gate is set by the receiver at close and by every failed claim:
+//   The gate is set by the receiver's seal and by every failed claim:
 //   one bit is both the loss report completeness derives from and the
 //   valve that stops writers spending work on a channel whose result the
 //   receiver must already reject.
@@ -173,7 +173,7 @@ pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 //
 // Three synchronization rules cover the whole protocol:
 //
-// 1. **Claim versus close** — the receiver's close boundary is a plain
+// 1. **Claim versus seal** — the receiver's seal boundary is a plain
 //    snapshot load of the claim counter: claims ordered at or before the
 //    value it reads (in the counter's modification order) are in the
 //    snapshot; later ones receive slot indices the receiver never visits.
@@ -194,7 +194,7 @@ pub(super) const OFFSET_MAX: u64 = u32::MAX as u64;
 //    uses `Release`: every payload write happens-before the committed
 //    descriptor becomes visible.
 // 3. **Receiver observation** — the freeze compare-and-swap in
-//    `ShmReader::close` uses `Acquire` on failure: observing a committed
+//    `ShmReader::seal` uses `Acquire` on failure: observing a committed
 //    descriptor also makes the payload writes it published visible, so the
 //    borrows `ShmReader` later hands out read settled bytes.
 

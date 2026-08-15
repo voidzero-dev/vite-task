@@ -287,7 +287,7 @@ impl Receiver {
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable and independently owned, and all attached
         // processes access it only through the `shm_io` protocol.
-        unsafe { ShmReader::close(mapping) }
+        unsafe { ShmReader::seal(mapping) }
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
 }

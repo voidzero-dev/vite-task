@@ -1,4 +1,4 @@
-//! The reader side: close the channel, then iterate the committed frames.
+//! The reader side: seal the channel, then iterate the committed frames.
 //!
 //!
 //! Closing never waits for writers, and no payload byte is read or copied:
@@ -86,7 +86,7 @@ pub enum ProtocolError {
     CorruptDescriptor { slot_index: usize },
 }
 
-/// A reader over the committed frames of a closed channel, serving them
+/// A reader over the committed frames of a sealed channel, serving them
 /// straight out of the mapping, which stays alive inside this value and
 /// is released when the reader drops. It holds no buffer: iteration
 /// re-reads the frozen descriptor table, so closing allocates nothing.
@@ -111,7 +111,7 @@ unsafe impl<M: Send> Send for ShmReader<M> {}
 unsafe impl<M: Sync> Sync for ShmReader<M> {}
 
 impl<M: AsRawSlice> ShmReader<M> {
-    /// Closes the channel over a shared-memory region and returns the
+    /// Seals the channel — no further records — and returns the
     /// reader of its committed frames.
     ///
     /// Never blocks on writers: writers admitted before the snapshot race
@@ -140,7 +140,7 @@ impl<M: AsRawSlice> ShmReader<M> {
     ///
     /// Panics when the region is not `u64`-aligned or its size is outside
     /// the supported range (see [`MappedLayout::new`]).
-    pub unsafe fn close(mem: M) -> Result<Self, ProtocolError> {
+    pub unsafe fn seal(mem: M) -> Result<Self, ProtocolError> {
         // SAFETY: forwarded from this function's contract, which keeps the
         // region valid for the reader's lifetime — and so for every use of
         // the views, which are stored in and dropped with the reader.
@@ -149,7 +149,7 @@ impl<M: AsRawSlice> ShmReader<M> {
         let mut frames = 0;
         let complete;
         {
-            // The close boundary (rule 1): claims at or before this
+            // The seal boundary (rule 1): claims at or before this
             // snapshot are inside it, later ones land in slots this pass
             // never visits. The count is clamped to the table capacity, so
             // a counter inflated by failed claims (or by a foreign
@@ -159,7 +159,7 @@ impl<M: AsRawSlice> ShmReader<M> {
                 usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(mapped.table().len());
             // The same load carries the completeness verdict: a gate set
             // before this boundary is a failed claim's loss report — or an
-            // earlier close, and a re-close cannot vouch for records
+            // earlier seal, and a re-seal cannot vouch for records
             // refused since then (rule 1).
             complete = claims & CLOSED == 0;
 
@@ -190,7 +190,7 @@ impl<M: AsRawSlice> ShmReader<M> {
                     continue;
                 };
                 if bits == ABORTED {
-                    // Aborted by an earlier close over the same region;
+                    // Aborted by an earlier seal over the same region;
                     // still ignored.
                     continue;
                 }
@@ -213,7 +213,7 @@ impl<M: AsRawSlice> ShmReader<M> {
 
     /// Whether every record a writer published made it in.
     ///
-    /// False when a claim failed before the channel closed — the region
+    /// False when a claim failed before the seal — the region
     /// was out of space, or a frame exceeded the frame limit: its record
     /// was lost, and the frames under-report what writers went on to do.
     /// Consumers that need completeness must reject them.
@@ -248,19 +248,19 @@ impl<'a> Iterator for Iter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some((slot, rest)) = self.table.split_first() {
             self.table = rest;
-            // The slot is terminal (`close` froze it), so this plain load
+            // The slot is terminal (`seal` froze it), so this plain load
             // reads the same value the freeze pass saw; the transfer that
             // carried the reader to this thread carried the freeze pass's
             // `Acquire` payload visibility with it (rule 3).
             let bits = slot.load(Ordering::Relaxed);
             // `None` is an aborted slot: nothing was published. Corrupt
-            // values cannot appear — `close` already failed the channel on
-            // them — so every decoded span is one `close` validated.
+            // values cannot appear — `seal` already failed the channel on
+            // them — so every decoded span is one `seal` validated.
             let Some(span) = decode(self.mapped.payloads.len(), bits) else {
                 continue;
             };
             self.remaining -= 1;
-            // SAFETY: `close` validated the span against the payload
+            // SAFETY: `seal` validated the span against the payload
             // region, and a committed span is immutable for the mapping's
             // lifetime (see the module docs above); the reader borrowed
             // for `'a` keeps the mapping alive and mapped.

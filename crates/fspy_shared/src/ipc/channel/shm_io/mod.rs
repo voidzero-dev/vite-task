@@ -52,19 +52,19 @@
 //! and disjoint from everything a live writer may still touch (see the
 //! receiver section's trust argument below).
 //!
-//! # Close boundary
+//! # Seal boundary
 //!
-//! [`ShmReader::close`]'s boundary is a snapshot of the claim counter.
+//! [`ShmReader::seal`]'s boundary is a snapshot of the claim counter.
 //! A writer admitted before the snapshot races the freeze pass per slot and
 //! its frame is either included (commit won) or ignored (abort won) — never
 //! torn; a claim after the snapshot lands in a slot the receiver never
-//! visits and is dropped, and the CLOSED gate set before close returns
+//! visits and is dropped, and the CLOSED gate set before the seal returns
 //! stops stragglers from claiming (and materializing pages) forever. Both
 //! drops are sound because writers publish a record *before* performing the
 //! recorded operation: a process that died mid-frame never performed the
 //! operation, and one that claimed or committed after the snapshot performs
-//! it outside the channel's boundary. A record refused *before* close — a
-//! full region, an oversized frame — sets the CLOSED gate first, so the
+//! it outside the channel's boundary. A record refused *before* the seal —
+//! a full region, an oversized frame — sets the CLOSED gate first, so the
 //! channel reports itself incomplete ([`ShmReader::is_complete`]) and
 //! refuses every later claim: once one record is lost the receiver must
 //! reject the result, and further records would be wasted work.
@@ -133,7 +133,7 @@ pub fn round_up_region_len(desired: usize) -> usize {
 
 /// Materializes the page backing the protocol header without changing
 /// protocol state, so that neither a writer's first claim nor
-/// [`ShmReader::close`]'s snapshot pays for the backing file's first
+/// [`ShmReader::seal`]'s snapshot pays for the backing file's first
 /// block allocation — a millisecond-scale cost on some journalling
 /// filesystems, for reads of holes as well as writes. Run it off any
 /// latency-sensitive path. Only Linux channels use this: elsewhere the
@@ -230,7 +230,7 @@ mod tests {
     fn collect_frames(shm: &MockedShm) -> ShmReader<MockedShm> {
         // SAFETY: `MockedShm` provides a stable, zero-initialized allocation
         // accessed only through the protocol.
-        unsafe { ShmReader::close(shm.clone()) }.unwrap()
+        unsafe { ShmReader::seal(shm.clone()) }.unwrap()
     }
 
     #[test]
@@ -456,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn claims_after_close_are_gated_without_poisoning() {
+    fn claims_after_seal_are_gated_without_poisoning() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
@@ -469,9 +469,9 @@ mod tests {
         assert!(iter.next() == None);
         assert!(frames.is_complete());
 
-        // Close set the gate: a straggler's claim fails cleanly and does
-        // not mark the channel incomplete — the operation is outside the
-        // closed boundary.
+        // The seal set the gate: a straggler's claim fails cleanly and
+        // does not mark the channel incomplete — the operation is outside
+        // the sealed boundary.
         assert!(writer.is_closed());
         assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
         assert!(frames.is_complete());
@@ -494,8 +494,8 @@ mod tests {
         // The late commit loses the race silently.
         frame.finish();
 
-        // A second close still reads no frames — and reports incomplete:
-        // the gate was set by the first close, and a re-close cannot vouch
+        // A second seal still reads no frames — and reports incomplete:
+        // the gate was set by the first seal, and a re-seal cannot vouch
         // for records refused since then.
         let frames = collect_frames(&shm);
         assert!(frames.iter().count() == 0);
@@ -566,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn close_races_with_active_writers() {
+    fn seal_races_with_active_writers() {
         let shm = MockedShm::alloc(1024 * 64);
         let barrier = Barrier::new(3);
 
@@ -577,7 +577,7 @@ mod tests {
                     let writer = unsafe { ShmWriter::new(shm.clone()) };
                     barrier.wait();
                     let mut written = 0usize;
-                    // Bounded so the test terminates even if close is slow;
+                    // Bounded so the test terminates even if the seal is slow;
                     // the region is large enough that capacity never fails.
                     for _ in 0..200 {
                         match writer.claim_frame(5.try_into().unwrap()) {
@@ -629,7 +629,7 @@ mod tests {
         shm.poke_u64(64, (bogus_len << 32) | bogus_offset);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { ShmReader::close(shm) };
+        let result = unsafe { ShmReader::seal(shm) };
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -645,7 +645,7 @@ mod tests {
         shm.poke_u64(64, (1 << 63) | (8u64 << 32) | 8);
 
         // SAFETY: see `collect_frames`.
-        let result = unsafe { ShmReader::close(shm) };
+        let result = unsafe { ShmReader::seal(shm) };
         assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
@@ -749,7 +749,7 @@ mod tests {
 
         // SAFETY: the mapping is a valid shared-memory region created zeroed
         // and accessed only through the protocol.
-        let frames = unsafe { ShmReader::close(mapping) }.unwrap();
+        let frames = unsafe { ShmReader::seal(mapping) }.unwrap();
         assert!(frames.is_complete());
         let collected = frames.iter().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert!(collected.len() == CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
@@ -817,7 +817,7 @@ mod tests {
         assert!(writer.try_write_frame(b"alive"));
 
         // SAFETY: see `real_shm_across_processes`.
-        let frames = unsafe { ShmReader::close(writer.into_memory()) }.unwrap();
+        let frames = unsafe { ShmReader::seal(writer.into_memory()) }.unwrap();
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);
