@@ -86,15 +86,15 @@ impl Client {
 
         let Ok(mut frame) = ipc_sender.claim_frame(frame_size) else {
             // The receiver has closed the channel (this process outlived the
-            // run's tracking boundary) or the region is full (the claim
-            // itself already marked the trace incomplete). Either way the
+            // run's tracking boundary) or the region is full (a loss the
+            // receiver sees as counter overshoot). Either way the
             // interception must proceed without a record — a preload library
             // can never panic its host process.
             return Ok(());
         };
         let mut writer: &mut [u8] = &mut frame;
-        // A serialization failure drops `frame` unfinished, which marks the
-        // trace incomplete.
+        // A serialization failure drops `frame` unfinished; the receiver
+        // ignores the abandoned slot.
         PathAccess::serialize_into(&mut writer, &path_access)?;
         debug_assert_eq!(writer.len(), 0);
         if !writer.is_empty() {
@@ -127,8 +127,8 @@ impl Client {
         // null-terminated arrays, as provided by the caller.
         let mut exec = unsafe { raw_exec.to_exec() };
         let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |mode, path| {
-            // A lost record already marked the trace incomplete inside
-            // `send`; the exec itself must proceed regardless.
+            // A failure here is a post-close skip, a full region, or an
+            // fspy bug; the exec itself must proceed regardless.
             let _ = self.send(mode, path);
         })?;
         RawExec::from_exec(exec, |raw_command| f(raw_command, pre_exec))

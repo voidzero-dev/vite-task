@@ -11,18 +11,19 @@
 //!
 //! # Shared atomics
 //!
-//! The header holds three independent monotonic `AtomicU64`s:
+//! The header holds two independent monotonic `AtomicU64` counters:
 //!
 //! - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
 //!   claims ever attempted. Claiming is one wait-free `fetch_add`; the
 //!   returned old value carries the claim's slot index, the gate, and — by
 //!   comparison against the fixed table capacity — the capacity verdict.
-//!   Failed claims still count, so the counter can overshoot the capacity;
-//!   readers clamp instead of trusting it.
 //! - the **payload counter**: payload bytes ever reserved, bumped by another
-//!   wait-free `fetch_add`. Also overshoots on failure. Never read by the
-//!   receiver — committed descriptors are self-describing.
-//! - the **incomplete flag**: nonzero once a live writer lost a record.
+//!   wait-free `fetch_add`.
+//!
+//! Failed claims still count, so a counter past its limit is the record of
+//! a lost frame: the receiver derives completeness from exactly that, and
+//! clamps instead of trusting the counts. Committed descriptors carry
+//! their own offset and length, so the counters never locate data.
 //!
 //! # Memory-ordering contract
 //!
@@ -35,11 +36,11 @@
 //!    Claims publish no payload data, so `Relaxed` suffices throughout.
 //!    The CLOSED gate only stops stragglers from claiming (and allocating
 //!    pages) forever; any claim admitted between the snapshot and the gate
-//!    lands beyond the snapshot and is never observed. The incomplete flag
-//!    rides the same rule: a writer sets it (`Relaxed` RMW) before
-//!    performing the operation whose record was lost, and the receiver
-//!    re-reads it after freezing; a flag the receiver misses therefore
-//!    belongs to an operation performed after the boundary.
+//!    lands beyond the snapshot and is never observed. Completeness rides
+//!    the same rule: a failed claim's counter bump is its loss report, made
+//!    before the writer performs the operation whose record was lost — so
+//!    the snapshot either sees the overshoot, or the loss belongs to an
+//!    operation performed after the boundary.
 //! 2. **Writer commit** — the slot compare-and-swap uses `Release`
 //!    ([`SharedState::commit`]): every payload write happens-before the
 //!    committed descriptor becomes visible.
@@ -63,11 +64,9 @@ const CLOSED: u64 = 1 << 63;
 struct Header {
     /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
     claims: AtomicU64,
-    /// Nonzero once a live writer lost a record.
-    incomplete: AtomicU64,
     /// Payload bytes ever reserved, including by failed claims.
     payload_reserved: AtomicU64,
-    _reserved: [u64; 5],
+    _reserved: [u64; 6],
 }
 
 const _: () = assert!(size_of::<Header>() == layout::HEADER_LEN);
@@ -168,11 +167,17 @@ impl SharedState<'_> {
 
     /// Atomically reserves one descriptor slot and one payload span.
     ///
-    /// Wait-free: two `fetch_add`s, no retry loop (rule 1).
+    /// Wait-free: two `fetch_add`s, no retry loop (rule 1). A claim that
+    /// does not fit fails, and its counter bumps are what tell the
+    /// receiver a record was lost.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `payload_len` exceeds [`layout::MAX_PAYLOAD_LEN`] — a
+    /// caller error, not a capacity condition, and the one loss the
+    /// counters could not record.
     pub(super) fn try_claim(self, payload_len: usize) -> Result<Reservation, ReserveError> {
-        if payload_len > layout::MAX_PAYLOAD_LEN {
-            return Err(ReserveError::Capacity);
-        }
+        assert!(payload_len <= layout::MAX_PAYLOAD_LEN);
         let reserved_len = layout::reserved_payload_len(payload_len);
 
         // Payload bytes first, so a payload-capacity failure does not burn a
@@ -206,26 +211,16 @@ impl SharedState<'_> {
         })
     }
 
-    /// Records that a frame this process may still act on was lost.
-    ///
-    /// Must be called before the operation whose record was lost is
-    /// performed (rule 1).
-    pub(super) fn flag_incomplete(self) {
-        self.header.incomplete.fetch_or(1, Ordering::Relaxed);
-    }
-
-    /// Whether any live writer lost a record. Read after the freeze pass
-    /// (rule 1).
-    pub(super) fn is_incomplete(self) -> bool {
-        self.header.incomplete.load(Ordering::Relaxed) != 0
-    }
-
-    /// Snapshots the number of admitted claims: the receiver's close
-    /// boundary (rule 1). Clamped to the table capacity because failed
-    /// claims overshoot the counter.
-    pub(super) fn snapshot_claims(self) -> usize {
-        let claims = self.header.claims.load(Ordering::Relaxed);
-        usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(self.table.len())
+    /// Snapshots the claim and payload counters: the receiver's close
+    /// boundary (rule 1). Returns the admitted slot count, clamped to the
+    /// table capacity, and whether every record made it — false once either
+    /// counter overshot its limit, which is how a failed claim reports the
+    /// loss.
+    pub(super) fn snapshot(self) -> (usize, bool) {
+        let claims = self.header.claims.load(Ordering::Relaxed) & !CLOSED;
+        let payload = self.header.payload_reserved.load(Ordering::Relaxed);
+        let complete = claims <= self.table.len() as u64 && payload <= self.payloads.len() as u64;
+        (usize::try_from(claims).unwrap_or(usize::MAX).min(self.table.len()), complete)
     }
 
     /// Sets the CLOSED gate so stragglers stop claiming.

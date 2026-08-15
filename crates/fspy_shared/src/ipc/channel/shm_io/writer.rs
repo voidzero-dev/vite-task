@@ -1,7 +1,6 @@
 //! The writer side: claiming, filling, and committing frames.
 
 use std::{
-    mem::ManuallyDrop,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
 };
@@ -30,8 +29,8 @@ pub enum ClaimError {
     /// outside the channel's boundary.
     #[error("the channel has been closed by the receiver")]
     Closed,
-    /// The frame is oversized or the region is full. The claim has already
-    /// recorded the loss, so the channel will report itself incomplete.
+    /// The region is full. The claim's counter bumps already recorded the
+    /// loss, so the channel will report itself incomplete.
     #[error("no space left in the shared-memory region")]
     Capacity,
 }
@@ -85,19 +84,18 @@ impl<M: AsRawSlice> ShmWriter<M> {
     /// Claims a frame of exactly `frame_size` bytes.
     ///
     /// The frame is invisible to the receiver until [`FrameMut::finish`]
-    /// commits it. Dropping the frame without finishing abandons the claim
-    /// and marks the channel incomplete.
+    /// commits it. Dropping the frame without finishing abandons the claim:
+    /// the receiver ignores the slot, exactly as if the writer had died.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `frame_size` exceeds the frame limit of `i32::MAX`
+    /// bytes.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let state = self.state();
         let reservation = state.try_claim(frame_size.get()).map_err(|err| match err {
             ReserveError::Closed => ClaimError::Closed,
-            ReserveError::Capacity => {
-                // The record is lost but this process lives on to perform the
-                // operation, so flag the channel incomplete before the caller
-                // proceeds.
-                state.flag_incomplete();
-                ClaimError::Capacity
-            }
+            ReserveError::Capacity => ClaimError::Capacity,
         })?;
 
         let content_ptr = state.payload_ptr(reservation.payload_offset);
@@ -117,22 +115,6 @@ impl<M: AsRawSlice> ShmWriter<M> {
 
     /// Writes one encoded value as a committed frame.
     pub fn write_encoded<T: SchemaWrite<DefaultConfig, Src = T>>(
-        &self,
-        value: &T,
-    ) -> Result<(), WriteEncodedError> {
-        let result = self.write_encoded_inner(value);
-        if let Err(err) = &result
-            && !matches!(err, WriteEncodedError::Claim(_))
-        {
-            // A pre-claim failure also loses a record this live process will
-            // still act on; claim errors have already been recorded (or are
-            // an ordinary post-close skip).
-            self.state().flag_incomplete();
-        }
-        result
-    }
-
-    fn write_encoded_inner<T: SchemaWrite<DefaultConfig, Src = T>>(
         &self,
         value: &T,
     ) -> Result<(), WriteEncodedError> {
@@ -178,12 +160,11 @@ impl<M: AsRawSlice> ShmWriter<M> {
 /// An exclusively owned, claimed-but-unpublished frame.
 ///
 /// [`FrameMut::finish`] commits the frame; it is the only way to make the
-/// payload visible to the receiver. Dropping the frame instead abandons the
-/// claim: the slot stays unfinished (the receiver will abort and ignore it)
-/// and the channel is marked incomplete, because the dropping process is alive
-/// to perform the operation this record was meant to describe. A process
-/// that dies mid-frame runs no drop code and marks nothing — correctly so,
-/// since records are published before the recorded operation is performed.
+/// payload visible to the receiver. Dropping the frame instead abandons
+/// the claim: the slot stays unfinished and the receiver ignores it,
+/// exactly as if the writer had died there. A writer that abandons a frame
+/// and still performs the operation it described steps outside the usage
+/// contract — records are published before the recorded operation.
 pub struct FrameMut<'a> {
     state: SharedState<'a>,
     slot_index: usize,
@@ -218,16 +199,9 @@ impl FrameMut<'_> {
     /// Commits the frame, making it visible to the receiver.
     ///
     /// If the receiver closed the channel and aborted this frame's slot
-    /// first, the frame is silently discarded: the access belongs to the
-    /// closed run's boundary race and is intentionally excluded either way.
+    /// first, the frame is silently discarded: the record belongs to the
+    /// close race and is intentionally excluded either way.
     pub fn finish(self) {
-        let this = ManuallyDrop::new(self);
-        this.state.commit(this.slot_index, this.descriptor);
-    }
-}
-
-impl Drop for FrameMut<'_> {
-    fn drop(&mut self) {
-        self.state.flag_incomplete();
+        self.state.commit(self.slot_index, self.descriptor);
     }
 }

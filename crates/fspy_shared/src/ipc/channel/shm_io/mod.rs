@@ -21,10 +21,10 @@
 //! The layout is derived from the mapping length alone ([`layout`]), so
 //! the region is self-describing: every process computes the same table
 //! and payload bounds from the mapped size. One borrow constructs typed
-//! views of the header (a `repr(C)` struct of three monotonic
-//! `AtomicU64`s: a claim counter carrying the CLOSED gate bit, a payload
-//! counter, and an incomplete flag) and of the descriptor table (a slice
-//! of atomics); the payload area stays untyped bytes.
+//! views of the header (a `repr(C)` struct of two monotonic `AtomicU64`
+//! counters: claims, carrying the CLOSED gate bit, and payload bytes
+//! reserved) and of the descriptor table (a slice of atomics); the payload
+//! area stays untyped bytes.
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
 //! reserves a descriptor slot — validated against the fixed region bounds
 //! from the returned old values. Failed claims overshoot the counters
@@ -62,9 +62,9 @@
 //! drops are sound because writers publish a record *before* performing the
 //! recorded operation: a process that died mid-frame never performed the
 //! operation, and one that claimed or committed after the snapshot performs
-//! it outside the channel's boundary. A live writer that loses a
-//! record *before* close (capacity, abandonment) flags the channel incomplete
-//! ([`Frames::is_complete`]).
+//! it outside the channel's boundary. A record lost to a full region
+//! *before* close shows up as a counter past its limit, and the channel
+//! reports itself incomplete ([`Frames::is_complete`]).
 //!
 //! Correctness never depends on writer-side cleanup: no exit hooks, PID
 //! checks, heartbeats, or timeouts.
@@ -263,29 +263,32 @@ mod tests {
     }
 
     #[test]
-    fn oversized_frame_fails_and_marks_incomplete() {
+    fn full_region_marks_the_channel_incomplete() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
 
         assert!(writer.try_write_frame(b"test"));
 
-        // Larger than the payload region, and larger than the absolute frame
-        // limit: both fail the claim. The failed reservation stays counted —
-        // harmless, because the failure already marked the channel
-        // incomplete.
+        // Larger than the payload region: the claim fails, and its counter
+        // bump — past the region's limit — is what tells the receiver a
+        // record was lost.
         assert!(!writer.try_write_frame(&vec![0u8; 2048]));
-        assert!(
-            writer.claim_frame(((i32::MAX as usize) + 1).try_into().unwrap()).unwrap_err()
-                == ClaimError::Capacity
-        );
 
         let frames = collect_frames(&shm);
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"test");
         assert!(iter.next() == None);
-        // The failed claims lost records while their process lived on.
         assert!(!frames.is_complete());
+    }
+
+    #[test]
+    #[should_panic = "payload_len <= layout::MAX_PAYLOAD_LEN"]
+    fn oversized_frame_is_a_caller_error() {
+        let shm = MockedShm::alloc(1024);
+        // SAFETY: see `single_thread_basic`.
+        let writer = unsafe { ShmWriter::new(shm) };
+        let _ = writer.claim_frame(((i32::MAX as usize) + 1).try_into().unwrap());
     }
 
     #[test]
@@ -295,9 +298,9 @@ mod tests {
         let writer = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"foo"));
 
-        // Simulate a crash right after claiming: no drop code runs.
-        let frame = writer.claim_frame(5.try_into().unwrap()).unwrap();
-        std::mem::forget(frame);
+        // A crash right after claiming and an abandoned frame leave the
+        // identical state: an unfinished slot.
+        let _ = writer.claim_frame(5.try_into().unwrap()).unwrap();
 
         assert!(writer.try_write_frame(b"bar"));
 
@@ -317,10 +320,12 @@ mod tests {
         let writer = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"foo"));
 
-        // Simulate a crash during writing.
-        let mut frame = writer.claim_frame(5.try_into().unwrap()).unwrap();
-        frame[..3].copy_from_slice(b"wor");
-        std::mem::forget(frame);
+        // Simulate a crash during writing: the frame is abandoned
+        // half-filled.
+        {
+            let mut frame = writer.claim_frame(5.try_into().unwrap()).unwrap();
+            frame[..3].copy_from_slice(b"wor");
+        }
 
         assert!(writer.try_write_frame(b"bar"));
 
@@ -343,12 +348,13 @@ mod tests {
         assert!(writer.try_write_frame(b"foo"));
 
         // Crash after claim (slot stays zero, payload untouched).
-        std::mem::forget(writer.claim_frame(5.try_into().unwrap()).unwrap());
+        let _ = writer.claim_frame(5.try_into().unwrap()).unwrap();
 
         // Crash mid-write (slot stays zero, payload partially filled).
-        let mut frame = writer.claim_frame(7.try_into().unwrap()).unwrap();
-        frame[..3].copy_from_slice(b"wor");
-        std::mem::forget(frame);
+        {
+            let mut frame = writer.claim_frame(7.try_into().unwrap()).unwrap();
+            frame[..3].copy_from_slice(b"wor");
+        }
 
         assert!(writer.try_write_frame(b"bar"));
 
@@ -361,21 +367,21 @@ mod tests {
     }
 
     #[test]
-    fn abandoned_frame_marks_the_channel_incomplete() {
+    fn abandoned_frame_is_ignored() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer = unsafe { ShmWriter::new(shm.clone()) };
         assert!(writer.try_write_frame(b"foo"));
 
-        // A live writer dropping an unfinished frame abandons a record it
-        // may still act on.
-        drop(writer.claim_frame(5.try_into().unwrap()).unwrap());
+        // Dropping an unfinished frame abandons it: the receiver ignores
+        // the slot exactly as if the writer had died there.
+        let _ = writer.claim_frame(5.try_into().unwrap()).unwrap();
 
         let frames = collect_frames(&shm);
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next() == None);
-        assert!(!frames.is_complete());
+        assert!(frames.is_complete());
     }
 
     #[cfg(target_os = "linux")]
@@ -758,7 +764,7 @@ mod tests {
             {
                 println!("claimed");
             }
-            std::mem::forget(frame);
+            let _ = frame;
             // Wait to be killed; nothing ever unparks this thread.
             loop {
                 std::thread::park();
@@ -783,8 +789,8 @@ mod tests {
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);
-        // Death runs no drop code, so the killed writer's lost frame does not
-        // mark the channel incomplete.
+        // The killed writer left only an unfinished slot; the counters
+        // stayed within their limits, so the channel is complete.
         assert!(frames.is_complete());
     }
 }

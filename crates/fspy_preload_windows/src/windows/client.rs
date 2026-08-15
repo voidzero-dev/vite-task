@@ -41,8 +41,8 @@ impl<'a> Client<'a> {
             return;
         };
         // A failed write means the receiver closed the channel (this process
-        // outlived the run's tracking boundary) or the record was lost — the
-        // latter already marked the trace incomplete. The intercepted call
+        // outlived the run's tracking boundary) or the region was full — a
+        // loss the receiver sees as counter overshoot. The intercepted call
         // must proceed either way; a detours DLL can never panic its host.
         let _ = sender.write_encoded(&access);
     }

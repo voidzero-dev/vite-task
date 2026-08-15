@@ -49,10 +49,10 @@ impl<M: AsRawSlice> Frames<M> {
 
     /// Whether every record a writer published made it in.
     ///
-    /// False when a live writer lost a record before the channel closed
-    /// (capacity exhaustion or an abandoned frame): the frames then
-    /// under-report what writers went on to do, and consumers that need
-    /// completeness must reject them.
+    /// False when the region ran out of space before the channel closed: a
+    /// claim failed, its record was lost, and the frames under-report what
+    /// writers went on to do. Consumers that need completeness must reject
+    /// them.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         self.complete
@@ -109,8 +109,10 @@ pub(super) unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolE
         // it, later ones land in slots this pass never visits. The count is
         // clamped to the table capacity, so a counter inflated by failed
         // claims (or by a foreign scribble) degrades to a full-table sweep,
-        // not an error.
-        let slot_count = state.snapshot_claims();
+        // not an error — and an overshot counter is exactly how the
+        // snapshot learns that a record was lost (rule 1 in `state`'s
+        // ordering contract).
+        let (slot_count, is_complete) = state.snapshot();
 
         // Gate further claims. Cheap: the creator pre-faulted this page
         // where first touches are expensive. Claims racing between the
@@ -123,12 +125,7 @@ pub(super) unsafe fn close<M: AsRawSlice>(mem: M) -> Result<Frames<M>, ProtocolE
         // of the descriptor table can no longer change — late writers lose
         // their commit race against `ABORTED`.
         spans = freeze_committed_spans(state, slot_count)?;
-
-        // Read the incomplete flag only after freezing: a writer sets it
-        // before performing an operation whose record was lost, so any flag
-        // this load misses belongs to an operation performed after the
-        // boundary (rule 1 in `state`'s ordering contract).
-        complete = !state.is_incomplete();
+        complete = is_complete;
     }
 
     Ok(Frames { mem, spans, complete })
