@@ -1306,7 +1306,6 @@ dependencies = [
  "itoa",
  "libc",
  "nix 0.31.2",
- "wincode",
 ]
 
 [[package]]

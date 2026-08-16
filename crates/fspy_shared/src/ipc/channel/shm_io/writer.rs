@@ -124,7 +124,9 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // The claim counter shares its word with the gate, so the count
         // stops one short of it rather than carrying into it. That one
         // condition covers both refusals: a gate already set is above the
-        // ceiling too.
+        // ceiling too. The add has to stay inside the closure — a set gate
+        // over a maxed count is `u64::MAX`, which `then_some` would add to
+        // eagerly and overflow.
         let claims =
             match mapped.claims().try_update(Ordering::Relaxed, Ordering::Relaxed, |claims| {
                 (claims < CLOSED - 1).then(|| claims + 1)
