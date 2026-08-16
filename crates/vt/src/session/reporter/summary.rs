@@ -160,6 +160,8 @@ pub enum SavedCacheMissReason {
 pub enum SavedExecutionError {
     Cache { kind: SavedCacheErrorKind, message: Str },
     Spawn { message: Str },
+    ForwardTaskProcessOutput { message: Str },
+    WaitForTaskProcessExit { message: Str },
     PostRunFingerprint { message: Str },
     IpcServerBind { message: Str },
 }
@@ -243,8 +245,12 @@ impl SavedExecutionError {
                 },
                 message: vt_str::format!("{source:#}"),
             },
-            ExecutionError::Spawn(source) => {
-                Self::Spawn { message: vt_str::format!("{source:#}") }
+            ExecutionError::Spawn(source) => Self::Spawn { message: vt_str::format!("{source:#}") },
+            ExecutionError::ForwardTaskProcessOutput(source) => {
+                Self::ForwardTaskProcessOutput { message: vt_str::format!("{source:#}") }
+            }
+            ExecutionError::WaitForTaskProcessExit(source) => {
+                Self::WaitForTaskProcessExit { message: vt_str::format!("{source:#}") }
             }
             ExecutionError::PostRunFingerprint(source) => {
                 Self::PostRunFingerprint { message: vt_str::format!("{source:#}") }
@@ -267,6 +273,12 @@ impl SavedExecutionError {
             }
             Self::Spawn { message } => {
                 vt_str::format!("Failed to spawn process: {message}")
+            }
+            Self::ForwardTaskProcessOutput { message } => {
+                vt_str::format!("Failed to forward task process output: {message}")
+            }
+            Self::WaitForTaskProcessExit { message } => {
+                vt_str::format!("Failed to wait for task process to exit: {message}")
             }
             Self::PostRunFingerprint { message } => {
                 vt_str::format!("Failed to create post-run fingerprint: {message}")
@@ -668,9 +680,7 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
     let cache_disabled_str = if stats.cache_disabled > 0 {
         let n = stats.cache_disabled;
         Str::from(
-            vt_str::format!("• {n} cache disabled")
-                .style(Style::new().bright_black())
-                .to_string(),
+            vt_str::format!("• {n} cache disabled").style(Style::new().bright_black()).to_string(),
         )
     } else {
         Str::default()
@@ -920,5 +930,29 @@ fn format_input_modified_notice(buf: &mut Vec<u8>, task_names: &[Str]) {
         let _ = write!(buf, " not cached because it modified its input.");
     } else {
         let _ = write!(buf, " not cached because they modified their inputs.");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_forwarding_error_has_distinct_message() {
+        let error = ExecutionError::ForwardTaskProcessOutput(anyhow::anyhow!(
+            "Resource temporarily unavailable (os error 11)"
+        ));
+
+        let saved = SavedExecutionError::from_execution_error(&error);
+
+        assert!(matches!(
+            &saved,
+            SavedExecutionError::ForwardTaskProcessOutput { message }
+                if message.as_str() == "Resource temporarily unavailable (os error 11)"
+        ));
+        assert_eq!(
+            saved.display_message().as_str(),
+            "Failed to forward task process output: Resource temporarily unavailable (os error 11)"
+        );
     }
 }

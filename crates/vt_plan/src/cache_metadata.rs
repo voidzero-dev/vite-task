@@ -70,6 +70,10 @@ pub struct CacheMetadata {
     pub unfiltered_envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if callback receives the field by reference"
+)]
 const fn is_true(value: &bool) -> bool {
     *value
 }

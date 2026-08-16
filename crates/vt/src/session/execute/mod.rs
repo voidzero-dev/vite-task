@@ -385,7 +385,7 @@ async fn run(
     //    to execute the command — or carry the globbed inputs into the run.
     let (stdio_config, globbed_inputs) = match lookup {
         CacheLookup::Hit(cached) => {
-            let replay_logs = cache_metadata.map_or(true, |metadata| metadata.replay_logs);
+            let replay_logs = cache_metadata.is_none_or(|metadata| metadata.replay_logs);
             let mut stdio_config = reporter.start(CacheStatus::Hit {
                 replayed_duration: cached.duration,
                 logs_replayed: replay_logs,

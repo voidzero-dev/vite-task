@@ -102,10 +102,6 @@ impl ResolvedTaskOptions {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "env_config, input_config, output_config are distinct config categories, not a naming smell"
-)]
 pub struct CacheConfig {
     #[serde(skip_serializing_if = "is_true")]
     pub replay_logs: bool,
@@ -114,6 +110,10 @@ pub struct CacheConfig {
     pub output_config: ResolvedGlobConfig,
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if callback receives the field by reference"
+)]
 const fn is_true(value: &bool) -> bool {
     *value
 }
