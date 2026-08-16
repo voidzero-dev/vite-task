@@ -1,7 +1,7 @@
 {
   "tasks": {
     "build": {
-      "command": "vtt print fresh logs; vtt write-file dist/output.txt artifact",
+      "command": "vtt print fresh logs && vtt write-file dist/output.txt artifact",
       "cache": true,
       "replayLogs": false,
       "input": [],
