@@ -22,10 +22,9 @@ use std::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
 /// The CLOSED gate bit of the claim counter: set when the receiver seals
 /// the channel, and by any failed claim as its loss report (rule 1).
 ///
-/// A bit, not a value to compare against, so it survives the `fetch_add`
-/// of a writer that arrives late. Counting alone would need 2^63 claims
-/// to reach it, and if it ever did the gate would simply read as set: no
-/// more records, and the seal fails. Wrong, but on the safe side.
+/// A bit, not a value to compare against, so it survives the increment of
+/// a writer that arrives late. Counting can never reach it either: a
+/// claim gives up rather than carry the count into this bit.
 pub const CLOSED: u64 = 1 << 63;
 
 /// The part of the region that is always in the same place — the
@@ -79,21 +78,25 @@ const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
 // Two independent monotonic `AtomicU64` counters:
 //
 // - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
-//   claims. One wait-free `fetch_add` per claim, and the old value it
-//   returns says everything the writer needs: which slot it got, whether
-//   the channel is closed, and whether the table is full. The seal sets
-//   the gate, and so does every failed claim: the one bit both reports
-//   the loss and stops later writers doing work for a result the
-//   receiver must already reject.
-// - the **payload counter**: payload bytes reserved, one `fetch_add`.
+//   claims. One increment per claim, and the old value it returns says
+//   everything the writer needs: which slot it got, whether the channel
+//   is closed, and whether the table is full. The seal sets the gate, and
+//   so does every failed claim: the one bit both reports the loss and
+//   stops later writers doing work for a result the receiver must
+//   already reject.
+// - the **payload counter**: payload bytes reserved, one increment.
 //
-// Both counters only ever climb, and a refused claim leaves its
-// increment behind. That costs nothing: neither counter says where data
-// is — each descriptor carries its own offset and length — so an
-// inflated counter cannot point anything at the wrong bytes. The
-// receiver clamps its snapshot to the table length rather than trusting
-// it, and once the gate is set no claim ever reaches the point of taking
-// a span, whatever the payload counter has climbed to.
+// Each increment is a compare-and-swap loop that gives up rather than
+// wrap: the claim count stops one short of the gate bit, and the payload
+// counter stops short of `u64::MAX`. A wrapped counter would be the one
+// way either could do harm — a payload counter that wrapped would hand
+// out an offset another frame already owns, and a claim count that
+// carried would close the channel with nobody having lost a record. Short
+// of that, both only climb, and a refused claim leaves its increment
+// behind: neither counter says where data is — each descriptor carries
+// its own offset and length — so an inflated one points nothing at the
+// wrong bytes. The receiver clamps its snapshot to the table length
+// rather than trusting it.
 //
 // # Memory-ordering contract
 //
