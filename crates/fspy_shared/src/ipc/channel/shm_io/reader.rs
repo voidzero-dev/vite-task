@@ -137,8 +137,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
                     SlotState::Committed { offset, len } => {
                         // A span no correct writer could have written
                         // fails the whole channel.
-                        let end = offset.checked_add(len.get());
-                        if end.is_none_or(|end| end > mapped.payload_len) {
+                        if !mapped.holds_span(offset, len.get()) {
                             return Err(ProtocolError::CorruptDescriptor { slot_index });
                         }
                         frames += 1;
@@ -196,24 +195,21 @@ impl<'a, const SLOTS: usize> Iterator for Iter<'a, SLOTS> {
             // what the freeze pass saw; whatever brought the reader to
             // this thread brought that pass's `Acquire` along (rule 3).
             let bits = slot.load(Ordering::Relaxed);
-            // An unfinished slot published nothing. A span outside the
-            // region cannot appear here — `seal` fails the channel on
-            // one — but checking lets the `unsafe` below stand on its
-            // own.
+            // An unfinished slot published nothing.
             let SlotState::Committed { offset, len } = SlotState::decode(bits) else {
                 continue;
             };
-            if offset.checked_add(len.get()).is_none_or(|end| end > self.mapped.payload_len) {
-                continue;
-            }
             self.remaining -= 1;
-            // SAFETY: the span is inside the region (checked above) and
-            // nothing writes to it any more; the reader borrowed for `'a`
-            // keeps the mapping alive.
+            // SAFETY: `seal` checked this descriptor against the payload
+            // area and would have failed the channel had it not fit, and
+            // the slot has been frozen ever since — so the load above
+            // returns the value it checked. Nothing writes to a committed
+            // span any more, and the reader borrowed for `'a` keeps the
+            // mapping alive.
             return Some(unsafe {
                 slice::from_raw_parts(
-                    self.mapped.payloads.add(offset as usize).as_ptr().cast_const(),
-                    len.get() as usize,
+                    self.mapped.payloads.add(to_usize(offset)).as_ptr().cast_const(),
+                    to_usize(len.get()),
                 )
             });
         }

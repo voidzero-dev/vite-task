@@ -107,21 +107,22 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         let reservation = u64::from(frame_size.get());
         // Payload bytes first, so a payload-capacity failure does not burn a
         // slot.
-        let payload_offset = mapped.payload_reserved().fetch_add(reservation, Ordering::Relaxed);
-        // Checked: if something else scribbled on the counter, the claim
-        // must fail rather than wrap around into a span outside the
-        // region.
-        let payload_end = payload_offset.checked_add(reservation);
-        if payload_end.is_none_or(|end| end > u64::from(mapped.payload_len)) {
+        let payload_start = mapped.payload_reserved().fetch_add(reservation, Ordering::Relaxed);
+        // The claim needs an offset a descriptor can hold and a frame that
+        // ends inside the payload area. Both are checked, so if something
+        // else scribbled on the counter the claim fails rather than
+        // wrapping around into a span outside the region.
+        let Some(payload_offset) = u32::try_from(payload_start)
+            .ok()
+            .filter(|&offset| mapped.holds_span(offset, frame_size.get()))
+        else {
             let err = report_loss();
-            // Put it back (rule 1), gate first. The reservation ran off
-            // the end of the region, so no live frame sits above it.
+            // Put it back (rule 1), gate first. Whichever check failed,
+            // the reservation ran past the end of the region, so no live
+            // frame sits above it.
             mapped.payload_reserved().fetch_sub(reservation, Ordering::Relaxed);
             return Err(err);
-        }
-        // In range by the check above, and the payload area is short
-        // enough for 32-bit offsets.
-        let payload_offset = u32::try_from(payload_offset).expect("bounded by the payload region");
+        };
 
         let claims = mapped.claims().fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
@@ -150,8 +151,8 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // taking this borrow.
         let content = unsafe {
             slice::from_raw_parts_mut(
-                mapped.payloads.add(payload_offset as usize).as_ptr(),
-                frame_size.get() as usize,
+                mapped.payloads.add(to_usize(payload_offset)).as_ptr(),
+                to_usize(frame_size.get()),
             )
         };
         Ok(FrameMut {

@@ -117,13 +117,13 @@ pub(super) const FROZEN: u64 = 1;
 //    never visits. Claims publish no payload data, so `Relaxed`
 //    suffices. The gate is not the boundary — it only stops late
 //    writers; a claim that gets in between the snapshot and the gate
-//    lands past the snapshot, where the receiver never looks. Completeness rides the same
-//    modification order: a failed claim sets the gate before performing
-//    the operation whose record was lost, so either the snapshot sees
-//    the bit or the loss happened after the boundary; a writer that
-//    skipped on seeing the
-//    bit is covered the same way; one that died before setting it never
-//    performed its operation, so nothing was lost.
+//    lands past the snapshot, where the receiver never looks.
+//    Completeness rides the same modification order: a failed claim sets
+//    the gate before performing the operation whose record was lost, so
+//    either the snapshot sees the bit or the loss happened after the
+//    boundary; a writer that skipped on seeing the bit is covered the
+//    same way; one that died before setting it never performed its
+//    operation, so nothing was lost.
 // 2. **Writer commit** — `FrameMut::finish`'s compare-and-swap uses
 //    `Release`: every payload write happens-before the descriptor is
 //    visible.
@@ -131,16 +131,17 @@ pub(super) const FROZEN: u64 = 1;
 //    `ShmReader::seal` uses `Acquire` on failure: an observed descriptor
 //    implies fully visible payload bytes.
 
-/// Converts a counter value to a slot index.
+/// Converts an integer into a `usize`.
 ///
-/// Never loses bits: the assert lets only targets whose `usize` is 64
-/// bits — the width of the counters — build this module. That assert is
-/// the only reason the cast below is safe, so it sits inside the
-/// function rather than at module scope.
+/// Never loses bits: the argument has to fit a `u64`, which is what the
+/// bound says, and the assert lets only targets whose `usize` is 64 bits
+/// build this module. That assert is the only reason the cast is safe,
+/// so it sits here rather than at module scope — and this is the only
+/// `as` in the protocol.
 #[expect(clippy::cast_possible_truncation, reason = "the assert allows only equal widths")]
-pub(super) const fn to_usize(value: u64) -> usize {
+pub(super) fn to_usize(value: impl Into<u64>) -> usize {
     const { assert!(size_of::<usize>() == size_of::<u64>(), "requires a 64-bit target") };
-    value as usize
+    value.into() as usize
 }
 
 /// Casts to a pointer of another type, returning `None` when the pointer
@@ -165,7 +166,7 @@ pub(super) struct MappedLayout<const SLOTS: usize> {
     pub(super) payloads: NonNull<u8>,
     /// Length of the payload area. A `u32`, the width of a descriptor's
     /// offset and length, so bounds checks need no conversion.
-    pub(super) payload_len: u32,
+    payload_len: u32,
 }
 
 /// A decoded descriptor slot (the codec above).
@@ -261,6 +262,16 @@ impl<const SLOTS: usize> MappedLayout<SLOTS> {
     /// The descriptor table.
     pub(super) const fn table(&self) -> &[AtomicU64] {
         &self.meta().table
+    }
+
+    /// Whether `len` bytes at `offset` lie inside the payload area. Both
+    /// sides ask this: the writer about the span it just reserved, the
+    /// reader about every descriptor it decodes.
+    pub(super) const fn holds_span(&self, offset: u32, len: u32) -> bool {
+        match offset.checked_add(len) {
+            Some(end) => end <= self.payload_len,
+            None => false,
+        }
     }
 }
 

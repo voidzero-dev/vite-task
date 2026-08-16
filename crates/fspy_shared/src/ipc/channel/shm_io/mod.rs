@@ -305,7 +305,7 @@ mod tests {
         // refused and sets the gate, which shuts out later claims — their
         // records would ride on a result the receiver must already
         // reject.
-        let oversized = ((u32::MAX as usize) + 1).try_into().unwrap();
+        let oversized = (layout::to_usize(u32::MAX) + 1).try_into().unwrap();
         assert!(matches!(writer.claim_frame(oversized), Err(ClaimError::Capacity)));
         assert!(writer.is_closed());
         assert!(!writer.try_write_frame(b"refused"));
@@ -698,7 +698,9 @@ mod tests {
         }
 
         let misaligned_shm = Misaligned(MockedShm::alloc(1024));
-        assert!(misaligned_shm.as_raw_slice().cast::<u8>() as usize % align_of::<u64>() != 0);
+        assert!(
+            !misaligned_shm.as_raw_slice().cast::<u8>().addr().is_multiple_of(align_of::<u64>())
+        );
 
         // SAFETY: the wrapped allocation is valid; only its alignment is
         // deliberately wrong.
