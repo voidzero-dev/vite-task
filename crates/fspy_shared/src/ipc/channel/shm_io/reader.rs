@@ -15,6 +15,7 @@
 
 use std::{
     fmt,
+    iter::FusedIterator,
     ptr::NonNull,
     slice,
     sync::atomic::{AtomicU64, Ordering},
@@ -198,6 +199,8 @@ impl<'a> Iterator for Iter<'a> {
         (0, Some(self.table.len()))
     }
 }
+
+impl FusedIterator for Iter<'_> {}
 
 impl<'a, M: AsRawSlice> IntoIterator for &'a ShmReader<M> {
     type IntoIter = Iter<'a>;

@@ -26,19 +26,19 @@ use std::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
 /// of a writer that arrives late. Counting alone would need 2^63 claims
 /// to reach it, and if it ever did the gate would simply read as set: no
 /// more records, and the seal fails. Wrong, but on the safe side.
-pub(super) const CLOSED: u64 = 1 << 63;
+pub const CLOSED: u64 = 1 << 63;
 
 /// The part of the region that is always in the same place — the
 /// counters and the descriptor table — as one `repr(C)` struct, which
 /// must start zeroed. The payload area is the rest of the mapping.
 #[repr(C)]
-pub(super) struct Meta<const SLOTS: usize> {
+pub struct Meta<const SLOTS: usize> {
     /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
-    pub(super) claims: AtomicU64,
+    pub claims: AtomicU64,
     /// Payload bytes ever reserved, including by failed claims.
-    pub(super) payload_reserved: AtomicU64,
+    pub payload_reserved: AtomicU64,
     /// One descriptor slot per frame.
-    pub(super) table: [AtomicU64; SLOTS],
+    pub table: [AtomicU64; SLOTS],
 }
 
 // The mapping starts at a `u64`-aligned address and is cast to `&Meta`,
@@ -125,7 +125,7 @@ const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
 /// so it sits here rather than at module scope — and this is the only
 /// `as` in the protocol.
 #[expect(clippy::cast_possible_truncation, reason = "the assert allows only equal widths")]
-pub(super) fn to_usize(value: impl Into<u64>) -> usize {
+pub fn to_usize(value: impl Into<u64>) -> usize {
     const { assert!(size_of::<usize>() == size_of::<u64>(), "requires a 64-bit target") };
     value.into() as usize
 }
@@ -144,21 +144,21 @@ fn try_cast_aligned<T, U>(ptr: *mut T) -> Option<*mut U> {
 /// The pointers stay valid as long as the mapping does, because they
 /// point into the mapped memory, not into the endpoint holding them.
 #[derive(Clone, Copy)]
-pub(super) struct MappedLayout<const SLOTS: usize> {
+pub struct MappedLayout<const SLOTS: usize> {
     meta: NonNull<Meta<SLOTS>>,
     /// Start of the payload area. A raw pointer, not a reference:
     /// writers hand out `&mut` slices into it, which must not overlap a
     /// shared reference.
-    pub(super) payload_start: NonNull<u8>,
+    pub payload_start: NonNull<u8>,
     /// Length of the payload area. A `u32`, the width of a descriptor's
     /// offset and length, so the writer's bounds check needs no
     /// conversion.
-    pub(super) payload_len: u32,
+    pub payload_len: u32,
 }
 
 /// A decoded descriptor slot (the codec above).
 #[derive(Clone, Copy)]
-pub(super) enum SlotState {
+pub enum SlotState {
     /// Nothing is published in the slot: the writer has not finished it
     /// yet, or died or gave it up before finishing. The receiver ignores
     /// such slots.
@@ -178,7 +178,7 @@ pub(super) enum SlotState {
 impl SlotState {
     /// Decodes a slot value into its state. The two processes sharing a
     /// value run on one machine, so native byte order is fine.
-    pub(super) const fn decode(slot_value: u64) -> Self {
+    pub const fn decode(slot_value: u64) -> Self {
         let [offset, len] = bytemuck::must_cast::<u64, [u32; 2]>(slot_value);
         let Some(len) = NonZeroU32::new(len) else {
             return Self::Unfinished;
@@ -187,7 +187,7 @@ impl SlotState {
     }
 
     /// Encodes this state as a slot value; the inverse of [`Self::decode`].
-    pub(super) const fn encode(self) -> u64 {
+    pub const fn encode(self) -> u64 {
         let [offset, len] = match self {
             Self::Unfinished => [0, 0],
             Self::Committed { offset, len } => [offset, len.get()],
@@ -209,7 +209,7 @@ impl<const SLOTS: usize> MappedLayout<SLOTS> {
     ///   used.
     /// - The memory must have been zero-initialized when the region was
     ///   created, and accessed only through this protocol since.
-    pub(super) unsafe fn new(mem: *mut [u8]) -> Option<Self> {
+    pub unsafe fn new(mem: *mut [u8]) -> Option<Self> {
         let mem_start = mem.cast::<u8>();
         // The mapping must hold the fixed struct.
         let payload_len = mem.len().checked_sub(size_of::<Meta<SLOTS>>())?;
@@ -237,17 +237,17 @@ impl<const SLOTS: usize> MappedLayout<SLOTS> {
     }
 
     /// The claim counter.
-    pub(super) const fn claims(&self) -> &AtomicU64 {
+    pub const fn claims(&self) -> &AtomicU64 {
         &self.meta().claims
     }
 
     /// The payload counter.
-    pub(super) const fn payload_reserved(&self) -> &AtomicU64 {
+    pub const fn payload_reserved(&self) -> &AtomicU64 {
         &self.meta().payload_reserved
     }
 
     /// The descriptor table.
-    pub(super) const fn table(&self) -> &[AtomicU64] {
+    pub const fn table(&self) -> &[AtomicU64] {
         &self.meta().table
     }
 }
