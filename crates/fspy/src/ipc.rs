@@ -26,19 +26,11 @@ impl TryFrom<Receiver> for ChannelAccesses {
     /// [`fspy_shared::ipc::channel::Receiver::close`]) — and its work is
     /// bounded by the number of reported records, so it runs inline.
     ///
-    /// Fails when a record was lost before close or the shared-memory
-    /// metadata was corrupted. Failing here — instead of returning a
-    /// silently short trace — keeps the tracking result trustworthy for
-    /// caching.
+    /// Fails when a record was lost before close, which is what keeps the
+    /// tracking result trustworthy for caching: closing hands back frames
+    /// only when they are all of them.
     fn try_from(receiver: Receiver) -> io::Result<Self> {
-        let frames = receiver.close()?;
-        if !frames.is_complete() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "file-access trace is incomplete: a tracked process lost a record",
-            ));
-        }
-        Ok(Self { frames })
+        Ok(Self { frames: receiver.close()? })
     }
 }
 

@@ -294,8 +294,10 @@ impl Receiver {
     ///
     /// # Errors
     ///
-    /// Fails only when the shared-memory metadata was corrupted (a protocol
-    /// impossibility for correct senders); the trace is then unusable.
+    /// Fails when a record was lost before the close — a sender ran out of
+    /// room, or tried to send something too large — and when the region
+    /// cannot hold the protocol at all. Either way there is no complete
+    /// set of records, so none are handed back.
     pub fn close(self) -> io::Result<Frames> {
         let Self { _keeper: keeper, mapping } = self;
         // Remove the backing file first so no new process attaches while the
@@ -348,7 +350,6 @@ mod tests {
 
         let frames = receiver.close().unwrap();
         assert!(frames.iter().next().unwrap() == &[4, 2]);
-        assert!(frames.is_complete());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -370,7 +371,6 @@ mod tests {
         assert!(received_frame == &[4, 2]);
 
         assert!(iter.next().is_none());
-        assert!(frames.is_complete());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -412,7 +412,6 @@ mod tests {
 
         let frames = receiver.close().unwrap();
         assert!(frames.iter().next().unwrap() == &[4, 2]);
-        assert!(frames.is_complete());
 
         assert!(
             sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap_err()
@@ -447,6 +446,5 @@ mod tests {
             frames.iter().map(|frame| from_utf8(frame).unwrap().parse::<u16>().unwrap()).collect();
         received_values.sort_unstable();
         assert!(received_values == (0u16..200).collect::<Vec<u16>>());
-        assert!(frames.is_complete());
     }
 }

@@ -10,8 +10,8 @@ Three requirements shaped everything here:
 2. **A writer may outlive the channel.** The receiver must never wait for
    writers; sealing is immediate.
 3. **The receiver must know whether it got everything.** Either the frames
-   hold every record writers published, or they are flagged incomplete.
-   Never a silently short result.
+   hold every record writers published, or sealing fails and hands back
+   nothing. Never a silently short result.
 
 Simpler designs fail these. A lock that writers hold while active proves
 "no writers left" only as long as every writer manages the lock correctly —
@@ -63,8 +63,9 @@ Three steps:
    fact and sets the CLOSED gate before the writer moves on.
 2. **Fill.** The writer serializes into its payload span. The span is
    exclusively its own; nobody else knows it exists yet.
-3. **Commit.** One compare-and-swap flips the frame's slot from zero to a
-   descriptor holding the payload's offset and length. Before this swap the
+3. **Commit.** One store puts a descriptor holding the payload's offset
+   and length into the frame's slot. Only the writer that claimed the slot
+   ever writes it, so no compare-and-swap is needed. Before the store the
    receiver cannot see the frame at all; after it, the frame is visible and
    its payload never changes again.
 
@@ -96,9 +97,8 @@ stop or crash the program doing the work.
 
 The loss is not silent. Before moving on, the failed claim sets the
 CLOSED gate — the same bit the receiver sets when it seals. When the
-receiver seals the channel it reads the bit once; if it was already
-set, `is_complete` returns false, and a reader that needs the full
-picture knows to throw the result away.
+receiver seals the channel it reads the bit once; if it was already set,
+sealing fails and no frames are handed out at all.
 
 Setting the bit before moving on matters for the same reason committing
 a record before acting does. If the receiver's read misses the bit, the
@@ -108,9 +108,9 @@ include. And a writer that dies before setting the bit never performed
 its action, so nothing was actually lost.
 
 Because the bit is also the gate, the first lost record closes the
-channel: every later claim is refused. That refusal costs nothing —
-`is_complete` is already false, so the result must be thrown away, and
-any further records would ride a result nobody can use.
+channel: every later claim is refused. That refusal costs nothing — the
+result is already doomed, so any further records would only be added to
+something nobody can use.
 
 One more limit: a single frame holds at most `u32::MAX` bytes, because a
 descriptor cannot describe more. Such a claim is refused — and reported —
@@ -121,28 +121,27 @@ the same way.
 The receiver seals the channel once:
 
 1. **Snapshot** the claim counter with a plain load. This is the boundary:
-   claims at or before it are in, later ones are not.
+   claims at or before it are in, later ones are not. If the CLOSED bit is
+   already set, a record was lost or someone sealed earlier, and the seal
+   fails right here — a partial set of frames is never handed out.
 2. **Gate** further claims by setting the CLOSED bit, so stragglers stop.
-3. **Freeze** every slot in the snapshot: a compare-and-swap flips zero to
-   FROZEN. If the slot was already committed, the swap fails and the frame
-   is kept. Exactly one side wins each slot, and either way the slot
-   never changes again.
-4. **Validate** each committed descriptor's bounds. A descriptor no correct
-   writer could produce fails the whole channel — never a panic, never an
-   out-of-bounds read.
+
+That is the whole of it: two loads and one bit. No slot is touched, so
+sealing costs the same whether the channel holds one frame or ten million.
 
 The result, `ShmReader`, owns the mapping and lends out one `&[u8]` per
-committed span, straight from shared memory — no copy. The borrows are
+committed span, straight from shared memory — no copy. It reads the table
+when asked, so a writer that was still filling a frame when the line was
+drawn may show up in a later read and not an earlier one. The borrows are
 sound because a committed span is never written again and is disjoint from
 everything a live straggler may still touch. The mapping is released when
 the reader is dropped.
 
 ```text
-                         writer's commit CAS wins
-                    +------------------------------> COMMITTED (readable)
-CLAIMED (slot 0) ---+
-                    +------------------------------> FROZEN (ignored)
-                         receiver's freeze CAS wins
+                       writer finishes the frame
+CLAIMED (slot 0) -------------------------------> COMMITTED (readable)
+       |
+       +-- writer dies or gives the claim up ---> stays zero (ignored)
 ```
 
 ## Why this is sound, in one list
@@ -150,29 +149,29 @@ CLAIMED (slot 0) ---+
 - Finding frames never involves reading payload bytes; every slot has a
   fixed place. A half-written payload can never be mistaken for metadata.
 - A payload is reachable only through its committed descriptor. The commit
-  is a `Release` write and the receiver's failed freeze is an `Acquire`
-  read, so an observed descriptor implies fully visible payload bytes.
-- Once a slot is committed or frozen, nothing ever changes it again.
-- The counters track the true counts: a refused claim sets the CLOSED
-  gate — marking the result incomplete and refusing every later claim —
-  and then subtracts its own increments back, so stragglers can hammer a
-  sealed channel forever without moving the counter toward the gate bit.
-  The receiver still clamps its snapshot to the fixed capacities, so even
-  a scribbled counter degrades into extra frozen slots, not corruption.
-- The bounds checks on descriptors are what make the `unsafe` reference
-  construction correct: whether the receiver stays memory-safe never
-  depends on another process behaving.
-- Whether the bytes are _right_ does trust the other processes to follow
-  the protocol — one that scribbles random memory is outside the model.
-  That trust is why the receiver can read frames straight out of shared
-  memory, with no copies and no checksums.
+  is a `Release` write and the receiver's load is an `Acquire` read, so a
+  descriptor the receiver sees brings its payload bytes with it.
+- One writer owns each slot and writes it once, so a slot goes from zero to
+  committed and never changes again.
+- No counter has to be exact: a refused claim sets the CLOSED gate —
+  failing the seal and refusing every later claim —
+  and leaves its increments where they are. Both counters only ever climb,
+  which costs nothing: neither one says where data is. The receiver still
+  clamps its snapshot to the fixed capacities, so even a scribbled counter
+  just means walking extra empty slots.
+- A committed descriptor names the span its writer reserved and checked,
+  so the receiver builds its borrows from it without re-checking. That
+  trusts the other processes to follow the protocol — one that scribbles
+  random memory is outside the model — and it is why the receiver can read
+  frames straight out of shared memory, with no copies and no checksums.
 
 ## Performance notes
 
-- Claiming is two atomic adds; committing is one CAS. Nothing retries.
-- Sealing costs one pass over the claimed slots. Nothing is copied and
-  nothing is allocated — the whole module is allocation-free; the reader
-  re-reads the frozen table to iterate.
+- Claiming is two atomic adds; committing is one store. Nothing retries,
+  and no operation on the write path is a read-modify-write of a slot.
+- Sealing is two loads and one bit, whatever the channel holds. Nothing is
+  copied and nothing is allocated — the whole module is allocation-free;
+  the reader reads the table to iterate.
 - On Linux, the first touch of the sparse backing file can cost
   milliseconds on journalling filesystems (it is the fault path, not block
   allocation — `fallocate` does not help). Creators should run `pre_fault`

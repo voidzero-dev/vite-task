@@ -1,23 +1,23 @@
 //! The writer side: claim a frame, fill it, finish it.
 
 use std::{
-    fmt,
     num::{NonZeroU32, NonZeroUsize},
     ops::{Deref, DerefMut},
     slice,
-    sync::atomic::Ordering,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use super::{
     AsRawSlice,
-    layout::{self, CLOSED, MappedLayout, SlotState, to_usize},
+    layout::{CLOSED, MappedLayout, SlotState, to_usize},
 };
 
 /// A concurrent shared-memory frame writer.
 ///
 /// Safe to use from many threads and processes at once: each frame is
 /// reserved atomically, filled in a span no one else can touch, and
-/// published with one atomic write (the ordering contract in [`layout`]).
+/// published with one atomic write (the ordering contract in
+/// [`super::layout`]).
 pub struct ShmWriter<M, const SLOTS: usize> {
     mapped: MappedLayout<SLOTS>,
     /// Owns the region the pointers point into. Declared after them:
@@ -39,14 +39,14 @@ unsafe impl<M: Sync, const SLOTS: usize> Sync for ShmWriter<M, SLOTS> {}
 pub enum ClaimError {
     /// The CLOSED gate was set: the receiver sealed the channel, or an
     /// earlier claim failed and shut it down. Dropping the record is
-    /// right either way — the receiver had already stopped collecting,
-    /// or that same bit already tells it the frames are incomplete.
+    /// right either way — the receiver had already stopped collecting, or
+    /// that same bit already makes the seal fail.
     #[error("the channel has been closed")]
     Closed,
     /// There was no room: the region is full, or the frame is longer than
     /// the `u32::MAX`-byte limit. The loss is already recorded — this
-    /// claim set the CLOSED gate — so the channel now reports itself
-    /// incomplete and refuses every later claim.
+    /// claim set the CLOSED gate — so sealing the channel will fail and
+    /// every later claim is refused.
     #[error("no space left in the shared-memory region")]
     Capacity,
 }
@@ -97,8 +97,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         };
 
         // A frame too long for the descriptor's 32-bit length field cannot
-        // be described, so this conversion is the oversize check. No
-        // counter has moved yet, so there is nothing to undo.
+        // be described, so this conversion is the oversize check.
         let Ok(frame_size) = NonZeroU32::try_from(frame_size) else {
             return Err(report_loss());
         };
@@ -108,40 +107,21 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // Payload bytes first, so a payload-capacity failure does not burn a
         // slot.
         let payload_start = mapped.payload_reserved().fetch_add(reservation, Ordering::Relaxed);
-        // The claim needs an offset a descriptor can hold and a frame that
-        // ends inside the payload area. Both are checked, so if something
-        // else scribbled on the counter the claim fails rather than
-        // wrapping around into a span outside the region.
-        let Some(payload_offset) = u32::try_from(payload_start)
-            .ok()
-            .filter(|&offset| mapped.holds_span(offset, frame_size.get()))
+        let Some(payload_offset) =
+            fitted_offset(payload_start, frame_size.get(), mapped.payload_len)
         else {
-            let err = report_loss();
-            // Put it back (rule 1), gate first. Whichever check failed,
-            // the reservation ran past the end of the region, so no live
-            // frame sits above it.
-            mapped.payload_reserved().fetch_sub(reservation, Ordering::Relaxed);
-            return Err(err);
+            return Err(report_loss());
         };
 
         let claims = mapped.claims().fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
-            // Not a loss: the receiver had already stopped collecting
-            // when this record was refused. Put the count back (rule 1)
-            // — the gate was already set. (The payload reservation
-            // stays: it is inside the region, nothing was written
-            // there, and the region caps how much can pile up.)
-            mapped.claims().fetch_sub(1, Ordering::Relaxed);
+            // Not a loss: the receiver had already stopped collecting when
+            // this record was refused.
             return Err(ClaimError::Closed);
         }
         let slot_index = to_usize(claims);
         if slot_index >= SLOTS {
-            let err = report_loss();
-            // Put the count back (rule 1), gate first: with the bit
-            // already set, no later reader can mistake the lowered count
-            // for an open channel.
-            mapped.claims().fetch_sub(1, Ordering::Relaxed);
-            return Err(err);
+            return Err(report_loss());
         }
 
         // SAFETY: the claim reserved this span for itself, and the check
@@ -156,9 +136,9 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
             )
         };
         Ok(FrameMut {
-            mapped,
-            slot_index,
-            descriptor: SlotState::Committed { offset: payload_offset, len: frame_size }.encode(),
+            slot: &self.mapped.table()[slot_index],
+            slot_to_commit: SlotState::Committed { offset: payload_offset, len: frame_size }
+                .encode(),
             content,
         })
     }
@@ -177,6 +157,17 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     }
 }
 
+/// The offset of a `len`-byte frame reserved at `start`, or `None` when it
+/// does not fit: the start must be small enough for a descriptor's 32-bit
+/// offset, and the frame must end inside the payload area. Both are
+/// checked, so if something else scribbled on the counter the claim fails
+/// rather than wrapping around into a span outside the region.
+fn fitted_offset(start: u64, len: u32, payload_len: u32) -> Option<u32> {
+    let offset = u32::try_from(start).ok()?;
+    let end = offset.checked_add(len)?;
+    (end <= payload_len).then_some(offset)
+}
+
 /// An exclusively owned, claimed-but-unpublished frame.
 ///
 /// [`FrameMut::finish`] commits the frame; it is the only way to show the
@@ -185,20 +176,11 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
 /// writer had died there. A writer that drops a frame and still performs
 /// the operation it described breaks the rule this channel is built on —
 /// write the record first, then do the thing it records.
+#[derive(Debug)]
 pub struct FrameMut<'a, const SLOTS: usize> {
-    mapped: MappedLayout<SLOTS>,
-    slot_index: usize,
-    descriptor: u64,
+    slot: &'a AtomicU64,
+    slot_to_commit: u64,
     content: &'a mut [u8],
-}
-
-impl<const SLOTS: usize> fmt::Debug for FrameMut<'_, SLOTS> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FrameMut")
-            .field("slot_index", &self.slot_index)
-            .field("len", &self.content.len())
-            .finish_non_exhaustive()
-    }
 }
 
 impl<const SLOTS: usize> Deref for FrameMut<'_, SLOTS> {
@@ -218,17 +200,14 @@ impl<const SLOTS: usize> DerefMut for FrameMut<'_, SLOTS> {
 impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
     /// Commits the frame, making it visible to the receiver.
     ///
-    /// If the receiver sealed the channel and froze this slot first, the
-    /// swap fails and the frame is dropped without a sound: this record
-    /// raced the seal, and is meant to be left out either way.
+    /// A receiver that already sealed the channel may or may not show this
+    /// frame: it reads the table when asked, so what it reports depends on
+    /// whether the descriptor is there yet. Either answer is truthful —
+    /// the operation this record describes had not happened when the
+    /// receiver drew its line.
     pub fn finish(self) {
         // Rule 2: `Release` orders every payload write before the
-        // descriptor.
-        let _ = self.mapped.table()[self.slot_index].compare_exchange(
-            layout::UNFINISHED,
-            self.descriptor,
-            Ordering::Release,
-            Ordering::Relaxed,
-        );
+        // descriptor. This writer owns the slot, so a store is enough.
+        self.slot.store(self.slot_to_commit, Ordering::Release);
     }
 }

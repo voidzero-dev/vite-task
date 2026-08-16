@@ -28,44 +28,44 @@
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes,
 //! one a descriptor slot — and the old values they return are what the
 //! writer checks against the region's fixed size. A failed claim sets the
-//! CLOSED gate to report the loss, then puts its increments back, so late
-//! writers can hammer a sealed channel forever without moving the
-//! counters. Each descriptor carries its own offset and length, so the
+//! CLOSED gate to report the loss and leaves its increments where they
+//! are: both counters only ever climb. Each descriptor carries its own
+//! offset and length, so the
 //! counters never say where data is, and every slot sits at a fixed
 //! place, so an unfinished frame can never hide a later one.
 //!
 //! # Frame lifecycle
 //!
 //! ```text
-//!                          writer commit CAS wins
-//!                     +-----------------------------> COMMITTED (readable)
-//! CLAIMED (slot 0) ---+
-//!                     +-----------------------------> FROZEN (ignored)
-//!                          receiver freeze CAS wins
+//!                        writer finishes the frame
+//! CLAIMED (slot 0) ---------------------------------> COMMITTED (readable)
+//!        |
+//!        +---- writer dies or gives the claim up ---> stays zero (ignored)
 //! ```
 //!
 //! The only way to reach a payload is through its committed descriptor,
 //! and a descriptor is committed only after the payload is fully written
 //! ([`layout`]'s ordering contract). The receiver never works out where a
 //! frame is by reading payload bytes, and the borrows [`ShmReader`] hands
-//! out cover exactly the committed spans it checked — nothing writes to
+//! out cover exactly the spans their writers reserved — nothing writes to
 //! them any more, and they never overlap what a live writer may touch.
 //!
 //! # Seal boundary
 //!
 //! [`ShmReader::seal`] draws its line by taking a snapshot of the claim
-//! counter. A writer that got in before the snapshot races the freeze
-//! pass for its own slot — its frame is either kept (commit won) or
-//! skipped (freeze won), never half-read; a claim taken after the
-//! snapshot lands in a slot the receiver never looks at, until the CLOSED
-//! gate stops late writers for good. Dropping either is safe because a
-//! writer writes its record *before* doing what the record describes: one
-//! that died mid-frame never did it, and one that claimed or committed
-//! after the snapshot does it after the receiver stopped collecting. A
-//! record refused *before* the seal — no room, oversized frame — sets the
-//! gate first, so the channel reports itself incomplete
-//! ([`ShmReader::is_complete`]) and refuses every later claim: one lost
-//! record already ruins the result.
+//! counter and then shutting the gate. It walks no slots: a frame is read
+//! if its descriptor is there when the reader looks at it, so a writer
+//! still filling a frame when the line was drawn may land on either side.
+//! A claim taken after the snapshot lands in a slot the reader never
+//! reaches. Both are safe because a writer writes its record *before*
+//! doing what the record describes: one that died mid-frame never did it,
+//! and one that claimed or committed after the snapshot does it after the
+//! receiver stopped collecting.
+//!
+//! A record refused *before* the seal — no room, oversized frame — sets
+//! the gate first, so every later claim is refused and the seal itself
+//! fails: one lost record already ruins the result, and a partial set of
+//! frames is never handed out.
 //!
 //! None of this needs writers to clean up after themselves: no exit
 //! hooks, PID checks, heartbeats, or timeouts.
@@ -81,9 +81,10 @@ use std::sync::atomic::Ordering;
 use fspy_shm::Mapping;
 #[cfg(target_os = "linux")]
 use layout::MappedLayout;
-// Only tests name the error types; production matches on `Ok`/`Err` alone.
+// Only tests name the error types; production reports them through
+// `Display` and matches on `Ok`/`Err` alone.
 #[cfg(test)]
-pub use reader::ProtocolError;
+pub use reader::SealError;
 pub use reader::ShmReader;
 #[cfg(test)]
 pub use writer::ClaimError;
@@ -241,7 +242,6 @@ mod tests {
         assert!(iter.next().unwrap() == b"world");
         assert!(iter.next().unwrap() == b"this is a test");
         assert!(iter.next() == None);
-        assert!(frames.is_complete());
     }
 
     #[test]
@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn full_region_marks_the_channel_incomplete() {
+    fn full_region_fails_the_seal() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
@@ -283,19 +283,19 @@ mod tests {
         // Larger than the payload region: the claim fails and sets the
         // gate, which is what tells the receiver a record was lost.
         assert!(!writer.try_write_frame(&vec![0u8; 2048]));
-        // The out-of-bounds reservation was taken back: only the four
-        // bytes of "test" remain counted.
-        assert!(shm.peek_u64(8) == 4);
+        // The refused reservation stays counted: four bytes of "test"
+        // plus the 2048 that did not fit.
+        assert!(shm.peek_u64(8) == 4 + 2048);
 
-        let frames = collect_frames(&shm);
-        let mut iter = frames.iter();
-        assert!(iter.next().unwrap() == b"test");
-        assert!(iter.next() == None);
-        assert!(!frames.is_complete());
+        // "test" did land, but a lost record means the frames are not all
+        // of them, so the seal hands back none of them.
+        // SAFETY: see `collect_frames`.
+        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
     #[test]
-    fn oversized_frame_is_refused_and_marks_incomplete() {
+    fn oversized_frame_is_refused_and_fails_the_seal() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
@@ -310,11 +310,9 @@ mod tests {
         assert!(writer.is_closed());
         assert!(!writer.try_write_frame(b"refused"));
 
-        let frames = collect_frames(&shm);
-        let mut iter = frames.iter();
-        assert!(iter.next().unwrap() == b"kept");
-        assert!(iter.next() == None);
-        assert!(!frames.is_complete());
+        // SAFETY: see `collect_frames`.
+        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
     #[test]
@@ -336,7 +334,6 @@ mod tests {
         assert!(iter.next().unwrap() == b"bar");
         assert!(iter.next() == None);
         // Death loses no performed operation, so the channel stays complete.
-        assert!(frames.is_complete());
     }
 
     #[test]
@@ -360,7 +357,6 @@ mod tests {
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next().unwrap() == b"bar");
         assert!(iter.next() == None);
-        assert!(frames.is_complete());
     }
 
     #[test]
@@ -389,7 +385,6 @@ mod tests {
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next().unwrap() == b"bar");
         assert!(iter.next() == None);
-        assert!(frames.is_complete());
     }
 
     #[test]
@@ -407,7 +402,6 @@ mod tests {
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next() == None);
-        assert!(frames.is_complete());
     }
 
     #[cfg(target_os = "linux")]
@@ -431,11 +425,10 @@ mod tests {
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next().unwrap() == b"bar");
         assert!(iter.next() == None);
-        assert!(frames.is_complete());
     }
 
     #[test]
-    fn slot_capacity_failure_marks_incomplete() {
+    fn slot_capacity_failure_fails_the_seal() {
         // A 1024-byte region has a 15-slot table; the 16th claim must fail
         // on the slot side while payload space remains.
         let shm = MockedShm::alloc(1024);
@@ -445,13 +438,14 @@ mod tests {
             assert!(writer.try_write_frame(b"x"));
         }
         assert!(writer.claim_frame(1.try_into().unwrap()).unwrap_err() == ClaimError::Capacity);
-        // The refusal put back what it added: the gate is set, the count
-        // is unchanged.
-        assert!(shm.peek_u64(0) == (1 << 63) | 15);
+        // The refused claim leaves its increment behind, and sets the
+        // gate: sixteen claims counted, fifteen of them in slots.
+        assert!(shm.peek_u64(0) == (1 << 63) | 16);
 
-        let frames = collect_frames(&shm);
-        assert!(frames.iter().count() == 15);
-        assert!(!frames.is_complete());
+        // Fifteen frames landed, but the sixteenth was lost.
+        // SAFETY: see `collect_frames`.
+        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
     #[test]
@@ -466,7 +460,6 @@ mod tests {
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next() == None);
-        assert!(frames.is_complete());
 
         // The seal set the gate: a late writer's claim fails cleanly and
         // does not mark the channel incomplete — that record belongs
@@ -476,15 +469,12 @@ mod tests {
         for _ in 0..100 {
             assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
         }
-        // Late writers leave no trace on the claim counter: every refusal
-        // puts back what it added, so counting can never reach the gate
-        // bit.
-        assert!(shm.peek_u64(0) == before);
-        assert!(frames.is_complete());
+        // Each refusal still counted its claim, and the gate stayed set.
+        assert!(shm.peek_u64(0) == before + 100);
     }
 
     #[test]
-    fn commit_after_abort_publishes_nothing() {
+    fn commit_after_seal_shows_up_in_a_later_read() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
         let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
@@ -492,20 +482,22 @@ mod tests {
         let mut frame = writer.claim_frame(5.try_into().unwrap()).unwrap();
         frame.copy_from_slice(b"late!");
 
-        // The receiver closes while the frame is unfinished and aborts it.
+        // The receiver seals while the frame is still unfinished: nothing
+        // to show yet, and nothing lost either — the writer has not
+        // performed the operation this record describes.
         let frames = collect_frames(&shm);
         assert!(frames.iter().count() == 0);
-        assert!(frames.is_complete());
 
-        // The late commit loses the race silently.
+        // The reader reads the table when asked, so a commit that lands
+        // after the seal shows up in the very same reader.
         frame.finish();
+        assert!(frames.iter().count() == 1);
 
-        // A second seal still reads no frames — and reports incomplete:
-        // the gate was set by the first seal, and a re-seal cannot vouch
-        // for records refused since then.
-        let frames = collect_frames(&shm);
-        assert!(frames.iter().count() == 0);
-        assert!(!frames.is_complete());
+        // A second seal fails: the first one set the gate, and a re-seal
+        // cannot say what was refused since then.
+        // SAFETY: see `collect_frames`.
+        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
     #[test]
@@ -540,7 +532,6 @@ mod tests {
             assert!(frame == b"hello" || frame == b"foo" || frame == b"this is a test");
         }
         assert!(count == 120);
-        assert!(frames.is_complete());
     }
 
     #[test]
@@ -560,18 +551,13 @@ mod tests {
             }
         });
 
-        let frames = collect_frames(&shm);
-        let mut count = 0;
-        for frame in &frames {
-            count += 1;
-            let frame = BStr::new(frame);
-            assert!(frame == b"hello" || frame == b"foo" || frame == b"this is a test");
-        }
-        // Some writes must have succeeded (the table holds 15 slots), some
-        // must have failed on capacity; the failures poison completeness.
-        assert!(count > 5);
-        assert!(count < 120);
-        assert!(!frames.is_complete());
+        // The table holds 15 slots and 120 writes were attempted, so some
+        // had to fail on capacity — and one failure is enough to fail the
+        // seal. The writers all survived it.
+        assert!(writer.is_closed());
+        // SAFETY: see `collect_frames`.
+        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
     #[test]
@@ -612,54 +598,20 @@ mod tests {
             (frames, results)
         });
 
-        // Every slot before the boundary ended up either a whole frame or
-        // frozen: the receiver saw only complete payloads.
+        // Every frame the reader yields is whole: a descriptor becomes
+        // visible only after its payload is written.
         let mut count = 0;
         for frame in &frames {
             count += 1;
             assert!(frame == b"hello");
         }
-        // Only commits that lost the freeze race may be missing, and no
-        // frame can appear that was never finished.
+        // Claims taken after the boundary are never read, so the count can
+        // fall short of what the writers wrote — but nothing can appear
+        // that was never finished.
         let written: usize = results.into_iter().sum();
         assert!(count <= written);
         // Writers either finished or cleanly observed `Closed`; nothing was
         // abandoned, so completeness holds.
-        assert!(frames.is_complete());
-    }
-
-    #[test]
-    fn corrupt_committed_descriptor_is_a_protocol_error() {
-        let shm = MockedShm::alloc(1024);
-        // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
-        assert!(writer.try_write_frame(b"hello"));
-
-        // Point slot 0 at a span escaping the payload region.
-        let bogus_len = 8u64;
-        let bogus_offset = 1020u64;
-        // Slot 0 sits right after the two counters.
-        shm.poke_u64(16, (bogus_len << 32) | bogus_offset);
-
-        // SAFETY: see `collect_frames`.
-        let result = unsafe { ShmReader::<_, S>::seal(shm) };
-        assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
-    }
-
-    #[test]
-    fn corrupt_oversized_descriptor_is_a_protocol_error() {
-        let shm = MockedShm::alloc(1024);
-        // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
-        assert!(writer.try_write_frame(b"hello"));
-
-        // A length field far beyond anything this region can hold.
-        // Slot 0 sits right after the two counters.
-        shm.poke_u64(16, (1 << 62) | (8u64 << 32) | 8);
-
-        // SAFETY: see `collect_frames`.
-        let result = unsafe { ShmReader::<_, S>::seal(shm) };
-        assert!(result.unwrap_err() == ProtocolError::CorruptDescriptor { slot_index: 0 });
     }
 
     #[test]
@@ -764,7 +716,6 @@ mod tests {
         // SAFETY: the mapping is a valid shared-memory region created zeroed
         // and accessed only through the protocol.
         let frames = unsafe { ShmReader::<_, S>::seal(mapping) }.unwrap();
-        assert!(frames.is_complete());
         let collected = frames.iter().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert!(collected.len() == CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
         for child_index in 0..CHILD_COUNT {
@@ -838,6 +789,5 @@ mod tests {
         assert!(iter.next() == None);
         // The killed writer left only an unfinished slot; the counters
         // stayed within their limits, so the channel is complete.
-        assert!(frames.is_complete());
     }
 }
