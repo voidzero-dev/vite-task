@@ -21,7 +21,10 @@ use winapi::{
 use winsafe::co::{CP, WC};
 
 use crate::{
-    ChildTermination, TrackedChild, command::Command, error::SpawnError, ipc::ChannelAccesses,
+    ChildTermination, TrackedChild,
+    command::Command,
+    error::SpawnError,
+    ipc::{ChannelAccesses, SHM_CAPACITY},
 };
 
 const INTERPOSE_CDYLIB: Artifact =
