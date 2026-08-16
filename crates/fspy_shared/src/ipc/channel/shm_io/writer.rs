@@ -86,7 +86,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// claim that does not fit — the region is full, or `frame_size` is
     /// over `u32::MAX` — fails as [`ClaimError::Capacity`] after setting
     /// the CLOSED gate.
-    pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_, SLOTS>, ClaimError> {
+    pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let mapped = self.mapped;
 
         // The loss report (rule 1): the gate marks the frames incomplete
@@ -131,7 +131,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // taking this borrow.
         let content = unsafe {
             slice::from_raw_parts_mut(
-                mapped.payloads.add(to_usize(payload_offset)).as_ptr(),
+                mapped.payload_start.add(to_usize(payload_offset)).as_ptr(),
                 to_usize(frame_size.get()),
             )
         };
@@ -177,13 +177,13 @@ fn fitted_offset(start: u64, len: u32, payload_len: u32) -> Option<u32> {
 /// the operation it described breaks the rule this channel is built on —
 /// write the record first, then do the thing it records.
 #[derive(Debug)]
-pub struct FrameMut<'a, const SLOTS: usize> {
+pub struct FrameMut<'a> {
     slot: &'a AtomicU64,
     slot_to_commit: u64,
     content: &'a mut [u8],
 }
 
-impl<const SLOTS: usize> Deref for FrameMut<'_, SLOTS> {
+impl Deref for FrameMut<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -191,13 +191,13 @@ impl<const SLOTS: usize> Deref for FrameMut<'_, SLOTS> {
     }
 }
 
-impl<const SLOTS: usize> DerefMut for FrameMut<'_, SLOTS> {
+impl DerefMut for FrameMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.content
     }
 }
 
-impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
+impl FrameMut<'_> {
     /// Commits the frame, making it visible to the receiver.
     ///
     /// A receiver that already sealed the channel may or may not show this

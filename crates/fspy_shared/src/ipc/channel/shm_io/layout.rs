@@ -149,7 +149,7 @@ pub(super) struct MappedLayout<const SLOTS: usize> {
     /// Start of the payload area. A raw pointer, not a reference:
     /// writers hand out `&mut` slices into it, which must not overlap a
     /// shared reference.
-    pub(super) payloads: NonNull<u8>,
+    pub(super) payload_start: NonNull<u8>,
     /// Length of the payload area. A `u32`, the width of a descriptor's
     /// offset and length, so the writer's bounds check needs no
     /// conversion.
@@ -223,8 +223,8 @@ impl<const SLOTS: usize> MappedLayout<SLOTS> {
 
         // The payload area is everything after the fixed struct.
         // SAFETY: the mapping holds the struct (checked above).
-        let payloads = NonNull::new(unsafe { mem_start.add(size_of::<Meta<SLOTS>>()) })?;
-        Some(Self { meta, payloads, payload_len })
+        let payload_start = NonNull::new(unsafe { mem_start.add(size_of::<Meta<SLOTS>>()) })?;
+        Some(Self { meta, payload_start, payload_len })
     }
 
     /// The fixed part of the region.

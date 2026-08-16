@@ -14,7 +14,9 @@
 //! this code does not defend against it.
 
 use std::{
-    fmt, slice,
+    fmt,
+    ptr::NonNull,
+    slice,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -126,8 +128,11 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
     /// filling a frame when the channel was sealed may appear in a later
     /// call and not an earlier one. Everything it yields is a whole frame
     /// whose writer finished it.
-    pub fn iter(&self) -> Iter<'_, SLOTS> {
-        self.into_iter()
+    pub fn iter(&self) -> Iter<'_> {
+        Iter {
+            payload_start: self.mapped.payload_start,
+            table: &self.mapped.table()[..self.slot_count],
+        }
     }
 }
 
@@ -138,14 +143,14 @@ impl<M, const SLOTS: usize> fmt::Debug for ShmReader<M, SLOTS> {
 }
 
 /// Iterator over a [`ShmReader`]'s committed frames, in claim order.
-pub struct Iter<'a, const SLOTS: usize> {
+pub struct Iter<'a> {
     /// Where the payload area is, for turning descriptors into spans.
-    mapped: MappedLayout<SLOTS>,
+    payload_start: NonNull<u8>,
     /// The admitted slots this iterator has not reached yet.
     table: &'a [AtomicU64],
 }
 
-impl<'a, const SLOTS: usize> Iterator for Iter<'a, SLOTS> {
+impl<'a> Iterator for Iter<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -153,9 +158,9 @@ impl<'a, const SLOTS: usize> Iterator for Iter<'a, SLOTS> {
             self.table = rest;
             // Rule 3: `Acquire`, so a descriptor this load sees brings
             // its payload bytes with it.
-            let bits = slot.load(Ordering::Acquire);
+            let slot_value = slot.load(Ordering::Acquire);
             // An unfinished slot published nothing.
-            let SlotState::Committed { offset, len } = SlotState::decode(bits) else {
+            let SlotState::Committed { offset, len } = SlotState::decode(slot_value) else {
                 continue;
             };
             // SAFETY: a committed descriptor names the span its writer
@@ -166,7 +171,7 @@ impl<'a, const SLOTS: usize> Iterator for Iter<'a, SLOTS> {
             // keeps the mapping alive.
             return Some(unsafe {
                 slice::from_raw_parts(
-                    self.mapped.payloads.add(to_usize(offset)).as_ptr().cast_const(),
+                    self.payload_start.add(to_usize(offset)).as_ptr().cast_const(),
                     to_usize(len.get()),
                 )
             });
@@ -182,10 +187,10 @@ impl<'a, const SLOTS: usize> Iterator for Iter<'a, SLOTS> {
 }
 
 impl<'a, M: AsRawSlice, const SLOTS: usize> IntoIterator for &'a ShmReader<M, SLOTS> {
-    type IntoIter = Iter<'a, SLOTS>;
+    type IntoIter = Iter<'a>;
     type Item = &'a [u8];
 
-    fn into_iter(self) -> Iter<'a, SLOTS> {
-        Iter { mapped: self.mapped, table: &self.mapped.table()[..self.slot_count] }
+    fn into_iter(self) -> Iter<'a> {
+        self.iter()
     }
 }
