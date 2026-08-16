@@ -1,13 +1,14 @@
 //! The reader side: seal the channel, then iterate the committed frames.
 //!
 //! Sealing never waits for writers, and no payload byte is read or
-//! copied: the reader keeps the mapping alive and lends out each
-//! committed span on demand. The borrows are sound because a committed
-//! span is never written again (committing consumes the writer's frame)
-//! and is disjoint from everything a live writer may still touch. This
-//! rests on the attach contract that the region is accessed only through
-//! this protocol; a process scribbling outside it is outside the trust
-//! model.
+//! copied: the reader keeps the mapping alive and hands out each
+//! committed span on demand. Those borrows are safe because nothing
+//! writes to a committed span again (committing uses up the writer's
+//! frame) and it never overlaps what a live writer may still touch.
+//! All of this assumes the promise made at attach — that the region is
+//! touched only through this protocol. A process that scribbles on it
+//! some other way breaks that promise, and this code does not defend
+//! against it.
 
 use std::{
     fmt, slice,
@@ -16,31 +17,32 @@ use std::{
 
 use super::{
     AsRawSlice,
-    layout::{self, CLOSED, FROZEN, MappedLayout, SlotState},
+    layout::{self, CLOSED, FROZEN, MappedLayout, SlotState, to_usize},
 };
 
 /// Why a channel could not be sealed into readable frames.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProtocolError {
-    /// The mapping cannot host the protocol at all (see
+    /// The mapping cannot hold the protocol at all (see
     /// [`MappedLayout::new`]).
     #[error("the shared-memory region cannot host the channel")]
     UnsupportedRegion,
-    /// A descriptor that no correct writer could have committed: the
-    /// region was corrupted, and its frames are unusable.
+    /// A descriptor no correct writer could have written: something
+    /// corrupted the region, and its frames cannot be used.
     #[error("corrupt shared-memory frame descriptor at slot {slot_index}")]
     CorruptDescriptor { slot_index: usize },
 }
 
 /// A reader over the committed frames of a sealed channel, serving them
 /// straight out of the mapping, which stays alive inside this value and
-/// is released when the reader drops. It holds no buffer: iteration
-/// re-reads the frozen descriptor table, so closing allocates nothing.
+/// is released when the reader drops. It holds no buffer of its own:
+/// iterating re-reads the frozen descriptor table, so sealing a channel
+/// allocates nothing.
 pub struct ShmReader<M, const SLOTS: usize> {
-    /// The layout mapped onto the owned region.
+    /// Where the parts of the owned region are.
     mapped: MappedLayout<SLOTS>,
-    /// Owns the region the views point into. Declared after them: fields
-    /// drop in order, and what borrows must die before what is borrowed.
+    /// Owns the region the pointers point into. Declared after them:
+    /// fields drop in order, and the borrower must go first.
     _mem: M,
     /// Length of the frozen prefix of the descriptor table.
     slot_count: usize,
@@ -49,9 +51,10 @@ pub struct ShmReader<M, const SLOTS: usize> {
     complete: bool,
 }
 
-// SAFETY: the reader reads only the header atomics, frozen slots, and
-// immutable committed spans; the stored views point into the mapping's
-// stable, independently owned target, not into the reader value itself.
+// SAFETY: the reader reads only the counters, frozen slots, and committed
+// spans that nothing writes to any more; the stored pointers point into
+// the mapped memory, which is owned separately and does not move, not
+// into the reader itself.
 unsafe impl<M: Send, const SLOTS: usize> Send for ShmReader<M, SLOTS> {}
 // SAFETY: see the `Send` impl.
 unsafe impl<M: Sync, const SLOTS: usize> Sync for ShmReader<M, SLOTS> {}
@@ -60,10 +63,11 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
     /// Seals the channel — no further records — and returns the reader
     /// of its committed frames.
     ///
-    /// Never blocks on writers: writers admitted before the snapshot race
-    /// per slot, ending committed (included) or frozen (excluded); claims
-    /// after the snapshot land in slots this pass never visits, until the
-    /// CLOSED gate — set before this returns — stops them.
+    /// Never waits for writers. A writer that got in before the snapshot
+    /// races this pass for its own slot and ends up either committed
+    /// (kept) or frozen (skipped); a claim taken after the snapshot lands
+    /// in a slot this pass never looks at, until the CLOSED gate — set
+    /// before this returns — stops the claims for good.
     ///
     /// # Safety
     ///
@@ -76,13 +80,14 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
     ///
     /// # Errors
     ///
-    /// [`ProtocolError`]: the mapping cannot host the protocol, or its
-    /// metadata could not have been produced by a correct writer — the
-    /// region was corrupted and its frames are unusable.
+    /// [`ProtocolError`]: the mapping cannot hold the protocol, or it
+    /// contains something no correct writer could have written — the
+    /// region was corrupted and its frames cannot be used.
     pub unsafe fn seal(mem: M) -> Result<Self, ProtocolError> {
         // SAFETY: forwarded from this function's contract, which keeps the
-        // region valid for the reader's lifetime — and so for every use of
-        // the views, which are stored in and dropped with the reader.
+        // region valid for as long as the reader lives — and so for every
+        // use of the pointers, which are stored in the reader and dropped
+        // with it.
         let Some(mapped) = (unsafe { MappedLayout::new(mem.as_raw_slice()) }) else {
             return Err(ProtocolError::UnsupportedRegion);
         };
@@ -91,29 +96,30 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
         let complete;
         {
             // The seal boundary (rule 1): claims at or before this
-            // snapshot are in; later ones land in slots this pass never
-            // visits. Clamped, so an inflated counter degrades to a
-            // full-table sweep, not an error.
+            // snapshot are in, later ones land in slots this pass never
+            // looks at. Clamped, so a counter reading higher than the
+            // table just means sweeping the whole table, not an error.
             let claims = mapped.claims().load(Ordering::Relaxed);
-            slot_count = usize::try_from(claims & !CLOSED).unwrap_or(usize::MAX).min(SLOTS);
-            // The same load carries the verdict: a gate set before the
-            // boundary is a loss report — or an earlier seal, and a
-            // re-seal cannot vouch for records refused since then.
+            slot_count = to_usize(claims & !CLOSED).min(SLOTS);
+            // The same load answers the other question: a gate already
+            // set before the boundary means a record was lost — or that
+            // someone sealed earlier, and a second seal cannot promise
+            // anything about records refused in between.
             complete = claims & CLOSED == 0;
 
-            // Gate further claims, so stragglers stop claiming and
-            // materializing pages. Claims racing in between are dropped
-            // soundly (rule 1).
+            // Shut the gate, so late writers stop claiming slots and
+            // touching new pages. A claim that slips in between is
+            // dropped safely (rule 1).
             mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
 
-            // Freeze pass: drive every admitted slot terminal and
-            // validate committed descriptors. Afterwards this prefix of
-            // the table can never change — late commits lose to `FROZEN`
-            // — so iteration re-reads it: nothing copied, nothing
-            // allocated.
+            // Freeze pass: give every slot up to the boundary its final
+            // value, and check the committed ones. Afterwards this part
+            // of the table can never change — a late commit loses to
+            // `FROZEN` — so iterating just re-reads it, copying and
+            // allocating nothing.
             for slot_index in 0..slot_count {
-                // Rule 3: `Acquire` on failure makes a committed payload
-                // visible.
+                // Rule 3: `Acquire` on failure means that if this slot
+                // is committed, its payload bytes are all visible.
                 let Err(bits) = mapped.table()[slot_index].compare_exchange(
                     layout::UNFINISHED,
                     FROZEN,
@@ -125,13 +131,14 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
                     continue;
                 };
                 match SlotState::decode(bits) {
-                    // Frozen by an earlier seal, or a scribble that
-                    // published nothing: no frame either way.
+                    // Frozen by an earlier seal, or scribbled on without
+                    // publishing anything: no frame either way.
                     SlotState::Unfinished => {}
                     SlotState::Committed { offset, len } => {
-                        // A span no correct writer could have committed
+                        // A span no correct writer could have written
                         // fails the whole channel.
-                        if offset as usize + len.get() as usize > mapped.payloads.len() {
+                        let end = offset.checked_add(len.get());
+                        if end.is_none_or(|end| end > mapped.payload_len) {
                             return Err(ProtocolError::CorruptDescriptor { slot_index });
                         }
                         frames += 1;
@@ -150,10 +157,10 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
 
     /// Whether every record a writer published made it in.
     ///
-    /// False when a claim failed before the seal — out of space, or an
-    /// oversized frame: the record was lost, and the frames under-report
-    /// what writers went on to do. Consumers that need completeness must
-    /// reject them.
+    /// False when a claim failed before the seal — no room left, or an
+    /// oversized frame. That record is gone, so the frames say less than
+    /// the writers actually did. Anyone who needs the full picture must
+    /// throw them away.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         self.complete
@@ -171,9 +178,9 @@ impl<M, const SLOTS: usize> fmt::Debug for ShmReader<M, SLOTS> {
 
 /// Iterator over a [`ShmReader`]'s committed frames, in claim order.
 pub struct Iter<'a, const SLOTS: usize> {
-    /// The layout the spans decode against and point into.
+    /// Where the payload area is, for turning descriptors into spans.
     mapped: MappedLayout<SLOTS>,
-    /// The not-yet-visited part of the table's frozen prefix.
+    /// The frozen slots this iterator has not reached yet.
     table: &'a [AtomicU64],
     /// Committed frames not yet yielded.
     remaining: usize,
@@ -185,28 +192,28 @@ impl<'a, const SLOTS: usize> Iterator for Iter<'a, SLOTS> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some((slot, rest)) = self.table.split_first() {
             self.table = rest;
-            // The slot is terminal, so this plain load reads what the
-            // freeze pass saw; whatever carried the reader to this thread
-            // carried the freeze pass's `Acquire` visibility too (rule 3).
+            // The slot can never change again, so this plain load reads
+            // what the freeze pass saw; whatever brought the reader to
+            // this thread brought that pass's `Acquire` along (rule 3).
             let bits = slot.load(Ordering::Relaxed);
-            // Unfinished published nothing. Out-of-bounds cannot appear
-            // — `seal` failed the channel on it — but checking keeps the
-            // `unsafe` below locally justified.
+            // An unfinished slot published nothing. A span outside the
+            // region cannot appear here — `seal` fails the channel on
+            // one — but checking lets the `unsafe` below stand on its
+            // own.
             let SlotState::Committed { offset, len } = SlotState::decode(bits) else {
                 continue;
             };
-            let (offset, len) = (offset as usize, len.get() as usize);
-            if offset + len > self.mapped.payloads.len() {
+            if offset.checked_add(len.get()).is_none_or(|end| end > self.mapped.payload_len) {
                 continue;
             }
             self.remaining -= 1;
-            // SAFETY: the span is in bounds (checked above) and
-            // immutable for the mapping's lifetime; the reader borrowed
-            // for `'a` keeps the mapping alive and mapped.
+            // SAFETY: the span is inside the region (checked above) and
+            // nothing writes to it any more; the reader borrowed for `'a`
+            // keeps the mapping alive.
             return Some(unsafe {
                 slice::from_raw_parts(
-                    self.mapped.payloads.cast::<u8>().cast_const().add(offset),
-                    len,
+                    self.mapped.payloads.add(offset as usize).as_ptr().cast_const(),
+                    len.get() as usize,
                 )
             });
         }

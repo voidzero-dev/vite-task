@@ -10,25 +10,25 @@ use std::{
 
 use super::{
     AsRawSlice,
-    layout::{self, CLOSED, MappedLayout, SlotState},
+    layout::{self, CLOSED, MappedLayout, SlotState, to_usize},
 };
 
 /// A concurrent shared-memory frame writer.
 ///
-/// Safe to use across threads and processes at once: frames are reserved
-/// atomically, filled in uniquely owned payload spans, and published with
-/// an atomic commit (the ordering contract in [`layout`]).
+/// Safe to use from many threads and processes at once: each frame is
+/// reserved atomically, filled in a span no one else can touch, and
+/// published with one atomic write (the ordering contract in [`layout`]).
 pub struct ShmWriter<M, const SLOTS: usize> {
     mapped: MappedLayout<SLOTS>,
-    /// Owns the region the views point into. Declared after them: fields
-    /// drop in order, and what borrows must die before what is borrowed.
+    /// Owns the region the pointers point into. Declared after them:
+    /// fields drop in order, and the borrower must go first.
     _mem: M,
 }
 
 // SAFETY: the writer touches the region only through the protocol's
-// atomics, which synchronize access from any thread; the stored views
-// point into the mapping's stable, independently owned target, not into
-// the writer value itself.
+// atomics, which synchronize access from any thread; the stored pointers
+// point into the mapped memory, which is owned separately and does not
+// move, not into the writer itself.
 unsafe impl<M: Send, const SLOTS: usize> Send for ShmWriter<M, SLOTS> {}
 // SAFETY: see the `Send` impl; the writer's shared-reference API is
 // internally synchronized by the protocol.
@@ -38,23 +38,23 @@ unsafe impl<M: Sync, const SLOTS: usize> Sync for ShmWriter<M, SLOTS> {}
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimError {
     /// The CLOSED gate was set: the receiver sealed the channel, or an
-    /// earlier failed claim condemned it. Skipping the record is sound
-    /// either way — it is outside the receiver's boundary, or the same
-    /// bit already makes the receiver report the channel incomplete.
+    /// earlier claim failed and shut it down. Dropping the record is
+    /// right either way — the receiver had already stopped collecting,
+    /// or that same bit already tells it the frames are incomplete.
     #[error("the channel has been closed")]
     Closed,
-    /// The claim was refused for space: the region was full, or the frame
-    /// was larger than the `u32::MAX`-byte frame limit. The loss is
-    /// already recorded — this claim set the CLOSED gate — so the channel
-    /// will report itself incomplete and refuse further claims.
+    /// There was no room: the region is full, or the frame is longer than
+    /// the `u32::MAX`-byte limit. The loss is already recorded — this
+    /// claim set the CLOSED gate — so the channel now reports itself
+    /// incomplete and refuses every later claim.
     #[error("no space left in the shared-memory region")]
     Capacity,
 }
 
 impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
-    /// Creates a writer backed by a shared-memory region, or `None` when
-    /// the region cannot host the protocol (see [`MappedLayout::new`]) —
-    /// a truncated or foreign file, for a sender that did not create it.
+    /// Creates a writer on a shared-memory region, or `None` when the
+    /// region cannot hold the protocol (see [`MappedLayout::new`]) — a
+    /// truncated or unrelated file, for a sender that did not create it.
     ///
     /// # Safety
     ///
@@ -64,15 +64,15 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     ///   accessed only through this protocol since.
     pub unsafe fn new(mem: M) -> Option<Self> {
         // SAFETY: forwarded from this function's contract, which keeps the
-        // region valid and protocol-governed for the writer's lifetime —
-        // and so for every use of the views, which are stored in and
-        // dropped with the writer.
+        // region valid, and used only by this protocol, for as long as the
+        // writer lives — and so for every use of the pointers, which are
+        // stored in the writer and dropped with it.
         let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) }?;
         Some(Self { mapped, _mem: mem })
     }
 
     /// Whether the CLOSED gate is set: the receiver sealed the channel,
-    /// or an earlier failed claim condemned it.
+    /// or an earlier claim failed and shut it down.
     pub fn is_closed(&self) -> bool {
         self.mapped.claims().load(Ordering::Relaxed) & CLOSED != 0
     }
@@ -80,78 +80,84 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// Claims a frame of exactly `frame_size` bytes. Wait-free: two
     /// `fetch_add`s, no retry loop (rule 1).
     ///
-    /// The frame is invisible to the receiver until [`FrameMut::finish`]
-    /// commits it; dropping it instead abandons the claim, and the
+    /// The receiver cannot see the frame until [`FrameMut::finish`]
+    /// commits it; dropping it instead gives the claim up, and the
     /// receiver ignores the slot exactly as if the writer had died. A
-    /// claim that does not fit — the region is full, or `frame_size`
-    /// exceeds `u32::MAX` — fails as [`ClaimError::Capacity`] after
-    /// setting the CLOSED gate.
+    /// claim that does not fit — the region is full, or `frame_size` is
+    /// over `u32::MAX` — fails as [`ClaimError::Capacity`] after setting
+    /// the CLOSED gate.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_, SLOTS>, ClaimError> {
         let mapped = self.mapped;
-        let payload_len = frame_size.get();
 
-        // The loss report (rule 1): the gate marks the result incomplete
-        // and condemns further claims.
+        // The loss report (rule 1): the gate marks the frames incomplete
+        // and shuts the channel down for later claims.
         let report_loss = || {
             mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
             ClaimError::Capacity
         };
 
-        // The descriptor's nonzero 32-bit length field is the oversize
-        // check; no counter was touched, so nothing to undo.
-        let Ok(encoded_len) = NonZeroU32::try_from(frame_size) else {
+        // A frame too long for the descriptor's 32-bit length field cannot
+        // be described, so this conversion is the oversize check. No
+        // counter has moved yet, so there is nothing to undo.
+        let Ok(frame_size) = NonZeroU32::try_from(frame_size) else {
             return Err(report_loss());
         };
+        // The payload space this claim takes, as the counter's `u64`.
+        // Widening a 32-bit size never loses anything.
+        let reservation = u64::from(frame_size.get());
         // Payload bytes first, so a payload-capacity failure does not burn a
         // slot.
-        let payload_start =
-            mapped.payload_reserved().fetch_add(payload_len as u64, Ordering::Relaxed);
-        // Checked: a foreign scribble of the counter must fail the claim,
-        // not wrap the bound into an out-of-bounds reservation.
-        let payload_end = payload_start.checked_add(payload_len as u64);
-        if payload_end.is_none_or(|end| end > mapped.payloads.len() as u64) {
+        let payload_offset = mapped.payload_reserved().fetch_add(reservation, Ordering::Relaxed);
+        // Checked: if something else scribbled on the counter, the claim
+        // must fail rather than wrap around into a span outside the
+        // region.
+        let payload_end = payload_offset.checked_add(reservation);
+        if payload_end.is_none_or(|end| end > u64::from(mapped.payload_len)) {
             let err = report_loss();
-            // Net-zero (rule 1), gate first: undo the reservation. It lay
-            // beyond the region, so no live span sits above it.
-            mapped.payload_reserved().fetch_sub(payload_len as u64, Ordering::Relaxed);
+            // Put it back (rule 1), gate first. The reservation ran off
+            // the end of the region, so no live frame sits above it.
+            mapped.payload_reserved().fetch_sub(reservation, Ordering::Relaxed);
             return Err(err);
         }
-        // Bounded by the capacity check: the payload region fits 32-bit
-        // offsets.
-        let payload_offset = u32::try_from(payload_start).expect("bounded by the payload region");
-        let payload_start = payload_offset as usize;
+        // In range by the check above, and the payload area is short
+        // enough for 32-bit offsets.
+        let payload_offset = u32::try_from(payload_offset).expect("bounded by the payload region");
 
         let claims = mapped.claims().fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
-            // Not a loss: a record refused after the seal is outside the
-            // channel's boundary. Net-zero (rule 1): the gate was
-            // observed, undo the increment. (The payload reservation
-            // stays: in bounds, never materialized, capped by the
-            // region.)
+            // Not a loss: the receiver had already stopped collecting
+            // when this record was refused. Put the count back (rule 1)
+            // — the gate was already set. (The payload reservation
+            // stays: it is inside the region, nothing was written
+            // there, and the region caps how much can pile up.)
             mapped.claims().fetch_sub(1, Ordering::Relaxed);
             return Err(ClaimError::Closed);
         }
-        let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
+        let slot_index = to_usize(claims);
         if slot_index >= SLOTS {
             let err = report_loss();
-            // Net-zero (rule 1), gate first: with the bit in the word, no
-            // later read mistakes the undone count for an open channel.
+            // Put the count back (rule 1), gate first: with the bit
+            // already set, no later reader can mistake the lowered count
+            // for an open channel.
             mapped.claims().fetch_sub(1, Ordering::Relaxed);
             return Err(err);
         }
 
-        // SAFETY: the claim reserved this span — in bounds by the
-        // capacity check — exclusively: other writers reserve disjoint
-        // spans, and the receiver reads no payload before observing its
-        // committed descriptor, which `finish` publishes only when it
-        // consumes this borrow.
+        // SAFETY: the claim reserved this span for itself, and the check
+        // above put it inside the region. Other writers reserve spans
+        // that never overlap, and the receiver reads no payload until it
+        // sees the committed descriptor, which `finish` writes only by
+        // taking this borrow.
         let content = unsafe {
-            slice::from_raw_parts_mut(mapped.payloads.cast::<u8>().add(payload_start), payload_len)
+            slice::from_raw_parts_mut(
+                mapped.payloads.add(payload_offset as usize).as_ptr(),
+                frame_size.get() as usize,
+            )
         };
         Ok(FrameMut {
             mapped,
             slot_index,
-            descriptor: SlotState::Committed { offset: payload_offset, len: encoded_len }.encode(),
+            descriptor: SlotState::Committed { offset: payload_offset, len: frame_size }.encode(),
             content,
         })
     }
@@ -172,12 +178,12 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
 
 /// An exclusively owned, claimed-but-unpublished frame.
 ///
-/// [`FrameMut::finish`] commits the frame; it is the only way to make the
-/// payload visible to the receiver. Dropping the frame instead abandons
-/// the claim: the slot stays unfinished and the receiver ignores it,
-/// exactly as if the writer had died there. A writer that abandons a frame
-/// and still performs the operation it described steps outside the usage
-/// contract — records are published before the recorded operation.
+/// [`FrameMut::finish`] commits the frame; it is the only way to show the
+/// payload to the receiver. Dropping the frame gives the claim up: the
+/// slot stays unfinished and the receiver ignores it, exactly as if the
+/// writer had died there. A writer that drops a frame and still performs
+/// the operation it described breaks the rule this channel is built on —
+/// write the record first, then do the thing it records.
 pub struct FrameMut<'a, const SLOTS: usize> {
     mapped: MappedLayout<SLOTS>,
     slot_index: usize,
@@ -211,10 +217,9 @@ impl<const SLOTS: usize> DerefMut for FrameMut<'_, SLOTS> {
 impl<const SLOTS: usize> FrameMut<'_, SLOTS> {
     /// Commits the frame, making it visible to the receiver.
     ///
-    /// If the receiver sealed the channel and froze this frame's slot
-    /// first, the swap fails and the frame is silently discarded: the
-    /// record belongs to the seal race and is intentionally excluded
-    /// either way.
+    /// If the receiver sealed the channel and froze this slot first, the
+    /// swap fails and the frame is dropped without a sound: this record
+    /// raced the seal, and is meant to be left out either way.
     pub fn finish(self) {
         // Rule 2: `Release` orders every payload write before the
         // descriptor.

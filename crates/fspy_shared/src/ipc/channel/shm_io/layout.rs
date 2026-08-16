@@ -10,26 +10,27 @@
 //! length is a const parameter the channel specifies; the payload area is
 //! the rest of the mapping, so the whole geometry is that struct's size.
 //! This module holds the struct, the slot wire format, and
-//! [`MappedLayout`]: the views bound to one mapping, built once at
-//! attach. The sides live in [`super::writer`] and [`super::reader`].
+//! [`MappedLayout`]: where the parts of one mapping are, worked out once
+//! at attach. The sides live in [`super::writer`] and [`super::reader`].
 //!
-//! Overflow safety: the payload area fits `u32` (checked at attach), so
-//! all offsets fit the 32-bit descriptor fields and all sums fit `usize`
-//! on the 64-bit targets the parent module asserts.
+//! Overflow safety: the payload area is never longer than `u32::MAX`
+//! bytes (checked at attach), so an offset and a length always fit a
+//! descriptor's 32-bit fields, and bounds checks add them in 32 bits.
 
 use std::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
 
 /// The CLOSED gate bit of the claim counter: set when the receiver seals
 /// the channel, and by any failed claim as its loss report (rule 1).
 ///
-/// A bit survives stragglers' `fetch_add`s, and net-zero refusals keep
-/// the count at most the table length plus the claims in flight, so
-/// counting can never reach it.
+/// A bit, not a value to compare against: it survives the `fetch_add` of
+/// a writer that arrives late. And a refused claim puts back what it
+/// added, so the count stays at or below one per slot plus the claims
+/// still running — it can never climb into this bit.
 pub(super) const CLOSED: u64 = 1 << 63;
 
-/// The region's fixed-location part — the protocol counters and the
-/// descriptor table — as one `repr(C)` struct, which must start zeroed.
-/// The payload area is simply the rest of the mapping.
+/// The part of the region that is always in the same place — the
+/// counters and the descriptor table — as one `repr(C)` struct, which
+/// must start zeroed. The payload area is the rest of the mapping.
 #[repr(C)]
 pub(super) struct Meta<const SLOTS: usize> {
     /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
@@ -40,8 +41,8 @@ pub(super) struct Meta<const SLOTS: usize> {
     pub(super) table: [AtomicU64; SLOTS],
 }
 
-// The `u64`-aligned mapping base is cast to `&Meta`; nothing in it may
-// raise the alignment.
+// The mapping starts at a `u64`-aligned address and is cast to `&Meta`,
+// so no field in `Meta` may need more alignment than that.
 const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
 
 // --- The descriptor slot codec ---------------------------------------------
@@ -59,13 +60,13 @@ const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
 // | `1`                   | Frozen by the seal: never publishable again     |
 // | length field nonzero  | Committed: offset and length of the payload     |
 //
-// Committed lengths are nonzero (a zero-length frame is never claimed), so
-// a committed value's length field is nonzero and the three states are
-// disjoint: `1` is a zero length with offset `1`, which no writer commits.
-// Once a slot is committed or frozen, nothing ever changes it again.
+// A claimed frame is never zero-length, so a committed value always has a
+// nonzero length field and no slot value can mean two of these at once:
+// `1` is a zero length with offset `1`, which no writer ever commits. Once
+// a slot is committed or frozen, nothing ever changes it again.
 //
-// Offsets are measured from the start of the payload area, so a
-// descriptor cannot name the counters or the table.
+// Offsets are counted from the start of the payload area, so a descriptor
+// can never point into the counters or the table.
 
 pub(super) const UNFINISHED: u64 = 0;
 
@@ -75,36 +76,38 @@ pub(super) const UNFINISHED: u64 = 0;
 pub(super) const FROZEN: u64 = 1;
 
 // --- The mapped layout and the ordering contract ---------------------------
-// `MappedLayout::new` builds two typed views — the `Meta` struct and the
-// raw payload area — once, at attach; the endpoint stores them beside
-// the mapping they point into. The payload area stays raw because
-// writers hold exclusive `&mut` borrows into it, which must not alias
-// any shared reference.
+// `MappedLayout::new` works out both pointers once, at attach: one to the
+// `Meta` struct, one to the payload area. The endpoint keeps them next to
+// the mapping they point into. The payload pointer stays raw because
+// writers hand out `&mut` slices into it, which must not overlap a shared
+// reference.
 //
 // # Shared atomics
 //
 // Two independent monotonic `AtomicU64` counters:
 //
 // - the **claim counter**: bit 63 is the CLOSED gate, the low bits count
-//   claims. One wait-free `fetch_add` per claim; the returned old value
-//   carries the slot index, the gate, and the capacity verdict. The gate
-//   is set by the seal and by every failed claim: one bit is both the
-//   loss report and the valve that stops writers wasting work on a
-//   result the receiver must already reject.
+//   claims. One wait-free `fetch_add` per claim, and the old value it
+//   returns says everything the writer needs: which slot it got, whether
+//   the channel is closed, and whether the table is full. The seal sets
+//   the gate, and so does every failed claim: the one bit both reports
+//   the loss and stops later writers doing work for a result the
+//   receiver must already reject.
 // - the **payload counter**: payload bytes reserved, one `fetch_add`.
 //
-// Refused claims are net-zero: with the gate set — observed, or set by
-// the refusal itself, always gate first — they subtract their own
-// increments back. Subs pair with the same claim's adds, so the claim
-// counter never drops below the successful count or a seal snapshot,
-// and never rises past the table length plus the claims in flight:
-// counting cannot reach the gate bit. (A writer dying between add and
-// undo strands one count — harmless short of 2^63 such deaths.) The
-// payload counter takes back only out-of-bounds reservations, which no
-// live span sits above; in-bounds reservations of refused claims stay
-// counted, never materialized, capped by the region. Counters never
-// locate data — descriptors carry their own offset and length — and the
-// receiver clamps rather than trusts them.
+// A refused claim puts back what it added, always after the gate is set
+// — either it saw the gate, or it set the gate itself. Each subtraction
+// pairs with that same claim's addition, so the claim counter never
+// falls below the number of successful claims, nor below what a seal
+// already saw, and never climbs past one per slot plus the claims still
+// running: it cannot count up into the gate bit. (A writer that dies
+// between adding and putting back leaves one count behind — harmless
+// unless it happens 2^63 times.) The payload counter takes back only
+// reservations that ran off the end, which no live frame sits above; a
+// refused claim that did fit keeps its bytes counted, and no one ever
+// writes there. Neither counter says where data is — each descriptor
+// carries its own offset and length — and the receiver clamps them
+// rather than trusting them.
 //
 // # Memory-ordering contract
 //
@@ -112,12 +115,13 @@ pub(super) const FROZEN: u64 = 1;
 //    of the claim counter: claims at or before it in the counter's
 //    modification order are in; later ones get slot indices the receiver
 //    never visits. Claims publish no payload data, so `Relaxed`
-//    suffices. The gate is not the boundary — it only stops stragglers;
-//    a claim admitted between snapshot and gate lands beyond the
-//    snapshot and is never observed. Completeness rides the same
+//    suffices. The gate is not the boundary — it only stops late
+//    writers; a claim that gets in between the snapshot and the gate
+//    lands past the snapshot, where the receiver never looks. Completeness rides the same
 //    modification order: a failed claim sets the gate before performing
-//    the operation whose record was lost, so the snapshot sees the bit
-//    or the loss is post-boundary; a writer that skipped on seeing the
+//    the operation whose record was lost, so either the snapshot sees
+//    the bit or the loss happened after the boundary; a writer that
+//    skipped on seeing the
 //    bit is covered the same way; one that died before setting it never
 //    performed its operation, so nothing was lost.
 // 2. **Writer commit** — `FrameMut::finish`'s compare-and-swap uses
@@ -126,6 +130,18 @@ pub(super) const FROZEN: u64 = 1;
 // 3. **Receiver observation** — the freeze compare-and-swap in
 //    `ShmReader::seal` uses `Acquire` on failure: an observed descriptor
 //    implies fully visible payload bytes.
+
+/// Converts a counter value to a slot index.
+///
+/// Never loses bits: the assert lets only targets whose `usize` is 64
+/// bits — the width of the counters — build this module. That assert is
+/// the only reason the cast below is safe, so it sits inside the
+/// function rather than at module scope.
+#[expect(clippy::cast_possible_truncation, reason = "the assert allows only equal widths")]
+pub(super) const fn to_usize(value: u64) -> usize {
+    const { assert!(size_of::<usize>() == size_of::<u64>(), "requires a 64-bit target") };
+    value as usize
+}
 
 /// Casts to a pointer of another type, returning `None` when the pointer
 /// is not aligned for `U`: a stable stand-in for the still-unstable
@@ -136,14 +152,20 @@ fn try_cast_aligned<T, U>(ptr: *mut T) -> Option<*mut U> {
     if ptr.addr().is_multiple_of(align_of::<U>()) { Some(ptr.cast()) } else { None }
 }
 
-/// The typed views of the region: the fixed [`Meta`] struct and the raw
-/// payload area. Built once at attach and stored in the endpoint; valid
-/// as long as the mapping, since they point into its stable target, not
-/// into the endpoint value.
+/// Where the two parts of the region are: the fixed [`Meta`] struct and
+/// the payload area. Worked out once at attach and kept in the endpoint.
+/// The pointers stay valid as long as the mapping does, because they
+/// point into the mapped memory, not into the endpoint holding them.
 #[derive(Clone, Copy)]
 pub(super) struct MappedLayout<const SLOTS: usize> {
     meta: NonNull<Meta<SLOTS>>,
-    pub(super) payloads: *mut [u8],
+    /// Start of the payload area. A raw pointer, not a reference:
+    /// writers hand out `&mut` slices into it, which must not overlap a
+    /// shared reference.
+    pub(super) payloads: NonNull<u8>,
+    /// Length of the payload area. A `u32`, the width of a descriptor's
+    /// offset and length, so bounds checks need no conversion.
+    pub(super) payload_len: u32,
 }
 
 /// A decoded descriptor slot (the codec above).
@@ -187,41 +209,40 @@ impl SlotState {
 }
 
 impl<const SLOTS: usize> MappedLayout<SLOTS> {
-    /// Builds the typed views of a shared mapping, or `None` when it
-    /// cannot host the protocol: base null or unaligned, [`Meta`] not
-    /// fitting, or a payload area beyond the descriptors' 32-bit
-    /// offsets.
+    /// Locates the parts of a shared mapping, or returns `None` when the
+    /// mapping cannot hold the protocol: a null or misaligned start, too
+    /// little room for [`Meta`], or a payload area too long for a 32-bit
+    /// offset to reach.
     ///
     /// # Safety
     ///
     /// - `mem` must be valid for reads and writes, and its address stable,
-    ///   for as long as the returned views (and any copy of them) are
+    ///   for as long as the returned pointers (and any copy of them) are
     ///   used.
     /// - The memory must have been zero-initialized when the region was
     ///   created, and accessed only through this protocol since.
     pub(super) unsafe fn new(mem: *mut [u8]) -> Option<Self> {
         let mem_start = mem.cast::<u8>();
-        let mem_len = mem.len();
         // The mapping must hold the fixed struct.
-        let payload_len = mem_len.checked_sub(size_of::<Meta<SLOTS>>())?;
-        // Descriptors store payload offsets in 32 bits: the conversion is
-        // the bound on the payload area.
-        u32::try_from(payload_len).ok()?;
-        // The pointer conversions are the base checks: aligned, non-null.
+        let payload_len = mem.len().checked_sub(size_of::<Meta<SLOTS>>())?;
+        // A descriptor holds a 32-bit offset, so the payload area can be
+        // no longer than a `u32`. Keeping the converted value is what lets
+        // later bounds checks stay in 32 bits.
+        let payload_len = u32::try_from(payload_len).ok()?;
+        // These two conversions are the checks on the start address:
+        // aligned for `Meta`, and not null.
         let meta = NonNull::new(try_cast_aligned::<_, Meta<SLOTS>>(mem_start)?)?;
 
         // The payload area is everything after the fixed struct.
         // SAFETY: the mapping holds the struct (checked above).
-        let payload_start = unsafe { mem_start.add(size_of::<Meta<SLOTS>>()) };
-
-        let payloads = std::ptr::slice_from_raw_parts_mut(payload_start, payload_len);
-        Some(Self { meta, payloads })
+        let payloads = NonNull::new(unsafe { mem_start.add(size_of::<Meta<SLOTS>>()) })?;
+        Some(Self { meta, payloads, payload_len })
     }
 
     /// The fixed part of the region.
     const fn meta(&self) -> &Meta<SLOTS> {
-        // SAFETY: `new`'s contract keeps the target valid while any view
-        // is used, and `Meta` consists entirely of atomics, so the shared
+        // SAFETY: `new`'s contract keeps the memory valid while any
+        // pointer is used, and `Meta` is all atomics, so the shared
         // borrow is valid even while other threads and processes access
         // the same memory through them.
         unsafe { self.meta.as_ref() }

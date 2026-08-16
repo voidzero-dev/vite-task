@@ -1,9 +1,10 @@
 //! A crash-tolerant, nonblocking frame channel in a shared memory region.
 //!
-//! Multiple writer processes append variable-length frames concurrently; one
+//! Many writer processes append variable-length frames at once; one
 //! receiver closes the channel and collects every committed frame without
-//! waiting for any writer. A process may die at any instruction — mid-claim,
-//! mid-write, pre-commit — and only its own unfinished frame is lost.
+//! waiting for any writer. A process may die at any instruction — while
+//! claiming, while writing, just before committing — and the only thing
+//! lost is its own unfinished frame.
 //!
 //! `README.md` in this directory tells the whole story in plain words and
 //! indexes the modules.
@@ -19,19 +20,19 @@
 //! ```
 //!
 //! Counters and table are one `repr(C)` struct whose table length is a
-//! compile-time constant every endpoint shares (the channel specifies
-//! it); the payload area is the rest of the mapping ([`layout`]).
-//! Attaching builds typed views of the struct; the payload area stays
-//! untyped bytes.
+//! compile-time constant both sides share (the channel picks it); the
+//! payload area is the rest of the mapping ([`layout`]). Attaching works
+//! out where the struct and the payload area start; the payload area
+//! stays plain bytes.
 //!
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes,
-//! one a descriptor slot — checked against the fixed bounds from the
-//! returned old values. A failed claim sets the CLOSED gate as its loss
-//! report, then takes its increments back: refusals are net-zero, so
-//! stragglers can hammer a sealed channel forever without moving the
-//! counters. Descriptors are self-describing, so the counters never
-//! locate data, and every slot has a fixed location, so an unfinished
-//! frame can never hide a later one.
+//! one a descriptor slot — and the old values they return are what the
+//! writer checks against the region's fixed size. A failed claim sets the
+//! CLOSED gate to report the loss, then puts its increments back, so late
+//! writers can hammer a sealed channel forever without moving the
+//! counters. Each descriptor carries its own offset and length, so the
+//! counters never say where data is, and every slot sits at a fixed
+//! place, so an unfinished frame can never hide a later one.
 //!
 //! # Frame lifecycle
 //!
@@ -43,30 +44,31 @@
 //!                          receiver freeze CAS wins
 //! ```
 //!
-//! A payload is reachable only through its committed descriptor, and a
-//! descriptor is committed only after the payload is fully written
-//! ([`layout`]'s ordering contract). The receiver never derives frame
-//! locations from payload bytes, and the borrows [`ShmReader`] hands out
-//! cover exactly the validated committed spans — immutable, and disjoint
-//! from everything a live writer may still touch.
+//! The only way to reach a payload is through its committed descriptor,
+//! and a descriptor is committed only after the payload is fully written
+//! ([`layout`]'s ordering contract). The receiver never works out where a
+//! frame is by reading payload bytes, and the borrows [`ShmReader`] hands
+//! out cover exactly the committed spans it checked — nothing writes to
+//! them any more, and they never overlap what a live writer may touch.
 //!
 //! # Seal boundary
 //!
-//! [`ShmReader::seal`]'s boundary is a snapshot of the claim counter. A
-//! writer admitted before the snapshot races the freeze pass per slot —
-//! its frame is included (commit won) or ignored (freeze won), never
-//! torn; a claim after the snapshot lands in a slot the receiver never
-//! visits, until the CLOSED gate stops stragglers for good. Both drops
-//! are sound because writers publish a record *before* performing the
-//! recorded operation: a writer that died mid-frame never performed it,
-//! and one that claimed or committed after the snapshot performs it
-//! outside the channel's boundary. A record refused *before* the seal —
-//! full region, oversized frame — sets the gate first, so the channel
-//! reports itself incomplete ([`ShmReader::is_complete`]) and refuses
-//! every later claim: one lost record already condemns the result.
+//! [`ShmReader::seal`] draws its line by taking a snapshot of the claim
+//! counter. A writer that got in before the snapshot races the freeze
+//! pass for its own slot — its frame is either kept (commit won) or
+//! skipped (freeze won), never half-read; a claim taken after the
+//! snapshot lands in a slot the receiver never looks at, until the CLOSED
+//! gate stops late writers for good. Dropping either is safe because a
+//! writer writes its record *before* doing what the record describes: one
+//! that died mid-frame never did it, and one that claimed or committed
+//! after the snapshot does it after the receiver stopped collecting. A
+//! record refused *before* the seal — no room, oversized frame — sets the
+//! gate first, so the channel reports itself incomplete
+//! ([`ShmReader::is_complete`]) and refuses every later claim: one lost
+//! record already ruins the result.
 //!
-//! Correctness never depends on writer-side cleanup: no exit hooks, PID
-//! checks, heartbeats, or timeouts.
+//! None of this needs writers to clean up after themselves: no exit
+//! hooks, PID checks, heartbeats, or timeouts.
 
 mod layout;
 mod reader;
@@ -86,14 +88,6 @@ pub use reader::ShmReader;
 #[cfg(test)]
 pub use writer::ClaimError;
 pub use writer::ShmWriter;
-
-// The region arithmetic in `layout` relies on `usize` accommodating sums of
-// 32-bit-bounded quantities, and the descriptor protocol on native 64-bit
-// atomics.
-const _: () = assert!(
-    size_of::<usize>() >= size_of::<u64>(),
-    "the shared-memory frame protocol requires a 64-bit target"
-);
 
 /// A trait to borrow a raw memory region.
 pub trait AsRawSlice {
@@ -125,19 +119,19 @@ impl<M: AsRawSlice> AsRawSlice for &M {
 /// Same contract as [`ShmWriter::new`].
 #[cfg(target_os = "linux")]
 pub unsafe fn pre_fault<const SLOTS: usize>(mem: &impl AsRawSlice) {
-    // Best-effort: a region that cannot host the protocol needs no
+    // Best effort: a region that cannot hold the protocol needs no
     // warm-up — attaching to it will fail anyway.
     // SAFETY: forwarded from this function's contract.
     let Some(mapped) = (unsafe { MappedLayout::<SLOTS>::new(mem.as_raw_slice()) }) else {
         return;
     };
     // A compare-exchange of zero with zero on the claim counter: on an
-    // untouched region it performs a real write — allocating the first
-    // block of a sparse backing file — without changing protocol state. If
-    // a claim got there first, the page is already backed and the failed
-    // exchange changes nothing. (An `or` of zero would not do: the
-    // compiler may lower it to a plain load, which materializes only a
-    // hole page without allocating the block.)
+    // untouched region it is a real write — which makes the file system
+    // allocate the first block of the sparse file — while leaving the
+    // counter as it was. If a claim got there first, the block already
+    // exists and the failed exchange changes nothing. (An `or` of zero
+    // would not do: the compiler may turn it into a plain load, which
+    // maps an empty page without allocating a block for it.)
     let _ = mapped.claims().compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
 }
 
@@ -308,8 +302,9 @@ mod tests {
         assert!(writer.try_write_frame(b"kept"));
 
         // No descriptor can describe a frame this long: the claim is
-        // refused and sets the gate, condemning later claims — their
-        // records would ride a result the receiver must already reject.
+        // refused and sets the gate, which shuts out later claims — their
+        // records would ride on a result the receiver must already
+        // reject.
         let oversized = ((u32::MAX as usize) + 1).try_into().unwrap();
         assert!(matches!(writer.claim_frame(oversized), Err(ClaimError::Capacity)));
         assert!(writer.is_closed());
@@ -450,7 +445,8 @@ mod tests {
             assert!(writer.try_write_frame(b"x"));
         }
         assert!(writer.claim_frame(1.try_into().unwrap()).unwrap_err() == ClaimError::Capacity);
-        // The refusal was net-zero: the gate is set, the count is intact.
+        // The refusal put back what it added: the gate is set, the count
+        // is unchanged.
         assert!(shm.peek_u64(0) == (1 << 63) | 15);
 
         let frames = collect_frames(&shm);
@@ -472,16 +468,17 @@ mod tests {
         assert!(iter.next() == None);
         assert!(frames.is_complete());
 
-        // The seal set the gate: a straggler's claim fails cleanly and
-        // does not mark the channel incomplete — the operation is outside
-        // the sealed boundary.
+        // The seal set the gate: a late writer's claim fails cleanly and
+        // does not mark the channel incomplete — that record belongs
+        // after the receiver stopped collecting.
         assert!(writer.is_closed());
         let before = shm.peek_u64(0);
         for _ in 0..100 {
             assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
         }
-        // Stragglers leave no trace on the claim counter: refusals are
-        // net-zero, so the gate can never be carried into by counting.
+        // Late writers leave no trace on the claim counter: every refusal
+        // puts back what it added, so counting can never reach the gate
+        // bit.
         assert!(shm.peek_u64(0) == before);
         assert!(frames.is_complete());
     }
@@ -615,8 +612,8 @@ mod tests {
             (frames, results)
         });
 
-        // Every admitted slot resolved to a whole frame or was frozen:
-        // the receiver observed only complete payloads.
+        // Every slot before the boundary ended up either a whole frame or
+        // frozen: the receiver saw only complete payloads.
         let mut count = 0;
         for frame in &frames {
             count += 1;
