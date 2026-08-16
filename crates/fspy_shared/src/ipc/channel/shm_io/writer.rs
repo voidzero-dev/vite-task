@@ -15,9 +15,9 @@ use super::{
 
 /// A concurrent shared-memory frame writer.
 ///
-/// Safe to use across threads and processes at the same time: frames are
-/// reserved with atomic operations, filled in uniquely owned payload spans,
-/// and published with an atomic commit (see the ordering contract above).
+/// Safe to use across threads and processes at once: frames are reserved
+/// atomically, filled in uniquely owned payload spans, and published with
+/// an atomic commit (the ordering contract in [`layout`]).
 pub struct ShmWriter<M, const SLOTS: usize> {
     mapped: MappedLayout<SLOTS>,
     /// Owns the region the views point into. Declared after them: fields
@@ -77,33 +77,28 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         self.mapped.claims().load(Ordering::Relaxed) & CLOSED != 0
     }
 
-    /// Claims a frame of exactly `frame_size` bytes.
+    /// Claims a frame of exactly `frame_size` bytes. Wait-free: two
+    /// `fetch_add`s, no retry loop (rule 1).
     ///
     /// The frame is invisible to the receiver until [`FrameMut::finish`]
-    /// commits it. Dropping the frame without finishing abandons the claim:
-    /// the receiver ignores the slot, exactly as if the writer had died.
-    /// Frames larger than `u32::MAX` bytes are refused as
-    /// [`ClaimError::Capacity`].
-    ///
-    /// Wait-free: two `fetch_add`s, no retry loop (rule 1). A claim that
-    /// does not fit fails after setting the CLOSED gate: the receiver
-    /// learns a record was lost, and later claims are refused — their
-    /// records would ride a result the receiver must already reject.
+    /// commits it; dropping it instead abandons the claim, and the
+    /// receiver ignores the slot exactly as if the writer had died. A
+    /// claim that does not fit — the region is full, or `frame_size`
+    /// exceeds `u32::MAX` — fails as [`ClaimError::Capacity`] after
+    /// setting the CLOSED gate.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_, SLOTS>, ClaimError> {
         let mapped = self.mapped;
         let payload_len = frame_size.get();
 
-        // Reports that this claim's record was lost, before the writer
-        // moves on (rule 1): the gate makes the receiver report the
-        // channel incomplete, and condemns further claims.
+        // The loss report (rule 1): the gate marks the result incomplete
+        // and condemns further claims.
         let report_loss = || {
             mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
             ClaimError::Capacity
         };
 
-        // The descriptor's 32-bit nonzero length field is the oversize
-        // check: refuse, before touching the counters, a frame it cannot
-        // describe — the channel keeps working for every record after it.
+        // The descriptor's nonzero 32-bit length field is the oversize
+        // check; no counter was touched, so nothing to undo.
         let Ok(encoded_len) = NonZeroU32::try_from(frame_size) else {
             return Err(report_loss());
         };
@@ -116,9 +111,8 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         let payload_end = payload_start.checked_add(payload_len as u64);
         if payload_end.is_none_or(|end| end > mapped.payloads.len() as u64) {
             let err = report_loss();
-            // Net-zero refusal, gate first (rule 1): undo this claim's own
-            // reservation. It lay beyond the region, so no live span sits
-            // above it and the counter cannot dip below one.
+            // Net-zero (rule 1), gate first: undo the reservation. It lay
+            // beyond the region, so no live span sits above it.
             mapped.payload_reserved().fetch_sub(payload_len as u64, Ordering::Relaxed);
             return Err(err);
         }
@@ -129,30 +123,26 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
 
         let claims = mapped.claims().fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
-            // Not a loss: a record refused after the seal describes an
-            // operation performed outside the channel's boundary. Net-zero
-            // refusal (rule 1): the gate was observed set, so undo the
-            // increment — the counter holds still instead of drifting
-            // toward the gate bit. (The payload reservation stays: in
-            // bounds, never materialized, and capped by the region.)
+            // Not a loss: a record refused after the seal is outside the
+            // channel's boundary. Net-zero (rule 1): the gate was
+            // observed, undo the increment. (The payload reservation
+            // stays: in bounds, never materialized, capped by the
+            // region.)
             mapped.claims().fetch_sub(1, Ordering::Relaxed);
             return Err(ClaimError::Closed);
         }
         let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
         if slot_index >= SLOTS {
             let err = report_loss();
-            // Net-zero refusal, gate first (rule 1): once the gate is in
-            // the word, every later read of the counter carries it, so no
-            // claim can mistake the undone value for an open channel.
+            // Net-zero (rule 1), gate first: with the bit in the word, no
+            // later read mistakes the undone count for an open channel.
             mapped.claims().fetch_sub(1, Ordering::Relaxed);
             return Err(err);
         }
 
-        // SAFETY: the claim reserved
-        // `[payload_start, payload_start + payload_len)` — inside the
-        // payload region by the capacity check above — exclusively for this
-        // frame: other writers reserve disjoint (if byte-adjacent) spans,
-        // and the receiver never reads a payload before observing its
+        // SAFETY: the claim reserved this span — in bounds by the
+        // capacity check — exclusively: other writers reserve disjoint
+        // spans, and the receiver reads no payload before observing its
         // committed descriptor, which `finish` publishes only when it
         // consumes this borrow.
         let content = unsafe {

@@ -18,20 +18,18 @@
 //!              fixed descriptor table      payloads grow up ->
 //! ```
 //!
-//! The counters and the descriptor table form one `repr(C)` struct whose
-//! table length is a compile-time constant every endpoint shares (the
-//! channel specifies it); the payload area is simply the rest of the
-//! mapping ([`layout`]). Attaching constructs typed views of that struct
-//! — two monotonic `AtomicU64` counters: claims, carrying the CLOSED
-//! gate bit, and payload bytes reserved — while the payload area stays
+//! Counters and table are one `repr(C)` struct whose table length is a
+//! compile-time constant every endpoint shares (the channel specifies
+//! it); the payload area is the rest of the mapping ([`layout`]).
+//! Attaching builds typed views of the struct; the payload area stays
 //! untyped bytes.
-//! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
-//! reserves a descriptor slot — validated against the fixed region bounds
-//! from the returned old values. A failed claim sets the CLOSED gate as
-//! its loss report, then takes its increments back: refusals are
-//! net-zero, so the counters track the true counts and stragglers can
-//! hammer a sealed channel forever without moving them. Committed
-//! descriptors are self-describing ([`layout`]), so the counters never
+//!
+//! A claim is two wait-free `fetch_add`s — one reserves payload bytes,
+//! one a descriptor slot — checked against the fixed bounds from the
+//! returned old values. A failed claim sets the CLOSED gate as its loss
+//! report, then takes its increments back: refusals are net-zero, so
+//! stragglers can hammer a sealed channel forever without moving the
+//! counters. Descriptors are self-describing, so the counters never
 //! locate data, and every slot has a fixed location, so an unfinished
 //! frame can never hide a later one.
 //!
@@ -45,30 +43,27 @@
 //!                          receiver freeze CAS wins
 //! ```
 //!
-//! A payload becomes reachable only through its committed descriptor, and a
+//! A payload is reachable only through its committed descriptor, and a
 //! descriptor is committed only after the payload is fully written
-//! (the ordering contract below). The receiver never derives frame
-//! locations from payload bytes, and the borrows [`ShmReader`] hands out cover
-//! exactly the validated committed spans — immutable under the protocol,
-//! and disjoint from everything a live writer may still touch (see the
-//! receiver section's trust argument below).
+//! ([`layout`]'s ordering contract). The receiver never derives frame
+//! locations from payload bytes, and the borrows [`ShmReader`] hands out
+//! cover exactly the validated committed spans — immutable, and disjoint
+//! from everything a live writer may still touch.
 //!
 //! # Seal boundary
 //!
-//! [`ShmReader::seal`]'s boundary is a snapshot of the claim counter.
-//! A writer admitted before the snapshot races the freeze pass per slot and
-//! its frame is either included (commit won) or ignored (abort won) — never
+//! [`ShmReader::seal`]'s boundary is a snapshot of the claim counter. A
+//! writer admitted before the snapshot races the freeze pass per slot —
+//! its frame is included (commit won) or ignored (freeze won), never
 //! torn; a claim after the snapshot lands in a slot the receiver never
-//! visits and is dropped, and the CLOSED gate set before the seal returns
-//! stops stragglers from claiming (and materializing pages) forever. Both
-//! drops are sound because writers publish a record *before* performing the
-//! recorded operation: a process that died mid-frame never performed the
-//! operation, and one that claimed or committed after the snapshot performs
-//! it outside the channel's boundary. A record refused *before* the seal —
-//! a full region, an oversized frame — sets the CLOSED gate first, so the
-//! channel reports itself incomplete ([`ShmReader::is_complete`]) and
-//! refuses every later claim: once one record is lost the receiver must
-//! reject the result, and further records would be wasted work.
+//! visits, until the CLOSED gate stops stragglers for good. Both drops
+//! are sound because writers publish a record *before* performing the
+//! recorded operation: a writer that died mid-frame never performed it,
+//! and one that claimed or committed after the snapshot performs it
+//! outside the channel's boundary. A record refused *before* the seal —
+//! full region, oversized frame — sets the gate first, so the channel
+//! reports itself incomplete ([`ShmReader::is_complete`]) and refuses
+//! every later claim: one lost record already condemns the result.
 //!
 //! Correctness never depends on writer-side cleanup: no exit hooks, PID
 //! checks, heartbeats, or timeouts.
