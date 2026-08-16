@@ -25,14 +25,11 @@
 //! out where the struct and the payload area start; the payload area
 //! stays plain bytes.
 //!
-//! A claim is two atomic increments — one reserves payload bytes, one a
-//! descriptor slot — and the old values they return are what the writer
-//! checks against the region's fixed size. Each increment is a
-//! compare-and-swap loop that gives up rather than wrap, so neither
-//! counter can ever come back around to a value that is already in use. A
-//! failed claim sets the CLOSED gate to report the loss and leaves its
-//! increments where they are: both counters only ever climb. Each
-//! descriptor carries its own
+//! A claim is two wait-free `fetch_add`s — one reserves payload bytes,
+//! one a descriptor slot — and the old values they return are what the
+//! writer checks against the region's fixed size. A failed claim sets the
+//! CLOSED gate to report the loss and leaves its increments where they
+//! are: both counters only ever climb. Each descriptor carries its own
 //! offset and length, so the counters never say where data is, and every
 //! slot sits at a fixed place, so an unfinished frame can never hide a
 //! later one.
@@ -472,10 +469,8 @@ mod tests {
         for _ in 0..100 {
             assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
         }
-        // A claim that sees the gate never counts itself: the
-        // compare-and-swap gives up instead of incrementing, so late
-        // writers leave no trace on the counter.
-        assert!(shm.peek_u64(0) == before);
+        // Each refusal still counted its claim, and the gate stayed set.
+        assert!(shm.peek_u64(0) == before + 100);
     }
 
     #[test]

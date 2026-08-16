@@ -77,8 +77,8 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         self.mapped.claims().load(Ordering::Relaxed) & CLOSED != 0
     }
 
-    /// Claims a frame of exactly `frame_size` bytes: two compare-and-swap
-    /// loops, one per counter (rule 1).
+    /// Claims a frame of exactly `frame_size` bytes. Wait-free: two
+    /// `fetch_add`s, no retry loop (rule 1).
     ///
     /// The receiver cannot see the frame until [`FrameMut::finish`]
     /// commits it; dropping it instead gives the claim up, and the
@@ -105,39 +105,20 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         // Widening a 32-bit size never loses anything.
         let reservation = u64::from(frame_size.get());
         // Payload bytes first, so a payload-capacity failure does not burn a
-        // slot. The add refuses to wrap rather than wrapping: an overflowed
-        // counter would hand out an offset inside the region that another
-        // frame already owns.
-        let Ok(payload_start) = mapped.payload_reserved().try_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |reserved| reserved.checked_add(reservation),
-        ) else {
-            return Err(report_loss());
-        };
+        // slot.
+        let payload_start = mapped.payload_reserved().fetch_add(reservation, Ordering::Relaxed);
         let Some(payload_offset) =
             fitted_offset(payload_start, frame_size.get(), mapped.payload_len)
         else {
             return Err(report_loss());
         };
 
-        // The claim counter shares its word with the gate, so the count
-        // stops one short of it rather than carrying into it. That one
-        // condition covers both refusals: a gate already set is above the
-        // ceiling too. The add has to stay inside the closure — a set gate
-        // over a maxed count is `u64::MAX`, which `then_some` would add to
-        // eagerly and overflow.
-        let claims =
-            match mapped.claims().try_update(Ordering::Relaxed, Ordering::Relaxed, |claims| {
-                (claims < CLOSED - 1).then(|| claims + 1)
-            }) {
-                Ok(claims) => claims,
-                // Not a loss: the receiver had already stopped collecting when
-                // this record was refused.
-                Err(claims) if claims & CLOSED != 0 => return Err(ClaimError::Closed),
-                // The count reached its ceiling, which takes 2^63 claims.
-                Err(_) => return Err(report_loss()),
-            };
+        let claims = mapped.claims().fetch_add(1, Ordering::Relaxed);
+        if claims & CLOSED != 0 {
+            // Not a loss: the receiver had already stopped collecting when
+            // this record was refused.
+            return Err(ClaimError::Closed);
+        }
         let slot_index = to_usize(claims);
         if slot_index >= SLOTS {
             return Err(report_loss());
