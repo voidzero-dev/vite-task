@@ -385,14 +385,18 @@ async fn run(
     //    to execute the command — or carry the globbed inputs into the run.
     let (stdio_config, globbed_inputs) = match lookup {
         CacheLookup::Hit(cached) => {
-            let mut stdio_config =
-                reporter.start(CacheStatus::Hit { replayed_duration: cached.duration });
+            let replay_logs = cache_metadata.is_none_or(|metadata| metadata.replay_logs);
+            let mut stdio_config = reporter.start(CacheStatus::Hit {
+                replayed_duration: cached.duration,
+                logs_replayed: replay_logs,
+            });
             return Ok(replay_cache_hit(
                 &mut stdio_config,
                 &cached,
                 workspace_root,
                 cache_dir,
                 program_name,
+                replay_logs,
             ));
         }
         CacheLookup::Miss { miss, globbed_inputs } => {
@@ -547,14 +551,17 @@ fn replay_cache_hit(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
+    replay_logs: bool,
 ) -> Report {
-    for output in cached.std_outputs.iter() {
-        let writer: &mut dyn std::io::Write = match output.kind {
-            pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
-            pipe::OutputKind::StdErr => &mut stdio_config.writers.stderr_writer,
-        };
-        let _ = writer.write_all(&output.content);
-        let _ = writer.flush();
+    if replay_logs {
+        for output in cached.std_outputs.iter() {
+            let writer: &mut dyn std::io::Write = match output.kind {
+                pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
+                pipe::OutputKind::StdErr => &mut stdio_config.writers.stderr_writer,
+            };
+            let _ = writer.write_all(&output.content);
+            let _ = writer.flush();
+        }
     }
 
     // Restore output files from the cached archive. Failure here means the

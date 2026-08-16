@@ -66,6 +66,7 @@ impl ResolvedTaskOptions {
         let cache_config = match user_options.cache_config {
             UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
             UserCacheConfig::Enabled { cache: _, enabled_cache_config } => {
+                let replay_logs = enabled_cache_config.replay_logs.unwrap_or(true);
                 let mut untracked_env: FxHashSet<Str> =
                     enabled_cache_config.untracked_env.unwrap_or_default().into_iter().collect();
                 untracked_env.extend(DEFAULT_UNTRACKED_ENV.iter().copied().map(Str::from));
@@ -83,6 +84,7 @@ impl ResolvedTaskOptions {
                 )?;
 
                 Some(CacheConfig {
+                    replay_logs,
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
                             .env
@@ -100,14 +102,20 @@ impl ResolvedTaskOptions {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "env_config, input_config, output_config are distinct config categories, not a naming smell"
-)]
 pub struct CacheConfig {
+    #[serde(skip_serializing_if = "is_true")]
+    pub replay_logs: bool,
     pub env_config: EnvConfig,
     pub input_config: ResolvedGlobConfig,
     pub output_config: ResolvedGlobConfig,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if callback receives the field by reference"
+)]
+const fn is_true(value: &bool) -> bool {
+    *value
 }
 
 /// Resolved input configuration for cache fingerprinting.

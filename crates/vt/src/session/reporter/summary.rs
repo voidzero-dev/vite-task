@@ -63,8 +63,12 @@ pub struct TaskSummary {
 /// making invalid combinations unrepresentable.
 #[derive(Serialize, Deserialize)]
 pub enum TaskResult {
-    /// Cache hit — output was replayed from cache. Always successful.
-    CacheHit { saved_duration_ms: u64 },
+    /// Cache hit. Always successful.
+    CacheHit {
+        saved_duration_ms: u64,
+        #[serde(default = "default_logs_replayed")]
+        logs_replayed: bool,
+    },
 
     /// In-process execution (built-in command like echo). Always successful.
     InProcess,
@@ -90,6 +94,10 @@ pub enum SpawnedCacheStatus {
     Miss(SavedCacheMissReason),
     /// No cache configuration for this task.
     Disabled,
+}
+
+const fn default_logs_replayed() -> bool {
+    true
 }
 
 /// Outcome of a spawned process.
@@ -121,7 +129,7 @@ pub enum SpawnOutcome {
     /// No `infra_error` field: cache operations are skipped on non-zero exit.
     Failed { exit_code: NonZeroI32 },
 
-    /// Execution failed without a usable process exit status.
+    /// Could not start the process (e.g., command not found).
     SpawnError(SavedExecutionError),
 }
 
@@ -193,7 +201,7 @@ impl SummaryStats {
 
         for task in tasks {
             match &task.result {
-                TaskResult::CacheHit { saved_duration_ms } => {
+                TaskResult::CacheHit { saved_duration_ms, .. } => {
                     stats.cache_hits += 1;
                     stats.total_saved += Duration::from_millis(*saved_duration_ms);
                 }
@@ -345,9 +353,10 @@ impl TaskResult {
         );
 
         match cache_status {
-            CacheStatus::Hit { replayed_duration } => {
-                Self::CacheHit { saved_duration_ms: duration_to_ms(*replayed_duration) }
-            }
+            CacheStatus::Hit { replayed_duration, logs_replayed } => Self::CacheHit {
+                saved_duration_ms: duration_to_ms(*replayed_duration),
+                logs_replayed: *logs_replayed,
+            },
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
@@ -565,10 +574,14 @@ impl TaskResult {
         }
 
         match self {
-            Self::CacheHit { saved_duration_ms } => {
+            Self::CacheHit { saved_duration_ms, logs_replayed } => {
                 let d = Duration::from_millis(*saved_duration_ms);
                 let formatted_duration = format_summary_duration(d);
-                vt_str::format!("→ Cache hit - output replayed - {formatted_duration} saved")
+                if *logs_replayed {
+                    vt_str::format!("→ Cache hit - output replayed - {formatted_duration} saved")
+                } else {
+                    vt_str::format!("→ Cache hit - logs skipped - {formatted_duration} saved")
+                }
             }
             Self::InProcess => Str::from("→ Cache disabled for built-in command"),
             Self::Spawned { cache_status, .. } => match cache_status {

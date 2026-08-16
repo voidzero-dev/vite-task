@@ -1,17 +1,6 @@
 # Changelog
 
-- **Fixed** Vite+ diagnostics now display individual paths and working directories without Rust debug formatting such as quoted paths or escaped Windows backslashes ([#534](https://github.com/voidzero-dev/vite-task/pull/534)).
-- **Fixed** Automatic file-access tracking now works inside the default Codex CLI and Claude Code sandboxes ([#562](https://github.com/voidzero-dev/vite-task/issues/562), [#563](https://github.com/voidzero-dev/vite-task/issues/563), [#576](https://github.com/voidzero-dev/vite-task/pull/576), [#569](https://github.com/voidzero-dev/vite-task/pull/569)).
-- **Fixed** Broad workspace globs no longer discover and run package scripts inside `node_modules` ([#539](https://github.com/voidzero-dev/vite-task/pull/539)).
-- **Added** Tasks now run with `VP_RUN=1` set, so tools can tell they are running under `vp run` instead of being invoked directly ([#570](https://github.com/voidzero-dev/vite-task/pull/570)).
-- **Fixed** The task cache now supports much larger automatically tracked input sets without hitting wincode's default 4 MiB sequence preallocation limit ([#554](https://github.com/voidzero-dev/vite-task/pull/554)).
-- **Fixed** npm workspace patterns beginning with `./` now discover matching packages correctly ([vite-plus#2201](https://github.com/voidzero-dev/vite-plus/issues/2201), [#547](https://github.com/voidzero-dev/vite-task/pull/547)).
-- **Fixed** Failures while forwarding output from a started task process no longer incorrectly say the process failed to spawn ([#506](https://github.com/voidzero-dev/vite-task/issues/506)).
-- **Fixed** An issue where Bun tasks on macOS did not rerun when files they read, wrote, or listed changed ([#532](https://github.com/voidzero-dev/vite-task/issues/532), [#542](https://github.com/voidzero-dev/vite-task/pull/542)).
-- **Improved** Windows file-access tracking now uses sparse temporary backing files where supported, avoiding upfront allocation of the full backing file on disk ([#524](https://github.com/voidzero-dev/vite-task/pull/524)).
-- **Fixed** Automatic file-access tracking on Linux now works in containers and Kubernetes runners with limited `/dev/shm` space ([#353](https://github.com/voidzero-dev/vite-task/issues/353), [#523](https://github.com/voidzero-dev/vite-task/pull/523)).
-- **Fixed** Windows automatic input tracking now records executable image reads when process creation performs the lookup inside `NtCreateUserProcess` ([#518](https://github.com/voidzero-dev/vite-task/pull/518)).
-- **Fixed** Failures while waiting for a started task process to exit no longer incorrectly say the process failed to spawn ([#515](https://github.com/voidzero-dev/vite-task/pull/515)).
+- **Added** `replayLogs: false` for cached tasks that should restore outputs and report cache hits without replaying cached stdout/stderr.
 - **Fixed** Missing env vars requested through `@voidzero-dev/vite-task-client` now return `undefined` instead of `null`, preserving Vite production `NODE_ENV` semantics when builds run through `vp run` ([#508](https://github.com/voidzero-dev/vite-task/pull/508)).
 - **Fixed** Windows builds no longer hang on CI when a `node_modules/.bin` `.cmd` shim is routed through PowerShell: the npm/pnpm/yarn `.ps1` wrappers read stdin and block forever on a non-TTY pipe, so the PowerShell rewrite is now skipped when stdin is not an interactive terminal, falling back to the `.cmd` (which never reads stdin) ([#491](https://github.com/voidzero-dev/vite-task/pull/491)).
 - **Added** First-party support for caching `vite build` with zero cache config, giving Vite projects correct cache hits out of the box ([vitejs/vite#22453](https://github.com/vitejs/vite/pull/22453)).

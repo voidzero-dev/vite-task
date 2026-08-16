@@ -95,6 +95,7 @@ impl vt::CommandHandler for CommandHandler {
                     program,
                     args: args.into_iter().filter(|a| a.as_str() != "--").collect(),
                     cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
+                        replay_logs: None,
                         env: None,
                         untracked_env: None,
                         input: None,

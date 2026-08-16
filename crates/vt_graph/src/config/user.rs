@@ -192,6 +192,9 @@ impl UserCacheConfig {
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledCacheConfig {
+    /// Whether to replay cached stdout/stderr on cache hits.
+    pub replay_logs: Option<bool>,
+
     /// Environment variable names to be fingerprinted and passed to the task.
     pub env: Option<Box<[Str]>>,
 
@@ -260,6 +263,7 @@ impl Default for UserTaskOptions {
             cache_config: UserCacheConfig::Enabled {
                 cache: None,
                 enabled_cache_config: EnabledCacheConfig {
+                    replay_logs: None,
                     env: None,
                     untracked_env: None,
                     input: None,
@@ -702,8 +706,30 @@ mod tests {
             UserCacheConfig::Enabled {
                 cache: Some(MustBe!(true)),
                 enabled_cache_config: EnabledCacheConfig {
+                    replay_logs: None,
                     env: Some(std::iter::once("NODE_ENV".into()).collect()),
                     untracked_env: Some(std::iter::once("FOO".into()).collect()),
+                    input: None,
+                    output: None,
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn test_replay_logs_can_be_disabled() {
+        let user_config_json = json!({
+            "cache": true,
+            "replayLogs": false,
+        });
+        assert_eq!(
+            serde_json::from_value::<UserCacheConfig>(user_config_json).unwrap(),
+            UserCacheConfig::Enabled {
+                cache: Some(MustBe!(true)),
+                enabled_cache_config: EnabledCacheConfig {
+                    replay_logs: Some(false),
+                    env: None,
+                    untracked_env: None,
                     input: None,
                     output: None,
                 }
