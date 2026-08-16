@@ -14,7 +14,6 @@ libc = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 fspy_nostd = { workspace = true }
 fspy_nostd_alloc = { workspace = true }
-wincode = { workspace = true }
 
 [target.'cfg(all(target_os = "linux", not(target_env = "musl")))'.dependencies]
 itoa = { workspace = true }
