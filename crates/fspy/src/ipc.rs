@@ -2,7 +2,7 @@ use std::io;
 
 use fspy_shared::ipc::{
     PathAccess,
-    channel::{Frames, Receiver},
+    channel::{FrameReader, Receiver},
 };
 
 // Shared memory region size: the channel's fixed descriptor table plus
@@ -12,7 +12,7 @@ pub const SHM_CAPACITY: usize = 4 * 1024 * 1024 * 1024;
 
 /// The path accesses a run reported through the IPC channel.
 pub struct ChannelAccesses {
-    frames: Frames,
+    frames: FrameReader,
 }
 
 impl TryFrom<Receiver> for ChannelAccesses {

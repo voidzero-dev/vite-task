@@ -45,25 +45,25 @@ pub enum SealError {
 /// is released when the reader drops. It holds no buffer of its own:
 /// iterating reads the descriptor table, so sealing a channel allocates
 /// nothing and touches nothing.
-pub struct ShmReader<M, const SLOTS: usize> {
-    /// Where the parts of the owned region are.
-    mapped: MappedLayout<SLOTS>,
+pub struct ShmReader<M> {
+    /// Where the payload area is, for turning descriptors into spans.
+    payload_start: NonNull<u8>,
+    /// The slots the seal admitted, in claim order.
+    table: NonNull<[AtomicU64]>,
     /// Owns the region the pointers point into. Declared after them:
     /// fields drop in order, and the borrower must go first.
     _mem: M,
-    /// How many slots the seal admitted: iteration stops there.
-    slot_count: usize,
 }
 
 // SAFETY: the reader only loads counters and descriptors atomically, and
 // reads committed spans that nothing writes to any more; the stored
 // pointers point into the mapped memory, which is owned separately and
 // does not move, not into the reader itself.
-unsafe impl<M: Send, const SLOTS: usize> Send for ShmReader<M, SLOTS> {}
+unsafe impl<M: Send> Send for ShmReader<M> {}
 // SAFETY: see the `Send` impl.
-unsafe impl<M: Sync, const SLOTS: usize> Sync for ShmReader<M, SLOTS> {}
+unsafe impl<M: Sync> Sync for ShmReader<M> {}
 
-impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
+impl<M: AsRawSlice> ShmReader<M> {
     /// Seals the channel — no further records — and returns the reader of
     /// its committed frames.
     ///
@@ -91,12 +91,12 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
     ///
     /// [`SealError`]: the mapping cannot hold the protocol, or the channel
     /// was already closed before this call.
-    pub unsafe fn seal(mem: M) -> Result<Self, SealError> {
+    pub unsafe fn seal<const SLOTS: usize>(mem: M) -> Result<Self, SealError> {
         // SAFETY: forwarded from this function's contract, which keeps the
         // region valid for as long as the reader lives — and so for every
         // use of the pointers, which are stored in the reader and dropped
         // with it.
-        let Some(mapped) = (unsafe { MappedLayout::new(mem.as_raw_slice()) }) else {
+        let Some(mapped) = (unsafe { MappedLayout::<SLOTS>::new(mem.as_raw_slice()) }) else {
             return Err(SealError::UnsupportedRegion);
         };
 
@@ -119,7 +119,15 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
         // (rule 1).
         mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
 
-        Ok(Self { mapped, _mem: mem, slot_count })
+        // The admitted slots, kept as a raw pointer so the reader needs
+        // no lifetime and no `SLOTS`.
+        // SAFETY of every later read through it: it points into the
+        // mapping this reader owns, and every byte of `Meta` is inside an
+        // `AtomicU64`, so a writer storing a descriptor never invalidates
+        // it. That last part stops holding if `Meta` ever gains a field
+        // that is not an atomic.
+        let table = NonNull::from_ref(&mapped.table()[..slot_count]);
+        Ok(Self { payload_start: mapped.payload_start, table, _mem: mem })
     }
 
     /// Iterates over the committed frames in claim order.
@@ -128,17 +136,22 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmReader<M, SLOTS> {
     /// filling a frame when the channel was sealed may appear in a later
     /// call and not an earlier one. Everything it yields is a whole frame
     /// whose writer finished it.
-    pub fn iter(&self) -> Iter<'_> {
+    pub const fn iter(&self) -> Iter<'_> {
         Iter {
-            payload_start: self.mapped.payload_start,
-            table: &self.mapped.table()[..self.slot_count],
+            payload_start: self.payload_start,
+            // SAFETY: the slots live in the mapping this reader owns, and
+            // every byte of them is inside an `AtomicU64`, so writers
+            // storing descriptors through their own pointers never
+            // invalidate this borrow. It lasts no longer than `&self`,
+            // and so no longer than the mapping.
+            table: unsafe { self.table.as_ref() },
         }
     }
 }
 
-impl<M, const SLOTS: usize> fmt::Debug for ShmReader<M, SLOTS> {
+impl<M> fmt::Debug for ShmReader<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ShmReader").field("slots", &self.slot_count).finish_non_exhaustive()
+        f.debug_struct("ShmReader").field("slots", &self.table.len()).finish_non_exhaustive()
     }
 }
 
@@ -186,7 +199,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-impl<'a, M: AsRawSlice, const SLOTS: usize> IntoIterator for &'a ShmReader<M, SLOTS> {
+impl<'a, M: AsRawSlice> IntoIterator for &'a ShmReader<M> {
     type IntoIter = Iter<'a>;
     type Item = &'a [u8];
 

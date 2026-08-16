@@ -23,9 +23,9 @@ use shm_io::{ShmReader, ShmWriter};
 /// address space until slots are actually touched.
 const SLOTS: usize = 1 << 26;
 
-/// The committed frames of a closed channel; borrows the shared mapping,
-/// which stays alive (and mapped) until this value drops.
-pub type Frames = shm_io::ShmReader<Mapping, SLOTS>;
+/// Reads the committed frames of a sealed channel; borrows the shared
+/// mapping, which stays alive (and mapped) until this value drops.
+pub type FrameReader = shm_io::ShmReader<Mapping>;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite, Serialize as _, config::DefaultConfig};
 
@@ -283,14 +283,14 @@ unsafe impl Sync for Receiver {}
 
 impl Receiver {
     /// Closes the channel and returns every committed frame, borrowed from
-    /// the shared mapping that moves into the returned [`Frames`].
+    /// the shared mapping that moves into the returned [`FrameReader`].
     ///
     /// Never blocks on senders: new claims are rejected from this point on,
     /// unfinished frames are atomically aborted, and committed frames become
     /// readable in place. A sender process that is still alive keeps
     /// running; anything it reports after this point is outside the
     /// channel's boundary by design. The mapping is released when the
-    /// returned [`Frames`] drops.
+    /// returned [`FrameReader`] drops.
     ///
     /// # Errors
     ///
@@ -298,7 +298,7 @@ impl Receiver {
     /// room, or tried to send something too large — and when the region
     /// cannot hold the protocol at all. Either way there is no complete
     /// set of records, so none are handed back.
-    pub fn close(self) -> io::Result<Frames> {
+    pub fn close(self) -> io::Result<FrameReader> {
         let Self { _keeper: keeper, mapping } = self;
         // Remove the backing file first so no new process attaches while the
         // channel closes.
@@ -306,7 +306,7 @@ impl Receiver {
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable and independently owned, and all attached
         // processes access it only through the `shm_io` protocol.
-        unsafe { ShmReader::<_, SLOTS>::seal(mapping) }
+        unsafe { ShmReader::seal::<SLOTS>(mapping) }
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
     }
 }

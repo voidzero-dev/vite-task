@@ -30,9 +30,9 @@
 //! writer checks against the region's fixed size. A failed claim sets the
 //! CLOSED gate to report the loss and leaves its increments where they
 //! are: both counters only ever climb. Each descriptor carries its own
-//! offset and length, so the
-//! counters never say where data is, and every slot sits at a fixed
-//! place, so an unfinished frame can never hide a later one.
+//! offset and length, so the counters never say where data is, and every
+//! slot sits at a fixed place, so an unfinished frame can never hide a
+//! later one.
 //!
 //! # Frame lifecycle
 //!
@@ -220,10 +220,10 @@ mod tests {
     /// The table length most tests use; regions add payload room on top.
     const S: usize = 15;
 
-    fn collect_frames(shm: &MockedShm) -> ShmReader<MockedShm, S> {
+    fn collect_frames(shm: &MockedShm) -> ShmReader<MockedShm> {
         // SAFETY: `MockedShm` provides a stable, zero-initialized allocation
         // accessed only through the protocol.
-        unsafe { ShmReader::seal(shm.clone()) }.unwrap()
+        unsafe { ShmReader::seal::<S>(shm.clone()) }.unwrap()
     }
 
     #[test]
@@ -290,7 +290,7 @@ mod tests {
         // "test" did land, but a lost record means the frames are not all
         // of them, so the seal hands back none of them.
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        let sealed = unsafe { ShmReader::seal::<S>(shm) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -311,7 +311,7 @@ mod tests {
         assert!(!writer.try_write_frame(b"refused"));
 
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        let sealed = unsafe { ShmReader::seal::<S>(shm) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -444,7 +444,7 @@ mod tests {
 
         // Fifteen frames landed, but the sixteenth was lost.
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        let sealed = unsafe { ShmReader::seal::<S>(shm) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -496,7 +496,7 @@ mod tests {
         // A second seal fails: the first one set the gate, and a re-seal
         // cannot say what was refused since then.
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        let sealed = unsafe { ShmReader::seal::<S>(shm) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -524,7 +524,7 @@ mod tests {
         });
 
         // SAFETY: see `collect_frames`.
-        let frames = unsafe { ShmReader::<_, S>::seal(shm) }.unwrap();
+        let frames = unsafe { ShmReader::seal::<S>(shm) }.unwrap();
         let mut count = 0;
         for frame in &frames {
             count += 1;
@@ -556,7 +556,7 @@ mod tests {
         // seal. The writers all survived it.
         assert!(writer.is_closed());
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::<_, S>::seal(shm) };
+        let sealed = unsafe { ShmReader::seal::<S>(shm) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -593,7 +593,7 @@ mod tests {
 
             barrier.wait();
             // SAFETY: see `collect_frames`.
-            let frames = unsafe { ShmReader::<_, S>::seal(shm.clone()) }.unwrap();
+            let frames = unsafe { ShmReader::seal::<S>(shm.clone()) }.unwrap();
             let results = writers.map(|writer| writer.join().unwrap());
             (frames, results)
         });
@@ -715,7 +715,7 @@ mod tests {
 
         // SAFETY: the mapping is a valid shared-memory region created zeroed
         // and accessed only through the protocol.
-        let frames = unsafe { ShmReader::<_, S>::seal(mapping) }.unwrap();
+        let frames = unsafe { ShmReader::seal::<S>(mapping) }.unwrap();
         let collected = frames.iter().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert!(collected.len() == CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
         for child_index in 0..CHILD_COUNT {
@@ -783,7 +783,7 @@ mod tests {
         assert!(writer.try_write_frame(b"alive"));
 
         // SAFETY: see `real_shm_across_processes`.
-        let frames = unsafe { ShmReader::<_, S>::seal(mapping) }.unwrap();
+        let frames = unsafe { ShmReader::seal::<S>(mapping) }.unwrap();
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);
