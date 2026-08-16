@@ -28,8 +28,11 @@ use std::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
 ///
 /// The gate must be a bit, not a sentinel value: stragglers keep
 /// `fetch_add`ing the counter after it is set, and an OR-ed bit survives
-/// 2^63 increments, while any exact value would be destroyed by the
-/// first. No realistic claim volume carries into bit 63.
+/// increments, while any exact value would be destroyed by the first.
+/// The bit itself is unreachable by counting: refusals are net-zero
+/// (rule 1), so the counter never rises past the table length plus one
+/// per claim in flight, and a 64-bit address space cannot host 2^63
+/// simultaneous claims.
 pub(super) const CLOSED: u64 = 1 << 63;
 
 /// The region's fixed-location part — the protocol counters and the
@@ -107,12 +110,22 @@ pub(super) const FROZEN: u64 = 1;
 // - the **payload counter**: payload bytes ever reserved, bumped by another
 //   wait-free `fetch_add`.
 //
-// Failed claims leave the counters bumped; that is harmless, because the
-// receiver clamps instead of trusting the counts, and committed
-// descriptors carry their own offset and length, so the counters never
-// locate data. The payload counter can even wrap on a long-condemned
-// channel — still harmless: wrapping requires prior failures, failures
-// set the gate, and the gate refuses every claim before a span is built.
+// Refused claims are net-zero: once the gate is set — observed in the
+// add's return, or set by the refusal itself, always gate first — they
+// subtract their counter increments back. Every subtraction undoes that
+// claim's own addition, so the claim counter never drops below the
+// successful count or any seal snapshot, and never rises past the table
+// length plus one per claim in flight: the gate bit cannot be reached by
+// counting on a 64-bit machine, whose address space cannot host 2^63
+// simultaneous claims. A writer that dies between its addition and its
+// undo leaves one count behind — the one residue wait-freedom cannot
+// erase — and it would take 2^63 such deaths to so much as condemn the
+// channel spuriously. The payload counter keeps the in-bounds
+// reservations of refused claims (never materialized, and the region
+// caps them); it only takes back reservations that lay beyond the
+// region, which no live span can sit above. Either way the counters
+// never locate data — committed descriptors carry their own offset and
+// length — and the receiver clamps instead of trusting the counts.
 //
 // # Memory-ordering contract
 //

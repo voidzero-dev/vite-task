@@ -108,16 +108,19 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
             return Err(report_loss());
         };
         // Payload bytes first, so a payload-capacity failure does not burn a
-        // slot. A failed reservation stays counted — overshoot is harmless
-        // because the counter is not what locates payloads (descriptors are)
-        // and a `u64` cannot realistically wrap.
+        // slot.
         let payload_start =
             mapped.payload_reserved().fetch_add(payload_len as u64, Ordering::Relaxed);
         // Checked: a foreign scribble of the counter must fail the claim,
         // not wrap the bound into an out-of-bounds reservation.
         let payload_end = payload_start.checked_add(payload_len as u64);
         if payload_end.is_none_or(|end| end > mapped.payloads.len() as u64) {
-            return Err(report_loss());
+            let err = report_loss();
+            // Net-zero refusal, gate first (rule 1): undo this claim's own
+            // reservation. It lay beyond the region, so no live span sits
+            // above it and the counter cannot dip below one.
+            mapped.payload_reserved().fetch_sub(payload_len as u64, Ordering::Relaxed);
+            return Err(err);
         }
         // Bounded by the capacity check: the payload region fits 32-bit
         // offsets.
@@ -127,12 +130,22 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         let claims = mapped.claims().fetch_add(1, Ordering::Relaxed);
         if claims & CLOSED != 0 {
             // Not a loss: a record refused after the seal describes an
-            // operation performed outside the channel's boundary.
+            // operation performed outside the channel's boundary. Net-zero
+            // refusal (rule 1): the gate was observed set, so undo the
+            // increment — the counter holds still instead of drifting
+            // toward the gate bit. (The payload reservation stays: in
+            // bounds, never materialized, and capped by the region.)
+            mapped.claims().fetch_sub(1, Ordering::Relaxed);
             return Err(ClaimError::Closed);
         }
         let slot_index = usize::try_from(claims).expect("claim count exceeds usize");
         if slot_index >= SLOTS {
-            return Err(report_loss());
+            let err = report_loss();
+            // Net-zero refusal, gate first (rule 1): once the gate is in
+            // the word, every later read of the counter carries it, so no
+            // claim can mistake the undone value for an open channel.
+            mapped.claims().fetch_sub(1, Ordering::Relaxed);
+            return Err(err);
         }
 
         // SAFETY: the claim reserved

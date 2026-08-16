@@ -28,11 +28,12 @@
 //! A claim is two wait-free `fetch_add`s — one reserves payload bytes, one
 //! reserves a descriptor slot — validated against the fixed region bounds
 //! from the returned old values. A failed claim sets the CLOSED gate as
-//! its loss report and leaves the counters bumped, harmlessly: readers
-//! clamp to the region capacities, and committed descriptors are
-//! self-describing ([`layout`]), so the counters never locate data. Every
-//! slot has a fixed location, so an unfinished frame can never hide a
-//! later one.
+//! its loss report, then takes its increments back: refusals are
+//! net-zero, so the counters track the true counts and stragglers can
+//! hammer a sealed channel forever without moving them. Committed
+//! descriptors are self-describing ([`layout`]), so the counters never
+//! locate data, and every slot has a fixed location, so an unfinished
+//! frame can never hide a later one.
 //!
 //! # Frame lifecycle
 //!
@@ -197,6 +198,16 @@ mod tests {
             Self { mem: Arc::new(mem), len }
         }
 
+        /// Reads one raw `u64` of the region, for asserting on protocol
+        /// state the API deliberately does not expose.
+        fn peek_u64(&self, byte_offset: usize) -> u64 {
+            // SAFETY: as for `poke_u64`.
+            let atomic = unsafe {
+                AtomicU64::from_ptr(self.as_raw_slice().cast::<u8>().add(byte_offset).cast())
+            };
+            atomic.load(Ordering::Relaxed)
+        }
+
         /// Overwrites one raw `u64` of the region, simulating foreign-process
         /// corruption of protocol metadata.
         fn poke_u64(&self, byte_offset: usize, value: u64) {
@@ -283,6 +294,9 @@ mod tests {
         // Larger than the payload region: the claim fails and sets the
         // gate, which is what tells the receiver a record was lost.
         assert!(!writer.try_write_frame(&vec![0u8; 2048]));
+        // The out-of-bounds reservation was taken back: only the four
+        // bytes of "test" remain counted.
+        assert!(shm.peek_u64(8) == 4);
 
         let frames = collect_frames(&shm);
         let mut iter = frames.iter();
@@ -441,6 +455,8 @@ mod tests {
             assert!(writer.try_write_frame(b"x"));
         }
         assert!(writer.claim_frame(1.try_into().unwrap()).unwrap_err() == ClaimError::Capacity);
+        // The refusal was net-zero: the gate is set, the count is intact.
+        assert!(shm.peek_u64(0) == (1 << 63) | 15);
 
         let frames = collect_frames(&shm);
         assert!(frames.iter().count() == 15);
@@ -465,7 +481,13 @@ mod tests {
         // does not mark the channel incomplete — the operation is outside
         // the sealed boundary.
         assert!(writer.is_closed());
-        assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
+        let before = shm.peek_u64(0);
+        for _ in 0..100 {
+            assert!(writer.claim_frame(5.try_into().unwrap()).unwrap_err() == ClaimError::Closed);
+        }
+        // Stragglers leave no trace on the claim counter: refusals are
+        // net-zero, so the gate can never be carried into by counting.
+        assert!(shm.peek_u64(0) == before);
         assert!(frames.is_complete());
     }
 

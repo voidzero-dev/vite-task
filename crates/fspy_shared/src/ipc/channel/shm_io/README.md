@@ -30,9 +30,8 @@ space, not memory: only pages that are actually written get backed.
 | counters | descriptor table (SLOTS slots) | payloads (the rest, grow up) |
 ```
 
-The region starts with one `repr(C)` struct: two `AtomicU64` counters,
-which only ever count up, followed by one 8-byte descriptor slot per
-frame. The table length is a compile-time constant the channel picks
+The region starts with one `repr(C)` struct: two `AtomicU64` counters
+followed by one 8-byte descriptor slot per frame. The table length is a compile-time constant the channel picks
 once for both ends:
 
 - the **claim counter** — how many frames were ever claimed. Bit 63 is
@@ -154,11 +153,12 @@ CLAIMED (slot 0) ---+
   is a `Release` write and the receiver's failed freeze is an `Acquire`
   read, so an observed descriptor implies fully visible payload bytes.
 - Once a slot is committed or frozen, nothing ever changes it again.
-- Counters only grow. The receiver clamps them to the fixed capacities —
-  an inflated counter degrades into extra frozen slots, not corruption.
-  Loss is reported through the CLOSED gate: a failed claim sets it before
-  the writer carries on, which both marks the result incomplete and
-  refuses every later claim.
+- The counters track the true counts: a refused claim sets the CLOSED
+  gate — marking the result incomplete and refusing every later claim —
+  and then subtracts its own increments back, so stragglers can hammer a
+  sealed channel forever without moving the counter toward the gate bit.
+  The receiver still clamps its snapshot to the fixed capacities, so even
+  a scribbled counter degrades into extra frozen slots, not corruption.
 - The bounds checks on descriptors are what make the `unsafe` reference
   construction correct: whether the receiver stays memory-safe never
   depends on another process behaving.
