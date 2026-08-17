@@ -89,16 +89,18 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
     }
 
-    if tracking_fell_short(outcome, metadata, fspy) {
-        // The task made more file accesses than the tracking channel had
-        // room for, so what arrived is a subset of what it touched. An
-        // entry built from a subset would replay with inputs and outputs
-        // missing.
+    // The accesses, or `None` when the task was not tracked at all. An
+    // `Err` means it made more file accesses than the tracking channel had
+    // room for, so what arrived is a subset of what it touched, and an entry
+    // built from a subset would replay with inputs and outputs missing.
+    #[cfg(fspy)]
+    let Ok(path_accesses) = outcome.path_accesses.as_ref().map(Result::as_ref).transpose() else {
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete), None);
-    }
+    };
 
     let fspy_outcome = observe_fspy(
-        outcome,
+        #[cfg(fspy)]
+        path_accesses,
         metadata,
         fspy,
         &ignored_input_rels,
@@ -192,29 +194,6 @@ pub(super) async fn update_cache(
     }
 }
 
-/// Whether the run's tracking came up short of what it needs to be
-/// cached: the accesses this run inferred are incomplete, and the task's
-/// config asks for inferred ones.
-///
-/// A task that spells out every input and output does not consult them, so
-/// a short trace costs it nothing.
-fn tracking_fell_short(
-    outcome: &ChildOutcome,
-    metadata: &CacheMetadata,
-    fspy: Option<&super::FspyTracking<'_>>,
-) -> bool {
-    #[cfg(fspy)]
-    {
-        let infers = metadata.input_config.includes_auto || metadata.output_config.includes_auto;
-        fspy.is_some() && infers && outcome.path_accesses.as_ref().is_some_and(Result::is_err)
-    }
-    #[cfg(not(fspy))]
-    {
-        let _ = (outcome, metadata, fspy);
-        false
-    }
-}
-
 /// Summarize the run's fspy observations. `Some` iff tracking was both
 /// requested (`tracking.fspy.is_some()`) and compiled in (`cfg(fspy)`). On a
 /// `cfg(not(fspy))` build this is always `None`, and [`update_cache`]
@@ -225,7 +204,7 @@ fn tracking_fell_short(
 /// `path_writes` is filtered by user-configured output negatives and
 /// tool-reported `ignoreOutput` paths before read-write overlap detection.
 fn observe_fspy(
-    outcome: &ChildOutcome,
+    #[cfg(fspy)] path_accesses: Option<&fspy::PathAccessIterable>,
     metadata: &CacheMetadata,
     fspy: Option<&super::FspyTracking<'_>>,
     ignored_input_rels: &FxHashSet<RelativePathBuf>,
@@ -236,16 +215,8 @@ fn observe_fspy(
     {
         use super::tracked_accesses::TrackedPathAccesses;
 
-        outcome.path_accesses.as_ref().map(|raw| {
-            // A trace that came up short reads as empty. It never reaches
-            // here for a task that infers anything from it, because
-            // `tracking_fell_short` has already turned the run away; one
-            // that spells out its inputs and outputs ignores the trace
-            // either way.
-            let tracked = raw.as_ref().map_or_else(
-                |_| TrackedPathAccesses::default(),
-                |raw| TrackedPathAccesses::from_raw(raw, workspace_root),
-            );
+        path_accesses.map(|raw| {
+            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root);
             let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
                 // fspy can be attached for auto-output-only tasks. In that
                 // mode reads must not become inferred inputs.
@@ -293,7 +264,7 @@ fn observe_fspy(
     }
     #[cfg(not(fspy))]
     {
-        let _ = (outcome, metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root);
+        let _ = (metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root);
         None
     }
 }
