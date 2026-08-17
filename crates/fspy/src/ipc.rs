@@ -1,45 +1,46 @@
-use std::io;
-
 use fspy_shared::ipc::{
     PathAccess,
     channel::{FrameReader, Receiver},
 };
 
-// Shared memory region size: the channel's fixed descriptor table plus
-// ~3.5 GiB of payload room — enough path accesses for almost any realistic
-// scenario. None of it occupies physical memory until actually used.
-pub const SHM_CAPACITY: usize = 4 * 1024 * 1024 * 1024;
-
 /// The path accesses a run reported through the IPC channel.
 pub struct ChannelAccesses {
-    frames: FrameReader,
+    /// `None` when a record was lost, which leaves what did arrive too
+    /// incomplete to build anything on.
+    frames: Option<FrameReader>,
 }
 
-impl TryFrom<Receiver> for ChannelAccesses {
-    type Error = io::Error;
-
-    /// Closes the channel and rejects traces that cannot back the run's
-    /// file accesses.
+impl From<Receiver> for ChannelAccesses {
+    /// Closes the channel and keeps its frames, unless a sender ran out of
+    /// room.
     ///
     /// Never waits for tracked processes: closing reads one counter and
     /// shuts the channel's gate (see
     /// [`fspy_shared::ipc::channel::Receiver::close`]), so it runs inline
     /// however many records were reported.
-    ///
-    /// Fails when a record was lost before close, which is what keeps the
-    /// tracking result trustworthy for caching: closing hands back frames
-    /// only when they are all of them. A run that fills the region
-    /// therefore fails here rather than reporting a short trace.
-    fn try_from(receiver: Receiver) -> io::Result<Self> {
-        Ok(Self { frames: receiver.close()? })
+    fn from(receiver: Receiver) -> Self {
+        Self { frames: receiver.close().ok() }
     }
 }
 
 impl ChannelAccesses {
+    /// Whether every record senders published is here.
+    ///
+    /// `false` means a sender could not record something it then went on
+    /// to do, so what follows is a subset of what the run really touched.
+    /// Anything that needs all of them — caching, above all — has to treat
+    /// the run as untracked rather than as having touched only these
+    /// paths.
+    pub fn is_complete(&self) -> bool {
+        self.frames.is_some()
+    }
+
     pub fn iter_path_accesses(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        self.frames.iter().map(|frame| {
-            wincode::deserialize_exact(frame)
-                .expect("committed frames are complete under the channel protocol")
+        self.frames.iter().flat_map(|frames| {
+            frames.iter().map(|frame| {
+                wincode::deserialize_exact(frame)
+                    .expect("committed frames are complete under the channel protocol")
+            })
         })
     }
 }

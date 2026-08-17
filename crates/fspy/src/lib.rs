@@ -20,7 +20,7 @@ mod command;
 use std::{env::temp_dir, fs::create_dir, io, process::ExitStatus, sync::LazyLock};
 
 pub use command::Command;
-pub use fspy_shared::ipc::{AccessMode, PathAccess};
+pub use fspy_shared::ipc::{AccessMode, ChannelSize, PathAccess};
 use futures_util::future::BoxFuture;
 pub use os_impl::PathAccessIterable;
 use os_impl::SpyImpl;

@@ -1,0 +1,24 @@
+[[e2e]]
+name = "capacity_exhaustion_leaves_the_task_alone"
+comment = """
+A task that reports more file accesses than its tracking channel can hold keeps running to the end: the accesses go unrecorded, but nothing kills the process over it. The run is not cached, because the accesses that did arrive are only some of the ones the task made, and the second run is a miss for the same reason rather than replaying a wrong entry.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "stat",
+  ], envs = [
+    [
+      "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY",
+      "65536",
+    ],
+  ], comment = "channel too small for the task's accesses" },
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "stat",
+  ], comment = "nothing was cached to replay" },
+]

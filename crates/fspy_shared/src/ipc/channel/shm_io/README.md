@@ -13,15 +13,15 @@ Three requirements shape the design:
 Any zero-initialized shared memory works. In practice it is a sparse file mapped into every participating process, so only the pages someone writes cost real memory.
 
 ```text
-| counters | descriptor table (SLOTS slots) | payloads (the rest, grow up) |
+| counters | descriptor table (one slot per frame) | payloads (the rest, grow up) |
 ```
 
-One `repr(C)` struct holds two `AtomicU64` counters followed by one 8-byte descriptor slot per frame. The channel fixes the table length at compile time for both ends.
+Two `AtomicU64` counters sit at the front, followed by one 8-byte descriptor slot per frame.
 
 - The **claim counter** counts frames ever claimed. Bit 63 is the CLOSED gate: the receiver sets it when it seals, and so does any writer whose claim failed, which is how the receiver hears about a lost record.
 - The **payload counter** counts payload bytes ever reserved.
 
-Payloads take the rest of the mapping, so that struct's size is the whole geometry. Attaching checks one bound: the struct fits, and what remains is small enough for the descriptors' 32-bit offsets. The production channel takes ~67 million slots out of 4 GiB and leaves ~3.5 GiB of payload room, enough for 15 to 20 million records of a few hundred bytes. Payload space runs out first.
+The mapping's size and the number of slots are the whole geometry, and every process attaching to a region passes the slot count it was created with. Payloads take what the table leaves. Attaching checks one bound: the counters and the table fit, and what remains is small enough for the descriptors' 32-bit offsets. Splitting 4 GiB at one slot per 64 bytes, say, gives ~67 million slots and ~3.5 GiB of payload room, which is tens of millions of records of a few hundred bytes; payload space runs out first.
 
 Where the table ends and payloads begin never moves. Claiming needs no retry loop, because a writer checks each counter against a fixed limit using the value `fetch_add` returned. Overshooting a limit costs nothing: no counter says where data is, since every committed descriptor carries its own offset and length.
 

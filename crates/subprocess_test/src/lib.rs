@@ -24,10 +24,15 @@ impl From<Command> for StdCommand {
     }
 }
 
+/// Shared memory for a test subprocess's file-access records: sparse
+/// address space, so a generous size costs nothing until it is used.
+#[cfg(feature = "fspy")]
+const TEST_SHM: fspy::ChannelSize = fspy::ChannelSize { capacity: 1 << 30, slots: 1 << 24 };
+
 #[cfg(feature = "fspy")]
 impl From<Command> for fspy::Command {
     fn from(cmd: Command) -> Self {
-        let mut fspy_cmd = Self::new(cmd.program);
+        let mut fspy_cmd = Self::new(cmd.program, TEST_SHM);
         fspy_cmd.args(cmd.args).envs(cmd.envs);
         fspy_cmd.current_dir(cmd.cwd);
         fspy_cmd

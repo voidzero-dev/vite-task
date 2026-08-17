@@ -10,9 +10,14 @@
 
 use std::{env, ffi::OsString, process::Stdio, time::Instant};
 
-use fspy::Command;
+use fspy::{ChannelSize, Command};
 use tokio::{io::AsyncReadExt as _, process::ChildStdout, runtime::Builder};
 use tokio_util::sync::CancellationToken;
+
+/// Shared memory for the tracked run's file-access records. It must match
+/// what the runner gives a real task, since claiming a frame is part of
+/// what this benchmark measures.
+const SHM: ChannelSize = ChannelSize { capacity: 4 << 30, slots: 1 << 26 };
 
 /// The base path the target opens, appended to its arguments so that only this
 /// crate names it: the target derives its per-thread paths from it, and
@@ -77,7 +82,7 @@ struct Launch {
 /// that a tracked launch covers session setup, injection, and teardown, and
 /// nothing of this launcher's own startup.
 async fn run_tracked(target: &OsString, target_args: &[OsString], relative: bool) -> Launch {
-    let mut command = Command::new(target);
+    let mut command = Command::new(target, SHM);
     command
         .args(target_args)
         .arg(if relative { MISSING_RELATIVE_PATH } else { MISSING_PATH })
@@ -141,7 +146,7 @@ async fn report(mut launch: Launch) {
 /// resolves the root working directory and joins the bare name back into
 /// [`MISSING_PATH`] — so the assertion below covers both modes.
 async fn validate(target: &OsString, target_args: &[OsString], relative: bool) {
-    let mut command = Command::new(target);
+    let mut command = Command::new(target, SHM);
     command
         .args(target_args)
         .arg(if relative { MISSING_RELATIVE_PATH } else { MISSING_PATH })

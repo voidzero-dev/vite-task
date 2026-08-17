@@ -25,7 +25,7 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
-use crate::ipc::{ChannelAccesses, SHM_CAPACITY};
+use crate::ipc::ChannelAccesses;
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
 
 #[derive(Debug)]
@@ -80,7 +80,7 @@ impl SpyImpl {
 
         #[cfg(not(target_env = "musl"))]
         let (ipc_channel_conf, ipc_receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+            channel(command.shm).map_err(SpawnError::ChannelCreation)?;
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]
@@ -162,7 +162,7 @@ impl SpyImpl {
                 // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
                 #[cfg(not(target_env = "musl"))]
-                let ipc_accesses = ChannelAccesses::try_from(ipc_receiver)?;
+                let ipc_accesses = ChannelAccesses::from(ipc_receiver);
                 let path_accesses = PathAccessIterable {
                     arenas,
                     #[cfg(not(target_env = "musl"))]
@@ -184,6 +184,23 @@ pub struct PathAccessIterable {
 }
 
 impl PathAccessIterable {
+    /// Whether every access the run made is here.
+    ///
+    /// `false` when a tracked process could not record one it went on to
+    /// perform, which leaves [`Self::iter`] short of what really happened.
+    /// The seccomp supervisor collects on this side of the boundary, so
+    /// only the shared-memory channel can come up short.
+    pub fn is_complete(&self) -> bool {
+        #[cfg(not(target_env = "musl"))]
+        {
+            self.ipc_accesses.is_complete()
+        }
+        #[cfg(target_env = "musl")]
+        {
+            true
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
         let accesses_in_arena =
             self.arenas.iter().flat_map(|arena| arena.borrow_accesses().iter()).copied();

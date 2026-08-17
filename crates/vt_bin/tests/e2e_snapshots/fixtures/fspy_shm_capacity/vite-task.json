@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "stat": {
+      "command": "vtt stat-many 20000",
+      "cache": true
+    }
+  }
+}

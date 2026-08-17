@@ -16,8 +16,8 @@ use super::{
 /// once. Each frame is reserved atomically, filled in a span no one else
 /// can touch, and published with one atomic write (the ordering contract
 /// in [`super::layout`]).
-pub struct ShmWriter<M, const SLOTS: usize> {
-    mapped: MappedLayout<SLOTS>,
+pub struct ShmWriter<M> {
+    mapped: MappedLayout,
     /// Owns the region the pointers point into. Declared after them:
     /// fields drop in order, and the borrower must go first.
     _mem: M,
@@ -27,10 +27,10 @@ pub struct ShmWriter<M, const SLOTS: usize> {
 // atomics, which synchronize access from any thread; the stored pointers
 // point into the mapped memory, which is owned separately and does not
 // move, not into the writer itself.
-unsafe impl<M: Send, const SLOTS: usize> Send for ShmWriter<M, SLOTS> {}
+unsafe impl<M: Send> Send for ShmWriter<M> {}
 // SAFETY: see the `Send` impl; the writer's shared-reference API is
 // internally synchronized by the protocol.
-unsafe impl<M: Sync, const SLOTS: usize> Sync for ShmWriter<M, SLOTS> {}
+unsafe impl<M: Sync> Sync for ShmWriter<M> {}
 
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
@@ -47,10 +47,11 @@ pub enum ClaimError {
     Capacity,
 }
 
-impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
-    /// Creates a writer on a shared-memory region, or `None` when the
-    /// region cannot hold the protocol (see [`MappedLayout::new`]), as a
-    /// truncated or unrelated file cannot.
+impl<M: AsRawSlice> ShmWriter<M> {
+    /// Creates a writer on a shared-memory region whose table holds
+    /// `slots` descriptors, or `None` when the region cannot hold the
+    /// protocol (see [`MappedLayout::new`]), as a truncated or unrelated
+    /// file cannot.
     ///
     /// # Safety
     ///
@@ -58,12 +59,13 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     ///   whole region for the writer's lifetime.
     /// - The region must have been zero-initialized when it was created and
     ///   accessed only through this protocol since.
-    pub unsafe fn new(mem: M) -> Option<Self> {
+    /// - `slots` must be the count the region was created with.
+    pub unsafe fn new(mem: M, slots: usize) -> Option<Self> {
         // SAFETY: forwarded from this function's contract, which keeps the
         // region valid, and used only by this protocol, for as long as the
         // writer lives, and so for every use of the pointers, which are
         // stored in the writer and dropped with it.
-        let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) }?;
+        let mapped = unsafe { MappedLayout::new(mem.as_raw_slice(), slots) }?;
         Some(Self { mapped, _mem: mem })
     }
 

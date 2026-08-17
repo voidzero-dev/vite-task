@@ -30,7 +30,7 @@ fn find_oxlint() -> std::path::PathBuf {
 
 async fn track_oxlint(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<PathAccessIterable> {
     let oxlint_path = find_oxlint();
-    let mut command = fspy::Command::new(&oxlint_path);
+    let mut command = fspy::Command::new(&oxlint_path, test_utils::TEST_SHM);
 
     // Build PATH with packages/tools/.bin prepended so oxlint can find tsgolint
     let tools_dir = tools_bin_dir();

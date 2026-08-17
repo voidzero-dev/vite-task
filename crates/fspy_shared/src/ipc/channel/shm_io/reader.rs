@@ -83,17 +83,18 @@ impl<M: AsRawSlice> ShmReader<M> {
     ///   whole region for the reader's lifetime.
     /// - The region must have been zero-initialized when it was created and
     ///   accessed only through this protocol since.
+    /// - `slots` must be the count the region was created with.
     ///
     /// # Errors
     ///
     /// [`SealError`]: the mapping cannot hold the protocol, or the channel
     /// was already closed before this call.
-    pub unsafe fn seal<const SLOTS: usize>(mem: M) -> Result<Self, SealError> {
+    pub unsafe fn seal(mem: M, slots: usize) -> Result<Self, SealError> {
         // SAFETY: forwarded from this function's contract, which keeps the
         // region valid for as long as the reader lives, and so for every
         // use of the pointers, which are stored in the reader and dropped
         // with it.
-        let Some(mapped) = (unsafe { MappedLayout::<SLOTS>::new(mem.as_raw_slice()) }) else {
+        let Some(mapped) = (unsafe { MappedLayout::new(mem.as_raw_slice(), slots) }) else {
             return Err(SealError::UnsupportedRegion);
         };
 
@@ -124,12 +125,10 @@ impl<M: AsRawSlice> ShmReader<M> {
         let admitted = slots.get(..to_usize(claims)).unwrap_or(slots);
 
         // The admitted slots, kept as a raw pointer so the reader needs
-        // no lifetime and no `SLOTS`.
+        // no lifetime.
         // SAFETY of every later read through it: it points into the
-        // mapping this reader owns, and every byte of `Meta` is inside an
-        // `AtomicU64`, so a writer storing a descriptor never invalidates
-        // it. That last part stops holding if `Meta` ever gains a field
-        // that is not an atomic.
+        // mapping this reader owns, and a slot is an `AtomicU64`, so a
+        // writer storing a descriptor never invalidates it.
         let table = NonNull::from_ref(admitted);
         Ok(Self { payload_start: mapped.payload_start, table, _mem: mem })
     }
@@ -144,10 +143,10 @@ impl<M: AsRawSlice> ShmReader<M> {
         Iter {
             payload_start: self.payload_start,
             // SAFETY: the slots live in the mapping this reader owns, and
-            // every byte of them is inside an `AtomicU64`, so writers
-            // storing descriptors through their own pointers never
-            // invalidate this borrow. It lasts no longer than `&self`,
-            // and so no longer than the mapping.
+            // each one is an `AtomicU64`, so writers storing descriptors
+            // through their own pointers never invalidate this borrow. It
+            // lasts no longer than `&self`, and so no longer than the
+            // mapping.
             table: unsafe { self.table.as_ref() },
         }
     }

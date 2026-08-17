@@ -15,7 +15,10 @@ async fn main() -> anyhow::Result<()> {
 
     let program = PathBuf::from(args.next().unwrap());
 
-    let mut command = fspy::Command::new(program);
+    // Sparse address space, so a generous region costs nothing until the
+    // tracked program's records use it.
+    let shm = fspy::ChannelSize { capacity: 4 << 30, slots: 1 << 26 };
+    let mut command = fspy::Command::new(program, shm);
     command.envs(std::env::vars_os()).args(args);
 
     let child = command.spawn(tokio_util::sync::CancellationToken::new()).await?;

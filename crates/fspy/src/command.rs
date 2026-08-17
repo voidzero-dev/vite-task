@@ -4,6 +4,7 @@ use std::{
     process::Stdio,
 };
 
+use fspy_shared::ipc::ChannelSize;
 #[cfg(unix)]
 use fspy_shared_unix::exec::Exec;
 use rustc_hash::FxHashMap;
@@ -15,6 +16,10 @@ use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 #[derive(derive_more::Debug)]
 pub struct Command {
     program: OsString,
+    /// Shared memory for this run's file-access records. Caller-chosen:
+    /// how many a program makes is the caller's business, not this
+    /// crate's.
+    pub(crate) shm: ChannelSize,
     args: Vec<OsString>,
     envs: FxHashMap<OsString, OsString>,
     cwd: Option<PathBuf>,
@@ -31,12 +36,14 @@ pub struct Command {
 }
 
 impl Command {
-    /// Create a new command to spy on the given program.
+    /// Create a new command to spy on the given program, giving its
+    /// records `shm` worth of shared memory.
     /// Initially, environment variables are not inherited from the parent.
     /// To inherit, explicitly use `.envs(std::env::vars_os())`.
-    pub fn new<P: AsRef<OsStr>>(program: P) -> Self {
+    pub fn new<P: AsRef<OsStr>>(program: P, shm: ChannelSize) -> Self {
         Self {
             program: program.as_ref().to_os_string(),
+            shm,
             args: Vec::new(),
             envs: FxHashMap::default(),
             cwd: None,

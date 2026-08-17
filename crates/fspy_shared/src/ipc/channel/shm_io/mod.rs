@@ -25,11 +25,10 @@ mod writer;
 use std::ptr::slice_from_raw_parts_mut;
 
 use fspy_shm::Mapping;
-// Only tests name the error types; production reports them through
-// `Display` and matches on `Ok`/`Err` alone.
-#[cfg(test)]
-pub use reader::SealError;
-pub use reader::ShmReader;
+pub use layout::to_usize;
+pub use reader::{SealError, ShmReader};
+// Only tests name a claim's failure; a sender skips the record either
+// way, so production matches on `Ok`/`Err` alone.
 #[cfg(test)]
 pub use writer::ClaimError;
 pub use writer::ShmWriter;
@@ -138,7 +137,7 @@ mod tests {
     fn collect_frames(shm: &MockedShm) -> ShmReader<MockedShm> {
         // SAFETY: `MockedShm` provides a stable, zero-initialized allocation
         // accessed only through the protocol.
-        unsafe { ShmReader::seal::<S>(shm.clone()) }.unwrap()
+        unsafe { ShmReader::seal(shm.clone(), S) }.unwrap()
     }
 
     #[test]
@@ -146,7 +145,7 @@ mod tests {
         let shm = MockedShm::alloc(1024);
         // SAFETY: `MockedShm::alloc` provides a valid, properly-sized,
         // zero-initialized allocation.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         assert!(writer.try_write_frame(b"hello"));
         assert!(writer.try_write_frame(b"world"));
         assert!(writer.try_write_frame(b"this is a test"));
@@ -163,7 +162,7 @@ mod tests {
     fn zero_sized_frames_are_rejected() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         assert!(writer.try_write_frame(b"hello"));
         assert!(!writer.try_write_frame(b""));
 
@@ -177,7 +176,7 @@ mod tests {
     fn frame_spanning_many_u64s_roundtrips_exactly() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         let pattern: Vec<u8> = (0..=99).collect();
         assert!(writer.try_write_frame(&pattern));
 
@@ -191,7 +190,7 @@ mod tests {
     fn full_region_fails_the_seal() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
 
         assert!(writer.try_write_frame(b"test"));
 
@@ -207,7 +206,7 @@ mod tests {
         // "test" did land, but a lost record means the frames are not all
         // of them, so the seal hands back none of them.
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::seal::<S>(shm) };
+        let sealed = unsafe { ShmReader::seal(shm, S) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -215,7 +214,7 @@ mod tests {
     fn oversized_frame_is_refused_and_fails_the_seal() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         assert!(writer.try_write_frame(b"kept"));
 
         // No descriptor can describe a frame this long: the claim is
@@ -228,7 +227,7 @@ mod tests {
         assert!(!writer.try_write_frame(b"refused"));
 
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::seal::<S>(shm) };
+        let sealed = unsafe { ShmReader::seal(shm, S) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -236,7 +235,7 @@ mod tests {
     fn crash_after_claim_is_skipped() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         assert!(writer.try_write_frame(b"foo"));
 
         // A crash right after claiming and an abandoned frame leave the
@@ -257,7 +256,7 @@ mod tests {
     fn crash_during_partial_write_is_skipped() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         assert!(writer.try_write_frame(b"foo"));
 
         // Simulate a crash during writing: the frame is abandoned
@@ -282,7 +281,7 @@ mod tests {
         // receiver from finding the valid frames around them.
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
 
         assert!(writer.try_write_frame(b"foo"));
 
@@ -308,7 +307,7 @@ mod tests {
     fn abandoned_frame_is_ignored() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         assert!(writer.try_write_frame(b"foo"));
 
         // Dropping an unfinished frame abandons it: the receiver ignores
@@ -327,7 +326,7 @@ mod tests {
         // on the slot side while payload space remains.
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         for _ in 0..15 {
             assert!(writer.try_write_frame(b"x"));
         }
@@ -337,7 +336,7 @@ mod tests {
 
         // Fifteen frames landed, but the sixteenth was lost.
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::seal::<S>(shm) };
+        let sealed = unsafe { ShmReader::seal(shm, S) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -345,7 +344,7 @@ mod tests {
     fn claims_after_seal_are_gated_without_poisoning() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         assert!(writer.try_write_frame(b"foo"));
 
         assert!(!writer.is_closed());
@@ -370,7 +369,7 @@ mod tests {
     fn commit_after_seal_shows_up_in_a_later_read() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
 
         let mut frame = writer.claim_frame(5.try_into().unwrap()).unwrap();
         frame.copy_from_slice(b"late!");
@@ -389,7 +388,7 @@ mod tests {
         // A second seal fails: the first one set the gate, and a re-seal
         // cannot say what was refused since then.
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::seal::<S>(shm) };
+        let sealed = unsafe { ShmReader::seal(shm, S) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -406,7 +405,7 @@ mod tests {
                     // SAFETY: see `single_thread_basic`. The clone shares the
                     // same backing memory, which is safe because the protocol
                     // synchronizes concurrent access with atomics.
-                    let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+                    let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
                     for _ in 0..10 {
                         assert!(writer.try_write_frame(b"hello"));
                         assert!(writer.try_write_frame(b"foo"));
@@ -417,7 +416,7 @@ mod tests {
         });
 
         // SAFETY: see `collect_frames`.
-        let frames = unsafe { ShmReader::seal::<S>(shm) }.unwrap();
+        let frames = unsafe { ShmReader::seal(shm, S) }.unwrap();
         let mut count = 0;
         for frame in &frames {
             count += 1;
@@ -431,7 +430,7 @@ mod tests {
     fn concurrent_exceeded_size() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         thread::scope(|s| {
             for _ in 0..4 {
                 s.spawn(|| {
@@ -449,7 +448,7 @@ mod tests {
         // seal. The writers all survived it.
         assert!(writer.is_closed());
         // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::seal::<S>(shm) };
+        let sealed = unsafe { ShmReader::seal(shm, S) };
         assert!(sealed.unwrap_err() == SealError::Closed);
     }
 
@@ -464,7 +463,7 @@ mod tests {
             let writers = [(); 2].map(|()| {
                 s.spawn(|| {
                     // SAFETY: see `concurrent`.
-                    let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+                    let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
                     barrier.wait();
                     let mut written = 0usize;
                     // Bounded so the test terminates even if the seal is slow;
@@ -486,7 +485,7 @@ mod tests {
 
             barrier.wait();
             // SAFETY: see `collect_frames`.
-            let frames = unsafe { ShmReader::seal::<S>(shm.clone()) }.unwrap();
+            let frames = unsafe { ShmReader::seal(shm.clone(), S) }.unwrap();
             let results = writers.map(|writer| writer.join().unwrap());
             (frames, results)
         });
@@ -511,7 +510,7 @@ mod tests {
     fn overshot_claim_counter_clamps_to_the_table() {
         let shm = MockedShm::alloc(1024);
         // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
         assert!(writer.try_write_frame(b"hello"));
 
         // A wildly inflated claim counter, from mass claim failures or a
@@ -549,7 +548,7 @@ mod tests {
 
         // SAFETY: the wrapped allocation is valid; only its alignment is
         // deliberately wrong.
-        assert!(unsafe { ShmWriter::<_, S>::new(misaligned_shm) }.is_none());
+        assert!(unsafe { ShmWriter::new(misaligned_shm, S) }.is_none());
     }
 
     #[test]
@@ -590,7 +589,7 @@ mod tests {
                         // SAFETY: `mapping` is a freshly mapped shared memory
                         // region with a valid pointer and size; the protocol
                         // synchronizes concurrent access.
-                        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(mapping) }.unwrap();
+                        let writer = unsafe { ShmWriter::new(mapping, S) }.unwrap();
                         for i in 0..FRAME_COUNT_EACH_CHILD {
                             let frame_data = std::format!("{child_index} {i}");
                             assert!(writer.try_write_frame(frame_data.as_bytes()));
@@ -608,7 +607,7 @@ mod tests {
 
         // SAFETY: the mapping is a valid shared-memory region created zeroed
         // and accessed only through the protocol.
-        let frames = unsafe { ShmReader::seal::<S>(mapping) }.unwrap();
+        let frames = unsafe { ShmReader::seal(mapping, S) }.unwrap();
         let collected = frames.iter().map(BStr::new).collect::<FxHashSet<&BStr>>();
         assert!(collected.len() == CHILD_COUNT * FRAME_COUNT_EACH_CHILD);
         for child_index in 0..CHILD_COUNT {
@@ -645,7 +644,7 @@ mod tests {
             let c_path = crate::ipc::channel::os_c_string(std::ffi::OsStr::new(&shm_name)).unwrap();
             let child_mapping = fspy_shm::open(c_path.as_c_str().as_thin()).unwrap().map().unwrap();
             // SAFETY: see `real_shm_across_processes`.
-            let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(child_mapping) }.unwrap();
+            let writer = unsafe { ShmWriter::new(child_mapping, S) }.unwrap();
             let mut frame = writer.claim_frame(5.try_into().unwrap()).unwrap();
             frame[..3].copy_from_slice(b"wor");
             // Signal the parent that the frame is claimed and partially
@@ -672,11 +671,11 @@ mod tests {
         // A surviving writer keeps working after the kill. It borrows the
         // mapping so the seal below can take it over.
         // SAFETY: see `real_shm_across_processes`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(&mapping) }.unwrap();
+        let writer = unsafe { ShmWriter::new(&mapping, S) }.unwrap();
         assert!(writer.try_write_frame(b"alive"));
 
         // SAFETY: see `real_shm_across_processes`.
-        let frames = unsafe { ShmReader::seal::<S>(mapping) }.unwrap();
+        let frames = unsafe { ShmReader::seal(mapping, S) }.unwrap();
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"alive");
         assert!(iter.next() == None);

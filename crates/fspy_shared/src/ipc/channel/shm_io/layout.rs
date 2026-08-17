@@ -21,30 +21,29 @@ use std::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
 /// answer.
 pub const CLOSED: u64 = 1 << 63;
 
-/// The part of the region that never moves: the counters and the
-/// descriptor table, as one `repr(C)` struct that starts zeroed. Payloads
+/// The two counters at the start of the region, as one `repr(C)` struct
+/// that starts zeroed. The descriptor table follows them, and payloads
 /// take the rest of the mapping.
 #[repr(C)]
-pub struct Meta<const SLOTS: usize> {
+pub struct Counters {
     /// Bit 63 is the CLOSED gate. The low bits count claims that got as
     /// far as reserving payload space, which is where a slot is taken.
     pub claims: AtomicU64,
     /// Payload bytes ever reserved, failed claims included.
     pub payload_reserved: AtomicU64,
-    /// One descriptor slot per frame.
-    pub table: [AtomicU64; SLOTS],
 }
 
-// The mapping starts at a `u64`-aligned address and is cast to `&Meta`,
-// so no field in `Meta` may need more alignment than that.
-const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
+// The mapping starts at a `u64`-aligned address and is cast to
+// `&Counters`, so no field in it may need more alignment than that. The
+// descriptor table then starts at a multiple of that alignment too.
+const _: () = assert!(align_of::<Counters>() == align_of::<AtomicU64>());
 
-// The reader keeps a raw pointer into the table and reads through it long
-// after the reference it came from is gone, which is sound only because
-// every byte of `Meta` sits inside an atomic. This catches a field being
-// added or padding appearing; it cannot catch a field changing type, so
-// keep that in mind when editing the struct.
-const _: () = assert!(size_of::<Meta<3>>() == 5 * size_of::<AtomicU64>());
+// Both endpoints keep raw pointers into the region and read through them
+// long after the references they came from are gone, which is sound only
+// because every byte they point at sits inside an atomic. This catches a
+// field being added or padding appearing; it cannot catch a field changing
+// type, so keep that in mind when editing the struct.
+const _: () = assert!(size_of::<Counters>() == 2 * size_of::<AtomicU64>());
 
 // --- The descriptor slot codec ---------------------------------------------
 //
@@ -69,10 +68,10 @@ const _: () = assert!(size_of::<Meta<3>>() == 5 * size_of::<AtomicU64>());
 // can never point into the counters or the table.
 
 // --- MappedLayout and the ordering contract --------------------------------
-// `MappedLayout::new` works out both pointers once, at attach, and the
-// endpoint keeps them beside the mapping. The payload pointer stays raw
-// because writers hand out `&mut` slices into it, which must not overlap a
-// shared reference.
+// `MappedLayout::new` works out where each part sits once, at attach, and
+// the endpoint keeps the result beside the mapping. The payload pointer
+// stays raw because writers hand out `&mut` slices into it, which must not
+// overlap a shared reference.
 //
 // Neither counter guards its add against wrapping, because neither wrap is
 // reachable. The payload counter passes the region only after a claim has
@@ -118,12 +117,15 @@ fn try_cast_aligned<T, U>(ptr: *mut T) -> Option<*mut U> {
     if ptr.addr().is_multiple_of(align_of::<U>()) { Some(ptr.cast()) } else { None }
 }
 
-/// Where the [`Meta`] struct and the payload area sit in one mapping,
-/// worked out once at attach. The pointers outlive this value, since they
-/// point into the mapping rather than into the endpoint holding them.
+/// Where the counters, the descriptor table and the payload area sit in
+/// one mapping, worked out once at attach. The pointers outlive this
+/// value, since they point into the mapping rather than into the endpoint
+/// holding them.
 #[derive(Clone, Copy)]
-pub struct MappedLayout<const SLOTS: usize> {
-    meta: NonNull<Meta<SLOTS>>,
+pub struct MappedLayout {
+    counters: NonNull<Counters>,
+    /// Every descriptor slot the region was created with.
+    table: NonNull<[AtomicU64]>,
     /// Start of the payload area, raw rather than a reference: writers
     /// hand out `&mut` slices into it, which must not overlap a shared
     /// reference.
@@ -173,11 +175,16 @@ impl SlotState {
     }
 }
 
-impl<const SLOTS: usize> MappedLayout<SLOTS> {
-    /// Locates the parts of a shared mapping, or returns `None` when the
-    /// mapping cannot hold the protocol: a null or misaligned start, too
-    /// little room for [`Meta`], or a payload area too long for a 32-bit
-    /// offset to reach.
+impl MappedLayout {
+    /// Locates the parts of a shared mapping whose table holds `slots`
+    /// descriptors, or returns `None` when the mapping cannot hold the
+    /// protocol: a null or misaligned start, too little room for the
+    /// counters and that many slots, or a payload area too long for a
+    /// 32-bit offset to reach.
+    ///
+    /// Both endpoints must pass the `slots` the region was created with.
+    /// A smaller one reads part of the table as payload; a larger one
+    /// reads payload bytes as descriptors.
     ///
     /// # Safety
     ///
@@ -186,46 +193,56 @@ impl<const SLOTS: usize> MappedLayout<SLOTS> {
     ///   used.
     /// - The memory must have been zero-initialized when the region was
     ///   created, and accessed only through this protocol since.
-    pub unsafe fn new(mem: *mut [u8]) -> Option<Self> {
+    pub unsafe fn new(mem: *mut [u8], slots: usize) -> Option<Self> {
         let mem_start = mem.cast::<u8>();
-        // The mapping must hold the fixed struct.
-        let payload_len = mem.len().checked_sub(size_of::<Meta<SLOTS>>())?;
+        // The mapping must hold the counters and the whole table.
+        let table_len = slots.checked_mul(size_of::<AtomicU64>())?;
+        let meta_len = size_of::<Counters>().checked_add(table_len)?;
+        let payload_len = mem.len().checked_sub(meta_len)?;
         // A descriptor holds a 32-bit offset, so the payload area can be
         // no longer than a `u32`. Keeping the converted value is what lets
         // later bounds checks stay in 32 bits.
         let payload_len = u32::try_from(payload_len).ok()?;
         // These two conversions are the checks on the start address:
-        // aligned for `Meta`, and not null.
-        let meta = NonNull::new(try_cast_aligned::<_, Meta<SLOTS>>(mem_start)?)?;
+        // aligned for `Counters`, and not null.
+        let counters = NonNull::new(try_cast_aligned::<_, Counters>(mem_start)?)?;
 
-        // The payload area is everything after the fixed struct.
-        // SAFETY: the mapping holds the struct (checked above).
-        let payload_start = NonNull::new(unsafe { mem_start.add(size_of::<Meta<SLOTS>>()) })?;
-        Some(Self { meta, payload_start, payload_len })
+        // The table sits right after the counters, and the payload area
+        // after the table.
+        // SAFETY: the mapping holds both (checked above), and the table's
+        // alignment follows from the start address being aligned for
+        // `Counters`, whose size is a multiple of that alignment.
+        let table_start = NonNull::new(unsafe { mem_start.add(size_of::<Counters>()) })?;
+        let table = NonNull::slice_from_raw_parts(table_start.cast::<AtomicU64>(), slots);
+        // SAFETY: as above.
+        let payload_start = NonNull::new(unsafe { mem_start.add(meta_len) })?;
+        Some(Self { counters, table, payload_start, payload_len })
     }
 
-    /// The fixed part of the region.
-    const fn meta(&self) -> &Meta<SLOTS> {
+    /// The counters at the start of the region.
+    const fn counters(&self) -> &Counters {
         // SAFETY: `new`'s contract keeps the memory valid while any
-        // pointer is used, and `Meta` is all atomics, so the shared
+        // pointer is used, and both counters are atomics, so the shared
         // borrow is valid even while other threads and processes access
         // the same memory through them.
-        unsafe { self.meta.as_ref() }
+        unsafe { self.counters.as_ref() }
     }
 
     /// The claim counter.
     pub const fn claims(&self) -> &AtomicU64 {
-        &self.meta().claims
+        &self.counters().claims
     }
 
     /// The payload counter.
     pub const fn payload_reserved(&self) -> &AtomicU64 {
-        &self.meta().payload_reserved
+        &self.counters().payload_reserved
     }
 
     /// The descriptor table.
     pub const fn table(&self) -> &[AtomicU64] {
-        &self.meta().table
+        // SAFETY: see `counters`; the table is a run of atomics inside the
+        // same mapping.
+        unsafe { self.table.as_ref() }
     }
 }
 
@@ -251,8 +268,14 @@ mod tests {
     }
 
     #[test]
-    fn meta_is_the_counters_then_the_table() {
-        assert!(size_of::<Meta<15>>() == (2 + 15) * size_of::<AtomicU64>());
-        assert!(align_of::<Meta<15>>() == align_of::<AtomicU64>());
+    fn a_region_too_small_for_the_table_is_rejected() {
+        let mut mem = [0u64; 4];
+        let raw = std::ptr::slice_from_raw_parts_mut(mem.as_mut_ptr().cast::<u8>(), 32);
+        // Two counters and two slots exactly fill it; a third slot does not.
+        // SAFETY: the array is live, aligned and zeroed, and nothing else
+        // touches it.
+        assert!(unsafe { MappedLayout::new(raw, 2) }.is_some());
+        // SAFETY: as above.
+        assert!(unsafe { MappedLayout::new(raw, 3) }.is_none());
     }
 }

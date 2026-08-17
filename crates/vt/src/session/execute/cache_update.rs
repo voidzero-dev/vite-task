@@ -89,6 +89,14 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
     }
 
+    if tracking_fell_short(outcome, metadata, fspy) {
+        // The task made more file accesses than the tracking channel had
+        // room for, so what arrived is a subset of what it touched. An
+        // entry built from a subset would replay with inputs and outputs
+        // missing.
+        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete), None);
+    }
+
     let fspy_outcome = observe_fspy(
         outcome,
         metadata,
@@ -181,6 +189,31 @@ pub(super) async fn update_cache(
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
             Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source: err }),
         ),
+    }
+}
+
+/// Whether the run's tracking came up short of what it needs to be
+/// cached: the accesses this run inferred are incomplete, and the task's
+/// config asks for inferred ones.
+///
+/// A task that spells out every input and output does not consult them, so
+/// a short trace costs it nothing.
+fn tracking_fell_short(
+    outcome: &ChildOutcome,
+    metadata: &CacheMetadata,
+    fspy: Option<&super::FspyTracking<'_>>,
+) -> bool {
+    #[cfg(fspy)]
+    {
+        let infers = metadata.input_config.includes_auto || metadata.output_config.includes_auto;
+        fspy.is_some()
+            && infers
+            && outcome.path_accesses.as_ref().is_some_and(|raw| !raw.is_complete())
+    }
+    #[cfg(not(fspy))]
+    {
+        let _ = (outcome, metadata, fspy);
+        false
     }
 }
 

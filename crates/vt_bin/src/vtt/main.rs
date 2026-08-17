@@ -27,6 +27,7 @@ mod rm;
 mod small_dev_shm;
 mod stat_file;
 mod stat_long_filename;
+mod stat_many;
 mod touch_file;
 mod write_file;
 
@@ -35,7 +36,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stat-file, stat_long_filename, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stat-file, stat_long_filename, stat-many, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -76,6 +77,7 @@ fn main() {
             Ok(())
         }
         "stat_long_filename" => stat_long_filename::run(&args[2..]),
+        "stat-many" => stat_many::run(&args[2..]),
         "touch-file" => touch_file::run(&args[2..]),
         "write-file" => write_file::run(&args[2..]),
         other => {

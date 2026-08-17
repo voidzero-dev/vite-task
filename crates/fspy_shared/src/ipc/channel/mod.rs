@@ -13,15 +13,7 @@ use allocator_api2::alloc::Global;
 use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
-use shm_io::{ShmReader, ShmWriter};
-
-/// Descriptor slots per channel — the compile-time half of the region's
-/// shape, shared by the receiver and every sender through this constant.
-/// It matches what the old an-eighth-of-the-region rule gave the 4 GiB
-/// production region: one 8-byte descriptor per ~56 payload bytes at full
-/// capacity, generous slack for record-sized frames. The table is sparse
-/// address space until slots are actually touched.
-const SLOTS: usize = 1 << 26;
+use shm_io::{SealError, ShmReader, ShmWriter, to_usize};
 
 /// Reads the committed frames of a sealed channel; borrows the shared
 /// mapping, which stays alive (and mapped) until this value drops.
@@ -29,7 +21,7 @@ pub type FrameReader = shm_io::ShmReader<Mapping>;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite, Serialize as _, config::DefaultConfig};
 
-use super::IpcStr;
+use super::{ChannelSize, IpcStr};
 
 /// Prefix of shared-memory backing file names inside the system temporary
 /// directory.
@@ -43,16 +35,15 @@ const SHM_BACKING_PREFIX: &str = "vite-task-fspy-";
 #[derive(SchemaWrite, SchemaRead, Clone, Debug)]
 pub struct ChannelConf {
     shm_id: Box<IpcStr>,
+    /// The slot count the region was created with, since a sender cannot
+    /// work it out from the mapping's size alone.
+    slots: u64,
 }
 
 /// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders.
-///
-/// `capacity` is the region size in bytes; it must hold the compile-time
-/// descriptor table, and the rest of it is payload room. Senders need no
-/// configuration beyond the `ChannelConf` — the layout is the
-/// compile-time table plus whatever the mapped file's size says.
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
-pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
+pub fn channel(size: ChannelSize) -> io::Result<(ChannelConf, Receiver)> {
+    let ChannelSize { capacity, slots } = size;
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str())?;
     let handle =
         fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
@@ -61,20 +52,23 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     let mapping = handle.map().map_err(shm_error_to_io)?;
 
     // Prove the region can host the protocol — the same fallible attach
-    // senders perform — so a bad capacity fails the task now, not at its
-    // first record.
+    // senders perform — so a size the two halves do not fit in fails the
+    // task now, not at its first record.
     // SAFETY: the region was just created zero-initialized and is only
     // accessed through the `shm_io` protocol.
-    if unsafe { ShmWriter::<_, SLOTS>::new(&mapping) }.is_none() {
+    if unsafe { ShmWriter::new(&mapping, slots) }.is_none() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "capacity cannot host the channel's descriptor table",
+            "the shared-memory capacity cannot hold that many slots",
         ));
     }
 
-    let conf = ChannelConf { shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed() };
+    let conf = ChannelConf {
+        shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed(),
+        slots: slots.try_into().expect("a slot count is a 64-bit target's own usize"),
+    };
 
-    Ok((conf, Receiver { _keeper: keeper, mapping }))
+    Ok((conf, Receiver { _keeper: keeper, mapping, slots }))
 }
 
 /// Encodes `path` as an owned NUL-terminated platform C string.
@@ -207,7 +201,7 @@ impl ChannelConf {
         // SAFETY: `mapping` is a freshly mapped shared memory region created
         // zero-initialized by `channel` and accessed only through the
         // `shm_io` protocol by every attached process.
-        let writer = unsafe { ShmWriter::new(mapping) }
+        let writer = unsafe { ShmWriter::new(mapping, to_usize(self.slots)) }
             .expect("the shared-memory region cannot hold the channel");
         if writer.is_closed() {
             return Err(io::Error::new(
@@ -220,7 +214,7 @@ impl ChannelConf {
 }
 
 pub struct Sender {
-    writer: ShmWriter<Mapping, SLOTS>,
+    writer: ShmWriter<Mapping>,
 }
 
 impl Sender {
@@ -272,6 +266,8 @@ pub struct Receiver {
     /// may attach.
     _keeper: ShmKeeper,
     mapping: Mapping,
+    /// The slot count the region was created with, needed again to seal it.
+    slots: usize,
 }
 
 // SAFETY: `Receiver` only holds the mapping; it accesses it exclusively
@@ -298,27 +294,47 @@ impl Receiver {
     ///
     /// # Errors
     ///
-    /// Fails when a record was lost before the close — a sender ran out of
-    /// room, tried to send something too large, or gave up on one it had
-    /// already claimed — and when the region cannot hold the protocol at
-    /// all. Either way there is no complete set of records, so none are
-    /// handed back, and a caller that needs the trace has to treat the run
-    /// as untrackable rather than as having reported nothing.
-    pub fn close(self) -> io::Result<FrameReader> {
-        let Self { _keeper: keeper, mapping } = self;
+    /// [`RecordsLost`] when a sender could not record something it went on
+    /// to do. There is no complete set of records then, so none are handed
+    /// back, and a caller that needs the trace has to treat the run as
+    /// untracked rather than as having reported nothing.
+    ///
+    /// # Panics
+    ///
+    /// When the region cannot hold the protocol, which [`channel`] proved
+    /// it could before any sender saw it.
+    pub fn close(self) -> Result<FrameReader, RecordsLost> {
+        let Self { _keeper: keeper, mapping, slots } = self;
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable and independently owned, and all attached
         // processes access it only through the `shm_io` protocol.
-        let reader = unsafe { ShmReader::seal::<SLOTS>(mapping) }
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let sealed = unsafe { ShmReader::seal(mapping, slots) };
         // Remove the backing file only after the gate is shut. A process
         // that attaches in between finds a closed channel and gives up
         // cleanly; one that found the file already gone could not attach at
         // all, and so could not report whatever it then failed to record.
         drop(keeper);
-        Ok(reader)
+        match sealed {
+            Ok(reader) => Ok(reader),
+            // This receiver is the only one that could have sealed, and it
+            // is gone by now, so the gate can only be a sender's report.
+            Err(SealError::Closed) => Err(RecordsLost),
+            Err(SealError::UnsupportedRegion) => {
+                panic!("the shared-memory region cannot hold the channel")
+            }
+        }
     }
 }
+
+/// A sender could not record something, so the receiver has no complete
+/// set of records to hand back.
+///
+/// The region filled up, or a record came out longer than one frame can
+/// hold. Both are the channel running out of room rather than anything the
+/// senders did wrong, and both leave the run untracked.
+#[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
+#[error("a sender ran out of room in the shared-memory channel")]
+pub struct RecordsLost;
 
 #[cfg(test)]
 mod tests {
@@ -331,15 +347,16 @@ mod tests {
     use super::*;
     use crate::ipc::{AccessMode, IpcPath, PathAccess};
 
-    /// Any test region must hold the compile-time table; sparse, so cheap.
-    const GIB: usize = 1 << 30;
+    /// A gibibyte of sparse address space, so its table costs nothing
+    /// until slots are touched.
+    const SIZE: ChannelSize = ChannelSize { capacity: 1 << 30, slots: 1 << 24 };
 
     /// The shared-memory path is generated absolute, so a sender in a process
     /// with a different working directory and a relative temporary directory
     /// must still attach.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sender_ignores_changed_temp_and_working_directory() {
-        let (conf, receiver) = channel(GIB).unwrap();
+        let (conf, receiver) = channel(SIZE).unwrap();
         let changed_cwd = temp_dir().join(format!("fspy-ipc-changed-cwd-{}", Uuid::new_v4()));
         fs::create_dir(&changed_cwd).unwrap();
 
@@ -369,7 +386,7 @@ mod tests {
     /// here rather than in a build.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sender_round_trips_records() {
-        let (conf, receiver) = channel(GIB).unwrap();
+        let (conf, receiver) = channel(SIZE).unwrap();
         let sender = conf.sender().unwrap();
         // A record path carries the platform's own string form: bytes on
         // unix, UTF-16 on Windows.
@@ -400,7 +417,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn smoke() {
-        let (conf, receiver) = channel(GIB).unwrap();
+        let (conf, receiver) = channel(SIZE).unwrap();
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
             let sender = conf.sender().unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
@@ -422,7 +439,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_close() {
-        let (conf, receiver) = channel(GIB).unwrap();
+        let (conf, receiver) = channel(SIZE).unwrap();
         let _frames = receiver.close().unwrap();
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
@@ -435,7 +452,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_receiver_dropped() {
-        let (conf, receiver) = channel(GIB).unwrap();
+        let (conf, receiver) = channel(SIZE).unwrap();
         drop(receiver);
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
@@ -449,7 +466,7 @@ mod tests {
     /// claim any new frame afterwards.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn attached_sender_cannot_claim_after_close() {
-        let (conf, receiver) = channel(GIB).unwrap();
+        let (conf, receiver) = channel(SIZE).unwrap();
         let sender = conf.sender().unwrap();
 
         let mut frame = sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
@@ -467,7 +484,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_senders() {
-        let (conf, receiver) = channel(GIB).unwrap();
+        let (conf, receiver) = channel(SIZE).unwrap();
         for i in 0u16..200 {
             let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
                 let sender = conf.sender().unwrap();
