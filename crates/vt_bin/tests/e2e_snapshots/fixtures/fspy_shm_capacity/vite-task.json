@@ -1,7 +1,7 @@
 {
   "tasks": {
     "stat": {
-      "command": "vtt stat_long_filename 2097152",
+      "command": "vtt stat-many 20000",
       "cache": true
     }
   }
