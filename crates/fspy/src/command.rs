@@ -18,7 +18,7 @@ use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 /// 4 GiB of sparse address space: none of it becomes real memory until
 /// records land in it, and it leaves room for tens of millions of
 /// accesses.
-pub const DEFAULT_SHM_CAPACITY: usize = 4 << 30;
+pub const DEFAULT_SHM_CAPACITY: usize = 4 * 1024 * 1024 * 1024;
 
 #[derive(derive_more::Debug)]
 pub struct Command {
