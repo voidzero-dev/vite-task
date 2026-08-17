@@ -114,13 +114,11 @@ const _: () = assert!(size_of::<Meta<3>>() == 5 * size_of::<AtomicU64>());
 //
 // # Memory-ordering contract
 //
-// 1. **Claim versus seal** — the seal boundary is a plain snapshot load
-//    of the claim counter: claims at or before it in the counter's
-//    modification order are in; later ones get slot indices the receiver
-//    never visits. Claims publish no payload data, so `Relaxed`
-//    suffices. The gate is not the boundary — it only stops late
-//    writers; a claim that gets in between the snapshot and the gate
-//    lands past the snapshot, where the receiver never looks.
+// 1. **Claim versus seal** — the seal swaps the gate into the claim
+//    counter and reads the old value in one step, so the boundary and the
+//    gate are one point in that counter's modification order: claims at
+//    or before it are in, and every later one fails on the gate. Claims
+//    publish no payload data, so `Relaxed` suffices.
 //    Completeness rides the same modification order: a failed claim sets
 //    the gate before performing the operation whose record was lost, so
 //    either the snapshot sees the bit or the loss happened after the

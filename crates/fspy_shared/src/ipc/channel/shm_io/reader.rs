@@ -101,10 +101,15 @@ impl<M: AsRawSlice> ShmReader<M> {
             return Err(SealError::UnsupportedRegion);
         };
 
-        // The seal boundary (rule 1): claims at or before this snapshot
-        // are in, later ones land in slots iteration never reaches.
-        let claims = mapped.claims().load(Ordering::Relaxed);
-        // The same load says whether anything was lost. The gate is
+        // Draw the boundary and shut the gate in one step (rule 1): what
+        // this returns is the claim count at the instant no later claim
+        // can succeed. Claims already in flight land in slots iteration
+        // never reaches. Replacing the count rather than keeping it is
+        // fine — from here on nothing reads it, since a later claim fails
+        // on the gate before its slot index is used, and a later seal
+        // only tests the bit.
+        let claims = mapped.claims().swap(CLOSED, Ordering::Relaxed);
+        // The same value says whether anything was lost. The gate was
         // already set: either a claim failed — and rule 1 puts that loss
         // before this boundary — or someone sealed earlier and this seal
         // cannot say what was refused since. No complete set to read.
@@ -114,11 +119,6 @@ impl<M: AsRawSlice> ShmReader<M> {
         // Clamped, so a counter reading higher than the table just means
         // walking the whole table, not an error.
         let slot_count = to_usize(claims).min(SLOTS);
-
-        // Shut the gate, so late writers stop claiming slots and touching
-        // new pages. A claim that slips in between is dropped safely
-        // (rule 1).
-        mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
 
         // The admitted slots, kept as a raw pointer so the reader needs
         // no lifetime and no `SLOTS`.
