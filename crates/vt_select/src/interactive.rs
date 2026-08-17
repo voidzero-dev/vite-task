@@ -518,7 +518,7 @@ pub fn run(
                     cleanup(&mut out, &state)?;
                     return Ok(super::SelectResult::Cancelled);
                 }
-                KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::Char('u') if modifiers == KeyModifiers::CONTROL => {
                     state.query.clear();
                     state.refilter();
                 }
@@ -536,7 +536,7 @@ pub fn run(
                 KeyCode::Down => {
                     state.move_down();
                 }
-                KeyCode::Char(c) if modifiers.is_empty() || modifiers == KeyModifiers::SHIFT => {
+                KeyCode::Char(c) if accepts_search_character(modifiers) => {
                     state.query.push(c);
                     state.refilter();
                 }
@@ -552,6 +552,12 @@ pub fn run(
         render(&mut out, &mut state, header, prompt)?;
         after_render(&RenderState { query: &state.query, selected_index: state.selected });
     }
+}
+
+fn accepts_search_character(modifiers: KeyModifiers) -> bool {
+    // Windows reports AltGr as Ctrl+Alt while preserving the printable character.
+    let modifiers = modifiers.difference(KeyModifiers::SHIFT);
+    modifiers.is_empty() || modifiers == (KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
 /// Clear the widget output and restore cursor.
@@ -674,6 +680,14 @@ mod tests {
         )
         .unwrap();
         strip_ansi(&String::from_utf8(buf).unwrap())
+    }
+
+    #[test]
+    fn search_character_modifiers_preserve_alt_gr_input() {
+        assert!(accepts_search_character(KeyModifiers::CONTROL | KeyModifiers::ALT));
+        assert!(accepts_search_character(
+            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT
+        ));
     }
 
     #[test]
