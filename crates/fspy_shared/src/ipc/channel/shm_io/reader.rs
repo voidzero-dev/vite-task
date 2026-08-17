@@ -116,6 +116,10 @@ impl<M: AsRawSlice> ShmReader<M> {
         // landing in that window reads the higher count with the gate
         // still clear. Clamping turns that into a walk over the whole
         // table; slicing on the raw count would panic.
+        //
+        // Not an error, either: that writer performs the operation it
+        // failed to record only after this boundary, and if it died first
+        // it never performed one at all.
         let slot_count = to_usize(claims).min(SLOTS);
 
         // The admitted slots, kept as a raw pointer so the reader needs
