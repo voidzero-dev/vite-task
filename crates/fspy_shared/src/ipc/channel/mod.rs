@@ -159,50 +159,46 @@ impl Drop for ShmKeeper {
 impl ChannelConf {
     /// Creates a sender.
     ///
-    /// Never blocks. Fails only when the channel is already over: the
-    /// receiver removed the backing file, or it sealed the region before
-    /// removing it and a sender caught the gate in between. Either way
-    /// whatever this process does next happens past the receiver's
-    /// boundary, so skipping its records loses nothing.
+    /// Never blocks.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When the channel is there but cannot be attached to: the file
-    /// refuses to open or map, or it cannot hold the protocol. A process
-    /// with no writer has no way to tell the receiver it recorded nothing,
-    /// and a trace that silently omits every access it made is worse than
-    /// no trace, so it stops here instead.
-    #[expect(
-        clippy::missing_errors_doc,
-        reason = "error conditions are self-evident from return type"
-    )]
+    /// Every way attaching can fail, for the caller to sort out. Two of
+    /// them say the channel is simply over, and a caller that meets them
+    /// has lost nothing by recording nothing, because whatever it does
+    /// next happens past the receiver's boundary:
+    ///
+    /// - [`io::ErrorKind::NotFound`]: the receiver removed the backing
+    ///   file.
+    /// - [`io::ErrorKind::BrokenPipe`]: the receiver sealed the region
+    ///   before removing it, and this call caught the gate in between.
+    ///
+    /// Anything else means the channel is there but cannot be attached to,
+    /// which is a caller with no way to report what it then fails to
+    /// record.
     pub fn sender(&self) -> io::Result<Sender> {
         // The arena never touches the process heap, so this stays safe in
         // the preload contexts that create senders (pre-`main` constructors,
         // the Windows loader lock).
         let arena = fspy_nostd_alloc::arena();
-        let shm_path = self
-            .shm_id
-            .to_os_c_string_in(&arena)
-            .expect("the channel's own shared-memory path is not a valid C string");
-        let handle = match fspy_shm::open(shm_path.as_c_str().as_thin()) {
-            Ok(handle) => handle,
-            Err(error) => {
-                let error = shm_error_to_io(error);
-                // The receiver removed the backing file, so it has already
-                // stopped collecting.
-                if error.kind() == io::ErrorKind::NotFound {
-                    return Err(error);
-                }
-                panic!("cannot open the shared-memory channel: {error}");
-            }
-        };
-        let mapping = handle.map().expect("cannot map the shared-memory channel");
+        let shm_path = self.shm_id.to_os_c_string_in(&arena).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the channel's shared-memory path is not a valid C string",
+            )
+        })?;
+        let mapping = fspy_shm::open(shm_path.as_c_str().as_thin())
+            .and_then(|handle| handle.map())
+            .map_err(shm_error_to_io)?;
         // SAFETY: `mapping` is a freshly mapped shared memory region created
         // zero-initialized by `channel` and accessed only through the
         // `shm_io` protocol by every attached process.
-        let writer = unsafe { ShmWriter::new(mapping, to_usize(self.slots)) }
-            .expect("the shared-memory region cannot hold the channel");
+        let writer = unsafe { ShmWriter::new(mapping, to_usize(self.slots)) }.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the shared-memory region cannot hold the channel",
+            )
+        })?;
         if writer.is_closed() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,

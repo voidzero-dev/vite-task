@@ -1,4 +1,4 @@
-use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
+use std::{cell::SyncUnsafeCell, ffi::CStr, io::ErrorKind, mem::MaybeUninit};
 
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
@@ -18,21 +18,19 @@ impl<'a> Client<'a> {
 
         let ipc_sender = match payload.channel_conf.sender() {
             Ok(sender) => Some(sender),
-            // The only failure `sender` returns is a channel that has
-            // already closed, which happens when this process starts after
-            // the root target exited. Everything it does from here is past
-            // the receiver's boundary, so recording nothing loses nothing.
-            // Anything worse stops the process inside `sender` instead.
-            Err(err) => {
-                #[expect(
-                    clippy::print_stderr,
-                    reason = "preload library uses stderr for debug diagnostics"
-                )]
-                {
-                    eprintln!("fspy: the trace channel has closed: {err}");
-                }
+            // The channel is over: this process started after the root
+            // target exited, so everything it does from here happens past
+            // the receiver's boundary and recording nothing loses nothing.
+            // Silently, because a detours DLL writing to the traced
+            // process's stderr corrupts whatever that process is printing.
+            Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::BrokenPipe) => {
                 None
             }
+            // The channel is there but cannot be attached to. A process
+            // with no sender has no way to tell the receiver it recorded
+            // nothing, and a trace that silently omits every access it made
+            // is worse than no trace.
+            Err(error) => panic!("fspy: cannot attach to the trace channel: {error}"),
         };
 
         Self { payload, ipc_sender }
