@@ -119,10 +119,9 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
             // this record was refused.
             return Err(ClaimError::Closed);
         }
-        let slot_index = to_usize(claims);
-        if slot_index >= SLOTS {
+        let Some(slot) = self.mapped.table().get(to_usize(claims)) else {
             return Err(report_loss());
-        }
+        };
 
         // SAFETY: the claim reserved this span for itself, and the check
         // above put it inside the region. Other writers reserve spans
@@ -136,7 +135,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
             )
         };
         Ok(FrameMut {
-            slot: &self.mapped.table()[slot_index],
+            slot,
             slot_to_commit: SlotState::Committed { offset: payload_offset, len: frame_size }
                 .encode(),
             content,
