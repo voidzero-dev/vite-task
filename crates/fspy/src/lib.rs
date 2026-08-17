@@ -19,7 +19,7 @@ mod command;
 
 use std::{env::temp_dir, fs::create_dir, io, process::ExitStatus, sync::LazyLock};
 
-pub use command::Command;
+pub use command::{Command, DEFAULT_SHM_CAPACITY, shm_for_capacity};
 pub use fspy_shared::ipc::{AccessMode, ChannelSize, PathAccess};
 use futures_util::future::BoxFuture;
 pub use os_impl::PathAccessIterable;

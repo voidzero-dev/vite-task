@@ -1,15 +1,6 @@
 use std::path::{Path, PathBuf, StripPrefixError};
 
 use fspy::{AccessMode, PathAccessIterable};
-
-/// Shared memory for a tracked test program's file-access records. Sparse
-/// address space, so this costs nothing until the records use it.
-#[expect(
-    clippy::allow_attributes,
-    reason = "this module is compiled into every test binary, including the ones that never spawn"
-)]
-#[allow(dead_code, reason = "not every test file spawns a tracked program")]
-pub const TEST_SHM: fspy::ChannelSize = fspy::ChannelSize { capacity: 1 << 30, slots: 1 << 24 };
 // Used by the track_child! macro; not all test files use this macro
 #[doc(hidden)]
 #[expect(
