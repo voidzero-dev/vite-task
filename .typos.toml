@@ -1,6 +1,8 @@
 [default.extend-words]
 ratatui = "ratatui"
 PUNICODE = "PUNICODE"
+# Win32 spells `ERROR_FILENAME_EXCED_RANGE` this way.
+EXCED = "EXCED"
 
 [files]
 extend-exclude = [

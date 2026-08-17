@@ -24,10 +24,6 @@ pub const DEFAULT_SHM_CAPACITY: usize = 4 << 30;
 pub struct Command {
     program: OsString,
     /// Bytes of shared memory for this run's file-access records.
-    #[cfg_attr(
-        target_env = "musl",
-        expect(dead_code, reason = "musl builds track through seccomp, with no channel to size")
-    )]
     pub(crate) shm_capacity: usize,
     args: Vec<OsString>,
     envs: FxHashMap<OsString, OsString>,
