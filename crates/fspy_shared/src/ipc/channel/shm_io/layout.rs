@@ -34,9 +34,15 @@ pub struct Counters {
 }
 
 // The mapping starts at a `u64`-aligned address and is cast to
-// `&Counters`, so no field in it may need more alignment than that. The
-// descriptor table then starts at a multiple of that alignment too.
+// `&Counters`, so no field in it may need more alignment than that. This
+// is also what makes the check on the start address serve both parts: an
+// address aligned for the counters is aligned for a slot.
 const _: () = assert!(align_of::<Counters>() == align_of::<AtomicU64>());
+
+// The descriptor table starts right after the counters, so their size has
+// to leave it aligned: an address good for a slot must still be good for
+// one this many bytes later.
+const _: () = assert!(size_of::<Counters>().is_multiple_of(align_of::<AtomicU64>()));
 
 // Both endpoints keep raw pointers into the region and read through them
 // long after the references they came from are gone, which is sound only
@@ -209,10 +215,11 @@ impl MappedLayout {
     ///   created, and accessed only through this protocol since.
     pub unsafe fn new(mem: *mut [u8], slots: usize) -> Option<Self> {
         let mem_start = mem.cast::<u8>();
-        // The mapping must hold the counters and the whole table.
-        let table_len = slots.checked_mul(size_of::<AtomicU64>())?;
-        let meta_len = size_of::<Counters>().checked_add(table_len)?;
-        let payload_len = mem.len().checked_sub(meta_len)?;
+        // The mapping must hold the counters and the whole table. Their
+        // sizes together are where payloads begin.
+        let table_bytes = slots.checked_mul(size_of::<AtomicU64>())?;
+        let payloads_at = size_of::<Counters>().checked_add(table_bytes)?;
+        let payload_len = mem.len().checked_sub(payloads_at)?;
         // A descriptor holds a 32-bit offset, so the payload area can be
         // no longer than a `u32`. Keeping the converted value is what lets
         // later bounds checks stay in 32 bits.
@@ -223,13 +230,14 @@ impl MappedLayout {
 
         // The table sits right after the counters, and the payload area
         // after the table.
-        // SAFETY: the mapping holds both (checked above), and the table's
-        // alignment follows from the start address being aligned for
-        // `Counters`, whose size is a multiple of that alignment.
+        // SAFETY: the mapping holds both, checked above. The slots are
+        // aligned because the start address is (the conversion above) and
+        // the counters are a whole number of slots wide (the assert near
+        // `Counters`). Payload bytes need no alignment.
         let table_start = NonNull::new(unsafe { mem_start.add(size_of::<Counters>()) })?;
         let table = NonNull::slice_from_raw_parts(table_start.cast::<AtomicU64>(), slots);
         // SAFETY: as above.
-        let payload_start = NonNull::new(unsafe { mem_start.add(meta_len) })?;
+        let payload_start = NonNull::new(unsafe { mem_start.add(payloads_at) })?;
         Some(Self { counters, table, payload_start, payload_len })
     }
 
@@ -279,6 +287,24 @@ mod tests {
         // Zero length fields publish nothing, whatever the offset half says.
         assert!(matches!(SlotState::decode(0), SlotState::Unfinished));
         assert!(matches!(SlotState::decode(42), SlotState::Unfinished));
+    }
+
+    /// Every slot the reader and writer touch is dereferenced as an
+    /// `AtomicU64`, so `new`'s arithmetic has to land the table on that
+    /// alignment. The const asserts near `Counters` argue it; this checks
+    /// the pointers `new` actually builds.
+    #[test]
+    fn the_table_lands_aligned_for_a_slot() {
+        let mut mem = [0u64; 64];
+        let raw = std::ptr::slice_from_raw_parts_mut(mem.as_mut_ptr().cast::<u8>(), 512);
+        for slots in 0..8 {
+            // SAFETY: the array is live, aligned and zeroed, and nothing
+            // else touches it.
+            let mapped = unsafe { MappedLayout::new(raw, slots) }.unwrap();
+            for slot in mapped.table() {
+                assert!(std::ptr::from_ref(slot).addr().is_multiple_of(align_of::<AtomicU64>()));
+            }
+        }
     }
 
     #[test]
