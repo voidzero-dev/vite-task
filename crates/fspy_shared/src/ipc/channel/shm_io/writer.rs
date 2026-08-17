@@ -71,6 +71,20 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         Some(Self { mapped, _mem: mem })
     }
 
+    /// Reports a record this writer could not write, which closes the
+    /// channel and fails its seal: whatever the receiver collects is no
+    /// longer all of them.
+    ///
+    /// A claim that fails for space reports itself. This is for the writer
+    /// that gives up for its own reasons — before it could claim, or after
+    /// claiming — and then goes on to perform the operation the record
+    /// described. Dropping the frame alone does not report anything: the
+    /// receiver cannot tell an abandoned slot from one whose writer died,
+    /// and a writer that died never performed its operation.
+    pub fn report_lost_record(&self) {
+        self.mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
+    }
+
     /// Whether the CLOSED gate is set: the receiver sealed the channel,
     /// or an earlier claim failed and shut it down.
     pub fn is_closed(&self) -> bool {

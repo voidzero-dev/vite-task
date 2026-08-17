@@ -35,7 +35,8 @@ pub const CLOSED: u64 = 1 << 63;
 /// must start zeroed. The payload area is the rest of the mapping.
 #[repr(C)]
 pub struct Meta<const SLOTS: usize> {
-    /// Bit 63 is the CLOSED gate; the low bits count claims ever attempted.
+    /// Bit 63 is the CLOSED gate; the low bits count the claims that got
+    /// as far as reserving payload space, which is where a slot is taken.
     pub claims: AtomicU64,
     /// Payload bytes ever reserved, including by failed claims.
     pub payload_reserved: AtomicU64,
@@ -46,6 +47,13 @@ pub struct Meta<const SLOTS: usize> {
 // The mapping starts at a `u64`-aligned address and is cast to `&Meta`,
 // so no field in `Meta` may need more alignment than that.
 const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
+
+// The reader keeps a raw pointer into the table and reads through it long
+// after the reference it came from is gone, which is sound only because
+// every byte of `Meta` sits inside an atomic. This catches a field being
+// added or padding appearing; it cannot catch a field changing type, so
+// keep that in mind when editing the struct.
+const _: () = assert!(size_of::<Meta<3>>() == 5 * size_of::<AtomicU64>());
 
 // --- The descriptor slot codec ---------------------------------------------
 //
@@ -97,13 +105,12 @@ const _: () = assert!(align_of::<Meta<0>>() == align_of::<AtomicU64>());
 //
 // Neither add is guarded against wrapping, because neither wrap can be
 // reached. The payload counter can only pass the region once a claim has
-// failed, which sets the gate — and from then on every claim is refused
-// at the claim counter, which is read after the reservation and before
-// any span is built, so a wrapped payload counter never gets to name an
-// offset. The claim count reaching the gate bit needs 2^63 claims, which
-// is thousands of years at the rate they are measured to run; a channel
-// lives for one command, and a gate that read as set by accident would
-// only make the seal fail.
+// failed, and from then on every claim is refused — by the bounds check
+// on the reservation, or by the gate — before any span is built, so even
+// a wrapped payload counter never gets to name an offset. The claim count
+// reaching the gate bit needs 2^63 claims, which is thousands of years at
+// the rate they are measured to run; a channel lives for one command, and
+// a gate that read as set by accident would only make the seal fail.
 //
 // # Memory-ordering contract
 //

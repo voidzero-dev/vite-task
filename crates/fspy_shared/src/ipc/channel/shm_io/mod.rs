@@ -286,6 +286,9 @@ mod tests {
         // The refused reservation stays counted: four bytes of "test"
         // plus the 2048 that did not fit.
         assert!(shm.peek_u64(8) == 4 + 2048);
+        // Payload space is reserved before a slot is, so the refusal cost
+        // no slot: one claim counted, and the gate set.
+        assert!(shm.peek_u64(0) == (1 << 63) | 1);
 
         // "test" did land, but a lost record means the frames are not all
         // of them, so the seal hands back none of them.
@@ -443,6 +446,24 @@ mod tests {
         assert!(shm.peek_u64(0) == (1 << 63) | 16);
 
         // Fifteen frames landed, but the sixteenth was lost.
+        // SAFETY: see `collect_frames`.
+        let sealed = unsafe { ShmReader::seal::<S>(shm) };
+        assert!(sealed.unwrap_err() == SealError::Closed);
+    }
+
+    /// A writer that gives up on a frame it already claimed, or before it
+    /// could claim one, has no failed claim to report the loss for it.
+    #[test]
+    fn a_reported_loss_fails_the_seal() {
+        let shm = MockedShm::alloc(1024);
+        // SAFETY: see `single_thread_basic`.
+        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
+        assert!(writer.try_write_frame(b"kept"));
+
+        assert!(!writer.is_closed());
+        writer.report_lost_record();
+        assert!(writer.is_closed());
+
         // SAFETY: see `collect_frames`.
         let sealed = unsafe { ShmReader::seal::<S>(shm) };
         assert!(sealed.unwrap_err() == SealError::Closed);

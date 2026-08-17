@@ -1,6 +1,6 @@
 //! The reader side: seal the channel, then iterate the committed frames.
 //!
-//! Sealing is two loads and one bit: it never walks the table and never
+//! Sealing is one load and one bit: it never walks the table and never
 //! waits for writers. Reading is just as cheap — no payload byte is read
 //! or copied. The reader keeps the mapping alive and hands out each
 //! committed span on demand. Those borrows are safe because nothing

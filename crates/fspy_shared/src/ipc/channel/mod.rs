@@ -182,8 +182,11 @@ impl ChannelConf {
     /// Creates a sender.
     ///
     /// Never blocks. Fails when the receiver has already closed the channel
-    /// or dropped: the backing file is then removed (and, for the removal
-    /// failure edge, the region itself is marked closed).
+    /// or dropped, because the backing file is removed either way. A close
+    /// also shuts the region's gate before removing it, so a sender that
+    /// attaches in that window still finds a closed channel; a receiver
+    /// that is merely dropped only removes the file, and a removal that
+    /// fails there leaves the region attachable.
     #[expect(
         clippy::missing_errors_doc,
         reason = "error conditions are self-evident from return type"
@@ -229,15 +232,19 @@ impl Sender {
     /// Serializes one record into a committed frame.
     ///
     /// A record that cannot be sent is skipped, because that is all a
-    /// sender inside an intercepted call can do: the channel may have
-    /// closed (the record belongs past its boundary), or the region may be
-    /// full (a loss the failed claim reports by setting the CLOSED gate,
-    /// so the receiver reports the frames incomplete).
+    /// sender inside an intercepted call can do — but never silently. A
+    /// failed claim already reports itself: for space by setting the CLOSED
+    /// gate, or as closed, which means the record belongs past the
+    /// receiver's boundary. The remaining ways to give up are this
+    /// sender's own, so it reports them, and the seal then refuses to hand
+    /// back a set of frames that is missing one.
     pub fn send<T: SchemaWrite<DefaultConfig, Src = T>>(&self, value: &T) {
         let Ok(serialized_size) = T::serialized_size(value) else {
+            self.writer.report_lost_record();
             return;
         };
         let Ok(Some(frame_size)) = usize::try_from(serialized_size).map(NonZeroUsize::new) else {
+            self.writer.report_lost_record();
             return;
         };
         let Ok(mut frame) = self.writer.claim_frame(frame_size) else {
@@ -245,7 +252,9 @@ impl Sender {
         };
         let mut buf: &mut [u8] = &mut frame;
         if T::serialize_into(&mut buf, value).is_err() || !buf.is_empty() {
-            // An abandoned frame; the receiver ignores its slot.
+            // The frame is abandoned — the receiver ignores its slot — so
+            // the loss needs reporting on its own.
+            self.writer.report_lost_record();
             return;
         }
         frame.finish();
@@ -285,29 +294,36 @@ impl Receiver {
     /// Closes the channel and returns every committed frame, borrowed from
     /// the shared mapping that moves into the returned [`FrameReader`].
     ///
-    /// Never blocks on senders: new claims are rejected from this point on,
-    /// unfinished frames are atomically aborted, and committed frames become
-    /// readable in place. A sender process that is still alive keeps
-    /// running; anything it reports after this point is outside the
-    /// channel's boundary by design. The mapping is released when the
+    /// Never blocks on senders: it reads the claim counter once, which
+    /// fixes how far reading goes, and shuts the gate so no later claim
+    /// succeeds. Committed frames become readable in place. A sender that
+    /// was still filling a frame keeps running, and its frame may or may
+    /// not appear depending on whether it commits before the read reaches
+    /// that slot — either way the operation it describes happens after the
+    /// receiver stopped collecting. The mapping is released when the
     /// returned [`FrameReader`] drops.
     ///
     /// # Errors
     ///
     /// Fails when a record was lost before the close — a sender ran out of
-    /// room, or tried to send something too large — and when the region
-    /// cannot hold the protocol at all. Either way there is no complete
-    /// set of records, so none are handed back.
+    /// room, tried to send something too large, or gave up on one it had
+    /// already claimed — and when the region cannot hold the protocol at
+    /// all. Either way there is no complete set of records, so none are
+    /// handed back, and a caller that needs the trace has to treat the run
+    /// as untrackable rather than as having reported nothing.
     pub fn close(self) -> io::Result<FrameReader> {
         let Self { _keeper: keeper, mapping } = self;
-        // Remove the backing file first so no new process attaches while the
-        // channel closes.
-        drop(keeper);
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable and independently owned, and all attached
         // processes access it only through the `shm_io` protocol.
-        unsafe { ShmReader::seal::<SLOTS>(mapping) }
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+        let reader = unsafe { ShmReader::seal::<SLOTS>(mapping) }
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        // Remove the backing file only after the gate is shut. A process
+        // that attaches in between finds a closed channel and gives up
+        // cleanly; one that found the file already gone could not attach at
+        // all, and so could not report whatever it then failed to record.
+        drop(keeper);
+        Ok(reader)
     }
 }
 
@@ -320,6 +336,7 @@ mod tests {
     use subprocess_test::command_for_fn;
 
     use super::*;
+    use crate::ipc::{AccessMode, IpcPath, PathAccess};
 
     /// Any test region must hold the compile-time table; sparse, so cheap.
     const GIB: usize = 1 << 30;
@@ -350,6 +367,31 @@ mod tests {
 
         let frames = receiver.close().unwrap();
         assert!(frames.iter().next().unwrap() == &[4, 2]);
+    }
+
+    /// `Sender::send` is the only writer production uses, and the rest of
+    /// these tests reach past it into `claim_frame`. This one drives it
+    /// end to end, so that a disagreement between `serialized_size` and
+    /// `serialize_into` — which would silently drop every record — fails
+    /// here rather than in a build.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sender_round_trips_records() {
+        let (conf, receiver) = channel(GIB).unwrap();
+        let sender = conf.sender().unwrap();
+        let paths = ["/tmp/one", "/tmp/two/three"];
+        for path in paths {
+            sender.send(&PathAccess::read(path));
+        }
+        drop(sender);
+
+        let frames = receiver.close().unwrap();
+        let mut iter = frames.iter();
+        for path in paths {
+            let access: PathAccess<'_> = wincode::deserialize_exact(iter.next().unwrap()).unwrap();
+            assert!(access.path == <&IpcPath>::from(path));
+            assert!(access.mode == AccessMode::READ);
+        }
+        assert!(iter.next().is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

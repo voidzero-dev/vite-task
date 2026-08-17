@@ -21,14 +21,15 @@ impl TryFrom<Receiver> for ChannelAccesses {
     /// Closes the channel and rejects traces that cannot back the run's
     /// file accesses.
     ///
-    /// Never waits for tracked processes — closing rejects new records and
-    /// atomically ignores unfinished ones (see
-    /// [`fspy_shared::ipc::channel::Receiver::close`]) — and its work is
-    /// bounded by the number of reported records, so it runs inline.
+    /// Never waits for tracked processes: closing reads one counter and
+    /// shuts the channel's gate (see
+    /// [`fspy_shared::ipc::channel::Receiver::close`]), so it runs inline
+    /// however many records were reported.
     ///
     /// Fails when a record was lost before close, which is what keeps the
     /// tracking result trustworthy for caching: closing hands back frames
-    /// only when they are all of them.
+    /// only when they are all of them. A run that fills the region
+    /// therefore fails here rather than reporting a short trace.
     fn try_from(receiver: Receiver) -> io::Result<Self> {
         Ok(Self { frames: receiver.close()? })
     }

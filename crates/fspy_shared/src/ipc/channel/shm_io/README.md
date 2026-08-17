@@ -76,16 +76,19 @@ runs is the heart of the design:
   zero. The receiver ignores it. Nothing else is affected, and no cleanup
   code ever runs or is needed.
 - **The process is alive but abandoned the frame** (dropped it without
-  finishing). Same thing: the slot stays zero and the receiver ignores it,
-  exactly as if the writer had died there.
+  finishing). The slot stays zero and the receiver ignores it, exactly as if
+  the writer had died there — the receiver cannot tell the two apart. So a
+  writer that gives up on a frame and then performs the action anyway has to
+  say so, with `ShmWriter::report_lost_record`.
 
 These rules assume one thing about how the channel is used: **a writer
 publishes a record before performing the action the record describes.**
 Then a dead writer's missing record describes an action that never
 happened, and a record refused after the seal describes an action performed
 after the channel closed — both safe to ignore. A writer that records
-_after_ acting, or that abandons a frame and performs the action anyway,
-steps outside this rule and loses records silently.
+_after_ acting steps outside this rule and loses records silently. One that
+gives up on a frame and acts anyway must report the loss, which closes the
+channel and fails its seal.
 
 ## When the region fills up
 
@@ -126,7 +129,7 @@ The receiver seals the channel once:
    fails right here — a partial set of frames is never handed out.
 2. **Gate** further claims by setting the CLOSED bit, so stragglers stop.
 
-That is the whole of it: two loads and one bit. No slot is touched, so
+That is the whole of it: one load and one bit. No slot is touched, so
 sealing costs the same whether the channel holds one frame or ten million.
 
 The result, `ShmReader`, owns the mapping and lends out one `&[u8]` per
@@ -169,7 +172,7 @@ CLAIMED (slot 0) -------------------------------> COMMITTED (readable)
 
 - Claiming is two atomic adds; committing is one store. Nothing retries,
   and no operation on the write path is a read-modify-write of a slot.
-- Sealing is two loads and one bit, whatever the channel holds. Nothing is
+- Sealing is one load and one bit, whatever the channel holds. Nothing is
   copied and nothing is allocated — the whole module is allocation-free;
   the reader reads the table to iterate.
 - On Linux, the first touch of the sparse backing file can cost
