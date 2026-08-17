@@ -37,10 +37,9 @@ const FSPY_SHM_CAPACITY_ENV: &str = "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY";
 #[cfg(fspy)]
 static FSPY_SHM: std::sync::LazyLock<fspy::ChannelSize> = std::sync::LazyLock::new(|| {
     let capacity = std::env::var_os(FSPY_SHM_CAPACITY_ENV).map_or(FSPY_SHM_CAPACITY, |value| {
-        value
-            .to_str()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("{FSPY_SHM_CAPACITY_ENV} is not a byte count: {value:?}"))
+        value.to_str().and_then(|value| value.parse().ok()).unwrap_or_else(|| {
+            panic!("{FSPY_SHM_CAPACITY_ENV} is not a byte count: {}", value.display())
+        })
     });
     fspy::ChannelSize { capacity, slots: capacity / FSPY_SHM_BYTES_PER_RECORD }
 });

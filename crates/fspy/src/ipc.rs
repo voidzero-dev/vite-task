@@ -31,7 +31,7 @@ impl ChannelAccesses {
     /// Anything that needs all of them — caching, above all — has to treat
     /// the run as untracked rather than as having touched only these
     /// paths.
-    pub fn is_complete(&self) -> bool {
+    pub const fn is_complete(&self) -> bool {
         self.frames.is_some()
     }
 

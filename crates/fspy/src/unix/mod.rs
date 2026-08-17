@@ -190,7 +190,8 @@ impl PathAccessIterable {
     /// perform, which leaves [`Self::iter`] short of what really happened.
     /// The seccomp supervisor collects on this side of the boundary, so
     /// only the shared-memory channel can come up short.
-    pub fn is_complete(&self) -> bool {
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
         #[cfg(not(target_env = "musl"))]
         {
             self.ipc_accesses.is_complete()

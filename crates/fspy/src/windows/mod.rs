@@ -36,7 +36,8 @@ impl PathAccessIterable {
     ///
     /// `false` when a tracked process could not record one it went on to
     /// perform, which leaves [`Self::iter`] short of what really happened.
-    pub fn is_complete(&self) -> bool {
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
         self.ipc_accesses.is_complete()
     }
 

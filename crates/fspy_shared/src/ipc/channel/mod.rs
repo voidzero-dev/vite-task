@@ -13,7 +13,7 @@ use allocator_api2::alloc::Global;
 use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
-use shm_io::{SealError, ShmReader, ShmWriter, to_usize};
+use shm_io::{SealError, ShmReader, ShmWriter, from_usize, to_usize};
 
 /// Reads the committed frames of a sealed channel; borrows the shared
 /// mapping, which stays alive (and mapped) until this value drops.
@@ -65,7 +65,7 @@ pub fn channel(size: ChannelSize) -> io::Result<(ChannelConf, Receiver)> {
 
     let conf = ChannelConf {
         shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed(),
-        slots: slots.try_into().expect("a slot count is a 64-bit target's own usize"),
+        slots: from_usize(slots),
     };
 
     Ok((conf, Receiver { _keeper: keeper, mapping, slots }))

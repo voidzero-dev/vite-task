@@ -577,7 +577,7 @@ impl TaskResult {
         } = self
         {
             return Str::from(
-                "→ Not cached: the task made more file accesses than could be tracked",
+                "→ Not cached: tracking ran out of room for this task's file accesses",
             );
         }
         // fspy-unsupported-on-this-OS message — same overrides precedence as above

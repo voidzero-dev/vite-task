@@ -1,14 +1,15 @@
-# capacity_exhaustion_leaves_the_task_alone
+# shm_capacity_env_sizes_the_tracking_channel
 
-A task that reports more file accesses than its tracking channel can hold keeps running to the end: the accesses go unrecorded, but nothing kills the process over it. The run is not cached, because the accesses that did arrive are only some of the ones the task made, and the second run is a miss for the same reason rather than replaying a wrong entry.
+`VP_RUN_INTERNAL_FSPY_SHM_CAPACITY` sizes the shared memory a tracked task reports its file accesses through. The task stats one 2 MiB path, and a 1 MiB channel has nowhere to put a record that long.
 
-## `VP_RUN_INTERNAL_FSPY_SHM_CAPACITY=65536 vt run -v stat`
+The task runs to the end anyway: recording must never stop the program doing the work, so the access goes unrecorded and the process carries on to a clean exit. What the run cannot claim is that it saw every file the task touched, so it is not cached, and the second run says the same rather than replaying an entry built from part of a trace.
 
-channel too small for the task's accesses
+## `VP_RUN_INTERNAL_FSPY_SHM_CAPACITY=1048576 vt run -v stat`
+
+1 MiB, no room for a 2 MiB record
 
 ```
-$ vtt stat-many 20000
-stat 20000
+$ vtt stat_long_filename 2097152
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -20,18 +21,17 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] fspy-shm-capacity#stat: $ vtt stat-many 20000 ✓
-      → Not cached: the task made more file accesses than could be tracked
+  [1] fspy-shm-capacity#stat: $ vtt stat_long_filename 2097152 ✓
+      → Not cached: tracking ran out of room for this task's file accesses
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-## `vt run -v stat`
+## `VP_RUN_INTERNAL_FSPY_SHM_CAPACITY=1048576 vt run -v stat`
 
 nothing was cached to replay
 
 ```
-$ vtt stat-many 20000
-stat 20000
+$ vtt stat_long_filename 2097152
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -43,7 +43,7 @@ Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
-  [1] fspy-shm-capacity#stat: $ vtt stat-many 20000 ✓
-      → Cache miss: no previous cache entry found
+  [1] fspy-shm-capacity#stat: $ vtt stat_long_filename 2097152 ✓
+      → Not cached: tracking ran out of room for this task's file accesses
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
