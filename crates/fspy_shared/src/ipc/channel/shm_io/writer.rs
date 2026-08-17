@@ -12,12 +12,10 @@ use super::{
     layout::{CLOSED, MappedLayout, SlotState, to_usize},
 };
 
-/// A concurrent shared-memory frame writer.
-///
-/// Safe to use from many threads and processes at once: each frame is
-/// reserved atomically, filled in a span no one else can touch, and
-/// published with one atomic write (the ordering contract in
-/// [`super::layout`]).
+/// A shared-memory frame writer, usable from many threads and processes at
+/// once. Each frame is reserved atomically, filled in a span no one else
+/// can touch, and published with one atomic write (the ordering contract
+/// in [`super::layout`]).
 pub struct ShmWriter<M, const SLOTS: usize> {
     mapped: MappedLayout<SLOTS>,
     /// Owns the region the pointers point into. Declared after them:
@@ -37,24 +35,22 @@ unsafe impl<M: Sync, const SLOTS: usize> Sync for ShmWriter<M, SLOTS> {}
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimError {
-    /// The CLOSED gate was set: the receiver sealed the channel, or an
-    /// earlier claim failed and shut it down. Dropping the record is
-    /// right either way — the receiver had already stopped collecting, or
-    /// that same bit already makes the seal fail.
+    /// The CLOSED gate is set, by a seal or by an earlier failed claim.
+    /// Dropping the record is right either way: the receiver had stopped
+    /// collecting, or that same bit already fails its seal.
     #[error("the channel has been closed")]
     Closed,
-    /// There was no room: the region is full, or the frame is longer than
-    /// the `u32::MAX`-byte limit. The loss is already recorded — this
-    /// claim set the CLOSED gate — so sealing the channel will fail and
-    /// every later claim is refused.
+    /// No room left, or a frame longer than the `u32::MAX` a descriptor
+    /// can describe. This claim set the CLOSED gate on its way out, so the
+    /// seal will fail and every later claim is refused.
     #[error("no space left in the shared-memory region")]
     Capacity,
 }
 
 impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// Creates a writer on a shared-memory region, or `None` when the
-    /// region cannot hold the protocol (see [`MappedLayout::new`]) — a
-    /// truncated or unrelated file, for a sender that did not create it.
+    /// region cannot hold the protocol (see [`MappedLayout::new`]), as a
+    /// truncated or unrelated file cannot.
     ///
     /// # Safety
     ///
@@ -65,7 +61,7 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     pub unsafe fn new(mem: M) -> Option<Self> {
         // SAFETY: forwarded from this function's contract, which keeps the
         // region valid, and used only by this protocol, for as long as the
-        // writer lives — and so for every use of the pointers, which are
+        // writer lives, and so for every use of the pointers, which are
         // stored in the writer and dropped with it.
         let mapped = unsafe { MappedLayout::new(mem.as_raw_slice()) }?;
         Some(Self { mapped, _mem: mem })
@@ -75,18 +71,17 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// channel and fails its seal: whatever the receiver collects is no
     /// longer all of them.
     ///
-    /// A claim that fails for space reports itself. This is for the writer
-    /// that gives up for its own reasons — before it could claim, or after
-    /// claiming — and then goes on to perform the operation the record
-    /// described. Dropping the frame alone does not report anything: the
-    /// receiver cannot tell an abandoned slot from one whose writer died,
-    /// and a writer that died never performed its operation.
+    /// A claim that fails for space reports itself. This covers a writer
+    /// that gives up for its own reasons, before or after claiming, and
+    /// then performs the operation the record described. Dropping the
+    /// frame reports nothing on its own: the receiver cannot tell an
+    /// abandoned slot from one whose writer died, and a writer that died
+    /// never performed its operation.
     pub fn report_lost_record(&self) {
         self.mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
     }
 
-    /// Whether the CLOSED gate is set: the receiver sealed the channel,
-    /// or an earlier claim failed and shut it down.
+    /// Whether the CLOSED gate is set, by a seal or by a failed claim.
     pub fn is_closed(&self) -> bool {
         self.mapped.claims().load(Ordering::Relaxed) & CLOSED != 0
     }
@@ -95,11 +90,10 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
     /// `fetch_add`s, no retry loop (rule 1).
     ///
     /// The receiver cannot see the frame until [`FrameMut::finish`]
-    /// commits it; dropping it instead gives the claim up, and the
-    /// receiver ignores the slot exactly as if the writer had died. A
-    /// claim that does not fit — the region is full, or `frame_size` is
-    /// over `u32::MAX` — fails as [`ClaimError::Capacity`] after setting
-    /// the CLOSED gate.
+    /// commits it. Dropping it gives the claim up, and the receiver
+    /// ignores the slot as if the writer had died. A claim that does not
+    /// fit returns [`ClaimError::Capacity`], after setting the CLOSED
+    /// gate.
     pub fn claim_frame(&self, frame_size: NonZeroUsize) -> Result<FrameMut<'_>, ClaimError> {
         let mapped = self.mapped;
 
@@ -182,14 +176,13 @@ fn fitted_offset(start: u64, len: u32, payload_len: u32) -> Option<u32> {
     (end <= payload_len).then_some(offset)
 }
 
-/// An exclusively owned, claimed-but-unpublished frame.
+/// An exclusively owned frame, claimed but not yet published.
 ///
-/// [`FrameMut::finish`] commits the frame; it is the only way to show the
-/// payload to the receiver. Dropping the frame gives the claim up: the
-/// slot stays unfinished and the receiver ignores it, exactly as if the
-/// writer had died there. A writer that drops a frame and still performs
-/// the operation it described breaks the rule this channel is built on —
-/// write the record first, then do the thing it records.
+/// [`FrameMut::finish`] is the only way to show the payload to the
+/// receiver. Dropping the frame gives the claim up: the slot stays
+/// unfinished and the receiver ignores it, as if the writer had died
+/// there. A writer that drops a frame and performs the operation anyway
+/// owes the channel a [`ShmWriter::report_lost_record`].
 #[derive(Debug)]
 pub struct FrameMut<'a> {
     slot: &'a AtomicU64,
@@ -214,11 +207,10 @@ impl DerefMut for FrameMut<'_> {
 impl FrameMut<'_> {
     /// Commits the frame, making it visible to the receiver.
     ///
-    /// A receiver that already sealed the channel may or may not show this
-    /// frame: it reads the table when asked, so what it reports depends on
-    /// whether the descriptor is there yet. Either answer is truthful —
-    /// the operation this record describes had not happened when the
-    /// receiver drew its line.
+    /// A receiver that already sealed the channel may or may not show it,
+    /// depending on whether this store lands before the read reaches that
+    /// slot. Either answer is truthful, because the operation this record
+    /// describes had not happened when the receiver drew its line.
     pub fn finish(self) {
         // Rule 2: `Release` orders every payload write before the
         // descriptor. This writer owns the slot, so a store is enough.

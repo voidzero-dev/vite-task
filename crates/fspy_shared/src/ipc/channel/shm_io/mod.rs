@@ -1,74 +1,22 @@
 //! A crash-tolerant, nonblocking frame channel in a shared memory region.
 //!
-//! Many writer processes append variable-length frames at once; one
-//! receiver closes the channel and collects every committed frame without
-//! waiting for any writer. A process may die at any instruction — while
-//! claiming, while writing, just before committing — and the only thing
-//! lost is its own unfinished frame.
+//! Many writer processes append variable-length frames at once. One
+//! receiver seals the channel and reads every committed frame without
+//! waiting for any of them. A writer may die at any instruction and lose
+//! only its own unfinished frame. No writer runs cleanup code, because
+//! none exists: no exit hooks, PID checks, heartbeats, or timeouts.
 //!
-//! `README.md` in this directory tells the whole story in plain words and
-//! indexes the modules.
+//! The channel asks one thing of its writers: **publish a record before
+//! performing the action it describes.** A record that never arrives then
+//! describes an action that never happened, and one refused after the seal
+//! describes an action performed after the receiver stopped collecting.
+//! [`ShmWriter::report_lost_record`] covers the case left over, where a
+//! writer gives up on a record and acts anyway.
 //!
-//! # Region layout
-//!
-//! ```text
-//! low addresses                                            high addresses
-//! +----------+--------+--------+---------+-----------+-----------+------+
-//! | counters | slot 0 | slot 1 | ...     | payload 0 | payload 1 | ...  |
-//! +----------+--------+--------+---------+-----------+-----------+------+
-//!              fixed descriptor table      payloads grow up ->
-//! ```
-//!
-//! Counters and table are one `repr(C)` struct whose table length is a
-//! compile-time constant both sides share (the channel picks it); the
-//! payload area is the rest of the mapping ([`layout`]). Attaching works
-//! out where the struct and the payload area start; the payload area
-//! stays plain bytes.
-//!
-//! A claim is two wait-free `fetch_add`s — one reserves payload bytes,
-//! one a descriptor slot — and the old values they return are what the
-//! writer checks against the region's fixed size. A failed claim sets the
-//! CLOSED gate to report the loss and leaves its increments where they
-//! are: both counters only ever climb. Each descriptor carries its own
-//! offset and length, so the counters never say where data is, and every
-//! slot sits at a fixed place, so an unfinished frame can never hide a
-//! later one.
-//!
-//! # Frame lifecycle
-//!
-//! ```text
-//!                        writer finishes the frame
-//! CLAIMED (slot 0) ---------------------------------> COMMITTED (readable)
-//!        |
-//!        +---- writer dies or gives the claim up ---> stays zero (ignored)
-//! ```
-//!
-//! The only way to reach a payload is through its committed descriptor,
-//! and a descriptor is committed only after the payload is fully written
-//! ([`layout`]'s ordering contract). The receiver never works out where a
-//! frame is by reading payload bytes, and the borrows [`ShmReader`] hands
-//! out cover exactly the spans their writers reserved — nothing writes to
-//! them any more, and they never overlap what a live writer may touch.
-//!
-//! # Seal boundary
-//!
-//! [`ShmReader::seal`] draws its line by taking a snapshot of the claim
-//! counter and then shutting the gate. It walks no slots: a frame is read
-//! if its descriptor is there when the reader looks at it, so a writer
-//! still filling a frame when the line was drawn may land on either side.
-//! A claim taken after the snapshot lands in a slot the reader never
-//! reaches. Both are safe because a writer writes its record *before*
-//! doing what the record describes: one that died mid-frame never did it,
-//! and one that claimed or committed after the snapshot does it after the
-//! receiver stopped collecting.
-//!
-//! A record refused *before* the seal — no room, oversized frame — sets
-//! the gate first, so every later claim is refused and the seal itself
-//! fails: one lost record already ruins the result, and a partial set of
-//! frames is never handed out.
-//!
-//! None of this needs writers to clean up after themselves: no exit
-//! hooks, PID checks, heartbeats, or timeouts.
+//! `README.md` in this directory describes the region, the claim sequence,
+//! and why the receiver can borrow frames out of shared memory. [`layout`]
+//! carries the memory-ordering contract that the code cites by rule
+//! number.
 
 mod layout;
 mod reader;
@@ -272,7 +220,7 @@ mod tests {
         assert!(writer.try_write_frame(b"kept"));
 
         // No descriptor can describe a frame this long: the claim is
-        // refused and sets the gate, which shuts out later claims — their
+        // refused and sets the gate, which shuts out later claims: their
         // records would ride on a result the receiver must already
         // reject.
         let oversized = (layout::to_usize(u32::MAX) + 1).try_into().unwrap();
@@ -427,7 +375,7 @@ mod tests {
         assert!(iter.next() == None);
 
         // The seal set the gate: a late writer's claim fails cleanly and
-        // does not mark the channel incomplete — that record belongs
+        // does not mark the channel incomplete, since that record belongs
         // after the receiver stopped collecting.
         assert!(writer.is_closed());
         let before = shm.peek_u64(0);
@@ -448,7 +396,7 @@ mod tests {
         frame.copy_from_slice(b"late!");
 
         // The receiver seals while the frame is still unfinished: nothing
-        // to show yet, and nothing lost either — the writer has not
+        // to show yet, and nothing lost either, since the writer has not
         // performed the operation this record describes.
         let frames = collect_frames(&shm);
         assert!(frames.iter().count() == 0);
@@ -517,7 +465,7 @@ mod tests {
         });
 
         // The table holds 15 slots and 120 writes were attempted, so some
-        // had to fail on capacity — and one failure is enough to fail the
+        // had to fail on capacity, and one failure is enough to fail the
         // seal. The writers all survived it.
         assert!(writer.is_closed());
         // SAFETY: see `collect_frames`.
@@ -571,7 +519,7 @@ mod tests {
             assert!(frame == b"hello");
         }
         // Claims taken after the boundary are never read, so the count can
-        // fall short of what the writers wrote — but nothing can appear
+        // fall short of what the writers wrote, but nothing can appear
         // that was never finished.
         let written: usize = results.into_iter().sum();
         assert!(count <= written);
@@ -586,10 +534,10 @@ mod tests {
         let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
         assert!(writer.try_write_frame(b"hello"));
 
-        // A wildly inflated claim counter — mass claim failures or a foreign
-        // scribble — degrades to a full-table sweep, never out-of-bounds
-        // slot access: the committed frame survives, the untouched slots
-        // freeze as unpublishable.
+        // A wildly inflated claim counter, from mass claim failures or a
+        // foreign scribble, degrades to a full-table sweep rather than an
+        // out-of-bounds slot access: the committed frame survives and the
+        // untouched slots read as unpublished.
         shm.poke_u64(0, (1 << 40) | 1);
 
         let frames = collect_frames(&shm);
@@ -692,7 +640,7 @@ mod tests {
     }
 
     /// A writer killed mid-frame (SIGKILL on Unix, `TerminateProcess` on
-    /// Windows — both via `Child::kill`) must not lose other writers' frames
+    /// Windows, both via `Child::kill`) must not lose other writers' frames
     /// or completeness: no cleanup code runs in the killed process.
     #[test]
     #[cfg(not(miri))]

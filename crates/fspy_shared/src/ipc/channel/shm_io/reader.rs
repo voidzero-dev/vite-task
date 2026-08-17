@@ -1,17 +1,16 @@
 //! The reader side: seal the channel, then iterate the committed frames.
 //!
-//! Sealing is one load and one bit: it never walks the table and never
-//! waits for writers. Reading is just as cheap — no payload byte is read
-//! or copied. The reader keeps the mapping alive and hands out each
-//! committed span on demand. Those borrows are safe because nothing
-//! writes to a committed span again (committing uses up the writer's
-//! frame) and it never overlaps what a live writer may still touch.
+//! Neither step walks the table or waits for a writer, and no payload byte
+//! is copied. The reader keeps the mapping alive and hands out each
+//! committed span on demand. Those borrows hold because nothing writes to
+//! a committed span again (committing uses up the writer's frame) and it
+//! never overlaps what a live writer may touch.
 //!
-//! A span's offset and length come from the writer that reserved them,
-//! and nothing here re-checks them. That rests on the promise made at
-//! attach — that the region is touched only through this protocol. A
-//! process that scribbles on it some other way breaks that promise, and
-//! this code does not defend against it.
+//! A span's offset and length come from the writer that reserved them, and
+//! nothing here re-checks them. That rests on the promise made at attach:
+//! only this protocol touches the region. A process that scribbles on it
+//! some other way breaks the promise, and this code does not defend
+//! against that.
 
 use std::{
     fmt,
@@ -33,19 +32,17 @@ pub enum SealError {
     /// [`MappedLayout::new`]).
     #[error("the shared-memory region cannot host the channel")]
     UnsupportedRegion,
-    /// The channel was already closed when the seal ran: a claim had
-    /// failed — no room left, or an oversized frame — or someone sealed it
-    /// earlier and this seal cannot say what was refused since. Either
-    /// way the frames are not all of them, so there are none to hand out.
+    /// The channel was already closed when the seal ran. A claim had
+    /// failed, or someone sealed earlier and this seal cannot say what was
+    /// refused since. Either way the frames are not all of them, so the
+    /// reader hands back none.
     #[error("the shared-memory channel was closed before it was sealed")]
     Closed,
 }
 
 /// A reader over the committed frames of a sealed channel, serving them
-/// straight out of the mapping, which stays alive inside this value and
-/// is released when the reader drops. It holds no buffer of its own:
-/// iterating reads the descriptor table, so sealing a channel allocates
-/// nothing and touches nothing.
+/// straight out of the mapping. It holds no buffer of its own, so sealing
+/// allocates nothing; dropping it releases the mapping.
 pub struct ShmReader<M> {
     /// Where the payload area is, for turning descriptors into spans.
     payload_start: NonNull<u8>,
@@ -65,19 +62,18 @@ unsafe impl<M: Send> Send for ShmReader<M> {}
 unsafe impl<M: Sync> Sync for ShmReader<M> {}
 
 impl<M: AsRawSlice> ShmReader<M> {
-    /// Seals the channel — no further records — and returns the reader of
+    /// Seals the channel against further records and returns the reader of
     /// its committed frames.
     ///
-    /// A reader exists only for a channel that kept everything: if a claim
-    /// had already failed, or the channel was already sealed, there is no
-    /// complete set of records to read and this fails instead.
+    /// A reader exists only for a channel that kept everything. If a claim
+    /// had already failed, or someone sealed earlier, there is no complete
+    /// set of records and this fails instead.
     ///
-    /// Never waits for writers, and never walks the table: it takes the
-    /// snapshot that fixes how far iteration goes, then shuts the gate so
-    /// no further claim is taken. A claim from before the snapshot that
-    /// commits later shows up if it lands before the read that looks for
-    /// it; one taken after the snapshot lands in a slot iteration never
-    /// reaches.
+    /// One atomic operation fixes how far iteration goes and shuts the
+    /// gate, so it neither waits for a writer nor walks the table. A claim
+    /// taken before that point but committed after it shows up if the
+    /// store lands before the read reaches its slot; one taken after it
+    /// lands in a slot iteration never reaches.
     ///
     /// # Safety
     ///
@@ -94,25 +90,23 @@ impl<M: AsRawSlice> ShmReader<M> {
     /// was already closed before this call.
     pub unsafe fn seal<const SLOTS: usize>(mem: M) -> Result<Self, SealError> {
         // SAFETY: forwarded from this function's contract, which keeps the
-        // region valid for as long as the reader lives — and so for every
+        // region valid for as long as the reader lives, and so for every
         // use of the pointers, which are stored in the reader and dropped
         // with it.
         let Some(mapped) = (unsafe { MappedLayout::<SLOTS>::new(mem.as_raw_slice()) }) else {
             return Err(SealError::UnsupportedRegion);
         };
 
-        // Draw the boundary and shut the gate in one step (rule 1): what
-        // this returns is the claim count at the instant no later claim
-        // can succeed. Claims already in flight land in slots iteration
-        // never reaches. Replacing the count rather than keeping it is
-        // fine — from here on nothing reads it, since a later claim fails
-        // on the gate before its slot index is used, and a later seal
-        // only tests the bit.
+        // Draw the boundary and shut the gate in one step (rule 1): this
+        // returns the claim count at the instant no later claim can
+        // succeed. Replacing the count rather than keeping it is fine,
+        // since nothing reads it from here on: a later claim fails on the
+        // gate before it uses its slot index, and a later seal only tests
+        // the bit.
         let claims = mapped.claims().swap(CLOSED, Ordering::Relaxed);
-        // The same value says whether anything was lost. The gate was
-        // already set: either a claim failed — and rule 1 puts that loss
-        // before this boundary — or someone sealed earlier and this seal
-        // cannot say what was refused since. No complete set to read.
+        // The same value says whether anything was lost. A gate already
+        // set means a failed claim, which rule 1 puts before this
+        // boundary, or an earlier seal this one cannot account for.
         if claims & CLOSED != 0 {
             return Err(SealError::Closed);
         }
@@ -179,7 +173,7 @@ impl<'a> Iterator for Iter<'a> {
             };
             // SAFETY: a committed descriptor names the span its writer
             // reserved inside the payload area, and the attach contract
-            // says nothing but this protocol writes the region — so these
+            // says nothing but this protocol writes the region, so these
             // are the bits a writer put here. Nothing writes to a
             // committed span any more, and the reader borrowed for `'a`
             // keeps the mapping alive.
