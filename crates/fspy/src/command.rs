@@ -12,19 +12,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 
-/// Shared memory for a tracked run's file-access records when the caller
-/// does not say otherwise.
-///
-/// 4 GiB of sparse address space: none of it becomes real memory until
-/// records land in it, and it leaves room for tens of millions of
-/// accesses.
-pub const DEFAULT_SHM_CAPACITY: usize = 4 * 1024 * 1024 * 1024;
-
 #[derive(derive_more::Debug)]
 pub struct Command {
     program: OsString,
-    /// Bytes of shared memory for this run's file-access records.
-    pub(crate) shm_capacity: usize,
     args: Vec<OsString>,
     envs: FxHashMap<OsString, OsString>,
     cwd: Option<PathBuf>,
@@ -47,7 +37,6 @@ impl Command {
     pub fn new<P: AsRef<OsStr>>(program: P) -> Self {
         Self {
             program: program.as_ref().to_os_string(),
-            shm_capacity: DEFAULT_SHM_CAPACITY,
             args: Vec::new(),
             envs: FxHashMap::default(),
             cwd: None,
@@ -121,17 +110,6 @@ impl Command {
 
     pub fn stdin<T: Into<Stdio>>(&mut self, cfg: T) -> &mut Self {
         self.stdin = Some(cfg.into());
-        self
-    }
-
-    /// Sizes the shared memory this run's file-access records go through,
-    /// in bytes.
-    ///
-    /// How many accesses a program makes is the caller's business rather
-    /// than this crate's, so a caller that knows better than
-    /// [`DEFAULT_SHM_CAPACITY`] says so here.
-    pub const fn shm_capacity(&mut self, bytes: usize) -> &mut Self {
-        self.shm_capacity = bytes;
         self
     }
 
