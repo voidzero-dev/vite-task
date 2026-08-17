@@ -60,22 +60,6 @@ pub fn channel(capacity: usize) -> io::Result<(ChannelConf, Receiver)> {
     let keeper = ShmKeeper { path: shm_c_path };
     let mapping = handle.map().map_err(shm_error_to_io)?;
 
-    // On Linux, the first touch of the sparse backing file — read or write —
-    // can cost milliseconds of journalled first-block allocation, and it
-    // would otherwise be paid by a sender's first record or by close's
-    // snapshot. Touch the header page through a second view concurrently
-    // with process startup instead. Only there: on Windows and macOS the
-    // first touch is cheap and the extra thread costs more than it saves.
-    // Best-effort — a channel without the pre-fault is merely slower.
-    #[cfg(target_os = "linux")]
-    if let Ok(prefault_mapping) = handle.map() {
-        let _ = std::thread::Builder::new().name("fspy-shm-prefault".into()).spawn(move || {
-            // SAFETY: the mapping views the region created zero-initialized
-            // above, which is only accessed through the `shm_io` protocol.
-            unsafe { shm_io::pre_fault::<SLOTS>(&prefault_mapping) };
-        });
-    }
-
     // Prove the region can host the protocol — the same fallible attach
     // senders perform — so a bad capacity fails the task now, not at its
     // first record.

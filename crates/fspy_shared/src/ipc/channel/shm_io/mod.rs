@@ -75,12 +75,8 @@ mod reader;
 mod writer;
 
 use std::ptr::slice_from_raw_parts_mut;
-#[cfg(target_os = "linux")]
-use std::sync::atomic::Ordering;
 
 use fspy_shm::Mapping;
-#[cfg(target_os = "linux")]
-use layout::MappedLayout;
 // Only tests name the error types; production reports them through
 // `Display` and matches on `Ok`/`Err` alone.
 #[cfg(test)]
@@ -105,35 +101,6 @@ impl<M: AsRawSlice> AsRawSlice for &M {
     fn as_raw_slice(&self) -> *mut [u8] {
         (**self).as_raw_slice()
     }
-}
-
-/// Materializes the region's first page without changing protocol
-/// state, so that neither a writer's first claim nor
-/// [`ShmReader::seal`]'s snapshot pays for the backing file's first
-/// block allocation — a millisecond-scale cost on some journalling
-/// filesystems, for reads of holes as well as writes. Run it off any
-/// latency-sensitive path. Only Linux channels use this: elsewhere the
-/// first touch is cheap.
-///
-/// # Safety
-///
-/// Same contract as [`ShmWriter::new`].
-#[cfg(target_os = "linux")]
-pub unsafe fn pre_fault<const SLOTS: usize>(mem: &impl AsRawSlice) {
-    // Best effort: a region that cannot hold the protocol needs no
-    // warm-up — attaching to it will fail anyway.
-    // SAFETY: forwarded from this function's contract.
-    let Some(mapped) = (unsafe { MappedLayout::<SLOTS>::new(mem.as_raw_slice()) }) else {
-        return;
-    };
-    // A compare-exchange of zero with zero on the claim counter: on an
-    // untouched region it is a real write — which makes the file system
-    // allocate the first block of the sparse file — while leaving the
-    // counter as it was. If a claim got there first, the block already
-    // exists and the failed exchange changes nothing. (An `or` of zero
-    // would not do: the compiler may turn it into a plain load, which
-    // maps an empty page without allocating a block for it.)
-    let _ = mapped.claims().compare_exchange(0, 0, Ordering::Relaxed, Ordering::Relaxed);
 }
 
 #[cfg(test)]
@@ -404,29 +371,6 @@ mod tests {
         let frames = collect_frames(&shm);
         let mut iter = frames.iter();
         assert!(iter.next().unwrap() == b"foo");
-        assert!(iter.next() == None);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn pre_fault_does_not_disturb_protocol_state() {
-        let shm = MockedShm::alloc(1024);
-        // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
-
-        // On the untouched region, before any claim.
-        // SAFETY: see `collect_frames`.
-        unsafe { pre_fault::<S>(&shm) };
-        assert!(writer.try_write_frame(b"foo"));
-        // Racing an already claimed region must change nothing either.
-        // SAFETY: see `collect_frames`.
-        unsafe { pre_fault::<S>(&shm) };
-        assert!(writer.try_write_frame(b"bar"));
-
-        let frames = collect_frames(&shm);
-        let mut iter = frames.iter();
-        assert!(iter.next().unwrap() == b"foo");
-        assert!(iter.next().unwrap() == b"bar");
         assert!(iter.next() == None);
     }
 

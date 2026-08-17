@@ -175,12 +175,11 @@ CLAIMED (slot 0) -------------------------------> COMMITTED (readable)
 - Sealing is one load and one bit, whatever the channel holds. Nothing is
   copied and nothing is allocated — the whole module is allocation-free;
   the reader reads the table to iterate.
-- On Linux, the first touch of the sparse backing file can cost
-  milliseconds on journalling filesystems (it is the fault path, not block
-  allocation — `fallocate` does not help). Creators should run `pre_fault`
-  off any latency-sensitive path — for example on a background thread,
-  concurrently with spawning the first writer. Windows and macOS fault
-  cheaply and skip this.
+- On Linux, the first touch of the sparse backing file can cost a
+  millisecond or two on journalling filesystems — the fault path, not block
+  allocation, so `fallocate` does not help. It is paid once per channel, by
+  whichever side touches the region first. Putting the file on a filesystem
+  that does not journal avoids it at the source.
 
 ## Files
 
