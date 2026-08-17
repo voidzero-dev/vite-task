@@ -28,7 +28,7 @@ fn track_script(
 ) -> anyhow::Result<PathAccessIterable> {
     let (program, path) = resolve_runtime(runtime)?;
 
-    let mut command = fspy::Command::new(program);
+    let mut command = fspy::Command::new(program, test_utils::TEST_SHM_CAPACITY);
     command
         .envs(vars_os().filter(|(name, _)| !name.eq_ignore_ascii_case("PATH")))
         .env("PATH", path); // https://github.com/jdx/mise/discussions/5968

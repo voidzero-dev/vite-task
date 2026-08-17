@@ -14,6 +14,29 @@ use tokio::process::{ChildStderr, ChildStdout};
 use tokio_util::sync::CancellationToken;
 use vt_plan::SpawnCommand;
 
+/// Shared memory for one tracked task's file-access records. 4 GiB of
+/// sparse address space: none of it becomes real memory until records
+/// land in it, and it leaves room for tens of millions of accesses.
+#[cfg(fspy)]
+const FSPY_SHM_CAPACITY: usize = 4 << 30;
+
+/// Overrides [`FSPY_SHM_CAPACITY`] with a byte count. Internal: it exists
+/// so tests can shrink the region until a task overruns it, and nothing
+/// outside this repository should set it.
+#[cfg(fspy)]
+const FSPY_SHM_CAPACITY_ENV: &str = "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY";
+
+/// The shared memory each tracked task gets. Read once, since a run's
+/// tasks all get the same size.
+#[cfg(fspy)]
+static FSPY_SHM_CAPACITY_IN_USE: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var_os(FSPY_SHM_CAPACITY_ENV).map_or(FSPY_SHM_CAPACITY, |value| {
+        value.to_str().and_then(|value| value.parse().ok()).unwrap_or_else(|| {
+            panic!("{FSPY_SHM_CAPACITY_ENV} is not a byte count: {}", value.display())
+        })
+    })
+});
+
 /// How the child's stdin/stdout/stderr are configured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnStdio {
@@ -99,7 +122,7 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
-    let mut fspy_cmd = fspy::Command::new(cmd.program_path.as_path());
+    let mut fspy_cmd = fspy::Command::new(cmd.program_path.as_path(), *FSPY_SHM_CAPACITY_IN_USE);
     fspy_cmd.args(cmd.args.iter().map(vt_str::Str::as_str));
     fspy_cmd.envs(cmd.spawn_envs.iter());
     fspy_cmd.envs(extra_envs);

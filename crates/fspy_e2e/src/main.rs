@@ -8,6 +8,10 @@ use std::{
 };
 
 use fspy::{AccessMode, PathAccess};
+
+/// Shared memory for a tracked case's file-access records. Sparse address
+/// space, so a generous region costs nothing until the records use it.
+const SHM_CAPACITY: usize = 4 << 30;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
@@ -75,7 +79,7 @@ async fn main() {
             continue;
         }
         println!("Running case `{}` in dir `{}`", name, case.dir);
-        let mut cmd = fspy::Command::new(case.cmd[0].clone());
+        let mut cmd = fspy::Command::new(case.cmd[0].clone(), SHM_CAPACITY);
         let dir = manifest_dir.join(&case.dir);
         cmd.args(&case.cmd[1..])
             .envs(env::vars_os())
