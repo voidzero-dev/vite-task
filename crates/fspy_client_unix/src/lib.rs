@@ -8,7 +8,7 @@
 pub mod convert;
 pub mod raw_exec;
 
-use std::{ffi::OsStr, fmt::Debug, io::ErrorKind, os::unix::ffi::OsStrExt as _, path::Path};
+use std::{ffi::OsStr, fmt::Debug, os::unix::ffi::OsStrExt as _, path::Path};
 
 use convert::{ToAbsolutePath, ToAccessMode};
 use fspy_shared::ipc::{PathAccess, channel::Sender};
@@ -45,25 +45,16 @@ impl Client {
     /// # Panics
     ///
     /// Panics when the payload is missing, malformed, or cannot be decoded,
-    /// and when the channel is there but cannot be attached to. A process
-    /// with no sender has no way to tell the receiver it recorded nothing,
-    /// and a trace that silently omits every access it made is worse than
-    /// no trace.
+    /// and when the channel is there but cannot be attached to (see
+    /// [`ChannelConf::sender`](fspy_shared::ipc::channel::ChannelConf::sender)).
     pub fn from_env(envs: impl Iterator<Item = fspy_nostd::env::Entry>) -> Self {
         let encoded_payload = decode_payload_from_env(envs).unwrap();
 
-        let ipc_sender = match encoded_payload.payload.ipc_channel_conf.sender() {
-            Ok(sender) => Some(sender),
-            // The channel is over: this process started after the root
-            // target exited, so everything it does from here happens past
-            // the receiver's boundary and recording nothing loses nothing.
-            // Silently, because a preload library writing to the traced
-            // process's stderr corrupts whatever that process is printing.
-            Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::BrokenPipe) => {
-                None
-            }
-            Err(error) => panic!("fspy: cannot attach to the trace channel: {error}"),
-        };
+        // `None` when the channel is already over, which happens when this
+        // process starts after the root target exited. Nothing is said
+        // about it: a preload library writing to the traced process's
+        // stderr corrupts whatever that process is printing.
+        let ipc_sender = encoded_payload.payload.ipc_channel_conf.sender();
 
         Self { encoded_payload, ipc_sender }
     }

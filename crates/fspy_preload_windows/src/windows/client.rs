@@ -1,4 +1,4 @@
-use std::{cell::SyncUnsafeCell, ffi::CStr, io::ErrorKind, mem::MaybeUninit};
+use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
 
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
@@ -16,22 +16,11 @@ impl<'a> Client<'a> {
     pub fn from_payload_bytes(payload_bytes: &'a [u8]) -> Self {
         let payload: Payload<'a> = wincode::deserialize_exact(payload_bytes).unwrap();
 
-        let ipc_sender = match payload.channel_conf.sender() {
-            Ok(sender) => Some(sender),
-            // The channel is over: this process started after the root
-            // target exited, so everything it does from here happens past
-            // the receiver's boundary and recording nothing loses nothing.
-            // Silently, because a detours DLL writing to the traced
-            // process's stderr corrupts whatever that process is printing.
-            Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::BrokenPipe) => {
-                None
-            }
-            // The channel is there but cannot be attached to. A process
-            // with no sender has no way to tell the receiver it recorded
-            // nothing, and a trace that silently omits every access it made
-            // is worse than no trace.
-            Err(error) => panic!("fspy: cannot attach to the trace channel: {error}"),
-        };
+        // `None` when the channel is already over, which happens when this
+        // process starts after the root target exited. Nothing is said
+        // about it: a detours DLL writing to the traced process's stderr
+        // corrupts whatever that process is printing.
+        let ipc_sender = payload.channel_conf.sender();
 
         Self { payload, ipc_sender }
     }

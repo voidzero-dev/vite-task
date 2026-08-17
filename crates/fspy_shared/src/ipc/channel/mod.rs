@@ -157,55 +157,52 @@ impl Drop for ShmKeeper {
 }
 
 impl ChannelConf {
-    /// Creates a sender.
+    /// Creates a sender, or `None` when the channel is already over.
     ///
-    /// Never blocks.
+    /// Never blocks. `None` means the receiver removed the backing file,
+    /// or sealed the region before removing it and this call caught the
+    /// gate in between. Either way whatever the caller does next happens
+    /// past the receiver's boundary, so recording nothing loses nothing.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Every way attaching can fail, for the caller to sort out. Two of
-    /// them say the channel is simply over, and a caller that meets them
-    /// has lost nothing by recording nothing, because whatever it does
-    /// next happens past the receiver's boundary:
-    ///
-    /// - [`io::ErrorKind::NotFound`]: the receiver removed the backing
-    ///   file.
-    /// - [`io::ErrorKind::BrokenPipe`]: the receiver sealed the region
-    ///   before removing it, and this call caught the gate in between.
-    ///
-    /// Anything else means the channel is there but cannot be attached to,
-    /// which is a caller with no way to report what it then fails to
-    /// record.
-    pub fn sender(&self) -> io::Result<Sender> {
+    /// When the channel is there but cannot be attached to: its path is
+    /// unreadable, the file refuses to open or map, or the region cannot
+    /// hold the protocol. A process with no sender has no way to tell the
+    /// receiver it recorded nothing, and a trace that silently omits every
+    /// access a process made is worse than no trace, so it stops here.
+    #[must_use]
+    pub fn sender(&self) -> Option<Sender> {
         // The arena never touches the process heap, so this stays safe in
         // the preload contexts that create senders (pre-`main` constructors,
         // the Windows loader lock).
         let arena = fspy_nostd_alloc::arena();
-        let shm_path = self.shm_id.to_os_c_string_in(&arena).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "the channel's shared-memory path is not a valid C string",
-            )
-        })?;
-        let mapping = fspy_shm::open(shm_path.as_c_str().as_thin())
-            .and_then(|handle| handle.map())
-            .map_err(shm_error_to_io)?;
+        let shm_path = self
+            .shm_id
+            .to_os_c_string_in(&arena)
+            .expect("the channel's shared-memory path is not a valid C string");
+        let mapping = match fspy_shm::open(shm_path.as_c_str().as_thin()) {
+            Ok(handle) => handle.map().expect("cannot map the shared-memory channel"),
+            Err(error) => {
+                let error = shm_error_to_io(error);
+                // The receiver removed the backing file, so it has already
+                // stopped collecting.
+                if error.kind() == io::ErrorKind::NotFound {
+                    return None;
+                }
+                panic!("cannot open the shared-memory channel: {error}");
+            }
+        };
         // SAFETY: `mapping` is a freshly mapped shared memory region created
         // zero-initialized by `channel` and accessed only through the
         // `shm_io` protocol by every attached process.
-        let writer = unsafe { ShmWriter::new(mapping, to_usize(self.slots)) }.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "the shared-memory region cannot hold the channel",
-            )
-        })?;
+        let writer = unsafe { ShmWriter::new(mapping, to_usize(self.slots)) }
+            .expect("the shared-memory region cannot hold the channel");
+        // The receiver sealed the region but has not removed it yet.
         if writer.is_closed() {
-            return Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "the channel has been closed by the receiver",
-            ));
+            return None;
         }
-        Ok(Sender { writer })
+        Some(Sender { writer })
     }
 }
 
@@ -439,7 +436,7 @@ mod tests {
         let _frames = receiver.close().unwrap();
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
-            print!("{}", conf.sender().is_ok());
+            print!("{}", conf.sender().is_some());
         });
         let output = std::process::Command::from(cmd).output().unwrap();
         assert!(B(&output.stdout) == B("false"));
@@ -452,7 +449,7 @@ mod tests {
         drop(receiver);
 
         let cmd = command_for_fn!(conf, |conf: ChannelConf| {
-            print!("{}", conf.sender().is_ok());
+            print!("{}", conf.sender().is_some());
         });
         let output = std::process::Command::from(cmd).output().unwrap();
         assert!(B(&output.stdout) == B("false"));
