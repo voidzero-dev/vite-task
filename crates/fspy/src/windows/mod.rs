@@ -80,13 +80,12 @@ impl SpyImpl {
     ) -> Result<TrackedChild, SpawnError> {
         let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
         command.env("FSPY", "1");
-        let shm_capacity = command.shm_capacity;
         let mut command = command.into_tokio_command();
 
         command.creation_flags(CREATE_SUSPENDED);
 
         let (channel_conf, receiver) =
-            channel(shm_capacity).map_err(SpawnError::ChannelCreation)?;
+            channel(crate::ipc::shm_capacity()).map_err(SpawnError::ChannelCreation)?;
 
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;
