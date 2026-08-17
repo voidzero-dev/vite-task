@@ -1,10 +1,13 @@
 [[e2e]]
 name = "shm_capacity_env_sizes_the_tracking_channel"
 comment = """
-`VP_RUN_INTERNAL_FSPY_SHM_CAPACITY` sizes the shared memory a tracked task reports its file accesses through. The task stats one 2 MiB path, and a 1 MiB channel has nowhere to put a record that long.
+`VP_RUN_INTERNAL_FSPY_SHM_CAPACITY` sizes the shared memory a tracked task reports its file accesses through. The task makes twenty thousand of them, and a 64 KiB channel holds a thousand: one descriptor slot per 64 bytes of the region.
 
-The task runs to the end anyway: recording must never stop the program doing the work, so the access goes unrecorded and the process carries on to a clean exit. What the run cannot claim is that it saw every file the task touched, so it is not cached, and the second run says the same rather than replaying an entry built from part of a trace.
+The task runs to the end anyway: recording must never stop the program doing the work, so the accesses past that go unrecorded and the process carries on to a clean exit, printing its last line. What the run cannot claim is that it saw every file the task touched, so it is not cached, and the second run says the same rather than replaying an entry built from part of a trace.
+
+Not on musl, which has no preload: those builds collect through the seccomp supervisor, on the runner's own side of the boundary, so they have no shared-memory channel to fill.
 """
+cfg = 'not(target_env = "musl")'
 steps = [
   { argv = [
     "vt",
@@ -14,9 +17,9 @@ steps = [
   ], envs = [
     [
       "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY",
-      "1048576",
+      "65536",
     ],
-  ], comment = "1 MiB, no room for a 2 MiB record" },
+  ], comment = "64 KiB, a thousand slots for twenty thousand accesses" },
   { argv = [
     "vt",
     "run",
@@ -25,7 +28,7 @@ steps = [
   ], envs = [
     [
       "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY",
-      "1048576",
+      "65536",
     ],
   ], comment = "nothing was cached to replay" },
 ]
