@@ -378,7 +378,18 @@ mod tests {
     async fn sender_round_trips_records() {
         let (conf, receiver) = channel(GIB).unwrap();
         let sender = conf.sender().unwrap();
-        let paths = ["/tmp/one", "/tmp/two/three"];
+        // A record path carries the platform's own string form: bytes on
+        // unix, UTF-16 on Windows.
+        #[cfg(unix)]
+        let owned = ["/tmp/one", "/tmp/two/three"];
+        #[cfg(windows)]
+        let owned = [r"C:\tmp\one", r"C:\tmp\two\three"]
+            .map(|path| path.encode_utf16().collect::<Vec<_>>());
+        #[cfg(unix)]
+        let paths = owned.map(<&IpcPath>::from);
+        #[cfg(windows)]
+        let paths = [IpcPath::from_wide(&owned[0]), IpcPath::from_wide(&owned[1])];
+
         for path in paths {
             sender.send(&PathAccess::read(path));
         }
@@ -388,7 +399,7 @@ mod tests {
         let mut iter = frames.iter();
         for path in paths {
             let access: PathAccess<'_> = wincode::deserialize_exact(iter.next().unwrap()).unwrap();
-            assert!(access.path == <&IpcPath>::from(path));
+            assert!(access.path == path);
             assert!(access.mode == AccessMode::READ);
         }
         assert!(iter.next().is_none());
