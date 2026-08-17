@@ -518,6 +518,10 @@ pub fn run(
                     cleanup(&mut out, &state)?;
                     return Ok(super::SelectResult::Cancelled);
                 }
+                KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.query.clear();
+                    state.refilter();
+                }
                 KeyCode::Enter => {
                     let Some(idx) = state.selected_item_index() else {
                         continue;
@@ -532,7 +536,7 @@ pub fn run(
                 KeyCode::Down => {
                     state.move_down();
                 }
-                KeyCode::Char(c) => {
+                KeyCode::Char(c) if modifiers.is_empty() || modifiers == KeyModifiers::SHIFT => {
                     state.query.push(c);
                     state.refilter();
                 }

@@ -195,6 +195,8 @@ enum WriteKey {
     Escape,
     Backspace,
     CtrlC,
+    CtrlU,
+    CtrlW,
 }
 
 impl WriteKey {
@@ -206,6 +208,8 @@ impl WriteKey {
             Self::Escape => "escape",
             Self::Backspace => "backspace",
             Self::CtrlC => "ctrl-c",
+            Self::CtrlU => "ctrl-u",
+            Self::CtrlW => "ctrl-w",
         }
     }
 
@@ -217,6 +221,8 @@ impl WriteKey {
             Self::Escape => b"\x1b",
             Self::Backspace => b"\x7f",
             Self::CtrlC => b"\x03",
+            Self::CtrlU => b"\x15",
+            Self::CtrlW => b"\x17",
         }
     }
 }
