@@ -203,9 +203,7 @@ impl ChannelConf {
                 panic!("cannot open the shared-memory channel: {error}");
             }
         };
-        let mapping = handle.map().unwrap_or_else(|error| {
-            panic!("cannot map the shared-memory channel: {}", shm_error_to_io(error))
-        });
+        let mapping = handle.map().expect("cannot map the shared-memory channel");
         // SAFETY: `mapping` is a freshly mapped shared memory region created
         // zero-initialized by `channel` and accessed only through the
         // `shm_io` protocol by every attached process.
@@ -240,21 +238,18 @@ impl Sender {
     /// in this crate or its codec, and a trace built on it would be wrong
     /// in ways the receiver cannot see.
     pub fn send<T: SchemaWrite<DefaultConfig, Src = T>>(&self, value: &T) {
-        let Ok(serialized_size) = T::serialized_size(value) else {
-            panic!("a record cannot report its serialized size");
-        };
-        let Ok(Some(frame_size)) = usize::try_from(serialized_size).map(NonZeroUsize::new) else {
-            panic!("a record reports a serialized size of {serialized_size} bytes");
-        };
+        let serialized_size =
+            T::serialized_size(value).expect("a record cannot report its serialized size");
+        let frame_size = usize::try_from(serialized_size)
+            .ok()
+            .and_then(NonZeroUsize::new)
+            .expect("a record reports a serialized size of zero, or one no frame could hold");
         let Ok(mut frame) = self.writer.claim_frame(frame_size) else {
             return;
         };
         let mut buf: &mut [u8] = &mut frame;
-        let written = T::serialize_into(&mut buf, value);
-        assert!(
-            written.is_ok() && buf.is_empty(),
-            "a record wrote fewer bytes than the {serialized_size} it reported"
-        );
+        T::serialize_into(&mut buf, value).expect("a record will not serialize into its own frame");
+        assert!(buf.is_empty(), "a record wrote fewer bytes than the size it reported");
         frame.finish();
     }
 }
