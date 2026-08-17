@@ -85,8 +85,14 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
 
         // The loss report (rule 1): the gate marks the frames incomplete
         // and shuts the channel down for later claims.
+        //
+        // Storing the gate rather than or-ing it in drops the claim count,
+        // which nothing reads once the gate is set. The seal fails on the
+        // bit before it looks at the count, and a claim that reads the
+        // cleared count reads the gate along with it, so it gives up
+        // before using a slot index.
         let report_loss = || {
-            mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
+            mapped.claims().store(CLOSED, Ordering::Relaxed);
             ClaimError::Capacity
         };
 

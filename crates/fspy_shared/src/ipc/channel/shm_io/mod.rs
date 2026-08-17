@@ -201,9 +201,8 @@ mod tests {
         // The refused reservation stays counted: four bytes of "test"
         // plus the 2048 that did not fit.
         assert!(shm.peek_u64(8) == 4 + 2048);
-        // Payload space is reserved before a slot is, so the refusal cost
-        // no slot: one claim counted, and the gate set.
-        assert!(shm.peek_u64(0) == (1 << 63) | 1);
+        // The loss report replaces the count with the gate.
+        assert!(shm.peek_u64(0) == 1 << 63);
 
         // "test" did land, but a lost record means the frames are not all
         // of them, so the seal hands back none of them.
@@ -333,9 +332,8 @@ mod tests {
             assert!(writer.try_write_frame(b"x"));
         }
         assert!(writer.claim_frame(1.try_into().unwrap()).unwrap_err() == ClaimError::Capacity);
-        // The refused claim leaves its increment behind, and sets the
-        // gate: sixteen claims counted, fifteen of them in slots.
-        assert!(shm.peek_u64(0) == (1 << 63) | 16);
+        // The loss report replaces the count with the gate.
+        assert!(shm.peek_u64(0) == 1 << 63);
 
         // Fifteen frames landed, but the sixteenth was lost.
         // SAFETY: see `collect_frames`.
