@@ -344,6 +344,19 @@ mod tests {
     /// until slots are touched.
     const SIZE: ChannelSize = ChannelSize { capacity: 1 << 30, slots: 1 << 24 };
 
+    /// A size whose two halves do not fit has to fail here, at creation.
+    /// Everything downstream treats the region as able to host the
+    /// protocol: `sender` panics when it cannot, and so does
+    /// `Receiver::close`.
+    #[test]
+    fn a_capacity_too_small_for_the_table_fails_the_channel() {
+        // The counters alone need sixteen bytes, and each slot eight more.
+        let Err(error) = channel(ChannelSize { capacity: 8, slots: 1 }) else {
+            panic!("a region too small for the protocol made a channel");
+        };
+        assert!(error.kind() == io::ErrorKind::InvalidInput);
+    }
+
     /// The shared-memory path is generated absolute, so a sender in a process
     /// with a different working directory and a relative temporary directory
     /// must still attach.
