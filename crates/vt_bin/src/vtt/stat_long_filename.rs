@@ -24,14 +24,21 @@ fn access_generated_path(
     let path = generated_path(count);
     match metadata(&path) {
         Ok(()) => Ok(()),
-        Err(error)
-            if error.kind() == io::ErrorKind::NotFound
-                || error.raw_os_error() == Some(libc::ENAMETOOLONG) =>
-        {
-            Ok(())
-        }
+        Err(error) if is_absent_or_too_long(&error) => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+/// Whether the platform said the file is not there, or that the name is
+/// longer than it accepts. Either is the expected answer: this command
+/// exists to have the access attempted and recorded, not to find a file.
+///
+/// Windows reports an over-long name as `ERROR_FILENAME_EXCED_RANGE`,
+/// which reaches here as [`io::ErrorKind::InvalidFilename`] rather than as
+/// the `ENAMETOOLONG` unix returns.
+fn is_absent_or_too_long(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::InvalidFilename)
+        || error.raw_os_error() == Some(libc::ENAMETOOLONG)
 }
 
 fn metadata(path: &str) -> io::Result<()> {

@@ -25,7 +25,7 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
-use crate::ipc::{OwnedReceiverLockGuard, SHM_CAPACITY};
+use crate::ipc::OwnedReceiverLockGuard;
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
 
 #[derive(Debug)]
@@ -80,7 +80,7 @@ impl SpyImpl {
 
         #[cfg(not(target_env = "musl"))]
         let (ipc_channel_conf, ipc_receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+            channel(command.shm_capacity).map_err(SpawnError::ChannelCreation)?;
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]
