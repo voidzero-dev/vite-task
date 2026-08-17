@@ -36,10 +36,6 @@ pub const fn shm_for_capacity(capacity: usize) -> ChannelSize {
 pub struct Command {
     program: OsString,
     /// Shared memory for this run's file-access records.
-    #[cfg_attr(
-        target_env = "musl",
-        expect(dead_code, reason = "musl builds track through seccomp, with no channel to size")
-    )]
     pub(crate) shm: ChannelSize,
     args: Vec<OsString>,
     envs: FxHashMap<OsString, OsString>,
