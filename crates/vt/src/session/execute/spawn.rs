@@ -14,26 +14,6 @@ use tokio::process::{ChildStderr, ChildStdout};
 use tokio_util::sync::CancellationToken;
 use vt_plan::SpawnCommand;
 
-/// Sets the shared memory a tracked task reports its file accesses
-/// through, in bytes, in place of the size fspy would pick. Internal: it
-/// exists so tests can shrink the channel until a task overruns it, and
-/// nothing outside this repository should set it.
-#[cfg(fspy)]
-const FSPY_SHM_CAPACITY_ENV: &str = "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY";
-
-/// The shared memory each tracked task gets. Read once, since a run's
-/// tasks all get the same size.
-#[cfg(fspy)]
-static FSPY_SHM: std::sync::LazyLock<fspy::ChannelSize> = std::sync::LazyLock::new(|| {
-    let capacity =
-        std::env::var_os(FSPY_SHM_CAPACITY_ENV).map_or(fspy::DEFAULT_SHM_CAPACITY, |value| {
-            value.to_str().and_then(|value| value.parse().ok()).unwrap_or_else(|| {
-                panic!("{FSPY_SHM_CAPACITY_ENV} is not a byte count: {}", value.display())
-            })
-        });
-    fspy::shm_for_capacity(capacity)
-});
-
 /// How the child's stdin/stdout/stderr are configured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnStdio {
@@ -61,9 +41,10 @@ pub struct ChildHandle {
 /// Result of waiting for a child to exit.
 pub struct ChildOutcome {
     pub exit_status: std::process::ExitStatus,
-    /// Raw fspy accesses. `Some` iff `fspy` was `true` at spawn time.
+    /// Raw fspy accesses. `Some` iff `fspy` was `true` at spawn time, and
+    /// `Err` when a tracked process could not record everything it did.
     #[cfg(fspy)]
-    pub path_accesses: Option<PathAccessIterable>,
+    pub path_accesses: Option<Result<PathAccessIterable, fspy::TrackingIncomplete>>,
 }
 
 /// Spawn a command with the requested fspy and stdio configuration.
@@ -120,7 +101,6 @@ where
     V: AsRef<OsStr>,
 {
     let mut fspy_cmd = fspy::Command::new(cmd.program_path.as_path());
-    fspy_cmd.shm(*FSPY_SHM);
     fspy_cmd.args(cmd.args.iter().map(vt_str::Str::as_str));
     fspy_cmd.envs(cmd.spawn_envs.iter());
     fspy_cmd.envs(extra_envs);

@@ -84,5 +84,5 @@ pub async fn spawn_command(cmd: subprocess_test::Command) -> anyhow::Result<Path
         .wait_handle
         .await?;
     assert!(termination.status.success());
-    Ok(termination.path_accesses)
+    Ok(termination.path_accesses.expect("the test region holds every record"))
 }

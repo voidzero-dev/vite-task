@@ -19,8 +19,9 @@ mod command;
 
 use std::{env::temp_dir, fs::create_dir, io, process::ExitStatus, sync::LazyLock};
 
-pub use command::{Command, DEFAULT_SHM_CAPACITY, shm_for_capacity};
-pub use fspy_shared::ipc::{AccessMode, ChannelSize, PathAccess};
+pub use command::Command;
+pub use error::TrackingIncomplete;
+pub use fspy_shared::ipc::{AccessMode, PathAccess};
 use futures_util::future::BoxFuture;
 pub use os_impl::PathAccessIterable;
 use os_impl::SpyImpl;
@@ -30,8 +31,9 @@ use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 pub struct ChildTermination {
     /// The exit status of the child process.
     pub status: ExitStatus,
-    /// The path accesses captured from the child process.
-    pub path_accesses: PathAccessIterable,
+    /// The path accesses captured from the child process, or the reason
+    /// they cannot be trusted to be all of them.
+    pub path_accesses: Result<PathAccessIterable, TrackingIncomplete>,
 }
 
 pub struct TrackedChild {

@@ -50,7 +50,7 @@ async fn track_test_bin(args: &[&str], cwd: Option<&str>) -> PathAccessIterable 
     let termination = tracked_child.wait_handle.await.unwrap();
     assert!(termination.status.success());
 
-    termination.path_accesses
+    termination.path_accesses.expect("the tracking region holds every record this run makes")
 }
 
 #[test(tokio::test)]

@@ -32,15 +32,6 @@ pub struct PathAccessIterable {
 }
 
 impl PathAccessIterable {
-    /// Whether every access the run made is here.
-    ///
-    /// `false` when a tracked process could not record one it went on to
-    /// perform, which leaves [`Self::iter`] short of what really happened.
-    #[must_use]
-    pub const fn is_complete(&self) -> bool {
-        self.ipc_accesses.is_complete()
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
         self.ipc_accesses.iter_path_accesses()
     }
@@ -88,12 +79,12 @@ impl SpyImpl {
     ) -> Result<TrackedChild, SpawnError> {
         let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
         command.env("FSPY", "1");
-        let shm = command.shm;
         let mut command = command.into_tokio_command();
 
         command.creation_flags(CREATE_SUSPENDED);
 
-        let (channel_conf, receiver) = channel(shm).map_err(SpawnError::ChannelCreation)?;
+        let (channel_conf, receiver) =
+            channel(crate::ipc::shm_size()).map_err(SpawnError::ChannelCreation)?;
 
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;
@@ -175,8 +166,8 @@ impl SpyImpl {
                 };
                 // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
-                let ipc_accesses = ChannelAccesses::from(receiver);
-                let path_accesses = PathAccessIterable { ipc_accesses };
+                let path_accesses = ChannelAccesses::try_from(receiver)
+                    .map(|ipc_accesses| PathAccessIterable { ipc_accesses });
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })

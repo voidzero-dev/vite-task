@@ -1,46 +1,71 @@
 use fspy_shared::ipc::{
-    PathAccess,
+    ChannelSize, PathAccess,
     channel::{FrameReader, Receiver},
 };
 
-/// The path accesses a run reported through the IPC channel.
-pub struct ChannelAccesses {
-    /// `None` when a record was lost, which leaves what did arrive too
-    /// incomplete to build anything on.
-    frames: Option<FrameReader>,
+use crate::error::TrackingIncomplete;
+
+/// Shared memory for one tracked run's file-access records.
+///
+/// 4 GiB of sparse address space: none of it becomes real memory until
+/// records land in it, and it leaves room for tens of millions of
+/// accesses.
+const DEFAULT_SHM_CAPACITY: usize = 4 * 1024 * 1024 * 1024;
+
+/// Overrides [`DEFAULT_SHM_CAPACITY`] with a byte count. Internal: it
+/// exists so a test can shrink the region until a run overruns it, and
+/// nothing outside this repository should set it.
+const SHM_CAPACITY_ENV: &str = "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY";
+
+/// How much shared memory to give the next tracked run, split at one
+/// record per 64 bytes: 8 for its descriptor and 56 for its payload.
+/// Records run a few hundred bytes each, so payload space runs out well
+/// before slots do.
+///
+/// # Panics
+///
+/// When the override is set to something that is not a byte count. It is
+/// ours to set, so a value we cannot read is a mistake worth stopping for
+/// rather than quietly ignoring.
+pub fn shm_size() -> ChannelSize {
+    let capacity = std::env::var_os(SHM_CAPACITY_ENV).map_or(DEFAULT_SHM_CAPACITY, |value| {
+        value.to_str().and_then(|value| value.parse().ok()).unwrap_or_else(|| {
+            panic!("{SHM_CAPACITY_ENV} is not a byte count: {}", value.display())
+        })
+    });
+    ChannelSize { capacity, slots: capacity / 64 }
 }
 
-impl From<Receiver> for ChannelAccesses {
-    /// Closes the channel and keeps its frames, unless a sender ran out of
-    /// room.
+/// The path accesses a run reported through the IPC channel.
+pub struct ChannelAccesses {
+    frames: FrameReader,
+}
+
+impl TryFrom<Receiver> for ChannelAccesses {
+    type Error = TrackingIncomplete;
+
+    /// Closes the channel and takes every record it collected.
     ///
     /// Never waits for tracked processes: closing reads one counter and
     /// shuts the channel's gate (see
     /// [`fspy_shared::ipc::channel::Receiver::close`]), so it runs inline
     /// however many records were reported.
-    fn from(receiver: Receiver) -> Self {
-        Self { frames: receiver.close().ok() }
+    ///
+    /// # Errors
+    ///
+    /// [`TrackingIncomplete`] when a tracked process could not record
+    /// something it went on to do. What did arrive is then a subset of
+    /// what the run really touched, so none of it is handed back.
+    fn try_from(receiver: Receiver) -> Result<Self, TrackingIncomplete> {
+        Ok(Self { frames: receiver.close().map_err(|_| TrackingIncomplete)? })
     }
 }
 
 impl ChannelAccesses {
-    /// Whether every record senders published is here.
-    ///
-    /// `false` means a sender could not record something it then went on
-    /// to do, so what follows is a subset of what the run really touched.
-    /// Anything that needs all of them — caching, above all — has to treat
-    /// the run as untracked rather than as having touched only these
-    /// paths.
-    pub const fn is_complete(&self) -> bool {
-        self.frames.is_some()
-    }
-
     pub fn iter_path_accesses(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        self.frames.iter().flat_map(|frames| {
-            frames.iter().map(|frame| {
-                wincode::deserialize_exact(frame)
-                    .expect("committed frames are complete under the channel protocol")
-            })
+        self.frames.iter().map(|frame| {
+            wincode::deserialize_exact(frame)
+                .expect("committed frames are complete under the channel protocol")
         })
     }
 }

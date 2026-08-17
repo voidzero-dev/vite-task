@@ -4,7 +4,6 @@ use std::{
     process::Stdio,
 };
 
-use fspy_shared::ipc::ChannelSize;
 #[cfg(unix)]
 use fspy_shared_unix::exec::Exec;
 use rustc_hash::FxHashMap;
@@ -13,30 +12,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 
-/// Shared memory for a tracked run's file-access records when the caller
-/// does not say otherwise.
-///
-/// 4 GiB of sparse address space: none of it becomes real memory until
-/// records land in it, and it leaves room for tens of millions of
-/// accesses.
-pub const DEFAULT_SHM_CAPACITY: usize = 4 << 30;
-
-/// Splits a byte budget into a descriptor table and payload room, at one
-/// record per 64 bytes: 8 for its descriptor and 56 for its payload.
-///
-/// Records run a few hundred bytes each, so payload space runs out well
-/// before slots do. A caller that knows its records are shaped differently
-/// can build a [`ChannelSize`] itself.
-#[must_use]
-pub const fn shm_for_capacity(capacity: usize) -> ChannelSize {
-    ChannelSize { capacity, slots: capacity / 64 }
-}
-
 #[derive(derive_more::Debug)]
 pub struct Command {
     program: OsString,
-    /// Shared memory for this run's file-access records.
-    pub(crate) shm: ChannelSize,
     args: Vec<OsString>,
     envs: FxHashMap<OsString, OsString>,
     cwd: Option<PathBuf>,
@@ -59,7 +37,6 @@ impl Command {
     pub fn new<P: AsRef<OsStr>>(program: P) -> Self {
         Self {
             program: program.as_ref().to_os_string(),
-            shm: shm_for_capacity(DEFAULT_SHM_CAPACITY),
             args: Vec::new(),
             envs: FxHashMap::default(),
             cwd: None,
@@ -133,17 +110,6 @@ impl Command {
 
     pub fn stdin<T: Into<Stdio>>(&mut self, cfg: T) -> &mut Self {
         self.stdin = Some(cfg.into());
-        self
-    }
-
-    /// Sizes the shared memory this run's file-access records go through.
-    ///
-    /// How many accesses a program makes is the caller's business rather
-    /// than this crate's, so a caller that knows better than
-    /// [`DEFAULT_SHM_CAPACITY`] says so here, usually through
-    /// [`shm_for_capacity`].
-    pub const fn shm(&mut self, size: ChannelSize) -> &mut Self {
-        self.shm = size;
         self
     }
 

@@ -206,9 +206,7 @@ fn tracking_fell_short(
     #[cfg(fspy)]
     {
         let infers = metadata.input_config.includes_auto || metadata.output_config.includes_auto;
-        fspy.is_some()
-            && infers
-            && outcome.path_accesses.as_ref().is_some_and(|raw| !raw.is_complete())
+        fspy.is_some() && infers && outcome.path_accesses.as_ref().is_some_and(Result::is_err)
     }
     #[cfg(not(fspy))]
     {
@@ -239,7 +237,15 @@ fn observe_fspy(
         use super::tracked_accesses::TrackedPathAccesses;
 
         outcome.path_accesses.as_ref().map(|raw| {
-            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root);
+            // A trace that came up short reads as empty. It never reaches
+            // here for a task that infers anything from it, because
+            // `tracking_fell_short` has already turned the run away; one
+            // that spells out its inputs and outputs ignores the trace
+            // either way.
+            let tracked = raw.as_ref().map_or_else(
+                |_| TrackedPathAccesses::default(),
+                |raw| TrackedPathAccesses::from_raw(raw, workspace_root),
+            );
             let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
                 // fspy can be attached for auto-output-only tasks. In that
                 // mode reads must not become inferred inputs.

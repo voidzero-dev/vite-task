@@ -27,7 +27,11 @@ async fn main() -> anyhow::Result<()> {
 
     let mut csv_writer = csv_async::AsyncWriter::from_writer(out_file);
 
-    for acc in termination.path_accesses.iter() {
+    for acc in termination
+        .path_accesses
+        .expect("the tracking region holds every record this run makes")
+        .iter()
+    {
         path_count += 1;
         let path_str = format!("{:?}", acc.path);
         let mode_str = format!("{:?}", acc.mode);

@@ -108,7 +108,11 @@ async fn main() {
         }
 
         let mut collector = AccessCollector::new(dir);
-        for access in termination.path_accesses.iter() {
+        for access in termination
+            .path_accesses
+            .expect("the tracking region holds every record this run makes")
+            .iter()
+        {
             collector.add(access);
         }
         let snap_file = File::create(manifest_dir.join(format!("snaps/{name}.txt"))).unwrap();
