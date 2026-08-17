@@ -10,8 +10,9 @@
 use std::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
 
 /// The CLOSED gate bit of the claim counter. The receiver sets it when it
-/// seals, and so does any failed claim, which is how it reports the loss
-/// (rule 1).
+/// seals, and so does a claim the region had no room for, which is how it
+/// reports the loss (rule 1). Nothing else sets it: what a writer cannot
+/// record for its own reasons is not this protocol's to report.
 ///
 /// A bit rather than a value to compare against, so it survives the
 /// increment of a writer that arrives late. Counting cannot reach it: that

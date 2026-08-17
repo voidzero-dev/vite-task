@@ -54,10 +54,13 @@ impl Client {
 
         let ipc_sender = match encoded_payload.payload.ipc_channel_conf.sender() {
             Ok(sender) => Some(sender),
+            // The only failure `sender` returns is a channel that has
+            // already closed, which happens when this process starts after
+            // the root target exited. Everything it does from here is past
+            // the receiver's boundary, so recording nothing loses nothing.
+            // Anything worse stops the process inside `sender` instead.
             Err(err) => {
-                // This can happen if the process starts after the root target
-                // has exited and the receiver has closed the channel.
-                eprintln!("fspy: failed to create ipc sender: {err}");
+                eprintln!("fspy: the trace channel has closed: {err}");
                 None
             }
         };

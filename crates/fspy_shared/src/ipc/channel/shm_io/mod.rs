@@ -9,9 +9,9 @@
 //! The channel asks one thing of its writers: **publish a record before
 //! performing the action it describes.** A record that never arrives then
 //! describes an action that never happened, and one refused after the seal
-//! describes an action performed after the receiver stopped collecting.
-//! [`ShmWriter::report_lost_record`] covers the case left over, where a
-//! writer gives up on a record and acts anyway.
+//! describes an action performed after the receiver stopped collecting. A
+//! writer that gives up on a record and performs the action anyway breaks
+//! the rule, and this protocol cannot tell that it did.
 //!
 //! `README.md` in this directory describes the region, the claim sequence,
 //! and why the receiver can borrow frames out of shared memory. [`layout`]
@@ -338,24 +338,6 @@ mod tests {
         assert!(shm.peek_u64(0) == (1 << 63) | 16);
 
         // Fifteen frames landed, but the sixteenth was lost.
-        // SAFETY: see `collect_frames`.
-        let sealed = unsafe { ShmReader::seal::<S>(shm) };
-        assert!(sealed.unwrap_err() == SealError::Closed);
-    }
-
-    /// A writer that gives up on a frame it already claimed, or before it
-    /// could claim one, has no failed claim to report the loss for it.
-    #[test]
-    fn a_reported_loss_fails_the_seal() {
-        let shm = MockedShm::alloc(1024);
-        // SAFETY: see `single_thread_basic`.
-        let writer: ShmWriter<_, S> = unsafe { ShmWriter::new(shm.clone()) }.unwrap();
-        assert!(writer.try_write_frame(b"kept"));
-
-        assert!(!writer.is_closed());
-        writer.report_lost_record();
-        assert!(writer.is_closed());
-
         // SAFETY: see `collect_frames`.
         let sealed = unsafe { ShmReader::seal::<S>(shm) };
         assert!(sealed.unwrap_err() == SealError::Closed);

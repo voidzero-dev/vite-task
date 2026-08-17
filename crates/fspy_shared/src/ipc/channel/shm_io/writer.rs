@@ -67,20 +67,6 @@ impl<M: AsRawSlice, const SLOTS: usize> ShmWriter<M, SLOTS> {
         Some(Self { mapped, _mem: mem })
     }
 
-    /// Reports a record this writer could not write, which closes the
-    /// channel and fails its seal: whatever the receiver collects is no
-    /// longer all of them.
-    ///
-    /// A claim that fails for space reports itself. This covers a writer
-    /// that gives up for its own reasons, before or after claiming, and
-    /// then performs the operation the record described. Dropping the
-    /// frame reports nothing on its own: the receiver cannot tell an
-    /// abandoned slot from one whose writer died, and a writer that died
-    /// never performed its operation.
-    pub fn report_lost_record(&self) {
-        self.mapped.claims().fetch_or(CLOSED, Ordering::Relaxed);
-    }
-
     /// Whether the CLOSED gate is set, by a seal or by a failed claim.
     pub fn is_closed(&self) -> bool {
         self.mapped.claims().load(Ordering::Relaxed) & CLOSED != 0
@@ -181,8 +167,9 @@ fn fitted_offset(start: u64, len: u32, payload_len: u32) -> Option<u32> {
 /// [`FrameMut::finish`] is the only way to show the payload to the
 /// receiver. Dropping the frame gives the claim up: the slot stays
 /// unfinished and the receiver ignores it, as if the writer had died
-/// there. A writer that drops a frame and performs the operation anyway
-/// owes the channel a [`ShmWriter::report_lost_record`].
+/// there. The two look identical from the outside, which is why a writer
+/// that drops a frame and performs the operation anyway breaks the rule
+/// this channel rests on.
 #[derive(Debug)]
 pub struct FrameMut<'a> {
     slot: &'a AtomicU64,

@@ -36,7 +36,7 @@ Where the table ends and payloads begin never moves. Claiming needs no retry loo
 - **The process died,** mid-claim or mid-fill. The slot stays zero and the receiver ignores it. No cleanup code runs, because none exists.
 - **The process abandoned the frame** and kept going. The slot stays zero and the receiver ignores that too, since it cannot tell the two apart.
 
-So the channel asks one thing of its users: **publish a record before performing the action it describes.** A dead writer's missing record then describes an action that never happened, and a record refused after the seal describes one performed after the channel closed. The receiver drops both. A writer that records after acting loses records with nothing said. A writer that abandons a frame and acts anyway calls `ShmWriter::report_lost_record`.
+So the channel asks one thing of its users: **publish a record before performing the action it describes.** A dead writer's missing record then describes an action that never happened, and a record refused after the seal describes one performed after the channel closed. The receiver drops both. A writer that records after acting, or that abandons a frame and acts anyway, breaks the rule and loses records with nothing said. The channel cannot see either one.
 
 ## When the region fills up
 

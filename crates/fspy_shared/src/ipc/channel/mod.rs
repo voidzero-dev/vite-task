@@ -165,12 +165,19 @@ impl Drop for ShmKeeper {
 impl ChannelConf {
     /// Creates a sender.
     ///
-    /// Never blocks. Fails when the receiver has already closed the channel
-    /// or dropped, because the backing file is removed either way. A close
-    /// also shuts the region's gate before removing it, so a sender that
-    /// attaches in that window still finds a closed channel; a receiver
-    /// that is merely dropped only removes the file, and a removal that
-    /// fails there leaves the region attachable.
+    /// Never blocks. Fails only when the channel is already over: the
+    /// receiver removed the backing file, or it sealed the region before
+    /// removing it and a sender caught the gate in between. Either way
+    /// whatever this process does next happens past the receiver's
+    /// boundary, so skipping its records loses nothing.
+    ///
+    /// # Panics
+    ///
+    /// When the channel is there but cannot be attached to: the file
+    /// refuses to open or map, or it cannot hold the protocol. A process
+    /// with no writer has no way to tell the receiver it recorded nothing,
+    /// and a trace that silently omits every access it made is worse than
+    /// no trace, so it stops here instead.
     #[expect(
         clippy::missing_errors_doc,
         reason = "error conditions are self-evident from return type"
@@ -180,24 +187,30 @@ impl ChannelConf {
         // the preload contexts that create senders (pre-`main` constructors,
         // the Windows loader lock).
         let arena = fspy_nostd_alloc::arena();
-        let shm_path = self.shm_id.to_os_c_string_in(&arena).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "invalid shared-memory path")
-        })?;
-        let mapping = fspy_shm::open(shm_path.as_c_str().as_thin())
-            .map_err(shm_error_to_io)?
-            .map()
-            .map_err(shm_error_to_io)?;
+        let shm_path = self
+            .shm_id
+            .to_os_c_string_in(&arena)
+            .expect("the channel's own shared-memory path is not a valid C string");
+        let handle = match fspy_shm::open(shm_path.as_c_str().as_thin()) {
+            Ok(handle) => handle,
+            Err(error) => {
+                let error = shm_error_to_io(error);
+                // The receiver removed the backing file, so it has already
+                // stopped collecting.
+                if error.kind() == io::ErrorKind::NotFound {
+                    return Err(error);
+                }
+                panic!("cannot open the shared-memory channel: {error}");
+            }
+        };
+        let mapping = handle.map().unwrap_or_else(|error| {
+            panic!("cannot map the shared-memory channel: {}", shm_error_to_io(error))
+        });
         // SAFETY: `mapping` is a freshly mapped shared memory region created
         // zero-initialized by `channel` and accessed only through the
         // `shm_io` protocol by every attached process.
-        let Some(writer) = (unsafe { ShmWriter::new(mapping) }) else {
-            // A truncated or foreign file fails here — it never panics the
-            // host process.
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "shared-memory region cannot host the channel",
-            ));
-        };
+        let writer = unsafe { ShmWriter::new(mapping) }
+            .expect("the shared-memory region cannot hold the channel");
         if writer.is_closed() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
@@ -215,32 +228,33 @@ pub struct Sender {
 impl Sender {
     /// Serializes one record into a committed frame.
     ///
-    /// A record that cannot be sent is skipped, because that is all a
-    /// sender inside an intercepted call can do — but never silently. A
-    /// failed claim already reports itself: for space by setting the CLOSED
-    /// gate, or as closed, which means the record belongs past the
-    /// receiver's boundary. The remaining ways to give up are this
-    /// sender's own, so it reports them, and the seal then refuses to hand
-    /// back a set of frames that is missing one.
+    /// A claim the channel refuses is skipped, because that is all a sender
+    /// inside an intercepted call can do: the channel has closed, so the
+    /// record belongs past the receiver's boundary, or the region is full
+    /// and the failed claim already set the CLOSED gate to say so.
+    ///
+    /// # Panics
+    ///
+    /// When the record's serialized size disagrees with the bytes it then
+    /// writes. Nothing the caller passes can cause that, so it is a defect
+    /// in this crate or its codec, and a trace built on it would be wrong
+    /// in ways the receiver cannot see.
     pub fn send<T: SchemaWrite<DefaultConfig, Src = T>>(&self, value: &T) {
         let Ok(serialized_size) = T::serialized_size(value) else {
-            self.writer.report_lost_record();
-            return;
+            panic!("a record cannot report its serialized size");
         };
         let Ok(Some(frame_size)) = usize::try_from(serialized_size).map(NonZeroUsize::new) else {
-            self.writer.report_lost_record();
-            return;
+            panic!("a record reports a serialized size of {serialized_size} bytes");
         };
         let Ok(mut frame) = self.writer.claim_frame(frame_size) else {
             return;
         };
         let mut buf: &mut [u8] = &mut frame;
-        if T::serialize_into(&mut buf, value).is_err() || !buf.is_empty() {
-            // The frame is abandoned — the receiver ignores its slot — so
-            // the loss needs reporting on its own.
-            self.writer.report_lost_record();
-            return;
-        }
+        let written = T::serialize_into(&mut buf, value);
+        assert!(
+            written.is_ok() && buf.is_empty(),
+            "a record wrote fewer bytes than the {serialized_size} it reported"
+        );
         frame.finish();
     }
 }

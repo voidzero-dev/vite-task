@@ -18,16 +18,18 @@ impl<'a> Client<'a> {
 
         let ipc_sender = match payload.channel_conf.sender() {
             Ok(sender) => Some(sender),
+            // The only failure `sender` returns is a channel that has
+            // already closed, which happens when this process starts after
+            // the root target exited. Everything it does from here is past
+            // the receiver's boundary, so recording nothing loses nothing.
+            // Anything worse stops the process inside `sender` instead.
             Err(err) => {
-                // this can happen if the process is started after the root target process has exited.
-                // By that time the channel would have been closed in the receiver side.
-                // In this case we just leave a message and skip sending any path accesses.
                 #[expect(
                     clippy::print_stderr,
                     reason = "preload library uses stderr for debug diagnostics"
                 )]
                 {
-                    eprintln!("fspy: failed to create ipc sender: {err}");
+                    eprintln!("fspy: the trace channel has closed: {err}");
                 }
                 None
             }
