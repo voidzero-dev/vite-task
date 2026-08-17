@@ -110,8 +110,12 @@ impl<M: AsRawSlice> ShmReader<M> {
         if claims & CLOSED != 0 {
             return Err(SealError::Closed);
         }
-        // Clamped, so a counter reading higher than the table just means
-        // walking the whole table, not an error.
+        // The count runs past the table whenever writers attempt more
+        // claims than there are slots: one bumps the counter, finds its
+        // index out of range, and only then sets the gate, so a seal
+        // landing in that window reads the higher count with the gate
+        // still clear. Clamping turns that into a walk over the whole
+        // table; slicing on the raw count would panic.
         let slot_count = to_usize(claims).min(SLOTS);
 
         // The admitted slots, kept as a raw pointer so the reader needs
