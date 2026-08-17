@@ -5,5 +5,6 @@ With fspy's shared-memory backing moved to memfd, file-access tracking succeeds 
 ## `vtt small_dev_shm vt run stress`
 
 ```
-$ vtt stat_long_filename 1048576
+$ vtt stat-many 1 1048576
+stat 1
 ```
