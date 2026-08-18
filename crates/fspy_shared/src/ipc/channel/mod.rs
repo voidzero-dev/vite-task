@@ -41,17 +41,20 @@ const SHM_BACKING_PREFIX: &str = "vite-task-fspy-";
 const SLOTS: usize = 1 << 26;
 
 /// Serializable configuration to create channel senders.
-#[derive(SchemaWrite, SchemaRead, Clone, Debug)]
-pub struct ChannelConf {
-    shm_id: Box<IpcStr>,
+///
+/// A conf is a view: it borrows the path the [`Receiver`] owns (or, in a
+/// receiving process, the payload bytes it was deserialized from), so
+/// materializing and serializing one allocates nothing.
+#[derive(SchemaWrite, SchemaRead, Clone, Copy, Debug)]
+pub struct ChannelConf<'a> {
+    shm_id: &'a IpcStr,
 }
 
-/// Creates a mpsc IPC channel with one receiver and a `ChannelConf` that can be passed around processes and used to create multiple senders.
+/// Creates a mpsc IPC channel and returns its receiver. [`Receiver::conf`]
+/// derives the serializable configuration that other processes use to create
+/// senders.
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
-pub fn channel<A: Allocator>(
-    capacity: usize,
-    allocator: A,
-) -> io::Result<(ChannelConf, Receiver<A>)> {
+pub fn channel<A: Allocator>(capacity: usize, allocator: A) -> io::Result<Receiver<A>> {
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str(), allocator)?;
     let handle =
         fspy_shm::create(shm_c_path.as_c_str().as_thin(), capacity).map_err(shm_error_to_io)?;
@@ -71,9 +74,7 @@ pub fn channel<A: Allocator>(
         ));
     }
 
-    let conf = ChannelConf { shm_id: IpcStr::from_os_c_str(keeper.path.as_c_str()).to_boxed() };
-
-    Ok((conf, Receiver { _keeper: keeper, mapping }))
+    Ok(Receiver { keeper, mapping })
 }
 
 /// Encodes `path` as an owned NUL-terminated platform C string.
@@ -161,7 +162,7 @@ impl<A: Allocator> Drop for ShmKeeper<A> {
     }
 }
 
-impl ChannelConf {
+impl ChannelConf<'_> {
     /// Creates a sender, or `None` when the channel is already over.
     ///
     /// Never blocks. `None` means the receiver removed the backing file,
@@ -179,7 +180,8 @@ impl ChannelConf {
     #[must_use]
     pub fn sender<A: Allocator>(&self, allocator: A) -> Option<Sender> {
         // The allocation is transient: the decoded path only has to outlive
-        // the open call below.
+        // the open call below, and dropping it hands the space back to a
+        // bump allocator, whose most recent allocation it is.
         let shm_path = self
             .shm_id
             .to_os_c_string_in(allocator)
@@ -260,7 +262,7 @@ unsafe impl Sync for Sender {}
 pub struct Receiver<A: Allocator> {
     /// Keeps the shared memory's backing file alive for as long as senders
     /// may attach.
-    _keeper: ShmKeeper<A>,
+    keeper: ShmKeeper<A>,
     mapping: Mapping,
 }
 
@@ -274,6 +276,13 @@ unsafe impl<A: Allocator + Send> Send for Receiver<A> {}
 unsafe impl<A: Allocator + Sync> Sync for Receiver<A> {}
 
 impl<A: Allocator> Receiver<A> {
+    /// Returns the serializable configuration other processes pass to
+    /// [`ChannelConf::sender`], borrowing this receiver's storage.
+    #[must_use]
+    pub fn conf(&self) -> ChannelConf<'_> {
+        ChannelConf { shm_id: IpcStr::from_os_c_str(self.keeper.path.as_c_str()) }
+    }
+
     /// Closes the channel and returns every committed frame, borrowed from
     /// the shared mapping that moves into the returned [`FrameReader`].
     ///
@@ -298,7 +307,7 @@ impl<A: Allocator> Receiver<A> {
     /// When the region cannot hold the protocol, which [`channel`] proved
     /// it could before any sender saw it.
     pub fn close(self) -> Result<FrameReader, RecordsLost> {
-        let Self { _keeper: keeper, mapping } = self;
+        let Self { keeper, mapping } = self;
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable and independently owned, and all attached
         // processes access it only through the `shm_io` protocol.
@@ -366,11 +375,13 @@ mod tests {
     /// must still attach.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sender_ignores_changed_temp_and_working_directory() {
-        let (conf, receiver) = channel(CAPACITY, Global).unwrap();
+        let receiver = channel(CAPACITY, Global).unwrap();
+        let conf = wincode::serialize(&receiver.conf()).unwrap();
         let changed_cwd = temp_dir().join(format!("fspy-ipc-changed-cwd-{}", Uuid::new_v4()));
         fs::create_dir(&changed_cwd).unwrap();
 
-        let mut command = command_for_fn!(conf, |conf: ChannelConf| {
+        let mut command = command_for_fn!(conf, |conf: Vec<u8>| {
+            let conf: ChannelConf = wincode::deserialize(&conf).unwrap();
             let sender = conf.sender(Global).unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
             let mut frame = sender.writer.claim_frame(frame_size).unwrap();
@@ -396,8 +407,8 @@ mod tests {
     /// here rather than in a build.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sender_round_trips_records() {
-        let (conf, receiver) = channel(CAPACITY, Global).unwrap();
-        let sender = conf.sender(Global).unwrap();
+        let receiver = channel(CAPACITY, Global).unwrap();
+        let sender = receiver.conf().sender(Global).unwrap();
         // A record path carries the platform's own string form: bytes on
         // unix, UTF-16 on Windows.
         #[cfg(unix)]
@@ -427,8 +438,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn smoke() {
-        let (conf, receiver) = channel(CAPACITY, Global).unwrap();
-        let cmd = command_for_fn!(conf, |conf: ChannelConf| {
+        let receiver = channel(CAPACITY, Global).unwrap();
+        let conf = wincode::serialize(&receiver.conf()).unwrap();
+        let cmd = command_for_fn!(conf, |conf: Vec<u8>| {
+            let conf: ChannelConf = wincode::deserialize(&conf).unwrap();
             let sender = conf.sender(Global).unwrap();
             let frame_size = NonZeroUsize::new(2).unwrap();
             let mut frame = sender.writer.claim_frame(frame_size).unwrap();
@@ -449,10 +462,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_close() {
-        let (conf, receiver) = channel(CAPACITY, Global).unwrap();
+        let receiver = channel(CAPACITY, Global).unwrap();
+        let conf = wincode::serialize(&receiver.conf()).unwrap();
         let _frames = receiver.close().unwrap();
 
-        let cmd = command_for_fn!(conf, |conf: ChannelConf| {
+        let cmd = command_for_fn!(conf, |conf: Vec<u8>| {
+            let conf: ChannelConf = wincode::deserialize(&conf).unwrap();
             print!("{}", conf.sender(Global).is_some());
         });
         let output = std::process::Command::from(cmd).output().unwrap();
@@ -462,10 +477,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(clippy::print_stdout, reason = "test diagnostics")]
     async fn forbid_new_senders_after_receiver_dropped() {
-        let (conf, receiver) = channel(CAPACITY, Global).unwrap();
+        let receiver = channel(CAPACITY, Global).unwrap();
+        let conf = wincode::serialize(&receiver.conf()).unwrap();
         drop(receiver);
 
-        let cmd = command_for_fn!(conf, |conf: ChannelConf| {
+        let cmd = command_for_fn!(conf, |conf: Vec<u8>| {
+            let conf: ChannelConf = wincode::deserialize(&conf).unwrap();
             print!("{}", conf.sender(Global).is_some());
         });
         let output = std::process::Command::from(cmd).output().unwrap();
@@ -476,8 +493,8 @@ mod tests {
     /// claim any new frame afterwards.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn attached_sender_cannot_claim_after_close() {
-        let (conf, receiver) = channel(CAPACITY, Global).unwrap();
-        let sender = conf.sender(Global).unwrap();
+        let receiver = channel(CAPACITY, Global).unwrap();
+        let sender = receiver.conf().sender(Global).unwrap();
 
         let mut frame = sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
         frame.copy_from_slice(&[4, 2]);
@@ -494,9 +511,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_senders() {
-        let (conf, receiver) = channel(CAPACITY, Global).unwrap();
+        let receiver = channel(CAPACITY, Global).unwrap();
+        let conf = wincode::serialize(&receiver.conf()).unwrap();
         for i in 0u16..200 {
-            let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (ChannelConf, u16)| {
+            let cmd = command_for_fn!((conf.clone(), i), |(conf, i): (Vec<u8>, u16)| {
+                let conf: ChannelConf = wincode::deserialize(&conf).unwrap();
                 let sender = conf.sender(Global).unwrap();
                 let data_to_send = i.to_string();
                 let mut frame = sender

@@ -83,9 +83,8 @@ impl SpyImpl {
 
         command.creation_flags(CREATE_SUSPENDED);
 
-        let (channel_conf, receiver) =
-            channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
-                .map_err(SpawnError::ChannelCreation)?;
+        let receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
+            .map_err(SpawnError::ChannelCreation)?;
 
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;
@@ -105,7 +104,7 @@ impl SpyImpl {
                 }
 
                 let payload = Payload {
-                    channel_conf: channel_conf.clone(),
+                    channel_conf: receiver.conf(),
                     ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
                 };
                 let payload_bytes = wincode::serialize(&payload).unwrap();

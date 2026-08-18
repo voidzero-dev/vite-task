@@ -22,6 +22,6 @@ DEFINE_GUID!(
 
 #[derive(SchemaWrite, SchemaRead, Debug, Clone)]
 pub struct Payload<'a> {
-    pub channel_conf: ChannelConf,
+    pub channel_conf: ChannelConf<'a>,
     pub ansi_dll_path_with_nul: &'a [u8],
 }

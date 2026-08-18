@@ -20,28 +20,36 @@ use fspy_shared_unix::{
 };
 use raw_exec::RawExec;
 
-pub struct Client {
-    encoded_payload: EncodedPayload,
+pub struct Client<'a> {
+    encoded_payload: EncodedPayload<'a>,
     ipc_sender: Option<Sender>,
 }
 
-// SAFETY: construction owns every field, later methods borrow them immutably,
-// and the sender synchronizes its shared-memory access.
-#[cfg(target_os = "macos")]
-unsafe impl Sync for Client {}
-// SAFETY: ownership of every field can move with the client, and the sender
-// synchronizes its shared-memory access.
-#[cfg(target_os = "macos")]
-unsafe impl Send for Client {}
+// Seals the view-only design: the client holds views of leaked memory and
+// the sender, never an allocator. A retained allocator handle is
+// interior-mutable and would fail this assertion. (`Sender`'s own manual
+// `Send`/`Sync` impls are the one audited exception the check trusts.)
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Client<'static>>();
+};
 
-impl Debug for Client {
+impl Debug for Client<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client").finish()
     }
 }
 
-impl Client {
-    /// Constructs a client from the encoded payload in the process environment.
+impl<'a> Client<'a> {
+    /// Constructs a client from the encoded payload in the process
+    /// environment, leaking the payload's storage into `allocator`.
+    ///
+    /// The sender's temporary path decode also comes from `allocator` and
+    /// drops before this returns; a bump allocator gets that space back,
+    /// since the block is its most recent allocation. `A: 'a` bounds the
+    /// client's lifetime — a `'static` allocator yields a `Client<'static>`
+    /// with no further ceremony — and the client never retains the
+    /// allocator itself (see the `Send + Sync` assertion above).
     ///
     /// # Panics
     ///
@@ -50,9 +58,9 @@ impl Client {
     /// [`ChannelConf::sender`](fspy_shared::ipc::channel::ChannelConf::sender)).
     pub fn from_env(
         envs: impl Iterator<Item = fspy_nostd::env::Entry>,
-        allocator: impl Allocator,
+        allocator: impl Allocator + Clone + 'a,
     ) -> Self {
-        let encoded_payload = decode_payload_from_env(envs).unwrap();
+        let encoded_payload = decode_payload_from_env(envs, allocator.clone()).unwrap();
 
         // `None` when the channel is already over, which happens when this
         // process starts after the root target exited. Nothing is said

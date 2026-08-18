@@ -9,7 +9,8 @@
 //! fixed-size chunks; and `bump_scope::Bump`s on top. [`pooled_bump`]
 //! creates a bump that draws its chunks from the pool and returns them on
 //! drop, so frequent short-lived bumps reuse memory instead of paying two
-//! syscalls each.
+//! syscalls each. [`page_bump`] bypasses the pool for bumps whose chunks
+//! must never be recycled into other bumps.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -34,10 +35,10 @@ use bump_scope::{
 };
 pub use c_string::{CString, OsCString};
 #[cfg(unix)]
-pub(crate) use mmap::MmapAllocator as PageAllocator;
+pub use mmap::MmapAllocator as PageAllocator;
 use pool::ChunkPool;
 #[cfg(windows)]
-pub(crate) use virtual_alloc::VirtualAllocator as PageAllocator;
+pub use virtual_alloc::VirtualAllocator as PageAllocator;
 
 /// Every cached chunk is 64 KiB: a whole multiple of the page size on all
 /// supported targets, and big enough that most intercepted calls fit their
@@ -85,6 +86,30 @@ impl Default for &'static ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOT
     fn default() -> Self {
         &CHUNK_POOL
     }
+}
+
+/// A bump allocator drawing whole pages straight from the kernel — never
+/// from the chunk pool — so its memory is never recycled into other bumps.
+///
+/// The concrete type is public so a caller can house one in static
+/// storage; note that a bump is not [`Sync`], so a `static` needs a cell
+/// that hands out access, and no safe code can retain a leaked handle
+/// globally.
+pub type PageBump = Bump<AllocatorApi2V02Compat<PageAllocator>, PageBumpSettings>;
+
+/// [`PageBump`]'s settings: start without a chunk, so creating one
+/// allocates nothing.
+pub type PageBumpSettings = <BumpSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<false>;
+
+/// Creates an empty [`PageBump`].
+///
+/// Creating it allocates nothing; the first allocation maps one chunk, and
+/// further chunks are mapped only if the data outgrows it. Dropping the
+/// bump frees its chunks; leaking it instead makes its allocations
+/// permanent.
+#[must_use]
+pub const fn page_bump() -> PageBump {
+    Bump::unallocated()
 }
 
 /// Creates a fresh bump backed by the process-wide chunk pool.

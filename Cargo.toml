@@ -52,7 +52,7 @@ bitflags = "2.10.0"
 brush-parser = "0.4.0"
 bstr = { version = "1.12.0", default-features = false }
 bump-scope = { version = "2", default-features = false, features = ["allocator-api2-02"] }
-bumpalo = { version = "3.17.0", features = ["collections"] }
+bumpalo = { version = "3.17.0", features = ["allocator-api2", "collections"] }
 bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
 cargo-platform = "=0.3.2"
 cc = "1.2.39"
@@ -138,6 +138,7 @@ fspy_nostd = { path = "crates/fspy_nostd" }
 fspy_nostd_alloc = { path = "crates/fspy_nostd_alloc" }
 similar = "3.0.0"
 smallvec = { version = "2.0.0-alpha.12", features = ["std"] }
+static_cell = "2"
 snapshot_test = { path = "crates/snapshot_test" }
 socket_ipc = { path = "crates/socket_ipc" }
 stackalloc = "1.2.1"

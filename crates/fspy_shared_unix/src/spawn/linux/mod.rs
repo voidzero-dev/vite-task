@@ -53,7 +53,7 @@ pub fn handle_exec(
                 LD_PRELOAD,
                 encoded_payload.payload.preload_path.as_os_str().as_bytes(),
             );
-            ensure_env(&mut command.envs, PAYLOAD_ENV_NAME, &encoded_payload.encoded_string)?;
+            ensure_env(&mut command.envs, PAYLOAD_ENV_NAME, encoded_payload.encoded_string)?;
             return Ok(None);
         }
     }

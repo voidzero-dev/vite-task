@@ -10,6 +10,7 @@ use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
 
 pub struct Client<'a> {
     payload: Payload<'a>,
+    payload_bytes: &'a [u8],
     ipc_sender: Option<Sender>,
 }
 
@@ -23,7 +24,7 @@ impl<'a> Client<'a> {
         // corrupts whatever that process is printing.
         let ipc_sender = payload.channel_conf.sender(allocator);
 
-        Self { payload, ipc_sender }
+        Self { payload, payload_bytes, ipc_sender }
     }
 
     pub fn send(&self, access: PathAccess<'_>) {
@@ -36,14 +37,15 @@ impl<'a> Client<'a> {
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {
-        let payload_bytes = wincode::serialize(&self.payload).unwrap();
+        // The payload propagates to children unchanged, so forward the bytes
+        // this process was given instead of re-serializing.
         // SAFETY: FFI call to DetourCopyPayloadToProcess with valid handle and payload buffer
         unsafe {
             DetourCopyPayloadToProcess(
                 child_handle,
                 &PAYLOAD_ID,
-                payload_bytes.as_ptr().cast(),
-                payload_bytes.len().try_into().unwrap(),
+                self.payload_bytes.as_ptr().cast(),
+                self.payload_bytes.len().try_into().unwrap(),
             )
         }
     }
