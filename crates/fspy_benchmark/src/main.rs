@@ -29,10 +29,6 @@ const DYNAMIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_TARGET");
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const STATIC_TARGET: &str = env!("CARGO_BIN_FILE_FSPY_BENCHMARK_STATIC_TARGET");
 
-/// Threads the target runs, passed through to it. Two, because a process that
-/// fspy tracks rarely accesses files from one thread.
-const THREADS: &str = "2";
-
 /// What a suite reads out of its launches.
 #[derive(Clone, Copy)]
 enum Metric {
@@ -44,6 +40,10 @@ enum Metric {
 
 struct Suite {
     name: &'static str,
+    /// Threads the target runs, passed through to it. Two for most suites,
+    /// because a process that fspy tracks rarely accesses files from one
+    /// thread.
+    threads: &'static str,
     /// Opens per target thread, passed through to it.
     opens: &'static str,
     /// Measured iterations. Each one launches every arm once.
@@ -62,6 +62,7 @@ struct Suite {
 /// affords fewer of them in the same time.
 const LAUNCH_SUITE: Suite = Suite {
     name: "launch",
+    threads: "2",
     opens: "0",
     iterations: if cfg!(windows) { 150 } else { 300 },
     warmup: 5,
@@ -75,6 +76,7 @@ const LAUNCH_SUITE: Suite = Suite {
 /// joining on top.
 const ACCESS_SUITE: Suite = Suite {
     name: "access",
+    threads: "2",
     opens: "2048",
     iterations: 102,
     warmup: 3,
@@ -84,11 +86,28 @@ const ACCESS_SUITE: Suite = Suite {
 
 const RELATIVE_ACCESS_SUITE: Suite = Suite {
     name: "access-relative",
+    threads: "2",
     opens: "2048",
     iterations: 102,
     warmup: 3,
     metric: Metric::Typical,
     relative: true,
+};
+
+/// The same opens under enough threads to make them fight over the tracker's
+/// shared counters. Each record costs two atomic read-modify-writes on words
+/// every other thread is also touching, so this is the row that prices how
+/// that contention scales; the two-thread rows barely provoke it. Runs half
+/// the iterations of the plain suite over half the opens, so four times the
+/// threads cost about the same wall clock.
+const CONTENDED_ACCESS_SUITE: Suite = Suite {
+    name: "access-contended",
+    threads: "8",
+    opens: "1024",
+    iterations: 54,
+    warmup: 3,
+    metric: Metric::Typical,
+    relative: false,
 };
 
 struct Backend {
@@ -114,7 +133,8 @@ fn main() {
                 validate(base_launcher, backend.target, relative);
             }
         }
-        for suite in [&LAUNCH_SUITE, &ACCESS_SUITE, &RELATIVE_ACCESS_SUITE] {
+        for suite in [&LAUNCH_SUITE, &ACCESS_SUITE, &RELATIVE_ACCESS_SUITE, &CONTENDED_ACCESS_SUITE]
+        {
             run_suite(backend, suite, base_launcher.as_deref());
         }
     }
@@ -237,7 +257,7 @@ fn launch(launcher: &OsStr, mode: Option<&str>, backend: &Backend, suite: &Suite
         command.arg("--relative");
     }
     let output = command
-        .args([backend.target, THREADS, suite.opens])
+        .args([backend.target, suite.threads, suite.opens])
         .stdin(Stdio::null())
         .stderr(Stdio::inherit())
         .output()
