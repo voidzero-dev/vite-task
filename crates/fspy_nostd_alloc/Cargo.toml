@@ -9,7 +9,7 @@ doctest = false
 
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
-bump-scope = { workspace = true }
+bump-scope = { workspace = true, features = ["allocator-api2-02"] }
 fspy_nostd = { workspace = true }
 
 [lints]

@@ -51,9 +51,9 @@ bindgen = "0.72.1"
 bitflags = "2.10.0"
 brush-parser = "0.4.0"
 bstr = { version = "1.12.0", default-features = false }
-bump-scope = { version = "2", default-features = false, features = ["allocator-api2-02"] }
-bumpalo = { version = "3.17.0", features = ["allocator-api2", "collections"] }
-bytemuck = { version = "1.23.0", features = ["extern_crate_alloc", "must_cast"] }
+bump-scope = { version = "2", default-features = false }
+bumpalo = "3.17.0"
+bytemuck = "1.23.0"
 cargo-platform = "=0.3.2"
 cc = "1.2.39"
 clap = "4.5.53"
@@ -63,8 +63,8 @@ constcat = "0.6.1"
 copy_dir = "0.1.3"
 cow-utils = "0.1.3"
 cp_r = "0.5.2"
-crossterm = { version = "0.29.0", features = ["event-stream"] }
-csv-async = { version = "1.3.1", features = ["tokio"] }
+crossterm = "0.29.0"
+csv-async = "1.3.1"
 ctor = "1.0"
 ctrlc = "3.5.2"
 derive_more = "2.0.1"
@@ -90,7 +90,7 @@ futures-util = "0.3.31"
 globset = "0.4.18"
 getrandom = "0.4.2"
 itoa = "1.0.17"
-jsonc-parser = { version = "0.32.0", features = ["serde"] }
+jsonc-parser = "0.32.0"
 libc = "0.2.185"
 libtest-mimic = "0.8.2"
 memmap2 = "0.9.11"
@@ -99,20 +99,20 @@ napi = "3"
 napi-build = "2"
 napi-derive = "3"
 fspy_ipc_str = { path = "crates/fspy_ipc_str" }
-nix = { version = "0.31.2", features = ["dir", "signal"] }
+nix = "0.31.2"
 ntapi = "0.4.1"
 nucleo-matcher = "0.3.1"
 omnipath = "0.1.6"
 once_cell = "1.19"
 os_str_bytes = "7.1.1"
 ouroboros = "0.18.5"
-owo-colors = { version = "4.1.0", features = ["supports-colors"] }
+owo-colors = "4.1.0"
 passfd = { git = "https://github.com/polachok/passfd", rev = "d55881752c16aced1a49a75f9c428d38d3767213", default-features = false }
 notify = "8.0.0"
 path-clean = "1.0.1"
 pathdiff = "0.2.3"
 petgraph = "0.8.2"
-phf = { version = "0.13.0", features = ["macros"] }
+phf = "0.13.0"
 portable-pty = "0.9.0"
 pretty_assertions = "1.4.1"
 proc-macro2 = "1"
@@ -126,7 +126,7 @@ ref-cast = "1.0.24"
 regex = "1.11.3"
 rusqlite = "0.39.0"
 rustc-hash = "2.1.1"
-rustix = { version = "1", default-features = false, features = ["mm"] }
+rustix = { version = "1", default-features = false }
 # SeccompAction::UserNotif (SECCOMP_RET_USER_NOTIF) was added after the latest published release (v0.5.0)
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "08587106340b8e3cb361c7561411510039436857" }
 serde = "1.0.219"
@@ -137,7 +137,7 @@ shell-escape = "0.1.5"
 fspy_nostd = { path = "crates/fspy_nostd" }
 fspy_nostd_alloc = { path = "crates/fspy_nostd_alloc" }
 similar = "3.0.0"
-smallvec = { version = "2.0.0-alpha.12", features = ["std"] }
+smallvec = "2.0.0-alpha.12"
 static_cell = "2"
 snapshot_test = { path = "crates/snapshot_test" }
 socket_ipc = { path = "crates/socket_ipc" }
@@ -148,14 +148,14 @@ syn = "2"
 syscalls = { version = "0.8.0", default-features = false }
 tar = "0.4.45"
 tempfile = "3.14.0"
-test-log = { version = "0.2.18", features = ["trace"] }
+test-log = "0.2.18"
 thiserror = "2"
 tokio = "1.48.0"
 tokio-util = "0.7.17"
 toml = "1.0.0"
 tracing = "0.1.43"
 tracing-error = "0.2.1"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "serde"] }
+tracing-subscriber = "0.3.19"
 ts-rs = { version = "12.0.0" }
 tui-term = "0.3.1"
 twox-hash = "2.1.1"
@@ -183,8 +183,8 @@ which = "8.0.0"
 widestring = "1.2.0"
 winapi = "0.3.9"
 windows-sys = "0.61"
-winsafe = { version = "0.0.27", features = ["kernel"] }
-xxhash-rust = { version = "0.8.15", features = ["const_xxh3"] }
+winsafe = { version = "0.0.27" }
+xxhash-rust = "0.8.15"
 ntest = "0.9.5"
 terminal_size = "0.4"
 zstd = "0.13"

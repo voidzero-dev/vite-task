@@ -9,7 +9,7 @@ publish = false
 allocator-api2 = { workspace = true, features = ["alloc"] }
 wincode = { workspace = true }
 bstr = { workspace = true, features = ["alloc", "std"] }
-bumpalo = { workspace = true }
+bumpalo = { workspace = true, features = ["allocator-api2", "collections"] }
 derive_more = { workspace = true, features = ["debug"] }
 materialized_artifact = { workspace = true }
 fspy_shared = { workspace = true }
@@ -50,18 +50,18 @@ fspy_preload_unix = { workspace = true }
 fspy_detours_sys = { workspace = true }
 fspy_preload_windows = { workspace = true }
 winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi"] }
-winsafe = { workspace = true }
+winsafe = { workspace = true, features = ["kernel"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 tempfile = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
-csv-async = { workspace = true }
+csv-async = { workspace = true, features = ["tokio"] }
 ctor = { workspace = true }
 ntest = { workspace = true }
 subprocess_test = { workspace = true, features = ["fspy"] }
-test-log = { workspace = true }
+test-log = { workspace = true, features = ["trace"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "io-std"] }
 
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dev-dependencies]
