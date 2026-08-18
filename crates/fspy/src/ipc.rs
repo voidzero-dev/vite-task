@@ -1,5 +1,5 @@
 use fspy_shared::ipc::{
-    ChannelSize, PathAccess,
+    PathAccess,
     channel::{FrameReader, Receiver},
 };
 
@@ -17,23 +17,19 @@ const DEFAULT_SHM_CAPACITY: usize = 4 * 1024 * 1024 * 1024;
 /// nothing outside this repository should set it.
 const SHM_CAPACITY_ENV: &str = "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY";
 
-/// How much shared memory to give the next tracked run, split at one
-/// record per 64 bytes: 8 for its descriptor and 56 for its payload.
-/// Records run a few hundred bytes each, so payload space runs out well
-/// before slots do.
+/// How much shared memory to give the next tracked run.
 ///
 /// # Panics
 ///
 /// When the override is set to something that is not a byte count. It is
 /// ours to set, so a value we cannot read is a mistake worth stopping for
 /// rather than quietly ignoring.
-pub fn shm_size() -> ChannelSize {
-    let capacity = std::env::var_os(SHM_CAPACITY_ENV).map_or(DEFAULT_SHM_CAPACITY, |value| {
+pub fn shm_capacity() -> usize {
+    std::env::var_os(SHM_CAPACITY_ENV).map_or(DEFAULT_SHM_CAPACITY, |value| {
         value.to_str().and_then(|value| value.parse().ok()).unwrap_or_else(|| {
             panic!("{SHM_CAPACITY_ENV} is not a byte count: {}", value.display())
         })
-    });
-    ChannelSize { capacity, slots: capacity / 64 }
+    })
 }
 
 /// The path accesses a run reported through the IPC channel.

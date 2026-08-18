@@ -25,7 +25,6 @@ mod writer;
 use std::ptr::slice_from_raw_parts_mut;
 
 use fspy_shm::Mapping;
-pub use layout::{from_usize, to_usize};
 pub use reader::{SealError, ShmReader};
 // Only tests name a claim's failure; a sender skips the record either
 // way, so production matches on `Ok`/`Err` alone.

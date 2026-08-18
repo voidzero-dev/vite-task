@@ -8,22 +8,6 @@ pub use fspy_ipc_str::IpcStr;
 pub use ipc_path::IpcPath;
 use wincode::{SchemaRead, SchemaWrite};
 
-/// How much shared memory a channel gets, and how many records fit in it.
-///
-/// Both numbers come from the caller: this crate has no way to guess how
-/// many records a workload makes. Both ends of one channel must agree on
-/// the slot count, which the receiver passes to `channel` and every sender
-/// reads back out of the `ChannelConf`.
-#[derive(Clone, Copy, Debug)]
-pub struct ChannelSize {
-    /// Bytes of shared memory. The descriptor table takes the front of it
-    /// and payloads take the rest.
-    pub capacity: usize,
-    /// Descriptor slots, one per record. A record past this many is
-    /// refused just like one the payload area has no room for.
-    pub slots: usize,
-}
-
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct AccessMode(u8);
 

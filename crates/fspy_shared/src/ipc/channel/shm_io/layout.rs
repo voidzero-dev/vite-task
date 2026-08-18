@@ -102,30 +102,16 @@ const _: () = assert!(size_of::<Counters>() == 2 * size_of::<AtomicU64>());
 // 3. **Receiver read.** `Iter` loads each descriptor with `Acquire`, so a
 //    descriptor it sees brings the payload bytes along.
 
-/// Requires the target's `usize` to be as wide as a `u64`, which is what
-/// makes [`to_usize`] and [`from_usize`] lossless. Stated once, and cited
-/// by both.
-const EQUAL_WIDTHS: () =
-    assert!(size_of::<usize>() == size_of::<u64>(), "requires a 64-bit target");
-
 /// Converts an integer into a `usize`.
 ///
-/// Never loses bits: the bound takes only what fits a `u64`, and
-/// [`EQUAL_WIDTHS`] lets only targets whose `usize` is that wide build
-/// this module. Those asserts are why the casts are safe, so the pair sits
-/// here rather than at module scope. They are the only `as` in the
-/// protocol.
+/// Never loses bits: the bound takes only what fits a `u64`, and the
+/// assert lets only targets whose `usize` is that wide build this module.
+/// That assert is why the cast is safe, so it sits here rather than at
+/// module scope. It is the only `as` in the protocol.
 #[expect(clippy::cast_possible_truncation, reason = "the assert allows only equal widths")]
 pub fn to_usize(value: impl Into<u64>) -> usize {
-    const { EQUAL_WIDTHS };
+    const { assert!(size_of::<usize>() == size_of::<u64>(), "requires a 64-bit target") };
     value.into() as usize
-}
-
-/// Converts a `usize` into a `u64`; the inverse of [`to_usize`].
-#[expect(clippy::as_conversions, reason = "the assert allows only equal widths")]
-pub const fn from_usize(value: usize) -> u64 {
-    const { EQUAL_WIDTHS };
-    value as u64
 }
 
 /// Casts to a pointer of another type, returning `None` when the pointer

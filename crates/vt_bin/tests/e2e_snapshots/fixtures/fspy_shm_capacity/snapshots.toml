@@ -1,7 +1,7 @@
 [[e2e]]
 name = "shm_capacity_env_sizes_the_tracking_channel"
 comment = """
-`VP_RUN_INTERNAL_FSPY_SHM_CAPACITY` sizes the shared memory a tracked task reports its file accesses through. The task makes twenty thousand of them, and a 64 KiB channel holds a thousand: one descriptor slot per 64 bytes of the region.
+`VP_RUN_INTERNAL_FSPY_SHM_CAPACITY` sizes the shared memory a tracked task reports its file accesses through. The task makes twenty thousand of them, and this run leaves 64 KiB for them once the descriptor table has taken its half-gibibyte of sparse address space, which is nowhere near enough.
 
 The task runs to the end anyway: recording must never stop the program doing the work, so the accesses past that go unrecorded and the process carries on to a clean exit, printing its last line. What the run cannot claim is that it saw every file the task touched, so it is not cached, and the second run says the same rather than replaying an entry built from part of a trace.
 
@@ -17,9 +17,9 @@ steps = [
   ], envs = [
     [
       "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY",
-      "65536",
+      "536936448",
     ],
-  ], comment = "64 KiB, a thousand slots for twenty thousand accesses" },
+  ], comment = "512 MiB of table and 64 KiB of room for records" },
   { argv = [
     "vt",
     "run",
@@ -28,7 +28,7 @@ steps = [
   ], envs = [
     [
       "VP_RUN_INTERNAL_FSPY_SHM_CAPACITY",
-      "65536",
+      "536936448",
     ],
   ], comment = "nothing was cached to replay" },
 ]
