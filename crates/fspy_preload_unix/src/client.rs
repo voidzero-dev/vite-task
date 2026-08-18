@@ -45,5 +45,5 @@ fn init_client() {
     // SAFETY: the ctor only reads the process environment while constructing
     // the client and does not retain borrowed environment views.
     let current = unsafe { fspy_nostd::env::current() }.unwrap();
-    CLIENT.set(Client::from_env(current.envs())).unwrap();
+    CLIENT.set(Client::from_env(current.envs(), fspy_nostd_alloc::pooled_bump())).unwrap();
 }

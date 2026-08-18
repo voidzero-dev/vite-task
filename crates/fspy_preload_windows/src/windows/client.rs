@@ -1,5 +1,6 @@
 use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
 
+use allocator_api2::alloc::Allocator;
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
     ipc::{PathAccess, channel::Sender},
@@ -13,14 +14,14 @@ pub struct Client<'a> {
 }
 
 impl<'a> Client<'a> {
-    pub fn from_payload_bytes(payload_bytes: &'a [u8]) -> Self {
+    pub fn from_payload_bytes(payload_bytes: &'a [u8], allocator: impl Allocator) -> Self {
         let payload: Payload<'a> = wincode::deserialize_exact(payload_bytes).unwrap();
 
         // `None` when the channel is already over, which happens when this
         // process starts after the root target exited. Nothing is said
         // about it: a detours DLL writing to the traced process's stderr
         // corrupts whatever that process is printing.
-        let ipc_sender = payload.channel_conf.sender();
+        let ipc_sender = payload.channel_conf.sender(allocator);
 
         Self { payload, ipc_sender }
     }

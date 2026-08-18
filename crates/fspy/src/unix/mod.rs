@@ -80,7 +80,8 @@ impl SpyImpl {
 
         #[cfg(not(target_env = "musl"))]
         let (ipc_channel_conf, ipc_receiver) =
-            channel(crate::ipc::shm_capacity()).map_err(SpawnError::ChannelCreation)?;
+            channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
+                .map_err(SpawnError::ChannelCreation)?;
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]

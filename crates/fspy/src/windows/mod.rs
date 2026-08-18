@@ -84,7 +84,8 @@ impl SpyImpl {
         command.creation_flags(CREATE_SUSPENDED);
 
         let (channel_conf, receiver) =
-            channel(crate::ipc::shm_capacity()).map_err(SpawnError::ChannelCreation)?;
+            channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
+                .map_err(SpawnError::ChannelCreation)?;
 
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;

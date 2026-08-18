@@ -10,6 +10,7 @@ pub mod raw_exec;
 
 use std::{ffi::OsStr, fmt::Debug, os::unix::ffi::OsStrExt as _, path::Path};
 
+use allocator_api2::alloc::Allocator;
 use convert::{ToAbsolutePath, ToAccessMode};
 use fspy_shared::ipc::{PathAccess, channel::Sender};
 use fspy_shared_unix::{
@@ -47,14 +48,17 @@ impl Client {
     /// Panics when the payload is missing, malformed, or cannot be decoded,
     /// and when the channel is there but cannot be attached to (see
     /// [`ChannelConf::sender`](fspy_shared::ipc::channel::ChannelConf::sender)).
-    pub fn from_env(envs: impl Iterator<Item = fspy_nostd::env::Entry>) -> Self {
+    pub fn from_env(
+        envs: impl Iterator<Item = fspy_nostd::env::Entry>,
+        allocator: impl Allocator,
+    ) -> Self {
         let encoded_payload = decode_payload_from_env(envs).unwrap();
 
         // `None` when the channel is already over, which happens when this
         // process starts after the root target exited. Nothing is said
         // about it: a preload library writing to the traced process's
         // stderr corrupts whatever that process is printing.
-        let ipc_sender = encoded_payload.payload.ipc_channel_conf.sender();
+        let ipc_sender = encoded_payload.payload.ipc_channel_conf.sender(allocator);
 
         Self { encoded_payload, ipc_sender }
     }

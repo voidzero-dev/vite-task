@@ -567,7 +567,9 @@ mod tests {
 
         let shm_path = crate::ipc::channel::shm_backing_path().unwrap();
         let shm_name = shm_path.to_str().expect("test temp dir is UTF-8").to_owned();
-        let c_path = crate::ipc::channel::os_c_string(shm_path.as_os_str()).unwrap();
+        let c_path =
+            crate::ipc::channel::os_c_string(shm_path.as_os_str(), allocator_api2::alloc::Global)
+                .unwrap();
         let handle = fspy_shm::create(c_path.as_c_str().as_thin(), SHM_SIZE).unwrap();
         let _keeper = crate::ipc::channel::ShmKeeper { path: c_path };
         // Map before the children run. Windows keeps views coherent while they
@@ -580,9 +582,11 @@ mod tests {
                 let cmd = command_for_fn!(
                     (shm_name.clone(), child_index),
                     |(shm_name, child_index): (String, usize)| {
-                        let c_path =
-                            crate::ipc::channel::os_c_string(std::ffi::OsStr::new(&shm_name))
-                                .unwrap();
+                        let c_path = crate::ipc::channel::os_c_string(
+                            std::ffi::OsStr::new(&shm_name),
+                            allocator_api2::alloc::Global,
+                        )
+                        .unwrap();
                         let mapping =
                             fspy_shm::open(c_path.as_c_str().as_thin()).unwrap().map().unwrap();
                         // SAFETY: `mapping` is a freshly mapped shared memory
@@ -634,13 +638,19 @@ mod tests {
 
         let shm_path = crate::ipc::channel::shm_backing_path().unwrap();
         let shm_name = shm_path.to_str().expect("test temp dir is UTF-8").to_owned();
-        let c_path = crate::ipc::channel::os_c_string(shm_path.as_os_str()).unwrap();
+        let c_path =
+            crate::ipc::channel::os_c_string(shm_path.as_os_str(), allocator_api2::alloc::Global)
+                .unwrap();
         let handle = fspy_shm::create(c_path.as_c_str().as_thin(), SHM_SIZE).unwrap();
         let _keeper = crate::ipc::channel::ShmKeeper { path: c_path };
         let mapping = handle.map().unwrap();
 
         let cmd = command_for_fn!(shm_name, |shm_name: String| {
-            let c_path = crate::ipc::channel::os_c_string(std::ffi::OsStr::new(&shm_name)).unwrap();
+            let c_path = crate::ipc::channel::os_c_string(
+                std::ffi::OsStr::new(&shm_name),
+                allocator_api2::alloc::Global,
+            )
+            .unwrap();
             let child_mapping = fspy_shm::open(c_path.as_c_str().as_thin()).unwrap().map().unwrap();
             // SAFETY: see `real_shm_across_processes`.
             let writer = unsafe { ShmWriter::new(child_mapping, S) }.unwrap();

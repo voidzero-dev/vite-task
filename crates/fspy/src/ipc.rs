@@ -1,3 +1,4 @@
+use allocator_api2::alloc::Global;
 use fspy_shared::ipc::{
     PathAccess,
     channel::{FrameReader, Receiver},
@@ -37,7 +38,7 @@ pub struct ChannelAccesses {
     frames: FrameReader,
 }
 
-impl TryFrom<Receiver> for ChannelAccesses {
+impl TryFrom<Receiver<Global>> for ChannelAccesses {
     type Error = TrackingIncomplete;
 
     /// Closes the channel and takes every record it collected.
@@ -52,7 +53,7 @@ impl TryFrom<Receiver> for ChannelAccesses {
     /// [`TrackingIncomplete`] when a tracked process could not record
     /// something it went on to do. What did arrive is then a subset of
     /// what the run really touched, so none of it is handed back.
-    fn try_from(receiver: Receiver) -> Result<Self, TrackingIncomplete> {
+    fn try_from(receiver: Receiver<Global>) -> Result<Self, TrackingIncomplete> {
         Ok(Self { frames: receiver.close().map_err(|_| TrackingIncomplete)? })
     }
 }

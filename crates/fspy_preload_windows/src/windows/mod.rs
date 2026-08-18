@@ -45,7 +45,7 @@ fn dll_main(_hinstance: HINSTANCE, reason: u32) -> winsafe::SysResult<()> {
             let payload_bytes = unsafe {
                 slice::from_raw_parts::<'static, u8>(payload_ptr, payload_len.try_into().unwrap())
             };
-            let client = Client::from_payload_bytes(payload_bytes);
+            let client = Client::from_payload_bytes(payload_bytes, fspy_nostd_alloc::pooled_bump());
             // SAFETY: setting the global client during single-threaded DLL_PROCESS_ATTACH
             unsafe { set_global_client(client) };
 

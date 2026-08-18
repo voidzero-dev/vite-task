@@ -1231,6 +1231,7 @@ dependencies = [
 name = "fspy"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "bstr",
  "bumpalo",
@@ -1382,9 +1383,11 @@ dependencies = [
 name = "fspy_preload_windows"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "constcat",
  "fspy_detours_sys",
  "fspy_nostd",
+ "fspy_nostd_alloc",
  "fspy_shared",
  "ntapi",
  "smallvec 2.0.0-alpha.12",
