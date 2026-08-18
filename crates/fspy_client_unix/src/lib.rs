@@ -103,6 +103,7 @@ impl<'a> Client<'a> {
         &self,
         config: ExecResolveConfig,
         raw_exec: RawExec,
+        allocator: impl Allocator,
         f: impl FnOnce(RawExec, Option<PreExec>) -> nix::Result<R>,
     ) -> nix::Result<R> {
         // SAFETY: raw_exec contains valid pointers to C strings and
@@ -111,7 +112,7 @@ impl<'a> Client<'a> {
         let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |mode, path| {
             self.send(mode, path);
         })?;
-        RawExec::from_exec(exec, |raw_command| f(raw_command, pre_exec))
+        RawExec::from_exec(exec, allocator, |raw_command| f(raw_command, pre_exec))
     }
 
     /// Resolves and reports one intercepted file access.
@@ -128,12 +129,12 @@ impl<'a> Client<'a> {
         &self,
         path: impl ToAbsolutePath,
         mode: impl ToAccessMode,
+        allocator: impl Allocator,
     ) -> anyhow::Result<()> {
         // SAFETY: mode contains a valid pointer (if ModeStr) or a plain value,
         // as provided by the caller.
         let mode = unsafe { mode.to_access_mode() };
-        let arena = fspy_nostd_alloc::pooled_bump();
-        let Some(abs_path) = path.to_absolute_path(&arena)? else {
+        let Some(abs_path) = path.to_absolute_path(&allocator)? else {
             return Ok(());
         };
         self.send(mode, Path::new(OsStr::from_bytes(abs_path.as_units())));

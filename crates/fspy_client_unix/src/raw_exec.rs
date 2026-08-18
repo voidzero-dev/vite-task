@@ -1,5 +1,6 @@
 use std::{ffi::CStr, ptr::null};
 
+use allocator_api2::alloc::Allocator;
 use bstr::{BStr, BString, ByteSlice};
 use fspy_shared_unix::exec::Exec;
 
@@ -45,16 +46,16 @@ impl RawExec {
 
     fn to_c_str_array<R>(
         mut strs: Vec<BString>,
+        allocator: impl Allocator,
         f: impl FnOnce(*const *const libc::c_char) -> R,
     ) -> R {
         // The pointer array exists only for the `f` call below, and building
         // it must not go through libc malloc: exec runs in the child of
         // `fork()` in multithreaded programs (`posix_spawn` forks then
         // execs), where malloc's lock may be held by a thread that no longer
-        // exists. A per-call arena has exactly this lifetime, and hands back
-        // the memory when the call ends.
-        let arena = fspy_nostd_alloc::pooled_bump();
-        let mut ptr_vec = allocator_api2::vec::Vec::with_capacity_in(strs.len() + 1, &arena);
+        // exists. The interception's per-call bump has exactly this
+        // lifetime, and hands back the memory when the call ends.
+        let mut ptr_vec = allocator_api2::vec::Vec::with_capacity_in(strs.len() + 1, allocator);
         for s in &mut strs {
             s.push(0);
             ptr_vec.push(s.as_ptr().cast::<libc::c_char>());
@@ -92,7 +93,7 @@ impl RawExec {
         Exec { program, args, envs }
     }
 
-    pub fn from_exec<R>(cmd: Exec, f: impl FnOnce(Self) -> R) -> R {
+    pub fn from_exec<R>(cmd: Exec, allocator: impl Allocator, f: impl FnOnce(Self) -> R) -> R {
         let envs: Vec<BString> = cmd
             .envs
             .into_iter()
@@ -107,8 +108,8 @@ impl RawExec {
             .collect();
 
         Self::to_c_str(cmd.program, |prog| {
-            Self::to_c_str_array(cmd.args, |argv| {
-                Self::to_c_str_array(envs, |envp| f(Self { prog, argv, envp }))
+            Self::to_c_str_array(cmd.args, &allocator, |argv| {
+                Self::to_c_str_array(envs, &allocator, |envp| f(Self { prog, argv, envp }))
             })
         })
     }

@@ -1372,6 +1372,7 @@ dependencies = [
 name = "fspy_preload_unix"
 version = "0.0.0"
 dependencies = [
+ "allocator-api2",
  "ctor",
  "fspy_client_unix",
  "fspy_nostd",

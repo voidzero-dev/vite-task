@@ -32,9 +32,10 @@ pub unsafe fn handle_open(path: impl ToAbsolutePath, mode: impl ToAccessMode) {
         let _reset = ResetHandling(handling);
 
         if let Some(client) = global_client() {
+            let allocator = fspy_nostd_alloc::pooled_bump();
             // SAFETY: path and mode contain valid pointers/values forwarded
             // from the interposed function's caller.
-            unsafe { client.try_handle_open(path, mode) }.unwrap();
+            unsafe { client.try_handle_open(path, mode, allocator) }.unwrap();
         }
     });
 }

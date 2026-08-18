@@ -47,6 +47,7 @@ unsafe fn handle_posix_spawn(
         client.handle_exec::<c_int>(
             config,
             RawExec { prog: file, argv: argv.cast(), envp: envp.cast() },
+            fspy_nostd_alloc::pooled_bump(),
             |raw_command, pre_exec| {
                 let call_original = move || {
                     original(
