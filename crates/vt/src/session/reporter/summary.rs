@@ -577,7 +577,7 @@ impl TaskResult {
         } = self
         {
             return Str::from(
-                "→ Not cached: tracking ran out of room for this task's file accesses",
+                "→ Not cached: this task used more files than automatic tracking can record. Configure `input` and `output` manually to enable caching.",
             );
         }
         // fspy-unsupported-on-this-OS message — same overrides precedence as above

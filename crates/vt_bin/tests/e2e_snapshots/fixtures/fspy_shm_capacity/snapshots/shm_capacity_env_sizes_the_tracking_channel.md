@@ -25,7 +25,7 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] fspy-shm-capacity#stat: $ vtt stat-many 20000 ✓
-      → Not cached: tracking ran out of room for this task's file accesses
+      → Not cached: this task used more files than automatic tracking can record. Configure `input` and `output` manually to enable caching.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -48,6 +48,6 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] fspy-shm-capacity#stat: $ vtt stat-many 20000 ✓
-      → Not cached: tracking ran out of room for this task's file accesses
+      → Not cached: this task used more files than automatic tracking can record. Configure `input` and `output` manually to enable caching.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
