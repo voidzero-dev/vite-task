@@ -60,6 +60,14 @@ fn flush(client: &Client) {
     let _ = client.get_env(OsStr::new("__VP_TEST_FLUSH__"), false).unwrap();
 }
 
+/// Opens a stream that speaks the wire protocol directly.
+///
+/// Every raw client must wait for the server — a response, or the close that
+/// follows a protocol error — before its work ends. On Windows the client
+/// reaches a pipe instance before the server's `accept` sees it, so a client
+/// that waits for nothing can finish while its connection is still unaccepted,
+/// and the server drops that instance, frames and all, when it stops
+/// accepting. Waiting is what puts the connection in the server's hands.
 fn connect_raw(name: &OsStr) -> RawStream {
     RawStream::connect(name).expect("connect raw")
 }
@@ -72,10 +80,14 @@ fn send_frame(stream: &mut RawStream, request: &Request<'_>) {
     stream.flush().expect("flush");
 }
 
-fn recv_get_env_response(stream: &mut RawStream) -> GetEnvResponse {
+fn recv_response_len(stream: &mut RawStream) -> usize {
     let mut len_bytes = [0u8; 4];
     stream.read_exact(&mut len_bytes).expect("read len");
-    let len = u32::from_le_bytes(len_bytes) as usize;
+    u32::from_le_bytes(len_bytes) as usize
+}
+
+fn recv_get_env_response(stream: &mut RawStream) -> GetEnvResponse {
+    let len = recv_response_len(stream);
     let mut buf = vec![0; len];
     stream.read_exact(&mut buf).expect("read body");
     wincode::deserialize_exact(&buf).expect("deserialize response")
@@ -122,33 +134,67 @@ fn raw_disable_cache_request_disables_cache() {
     assert!(reports.cache_disabled);
 }
 
-/// A client that dies between sending a request and reading the answer must
-/// only end its own stream, never fail the session server.
+/// A client that dies while the server is answering it must end only its own
+/// stream. The work the server already did stays recorded, another client
+/// keeps being served across the death, and the driver still finishes clean.
 #[test]
-fn client_gone_before_reading_response_is_not_an_error() {
-    // Enough env entries that the response cannot fit any pipe buffer: the
-    // server's write can only finish after this client reads, and it never
-    // does, so the write reliably fails with a broken pipe.
+fn client_gone_mid_response_only_ends_its_own_stream() {
+    const ENV_COUNT: usize = 4096;
+
+    // Enough env entries that the answer cannot fit any pipe buffer, so the
+    // server can only finish writing it after the asking client reads — and
+    // that client never will.
     let mut envs = FxHashMap::default();
-    for i in 0..4096 {
+    for i in 0..ENV_COUNT {
         let mut key = OsString::from("VP_TEST_");
         key.push(i.to_string());
         envs.insert(Arc::<OsStr>::from(&*key), Arc::<OsStr>::from(OsStr::new(&*"v".repeat(64))));
     }
+    envs.insert(
+        Arc::<OsStr>::from(OsStr::new("SURVIVOR")),
+        Arc::<OsStr>::from(OsStr::new("alive")),
+    );
 
     let reports = run_with_server(envs, |envs| {
-        let name = &envs[0].1;
-        let mut stream = connect_raw(name);
-        send_frame(&mut stream, &Request::DisableCache);
+        // A well-behaved client, connected before the other one dies and used
+        // after, so its stream spans the death.
+        let survivor = connect(&envs);
+
+        let mut doomed = connect_raw(&envs[0].1);
         send_frame(
-            &mut stream,
-            &Request::GetEnvs { query: RawEnvQuery::Prefix("VP_TEST_"), tracked: false },
+            &mut doomed,
+            &Request::GetEnvs { query: RawEnvQuery::Prefix("VP_TEST_"), tracked: true },
         );
+        // Take the answer's length and nothing else. Those four bytes arrive
+        // only once the server has read the request, looked every env up, and
+        // started writing; the body behind them outgrows every pipe buffer, so
+        // that write is still waiting for a reader on the line below.
+        let len = recv_response_len(&mut doomed);
+        assert!(len > 64 * 1024, "answer must outgrow the pipe buffers, got {len} bytes");
+
+        // Nobody has read that body, so the write is still unfinished right
+        // now. A stuck client must not hold up anyone else.
+        let stuck = survivor.get_env(OsStr::new("SURVIVOR"), false).unwrap();
+        assert_eq!(stuck.as_deref(), Some(OsStr::new("alive")));
+
+        drop(doomed);
+
+        // And the same stream keeps working once the other one is dead.
+        let found = survivor.get_env(OsStr::new("SURVIVOR"), true).unwrap();
+        assert_eq!(found.as_deref(), Some(OsStr::new("alive")));
     })
     .expect("driver must survive the dead client");
 
-    // The frame before the abandoned request still got through.
-    assert!(reports.cache_disabled);
+    // The dead client's request was handled; only its answer went nowhere.
+    let answered = reports
+        .tracked_get_envs
+        .get(&EnvQuery::Prefix(Arc::from("VP_TEST_")))
+        .expect("the dead client's query reached the handler");
+    assert_eq!(answered.matches.len(), ENV_COUNT);
+
+    // The other stream was untouched by the death.
+    let served = reports.tracked_get_env.get(OsStr::new("SURVIVOR")).expect("survivor recorded");
+    assert_eq!(served.as_deref(), Some(OsStr::new("alive")));
 }
 
 #[test]
