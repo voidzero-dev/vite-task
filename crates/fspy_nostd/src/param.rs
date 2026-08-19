@@ -9,16 +9,15 @@
 //! vector, the value is learned from syscall behavior that any kernel
 //! version guarantees: see [`linux::page_size`].
 //!
-//! On other unix platforms (macOS, where every syscall goes through
-//! libSystem by platform contract anyway) it is rustix's `sysconf`, a
-//! lock-free read of startup data.
+//! On macOS, where every syscall goes through libSystem by platform contract
+//! anyway, it calls `sysconf` directly.
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub use linux::page_size;
-#[cfg(not(target_os = "linux"))]
-pub use rustix::param::page_size;
+#[cfg(target_os = "macos")]
+pub use mac::page_size;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "none"))]
 mod linux {
     use core::{
         ptr,
@@ -70,16 +69,12 @@ mod linux {
     /// as the first offset the kernel accepts: for a power-of-two page
     /// size P, the first power of two P divides is P itself.
     ///
-    /// Why not `rustix::param::page_size()` (fine on macOS, used there)?
-    /// Its Linux sources are exactly the ones this crate must not assume:
-    /// with `use-libc-auxv` it is libc's `sysconf`; without, its lazy init
-    /// needs `prctl(PR_GET_AUXV)` (kernel 6.4+) or `/proc/self/auxv`, it
-    /// panics when both are unavailable, and with rustix's `alloc` feature
-    /// enabled — which Cargo feature unification lets any other rustix
-    /// user in the build graph turn on for our copy — the `/proc` path
-    /// heap-allocates, which is forbidden in the contexts this crate
-    /// serves. The probe has none of those modes: no allocation, no panic,
-    /// no minimum kernel, and its worst case is 0.
+    /// Why not an auxiliary-vector helper? Its Linux sources are exactly the
+    /// ones this crate must not assume: libc startup state,
+    /// `prctl(PR_GET_AUXV)` (kernel 6.4+), `/proc/self/auxv`, or an initial
+    /// stack pointer retained from process entry. The probe has none of those
+    /// requirements: no allocation, no panic, no minimum kernel, and its worst
+    /// case is 0.
     #[cold]
     fn probe_page_size() -> usize {
         // Large enough that every probe below stays inside the mapping
@@ -129,19 +124,24 @@ mod linux {
     mod tests {
         use super::*;
 
-        /// Cross-validates the probe against rustix's auxv-based answer
-        /// (a dev-dependency here; CI Linux runners always have `/proc`).
-        #[test]
-        fn probe_matches_rustix() {
-            assert_eq!(page_size(), rustix::param::page_size());
-            #[cfg(target_arch = "x86_64")]
-            assert_eq!(page_size(), 4096);
-        }
-
         #[test]
         fn probe_is_stable_and_cached() {
             assert_eq!(probe_page_size(), page_size());
             assert_eq!(page_size(), page_size());
+            #[cfg(target_arch = "x86_64")]
+            assert_eq!(page_size(), 4096);
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    /// Returns the process page size, or zero if libSystem cannot report it.
+    #[must_use]
+    pub fn page_size() -> usize {
+        // SAFETY: `sysconf` accepts this constant by value and accesses no
+        // caller-owned memory.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        usize::try_from(page).unwrap_or(0)
     }
 }

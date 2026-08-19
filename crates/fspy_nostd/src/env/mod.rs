@@ -13,12 +13,12 @@ use bstr::BStr;
 
 use crate::{CStr, Fat};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "none"))]
 mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub use linux::{Current, FatArgs, FatEnvs, current};
 #[cfg(target_os = "macos")]
 pub use mac::{Current, FatArgs, FatEnvs, ThinArgs, ThinEnvs, args, current, envs};

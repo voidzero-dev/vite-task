@@ -8,47 +8,31 @@
 #![cfg_attr(not(test), no_std)]
 
 mod c_str;
+mod error;
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+mod fd;
 #[cfg(windows)]
 mod windows;
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 pub mod env;
-#[cfg(any(unix, windows))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", windows))]
 pub mod fs;
-#[cfg(any(unix, windows))]
+#[cfg(any(target_os = "linux", target_os = "none"))]
+pub mod io;
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", windows))]
 pub mod mm;
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 pub mod param;
 
 pub use c_str::{CStr, CStrUnit, Fat, OsCStr, Thin, Units, WideCStr};
+pub use error::{Error, Result};
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+pub use fd::{BorrowedFd, CWD, OwnedFd, RawFd};
 #[cfg(windows)]
 pub use windows::{
     BorrowedHandle, OwnedHandle, RawHandle, SecurityAttributes, bool_result, get_module_handle,
-    last_error,
 };
-
-#[cfg(windows)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(transparent)]
-pub struct Error(u32);
-
-#[cfg(windows)]
-impl Error {
-    /// Creates an error from a raw Windows error code.
-    #[must_use]
-    pub const fn from_raw_os_error(code: u32) -> Self {
-        Self(code)
-    }
-
-    /// Returns the raw Windows error code.
-    #[must_use]
-    pub const fn raw_os_error(self) -> u32 {
-        self.0
-    }
-}
-
-pub type Result<T> = core::result::Result<T, Error>;
-
 #[cfg(windows)]
 #[doc(hidden)]
 pub use windows_sys::w as __wide_cstr_literal;
@@ -65,29 +49,3 @@ macro_rules! wide_cstr {
         }
     }};
 }
-
-#[cfg(unix)]
-pub use rustix::{
-    fd::{AsRawFd, BorrowedFd, OwnedFd},
-    fs::CWD,
-    io::Errno as Error,
-};
-
-// Compile-time proof that rustix uses its raw-syscall backend (`linux_raw`)
-// on Linux — and with it, that rustix calls do not go through libc there.
-// `rustix::runtime` is gated on that backend (`#[cfg(linux_raw)]`), so this
-// reference fails to resolve, failing the whole build, whenever anything
-// selects the libc backend instead: the `rustix/use-libc` feature (which any
-// crate in the dependency graph can enable through feature unification, where
-// no build script could ever see it), `RUSTFLAGS=--cfg=rustix_use_libc`, or a
-// target rustix has no raw backend for. Miri also forces the libc backend, so
-// it is exempted: it type-checks rather than ships code.
-//
-// The module's contents are not covered by rustix's stability promise, so a
-// rustix upgrade may break this line. If that happens, re-point it at any
-// other `rustix::runtime` item — do not delete it: it is the only enforcement
-// of the raw-rustix rule above.
-#[cfg(all(target_os = "linux", not(miri)))]
-const _: () = {
-    let _ = rustix::runtime::exit_group;
-};

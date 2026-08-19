@@ -92,6 +92,7 @@ getrandom = "0.4.2"
 itoa = "1.0.17"
 jsonc-parser = "0.32.0"
 libc = "0.2.185"
+linux-raw-sys = { version = "0.12", default-features = false }
 libtest-mimic = "0.8.2"
 memmap2 = "0.9.11"
 monostate = "1.0.2"
@@ -126,7 +127,6 @@ ref-cast = "1.0.24"
 regex = "1.11.3"
 rusqlite = "0.39.0"
 rustc-hash = "2.1.1"
-rustix = { version = "1", default-features = false }
 # SeccompAction::UserNotif (SECCOMP_RET_USER_NOTIF) was added after the latest published release (v0.5.0)
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "08587106340b8e3cb361c7561411510039436857" }
 serde = "1.0.219"

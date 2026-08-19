@@ -1,15 +1,22 @@
 use core::{mem::MaybeUninit, slice};
 
-use rustix::{
-    fd::{AsFd as _, AsRawFd as _, FromRawFd as _, OwnedFd},
-    fs::{AtFlags, Mode, OFlags},
+use crate::{
+    BorrowedFd, CStr, CWD, Error, Fat, OwnedFd, Result, Thin,
+    fs::{AtFlags, Mode, OFlags, Stat},
 };
-
-use crate::{BorrowedFd, CStr, CWD, Error, Fat, Result, Thin};
 
 // Darwin UAPI `MAXPATHLEN`.
 pub(super) const PATH_MAX: usize = 1024;
 const _: () = assert!(libc::PATH_MAX == 1024);
+pub(super) const O_RDONLY: u32 = libc::O_RDONLY.cast_unsigned();
+pub(super) const O_RDWR: u32 = libc::O_RDWR.cast_unsigned();
+pub(super) const O_CREAT: u32 = libc::O_CREAT.cast_unsigned();
+pub(super) const O_EXCL: u32 = libc::O_EXCL.cast_unsigned();
+pub(super) const O_CLOEXEC: u32 = libc::O_CLOEXEC.cast_unsigned();
+pub(super) const AT_REMOVEDIR: u32 = libc::AT_REMOVEDIR.cast_unsigned();
+pub(super) type ModeBits = libc::mode_t;
+pub(super) const S_IRUSR: ModeBits = libc::S_IRUSR;
+pub(super) const S_IWUSR: ModeBits = libc::S_IWUSR;
 
 #[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
 pub(super) fn openat<R>(
@@ -29,8 +36,7 @@ pub(super) fn openat<R>(
         )
     };
     if fd == -1 {
-        // SAFETY: libSystem stored this call's error before returning -1.
-        return Err(Error::from_raw_os_error(unsafe { *libc::__error() }));
+        return Err(Error::last_os_error());
     }
 
     // SAFETY: ownership of the newly opened descriptor transfers here.
@@ -44,9 +50,25 @@ pub(super) fn unlinkat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFla
     let result = unsafe {
         libc::unlinkat(dirfd.as_raw_fd(), path.as_ptr().cast(), flags.bits().cast_signed())
     };
-    if result == -1 {
-        // SAFETY: libSystem stored this call's error before returning -1.
-        Err(Error::from_raw_os_error(unsafe { *libc::__error() }))
+    if result == -1 { Err(Error::last_os_error()) } else { Ok(()) }
+}
+
+pub(super) fn fstat(fd: BorrowedFd<'_>) -> Result<Stat> {
+    let mut raw = core::mem::MaybeUninit::<libc::stat>::zeroed();
+    // SAFETY: `fd` remains borrowed and `raw` is writable for the call.
+    if unsafe { libc::fstat(fd.as_raw_fd(), raw.as_mut_ptr()) } == -1 {
+        return Err(Error::last_os_error());
+    }
+    // SAFETY: a successful `fstat` initialized the complete structure.
+    let raw = unsafe { raw.assume_init() };
+    Ok(Stat { st_size: raw.st_size })
+}
+
+pub(super) fn ftruncate(fd: BorrowedFd<'_>, len: u64) -> Result<()> {
+    let len = i64::try_from(len).map_err(|_| Error::OVERFLOW)?;
+    // SAFETY: `fd` remains borrowed and the length is passed by value.
+    if unsafe { libc::ftruncate(fd.as_raw_fd(), len) } == -1 {
+        Err(Error::last_os_error())
     } else {
         Ok(())
     }
@@ -75,8 +97,7 @@ pub fn fcntl_getpath<'buf>(
         libc::fcntl(fd.as_raw_fd(), libc::F_GETPATH, buf.as_mut_ptr().cast::<libc::c_char>())
     };
     if result == -1 {
-        // SAFETY: libSystem stored this call's error before returning -1.
-        return Err(Error::from_raw_os_error(unsafe { *libc::__error() }));
+        return Err(Error::last_os_error());
     }
 
     // SAFETY: `F_GETPATH` wrote a NUL-terminated pathname into `buf`.

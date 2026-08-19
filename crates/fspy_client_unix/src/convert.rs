@@ -2,7 +2,7 @@ use std::ffi::CStr;
 
 use allocator_api2::{alloc::Allocator, vec::Vec};
 use bstr::ByteSlice;
-use fspy_nostd::{AsRawFd as _, BorrowedFd, CWD};
+use fspy_nostd::{BorrowedFd, CWD};
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int};
 

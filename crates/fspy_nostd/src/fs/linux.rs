@@ -1,14 +1,21 @@
 use core::{mem::MaybeUninit, slice};
 
-use rustix::fd::FromRawFd as _;
-
 use crate::{
-    AsRawFd as _, BorrowedFd, CStr, Error, Fat, OwnedFd, Result, Thin,
-    fs::{AtFlags, Mode, OFlags},
+    BorrowedFd, CStr, Error, Fat, OwnedFd, Result, Thin,
+    fs::{AtFlags, Mode, OFlags, Stat},
 };
 
 // Linux UAPI `PATH_MAX`.
 pub(super) const PATH_MAX: usize = 4096;
+pub(super) const O_RDONLY: u32 = linux_raw_sys::general::O_RDONLY;
+pub(super) const O_RDWR: u32 = linux_raw_sys::general::O_RDWR;
+pub(super) const O_CREAT: u32 = linux_raw_sys::general::O_CREAT;
+pub(super) const O_EXCL: u32 = linux_raw_sys::general::O_EXCL;
+pub(super) const O_CLOEXEC: u32 = linux_raw_sys::general::O_CLOEXEC;
+pub(super) const AT_REMOVEDIR: u32 = linux_raw_sys::general::AT_REMOVEDIR;
+pub(super) type ModeBits = u32;
+pub(super) const S_IRUSR: ModeBits = linux_raw_sys::general::S_IRUSR;
+pub(super) const S_IWUSR: ModeBits = linux_raw_sys::general::S_IWUSR;
 
 #[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
 pub(super) fn openat<R>(
@@ -28,7 +35,7 @@ pub(super) fn openat<R>(
             mode.bits()
         )
     }
-    .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
+    .map_err(Error::from)?;
 
     // This should not fail with a well-behaved kernel: `openat` returns a
     // nonnegative `c_int` file descriptor.
@@ -50,7 +57,26 @@ pub(super) fn unlinkat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFla
             flags.bits()
         )
     }
-    .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
+    .map_err(Error::from)?;
+    Ok(())
+}
+
+pub(super) fn fstat(fd: BorrowedFd<'_>) -> Result<Stat> {
+    let mut raw = core::mem::MaybeUninit::<linux_raw_sys::general::stat>::zeroed();
+    // SAFETY: `fd` remains borrowed and `raw` points to writable storage for
+    // the kernel's architecture-specific `stat` structure.
+    unsafe { syscalls::syscall!(syscalls::Sysno::fstat, fd.as_raw_fd(), raw.as_mut_ptr()) }
+        .map_err(Error::from)?;
+    // SAFETY: a successful `fstat` initialized the complete structure.
+    let raw = unsafe { raw.assume_init() };
+    Ok(Stat { st_size: raw.st_size })
+}
+
+pub(super) fn ftruncate(fd: BorrowedFd<'_>, len: u64) -> Result<()> {
+    // SAFETY: `fd` remains borrowed; the kernel receives the desired length
+    // by value and validates whether it is representable for the file.
+    unsafe { syscalls::syscall!(syscalls::Sysno::ftruncate, fd.as_raw_fd(), len) }
+        .map_err(Error::from)?;
     Ok(())
 }
 
@@ -82,21 +108,19 @@ pub fn readlinkat<'buf>(
             buf.len()
         )
     }
-    .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
+    .map_err(Error::from)?;
 
     // SAFETY: the syscall initialized exactly this prefix.
     Ok(unsafe { slice::from_raw_parts(buf.as_ptr().cast(), initialized) })
 }
 
 pub(super) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
-    // rustix exposes only an allocating `getcwd`, so use the raw syscall for
-    // caller-owned storage.
     // SAFETY: `buf` is writable for exactly `buf.len()` bytes. The syscall
     // writes no more than that and returns the initialized length including
     // its terminating NUL.
     let initialized =
         unsafe { syscalls::syscall!(syscalls::Sysno::getcwd, buf.as_mut_ptr(), buf.len()) }
-            .map_err(|errno| Error::from_raw_os_error(errno.into_raw()))?;
+            .map_err(Error::from)?;
 
     // SAFETY: the syscall initialized this prefix through its terminating NUL.
     let bytes = unsafe { slice::from_raw_parts(buf.as_ptr().cast(), initialized) };
