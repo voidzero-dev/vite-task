@@ -444,6 +444,8 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     // GitHub Actions
     "GITHUB_*",
     "RUNNER_*",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    // ACTIONS_ID_TOKEN_REQUEST_TOKEN is covered by *_TOKEN below.
     // Windows specific
     "APPDATA",
     // Node's compile cache uses LOCALAPPDATA to pick its cache directory
