@@ -1,7 +1,7 @@
 #[cfg(target_os = "macos")]
 use libc::__error;
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::GetLastError;
+use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, GetLastError};
 
 /// An operating-system error code.
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
@@ -51,6 +51,9 @@ impl Error {
 
 #[cfg(windows)]
 impl Error {
+    /// The requested file does not exist.
+    pub const NOENT: Self = Self(ERROR_FILE_NOT_FOUND);
+
     /// Creates an error from a raw Windows error code.
     #[must_use]
     pub const fn from_raw_os_error(code: u32) -> Self {

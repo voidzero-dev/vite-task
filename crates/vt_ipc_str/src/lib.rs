@@ -1,3 +1,6 @@
+#![cfg_attr(target_os = "none", no_std)]
+
+use core::{fmt::Debug, mem::MaybeUninit};
 #[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(unix)]
@@ -6,14 +9,19 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::windows::ffi::OsStrExt as _;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStringExt as _;
-use std::{borrow::Cow, ffi::OsStr, fmt::Debug, mem::MaybeUninit};
+#[cfg(any(unix, windows))]
+use std::{borrow::Cow, ffi::OsStr};
 
 #[cfg(feature = "fspy_nostd")]
 use allocator_api2::alloc::Allocator;
+#[cfg(any(unix, target_os = "none"))]
+use bstr::BStr;
 use bumpalo::Bump;
+use bytemuck::TransparentWrapper;
+#[cfg(any(unix, windows))]
+use bytemuck::TransparentWrapperAlloc;
 #[cfg(windows)]
 use bytemuck::must_cast_slice;
-use bytemuck::{TransparentWrapper, TransparentWrapperAlloc};
 #[cfg(feature = "fspy_nostd")]
 use fspy_nostd::{Fat, OsCStr};
 #[cfg(feature = "fspy_nostd")]
@@ -53,7 +61,7 @@ pub struct IpcStr {
 }
 
 impl IpcStr {
-    #[cfg(unix)]
+    #[cfg(any(unix, target_os = "none"))]
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> &Self {
         Self::wrap_ref(bytes)
@@ -85,6 +93,7 @@ impl IpcStr {
         )
     }
 
+    #[cfg(any(unix, windows))]
     #[must_use]
     pub fn to_cow_os_str(&self) -> Cow<'_, OsStr> {
         #[cfg(windows)]
@@ -108,7 +117,7 @@ impl IpcStr {
     /// neither direction goes through [`OsStr`], so both work without std.
     #[must_use]
     pub fn from_os_c_str(path: OsCStr<'_, Fat>) -> &Self {
-        #[cfg(unix)]
+        #[cfg(any(unix, target_os = "none"))]
         return Self::wrap_ref(path.as_units());
         #[cfg(windows)]
         return Self::wrap_ref(must_cast_slice(path.as_units()));
@@ -121,7 +130,7 @@ impl IpcStr {
     /// length on Windows, or an interior NUL code unit.
     #[must_use]
     pub fn to_os_c_string_in<A: Allocator>(&self, allocator: A) -> Option<OsCString<Fat, A>> {
-        #[cfg(unix)]
+        #[cfg(any(unix, target_os = "none"))]
         {
             let mut units =
                 allocator_api2::vec::Vec::with_capacity_in(self.data.len() + 1, allocator);
@@ -148,8 +157,11 @@ impl IpcStr {
 }
 
 impl Debug for IpcStr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <OsStr as Debug>::fmt(self.to_cow_os_str().as_ref(), f)
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        #[cfg(any(unix, target_os = "none"))]
+        return <BStr as Debug>::fmt(BStr::new(&self.data), f);
+        #[cfg(windows)]
+        return <OsStr as Debug>::fmt(self.to_cow_os_str().as_ref(), f);
     }
 }
 
@@ -180,6 +192,7 @@ unsafe impl<'de, C: Config> SchemaRead<'de, C> for &'de IpcStr {
 }
 
 // SAFETY: Delegates to `IpcStr`'s SchemaWrite impl, preserving its invariants.
+#[cfg(any(unix, windows))]
 unsafe impl<C: Config> SchemaWrite<C> for Box<IpcStr> {
     type Src = Self;
 
@@ -194,6 +207,7 @@ unsafe impl<C: Config> SchemaWrite<C> for Box<IpcStr> {
 
 // SchemaRead for Box<IpcStr>: owned decode
 // SAFETY: Delegates to `&[u8]`'s SchemaRead impl; dst is initialized on Ok.
+#[cfg(any(unix, windows))]
 unsafe impl<'de, C: Config> SchemaRead<'de, C> for Box<IpcStr> {
     type Dst = Self;
 
@@ -211,6 +225,7 @@ impl<'a, S: AsRef<OsStr> + ?Sized> From<&'a S> for &'a IpcStr {
     }
 }
 
+#[cfg(any(unix, windows))]
 impl<S: AsRef<OsStr>> From<S> for Box<IpcStr> {
     #[cfg(unix)]
     fn from(value: S) -> Self {
