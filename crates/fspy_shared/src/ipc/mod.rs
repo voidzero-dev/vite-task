@@ -1,7 +1,8 @@
 pub mod channel;
 mod ipc_path;
-use std::iter;
+use core::iter;
 
+#[cfg(not(target_os = "none"))]
 use bumpalo::Bump;
 pub use ipc_path::IpcPath;
 pub use vt_ipc_str::IpcStr;
@@ -68,6 +69,7 @@ impl<'a> PathAccess<'a> {
         }
     }
 
+    #[cfg(not(target_os = "none"))]
     #[must_use]
     pub fn clone_in<'bump>(&self, bump: &'bump Bump) -> PathAccess<'bump> {
         match self {
