@@ -341,11 +341,18 @@ impl ExecutionCache {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
             }
 
-            // Validate post-run fingerprint (inferred inputs + tracked envs)
-            if let Some(mismatch) = cache_value
-                .post_run_fingerprint
-                .validate(workspace_root, &cache_metadata.unfiltered_envs)?
-            {
+            // Validate post-run fingerprint (inferred inputs + tracked envs).
+            // Bulk-query validation excludes `untrackedEnv`-declared names on
+            // both sides; the untracked config is part of the spawn
+            // fingerprint, so it matches the one active at record time.
+            let untracked_env = vt_glob::env::EnvGlobSet::new(
+                spawn_fingerprint.env_fingerprints().untracked_env_config.iter(),
+            )?;
+            if let Some(mismatch) = cache_value.post_run_fingerprint.validate(
+                workspace_root,
+                &cache_metadata.unfiltered_envs,
+                &untracked_env,
+            )? {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch.into())));
             }
             // Associate the execution key to the cache entry key if not already,
