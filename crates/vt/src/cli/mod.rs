@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::{ffi::OsString, path::Path, sync::Arc};
 
 use vt_graph::{TaskSpecifier, query::TaskQuery};
 use vt_path::AbsolutePath;
 use vt_plan::plan_request::{CacheOverride, PlanOptions, QueryPlanRequest};
 use vt_str::Str;
-use vt_workspace::package_filter::{PackageQueryArgs, PackageQueryError};
+use vt_workspace::package_filter::{PackageQueryArgs, PackageQueryCliArgs, PackageQueryError};
 
 /// Controls how task output is displayed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, usage::ValueEnum)]
@@ -30,7 +30,7 @@ pub enum CacheSubcommand {
 #[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
 pub struct RunFlags {
     #[usage(flatten)]
-    pub package_query: PackageQueryArgs,
+    pub package_query: PackageQueryCliArgs,
 
     /// Do not run dependencies specified in `dependsOn` fields.
     #[usage(long)]
@@ -140,6 +140,87 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// One runtime value offered by task or package completion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItem {
+    pub value: Str,
+}
+
+/// Runtime completion values loaded from the current workspace.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompletionData {
+    pub tasks: Vec<CompletionItem>,
+    pub packages: Vec<CompletionItem>,
+}
+
+fn is_vpr(split: &usage::complete::Split) -> bool {
+    split.words.first().is_some_and(|word| {
+        Path::new(word).file_stem().is_some_and(|name| name.eq_ignore_ascii_case("vpr"))
+    })
+}
+
+/// Whether completion can need task or package names from the current workspace.
+#[must_use]
+pub fn completion_uses_workspace_data(split: &usage::complete::Split) -> bool {
+    is_vpr(split)
+        || split.words.iter().any(|word| word == "run" || word == "--filter" || word == "-F")
+}
+
+/// Complete one command line from the static grammar and workspace values.
+#[must_use]
+pub fn complete(
+    split: &usage::complete::Split,
+    data: &CompletionData,
+) -> usage::complete::Completions<'static> {
+    let spec = Cli::spec();
+    let view = is_vpr(split)
+        .then_some(())
+        .and_then(|()| spec.views.iter().find(|view| view.name == "vpr"));
+    let mut answer = view.map_or_else(
+        || usage::complete::complete(spec, split),
+        |view| usage::complete::complete_view(spec, split, view),
+    );
+    let position = view.map_or_else(
+        || usage::complete::walk(spec.root.cmd, split.argv()),
+        |view| usage::complete::walk_view(spec.root.cmd, split.argv(), view),
+    );
+    let runtime = if position.awaiting_value.is_some_and(|flag| {
+        flag.longs.contains(&"filter") || flag.name.eq_ignore_ascii_case("filters")
+    }) {
+        Some(&data.packages)
+    } else if position.next_arg.is_some_and(|arg| arg.name == "TASK_SPECIFIER_OR_ADDITIONAL_ARG")
+        && position.next_arg_values == 0
+    {
+        Some(&data.tasks)
+    } else {
+        None
+    };
+
+    if let Some(runtime) = runtime {
+        answer.candidates.extend(
+            runtime.iter().filter(|item| item.value.starts_with(&split.prefix)).map(|item| {
+                usage::complete::Candidate { value: item.value.to_string(), description: None }
+            }),
+        );
+        answer.candidates.sort();
+        answer.candidates.dedup_by(|left, right| left.value == right.value);
+        answer.files = None;
+    }
+
+    answer
+}
+
+/// Answer a hidden completion request with workspace values.
+#[must_use]
+pub fn completion_request(argv: &[OsString], data: &CompletionData) -> Option<String> {
+    let request = usage::complete::Request::parse(argv)?;
+    if request.candidates_for.is_some() {
+        return Cli::completion_request(argv);
+    }
+    let answer = complete(&request.split, data);
+    Some(usage::complete::render(&answer, request.shell))
+}
+
 impl Command {
     /// Resolve the parsed command into the dispatched [`ResolvedCommand`] enum.
     ///
@@ -234,8 +315,9 @@ impl ResolvedRunCommand {
         // Read before `into_package_query` consumes the args.
         let fail_if_no_match = self.flags.package_query.fail_if_no_match;
 
+        let package_query_args = PackageQueryArgs::from(self.flags.package_query);
         let (package_query, is_cwd_only) =
-            self.flags.package_query.into_package_query(task_specifier.package_name, cwd)?;
+            package_query_args.into_package_query(task_specifier.package_name, cwd)?;
 
         Ok((
             QueryPlanRequest {
@@ -381,6 +463,37 @@ mod tests {
             Shell::Bash,
         );
         assert!(completion.candidates.iter().any(|candidate| candidate.value == "grouped"));
+    }
+
+    #[test]
+    fn completes_workspace_tasks_packages_and_vpr() {
+        let data = CompletionData {
+            tasks: vec![CompletionItem { value: "build".into() }],
+            packages: vec![CompletionItem { value: "@scope/app".into() }],
+        };
+        let candidates = |line: &str| {
+            let split = usage::complete::split(line, line.len(), Shell::Bash);
+            complete(&split, &data)
+                .candidates
+                .into_iter()
+                .map(|candidate| candidate.value)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(candidates("vt run bu"), ["build"]);
+        assert_eq!(candidates("vt run --filter @s"), ["@scope/app"]);
+        assert_eq!(candidates("vpr bu"), ["build"]);
+        assert!(candidates("vt run build -- bu").is_empty());
+    }
+
+    #[test]
+    fn loads_workspace_data_only_for_dynamic_positions() {
+        let split = |line: &str| usage::complete::split(line, line.len(), Shell::Bash);
+
+        assert!(!completion_uses_workspace_data(&split("vt --lo")));
+        assert!(completion_uses_workspace_data(&split("vt run bu")));
+        assert!(completion_uses_workspace_data(&split("vt run --filter app")));
+        assert!(completion_uses_workspace_data(&split("vpr bu")));
     }
 
     #[test]

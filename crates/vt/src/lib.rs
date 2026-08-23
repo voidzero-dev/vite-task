@@ -13,7 +13,10 @@ mod napi_client;
 pub mod session;
 
 // Public exports for vt_bin
-pub use cli::{CacheSubcommand, Cli, Command, LogMode, RunCommand, RunFlags};
+pub use cli::{
+    CacheSubcommand, Cli, Command, CompletionData, CompletionItem, LogMode, RunCommand, RunFlags,
+    complete, completion_request, completion_uses_workspace_data,
+};
 pub use session::{
     CommandHandler, ExitStatus, HandledCommand, Session, SessionConfig, print_error,
 };

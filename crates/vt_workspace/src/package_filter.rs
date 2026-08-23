@@ -240,25 +240,36 @@ pub enum PackageQueryError {
     InvalidFilter(#[from] PackageFilterParseError),
 }
 
-/// CLI arguments for selecting which packages a command applies to.
+/// Parser-neutral input for selecting which packages a command applies to.
 ///
-/// Use `#[usage(flatten)]` to embed these in a parent `usage-rs` struct.
-/// Call [`into_package_query`](Self::into_package_query) to convert into an opaque [`PackageQuery`].
+/// Call [`into_package_query`](Self::into_package_query) to convert this value into an opaque
+/// [`PackageQuery`]. CLI parsers can construct it from [`PackageQueryCliArgs`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
+pub struct PackageQueryArgs {
+    recursive: bool,
+    transitive: bool,
+    workspace_root: bool,
+    filters: Vec<Str>,
+    pub fail_if_no_match: bool,
+}
+
+/// `usage-rs` arguments for selecting which packages a command applies to.
 #[derive(Debug, Clone, Default, PartialEq, Eq, usage::Args)]
 #[usage(args_override_self = false)]
 #[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
-pub struct PackageQueryArgs {
+pub struct PackageQueryCliArgs {
     /// Select all packages in the workspace.
     #[usage(short = 'r', long)]
-    recursive: bool,
+    pub recursive: bool,
 
     /// Select the current package and its transitive dependencies.
     #[usage(short = 't', long)]
-    transitive: bool,
+    pub transitive: bool,
 
     /// Select the workspace root package.
     #[usage(short = 'w', long = "workspace-root")]
-    workspace_root: bool,
+    pub workspace_root: bool,
 
     /// Match packages by name, directory, or glob pattern.
     #[usage(
@@ -275,7 +286,7 @@ Match packages by name, directory, or glob pattern.
   --filter <pattern>^...    Select only the dependencies (exclude the package itself)
   --filter !<pattern>       Exclude packages matching the pattern"
     )]
-    filters: Vec<Str>,
+    pub filters: Vec<Str>,
 
     /// Exit with a non-zero status if a `--filter` expression matches no packages.
     ///
@@ -284,6 +295,18 @@ Match packages by name, directory, or glob pattern.
     /// produces a warning and the command exits successfully.
     #[usage(long = "fail-if-no-match")]
     pub fail_if_no_match: bool,
+}
+
+impl From<PackageQueryCliArgs> for PackageQueryArgs {
+    fn from(value: PackageQueryCliArgs) -> Self {
+        Self {
+            recursive: value.recursive,
+            transitive: value.transitive,
+            workspace_root: value.workspace_root,
+            filters: value.filters,
+            fail_if_no_match: value.fail_if_no_match,
+        }
+    }
 }
 
 impl PackageQueryArgs {
@@ -629,7 +652,7 @@ mod tests {
     #[usage(bin = "test", unknown_flags = "error", args_override_self = false)]
     struct PackageQueryCli {
         #[usage(flatten)]
-        args: PackageQueryArgs,
+        args: PackageQueryCliArgs,
     }
 
     fn parse_package_args(argv: &[&str]) -> PackageQueryArgs {
@@ -637,6 +660,7 @@ mod tests {
         usage::test::parse(PackageQueryCli::spec(), &argv.words(), PackageQueryCli::parse_from)
             .unwrap_or_else(|error| panic!("package query must parse:\n{error}"))
             .args
+            .into()
     }
 
     #[test]

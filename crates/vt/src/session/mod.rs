@@ -215,6 +215,46 @@ impl<'a> Session<'a> {
         self.lazy_task_graph.load_task_graph().await
     }
 
+    /// Load task and package names for shell completion without running a task.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task graph cannot be loaded from the workspace configuration.
+    pub async fn completion_data(
+        &mut self,
+    ) -> Result<crate::cli::CompletionData, TaskGraphLoadError> {
+        let cwd = Arc::clone(&self.cwd);
+        let graph = self.ensure_task_graph_loaded().await?;
+        let current_package_path = graph.get_package_path_from_cwd(&cwd).cloned();
+        let mut tasks = Vec::new();
+
+        for entry in graph.list_tasks() {
+            let package_name = &entry.task_display.package_name;
+            if current_package_path.as_ref() == Some(&entry.task_display.package_path) {
+                tasks.push(crate::cli::CompletionItem {
+                    value: entry.task_display.task_name.clone(),
+                });
+            }
+            if !package_name.is_empty() {
+                tasks.push(crate::cli::CompletionItem {
+                    value: vt_str::format!("{package_name}#{}", entry.task_display.task_name),
+                });
+            }
+        }
+        tasks.sort_unstable_by(|left, right| left.value.cmp(&right.value));
+        tasks.dedup_by(|left, right| left.value == right.value);
+
+        let mut packages = graph
+            .list_package_names()
+            .into_iter()
+            .map(|value| crate::cli::CompletionItem { value })
+            .collect::<Vec<_>>();
+        packages.sort_unstable_by(|left, right| left.value.cmp(&right.value));
+        packages.dedup_by(|left, right| left.value == right.value);
+
+        Ok(crate::cli::CompletionData { tasks, packages })
+    }
+
     /// Initialize a session with custom cwd, environment variables. Useful for testing.
     ///
     /// # Errors

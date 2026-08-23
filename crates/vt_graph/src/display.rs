@@ -55,6 +55,17 @@ impl IndexedTaskGraph {
             })
             .collect()
     }
+
+    /// Return the names of all named packages in the workspace.
+    #[must_use]
+    pub fn list_package_names(&self) -> Vec<Str> {
+        self.indexed_package_graph
+            .package_graph()
+            .node_weights()
+            .map(|package| package.package_json.name.clone())
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
 }
 
 // Display-only formatting for task list/selector descriptions. Execution planning keeps
