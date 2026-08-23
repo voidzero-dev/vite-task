@@ -8,7 +8,6 @@ use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, sync::Arc};
 
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
-use clap::Parser as _;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
 use reporter::{
@@ -272,9 +271,6 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// # Panics
-    ///
-    /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
     async fn main_inner(&mut self, command: Command) -> Result<(), SessionError> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
@@ -318,9 +314,7 @@ impl<'a> Session<'a> {
                 } else {
                     // No task specifier (e.g. `vp run` or `vp run --verbose`).
                     // Only bare `vp run` enters the selector; with extra flags, error.
-                    let bare = RunCommand::try_parse_from::<_, &str>([])
-                        .expect("parsing hardcoded bare command should never fail")
-                        .into_resolved();
+                    let bare = RunCommand::default().into_resolved();
 
                     // Normalize the run_command for comparison by ignoring cache flags, which don't affect task selection.
                     let mut normalized_run_command = run_command.clone();

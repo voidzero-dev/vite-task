@@ -5,9 +5,8 @@ use std::{
     sync::Arc,
 };
 
-use clap::Parser;
 use vt::{
-    Command, EnabledCacheConfig, HandledCommand, ScriptCommand, SessionConfig, UserCacheConfig,
+    Cli, EnabledCacheConfig, HandledCommand, ScriptCommand, SessionConfig, UserCacheConfig,
     get_path_env, plan_request::SyntheticPlanRequest,
 };
 use vt_path::AbsolutePath;
@@ -46,28 +45,24 @@ pub fn find_executable(
     Ok(executable_path.into_os_string().into())
 }
 
-/// Internal argument parser for `vt`/`vp` commands that appear inside task scripts.
-///
-/// [`CommandHandler`] uses this to parse the command line when it intercepts a `vt` or `vp`
-/// invocation during script execution. It extends [`Command`] with a `tool` subcommand that
-/// forwards to the `vtt` test-utility binary — a subcommand that only makes sense within
-/// script execution and is therefore not exposed on the top-level `vt` CLI entry point.
-#[derive(Debug, Parser)]
-#[command(name = "vt", version)]
-enum Args {
-    /// Forward arguments to the `vtt` test-utility binary.
-    ///
-    /// Resolves `vtt` via `node_modules/.bin` lookup (same as any other script executable),
-    /// then synthesizes a cached invocation with the given arguments. The `--` separator,
-    /// if present, is stripped before forwarding.
-    Tool {
-        #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<Str>,
-    },
-    /// Any other `vt` subcommand, delegated to the standard [`Command`] parser.
-    #[command(flatten)]
-    Task(Command),
+#[expect(
+    clippy::allow_attributes,
+    reason = "usage-rs derive output does not inherit item-level lint attributes"
+)]
+#[allow(clippy::disallowed_types, reason = "usage-rs generates parser state with String fields")]
+mod tool_args {
+    use vt_str::Str;
+
+    /// Arguments that the internal `tool` command forwards to `vtt`.
+    #[derive(Debug, usage::Cli)]
+    #[usage(bin = "vt tool", unknown_flags = "error", args_override_self = false)]
+    pub struct ToolArgs {
+        #[usage(double_dash = "automatic", value_name = "ARG")]
+        pub args: Vec<Str>,
+    }
 }
+
+use tool_args::ToolArgs;
 
 #[async_trait::async_trait(?Send)]
 impl vt::CommandHandler for CommandHandler {
@@ -85,26 +80,30 @@ impl vt::CommandHandler for CommandHandler {
             }
             _ => return Ok(HandledCommand::Verbatim),
         }
-        let args = Args::try_parse_from(
-            std::iter::once(command.program.as_str()).chain(command.args.iter().map(Str::as_str)),
-        )?;
-        match args {
-            Args::Tool { args } => {
-                let program = find_executable(get_path_env(&command.envs), &command.cwd, "vtt")?;
-                Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
-                    program,
-                    args: args.into_iter().filter(|a| a.as_str() != "--").collect(),
-                    cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
-                        env: None,
-                        untracked_env: None,
-                        input: None,
-                        output: None,
-                    }),
-                    envs: Arc::clone(&command.envs),
-                }))
-            }
-            Args::Task(parsed) => Ok(HandledCommand::ViteTaskCommand(parsed)),
+        if command.args.first().is_some_and(|arg| arg == "tool") {
+            let argv =
+                command.args[1..].iter().map(std::convert::AsRef::as_ref).collect::<Vec<_>>();
+            let ToolArgs { args } = ToolArgs::parse_from(&argv)
+                .map_err(|error| anyhow::anyhow!(ToolArgs::render_failure(&argv, &error)))?;
+            let program = find_executable(get_path_env(&command.envs), &command.cwd, "vtt")?;
+            return Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
+                program,
+                args: args.into_iter().filter(|arg| arg != "--").collect(),
+                cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
+                    env: None,
+                    untracked_env: None,
+                    input: None,
+                    output: None,
+                }),
+                envs: Arc::clone(&command.envs),
+            }));
         }
+
+        let argv = command.args.iter().map(std::convert::AsRef::as_ref).collect::<Vec<_>>();
+        let parsed = Cli::parse_from(&argv)
+            .map_err(|error| anyhow::anyhow!(Cli::render_failure(&argv, &error)))?
+            .command;
+        Ok(HandledCommand::ViteTaskCommand(parsed))
     }
 }
 

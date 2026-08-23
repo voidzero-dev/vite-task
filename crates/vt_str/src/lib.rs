@@ -1,6 +1,7 @@
 #[expect(clippy::disallowed_types, reason = "vt_str defines Str using std types internally")]
 use std::{
     borrow::Borrow,
+    convert::Infallible,
     ffi::OsStr,
     fmt::{Debug, Display},
     mem::MaybeUninit,
@@ -142,6 +143,14 @@ unsafe impl<'de, C: Config> SchemaRead<'de, C> for Str {
 impl From<&str> for Str {
     fn from(value: &str) -> Self {
         Self(value.into())
+    }
+}
+
+impl std::str::FromStr for Str {
+    type Err = Infallible;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(value))
     }
 }
 

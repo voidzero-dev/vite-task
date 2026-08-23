@@ -22,10 +22,10 @@ libc = { workspace = true }
 notify = { workspace = true }
 pty_terminal_test_client = { workspace = true }
 async-trait = { workspace = true }
-clap = { workspace = true, features = ["derive"] }
 jsonc-parser = { workspace = true, features = ["serde"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+usage = { workspace = true, features = ["diagnostics", "help", "spec"] }
 vt_path = { workspace = true }
 vt_str = { workspace = true }
 vt = { workspace = true }

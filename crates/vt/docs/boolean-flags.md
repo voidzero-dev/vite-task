@@ -51,4 +51,4 @@ vp run build --no-cache
 
 ## Implementation Details
 
-The flags use clap's argument parsing. The `--cache`/`--no-cache` pair uses clap's `conflicts_with` attribute to ensure they cannot be used together.
+The flags use `usage-rs` argument parsing. The `--cache` and `--no-cache` fields declare a conflict so that they cannot be used together.

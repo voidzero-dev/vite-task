@@ -1,5 +1,5 @@
 error: the argument '--cache' cannot be used with '--no-cache'
 
-Usage: vt run --cache <TASK_SPECIFIER> <ADDITIONAL_ARGS>...
+Usage: vt run [FLAGS] [TASK_SPECIFIER_OR_ADDITIONAL_ARG]…
 
 For more information, try '--help'.

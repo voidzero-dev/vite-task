@@ -1,5 +1,14 @@
 mod error;
 pub mod package;
+#[expect(
+    clippy::allow_attributes,
+    reason = "usage-rs derive output does not inherit item-level lint attributes"
+)]
+#[allow(
+    clippy::disallowed_types,
+    clippy::pub_underscore_fields,
+    reason = "usage-rs generates parser state with String and underscore-prefixed fields"
+)]
 pub mod package_filter;
 pub mod package_graph;
 mod package_manager;

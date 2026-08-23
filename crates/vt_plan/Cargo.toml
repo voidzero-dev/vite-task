@@ -34,7 +34,6 @@ vt_graph = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
-clap = { workspace = true, features = ["derive"] }
 copy_dir = { workspace = true }
 libtest-mimic = { workspace = true }
 snapshot_test = { workspace = true }

@@ -1,10 +1,19 @@
+#[expect(
+    clippy::allow_attributes,
+    reason = "usage-rs derive output does not inherit item-level lint attributes"
+)]
+#[allow(
+    clippy::disallowed_types,
+    clippy::pub_underscore_fields,
+    reason = "usage-rs generates parser state with String and underscore-prefixed fields"
+)]
 mod cli;
 mod collections;
 mod napi_client;
 pub mod session;
 
 // Public exports for vt_bin
-pub use cli::{CacheSubcommand, Command, RunCommand, RunFlags};
+pub use cli::{CacheSubcommand, Cli, Command, LogMode, RunCommand, RunFlags};
 pub use session::{
     CommandHandler, ExitStatus, HandledCommand, Session, SessionConfig, print_error,
 };

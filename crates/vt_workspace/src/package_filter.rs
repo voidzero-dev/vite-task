@@ -242,28 +242,28 @@ pub enum PackageQueryError {
 
 /// CLI arguments for selecting which packages a command applies to.
 ///
-/// Use `#[clap(flatten)]` to embed these in a parent clap struct.
+/// Use `#[usage(flatten)]` to embed these in a parent `usage-rs` struct.
 /// Call [`into_package_query`](Self::into_package_query) to convert into an opaque [`PackageQuery`].
-#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, usage::Args)]
+#[usage(args_override_self = false)]
 #[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
 pub struct PackageQueryArgs {
     /// Select all packages in the workspace.
-    #[clap(default_value = "false", short, long)]
+    #[usage(short = 'r', long)]
     recursive: bool,
 
     /// Select the current package and its transitive dependencies.
-    #[clap(default_value = "false", short, long)]
+    #[usage(short = 't', long)]
     transitive: bool,
 
     /// Select the workspace root package.
-    #[clap(default_value = "false", short = 'w', long = "workspace-root")]
+    #[usage(short = 'w', long = "workspace-root")]
     workspace_root: bool,
 
     /// Match packages by name, directory, or glob pattern.
-    #[clap(
+    #[usage(
         short = 'F',
         long = "filter",
-        num_args = 1,
         long_help = "\
 Match packages by name, directory, or glob pattern.
 
@@ -282,7 +282,7 @@ Match packages by name, directory, or glob pattern.
     /// Without this flag, an unmatched filter (a typo, an empty glob, or a
     /// traversal like `{.}^...` that collapses to zero on a leaf package) only
     /// produces a warning and the command exits successfully.
-    #[clap(long = "fail-if-no-match", default_value = "false")]
+    #[usage(long = "fail-if-no-match")]
     pub fail_if_no_match: bool,
 }
 
@@ -624,6 +624,73 @@ fn build_name_pattern(name: &str) -> Result<PackageNamePattern, PackageFilterPar
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug, usage::Cli)]
+    #[usage(bin = "test", unknown_flags = "error", args_override_self = false)]
+    struct PackageQueryCli {
+        #[usage(flatten)]
+        args: PackageQueryArgs,
+    }
+
+    fn parse_package_args(argv: &[&str]) -> PackageQueryArgs {
+        let argv = usage::test::argv(argv);
+        usage::test::parse(PackageQueryCli::spec(), &argv.words(), PackageQueryCli::parse_from)
+            .unwrap_or_else(|error| panic!("package query must parse:\n{error}"))
+            .args
+    }
+
+    #[test]
+    fn parses_all_package_query_short_options() {
+        let args = parse_package_args(&[
+            "-r",
+            "-t",
+            "-w",
+            "-F",
+            "@scope/app",
+            "-F",
+            "./packages/*",
+            "--fail-if-no-match",
+        ]);
+
+        assert!(args.recursive);
+        assert!(args.transitive);
+        assert!(args.workspace_root);
+        assert_eq!(args.filters, ["@scope/app", "./packages/*"]);
+        assert!(args.fail_if_no_match);
+    }
+
+    #[test]
+    fn parses_all_package_query_long_options() {
+        let args = parse_package_args(&[
+            "--recursive",
+            "--transitive",
+            "--workspace-root",
+            "--filter",
+            "app",
+            "--fail-if-no-match",
+        ]);
+
+        assert!(args.recursive);
+        assert!(args.transitive);
+        assert!(args.workspace_root);
+        assert_eq!(args.filters, ["app"]);
+        assert!(args.fail_if_no_match);
+    }
+
+    #[test]
+    fn rejects_unknown_options_and_missing_filter_values() {
+        for argv in [&["--unknown"][..], &["--filter"]] {
+            let words = usage::test::argv(argv);
+            assert!(
+                usage::test::parse(
+                    PackageQueryCli::spec(),
+                    &words.words(),
+                    PackageQueryCli::parse_from,
+                )
+                .is_err()
+            );
+        }
+    }
 
     /// Construct an [`AbsolutePath`] from a Unix-style literal (test helper).
     ///

@@ -7,7 +7,6 @@ use std::{
     sync::Arc,
 };
 
-use clap::Parser;
 use copy_dir::copy_dir;
 use cow_utils::CowUtils as _;
 use redact::redact_snapshot;
@@ -15,20 +14,12 @@ use rustc_hash::FxHashMap;
 use serde::Serialize;
 use task_graph_markdown::render_task_graph_markdown;
 use tokio::runtime::Runtime;
-use vt::{Command, Session};
+use vt::{Cli, Command, Session};
 use vt_graph::display::TaskDisplay;
 use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vt_plan::{ExecutionGraph, ExecutionItemKind};
 use vt_str::Str;
 use vt_workspace::find_workspace_root;
-
-/// Local parser wrapper for `BuiltInCommand`
-#[derive(Parser)]
-#[command(name = "vt")]
-enum Cli {
-    #[clap(flatten)]
-    Command(Command),
-}
 
 #[derive(serde::Deserialize, Debug)]
 struct Plan {
@@ -240,20 +231,18 @@ fn run_case_inner(
             let args_display =
                 plan.args.iter().map(vt_str::Str::as_str).collect::<Vec<_>>().join(" ");
 
-            let cli = match Cli::try_parse_from(
-                std::iter::once("vt") // dummy program name
-                    .chain(plan.args.iter().map(vt_str::Str::as_str)),
-            ) {
+            let argv = plan.args.iter().map(std::convert::AsRef::as_ref).collect::<Vec<_>>();
+            let cli = match Cli::parse_from(&argv) {
                 Ok(ok) => ok,
                 Err(err) => {
                     snapshots.check_snapshot(
                         vt_str::format!("{snapshot_base}.snap").as_str(),
-                        &err.to_string(),
+                        &Cli::render_failure(&argv, &err),
                     )?;
                     continue;
                 }
             };
-            let Cli::Command(parsed) = cli;
+            let parsed = cli.command;
             let Command::Run(run_command) = parsed else {
                 panic!("only `run` commands supported in plan tests")
             };

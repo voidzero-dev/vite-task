@@ -16,7 +16,6 @@ anstream = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
-clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "from"] }
 futures-util = { workspace = true }
@@ -43,6 +42,7 @@ tokio = { workspace = true, features = [
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
+usage = { workspace = true, features = ["completions", "diagnostics", "help", "spec"] }
 materialized_artifact = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 vt_glob = { workspace = true }
@@ -65,6 +65,7 @@ zstd = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+usage = { workspace = true, features = ["completions", "test"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 fspy = { workspace = true }

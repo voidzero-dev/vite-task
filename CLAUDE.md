@@ -160,4 +160,4 @@ When a change is user-facing (new feature, changed behavior, bug fix, removal, o
 
 - **Task Format**: `package#task` (e.g., `app#build`, `@test/utils#lint`)
 - **Config File**: `vite-task.json` in each package
-- **Rust Edition**: 2024, MSRV 1.88.0
+- **Rust Edition**: 2024, MSRV 1.91.0

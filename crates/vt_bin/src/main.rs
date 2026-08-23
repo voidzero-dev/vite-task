@@ -1,5 +1,4 @@
-use clap::Parser as _;
-use vt::{Command, ExitStatus, Session};
+use vt::{Cli, ExitStatus, Session};
 use vt_bin::OwnedSessionConfig;
 
 fn main() -> ! {
@@ -10,7 +9,7 @@ fn main() -> ! {
 }
 
 async fn run() -> ExitStatus {
-    let args = Command::parse();
+    let args = Cli::parse().command;
     let mut owned_config = OwnedSessionConfig::default();
     let session = match Session::init(owned_config.as_config()) {
         Ok(session) => session,

@@ -8,7 +8,6 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-clap = { workspace = true, features = ["derive"] }
 petgraph = { workspace = true, features = ["serde-1"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -17,6 +16,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 serde_norway = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+usage = { workspace = true, features = ["spec"] }
 vec1 = { workspace = true, features = ["smallvec-v1"] }
 vt_glob = { workspace = true }
 vt_path = { workspace = true }
@@ -25,6 +25,7 @@ wax = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+usage = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true
