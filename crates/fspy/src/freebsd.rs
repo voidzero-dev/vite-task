@@ -24,7 +24,10 @@ pub struct SpyImpl;
 impl SpyImpl {
     /// Initialize the (empty) backend. `dir` is unused on FreeBSD because
     /// there is no preload library or Detours artifact to materialize.
-    #[allow(clippy::unused_self, reason = "init_in takes a directory for parity with the other backends")]
+    #[allow(
+        clippy::unused_self,
+        reason = "init_in takes a directory for parity with the other backends"
+    )]
     pub fn init_in(_dir: &std::path::Path) -> io::Result<Self> {
         Ok(Self)
     }
@@ -66,20 +69,12 @@ impl SpyImpl {
                     child.wait().await?
                 }
             };
-            io::Result::Ok(ChildTermination {
-                status,
-                path_accesses: Ok(PathAccessIterable),
-            })
+            io::Result::Ok(ChildTermination { status, path_accesses: Ok(PathAccessIterable) })
         })
         .map(|f| f?) // flatten JoinError and io::Result
         .boxed();
 
-        Ok(TrackedChild {
-            stdin,
-            stdout,
-            stderr,
-            wait_handle,
-        })
+        Ok(TrackedChild { stdin, stdout, stderr, wait_handle })
     }
 }
 

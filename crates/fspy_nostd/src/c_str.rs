@@ -48,7 +48,7 @@ pub type WideCStr<'a, R> = CStr<'a, R, u16>;
 
 /// A borrowed NUL-terminated string of the platform's native path code
 /// units: bytes on Unix and wide (`u16`) code units on Windows.
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", target_os = "freebsd"))]
 pub type OsCStr<'a, R> = CStr<'a, R>;
 /// A borrowed NUL-terminated string of the platform's native path code
 /// units: bytes on Unix and wide (`u16`) code units on Windows.
