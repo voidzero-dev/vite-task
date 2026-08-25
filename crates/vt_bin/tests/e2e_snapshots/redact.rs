@@ -80,6 +80,11 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let duration_regex = regex::Regex::new(r"\d+(\.\d+)?(ns|ms|s)").unwrap();
     output = duration_regex.replace_all(&output, "<duration>").into_owned();
 
+    // Redact the version from Vitest's banner. Keep the rest of its output,
+    // including warnings about mismatched Vitest package versions, visible.
+    let vitest_version_regex = regex::Regex::new(r"(?m)^ RUN  v\d+\.\d+\.\d+").unwrap();
+    output = vitest_version_regex.replace_all(&output, " RUN  v<version>").into_owned();
+
     // Normalize the ", <duration> saved" suffix in cache hit summaries.
     // When tools are fast (e.g., Rust binaries), saved time may be 0ns and the
     // runner omits the suffix entirely. Stripping it ensures stable snapshots.
