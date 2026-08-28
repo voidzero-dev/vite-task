@@ -94,7 +94,7 @@ pub fn create_file<R>(
         )
     };
     if handle == INVALID_HANDLE_VALUE {
-        Err(crate::windows::last_error())
+        Err(crate::Error::last_os_error())
     } else {
         // SAFETY: `CreateFileW` returned a valid, newly owned handle.
         Ok(unsafe { OwnedHandle::from_raw_handle(handle) })

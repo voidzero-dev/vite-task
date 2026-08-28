@@ -89,8 +89,18 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
     }
 
+    // The accesses, or `None` when the task was not tracked at all. An
+    // `Err` means it made more file accesses than the tracking channel had
+    // room for, so what arrived is a subset of what it touched, and an entry
+    // built from a subset would replay with inputs and outputs missing.
+    #[cfg(fspy)]
+    let Ok(path_accesses) = outcome.path_accesses.as_ref().map(Result::as_ref).transpose() else {
+        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete), None);
+    };
+
     let fspy_outcome = observe_fspy(
-        outcome,
+        #[cfg(fspy)]
+        path_accesses,
         metadata,
         fspy,
         &ignored_input_rels,
@@ -194,7 +204,7 @@ pub(super) async fn update_cache(
 /// `path_writes` is filtered by user-configured output negatives and
 /// tool-reported `ignoreOutput` paths before read-write overlap detection.
 fn observe_fspy(
-    outcome: &ChildOutcome,
+    #[cfg(fspy)] path_accesses: Option<&fspy::PathAccessIterable>,
     metadata: &CacheMetadata,
     fspy: Option<&super::FspyTracking<'_>>,
     ignored_input_rels: &FxHashSet<RelativePathBuf>,
@@ -205,7 +215,7 @@ fn observe_fspy(
     {
         use super::tracked_accesses::TrackedPathAccesses;
 
-        outcome.path_accesses.as_ref().map(|raw| {
+        path_accesses.map(|raw| {
             let tracked = TrackedPathAccesses::from_raw(raw, workspace_root);
             let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
                 // fspy can be attached for auto-output-only tasks. In that
@@ -254,7 +264,7 @@ fn observe_fspy(
     }
     #[cfg(not(fspy))]
     {
-        let _ = (outcome, metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root);
+        let _ = (metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root);
         None
     }
 }

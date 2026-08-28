@@ -11,8 +11,6 @@ use fspy_seccomp_unotify::supervisor::supervise;
 use fspy_shared::ipc::PathAccess;
 #[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::{IpcStr, channel::channel};
-#[cfg(target_os = "macos")]
-use fspy_shared_unix::payload::Artifacts;
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{Payload, encode_payload},
@@ -25,13 +23,19 @@ use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_env = "musl"))]
-use crate::ipc::{OwnedReceiverLockGuard, SHM_CAPACITY};
+use crate::ipc::ChannelAccesses;
 use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
 
 #[derive(Debug)]
+#[cfg_attr(
+    target_os = "macos",
+    expect(clippy::struct_field_names, reason = "each field names a distinct injected path")
+)]
 pub struct SpyImpl {
     #[cfg(target_os = "macos")]
-    artifacts: Artifacts,
+    bash_path: Box<IpcStr>,
+    #[cfg(target_os = "macos")]
+    coreutils_path: Box<IpcStr>,
 
     #[cfg(not(target_env = "musl"))]
     preload_path: Box<IpcStr>,
@@ -58,15 +62,19 @@ impl SpyImpl {
             #[cfg(not(target_env = "musl"))]
             preload_path,
             #[cfg(target_os = "macos")]
-            artifacts: {
-                let coreutils_path =
-                    macos_artifacts::COREUTILS_BINARY.materialize().executable().at(dir)?;
-                let bash_path = macos_artifacts::OILS_BINARY.materialize().executable().at(dir)?;
-                Artifacts {
-                    bash_path: bash_path.as_path().into(),
-                    coreutils_path: coreutils_path.as_path().into(),
-                }
-            },
+            bash_path: macos_artifacts::OILS_BINARY
+                .materialize()
+                .executable()
+                .at(dir)?
+                .as_path()
+                .into(),
+            #[cfg(target_os = "macos")]
+            coreutils_path: macos_artifacts::COREUTILS_BINARY
+                .materialize()
+                .executable()
+                .at(dir)?
+                .as_path()
+                .into(),
         })
     }
 
@@ -79,24 +87,32 @@ impl SpyImpl {
         let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
 
         #[cfg(not(target_env = "musl"))]
-        let (ipc_channel_conf, ipc_receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+        let ipc_receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
+            .map_err(SpawnError::ChannelCreation)?;
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]
-            ipc_channel_conf,
-
-            #[cfg(target_os = "macos")]
-            artifacts: self.artifacts.clone(),
+            ipc_channel_conf: ipc_receiver.conf(),
+            #[cfg(target_env = "musl")]
+            ipc_channel_conf: core::marker::PhantomData,
 
             #[cfg(not(target_env = "musl"))]
-            preload_path: self.preload_path.clone(),
+            preload_path: &self.preload_path,
+
+            #[cfg(target_os = "macos")]
+            artifacts: fspy_shared_unix::payload::Artifacts {
+                bash_path: &self.bash_path,
+                coreutils_path: &self.coreutils_path,
+            },
 
             #[cfg(target_os = "linux")]
             seccomp_payload: supervisor.payload().clone(),
         };
 
-        let encoded_payload = encode_payload(payload);
+        // Spawn-scoped storage for the encoded payload, freed when this
+        // spawn returns.
+        let payload_bump = bumpalo::Bump::new();
+        let encoded_payload = encode_payload(payload, &payload_bump);
 
         let mut exec = command.get_exec();
         let mut exec_resolve_accesses = PathAccessArena::default();
@@ -137,7 +153,7 @@ impl SpyImpl {
             stdout: child.stdout.take(),
             stderr: child.stderr.take(),
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
-            // because we need to stop the supervisor and lock the channel as soon as the child exits.
+            // because we need to stop the supervisor and close the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
                 let status = tokio::select! {
                     status = child.wait() => status?,
@@ -159,16 +175,14 @@ impl SpyImpl {
                 );
                 let arenas = arenas.collect::<Vec<_>>();
 
-                // Lock the ipc channel after the child has exited.
+                // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
                 #[cfg(not(target_env = "musl"))]
-                let ipc_receiver_lock_guard =
-                    OwnedReceiverLockGuard::lock_async(ipc_receiver).await?;
-                let path_accesses = PathAccessIterable {
-                    arenas,
-                    #[cfg(not(target_env = "musl"))]
-                    ipc_receiver_lock_guard,
-                };
+                #[cfg(not(target_env = "musl"))]
+                let path_accesses = ChannelAccesses::try_from(ipc_receiver)
+                    .map(|ipc_accesses| PathAccessIterable { arenas, ipc_accesses });
+                #[cfg(target_env = "musl")]
+                let path_accesses = Ok(PathAccessIterable { arenas });
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })
@@ -181,7 +195,7 @@ impl SpyImpl {
 pub struct PathAccessIterable {
     arenas: Vec<PathAccessArena>,
     #[cfg(not(target_env = "musl"))]
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
+    ipc_accesses: ChannelAccesses,
 }
 
 impl PathAccessIterable {
@@ -191,7 +205,7 @@ impl PathAccessIterable {
 
         #[cfg(not(target_env = "musl"))]
         {
-            let accesses_in_shm = self.ipc_receiver_lock_guard.iter_path_accesses();
+            let accesses_in_shm = self.ipc_accesses.iter_path_accesses();
             accesses_in_shm.chain(accesses_in_arena)
         }
         #[cfg(target_env = "musl")]

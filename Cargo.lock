@@ -368,6 +368,9 @@ name = "bumpalo"
 version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
+dependencies = [
+ "allocator-api2",
+]
 
 [[package]]
 name = "bytemuck"
@@ -1231,6 +1234,7 @@ dependencies = [
 name = "fspy"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "bstr",
  "bumpalo",
@@ -1306,7 +1310,6 @@ dependencies = [
  "itoa",
  "libc",
  "nix 0.31.2",
- "wincode",
 ]
 
 [[package]]
@@ -1351,7 +1354,7 @@ dependencies = [
  "bitflags 2.10.0",
  "bstr",
  "libc",
- "rustix",
+ "linux-raw-sys 0.12.1",
  "syscalls",
  "windows-sys 0.61.2",
 ]
@@ -1369,6 +1372,7 @@ dependencies = [
 name = "fspy_preload_unix"
 version = "0.0.0"
 dependencies = [
+ "allocator-api2",
  "ctor",
  "fspy_client_unix",
  "fspy_nostd",
@@ -1377,15 +1381,18 @@ dependencies = [
  "fspy_shared_unix",
  "libc",
  "nix 0.31.2",
+ "static_cell",
 ]
 
 [[package]]
 name = "fspy_preload_windows"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "constcat",
  "fspy_detours_sys",
  "fspy_nostd",
+ "fspy_nostd_alloc",
  "fspy_shared",
  "ntapi",
  "smallvec 2.0.0-alpha.12",
@@ -1435,7 +1442,6 @@ dependencies = [
  "subprocess_test",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
  "uuid",
  "vt_path",
  "winapi",
@@ -1446,6 +1452,7 @@ dependencies = [
 name = "fspy_shared_unix"
 version = "0.0.0"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "base64",
  "bstr",
@@ -2000,6 +2007,12 @@ name = "linux-raw-sys"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "litrs"
@@ -3254,7 +3267,7 @@ dependencies = [
  "bitflags 2.10.0",
  "errno",
  "libc",
- "linux-raw-sys",
+ "linux-raw-sys 0.11.0",
  "windows-sys 0.61.2",
 ]
 
@@ -3594,6 +3607,15 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "static_cell"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0530892bb4fa575ee0da4b86f86c667132a94b74bb72160f58ee5a4afec74c23"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "strsim"

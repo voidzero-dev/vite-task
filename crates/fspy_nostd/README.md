@@ -2,7 +2,8 @@
 
 Low-level operations for fspy code that runs before a process runtime is ready or in a context where normal runtime code can deadlock.
 
-The current implementation supports Linux, macOS, and Windows.
+The current implementation supports Linux, `target_os = "none"` code injected
+into Linux, macOS, and Windows.
 
 ## Execution contexts
 
@@ -34,7 +35,12 @@ Preload code can also run before `main`, while libc and the target runtime are s
 
 The injected runtime cannot assume that the target process has libc. Linux kernel operations in `fspy_nostd` use raw syscalls, so injected code can reuse them without linking or calling libc.
 
-The final injected artifact must also reject libc references that dependencies or compiler-generated memory operations introduce. The raw-syscall check covers the `rustix` backend, not the complete artifact link.
+For this crate, `target_os = "none"` means code that runs inside a Linux
+process. It uses the same Linux kernel ABI as the normal Linux build.
+
+The final injected artifact must also reject libc references introduced by
+other dependencies or compiler-generated memory operations. This crate's
+Linux operations alone cannot enforce the complete artifact link.
 
 ## API rules
 
@@ -46,11 +52,17 @@ Every exported operation follows these rules:
 
 Code that needs allocation uses an explicit allocator. [`fspy_nostd_alloc`](../fspy_nostd_alloc) provides one based on memory mappings.
 
-## Linux raw-syscall enforcement
+## Platform boundaries
 
-`rustix` can use libc instead of raw syscalls. A dependency can select that backend through feature unification or `RUSTFLAGS`.
+- Linux and `none` issue syscalls directly and obtain ABI constants and
+  structures from `linux-raw-sys`.
+- macOS calls libSystem through `libc`, as required by the platform.
+- Windows calls Win32 directly.
 
-[`lib.rs`](src/lib.rs) references `rustix::runtime`, which exists only with the raw Linux backend. Selecting the libc backend makes `fspy_nostd` fail to compile.
+`Error` owns the raw platform error code. On macOS and Windows it additionally
+provides `Error::last_os_error()` because their APIs report failure through a
+sentinel and put the reason in thread-local state. Linux and `none` syscalls
+return their error directly, so that method deliberately does not exist there.
 
 ## Modules
 

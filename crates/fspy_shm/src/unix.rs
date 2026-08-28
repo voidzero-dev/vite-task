@@ -63,7 +63,7 @@ pub fn create(path: OsCStr<'_, Thin>, size: usize) -> Result<ShmHandle> {
     )?;
 
     // Every byte reads as zero because the file is all holes.
-    if let Err(error) = fspy_nostd::fs::ftruncate(&file, size as u64) {
+    if let Err(error) = fspy_nostd::fs::ftruncate(file.as_fd(), size as u64) {
         // Do not hand the caller an unusable partial file to clean up.
         let _ = remove(path);
         return Err(error);
@@ -93,7 +93,8 @@ pub fn open(path: OsCStr<'_, Thin>) -> Result<ShmHandle> {
     // resize cannot make a mapping access invalid memory.
     //
     // A regular file's size is never negative.
-    let size = crate::file_size_to_len(fspy_nostd::fs::fstat(&file)?.st_size.cast_unsigned());
+    let size =
+        crate::file_size_to_len(fspy_nostd::fs::fstat(file.as_fd())?.st_size.cast_unsigned());
     Ok(ShmHandle { file, size })
 }
 
@@ -127,7 +128,7 @@ impl ShmHandle {
                 len,
                 fspy_nostd::mm::ProtFlags::READ | fspy_nostd::mm::ProtFlags::WRITE,
                 fspy_nostd::mm::MapFlags::SHARED,
-                &self.file,
+                self.file.as_fd(),
                 0,
             )
         }?;

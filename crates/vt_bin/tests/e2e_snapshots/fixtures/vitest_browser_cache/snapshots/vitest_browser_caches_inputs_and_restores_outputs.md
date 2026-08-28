@@ -9,7 +9,7 @@ first browser run: cache miss writes dist/result.json
 ```
 $ vitest run
 
- RUN  v4.1.10 <workspace>
+ RUN  v<version> <workspace>
 
  ✓  chromium  src/greeting.test.js (1 test) <duration>
 JSON report written to <workspace>/dist/result.json
@@ -37,7 +37,7 @@ unchanged inputs: cache hit restores dist/result.json
 ```
 $ vitest run ◉ cache hit, replaying
 
- RUN  v4.1.10 <workspace>
+ RUN  v<version> <workspace>
 
  ✓  chromium  src/greeting.test.js (1 test) <duration>
 JSON report written to <workspace>/dist/result.json
@@ -68,7 +68,7 @@ automatic input changed: cache miss reruns the browser test
 ```
 $ vitest run ○ cache miss: 'src/greeting.js' modified, executing
 
- RUN  v4.1.10 <workspace>
+ RUN  v<version> <workspace>
 
  ✓  chromium  src/greeting.test.js (1 test) <duration>
 JSON report written to <workspace>/dist/result.json

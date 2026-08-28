@@ -8,7 +8,7 @@ publish = false
 rust-version.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { workspace = true }
+nix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

@@ -99,6 +99,12 @@ pub enum CacheNotUpdatedReason {
     /// A runner-aware tool explicitly requested that this run not be cached
     /// (e.g. vite dev-server, a watch task).
     ToolRequested,
+    /// A tracked process could not record a file access it went on to
+    /// perform: the channel it reports them through had no room left, or
+    /// none for a record that long. The accesses that did arrive are a
+    /// subset of what the task touched, so caching from them would bake in
+    /// inputs and outputs that are not all of them.
+    TrackingIncomplete,
 }
 
 #[derive(Debug)]

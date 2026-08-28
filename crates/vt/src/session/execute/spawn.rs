@@ -41,9 +41,10 @@ pub struct ChildHandle {
 /// Result of waiting for a child to exit.
 pub struct ChildOutcome {
     pub exit_status: std::process::ExitStatus,
-    /// Raw fspy accesses. `Some` iff `fspy` was `true` at spawn time.
+    /// Raw fspy accesses. `Some` iff `fspy` was `true` at spawn time, and
+    /// `Err` when a tracked process could not record everything it did.
     #[cfg(fspy)]
-    pub path_accesses: Option<PathAccessIterable>,
+    pub path_accesses: Option<Result<PathAccessIterable, fspy::TrackingIncomplete>>,
 }
 
 /// Spawn a command with the requested fspy and stdio configuration.

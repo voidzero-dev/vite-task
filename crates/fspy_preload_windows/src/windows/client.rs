@@ -1,5 +1,6 @@
 use std::{cell::SyncUnsafeCell, ffi::CStr, mem::MaybeUninit};
 
+use allocator_api2::alloc::Allocator;
 use fspy_detours_sys::DetourCopyPayloadToProcess;
 use fspy_shared::{
     ipc::{PathAccess, channel::Sender},
@@ -9,49 +10,42 @@ use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
 
 pub struct Client<'a> {
     payload: Payload<'a>,
+    payload_bytes: &'a [u8],
     ipc_sender: Option<Sender>,
 }
 
 impl<'a> Client<'a> {
-    pub fn from_payload_bytes(payload_bytes: &'a [u8]) -> Self {
+    pub fn from_payload_bytes(payload_bytes: &'a [u8], allocator: impl Allocator) -> Self {
         let payload: Payload<'a> = wincode::deserialize_exact(payload_bytes).unwrap();
 
-        let ipc_sender = match payload.channel_conf.sender() {
-            Ok(sender) => Some(sender),
-            Err(err) => {
-                // this can happen if the process is started after the root target process has exited.
-                // By that time the channel would have been closed in the receiver side.
-                // In this case we just leave a message and skip sending any path accesses.
-                #[expect(
-                    clippy::print_stderr,
-                    reason = "preload library uses stderr for debug diagnostics"
-                )]
-                {
-                    eprintln!("fspy: failed to create ipc sender: {err}");
-                }
-                None
-            }
-        };
+        // `None` when the channel is already over, which happens when this
+        // process starts after the root target exited. Nothing is said
+        // about it: a detours DLL writing to the traced process's stderr
+        // corrupts whatever that process is printing.
+        let ipc_sender = payload.channel_conf.sender(allocator);
 
-        Self { payload, ipc_sender }
+        Self { payload, payload_bytes, ipc_sender }
     }
 
     pub fn send(&self, access: PathAccess<'_>) {
         let Some(sender) = &self.ipc_sender else {
             return;
         };
-        sender.write_encoded(&access).expect("failed to send path access");
+        // The intercepted call proceeds whether or not the record could be
+        // sent; a detours DLL can never panic its host.
+        sender.send(&access);
     }
 
     pub unsafe fn prepare_child_process(&self, child_handle: HANDLE) -> BOOL {
-        let payload_bytes = wincode::serialize(&self.payload).unwrap();
+        // The payload propagates to children unchanged, so forward the bytes
+        // this process was given instead of re-serializing.
         // SAFETY: FFI call to DetourCopyPayloadToProcess with valid handle and payload buffer
         unsafe {
             DetourCopyPayloadToProcess(
                 child_handle,
                 &PAYLOAD_ID,
-                payload_bytes.as_ptr().cast(),
-                payload_bytes.len().try_into().unwrap(),
+                self.payload_bytes.as_ptr().cast(),
+                self.payload_bytes.len().try_into().unwrap(),
             )
         }
     }

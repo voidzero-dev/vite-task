@@ -1,9 +1,6 @@
 use core::{ffi::c_void, marker::PhantomData, ptr::NonNull};
 
-use windows_sys::Win32::{
-    Foundation::GetLastError, Security::SECURITY_ATTRIBUTES,
-    System::LibraryLoader::GetModuleHandleW,
-};
+use windows_sys::Win32::{Security::SECURITY_ATTRIBUTES, System::LibraryLoader::GetModuleHandleW};
 
 use crate::{Result, WideCStr};
 
@@ -103,26 +100,16 @@ impl Drop for OwnedHandle {
     }
 }
 
-/// Returns the calling thread's last Win32 error.
-///
-/// Call this immediately after the failing Win32 call: anything in between,
-/// including drops, can overwrite the thread-local error code.
-#[must_use]
-pub fn last_error() -> crate::Error {
-    // SAFETY: `GetLastError` reads thread-local error state.
-    crate::Error::from_raw_os_error(unsafe { GetLastError() })
-}
-
 /// Converts a Win32 `BOOL` result into a [`Result`].
 ///
-/// As with [`last_error`], call this immediately after the Win32 call whose
-/// result it receives.
+/// As with [`crate::Error::last_os_error`], call this immediately after the
+/// Win32 call whose result it receives.
 ///
 /// # Errors
 ///
 /// Returns the calling thread's last Win32 error when `result` is zero.
 pub fn bool_result(result: i32) -> Result<()> {
-    if result == 0 { Err(last_error()) } else { Ok(()) }
+    if result == 0 { Err(crate::Error::last_os_error()) } else { Ok(()) }
 }
 
 /// Returns a handle to the loaded module named by `name`.
@@ -137,10 +124,7 @@ pub fn bool_result(result: i32) -> Result<()> {
 pub fn get_module_handle<R>(name: WideCStr<'_, R>) -> Result<NonNull<c_void>> {
     // SAFETY: `name` remains a valid NUL-terminated wide string for the call.
     let module = unsafe { GetModuleHandleW(name.as_ptr()) };
-    NonNull::new(module).ok_or_else(|| {
-        // SAFETY: `GetModuleHandleW` just failed on this thread.
-        crate::Error::from_raw_os_error(unsafe { GetLastError() })
-    })
+    NonNull::new(module).ok_or_else(crate::Error::last_os_error)
 }
 
 #[cfg(test)]

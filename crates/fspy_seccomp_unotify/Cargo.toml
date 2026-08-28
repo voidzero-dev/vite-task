@@ -21,7 +21,7 @@ futures-util = { workspace = true }
 assertables = { workspace = true }
 futures-util = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
-test-log = { workspace = true }
+test-log = { workspace = true, features = ["trace"] }
 tokio = { workspace = true, features = ["macros", "time"] }
 
 [features]

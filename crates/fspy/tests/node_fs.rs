@@ -49,7 +49,9 @@ fn track_script(
         let child = command.spawn(tokio_util::sync::CancellationToken::new()).await?;
         let termination = child.wait_handle.await?;
         assert!(termination.status.success());
-        Ok(termination.path_accesses)
+        Ok(termination
+            .path_accesses
+            .expect("the tracking region holds every record this run makes"))
     })
 }
 

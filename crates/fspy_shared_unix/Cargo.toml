@@ -6,6 +6,7 @@ license.workspace = true
 publish = false
 
 [target.'cfg(unix)'.dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
 anyhow = { workspace = true }
 base64 = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
@@ -23,7 +24,7 @@ fspy_seccomp_unotify = { workspace = true, features = ["target"] }
 memmap2 = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-phf = { workspace = true }
+phf = { workspace = true, features = ["macros"] }
 
 [lints]
 workspace = true

@@ -69,7 +69,7 @@ pub fn handle_exec(
             DYLD_INSERT_LIBRARIES,
             encoded_payload.payload.preload_path.as_os_str().as_bytes(),
         );
-        ensure_env(&mut command.envs, PAYLOAD_ENV_NAME, &encoded_payload.encoded_string)?;
+        ensure_env(&mut command.envs, PAYLOAD_ENV_NAME, encoded_payload.encoded_string)?;
     } else {
         command.envs.retain(|(name, _)| {
             name != DYLD_INSERT_LIBRARIES && name != PAYLOAD_ENV_NAME.as_bytes()

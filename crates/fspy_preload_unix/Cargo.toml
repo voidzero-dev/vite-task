@@ -15,7 +15,9 @@ fspy_shared_unix = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true, features = ["signal", "fs", "socket", "mman", "time"] }
 fspy_nostd = { workspace = true }
+allocator-api2 = { workspace = true }
 fspy_nostd_alloc = { workspace = true }
+static_cell = { workspace = true }
 
 [lints]
 workspace = true

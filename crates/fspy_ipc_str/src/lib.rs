@@ -94,12 +94,6 @@ impl IpcStr {
         Self::wrap_ref(bump.alloc_slice_copy(&self.data))
     }
 
-    /// Copies this IPC string into a box.
-    #[must_use]
-    pub fn to_boxed(&self) -> Box<Self> {
-        Self::wrap_box(self.data.into())
-    }
-
     /// Creates an IPC string that borrows the code units of `path`, without
     /// its NUL terminator.
     ///
@@ -207,12 +201,6 @@ unsafe impl<'de, C: Config> SchemaRead<'de, C> for Box<IpcStr> {
 impl<'a, S: AsRef<OsStr> + ?Sized> From<&'a S> for &'a IpcStr {
     fn from(value: &'a S) -> Self {
         IpcStr::from_bytes(value.as_ref().as_bytes())
-    }
-}
-
-impl Clone for Box<IpcStr> {
-    fn clone(&self) -> Self {
-        IpcStr::wrap_box(self.data.into())
     }
 }
 

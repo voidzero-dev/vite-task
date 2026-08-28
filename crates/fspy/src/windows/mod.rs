@@ -21,22 +21,19 @@ use winapi::{
 use winsafe::co::{CP, WC};
 
 use crate::{
-    ChildTermination, TrackedChild,
-    command::Command,
-    error::SpawnError,
-    ipc::{OwnedReceiverLockGuard, SHM_CAPACITY},
+    ChildTermination, TrackedChild, command::Command, error::SpawnError, ipc::ChannelAccesses,
 };
 
 const INTERPOSE_CDYLIB: Artifact =
     artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_WINDOWS");
 
 pub struct PathAccessIterable {
-    ipc_receiver_lock_guard: OwnedReceiverLockGuard,
+    ipc_accesses: ChannelAccesses,
 }
 
 impl PathAccessIterable {
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        self.ipc_receiver_lock_guard.iter_path_accesses()
+        self.ipc_accesses.iter_path_accesses()
     }
 }
 
@@ -86,8 +83,8 @@ impl SpyImpl {
 
         command.creation_flags(CREATE_SUSPENDED);
 
-        let (channel_conf, receiver) =
-            channel(SHM_CAPACITY).map_err(SpawnError::ChannelCreation)?;
+        let receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
+            .map_err(SpawnError::ChannelCreation)?;
 
         let mut spawn_success = false;
         let spawn_success = &mut spawn_success;
@@ -107,7 +104,7 @@ impl SpyImpl {
                 }
 
                 let payload = Payload {
-                    channel_conf: channel_conf.clone(),
+                    channel_conf: receiver.conf(),
                     ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
                 };
                 let payload_bytes = wincode::serialize(&payload).unwrap();
@@ -158,7 +155,7 @@ impl SpyImpl {
             stderr: child.stderr.take(),
             process_handle,
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
-            // because we need to stop the supervisor and lock the channel as soon as the child exits.
+            // because we need to stop the supervisor and close the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
                 let status = tokio::select! {
                     status = child.wait() => status?,
@@ -167,10 +164,10 @@ impl SpyImpl {
                         child.wait().await?
                     }
                 };
-                // Lock the ipc channel after the child has exited.
+                // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
-                let ipc_receiver_lock_guard = OwnedReceiverLockGuard::lock_async(receiver).await?;
-                let path_accesses = PathAccessIterable { ipc_receiver_lock_guard };
+                let path_accesses = ChannelAccesses::try_from(receiver)
+                    .map(|ipc_accesses| PathAccessIterable { ipc_accesses });
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })

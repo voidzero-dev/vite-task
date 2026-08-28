@@ -60,7 +60,7 @@ pub fn virtual_alloc(
     // and Windows validates the size, allocation type, and protection.
     let address =
         unsafe { VirtualAlloc(ptr::null(), size, allocation_type.bits(), protection as u32) };
-    NonNull::new(address).ok_or_else(crate::windows::last_error)
+    NonNull::new(address).ok_or_else(crate::Error::last_os_error)
 }
 
 /// Calls `VirtualFree` with `MEM_RELEASE`, releasing the whole region.
@@ -143,7 +143,7 @@ pub fn create_file_mapping(
         )
     };
     if mapping.is_null() {
-        return Err(crate::windows::last_error());
+        return Err(crate::Error::last_os_error());
     }
     // SAFETY: `CreateFileMappingW` returned a valid, newly owned handle.
     Ok(unsafe { OwnedHandle::from_raw_handle(mapping) })
@@ -174,7 +174,7 @@ pub fn map_view_of_file(
         )
     };
     let Some(ptr) = core::ptr::NonNull::new(view.Value.cast::<u8>()) else {
-        return Err(crate::windows::last_error());
+        return Err(crate::Error::last_os_error());
     };
     Ok(MappingView { ptr })
 }

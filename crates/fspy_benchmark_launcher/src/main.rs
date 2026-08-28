@@ -10,7 +10,7 @@
 
 use std::{env, ffi::OsString, process::Stdio, time::Instant};
 
-use fspy::Command;
+use fspy::{Command, PathAccessIterable};
 use tokio::{io::AsyncReadExt as _, process::ChildStdout, runtime::Builder};
 use tokio_util::sync::CancellationToken;
 
@@ -140,6 +140,30 @@ async fn report(mut launch: Launch) {
 /// In relative mode the captured path must come out identical — the tracker
 /// resolves the root working directory and joins the bare name back into
 /// [`MISSING_PATH`] — so the assertion below covers both modes.
+/// Takes the accesses out of a [`fspy::ChildTermination`], whichever shape
+/// that field has.
+///
+/// The benchmark compiles this one source file against two revisions of
+/// `fspy` — the pull request's and its merge base's — so that identical
+/// launcher code times both arms. A revision that changes the field's type
+/// would otherwise stop the other arm from building. Exactly one of these
+/// impls applies per build; the other is inert.
+trait TrackedAccesses {
+    fn tracked(self) -> PathAccessIterable;
+}
+
+impl TrackedAccesses for PathAccessIterable {
+    fn tracked(self) -> PathAccessIterable {
+        self
+    }
+}
+
+impl<E: std::fmt::Debug> TrackedAccesses for Result<PathAccessIterable, E> {
+    fn tracked(self) -> PathAccessIterable {
+        self.expect("the tracking region holds every record this run makes")
+    }
+}
+
 async fn validate(target: &OsString, target_args: &[OsString], relative: bool) {
     let mut command = Command::new(target);
     command
@@ -159,7 +183,7 @@ async fn validate(target: &OsString, target_args: &[OsString], relative: bool) {
         .await
         .expect("failed to wait for tracked target");
     assert!(termination.status.success(), "benchmark target failed: {}", termination.status);
-    let captured_missing_access = termination.path_accesses.iter().any(|access| {
+    let captured_missing_access = termination.path_accesses.tracked().iter().any(|access| {
         access.path.strip_path_prefix(MISSING_PATH, |result| {
             result.is_ok_and(|path| path.as_os_str().is_empty())
         })

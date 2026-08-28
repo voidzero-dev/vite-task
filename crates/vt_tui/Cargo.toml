@@ -17,7 +17,7 @@ test = false
 
 [dependencies]
 color-eyre = { workspace = true }
-crossterm = { workspace = true }
+crossterm = { workspace = true, features = ["event-stream"] }
 directories = { workspace = true }
 futures = { workspace = true }
 portable-pty = { workspace = true }
@@ -29,4 +29,4 @@ tui-term = { workspace = true }
 
 tracing = { workspace = true }
 tracing-error = { workspace = true }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "serde"] }

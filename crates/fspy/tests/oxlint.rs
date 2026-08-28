@@ -51,7 +51,7 @@ async fn track_oxlint(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<Pa
     let child = command.spawn(tokio_util::sync::CancellationToken::new()).await?;
     let termination = child.wait_handle.await?;
     // oxlint may return non-zero if it finds lint errors, that's OK
-    Ok(termination.path_accesses)
+    Ok(termination.path_accesses.expect("the test region holds every record"))
 }
 
 #[test(tokio::test)]

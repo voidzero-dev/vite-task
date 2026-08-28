@@ -1,7 +1,7 @@
 {
   "tasks": {
     "stress": {
-      "command": "vtt stat_long_filename 1048576",
+      "command": "vtt stat-many 1 1048576",
       "cache": true
     }
   }

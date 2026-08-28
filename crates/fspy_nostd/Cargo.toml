@@ -11,24 +11,15 @@ doctest = false
 # Only the borrowed `BStr` type is used. Keeping every feature disabled makes
 # the environment iterator usable without `alloc` or `std`.
 bstr = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["fs"] }
+bitflags = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }
 
-# On Linux the page size is probed from the kernel directly (see param.rs);
-# rustix's `param` is only needed where sysconf is the platform interface.
-[target.'cfg(all(unix, not(target_os = "linux")))'.dependencies]
-rustix = { workspace = true, features = ["param"] }
-
-# The compile-time backend check in lib.rs needs a `linux_raw`-gated rustix
-# item to reference; `runtime` is the module that has one.
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "none"))'.dependencies]
 # Parsing remains allocation-free and no-std; `atoi` enables `std` by default.
 atoi = { version = "3.1.0", default-features = false }
-rustix = { workspace = true, features = ["runtime"] }
+linux-raw-sys = { workspace = true, features = ["errno", "general", "no_std"] }
 syscalls = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
@@ -40,10 +31,6 @@ windows-sys = { workspace = true, features = [
   "Win32_System_LibraryLoader",
   "Win32_System_Memory",
 ] }
-
-# Cross-validates the page-size probe against rustix's auxv-based answer.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-rustix = { workspace = true, features = ["param"] }
 
 [lints]
 workspace = true

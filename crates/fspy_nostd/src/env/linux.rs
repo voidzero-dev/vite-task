@@ -2,10 +2,12 @@ use core::{ffi::CStr as CoreCStr, num::NonZeroUsize, ptr, slice};
 
 use atoi::FromRadix10Checked as _;
 use bstr::{BStr, ByteSlice as _};
-use rustix::fs::{Mode, OFlags};
 
 use super::Entry;
-use crate::{CStr, CWD, Error, Fat, Result};
+use crate::{
+    CStr, CWD, Error, Fat, Result, Thin,
+    fs::{Mode, OFlags},
+};
 
 #[derive(Clone, Copy)]
 struct Bounds {
@@ -147,9 +149,8 @@ impl Iterator for FatEnvs {
 ///
 /// This opens and reads `/proc/self/stat` once into fixed stack storage and
 /// parses `arg_start`, `arg_end`, `env_start`, and `env_end` together. It does
-/// not allocate, and rustix's raw Linux backend makes the file operations
-/// direct syscalls. Iterators subsequently created from the snapshot perform
-/// no syscalls.
+/// not allocate, and the file operations are direct syscalls. Iterators
+/// subsequently created from the snapshot perform no syscalls.
 ///
 /// # Errors
 ///
@@ -174,7 +175,9 @@ fn read_bounds() -> Result<Bounds> {
     const STAT_PATH: &CoreCStr = c"/proc/self/stat";
     const STAT_CAPACITY: usize = 4096;
 
-    let fd = rustix::fs::openat(CWD, STAT_PATH, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())?;
+    // SAFETY: `STAT_PATH` is a static NUL-terminated byte string.
+    let path = unsafe { CStr::<Thin>::from_ptr(STAT_PATH.as_ptr().cast()) };
+    let fd = crate::fs::openat(CWD, path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())?;
     let mut stat = [0; STAT_CAPACITY];
     let mut initialized = 0;
 
@@ -186,7 +189,7 @@ fn read_bounds() -> Result<Bounds> {
             return Err(Error::OVERFLOW);
         }
 
-        let Some(read) = NonZeroUsize::new(rustix::io::read(&fd, remaining)?) else {
+        let Some(read) = NonZeroUsize::new(crate::io::read(fd.as_fd(), remaining)?) else {
             break;
         };
         initialized = initialized.checked_add(read.get()).ok_or(Error::OVERFLOW)?;

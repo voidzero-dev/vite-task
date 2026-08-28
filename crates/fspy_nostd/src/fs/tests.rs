@@ -31,12 +31,14 @@ fn getcwd_rejects_an_empty_buffer() {
 #[cfg(target_os = "macos")]
 #[test]
 fn fcntl_getpath_returns_descriptor_path() {
-    use rustix::{
-        fd::AsFd as _,
-        fs::{Mode, OFlags, open},
-    };
-
-    let root = open(c"/", OFlags::RDONLY, Mode::empty()).unwrap();
+    let root = super::openat(
+        crate::CWD,
+        // SAFETY: the literal is NUL-terminated and static.
+        unsafe { crate::CStr::<crate::Thin>::from_ptr(c"/".as_ptr().cast()) },
+        super::OFlags::RDONLY,
+        super::Mode::empty(),
+    )
+    .unwrap();
     let mut buf = [MaybeUninit::uninit(); super::PATH_MAX];
     let buf_ptr = buf.as_ptr().cast::<u8>();
 
