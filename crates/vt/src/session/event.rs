@@ -91,6 +91,10 @@ pub enum CacheNotUpdatedReason {
     /// (its `input` config includes auto-inference). Task ran but cannot
     /// be cached without tracked path accesses.
     FspyUnsupported,
+    /// fspy is compiled in, but the tracked spawn failed (e.g. the preload
+    /// library could not be materialized), so the task ran untracked and
+    /// cannot be cached without tracked path accesses.
+    FspyUnavailable,
     /// The runner's IPC server failed during execution, so the collected
     /// reports may be incomplete. Caching such a run would risk stale
     /// inputs/outputs on the next hit. Carries the underlying error for
