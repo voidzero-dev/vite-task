@@ -16,6 +16,9 @@ bitflags = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }
 
+[target.'cfg(target_os = "freebsd")'.dependencies]
+libc = { workspace = true }
+
 [target.'cfg(any(target_os = "linux", target_os = "none"))'.dependencies]
 # Parsing remains allocation-free and no-std; `atoi` enables `std` by default.
 atoi = { version = "3.1.0", default-features = false }

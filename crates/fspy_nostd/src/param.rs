@@ -14,7 +14,7 @@
 
 #[cfg(any(target_os = "linux", target_os = "none"))]
 pub use linux::page_size;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 pub use mac::page_size;
 
 #[cfg(any(target_os = "linux", target_os = "none"))]
@@ -134,7 +134,7 @@ mod linux {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 mod mac {
     /// Returns the process page size, or zero if libSystem cannot report it.
     #[must_use]

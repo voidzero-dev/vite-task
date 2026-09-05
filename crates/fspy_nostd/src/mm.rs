@@ -2,19 +2,19 @@
 
 #[cfg(any(target_os = "linux", target_os = "none"))]
 mod linux;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 mod mac;
 #[cfg(windows)]
 mod windows;
 
 #[cfg(any(target_os = "linux", target_os = "none"))]
 use linux as imp;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 use mac as imp;
 #[cfg(windows)]
 pub use windows::*;
 
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", target_os = "freebsd"))]
 mod unix {
     use core::ffi::c_void;
 
@@ -133,5 +133,10 @@ mod unix {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "none",
+    target_os = "macos",
+    target_os = "freebsd"
+))]
 pub use unix::*;
