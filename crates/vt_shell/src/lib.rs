@@ -57,13 +57,98 @@ const PARSER_OPTIONS: ParserOptions = ParserOptions {
 /// Uses `brush_parser::word::parse` to properly handle nested quoting
 /// (e.g. single quotes inside double quotes are preserved as literal characters).
 /// Returns `None` if the word contains expansions that cannot be statically resolved
-/// (parameter expansion, command substitution, arithmetic).
-fn unquote(word: &Word) -> Option<Str> {
+/// (pathname expansion when enabled, parameter expansion, command substitution, arithmetic).
+fn unquote(word: &Word, pathname_expansion_enabled: bool) -> Option<Str> {
     let Word { value, loc: _ } = word;
     let pieces = brush_parser::word::parse(value.as_str(), &PARSER_OPTIONS).ok()?;
+    if pathname_expansion_enabled && contains_pathname_expansion(&pieces) {
+        return None;
+    }
     let mut result = Str::with_capacity(value.len());
     flatten_pieces(&pieces, &mut result)?;
     Some(result)
+}
+
+#[derive(Default)]
+struct PathnameExpansionDetector {
+    bracket_expression: Option<BracketExpression>,
+}
+
+#[derive(Default)]
+struct BracketExpression {
+    has_member: bool,
+    can_negate: bool,
+}
+
+impl PathnameExpansionDetector {
+    fn push(&mut self, value: &str, pattern_syntax_enabled: bool) -> bool {
+        for char in value.chars() {
+            if char == '/' {
+                // A bracket expression cannot cross a pathname component boundary.
+                self.bracket_expression = None;
+                continue;
+            }
+
+            let Some(bracket_expression) = &mut self.bracket_expression else {
+                if pattern_syntax_enabled {
+                    if matches!(char, '*' | '?') {
+                        return true;
+                    }
+                    if char == '[' {
+                        self.bracket_expression =
+                            Some(BracketExpression { has_member: false, can_negate: true });
+                    }
+                }
+                continue;
+            };
+
+            if pattern_syntax_enabled && char == ']' {
+                if bracket_expression.has_member {
+                    return true;
+                }
+                // `]` is a literal member when it is the first character after `[` or
+                // an optional negation character. A later unquoted `]` must still close it.
+                bracket_expression.has_member = true;
+            } else if pattern_syntax_enabled
+                && bracket_expression.can_negate
+                && matches!(char, '!' | '^')
+            {
+            } else {
+                bracket_expression.has_member = true;
+            }
+            bracket_expression.can_negate = false;
+        }
+        false
+    }
+}
+
+fn contains_pathname_expansion(pieces: &[WordPieceWithSource]) -> bool {
+    fn visit(
+        pieces: &[WordPieceWithSource],
+        detector: &mut PathnameExpansionDetector,
+        pattern_syntax_enabled: bool,
+    ) -> bool {
+        for piece in pieces {
+            let found = match &piece.piece {
+                WordPiece::Text(s) => detector.push(s, pattern_syntax_enabled),
+                WordPiece::SingleQuotedText(s) | WordPiece::AnsiCQuotedText(s) => {
+                    detector.push(s, false)
+                }
+                WordPiece::EscapeSequence(s) => {
+                    detector.push(s.strip_prefix('\\').unwrap_or(s), false)
+                }
+                WordPiece::DoubleQuotedSequence(inner)
+                | WordPiece::GettextDoubleQuotedSequence(inner) => visit(inner, detector, false),
+                _ => false,
+            };
+            if found {
+                return true;
+            }
+        }
+        false
+    }
+
+    visit(pieces, &mut PathnameExpansionDetector::default(), true)
 }
 
 /// Recursively extract literal text from parsed word pieces.
@@ -92,7 +177,10 @@ fn flatten_pieces(pieces: &[WordPieceWithSource], result: &mut Str) -> Option<()
     Some(())
 }
 
-fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<usize>)> {
+fn pipeline_to_command(
+    pipeline: &Pipeline,
+    pathname_expansion_enabled: bool,
+) -> Option<(TaskParsedCommand, Range<usize>)> {
     let location = pipeline.location()?;
     let range = location.start.index..location.end.index;
 
@@ -122,7 +210,8 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
             let AssignmentValue::Scalar(value) = value else {
                 return None;
             };
-            envs.insert(name.as_str().into(), unquote(value)?);
+            // Assignment values are not subject to pathname expansion.
+            envs.insert(name.as_str().into(), unquote(value, false)?);
         }
     }
     let mut args = Vec::<Str>::new();
@@ -131,14 +220,24 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
             let CommandPrefixOrSuffixItem::Word(word) = suffix_item else {
                 return None;
             };
-            args.push(unquote(word)?);
+            args.push(unquote(word, pathname_expansion_enabled)?);
         }
     }
-    Some((TaskParsedCommand { envs, program: unquote(program)?, args }, range))
+    Some((
+        TaskParsedCommand { envs, program: unquote(program, pathname_expansion_enabled)?, args },
+        range,
+    ))
 }
 
+/// Parses commands that can be executed without a shell.
+///
+/// Set `pathname_expansion_enabled` when the target shell treats unquoted patterns as pathname
+/// expansions. Such patterns make the command ineligible for static execution.
 #[must_use]
-pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<usize>)>> {
+pub fn try_parse_as_and_list(
+    cmd: &str,
+    pathname_expansion_enabled: bool,
+) -> Option<Vec<(TaskParsedCommand, Range<usize>)>> {
     let mut parser = Parser::new(cmd.as_bytes(), &PARSER_OPTIONS);
     let Program { complete_commands } = parser.parse_program().ok()?;
     let [compound_list] = complete_commands.as_slice() else {
@@ -150,12 +249,12 @@ pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<
     };
 
     let mut commands = Vec::<(TaskParsedCommand, Range<usize>)>::new();
-    commands.push(pipeline_to_command(&and_or_list.first)?);
+    commands.push(pipeline_to_command(&and_or_list.first, pathname_expansion_enabled)?);
     for and_or in &and_or_list.additional {
         let AndOr::And(pipeline) = and_or else {
             return None;
         };
-        commands.push(pipeline_to_command(pipeline)?);
+        commands.push(pipeline_to_command(pipeline, pathname_expansion_enabled)?);
     }
     Some(commands)
 }
@@ -164,10 +263,14 @@ pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<
 mod tests {
     use super::*;
 
+    fn parse(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<usize>)>> {
+        try_parse_as_and_list(cmd, true)
+    }
+
     #[test]
     fn test_parse_single_command() {
         let source = r"A=B hello world";
-        let list = try_parse_as_and_list(source).unwrap();
+        let list = parse(source).unwrap();
         assert_eq!(list.len(), 1);
         let (cmd, range) = &list[0];
         assert_eq!(&source[range.clone()], source);
@@ -184,7 +287,7 @@ mod tests {
     #[test]
     fn test_parse_command() {
         let source = r#"A=B hello world && FOO="BE\"R" program "arg1" "arg\"2" && zzz"#;
-        let list = try_parse_as_and_list(source).unwrap();
+        let list = parse(source).unwrap();
 
         let commands = list.iter().map(|(cmd, _)| cmd).collect::<Vec<_>>();
         assert_eq!(
@@ -242,22 +345,22 @@ mod tests {
     fn test_unquote_preserves_nested_quotes() {
         // Single quotes inside double quotes are preserved
         let cmd = r#"echo "hello 'world'""#;
-        let list = try_parse_as_and_list(cmd).unwrap();
+        let list = parse(cmd).unwrap();
         assert_eq!(list[0].0.args[0].as_str(), "hello 'world'");
 
         // Double quotes inside single quotes are preserved
         let cmd = r#"echo 'hello "world"'"#;
-        let list = try_parse_as_and_list(cmd).unwrap();
+        let list = parse(cmd).unwrap();
         assert_eq!(list[0].0.args[0].as_str(), "hello \"world\"");
 
         // Backslash escaping in double quotes
         let cmd = r#"echo "hello\"world""#;
-        let list = try_parse_as_and_list(cmd).unwrap();
+        let list = parse(cmd).unwrap();
         assert_eq!(list[0].0.args[0].as_str(), "hello\"world");
 
         // Backslash escaping outside quotes
         let cmd = r"echo hello\ world";
-        let list = try_parse_as_and_list(cmd).unwrap();
+        let list = parse(cmd).unwrap();
         assert_eq!(list[0].0.args[0].as_str(), "hello world");
     }
 
@@ -287,9 +390,96 @@ mod tests {
     }
 
     #[test]
+    fn test_unquoted_pathname_expansion_uses_shell_fallback() {
+        for cmd in [
+            "tool packages/*/src",
+            "tool packages/?/src",
+            "tool packages/[ab]/src",
+            "tool packages/[!ab]/src",
+            "tool packages/[]a]/src",
+            "tool packages/[[:alpha:]]/src",
+            "packages/*/bin --help",
+            "tool --pattern=*",
+            "tool https://example.test/items?limit=1",
+            "tool expression[ab]",
+        ] {
+            assert!(parse(cmd).is_none(), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn test_pathname_expansion_fallback_is_not_path_heuristic() {
+        // Shell expansion is determined by unquoted word syntax, not by whether a word looks
+        // like a filesystem path. These non-path words must still use the shell so their
+        // behavior matches package-manager scripts.
+        for cmd in ["tool --include=*", "tool key?value", "tool selector[ab]"] {
+            assert!(parse(cmd).is_none(), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn test_shell_without_pathname_expansion_keeps_patterns_on_static_path() {
+        let parsed =
+            try_parse_as_and_list("tool packages/*/src && tool packages/[ab]/src", false).unwrap();
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].0.args[0], "packages/*/src");
+        assert_eq!(parsed[1].0.args[0], "packages/[ab]/src");
+    }
+
+    #[test]
+    fn test_unmatched_bracket_stays_on_static_path() {
+        // An unmatched `[` is an ordinary character rather than a bracket expression. A slash
+        // also terminates the pathname component before a later `]` can close the expression.
+        for (cmd, expected) in [
+            ("tool selector[abc", "selector[abc"),
+            ("tool packages/[abc/src]", "packages/[abc/src]"),
+            ("tool selector[]", "selector[]"),
+            ("tool selector[!]", "selector[!]"),
+        ] {
+            let parsed = parse(cmd).unwrap();
+            assert_eq!(parsed[0].0.args[0], expected);
+        }
+    }
+
+    #[test]
+    fn test_glob_in_and_list_falls_back_as_one_shell_script() {
+        assert!(parse("tool before && tool packages/*/src").is_none());
+        assert!(parse("tool packages/*/src && tool after").is_none());
+
+        let parsed = parse("tool before && tool after").unwrap();
+        assert_eq!(parsed.len(), 2);
+    }
+
+    #[test]
+    fn test_invalid_shell_syntax_uses_shell_fallback() {
+        assert!(parse("tool 'unterminated").is_none());
+    }
+
+    #[test]
+    fn test_quoted_or_escaped_pathname_patterns_stay_literal() {
+        for (cmd, expected) in [
+            (r#"tool "packages/*/src""#, "packages/*/src"),
+            ("tool 'packages/?/src'", "packages/?/src"),
+            (r"tool packages/\[ab\]/src", "packages/[ab]/src"),
+            (r#"tool "https://example.test/items?limit=1""#, "https://example.test/items?limit=1"),
+            (r"tool --pattern=\*", "--pattern=*"),
+        ] {
+            let parsed = parse(cmd).unwrap();
+            assert_eq!(parsed[0].0.args[0], expected);
+        }
+    }
+
+    #[test]
+    fn test_assignment_value_pathname_patterns_stay_literal() {
+        let parsed = parse("PATTERN=* tool").unwrap();
+        assert_eq!(parsed[0].0.envs["PATTERN"], "*");
+    }
+
+    #[test]
     fn test_parse_urllib_prepare() {
         let cmd = r#"node -e "const v = parseInt(process.versions.node, 10); if (v >= 20) require('child_process').execSync('vp config', {stdio: 'inherit'});""#;
-        let result = try_parse_as_and_list(cmd);
+        let result = parse(cmd);
         let (parsed, _) = &result.as_ref().unwrap()[0];
         // Single quotes inside double quotes must be preserved as literal characters
         assert_eq!(
