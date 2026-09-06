@@ -4,9 +4,6 @@ edition = "2024"
 license.workspace = true
 publish = false
 
-[lib]
-doctest = false
-
 [dependencies]
 # Only the borrowed `BStr` type is used. Keeping every feature disabled makes
 # the environment iterator usable without `alloc` or `std`.
