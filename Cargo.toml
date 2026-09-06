@@ -128,7 +128,7 @@ regex = "1.11.3"
 rusqlite = "0.39.0"
 rustc-hash = "2.1.1"
 # SeccompAction::UserNotif (SECCOMP_RET_USER_NOTIF) was added after the latest published release (v0.5.0)
-seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "08587106340b8e3cb361c7561411510039436857" }
+seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "c05f20798917d8df814d1154aea3135a53f7f944" }
 serde = "1.0.219"
 serde_json = "1.0.140"
 serde_norway = "0.9.42"
