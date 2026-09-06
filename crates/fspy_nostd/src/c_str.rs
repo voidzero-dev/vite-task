@@ -22,6 +22,7 @@ impl CStrUnit for u16 {}
 
 /// Marks a [`CStr`] whose length is not known.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct Thin {
     _private: (),
 }
@@ -36,12 +37,26 @@ pub struct Fat {
 ///
 /// [`CStr<'_, Thin>`] stores only the string pointer, while
 /// [`CStr<'_, Fat>`] also stores the length including the terminating NUL.
+/// A thin view has the memory layout of a non-null code-unit pointer.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct CStr<'a, R, U: CStrUnit = u8> {
     ptr: NonNull<U>,
     repr: R,
     lifetime: PhantomData<&'a U>,
 }
+
+const _: () = {
+    use core::mem::{align_of, offset_of, size_of};
+    assert!(size_of::<Thin>() == 0);
+    assert!(align_of::<Thin>() == 1);
+    assert!(size_of::<CStr<'_, Thin>>() == size_of::<*const u8>());
+    assert!(align_of::<CStr<'_, Thin>>() == align_of::<*const u8>());
+    assert!(offset_of!(CStr<'_, Thin>, ptr) == 0);
+    assert!(size_of::<CStr<'_, Thin, u16>>() == size_of::<*const u16>());
+    assert!(align_of::<CStr<'_, Thin, u16>>() == align_of::<*const u16>());
+    assert!(offset_of!(CStr<'_, Thin, u16>, ptr) == 0);
+};
 
 /// A borrowed NUL-terminated string of `u16` code units.
 pub type WideCStr<'a, R> = CStr<'a, R, u16>;

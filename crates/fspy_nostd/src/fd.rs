@@ -1,4 +1,9 @@
-use core::marker::PhantomData;
+use core::{fmt, marker::PhantomData};
+
+use crate::{Error, Result};
+
+#[cfg(test)]
+mod tests;
 
 /// A raw Unix file descriptor.
 pub type RawFd = i32;
@@ -41,6 +46,31 @@ impl BorrowedFd<'_> {
     pub const fn as_raw_fd(self) -> RawFd {
         self.fd
     }
+}
+
+/// Writes UTF-8 directly, retrying interrupted and partial writes.
+///
+/// Zero progress and other write errors return [`fmt::Error`]. Output may
+/// already have been written when an error is returned. Writes may block,
+/// interleave with other writers, or raise `SIGPIPE` on a broken pipe.
+/// This implementation adds no locks or allocation; formatting arguments
+/// may have their own runtime requirements.
+impl fmt::Write for BorrowedFd<'_> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        write_all(text.as_bytes(), |bytes| crate::io::write(*self, bytes))
+    }
+}
+
+fn write_all(mut bytes: &[u8], mut write: impl FnMut(&[u8]) -> Result<usize>) -> fmt::Result {
+    while !bytes.is_empty() {
+        match write(bytes) {
+            Ok(0) => return Err(fmt::Error),
+            Ok(count) => bytes = bytes.get(count..).ok_or(fmt::Error)?,
+            Err(error) if error == Error::INTR => {}
+            Err(_) => return Err(fmt::Error),
+        }
+    }
+    Ok(())
 }
 
 impl OwnedFd {

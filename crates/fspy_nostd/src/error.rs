@@ -18,6 +18,7 @@ pub struct Error(u32);
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 impl Error {
     pub const BADF: Self = Self(errno::BADF);
+    pub const INTR: Self = Self(errno::INTR);
     pub const INVAL: Self = Self(errno::INVAL);
     pub const NOENT: Self = Self(errno::NOENT);
     pub const NOMEM: Self = Self(errno::NOMEM);
@@ -87,6 +88,7 @@ impl From<syscalls::Errno> for Error {
 #[cfg(any(target_os = "linux", target_os = "none"))]
 mod errno {
     pub const BADF: i32 = linux_raw_sys::errno::EBADF.cast_signed();
+    pub const INTR: i32 = linux_raw_sys::errno::EINTR.cast_signed();
     pub const INVAL: i32 = linux_raw_sys::errno::EINVAL.cast_signed();
     pub const NOMEM: i32 = linux_raw_sys::errno::ENOMEM.cast_signed();
     pub const NOENT: i32 = linux_raw_sys::errno::ENOENT.cast_signed();
@@ -97,6 +99,7 @@ mod errno {
 #[cfg(target_os = "macos")]
 mod errno {
     pub const BADF: i32 = libc::EBADF;
+    pub const INTR: i32 = libc::EINTR;
     pub const INVAL: i32 = libc::EINVAL;
     pub const NOMEM: i32 = libc::ENOMEM;
     pub const NOENT: i32 = libc::ENOENT;
