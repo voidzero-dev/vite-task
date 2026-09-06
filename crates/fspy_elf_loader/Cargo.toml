@@ -10,5 +10,11 @@ rust-version.workspace = true
 [dependencies]
 fspy_nostd = { workspace = true }
 
+[[bin]]
+name = "fspy_elf_loader_test_launcher"
+path = "tests/support/launcher.rs"
+test = false
+bench = false
+
 [lints]
 workspace = true
