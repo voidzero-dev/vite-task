@@ -8,6 +8,8 @@
 #![cfg_attr(not(test), no_std)]
 
 mod c_str;
+#[cfg(any(target_os = "linux", target_os = "none"))]
+mod entry;
 mod error;
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 mod fd;

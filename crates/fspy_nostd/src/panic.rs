@@ -7,7 +7,7 @@ use core::{
 /// Installs a Linux panic handler in a freestanding executable.
 ///
 /// Invoke once as `fspy_nostd::panic_handler!()`. Do not combine it with `std`
-/// or another panic handler.
+/// or another panic handler. [`crate::main`] already installs this handler.
 /// The executable must keep stderr open and unreplaced until termination.
 ///
 /// Prints the panic to descriptor 2, then calls `exit_group(101)` without
