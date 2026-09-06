@@ -11,6 +11,8 @@ mod c_str;
 mod error;
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 mod fd;
+#[cfg(any(target_os = "linux", target_os = "none"))]
+mod panic;
 #[cfg(windows)]
 mod windows;
 
@@ -18,17 +20,22 @@ mod windows;
 pub mod env;
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", windows))]
 pub mod fs;
-#[cfg(any(target_os = "linux", target_os = "none"))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 pub mod io;
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", windows))]
 pub mod mm;
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 pub mod param;
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+pub mod stdio;
 
 pub use c_str::{CStr, CStrUnit, Fat, OsCStr, Thin, Units, WideCStr};
 pub use error::{Error, Result};
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 pub use fd::{BorrowedFd, CWD, OwnedFd, RawFd};
+#[cfg(any(target_os = "linux", target_os = "none"))]
+#[doc(hidden)]
+pub use panic::handle as __panic_handler;
 #[cfg(windows)]
 pub use windows::{
     BorrowedHandle, OwnedHandle, RawHandle, SecurityAttributes, bool_result, get_module_handle,
