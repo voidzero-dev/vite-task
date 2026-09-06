@@ -25,9 +25,11 @@ use wincode::{
     io::{Reader, Writer},
 };
 
+pub use super::execute::fingerprint::InputChangeKind;
 use super::execute::{
-    fingerprint::{PostRunFingerprint, TrackedEnvQuery},
+    fingerprint::{InputChange, InputFingerprints},
     pipe::StdOutput,
+    post_run::{PostRunMismatch, TrackedEnvFingerprints, TrackedEnvQuery},
 };
 
 const TASK_CACHE_PREALLOCATION_SIZE_LIMIT: usize = 256 * 1024 * 1024;
@@ -118,19 +120,19 @@ unsafe impl<'de, C: ConfigCore> SchemaRead<'de, C> for DurationSchema {
 
 /// Cached execution result for a task.
 ///
-/// Contains the post-run fingerprint (from fspy), captured outputs,
-/// execution duration, and explicit input file hashes.
+/// Contains the run's input fingerprints and tracked env state, captured
+/// outputs, and execution duration.
 #[derive(Debug, SchemaWrite, SchemaRead, Serialize)]
 pub struct CacheEntryValue {
-    pub post_run_fingerprint: PostRunFingerprint,
+    /// Fingerprints of everything the cached run read. Checked against the
+    /// filesystem at lookup to decide whether the entry is still valid.
+    pub input_fingerprints: InputFingerprints,
+    /// Env vars and bulk env queries observed by runner-aware tools during
+    /// the run. Checked against the current env context at lookup.
+    pub tracked_env_fingerprints: TrackedEnvFingerprints,
     pub std_outputs: Arc<[StdOutput]>,
     #[wincode(with = "DurationSchema")]
     pub duration: Duration,
-    /// Hashes of explicit input files computed from positive globs.
-    /// Files matching negative globs are already filtered out.
-    /// Path is relative to workspace root, value is `xxHash3_64` of file content.
-    /// Stored in the value (not the key) so changes can be detected and reported.
-    pub globbed_inputs: BTreeMap<RelativePathBuf, u64>,
     /// Filename of the output archive (e.g. `{uuid}.tar.zst`) stored alongside
     /// `cache.db` in the cache directory. `None` if no output files were produced.
     pub output_archive: Option<Str>,
@@ -149,16 +151,6 @@ pub struct ExecutionCache {
 pub enum CacheMiss {
     NotFound,
     FingerprintMismatch(FingerprintMismatch),
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum InputChangeKind {
-    /// File content changed but path is the same
-    ContentModified,
-    /// New file or folder added
-    Added,
-    /// Existing file or folder removed
-    Removed,
 }
 
 /// A single env var difference between a stored fingerprint and the current
@@ -240,11 +232,15 @@ pub enum FingerprintMismatch {
     },
 }
 
-impl From<crate::session::execute::fingerprint::PostRunMismatch> for FingerprintMismatch {
-    fn from(mismatch: crate::session::execute::fingerprint::PostRunMismatch) -> Self {
-        use crate::session::execute::fingerprint::PostRunMismatch;
+impl From<InputChange> for FingerprintMismatch {
+    fn from(change: InputChange) -> Self {
+        Self::InputChanged { kind: change.kind, path: change.path }
+    }
+}
+
+impl From<PostRunMismatch> for FingerprintMismatch {
+    fn from(mismatch: PostRunMismatch) -> Self {
         match mismatch {
-            PostRunMismatch::Input { kind, path } => Self::InputChanged { kind, path },
             PostRunMismatch::TrackedEnv(mismatch) => Self::TrackedEnvChanged(mismatch),
             PostRunMismatch::TrackedEnvQuery { query, mismatch } => {
                 Self::TrackedEnvQueryChanged { query, mismatch }
@@ -274,7 +270,7 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
 /// its own cache warm across branch switches, and a cache from a different
 /// version is simply ignored (it lives in a directory this build never looks
 /// at) rather than aborting the run. Bumping the version starts a fresh cache.
-const CACHE_SCHEMA_VERSION: u32 = 18;
+const CACHE_SCHEMA_VERSION: u32 = 19;
 
 /// Name of the per-version subdirectory (e.g. `v14`) under the task-cache
 /// directory that holds the database and output archives for the current
@@ -334,17 +330,19 @@ impl ExecutionCache {
 
         // Try to find the cache entry by key (spawn fingerprint + input config)
         if let Some(cache_value) = self.get_by_cache_key(&cache_key).await? {
-            // Validate explicit globbed inputs against the stored values
-            if let Some(mismatch) =
-                detect_globbed_input_change(&cache_value.globbed_inputs, globbed_inputs)
+            // Validate the stored input fingerprints against the filesystem:
+            // the listed-inputs snapshot against the fresh one, then each
+            // discovered input against the disk.
+            if let Some(change) =
+                cache_value.input_fingerprints.find_change(globbed_inputs, workspace_root)?
             {
-                return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
+                return Ok(Err(CacheMiss::FingerprintMismatch(change.into())));
             }
 
-            // Validate post-run fingerprint (inferred inputs + tracked envs)
+            // Validate the tracked env state against the current env context.
             if let Some(mismatch) = cache_value
-                .post_run_fingerprint
-                .validate(workspace_root, &cache_metadata.unfiltered_envs)?
+                .tracked_env_fingerprints
+                .validate_envs(&cache_metadata.unfiltered_envs)?
             {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch.into())));
             }
@@ -416,60 +414,6 @@ impl ExecutionCache {
         self.upsert_cache_entry(&cache_key, &cache_value).await?;
         self.upsert_task_fingerprint(execution_cache_key, &cache_key).await?;
         Ok(())
-    }
-}
-
-/// Compare stored and current globbed inputs, returning the first changed path.
-/// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
-fn detect_globbed_input_change(
-    stored: &BTreeMap<RelativePathBuf, u64>,
-    current: &BTreeMap<RelativePathBuf, u64>,
-) -> Option<FingerprintMismatch> {
-    let mut stored_iter = stored.iter();
-    let mut current_iter = current.iter();
-    let mut s = stored_iter.next();
-    let mut c = current_iter.next();
-
-    loop {
-        match (s, c) {
-            (None, None) => return None,
-            (Some((sp, _)), None) => {
-                return Some(FingerprintMismatch::InputChanged {
-                    kind: InputChangeKind::Removed,
-                    path: sp.clone(),
-                });
-            }
-            (None, Some((cp, _))) => {
-                return Some(FingerprintMismatch::InputChanged {
-                    kind: InputChangeKind::Added,
-                    path: cp.clone(),
-                });
-            }
-            (Some((sp, sh)), Some((cp, ch))) => match sp.cmp(cp) {
-                std::cmp::Ordering::Equal => {
-                    if sh != ch {
-                        return Some(FingerprintMismatch::InputChanged {
-                            kind: InputChangeKind::ContentModified,
-                            path: sp.clone(),
-                        });
-                    }
-                    s = stored_iter.next();
-                    c = current_iter.next();
-                }
-                std::cmp::Ordering::Less => {
-                    return Some(FingerprintMismatch::InputChanged {
-                        kind: InputChangeKind::Removed,
-                        path: sp.clone(),
-                    });
-                }
-                std::cmp::Ordering::Greater => {
-                    return Some(FingerprintMismatch::InputChanged {
-                        kind: InputChangeKind::Added,
-                        path: cp.clone(),
-                    });
-                }
-            },
-        }
     }
 }
 

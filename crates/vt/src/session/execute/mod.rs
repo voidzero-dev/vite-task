@@ -3,6 +3,7 @@ pub mod fingerprint;
 pub mod glob;
 mod hash;
 pub mod pipe;
+pub mod post_run;
 mod scheduler;
 pub mod spawn;
 #[cfg(fspy)]

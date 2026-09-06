@@ -1,81 +1,24 @@
-//! Post-run fingerprinting for execution caching.
-//!
-//! This module provides types and functions for creating and validating
-//! fingerprints of file system state after task execution.
+//! Per-path fingerprints and the run's input-fingerprint record.
 
 use std::{
     collections::BTreeMap,
-    ffi::OsStr,
     fs::File,
     io::{self, BufRead},
     sync::Arc,
 };
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use vt_path::{AbsolutePath, RelativePathBuf};
-use vt_plan::cache_metadata::EnvValueHash;
 use vt_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::{
-    collections::HashMap,
-    session::cache::{EnvMismatch, InputChangeKind},
-};
-
-#[derive(
-    SchemaWrite, SchemaRead, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub enum TrackedEnvQuery {
-    Glob(Str),
-    Prefix(Str),
-}
+use crate::collections::HashMap;
 
 /// Path read access info
 #[derive(Debug, Clone, Copy)]
 pub struct PathRead {
     pub read_dir_entries: bool,
-}
-
-/// Post-run fingerprint capturing file state after execution.
-/// Used to validate whether cached outputs are still valid.
-#[derive(SchemaWrite, SchemaRead, Debug, Default, Serialize)]
-pub struct PostRunFingerprint {
-    /// Paths inferred from fspy during execution with their content fingerprints.
-    /// Only populated when `input_config.includes_auto` is true.
-    pub inferred_inputs: HashMap<RelativePathBuf, PathFingerprint>,
-
-    /// Env vars observed via runner-aware IPC `getEnv` with `tracked: true`.
-    /// Key is the env name; value is the env value hash at execution time, or
-    /// `None` if unset. Validated at cache lookup against the same plan env
-    /// context that served the original request.
-    pub tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
-
-    /// Bulk env queries (`getEnvs`) made with `tracked: true`.
-    /// Outer key is the query, inner map is the match-set at execution time
-    /// (name -> value hash). Validated at cache lookup by re-matching against
-    /// the current env context and comparing the resulting set.
-    ///
-    /// Non-UTF-8 env names are never matched, saved, or treated as errors:
-    /// they are not returned to the client, so their existence cannot affect
-    /// task behavior. Values are stricter. A matched env must have a UTF-8
-    /// value; the JS client errors when querying a matched non-UTF-8 value,
-    /// and cache-hit validation treats a currently matched non-UTF-8 value as
-    /// a changed mismatch so stale cached output is not replayed.
-    pub tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
-}
-
-/// A mismatch between the stored post-run fingerprint and the current state.
-#[derive(Debug, Clone)]
-pub enum PostRunMismatch {
-    /// An inferred input file or directory changed.
-    Input { kind: InputChangeKind, path: RelativePathBuf },
-    /// A tool-tracked env var changed value, appeared, or disappeared.
-    TrackedEnv(EnvMismatch),
-    /// A tool-tracked bulk env query's match-set changed between runs. Carries
-    /// the first differing entry in env-name order.
-    TrackedEnvQuery { query: TrackedEnvQuery, mismatch: EnvMismatch },
 }
 
 /// Fingerprint for a single path (file or directory)
@@ -100,200 +43,127 @@ pub enum DirEntryKind {
     Symlink,
 }
 
-impl PostRunFingerprint {
-    /// Creates a new fingerprint from path accesses after task execution.
-    ///
-    /// Negative glob filtering is done upstream (see
-    /// [`super::tracked_accesses::TrackedPathAccesses::from_raw`]).
-    /// Paths already present in `globbed_inputs` are skipped — they are
-    /// already tracked by the prerun glob fingerprint, and the read-write
-    /// overlap check in `execute_spawn` guarantees the task did not modify
-    /// them, so the prerun hash is still correct.
-    ///
-    /// # Arguments
-    /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
-    /// * `base_dir` - Workspace root for resolving relative paths
-    /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
-    /// * `tracked_envs` - Tool-requested env vars (name -> value hash), validated on lookup
-    /// * `tracked_env_queries` - Tool-requested bulk env queries (query -> match-set hashes)
-    #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
-    pub fn create(
-        inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
-        base_dir: &AbsolutePath,
-        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
-        tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
-    ) -> anyhow::Result<Self> {
-        let inferred_inputs = inferred_path_reads
-            .par_iter()
-            .filter(|(path, _)| !globbed_inputs.contains_key(*path))
-            .map(|(relative_path, path_read)| {
-                let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
-                let fingerprint = fingerprint_path(&full_path, *path_read)?;
-                Ok((relative_path.clone(), fingerprint))
-            })
-            .collect::<anyhow::Result<HashMap<_, _>>>()?;
+/// How an input changed since a previous run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InputChangeKind {
+    /// File content changed but path is the same
+    ContentModified,
+    /// New file or folder added
+    Added,
+    /// Existing file or folder removed
+    Removed,
+}
 
-        Ok(Self { inferred_inputs, tracked_envs, tracked_env_queries })
+/// The first input found to differ from a previous run.
+#[derive(Debug, Clone)]
+pub struct InputChange {
+    pub kind: InputChangeKind,
+    pub path: RelativePathBuf,
+}
+
+/// Fingerprints of everything a task run read.
+///
+/// Opaque: produced at the end of a run, stored by the caller, and handed
+/// back at the start of a later run to detect input changes.
+#[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Default, Serialize)]
+pub struct InputFingerprints {
+    /// Content hashes of the explicitly-listed inputs, captured before the
+    /// run (the pre-run snapshot). The read-write-overlap check guarantees
+    /// the task did not modify them, so they double as the post-run state.
+    snapshot: BTreeMap<RelativePathBuf, u64>,
+    /// Fingerprints of the inputs the run discovered while it ran (traced
+    /// reads not already covered by the snapshot).
+    discovered: HashMap<RelativePathBuf, PathFingerprint>,
+}
+
+impl InputFingerprints {
+    pub(crate) const fn new(
+        snapshot: BTreeMap<RelativePathBuf, u64>,
+        discovered: HashMap<RelativePathBuf, PathFingerprint>,
+    ) -> Self {
+        Self { snapshot, discovered }
     }
 
-    /// Validates the fingerprint against current filesystem state and the
-    /// unfiltered env context used by runner-aware IPC. `unfiltered_envs` must
-    /// be the same plan env context that served the original `getEnv` request,
-    /// not the filtered env passed to the spawned process.
-    ///
-    /// Returns `Some(mismatch)` if anything changed, `None` if all valid.
-    /// Returns an error if a tracked env is currently present but cannot be
-    /// represented as UTF-8; treating that value as unset would make cache
-    /// validation unsound.
-    #[tracing::instrument(level = "debug", skip_all, name = "validate_post_run_fingerprint")]
-    pub fn validate(
+    /// Find the first input that differs between this (stored) record and the
+    /// present: the stored snapshot is diffed against `current_snapshot`
+    /// (pure), then each discovered input is re-fingerprinted against the
+    /// filesystem. Check order determines which change gets reported when
+    /// several exist.
+    pub(crate) fn find_change(
         &self,
+        current_snapshot: &BTreeMap<RelativePathBuf, u64>,
         base_dir: &AbsolutePath,
-        unfiltered_envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
-    ) -> anyhow::Result<Option<PostRunMismatch>> {
-        let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
-            |(input_relative_path, path_fingerprint)| {
-                let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
-                let path_read = PathRead {
-                    read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
-                };
-                let current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
-                    Ok(ok) => ok,
-                    Err(err) => return Some(Err(err)),
-                };
-                if path_fingerprint == &current_path_fingerprint {
-                    None
-                } else {
-                    let (kind, entry_name) =
-                        determine_change_kind(path_fingerprint, &current_path_fingerprint);
-                    let path = if let Some(name) = entry_name {
-                        // For folder changes, build `dir/entry` path
-                        let entry = match RelativePathBuf::new(name.as_str()) {
-                            Ok(p) => p,
-                            Err(e) => return Some(Err(e.into())),
-                        };
-                        input_relative_path.as_relative_path().join(entry)
-                    } else {
-                        input_relative_path.clone()
-                    };
-                    Some(Ok(PostRunMismatch::Input { kind, path }))
-                }
-            },
-        );
-        if let Some(result) = input_mismatch {
-            return result.map(Some);
+    ) -> anyhow::Result<Option<InputChange>> {
+        if let Some(change) = detect_snapshot_change(&self.snapshot, current_snapshot) {
+            return Ok(Some(change));
         }
+        validate_discovered(&self.discovered, base_dir)
+    }
+}
 
-        for (name, stored_value) in &self.tracked_envs {
-            let current_value = unfiltered_envs
-                .get(OsStr::new(name.as_str()))
-                .map(|value| {
-                    let value_str = value.to_str().ok_or_else(|| {
-                        anyhow::anyhow!("tracked env value for {name} is not valid UTF-8")
-                    })?;
-                    Ok::<_, anyhow::Error>(EnvValueHash::new(value_str))
-                })
-                .transpose()?;
-            if let Some(mismatch) =
-                EnvMismatch::compare(name, stored_value.as_ref(), current_value.as_ref())
-            {
-                return Ok(Some(PostRunMismatch::TrackedEnv(mismatch)));
-            }
-        }
+/// Fingerprint the inputs a run discovered: every traced read not already in
+/// the snapshot. Paths in the snapshot are skipped — they are already tracked
+/// by the pre-run hashes, and the read-write overlap check guarantees the task
+/// did not modify them, so the pre-run hash is still correct.
+pub fn fingerprint_discovered(
+    path_reads: &HashMap<RelativePathBuf, PathRead>,
+    base_dir: &AbsolutePath,
+    snapshot: &BTreeMap<RelativePathBuf, u64>,
+) -> anyhow::Result<HashMap<RelativePathBuf, PathFingerprint>> {
+    path_reads
+        .par_iter()
+        .filter(|(path, _)| !snapshot.contains_key(*path))
+        .map(|(relative_path, path_read)| {
+            let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
+            let fingerprint = fingerprint_path(&full_path, *path_read)?;
+            Ok((relative_path.clone(), fingerprint))
+        })
+        .collect::<anyhow::Result<HashMap<_, _>>>()
+}
 
-        for (query, stored_matches) in &self.tracked_env_queries {
-            let current_matches = match match_env_query(query, unfiltered_envs)? {
-                EnvQueryValidation::Matches(matches) => matches,
-                EnvQueryValidation::NonUtf8Value(mismatch) => {
-                    return Ok(Some(PostRunMismatch::TrackedEnvQuery {
-                        query: query.clone(),
-                        mismatch,
-                    }));
-                }
+/// Re-fingerprint each stored discovered input against the current filesystem
+/// state, returning the first mismatch found (parallel, so the pick among
+/// several concurrent mismatches is nondeterministic — intentional).
+fn validate_discovered(
+    discovered: &HashMap<RelativePathBuf, PathFingerprint>,
+    base_dir: &AbsolutePath,
+) -> anyhow::Result<Option<InputChange>> {
+    let change = discovered.par_iter().find_map_any(|(input_relative_path, path_fingerprint)| {
+        let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
+        let path_read = PathRead {
+            read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
+        };
+        let current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
+            Ok(ok) => ok,
+            Err(err) => return Some(Err(err)),
+        };
+        if path_fingerprint == &current_path_fingerprint {
+            None
+        } else {
+            let (kind, entry_name) =
+                determine_change_kind(path_fingerprint, &current_path_fingerprint);
+            let path = if let Some(name) = entry_name {
+                // For folder changes, build `dir/entry` path
+                let entry = match RelativePathBuf::new(name.as_str()) {
+                    Ok(p) => p,
+                    Err(e) => return Some(Err(e.into())),
+                };
+                input_relative_path.as_relative_path().join(entry)
+            } else {
+                input_relative_path.clone()
             };
-            if let Some(mismatch) = first_env_glob_mismatch(stored_matches, &current_matches) {
-                return Ok(Some(PostRunMismatch::TrackedEnvQuery {
-                    query: query.clone(),
-                    mismatch,
-                }));
-            }
+            Some(Ok(InputChange { kind, path }))
         }
-
-        Ok(None)
-    }
+    });
+    change.transpose()
 }
 
-/// Build the current match-set for `query` by enumerating the given env
-/// snapshot and keeping matching UTF-8 names. If a matching env has a non-UTF-8
-/// value, return a changed mismatch so the stale cache entry is not replayed.
-fn match_env_query(
-    query: &TrackedEnvQuery,
-    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
-) -> anyhow::Result<EnvQueryValidation> {
-    Ok(match query {
-        TrackedEnvQuery::Glob(pattern) => {
-            let glob = vt_glob::env::EnvGlob::new(pattern.as_str())?;
-            collect_matching_envs(envs, |name| glob.is_match(name))
-        }
-        TrackedEnvQuery::Prefix(prefix) => {
-            collect_matching_envs(envs, |name| env_name_starts_with(name, prefix.as_str()))
-        }
-    })
-}
-
-fn collect_matching_envs(
-    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
-    is_match: impl Fn(&str) -> bool,
-) -> EnvQueryValidation {
-    let mut matches = BTreeMap::new();
-    for (name, value) in envs {
-        let Some(name_str) = name.to_str() else {
-            continue;
-        };
-        if !is_match(name_str) {
-            continue;
-        }
-        let Some(value_str) = value.to_str() else {
-            return EnvQueryValidation::NonUtf8Value(EnvMismatch::Changed {
-                name: Str::from(name_str),
-            });
-        };
-        matches.insert(Str::from(name_str), EnvValueHash::new(value_str));
-    }
-    EnvQueryValidation::Matches(matches)
-}
-
-enum EnvQueryValidation {
-    Matches(BTreeMap<Str, EnvValueHash>),
-    NonUtf8Value(EnvMismatch),
-}
-
-#[cfg(not(windows))]
-fn env_name_starts_with(name: &str, prefix: &str) -> bool {
-    name.starts_with(prefix)
-}
-
-#[cfg(windows)]
-fn env_name_starts_with(name: &str, prefix: &str) -> bool {
-    let mut name_chars = name.chars();
-    for prefix_char in prefix.chars() {
-        let Some(name_char) = name_chars.next() else {
-            return false;
-        };
-        if !name_char.eq_ignore_ascii_case(&prefix_char) {
-            return false;
-        }
-    }
-    true
-}
-
-/// Find the first deterministic difference between stored and current env
-/// glob match-sets.
-fn first_env_glob_mismatch(
-    stored: &BTreeMap<Str, EnvValueHash>,
-    current: &BTreeMap<Str, EnvValueHash>,
-) -> Option<EnvMismatch> {
+/// Compare stored and current snapshot hashes, returning the first changed path.
+/// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
+fn detect_snapshot_change(
+    stored: &BTreeMap<RelativePathBuf, u64>,
+    current: &BTreeMap<RelativePathBuf, u64>,
+) -> Option<InputChange> {
     let mut stored_iter = stored.iter();
     let mut current_iter = current.iter();
     let mut s = stored_iter.next();
@@ -302,19 +172,28 @@ fn first_env_glob_mismatch(
     loop {
         match (s, c) {
             (None, None) => return None,
-            (Some((name, _)), None) => return Some(EnvMismatch::Removed { name: name.clone() }),
-            (None, Some((name, _))) => return Some(EnvMismatch::Added { name: name.clone() }),
-            (Some((sn, sv)), Some((cn, cv))) => match sn.cmp(cn) {
+            (Some((sp, _)), None) => {
+                return Some(InputChange { kind: InputChangeKind::Removed, path: sp.clone() });
+            }
+            (None, Some((cp, _))) => {
+                return Some(InputChange { kind: InputChangeKind::Added, path: cp.clone() });
+            }
+            (Some((sp, sh)), Some((cp, ch))) => match sp.cmp(cp) {
                 std::cmp::Ordering::Equal => {
-                    if sv != cv {
-                        return Some(EnvMismatch::Changed { name: sn.clone() });
+                    if sh != ch {
+                        return Some(InputChange {
+                            kind: InputChangeKind::ContentModified,
+                            path: sp.clone(),
+                        });
                     }
                     s = stored_iter.next();
                     c = current_iter.next();
                 }
-                std::cmp::Ordering::Less => return Some(EnvMismatch::Removed { name: sn.clone() }),
+                std::cmp::Ordering::Less => {
+                    return Some(InputChange { kind: InputChangeKind::Removed, path: sp.clone() });
+                }
                 std::cmp::Ordering::Greater => {
-                    return Some(EnvMismatch::Added { name: cn.clone() });
+                    return Some(InputChange { kind: InputChangeKind::Added, path: cp.clone() });
                 }
             },
         }
@@ -516,116 +395,41 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::{OsStr, OsString};
-
     use super::*;
 
-    #[cfg(unix)]
-    fn non_utf8_os_string() -> OsString {
-        use std::os::unix::ffi::OsStringExt;
-
-        OsString::from_vec(vec![0xFF])
-    }
-
-    #[cfg(windows)]
-    fn non_utf8_os_string() -> OsString {
-        use std::os::windows::ffi::OsStringExt;
-
-        OsString::from_wide(&[0xD800])
-    }
-
+    /// The opaque record must survive the cache's serialization round trip
+    /// with every fingerprint shape it can carry.
     #[test]
-    fn validate_errors_on_current_non_utf8_tracked_env_value() {
-        let mut tracked_envs = BTreeMap::new();
-        tracked_envs.insert(Str::from("PROBE_ENV"), None);
-        let fingerprint = PostRunFingerprint { tracked_envs, ..PostRunFingerprint::default() };
+    fn input_fingerprints_wincode_round_trip() {
+        let mut snapshot = BTreeMap::new();
+        snapshot.insert(RelativePathBuf::new("src/a.txt").unwrap(), 42u64);
 
-        let mut unfiltered_envs = FxHashMap::default();
-        unfiltered_envs.insert(
-            Arc::<OsStr>::from(OsStr::new("PROBE_ENV")),
-            Arc::<OsStr>::from(non_utf8_os_string()),
+        let mut entries = BTreeMap::new();
+        entries.insert(Str::from("child.txt"), DirEntryKind::File);
+        entries.insert(Str::from("nested"), DirEntryKind::Dir);
+        entries.insert(Str::from("link"), DirEntryKind::Symlink);
+
+        let mut discovered = HashMap::default();
+        discovered
+            .insert(RelativePathBuf::new("read.txt").unwrap(), PathFingerprint::FileContentHash(7));
+        discovered.insert(RelativePathBuf::new("probed").unwrap(), PathFingerprint::NotFound);
+        discovered
+            .insert(RelativePathBuf::new("opened-dir").unwrap(), PathFingerprint::Folder(None));
+        discovered.insert(
+            RelativePathBuf::new("listed-dir").unwrap(),
+            PathFingerprint::Folder(Some(entries)),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let err = fingerprint
-            .validate(&workspace_root, &unfiltered_envs)
-            .expect_err("non-UTF-8 tracked env values must error");
+        let fingerprints = InputFingerprints::new(snapshot, discovered);
 
-        assert!(err.to_string().contains("tracked env value for PROBE_ENV is not valid UTF-8"));
-    }
+        let config = wincode::config::Configuration::default();
+        let bytes = wincode::config::serialize(&fingerprints, config).unwrap();
+        let back: InputFingerprints = wincode::config::deserialize_exact(&bytes, config).unwrap();
+        assert_eq!(fingerprints, back);
 
-    #[test]
-    fn validate_reports_current_non_utf8_tracked_env_glob_value_as_changed() {
-        let mut tracked_env_queries = BTreeMap::new();
-        tracked_env_queries.insert(TrackedEnvQuery::Glob(Str::from("PROBE_*")), BTreeMap::new());
-        let fingerprint =
-            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
-
-        let mut unfiltered_envs = FxHashMap::default();
-        unfiltered_envs.insert(
-            Arc::<OsStr>::from(OsStr::new("PROBE_BAD")),
-            Arc::<OsStr>::from(non_utf8_os_string()),
-        );
-
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
-
-        match mismatch {
-            Some(PostRunMismatch::TrackedEnvQuery {
-                query,
-                mismatch: EnvMismatch::Changed { name },
-            }) => {
-                assert_eq!(query, TrackedEnvQuery::Glob(Str::from("PROBE_*")));
-                assert_eq!(name.as_str(), "PROBE_BAD");
-            }
-            other => panic!("expected changed tracked env query mismatch, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn validate_tracked_env_prefix_treats_star_literally() {
-        let mut tracked_env_queries = BTreeMap::new();
-        let mut stored_matches = BTreeMap::new();
-        stored_matches.insert(Str::from("PROBE_*A"), EnvValueHash::new("literal"));
-        tracked_env_queries.insert(TrackedEnvQuery::Prefix(Str::from("PROBE_*")), stored_matches);
-        let fingerprint =
-            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
-
-        let mut unfiltered_envs = FxHashMap::default();
-        unfiltered_envs.insert(
-            Arc::<OsStr>::from(OsStr::new("PROBE_*A")),
-            Arc::<OsStr>::from(OsStr::new("literal")),
-        );
-        unfiltered_envs.insert(
-            Arc::<OsStr>::from(OsStr::new("PROBE_XA")),
-            Arc::<OsStr>::from(OsStr::new("wildcard if interpreted as glob")),
-        );
-
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
-
-        assert!(mismatch.is_none());
-    }
-
-    #[test]
-    fn validate_ignores_non_utf8_tracked_env_glob_names() {
-        let mut tracked_env_queries = BTreeMap::new();
-        tracked_env_queries.insert(TrackedEnvQuery::Glob(Str::from("PROBE_*")), BTreeMap::new());
-        let fingerprint =
-            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
-
-        let mut unfiltered_envs = FxHashMap::default();
-        unfiltered_envs.insert(
-            Arc::<OsStr>::from(non_utf8_os_string()),
-            Arc::<OsStr>::from(OsStr::new("value")),
-        );
-
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
-
-        assert!(mismatch.is_none());
+        let empty = InputFingerprints::default();
+        let bytes = wincode::config::serialize(&empty, config).unwrap();
+        let back: InputFingerprints = wincode::config::deserialize_exact(&bytes, config).unwrap();
+        assert_eq!(empty, back);
     }
 }
