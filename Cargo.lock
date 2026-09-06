@@ -1335,6 +1335,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fspy_elf_loader"
+version = "0.1.0"
+dependencies = [
+ "fspy_nostd",
+]
+
+[[package]]
 name = "fspy_ipc_str"
 version = "0.0.0"
 dependencies = [
