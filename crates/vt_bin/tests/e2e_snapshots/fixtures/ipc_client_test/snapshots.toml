@@ -670,3 +670,64 @@ steps = [
     ],
   ], comment = "cache hit: changed match set was requested with tracked: false" },
 ]
+
+[[e2e]]
+name = "fetch_envs_tracked_query_ignores_untracked_names"
+comment = """
+Exercises `getEnvs(pattern, { tracked: true })` combined with `untrackedEnv`. Names matching `untrackedEnv` are excluded from the tracked match-set at record and validation time, so an ambient variable swept up by a broad query (a CI orchestration id, for example) cannot invalidate the cache. The runner still serves those variables to the tool; a hit replays the recorded output, per the untracked contract.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-untracked-noise",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+  ], comment = "populate: the tracked match-set records {PROBE_A}; PROBE_NOISE_* is excluded" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-untracked-noise",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_NOISE_ID",
+      "run-1",
+    ],
+  ], comment = "ambient noise matches the query but also untrackedEnv -> cache hit" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-untracked-noise",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_NOISE_ID",
+      "run-2",
+    ],
+  ], comment = "noise value changes -> still a hit" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-untracked-noise",
+  ], envs = [
+    [
+      "PROBE_A",
+      "changed",
+    ],
+    [
+      "PROBE_NOISE_ID",
+      "run-2",
+    ],
+  ], comment = "tracked match PROBE_A changes -> cache miss" },
+]

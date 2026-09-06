@@ -441,9 +441,11 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "USE_OUTPUT_FOR_EDGE_FUNCTIONS",
     "NOW_BUILDER",
     "VC_MICROFRONTENDS_CONFIG_FILE_NAME",
-    // GitHub Actions
+    // GitHub Actions. `ACTIONS_*` covers runner-orchestration variables like
+    // `ACTIONS_ORCHESTRATION_ID` that change every run.
     "GITHUB_*",
     "RUNNER_*",
+    "ACTIONS_*",
     // Windows specific
     "APPDATA",
     // Node's compile cache uses LOCALAPPDATA to pick its cache directory

@@ -84,6 +84,11 @@
       "command": "node scripts/fetch_env.mjs --untracked PROBE_ENV",
       "cache": true
     },
+    "fetch-envs-untracked-noise": {
+      "command": "node scripts/fetch_envs.mjs",
+      "untrackedEnv": ["PROBE_NOISE_*"],
+      "cache": true
+    },
     "fetch-envs-untracked": {
       "command": "node scripts/fetch_envs.mjs --untracked",
       "cache": true
