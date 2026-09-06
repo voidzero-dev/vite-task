@@ -128,7 +128,7 @@ jobs:
 
       # x86_64-apple-darwin runs on arm64 runner under Rosetta; install x64 Node
       # so fspy's x86_64 preload dylib can be injected into spawned node procs.
-      - uses: oxc-project/setup-node@d59b270414aa7d0eed947eed4eb5b0b8a675f01d # v1.4.0
+      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
         with:
           architecture: ${{ matrix.target == 'x86_64-apple-darwin' && 'x64' || '' }}
 
@@ -189,7 +189,7 @@ jobs:
 
       - run: rustup target add x86_64-pc-windows-msvc
 
-      - uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
         with:
           tool: cargo-nextest,cargo-xwin
 
@@ -260,7 +260,7 @@ jobs:
         with:
           name: windows-test-archive
 
-      - uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
         with:
           tool: cargo-nextest
 
@@ -272,7 +272,7 @@ jobs:
         if: matrix.mode == 'default'
         run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION"
 
-      - uses: oxc-project/setup-node@d59b270414aa7d0eed947eed4eb5b0b8a675f01d # v1.4.0
+      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
         if: matrix.mode == 'ignored'
 
       - name: Install runtime binaries
@@ -332,7 +332,7 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - uses: oxc-project/setup-node@d59b270414aa7d0eed947eed4eb5b0b8a675f01d # v1.4.0
+      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
 
       - name: Run ignored tests
         run: cargo test -- --ignored
@@ -353,7 +353,7 @@ jobs:
           tools: cargo-shear@1.11.1,cargo-autoinherit@0.1.6
           components: clippy rust-docs rustfmt
 
-      - uses: oxc-project/setup-node@d59b270414aa7d0eed947eed4eb5b0b8a675f01d # v1.4.0
+      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
       - run: pnpm exec vp fmt --check
       - run: cargo autoinherit && git diff --exit-code
       - run: cargo shear --deny-warnings
