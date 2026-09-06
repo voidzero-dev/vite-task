@@ -1,6 +1,8 @@
+// ELF execution uses the Linux process ABI.
+#![cfg(any(target_os = "linux", target_os = "none"))]
 #![no_std]
 
-use fspy_nostd::{CStr, OwnedFd, Thin};
+use fspy_nostd::{CStr, OwnedFd, Thin, env::AuxEntry};
 
 /// Loads an ELF executable into the current process and enters it.
 ///
@@ -10,9 +12,10 @@ use fspy_nostd::{CStr, OwnedFd, Thin};
 ///
 /// `execfn` is the original execution name used for `AT_EXECFN`; it need not
 /// match `argv[0]`. Arguments and environment entries are copied to the new
-/// stack. `inherited_auxv` comes from the loader's kernel exec: image-specific
-/// entries are replaced, reusable entries are preserved, and referenced data
-/// is copied where needed. The resulting vector ends with `AT_NULL`.
+/// stack. `inherited_auxv` supplies [`AuxEntry`] values from the loader's kernel
+/// exec, excluding `AT_NULL`. Image-specific entries are replaced, reusable
+/// entries are preserved, and referenced data is copied where needed. The
+/// resulting vector ends with `AT_NULL`.
 ///
 /// Path resolution, shebang handling, and execution-policy checks belong to
 /// the caller. This function does not perform kernel exec cleanup: installed
@@ -38,7 +41,7 @@ pub unsafe fn exec_elf<'a>(
     execfn: CStr<'a, Thin>,
     argv: impl Iterator<Item = CStr<'a, Thin>>,
     envp: impl Iterator<Item = CStr<'a, Thin>>,
-    inherited_auxv: impl Iterator<Item = (usize, usize)>,
+    inherited_auxv: impl Iterator<Item = AuxEntry>,
 ) -> ! {
     let _ = (elf_file, execfn, argv, envp, inherited_auxv);
     unimplemented!()
