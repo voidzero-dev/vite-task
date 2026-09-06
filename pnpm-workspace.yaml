@@ -14,7 +14,7 @@ catalog:
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.62.1
-  '@vitest/browser-playwright': 4.1.11
+  '@vitest/browser-playwright': 5.0.0
   bun: 1.4.0
   cross-env: ^10.1.0
   deno: 2.9.6
@@ -28,7 +28,7 @@ catalog:
   typescript: ^6.0.3
   vite: npm:@voidzero-dev/vite-plus-core@0.3.0
   vite-plus: 0.3.0
-  vitest: 4.1.11
+  vitest: 5.0.0
 
 catalogMode: prefer
 overrides:
