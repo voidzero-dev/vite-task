@@ -178,6 +178,8 @@ fn resolve_envs_with_patterns<'a>(
 
 #[cfg(test)]
 mod tests {
+    use vt_graph::config::DEFAULT_UNTRACKED_ENV;
+
     use super::*;
 
     fn create_test_envs(pairs: Vec<(&str, &str)>) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
@@ -557,5 +559,22 @@ mod tests {
         assert!(envs.contains_key(OsStr::new("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")));
         // Non-matching env should be filtered out
         assert!(!envs.contains_key(OsStr::new("OTHER_VAR")));
+    }
+
+    #[test]
+    fn test_github_actions_oidc_env_untracked() {
+        let env_config = create_env_config(&[], DEFAULT_UNTRACKED_ENV);
+
+        let mut envs = create_test_envs(vec![
+            ("ACTIONS_ID_TOKEN_REQUEST_URL", "https://example.com/id-token"),
+            ("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-token"),
+            ("ACTIONS_UNRELATED", "should-be-filtered"),
+        ]);
+
+        let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert!(envs.contains_key(OsStr::new("ACTIONS_ID_TOKEN_REQUEST_URL")));
+        assert!(envs.contains_key(OsStr::new("ACTIONS_ID_TOKEN_REQUEST_TOKEN")));
+        assert!(!envs.contains_key(OsStr::new("ACTIONS_UNRELATED")));
     }
 }
