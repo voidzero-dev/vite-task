@@ -132,7 +132,9 @@ async fn plan_task_as_execution_node(
         let command_str = command.as_str();
         let is_last_command = command_item_index + 1 == commands.len();
         // Try to parse the command string as a list of subcommands separated by `&&`
-        if let Some(parsed_subcommands) = try_parse_as_and_list(command_str) {
+        // `cmd.exe` passes wildcard characters through literally. Only shells with
+        // POSIX pathname expansion need to preserve unquoted patterns for shell execution.
+        if let Some(parsed_subcommands) = try_parse_as_and_list(command_str, cfg!(unix)) {
             let and_item_count = parsed_subcommands.len();
             for (and_item_index, (and_item, add_item_span)) in
                 parsed_subcommands.into_iter().enumerate()

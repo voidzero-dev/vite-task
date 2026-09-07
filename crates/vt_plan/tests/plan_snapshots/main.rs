@@ -35,6 +35,8 @@ struct Plan {
     pub name: Str,
     pub args: Vec<Str>,
     #[serde(default)]
+    pub platform: Option<Str>,
+    #[serde(default)]
     pub cwd: RelativePathBuf,
     #[serde(default)]
     pub compact: bool,
@@ -234,6 +236,9 @@ fn run_case_inner(
         snapshots.check_snapshot("task_graph.md", task_graph_markdown.as_str())?;
 
         for plan in cases_file.plan_cases {
+            if !should_run_on_this_platform(plan.platform.as_ref()) {
+                continue;
+            }
             assert_identifier_like("plan case name", plan.name.as_str());
             let snapshot_base = vt_str::format!("query_{}", plan.name);
             let compact = plan.compact;

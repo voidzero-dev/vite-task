@@ -1,0 +1,93 @@
+[[e2e]]
+name = "unquoted_glob_expands_on_unix"
+cfg = "unix"
+comment = """
+Unquoted pathname patterns in package scripts are executed by the platform shell, matching package-manager script semantics on Unix.
+"""
+steps = [["vt", "run", "unquoted-glob"]]
+
+[[e2e]]
+name = "unquoted_glob_stays_static_on_windows"
+cfg = "windows"
+comment = """
+Because `cmd.exe` does not perform pathname expansion, an unquoted pattern stays on the static execution path and is passed to the program literally.
+"""
+steps = [["vt", "run", "unquoted-glob"]]
+
+[[e2e]]
+name = "unquoted_glob_preserves_extra_args_on_unix"
+cfg = "unix"
+comment = """
+Extra arguments passed to `vt run` are shell-escaped and appended after the package script. Shell operators inside one argument must remain literal after Unix shell expansion.
+"""
+steps = [["vt", "run", "unquoted-glob", "tail && vtt exit 31"]]
+
+[[e2e]]
+name = "unquoted_glob_preserves_extra_args_on_windows"
+cfg = "windows"
+comment = """
+The static Windows execution path preserves extra argument boundaries without routing them through `cmd.exe`. Shell operators inside one argument must remain literal.
+"""
+steps = [["vt", "run", "unquoted-glob", "tail && vtt exit 31"]]
+
+[[e2e]]
+name = "and_list_with_glob_uses_one_shell_on_unix"
+cfg = "unix"
+comment = """
+If any command in an `&&` list needs pathname expansion, the complete list is kept intact for the Unix shell so ordering and short-circuit semantics are preserved.
+"""
+steps = [["vt", "run", "and-glob"]]
+
+[[e2e]]
+name = "and_list_with_glob_stays_static_on_windows"
+cfg = "windows"
+comment = """
+Since the pathname pattern has no special meaning to `cmd.exe`, the existing static `&&` planning remains available on Windows while preserving ordering and literal arguments.
+"""
+steps = [["vt", "run", "and-glob"]]
+
+[[e2e]]
+name = "quoted_glob_stays_literal"
+comment = """
+Quoted pathname patterns remain literal for the child command to interpret on every platform.
+"""
+steps = [["vt", "run", "quoted-glob"]]
+
+[[e2e]]
+name = "nested_vt_quoted_glob_stays_command_owned"
+comment = """
+A quoted pathname pattern remains one literal argument when passed to a nested Vite+ command, so the command can implement portable glob semantics itself.
+"""
+steps = [["vt", "run", "nested-vt-quoted-glob"]]
+
+[[e2e]]
+name = "nested_vt_receives_expanded_glob_on_unix"
+cfg = "unix"
+comment = """
+An unquoted pathname pattern in a package script that invokes nested `vt run` is expanded by the shell before the new `vt` process starts. This verifies PATH lookup and preserves both preceding extra arguments and expanded paths.
+"""
+steps = [["vt", "run", "nested-vt-glob"]]
+
+[[e2e]]
+name = "nested_vt_receives_literal_glob_on_windows"
+cfg = "windows"
+comment = """
+On Windows, the static planner keeps nested `vt run` in process and forwards the pattern literally while preserving the preceding extra argument.
+"""
+steps = [["vt", "run", "nested-vt-glob"]]
+
+[[e2e]]
+name = "nested_vt_propagates_exit_code_on_unix"
+cfg = "unix"
+comment = """
+The shell fallback used for an unquoted pathname pattern preserves a nested `vt run` failure exit code after Unix shell expansion.
+"""
+steps = [["vt", "run", "nested-vt-glob-fails"]]
+
+[[e2e]]
+name = "nested_vt_propagates_exit_code_on_windows"
+cfg = "windows"
+comment = """
+The static Windows path for an unquoted pathname pattern preserves a nested `vt run` failure exit code.
+"""
+steps = [["vt", "run", "nested-vt-glob-fails"]]
