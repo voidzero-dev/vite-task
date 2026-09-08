@@ -11,7 +11,7 @@ The user configures a base URL that includes the storage namespace, such as `htt
 | Operation | Method | URL |
 | --- | --- | --- |
 | Fetch metadata | POST | `{endpoint}/fetch` |
-| Download a blob | GET | `{endpoint}/download/{blob_id}` |
+| Download a blob | GET | `{endpoint}/blob/{blob_id}` |
 | Store an entry | POST | `{endpoint}/store` |
 
 ## Fetch
@@ -64,7 +64,7 @@ The server compares keys by byte equality. Any schema version or compatibility i
 ## Download
 
 ```http
-GET {endpoint}/download/{blob_id}
+GET {endpoint}/blob/{blob_id}
 ```
 
 The server returns HTTP 200 with `Content-Type: application/octet-stream` and raw blob bytes, or HTTP 404 if the blob is unavailable.
