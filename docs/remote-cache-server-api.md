@@ -4,6 +4,8 @@ This API stores and retrieves entries by `key`, with a `secondary_key` for fallb
 
 The server treats keys, values, and blobs as opaque bytes. It does not interpret their schema or format.
 
+For context, see the [existing task cache flow](https://gist.github.com/wan9chi/3ececdfa6b268d33c91560fe16e01043).
+
 ## Endpoint
 
 The user configures a base URL that includes the storage namespace, such as `https://cache.example.com/projects/my-project`.
