@@ -14,29 +14,14 @@ The user configures a base URL that includes the storage namespace, such as `htt
 | Download an attachment | GET | `{endpoint}/download/{blob_id}` |
 | Store an entry | POST | `{endpoint}/store` |
 
-## Encoding
-
-The client encodes keys and values with wincode (This is a implemenetaion detail, the server isn't aware of it).
-
-Both keys include the cache schema version and platform compatibility fields:
-
-```text
-key           = encode(schema version, platform, primary_key)
-secondary_key = encode(schema version, platform, secondary_key)
-```
-
-Including compatibility fields in both keys prevents exact and fallback lookups from selecting incompatible entries. The server only compares bytes, so it needs no schema-version logic.
-
-Requests and responses use CBOR, except for multipart uploads and raw downloads. CBOR carries binary keys and values without base64 overhead. The server decodes the CBOR envelope and leaves the wincode payloads opaque. Canonical CBOR is unnecessary because key equality depends on the contained bytes.
-
-The schemas below describe types, not literal request bodies. `bytes` means a CBOR byte string; `string` means a CBOR text string. Field names and `kind` values are text strings. All shown fields are required unless marked optional. Nullable fields must be present, using CBOR `null` when absent.
-
 ## Fetch
 
 ```http
 POST {endpoint}/fetch
 Content-Type: application/cbor
 ```
+
+The schemas describe field types, not literal request bodies. `bytes` means a CBOR byte string; `string` means a CBOR text string. All shown fields are required unless marked optional. Nullable fields must be present, using CBOR `null` when absent.
 
 Request:
 
@@ -70,6 +55,19 @@ Fallback includes the stored primary key so the client can explain what changed.
 
 For an exact match, the client validates listed input hashes, discovered path fingerprints, tracked environment values, and environment queries. It downloads the attachment only after validation passes. Separating metadata from the archive avoids transferring outputs the client cannot reuse.
 
+### Key and value encoding
+
+In these requests and responses, CBOR encodes the outer map, including field names and `kind` as text strings. The `key`, `secondary_key`, and `value` fields carry binary data without base64 overhead. The server reads the map but treats those fields as opaque bytes.
+
+The client uses wincode to encode the contents of these binary fields. This is a client implementation detail. Both keys include the cache schema version and platform compatibility fields:
+
+```text
+key           = encode(schema version, platform, primary_key)
+secondary_key = encode(schema version, platform, secondary_key)
+```
+
+The server only compares key bytes, so it needs no schema-version logic.
+
 ## Download
 
 ```http
@@ -77,10 +75,6 @@ GET {endpoint}/download/{blob_id}
 ```
 
 The server returns HTTP 200 with `Content-Type: application/octet-stream` and raw attachment bytes, or HTTP 404 if the attachment is unavailable.
-
-Blob IDs are opaque, URL-safe strings scoped to the endpoint. An ID must never refer to different bytes, so replacing an entry cannot cause a client to download an archive that disagrees with previously fetched metadata.
-
-The client finishes downloading before reporting or replaying a remote hit. This lets it recover from a download failure without first displaying cached output. It then saves the archive locally and uses the existing restoration path.
 
 ## Store
 
@@ -100,7 +94,7 @@ Metadata:
 { key: bytes, secondary_key: bytes, value: bytes }
 ```
 
-Multipart lets the client stream large archives without buffering the whole upload or depending on streaming support in its CBOR library.
+Why not encode attachment bytes in CBOR: the Multipart lets the client stream large archives without buffering the whole upload or depending on streaming support in its CBOR library.
 
 The server returns HTTP 200 with `Content-Type: application/cbor`:
 
@@ -108,9 +102,7 @@ The server returns HTTP 200 with `Content-Type: application/cbor`:
 { blob_id: string | null }
 ```
 
-Omitting `blob` returns `null`. A present, zero-byte attachment receives an ID. This supports tasks with no output archive while preserving the distinction between an empty attachment and no attachment.
-
-The client uploads only runs that pass the existing cache-update checks, after saving locally. Upload failures do not fail successful tasks, preserving the local workflow when the server is unavailable.
+Omitting `blob` returns `null`. This supports tasks with no output archive while preserving the distinction between an empty attachment and no attachment.
 
 ## Storage semantics
 
