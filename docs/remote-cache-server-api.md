@@ -99,23 +99,14 @@ Omitting `blob` returns `null`. A present, zero-byte blob receives a `blob_id`, 
 
 ## Storage semantics
 
-- Store replaces the value and blob under `key`. Omitting `blob` removes the entry's previous `blob_id`.
-- Store updates `secondary_key` to reference the supplied `key`. The entry it previously referenced remains available through its own `key`.
-- A successful store makes the complete entry, association, and blob available together. Later requests can retrieve them unless another write or eviction intervenes.
-- Concurrent stores may resolve in either order. The server must keep each value paired with the blob from the same store request.
-- Repeating an identical store follows the same replacement rules and need not return the same `blob_id`.
-- The server may evict entries and blobs. Download may return HTTP 404 after a successful fetch because eviction can happen between requests.
-
-### How entries and associations work
-
-The server stores each value under a `key`. A `secondary_key` references one `key` and provides a fallback when the requested entry is absent. Separating these mappings lets the server change the fallback target while keeping older entries available for exact lookup.
+The server stores each value under a `key`. A `secondary_key` references one `key` and provides a fallback when the requested entry is absent.
 
 ```text
 Entries:      key → value
 Associations: secondary_key → key
 ```
 
-These are logical mappings, not a prescribed database structure. The explanation below omits blobs and uses `A`, `B`, and `S` as labels for opaque keys, and `VA` and `VB` as labels for opaque values.
+Note that these are logical mappings, not necessarily the final database structure in the server.
 
 #### Store writes an entry and an association
 
@@ -130,7 +121,7 @@ Associations: S → A
 
 #### Fetch follows the association when no exact match exists
 
-The server first searches Entries using `key`. If it finds no entry, it looks up `secondary_key` in Associations and retrieves the referenced entry. Fetch changes neither mapping.
+The server first searches Entries using `key`. If it finds no entry, it looks up `secondary_key` in Associations and retrieves the referenced entry.
 
 With the state above, `fetch(key=B, secondary_key=S)` finds no entry `B`. The server follows `S → A` and returns:
 
@@ -151,13 +142,13 @@ Entries:      A → VA, B → VB
 Associations: S → B
 ```
 
-Entry `A` remains available through exact lookup. The association now selects `B` for fallback.
+Entry `A` remains available through exact lookup by key `A`. The association now selects `B` on fallback.
 
 #### Exact lookup takes precedence over the association
 
-An association does not restrict which entries can be retrieved. Even when `S` references `B`, an exact lookup for `A` returns `VA`. Fetching `A` does not change `S → B`.
+An association does not restrict which entries can be retrieved when the `key` matches. Even when `S` references `B`, an exact lookup for `A` returns `VA`. Fetching `A` does not change `S → B`.
 
-With the state above and no further stores or evictions:
+With the state above:
 
 | Request | Result |
 | --- | --- |
@@ -165,8 +156,6 @@ With the state above and no further stores or evictions:
 | `fetch(key=B, secondary_key=S)` | Exact match: `VB` |
 | `fetch(key=C, secondary_key=S)`, where `C` is absent | Fallback match: `key=B`, `value=VB` |
 | `fetch(key=C, secondary_key=T)`, where `C` and association `T` are absent | `not_found` |
-
-Fallback follows one reference; it does not search other entries for a match. If the referenced entry is unavailable, fetch returns `not_found`, even if other entries remain in storage.
 
 ## Errors and limits
 
