@@ -167,10 +167,11 @@ The cached execution result:
 
 ```rust
 pub struct CacheEntryValue {
-    pub post_run_fingerprint: PostRunFingerprint,
+    pub input_fingerprints: InputFingerprints,
+    pub tracked_env_fingerprints: TrackedEnvFingerprints,
     pub std_outputs: Arc<[StdOutput]>,
     pub duration: Duration,
-    pub globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+    pub output_archive: Option<Str>,
 }
 ```
 
@@ -357,10 +358,11 @@ Cache entries are serialized using `bincode` for efficient storage.
 │  3. Create CacheEntryValue                                   │
 │  ────────────────────────────                                │
 │    CacheEntryValue {                                         │
-│        post_run_fingerprint,                                 │
+│        input_fingerprints,                                   │
+│        tracked_env_fingerprints,                             │
 │        std_outputs,                                          │
 │        duration,                                             │
-│        globbed_inputs,                                       │
+│        output_archive,                                       │
 │    }                                                         │
 │         │                                                    │
 │         ▼                                                    │
@@ -571,7 +573,8 @@ crates/vt/src/session/
 │   └── display.rs        # Cache status display formatting
 ├── execute/
 │   ├── mod.rs            # execute_spawn, SpawnOutcome
-│   ├── fingerprint.rs    # PostRunFingerprint, PathFingerprint, DirEntryKind
+│   ├── fingerprint.rs    # InputFingerprints, PathFingerprint, InputChange
+│   ├── post_run.rs       # TrackedEnvFingerprints (tracked env validation)
 │   └── spawn.rs          # spawn_with_tracking, fspy integration
 └── reporter/
     └── mod.rs            # Reporter traits for cache hit/miss display
