@@ -159,20 +159,14 @@ With the state above:
 
 ## Errors and limits
 
-Error responses use `Content-Type: application/cbor`:
+Error responses use `Content-Type: text/plain; charset=utf-8` with a human-readable message. The HTTP status identifies the error; callers do not need to parse the message.
 
-```text
-{ code: string, message: string }
-```
+| HTTP status | Meaning |
+| --- | --- |
+| 400 | Malformed request or invalid fields. |
+| 404 | Blob unavailable. |
+| 413 | Request exceeds server size limits. |
+| 500 | Server could not complete the operation. |
+| 503 | Service temporarily unavailable. |
 
-The `code` field is stable for programmatic handling. The `message` field provides a human-readable explanation.
-
-| HTTP status | Code | Meaning |
-| --- | --- | --- |
-| 400 | `invalid_request` | Malformed request or invalid fields. |
-| 404 | `blob_not_found` | Blob unavailable. |
-| 413 | `payload_too_large` | Request exceeds server size limits. |
-| 500 | `internal_error` | Server could not complete the operation. |
-| 503 | `unavailable` | Service temporarily unavailable. |
-
-Fetch returns HTTP 200 with `kind: "not_found"` when neither lookup finds an entry because absence is an expected lookup result. Servers document their request-size limits.
+Fetch returns HTTP 200 with `kind: "not_found"` when neither lookup finds an entry because absence is an expected lookup result.
