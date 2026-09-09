@@ -30,7 +30,7 @@ The pinned source confirms Vite usage:
 
 ## Measured sizes
 
-All sizes use decimal MB (`1 MB = 1,000,000 bytes`). “Output” sums regular-file bytes, including static assets and source maps present in the selected directory. “Archive” measures a single sorted GNU tar stream compressed with `zstd -3 -T1`, using zstd `1.5.7`. We normalize tar paths and metadata; archive sizes approximate the proposed cache format rather than reproducing an implemented remote-cache archive byte for byte.
+All sizes use decimal MB (`1 MB = 1,000,000 bytes`). “Output” sums regular-file bytes, including static assets and source maps present in the selected directory. “Archive” measures a single sorted GNU tar stream compressed with `zstd -3 -T1`, using zstd `1.5.7`. We normalize tar paths and metadata. Archive sizes estimate the compressed output payload; a complete cache entry also includes task metadata.
 
 | Project    | Files | Output MB | Archive MB | Source-map MB before compression | Archive MB with `.map` files omitted |
 | ---------- | ----: | --------: | ---------: | -------------------------------: | -----------------------------------: |
@@ -43,11 +43,11 @@ Source maps comprise about 70% of Hoppscotch's uncompressed output and 73% of n8
 
 The last column is a controlled sensitivity calculation on the same files, not another build. Removing maps reduces the compressed archives to 12.18 MB and 13.15 MB respectively, still above 5 MB. A cache must preserve the outputs required by its task; these measurements do not justify silently dropping source maps. For Directus and Docmost, the published frontend directories contain no `.map` files.
 
-These archives contain frontend output files only. The proposed cache also stores terminal events and an inferred-input validation manifest. A real cached task can produce additional files outside `dist/`; release packaging can omit such files. Measure those bytes during implementation before assigning a complete per-result size. Backend and shared-package builds are separate task results unless the operator caches them as one task.
+These archives contain frontend output files only. A complete cached task also needs terminal events and client validation metadata. Under [PR #713](https://github.com/voidzero-dev/vite-task/pull/713), the client encodes these in an opaque value and optional blob; the Worker does not prescribe their internal format. A real cached task can produce additional files outside `dist/`; release packaging can omit such files. Measure those bytes during implementation before assigning a complete per-result size. Backend and shared-package builds are separate task results unless the operator caches them as one task.
 
 ## Effect on the free storage budget
 
-Using the RFC's 8 GB application budget and seven-day retention, the measured output archives alone give these steady-state ceilings:
+Using the RFC's 8 GB application budget and seven-day retention, the measured output archives alone give these steady-state ceilings when each store creates a different exact key:
 
 | Project-sized result | New results/day within 8 GB | Storage at 200 new results/day, seven days |
 | -------------------- | --------------------------: | -----------------------------------------: |
@@ -56,13 +56,13 @@ Using the RFC's 8 GB application budget and seven-day retention, the measured ou
 | Hoppscotch           |                          35 |                                   45.06 GB |
 | n8n                  |                          32 |                                   48.59 GB |
 
-Calculate the ceiling as `floor(8,000,000,000 / (archive_bytes * 7))`. These are artifact-only upper bounds; manifests, logs, pending uploads, and delayed deletion lower them. A new cache key stores another complete archive in the proposed version 1 service, even when many assets match the previous build. Read hits do not create another copy. Count separate namespaces and compatibility identities where the service stores separate results.
+Calculate the ceiling as `floor(8,000,000,000 / (archive_bytes * 7))`. These are artifact-only upper bounds; client metadata, logs, pending uploads, retired generations, and delayed deletion lower them. A new exact key stores another complete archive even when many assets match the previous build. Repeated stores to the same key replace its value and blob, keeping the old generation only for a short download grace period. Input changes do not necessarily create a different exact key. Read hits do not create another copy. Count separate namespaces and client compatibility identities where the service stores separate results.
 
-For a **50 MB complete-result planning case**, the same budget supports at most **22 new results/day** with seven-day retention, before operational headroom. At 200 new results/day, storage reaches 70 GB. With other usage assumptions unchanged, raising the storage budget would cost about **$0.90/month in R2 storage** beyond the 10 GB included allowance; Workers could remain Free. This uses the RFC's steady-state 30-day billing model and [R2 Standard pricing](https://developers.cloudflare.com/r2/pricing/), checked on the measurement date. The default profile would reject additional publications instead of raising its budget.
+For a **50 MB complete-result planning case**, the same budget supports at most **22 new distinct keys/day** with seven-day retention, before operational headroom. At 200 new distinct keys/day, storage reaches 70 GB. Under the RFC's operation assumptions, raising the storage budget would cost about **$0.90/month in R2 storage** beyond the 10 GB included allowance. Workers could remain Free if the streaming implementation meets its CPU limit. This uses the RFC's steady-state 30-day billing model and [R2 Standard pricing](https://developers.cloudflare.com/r2/pricing/), rechecked on 2026-09-09. The default profile would reject additional stores instead of raising its budget.
 
-Keep 5 MB for a small-output scenario, add 50 MB for mature frontend builds, and retain a 100 MB stress case. These values are planning inputs, not estimates of population averages. A few full-frontend publications per day can fit the free budget; hundreds of publications per day need smaller results, shorter retention, or additional storage. The number of developers does not determine which case applies.
+Keep 5 MB for a small-output scenario and 50 MB for mature frontend builds. All four measured archives fit the RFC's 64 MiB blob limit. These values are planning inputs, not estimates of population averages. A few new full-frontend keys per day can fit the free budget; hundreds of different keys per day need smaller results, shorter retention, or additional storage. Frequent overwrites can retain much less data but still consume operations. The number of readers does not determine this storage case. In v1, only explicit main-branch CI publication adds remote results; public readers need no credentials or per-user subscription.
 
-This sample covers one release per product and favors mature applications. It does not measure a publication-weighted average, daily change rate, cache hit rate, or the fraction of ordinary users that stay free. The RFC's canary still needs those measurements across task types and successive changes.
+This sample covers one release per product and favors mature applications. It does not measure a store-weighted average, daily change rate, exact-key replacement rate, cache hit rate, or the fraction of ordinary users that stay free. The RFC's canary still needs those measurements across task types and successive changes.
 
 ## Reproduce
 
