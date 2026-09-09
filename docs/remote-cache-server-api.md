@@ -99,6 +99,18 @@ The server returns HTTP 200 with `Content-Type: application/cbor`:
 
 Omitting `blob` returns `null`. A present, zero-byte blob receives a `blob_id`, distinguishing an empty blob from no blob.
 
+## Sizes
+
+Client-supplied keys, values, and blobs can be arbitrarily long. This API defines no fixed maximum lengths. A server may enforce resource limits and return HTTP 413 when a request exceeds them.
+
+| Field | Contents |
+| --- | --- |
+| `key`, `secondary_key` | Names, arguments, and environment fingerprints. Usually small. |
+| `value` | Input paths and hashes. Grows with the number of tracked inputs. |
+| `blob` | Output archive. Grows with the compressed output size. |
+
+For scale, a build tracking about 4,200 input paths and producing eight output files had a `key` of about 1 KB, a `secondary_key` of about 50 bytes, and a `value` and `blob` of roughly 250 KB each.
+
 ## Storage semantics
 
 The server stores each value under a `key`. A `secondary_key` references one `key` and provides a fallback when the requested entry is absent.
