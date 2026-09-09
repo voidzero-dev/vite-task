@@ -1,10 +1,10 @@
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 use libc::__error;
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::GetLastError;
 
 /// An operating-system error code.
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", target_os = "freebsd"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct Error(i32);
@@ -15,7 +15,7 @@ pub struct Error(i32);
 #[repr(transparent)]
 pub struct Error(u32);
 
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", target_os = "freebsd"))]
 impl Error {
     pub const BADF: Self = Self(errno::BADF);
     pub const INVAL: Self = Self(errno::INVAL);
@@ -40,7 +40,7 @@ impl Error {
     ///
     /// Call this immediately after the failing libc call: anything in between,
     /// including drops, can overwrite the thread-local error code.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
     #[must_use]
     pub fn last_os_error() -> Self {
         // SAFETY: libSystem exposes the calling thread's errno through this
@@ -91,7 +91,7 @@ mod errno {
     pub const RANGE: i32 = linux_raw_sys::errno::ERANGE.cast_signed();
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 mod errno {
     pub const BADF: i32 = libc::EBADF;
     pub const INVAL: i32 = libc::EINVAL;

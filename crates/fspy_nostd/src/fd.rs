@@ -76,7 +76,7 @@ impl Drop for OwnedFd {
             // once. Close errors cannot be acted on during drop.
             let _ = unsafe { syscalls::syscall!(syscalls::Sysno::close, self.fd) };
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "freebsd"))]
         {
             // SAFETY: this type owns the descriptor and closes it exactly
             // once. Close errors cannot be acted on during drop.
@@ -87,7 +87,7 @@ impl Drop for OwnedFd {
 
 #[cfg(any(target_os = "linux", target_os = "none"))]
 const CWD_RAW: RawFd = linux_raw_sys::general::AT_FDCWD;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 const CWD_RAW: RawFd = libc::AT_FDCWD;
 
 /// The reserved directory descriptor representing the current directory.

@@ -9,25 +9,42 @@
 
 mod c_str;
 mod error;
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", target_os = "freebsd"))]
 mod fd;
 #[cfg(windows)]
 mod windows;
 
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 pub mod env;
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", windows))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "none",
+    target_os = "macos",
+    windows,
+    target_os = "freebsd"
+))]
 pub mod fs;
 #[cfg(any(target_os = "linux", target_os = "none"))]
 pub mod io;
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", windows))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "none",
+    target_os = "macos",
+    windows,
+    target_os = "freebsd"
+))]
 pub mod mm;
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos", target_os = "freebsd"))]
 pub mod param;
 
 pub use c_str::{CStr, CStrUnit, Fat, OsCStr, Thin, Units, WideCStr};
 pub use error::{Error, Result};
-#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "none",
+    target_os = "macos",
+    target_os = "freebsd"
+))]
 pub use fd::{BorrowedFd, CWD, OwnedFd, RawFd};
 #[cfg(windows)]
 pub use windows::{

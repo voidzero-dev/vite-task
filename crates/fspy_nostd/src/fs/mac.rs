@@ -1,9 +1,12 @@
-use core::{mem::MaybeUninit, slice};
-
+#[cfg(target_os = "macos")]
+use crate::CWD;
 use crate::{
-    BorrowedFd, CStr, CWD, Error, Fat, OwnedFd, Result, Thin,
+    BorrowedFd, CStr, Error, Fat, OwnedFd, Result, Thin,
     fs::{AtFlags, Mode, OFlags, Stat},
 };
+use core::mem::MaybeUninit;
+#[cfg(target_os = "macos")]
+use core::slice;
 
 // Darwin UAPI `MAXPATHLEN`.
 pub(super) const PATH_MAX: usize = 1024;
@@ -84,9 +87,12 @@ pub(super) fn ftruncate(fd: BorrowedFd<'_>, len: u64) -> Result<()> {
 /// This function performs one `fcntl` call and does not retry. `F_GETPATH`
 /// accepts no buffer length and always uses its fixed `MAXPATHLEN` storage.
 ///
+/// macOS-only: `F_GETPATH` is a Darwin `fcntl` command.
+///
 /// # Errors
 ///
 /// Returns the error reported by `fcntl`.
+#[cfg(target_os = "macos")]
 pub fn fcntl_getpath<'buf>(
     fd: BorrowedFd<'_>,
     buf: &'buf mut [MaybeUninit<u8>; PATH_MAX],
@@ -104,6 +110,7 @@ pub fn fcntl_getpath<'buf>(
     Ok(unsafe { CStr::from_ptr(buf.as_ptr().cast()) })
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
     let (chunks, remainder) = buf.as_chunks_mut::<PATH_MAX>();
     let Some(full) = chunks.first_mut() else {
@@ -112,6 +119,33 @@ pub(super) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
     getcwd_full(full)
 }
 
+/// Writes the absolute pathname of the current working directory into `buf`.
+///
+/// Uses the standard `getcwd(2)` call, which writes a NUL-terminated
+/// pathname into the caller-provided buffer.
+///
+/// # Errors
+///
+/// Returns [`Error::RANGE`] when `buf` is too small to hold the pathname;
+/// the empty buffer cannot hold any pathname at all. FreeBSD reports that
+/// case as `EINVAL`, so it is normalized here to match the macOS path.
+#[cfg(target_os = "freebsd")]
+pub(super) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
+    // SAFETY: `buf` is writable for `buf.len()` bytes; `getcwd` writes no
+    // more than that and returns a NUL-terminated pathname or null on error.
+    let ptr = unsafe { libc::getcwd(buf.as_mut_ptr().cast(), buf.len()) };
+    if ptr.is_null() {
+        if buf.is_empty() {
+            return Err(Error::RANGE);
+        }
+        return Err(Error::last_os_error());
+    }
+    // SAFETY: `getcwd` wrote a valid NUL-terminated pathname into `buf`.
+    let thin = unsafe { CStr::<Thin>::from_ptr(ptr.cast()) };
+    Ok(thin.count())
+}
+
+#[cfg(target_os = "macos")]
 // Keep the `PATH_MAX` scratch storage in a separate stack frame so the
 // large-buffer path does not reserve it. `inline(never)` preserves that
 // conditional stack allocation after optimization.
@@ -142,6 +176,7 @@ fn getcwd_small(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
 /// common resolution there is.
 ///
 /// [`getcwd`]: https://github.com/apple-oss-distributions/Libc/blob/Libc-1752.120.2/gen/FreeBSD/getcwd.c#L62-L138
+#[cfg(target_os = "macos")]
 fn getcwd_full(buf: &mut [MaybeUninit<u8>; PATH_MAX]) -> Result<CStr<'_, Fat>> {
     // SAFETY: the byte string contains one trailing NUL.
     let dot_path = unsafe { CStr::<Fat>::from_units_with_nul_unchecked(b".\0") };

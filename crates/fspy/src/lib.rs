@@ -2,18 +2,27 @@
 
 pub mod error;
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(all(not(target_env = "musl"), not(target_os = "freebsd")))]
 mod ipc;
 
-#[cfg(unix)]
+// The `unix/` supervision backend (seccomp supervisor on Linux, Detours
+// artifacts + LD_PRELOAD interposer on macOS) is implemented for those two
+// platforms only. FreeBSD compiles a no-op backend (below) that runs the
+// command without file-access tracing, so the supervision modules and their
+// preload/shared-UNIX dependencies are excluded from the FreeBSD build graph.
+#[cfg(all(unix, not(target_os = "freebsd")))]
 #[path = "./unix/mod.rs"]
+mod os_impl;
+
+#[cfg(target_os = "freebsd")]
+#[path = "./freebsd.rs"]
 mod os_impl;
 
 #[cfg(target_os = "windows")]
 #[path = "./windows/mod.rs"]
 mod os_impl;
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "freebsd")))]
 mod arena;
 mod command;
 
