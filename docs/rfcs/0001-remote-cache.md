@@ -65,7 +65,7 @@ The client follows this sequence:
 3. Validate an exact response. Download its blob only if the result passes validation.
 4. Restore the outputs. Save the result in local storage.
 
-A fallback or `not_found` response leads to task execution. A successful eligible execution updates local storage, then queues its result for `/store` if uploads are enabled for that run. Cache hits do not trigger uploads.
+A fallback response or HTTP `404` from `/fetch` leads to task execution. A successful eligible execution updates local storage, then queues its result for `/store` if uploads are enabled for that run. Cache hits do not trigger uploads.
 
 ## 4. HTTP API mapping
 
@@ -80,15 +80,14 @@ Content-Type: application/cbor
 { key: bytes, secondary_key: bytes }
 ```
 
-Return HTTP `200`, `Content-Type: application/cbor`, with one of:
+For a match, return HTTP `200`, `Content-Type: application/cbor`, with one of:
 
 ```text
 { kind: "exact", value: bytes, blob_id: string | null }
 { kind: "fallback", key: bytes, value: bytes, blob_id: string | null }
-{ kind: "not_found" }
 ```
 
-Check `key` first. If no live entry exists, resolve `secondary_key` to a stored key. Check that entry. Include the stored key only in the fallback variant. If neither resolves, return `not_found`. Fetch does not change entries or associations.
+Check `key` first. If no live entry exists, resolve `secondary_key` to a stored key. Check that entry. Include the stored key only in the fallback variant. If neither resolves, return HTTP `404`. Fetch does not change entries or associations.
 
 ### Download a blob
 
@@ -138,12 +137,12 @@ API errors use `Content-Type: text/plain; charset=utf-8`. Clients use the status
 | Status | Meaning                                                                  |
 | ------ | ------------------------------------------------------------------------ |
 | `400`  | Malformed request or invalid field types                                 |
-| `404`  | Blob unavailable                                                         |
+| `404`  | No matching entry on fetch, or blob unavailable                           |
 | `413`  | Request exceeds configured size limits                                   |
 | `500`  | Operation could not complete                                             |
 | `503`  | Service temporarily unavailable, including exhausted application budgets |
 
-If metadata is absent, return `200` with `not_found`. Version 1 reads require no credentials. For `/store`, this deployment adds these errors:
+If metadata is absent, return `404`. Version 1 reads require no credentials. For `/store`, this deployment adds these errors:
 
 - `401`: The JSON Web Token (JWT) is missing, invalid, or expired.
 - `403`: The verified JWT fails the namespace's write policy.
