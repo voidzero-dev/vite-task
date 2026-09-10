@@ -14,6 +14,7 @@ use std::{
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use vt_glob::env::EnvGlobSet;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::cache_metadata::EnvValueHash;
 use vt_str::Str;
@@ -142,6 +143,16 @@ impl PostRunFingerprint {
     /// be the same plan env context that served the original `getEnv` request,
     /// not the filtered env passed to the spawned process.
     ///
+    /// `untracked_env` carries the task's `untrackedEnv` patterns. Names
+    /// matching them are excluded from bulk-query match-sets on both the
+    /// stored and current side: `untrackedEnv` declares those variables
+    /// non-build-affecting, so an ambient variable swept up by a broad
+    /// `getEnvs` query (empty prefix matches everything) must not invalidate
+    /// the cache — mirroring how spawn-env filtering passes untracked vars
+    /// through without fingerprinting them. Explicit single-name `getEnv`
+    /// reads stay fingerprinted: naming a variable is a direct dependency
+    /// declaration by the tool.
+    ///
     /// Returns `Some(mismatch)` if anything changed, `None` if all valid.
     /// Returns an error if a tracked env is currently present but cannot be
     /// represented as UTF-8; treating that value as unset would make cache
@@ -151,6 +162,7 @@ impl PostRunFingerprint {
         &self,
         base_dir: &AbsolutePath,
         unfiltered_envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+        untracked_env: &EnvGlobSet,
     ) -> anyhow::Result<Option<PostRunMismatch>> {
         let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
             |(input_relative_path, path_fingerprint)| {
@@ -203,7 +215,7 @@ impl PostRunFingerprint {
         }
 
         for (query, stored_matches) in &self.tracked_env_queries {
-            let current_matches = match match_env_query(query, unfiltered_envs)? {
+            let current_matches = match match_env_query(query, unfiltered_envs, untracked_env)? {
                 EnvQueryValidation::Matches(matches) => matches,
                 EnvQueryValidation::NonUtf8Value(mismatch) => {
                     return Ok(Some(PostRunMismatch::TrackedEnvQuery {
@@ -212,7 +224,17 @@ impl PostRunFingerprint {
                     }));
                 }
             };
-            if let Some(mismatch) = first_env_glob_mismatch(stored_matches, &current_matches) {
+            // Filter the stored side too: entries recorded before untracked
+            // exclusion existed (or under a narrower `untrackedEnv`) may
+            // contain names the current config declares untracked. Comparing
+            // both sides post-filter lets those entries keep hitting instead
+            // of forcing a one-time miss.
+            let stored_matches: BTreeMap<Str, EnvValueHash> = stored_matches
+                .iter()
+                .filter(|(name, _)| !untracked_env.is_match(name.as_str()))
+                .map(|(name, value)| (name.clone(), *value))
+                .collect();
+            if let Some(mismatch) = first_env_glob_mismatch(&stored_matches, &current_matches) {
                 return Ok(Some(PostRunMismatch::TrackedEnvQuery {
                     query: query.clone(),
                     mismatch,
@@ -225,20 +247,22 @@ impl PostRunFingerprint {
 }
 
 /// Build the current match-set for `query` by enumerating the given env
-/// snapshot and keeping matching UTF-8 names. If a matching env has a non-UTF-8
-/// value, return a changed mismatch so the stale cache entry is not replayed.
+/// snapshot and keeping matching UTF-8 names, minus names the task declares
+/// in `untrackedEnv`. If a matching env has a non-UTF-8 value, return a
+/// changed mismatch so the stale cache entry is not replayed.
 fn match_env_query(
     query: &TrackedEnvQuery,
     envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    untracked_env: &EnvGlobSet,
 ) -> anyhow::Result<EnvQueryValidation> {
     Ok(match query {
         TrackedEnvQuery::Glob(pattern) => {
             let glob = vt_glob::env::EnvGlob::new(pattern.as_str())?;
-            collect_matching_envs(envs, |name| glob.is_match(name))
+            collect_matching_envs(envs, |name| glob.is_match(name) && !untracked_env.is_match(name))
         }
-        TrackedEnvQuery::Prefix(prefix) => {
-            collect_matching_envs(envs, |name| env_name_starts_with(name, prefix.as_str()))
-        }
+        TrackedEnvQuery::Prefix(prefix) => collect_matching_envs(envs, |name| {
+            env_name_starts_with(name, prefix.as_str()) && !untracked_env.is_match(name)
+        }),
     })
 }
 
@@ -534,6 +558,103 @@ mod tests {
         OsString::from_wide(&[0xD800])
     }
 
+    fn no_untracked() -> EnvGlobSet {
+        EnvGlobSet::new(std::iter::empty::<&str>()).expect("empty set compiles")
+    }
+
+    #[test]
+    fn validate_excludes_untracked_names_from_bulk_query_current_side() {
+        // A broad (empty-prefix) tracked query must not miss when an ambient
+        // variable covered by `untrackedEnv` appears between runs.
+        let mut tracked_env_queries = BTreeMap::new();
+        let mut stored_matches = BTreeMap::new();
+        stored_matches.insert(Str::from("MY_VAR"), EnvValueHash::new("x"));
+        tracked_env_queries.insert(TrackedEnvQuery::Prefix(Str::from("")), stored_matches);
+        let fingerprint =
+            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
+
+        let mut unfiltered_envs = FxHashMap::default();
+        unfiltered_envs
+            .insert(Arc::<OsStr>::from(OsStr::new("MY_VAR")), Arc::<OsStr>::from(OsStr::new("x")));
+        unfiltered_envs.insert(
+            Arc::<OsStr>::from(OsStr::new("ACTIONS_ORCHESTRATION_ID")),
+            Arc::<OsStr>::from(OsStr::new("run-12345")),
+        );
+
+        let workspace_root = vt_path::current_dir().expect("cwd");
+        let untracked = EnvGlobSet::new(["ACTIONS_*"]).expect("set compiles");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &unfiltered_envs, &untracked)
+            .expect("validation succeeds");
+        assert!(mismatch.is_none(), "untracked ambient var must not invalidate: {mismatch:?}");
+
+        // Sanity contrast: without the untracked exclusion the same state is
+        // a mismatch (the ambient variable was added to the match-set).
+        let mismatch = fingerprint
+            .validate(&workspace_root, &unfiltered_envs, &no_untracked())
+            .expect("validation succeeds");
+        assert!(matches!(
+            mismatch,
+            Some(PostRunMismatch::TrackedEnvQuery { mismatch: EnvMismatch::Added { .. }, .. })
+        ));
+    }
+
+    #[test]
+    fn validate_excludes_untracked_names_from_bulk_query_stored_side() {
+        // Entries recorded before the untracked exclusion existed may contain
+        // untracked names in the stored match-set; they must still hit.
+        let mut tracked_env_queries = BTreeMap::new();
+        let mut stored_matches = BTreeMap::new();
+        stored_matches.insert(Str::from("MY_VAR"), EnvValueHash::new("x"));
+        stored_matches.insert(Str::from("GITHUB_RUN_ID"), EnvValueHash::new("old-run"));
+        tracked_env_queries.insert(TrackedEnvQuery::Prefix(Str::from("")), stored_matches);
+        let fingerprint =
+            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
+
+        let mut unfiltered_envs = FxHashMap::default();
+        unfiltered_envs
+            .insert(Arc::<OsStr>::from(OsStr::new("MY_VAR")), Arc::<OsStr>::from(OsStr::new("x")));
+        unfiltered_envs.insert(
+            Arc::<OsStr>::from(OsStr::new("GITHUB_RUN_ID")),
+            Arc::<OsStr>::from(OsStr::new("new-run")),
+        );
+
+        let workspace_root = vt_path::current_dir().expect("cwd");
+        let untracked = EnvGlobSet::new(["GITHUB_*"]).expect("set compiles");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &unfiltered_envs, &untracked)
+            .expect("validation succeeds");
+        assert!(mismatch.is_none(), "stored untracked names must be ignored: {mismatch:?}");
+    }
+
+    #[test]
+    fn validate_still_tracks_non_untracked_bulk_query_changes() {
+        // The exclusion must not weaken fingerprinting of variables the task
+        // does depend on: a changed tracked match still misses.
+        let mut tracked_env_queries = BTreeMap::new();
+        let mut stored_matches = BTreeMap::new();
+        stored_matches.insert(Str::from("MY_VAR"), EnvValueHash::new("x"));
+        tracked_env_queries.insert(TrackedEnvQuery::Prefix(Str::from("")), stored_matches);
+        let fingerprint =
+            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
+
+        let mut unfiltered_envs = FxHashMap::default();
+        unfiltered_envs.insert(
+            Arc::<OsStr>::from(OsStr::new("MY_VAR")),
+            Arc::<OsStr>::from(OsStr::new("changed")),
+        );
+
+        let workspace_root = vt_path::current_dir().expect("cwd");
+        let untracked = EnvGlobSet::new(["ACTIONS_*"]).expect("set compiles");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &unfiltered_envs, &untracked)
+            .expect("validation succeeds");
+        assert!(matches!(
+            mismatch,
+            Some(PostRunMismatch::TrackedEnvQuery { mismatch: EnvMismatch::Changed { .. }, .. })
+        ));
+    }
+
     #[test]
     fn validate_errors_on_current_non_utf8_tracked_env_value() {
         let mut tracked_envs = BTreeMap::new();
@@ -548,7 +669,7 @@ mod tests {
 
         let workspace_root = vt_path::current_dir().expect("cwd");
         let err = fingerprint
-            .validate(&workspace_root, &unfiltered_envs)
+            .validate(&workspace_root, &unfiltered_envs, &no_untracked())
             .expect_err("non-UTF-8 tracked env values must error");
 
         assert!(err.to_string().contains("tracked env value for PROBE_ENV is not valid UTF-8"));
@@ -568,8 +689,9 @@ mod tests {
         );
 
         let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &unfiltered_envs, &no_untracked())
+            .expect("validation succeeds");
 
         match mismatch {
             Some(PostRunMismatch::TrackedEnvQuery {
@@ -603,8 +725,9 @@ mod tests {
         );
 
         let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &unfiltered_envs, &no_untracked())
+            .expect("validation succeeds");
 
         assert!(mismatch.is_none());
     }
@@ -623,8 +746,9 @@ mod tests {
         );
 
         let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &unfiltered_envs, &no_untracked())
+            .expect("validation succeeds");
 
         assert!(mismatch.is_none());
     }
