@@ -13,6 +13,8 @@ mod entry;
 mod error;
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 mod fd;
+#[doc(hidden)]
+pub mod no_global_alloc;
 #[cfg(any(target_os = "linux", target_os = "none"))]
 mod panic;
 #[cfg(windows)]
