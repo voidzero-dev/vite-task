@@ -123,10 +123,10 @@ pub(super) async fn update_cache(
     }
 
     if fspy_outcome.is_none() && fspy.is_some() {
-        // Task requested fspy auto-inference but this binary was built without
-        // `cfg(fspy)`. Task ran, but we can't compute a valid cache entry
+        // Task requested fspy auto-inference but produced no tracked
+        // accesses. Task ran, but we can't compute a valid cache entry
         // without tracked path accesses.
-        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None);
+        return (CacheUpdateStatus::NotUpdated(fspy_missing_reason(outcome)), None);
     }
 
     // Collect tool-reported tracked envs for the post-run fingerprint. Env
@@ -191,6 +191,17 @@ pub(super) async fn update_cache(
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
             Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source: err }),
         ),
+    }
+}
+
+/// Why a run that requested fspy auto-inference produced no tracked
+/// accesses: either this binary was built without `cfg(fspy)`, or the
+/// tracked spawn failed and the task ran untracked (see [`super::spawn`]).
+const fn fspy_missing_reason(outcome: &ChildOutcome) -> CacheNotUpdatedReason {
+    if outcome.fspy_unavailable {
+        CacheNotUpdatedReason::FspyUnavailable
+    } else {
+        CacheNotUpdatedReason::FspyUnsupported
     }
 }
 

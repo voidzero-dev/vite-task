@@ -13,9 +13,8 @@ use vt_path::{AbsolutePath, AbsolutePathBuf};
 ///
 /// # Panics
 ///
-/// Panics if the materialization fails on first call — this mirrors fspy's
-/// `SPY_IMPL` and the same reasoning applies: if we can't write into the
-/// system temp dir, the runner can't run tasks anyway.
+/// Panics if the materialization fails on first call: if we can't write
+/// into the system temp dir, the runner can't run tasks anyway.
 #[must_use]
 pub fn napi_client_path() -> &'static AbsolutePath {
     static PATH: LazyLock<AbsolutePathBuf> = LazyLock::new(|| {

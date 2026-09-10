@@ -163,46 +163,41 @@ impl<A: Allocator> Drop for ShmKeeper<A> {
 }
 
 impl ChannelConf<'_> {
-    /// Creates a sender, or `None` when the channel is already over.
+    /// Creates a sender, or `None` when attaching is not possible.
     ///
-    /// Never blocks. `None` means the receiver removed the backing file,
-    /// or sealed the region before removing it and this call caught the
-    /// gate in between. Either way whatever the caller does next happens
-    /// past the receiver's boundary, so recording nothing loses nothing.
+    /// Never blocks, never panics. `None` means the channel is already over
+    /// — the receiver removed the backing file, or sealed the region before
+    /// removing it and this call caught the gate in between — or that the
+    /// channel is there but cannot be attached to: its path is not a valid
+    /// C string, the file refuses to open or map, or the region cannot hold
+    /// the protocol.
     ///
-    /// # Panics
-    ///
-    /// When the channel is there but cannot be attached to: its path is
-    /// unreadable, the file refuses to open or map, or the region cannot
-    /// hold the protocol. A process with no sender has no way to tell the
-    /// receiver it recorded nothing, and a trace that silently omits every
-    /// access a process made is worse than no trace, so it stops here.
+    /// Returning `None` rather than panicking matters because a sender is
+    /// created inside arbitrary traced processes (a preload constructor),
+    /// where panicking kills the host process. A process with no sender
+    /// records nothing, and the receiver learns the run went untracked
+    /// through the loss-report path instead (see [`Sender::report_loss`]).
     #[must_use]
     pub fn sender<A: Allocator>(&self, allocator: A) -> Option<Sender> {
         // The allocation is transient: the decoded path only has to outlive
         // the open call below, and dropping it hands the space back to a
         // bump allocator, whose most recent allocation it is.
-        let shm_path = self
-            .shm_id
-            .to_os_c_string_in(allocator)
-            .expect("the channel's shared-memory path is not a valid C string");
+        let shm_path = self.shm_id.to_os_c_string_in(allocator)?;
         let mapping = match fspy_shm::open(shm_path.as_c_str().as_thin()) {
-            Ok(handle) => handle.map().expect("cannot map the shared-memory channel"),
-            Err(error) => {
-                let error = shm_error_to_io(error);
-                // The receiver removed the backing file, so it has already
-                // stopped collecting.
-                if error.kind() == io::ErrorKind::NotFound {
-                    return None;
-                }
-                panic!("cannot open the shared-memory channel: {error}");
+            Ok(handle) => handle.map().ok()?,
+            Err(_) => {
+                // NotFound means the receiver removed the backing file, so it
+                // has already stopped collecting. Any other open failure
+                // degrades to no sender for the same reason: the trace is
+                // incomplete either way and the host process must not die
+                // over it.
+                return None;
             }
         };
         // SAFETY: `mapping` is a freshly mapped shared memory region created
         // zero-initialized by `channel` and accessed only through the
         // `shm_io` protocol by every attached process.
-        let writer = unsafe { ShmWriter::new(mapping, SLOTS) }
-            .expect("the shared-memory region cannot hold the channel");
+        let writer = unsafe { ShmWriter::new(mapping, SLOTS) }?;
         // The receiver sealed the region but has not removed it yet.
         if writer.is_closed() {
             return None;
@@ -216,6 +211,18 @@ pub struct Sender {
 }
 
 impl Sender {
+    /// Reports that this process went on to perform an operation it could
+    /// not record, sealing the channel as incomplete.
+    ///
+    /// Used when a traced process escapes tracing — e.g. a preload that
+    /// could not install its injection machinery and forwards the operation
+    /// to the OS untracked. The receiver's close then reports
+    /// [`RecordsLost`], so the run is treated as untracked rather than
+    /// cached from a partial trace.
+    pub fn report_loss(&self) {
+        self.writer.report_loss();
+    }
+
     /// Serializes one record into a committed frame.
     ///
     /// A claim the channel refuses is skipped, because that is all a sender
@@ -358,8 +365,8 @@ mod tests {
 
     /// A capacity with no room for the table has to fail here, at
     /// creation. Everything downstream treats the region as able to host
-    /// the protocol: `sender` panics when it cannot, and so does
-    /// `Receiver::close`.
+    /// the protocol: `sender` returns `None` when it cannot, and
+    /// `Receiver::close` panics.
     #[test]
     fn a_capacity_too_small_for_the_table_fails_the_channel() {
         // The counters alone need sixteen bytes, and the table needs eight
