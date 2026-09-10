@@ -2,7 +2,7 @@
 
 Status: Draft design.
 
-Updated: 2026-09-09. Repository baseline: `9a1d32cf`. API baseline: [PR #713](https://github.com/voidzero-dev/vite-task/pull/713), commit [`362f5bd9`](https://github.com/voidzero-dev/vite-task/blob/362f5bd91bb32806b512d3d9a5339ff435bf5f0a/docs/remote-cache-server-api.md). The API proposal remains a draft; check its final contract before implementation.
+Updated: 2026-09-10. Repository baseline: `9a1d32cf`. API baseline: [PR #713](https://github.com/voidzero-dev/vite-task/pull/713), commit [`362f5bd9`](https://github.com/voidzero-dev/vite-task/blob/362f5bd91bb32806b512d3d9a5339ff435bf5f0a/docs/remote-cache-server-api.md). The API proposal remains a draft; check its final contract before implementation.
 
 ## 1. Motivation
 
@@ -27,8 +27,9 @@ PR #713 defines the HTTP contract. This RFC defines the Cloudflare storage, auth
 | Store          | Replace the entry and secondary association together after object storage succeeds                      |
 | Access control | Anonymous reads; GitHub OIDC writes restricted to the registered repository and main-branch push events |
 | Transfer       | One multipart HTTP store request; internal R2 multipart upload for larger blobs                         |
+| Client mode    | `--remote-cache` or `VP_REMOTE_CACHE` selects `off`, `read`, or `read-write`; defaults to `read` with an endpoint and `off` without one |
 | Defaults       | Seven-day retention, 8 GB total R2 budget, 64 MiB maximum blob                                          |
-| Failure        | Bounded waits; read failures become misses; explicit push reports publication failures                  |
+| Failure        | Bounded waits; read failures become misses; upload failures warn without changing the task exit status |
 
 The first delivery includes a template for self-deployment and a native Rust client adapter. The client must work on macOS, Linux, and Windows. Reuse across different operating systems or architectures requires a separate agreement about client compatibility.
 
@@ -64,7 +65,7 @@ The client follows this sequence:
 3. Validate an exact response. Download its blob only if the result passes validation.
 4. Restore the outputs. Save the result in local storage.
 
-A fallback or `not_found` response leads to task execution. A successful eligible execution updates local storage only. `vp cache push` publishes selected results through `/store`.
+A fallback or `not_found` response leads to task execution. A successful eligible execution updates local storage, then queues its result for `/store` if uploads are enabled for that run. Cache hits do not trigger uploads.
 
 ## 4. HTTP API mapping
 
@@ -150,11 +151,11 @@ If metadata is absent, return `200` with `not_found`. Version 1 reads require no
 
 Keep these errors generic. Use plain text. PR #713 does not define authentication. Rate limiting can return `429` with `Retry-After`. Cloudflare can reject requests before the Worker runs. Clients must handle error bodies outside the protocol without authentication redirects.
 
-## 5. Public reads, GitHub OIDC writes, and explicit publication
+## 5. Public reads, GitHub OIDC writes, and cache uploads
 
 Version 1 serves public cache data for open-source repositories on GitHub.com. Anyone can call `/fetch` and `/blob/{blob_id}` without credentials. Only an authorized GitHub Actions job can call `/store`. Developers use the checked-in endpoint without login, secrets, or individual permission setup. Version 2 covers private projects with Cloudflare One authorization.
 
-### Client configuration and `vp cache push`
+### Client configuration and remote cache modes
 
 ```ts
 export default {
@@ -166,23 +167,27 @@ export default {
 };
 ```
 
-An endpoint enables public remote reads during `vp run`. Successful eligible tasks save their results locally. Publication is explicit: `vp cache push` sends selected local results through one `/store` request per entry.
+Use `--remote-cache` to select a mode for one invocation, or set `VP_REMOTE_CACHE` to configure all `vp run` commands in an environment. Both accept the same values:
 
-Use `VP_REMOTE_CACHE_URL` to override the endpoint on a host. Use `--no-remote-cache` to disable remote use for one invocation. Task-level `remoteCache: false` excludes remote reads and publication but retains local caching. `cache: false`, `--no-cache`, and tool-requested cache disabling also exclude results from publication.
+| Command | Environment variable | Remote reads | Uploads |
+| --- | --- | --- | --- |
+| `vp run build --remote-cache=off` | `VP_REMOTE_CACHE=off` | Disabled | Disabled |
+| `vp run build --remote-cache=read` | `VP_REMOTE_CACHE=read` | Enabled | Disabled |
+| `vp run build --remote-cache=read-write` | `VP_REMOTE_CACHE=read-write` | Enabled | Enabled |
 
-Without an endpoint, the client makes no remote reads. An explicit push without an endpoint reports a configuration error.
+The command-line option takes precedence over `VP_REMOTE_CACHE`. If neither is set, use `read` when an endpoint is configured; otherwise, use `off`. The mode leaves local caching unchanged.
 
-By default, push selects eligible results from the latest completed `vp run` invocation. The results must belong to the current workspace, CI job, and commit. A new run replaces the selection. A failed or cancelled run must not leave an older successful run selected.
+Use `VP_REMOTE_CACHE_URL` to override the endpoint on a host. Without an endpoint, the client makes no remote requests. Selecting `read` or `read-write` through the command-line option or `VP_REMOTE_CACHE` without an endpoint reports a configuration error before execution.
 
-Push does not select the whole local cache by default. It excludes entries imported from remote and caches restored from other jobs.
+Task-level `remoteCache: false` excludes remote reads and uploads but retains local caching. `cache: false`, `--no-cache`, and tool-requested cache disabling also prevent uploads. The remote cache mode does not override these exclusions.
 
-Record the selection locally. Preserve its exact metadata and archive snapshot until publication or bounded cleanup. The current [cache update](../../crates/vt/src/session/execute/cache_update.rs) archives outputs. [Entry replacement](../../crates/vt/src/session/cache/mod.rs) can remove the previous archive. A delayed push therefore needs a snapshot or lease to preserve the selected data.
+Version 1 uploads require GitHub Actions OIDC authorization for a main-branch push job. Enable uploads in that job with `VP_REMOTE_CACHE=read-write` or `--remote-cache=read-write`.
 
-Do not rebuild the archive from the later working tree. Do not silently upload a replacement entry. If a snapshot is missing or inconsistent, fail publication without changes to remote mappings.
+### Upload lifecycle
 
-`vp cache push` reports published, skipped, and failed entries. A remote publication failure returns a nonzero exit status and preserves local results. CI can set `continue-on-error` for this cache-only step. Each entry commits separately, so some entries can succeed while others fail.
+In `read-write` mode, queue one `/store` request after each successful eligible task saves its result locally. Upload only results generated by the current invocation. Cache hits do not trigger uploads.
 
-Repeated pushes follow the replacement rules in PR #713. They do not guarantee exactly-once delivery. If no entries qualify, push succeeds without an upload or OIDC token.
+Upload in the background with bounded concurrency so dependent tasks can start without waiting for network transfers. A successful task's result remains eligible even if another task fails. Before exiting after task execution, wait for pending uploads within a bounded deadline.
 
 ### One-time repository binding
 
@@ -198,9 +203,9 @@ After a repository transfer, review the binding. Update the owner ID. After an e
 
 The publishing job grants `permissions: id-token: write`. This permission lets the job request an OIDC token. The Worker decides whether the token grants write access. The native client uses GitHub's `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` to request a token with the namespace audience. See GitHub's [OIDC workflow configuration](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-cloud-providers).
 
-Only `vp cache push` requests the token. Send the returned JWT to `/store` as `Authorization: Bearer <github_oidc_token>`. The Worker verifies it directly, without a custom endpoint for token exchange.
+`vp run` requests the token only when uploads are enabled and a newly generated result is ready to upload. Send the returned JWT to `/store` as `Authorization: Bearer <github_oidc_token>`. The Worker verifies it directly, without a custom endpoint for token exchange.
 
-Keep the JWT in process memory. Reuse it only while it remains valid for the same audience. Obtain a fresh token before expiry. Send the runner's request token only to GitHub's token endpoint. Never send that request token to the cache Worker. Outside Actions, push reports that GitHub OIDC is unavailable.
+Keep the JWT in process memory. Reuse it only while it remains valid for the same audience. Obtain a fresh token before expiry. Send the runner's request token only to GitHub's token endpoint. Never send that request token to the cache Worker. If GitHub OIDC is unavailable, report one warning and stop upload attempts for the invocation without changing the task exit status.
 
 Do not forward either token across redirects. Do not write either token to config, command arguments, output, or the cache. Remove the OIDC request variables and remote-cache controls from these locations, including through wildcard environment selection:
 
@@ -475,7 +480,7 @@ Application budgets keep ordinary storage growth within the configured allowance
 
 ## 11. Failure handling and operations
 
-The client preserves local results if remote reads, validation, downloads, or explicit publication fail. `vp run` executes the task after a failed read. `vp cache push` reports failures through its own exit status.
+The client preserves local results if remote reads, validation, downloads, or uploads fail. `vp run` executes the task after a failed read. Upload failures produce warnings and a run-summary count without changing the task exit status. Reject invalid mode values or a missing required endpoint before execution.
 
 Use short metadata deadlines and bounded transfer deadlines. Support cancellation. Limit concurrency. After repeated failures, use a circuit breaker to stop remote attempts for the rest of the invocation.
 
@@ -519,7 +524,7 @@ Provide setup that can run repeatedly without duplicate resources. Support polic
 
 Use the Free profile in section 10 by default. Change operational budgets for Paid only after the operator selects them. The operator must explicitly select more retention or R2 storage, independently of the Workers subscription.
 
-The following workflow excerpt shows the client flow. Keep the existing checkout, Vite+ setup, and dependency-installation steps. The repository can store the endpoint in `vite.config.*`. This example uses a non-secret repository variable as a protected CI override. The build saves local results. A separate step publishes them:
+The following workflow excerpt shows the client flow. Keep the existing checkout, Vite+ setup, and dependency-installation steps. The repository can store the endpoint in `vite.config.*`. This example uses a non-secret repository variable as a protected CI override. The build saves local results and uploads newly generated eligible entries:
 
 ```yaml
 on:
@@ -534,25 +539,29 @@ jobs:
       id-token: write
     env:
       VP_REMOTE_CACHE_URL: ${{ vars.VP_REMOTE_CACHE_URL }}
+      VP_REMOTE_CACHE: read-write
     steps:
       # Existing checkout, Vite+ setup, and dependency installation steps.
       - run: vp run build
         working-directory: docs
         env:
           DOCS_SITE_ORIGIN: ${{ vars.DOCS_SITE_ORIGIN }}
-      - run: vp cache push
-        working-directory: docs
-        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        continue-on-error: true
 ```
 
-The workflow trigger and step condition avoid unnecessary upload attempts. The Worker independently checks signed repository, branch, and event claims. A PR workflow reads from the same public endpoint without `id-token: write` or a push step.
+The Worker checks signed repository, branch, and event claims. PR workflows use the default `read` mode with the same command and endpoint, and omit `id-token: write`.
+
+A workflow that handles both main-branch pushes and PRs can select the mode once for all run commands:
+
+```yaml
+env:
+  VP_REMOTE_CACHE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'read-write' || 'read' }}
+```
 
 Preserve the existing [`DOCS_SITE_ORIGIN` input tracking](https://github.com/voidzero-dev/vite-plus/blob/ed1710f7aff8941436907a4d755d6b38c798ed41/docs/vite.config.ts). Keep the workflow's configured site-origin value. Keep dependency installation and package-manager caching.
 
 During a limited production trial, or canary, keep the existing task-directory restore/save steps within their trust boundary. Do not republish restored entries by default. Remove those steps after compatible clients pass anonymous reuse tests from fresh checkouts and explicit publication tests.
 
-To roll back publication, remove the push step or disable server writes. To disable remote reads, remove the endpoint or use `--no-remote-cache`.
+To stop uploads while retaining remote reads, select `read` through `--remote-cache` or `VP_REMOTE_CACHE`, or disable server writes. To disable remote reads and uploads, select `off`.
 
 ## 13. Free and Paid capacity comparison
 
@@ -796,7 +805,7 @@ For version 2, review [Workers Access integration](https://developers.cloudflare
 
 Resolve these questions during implementation:
 
-- Additional flags for push selection and the lifetime of snapshots.
+- Upload concurrency, shutdown deadlines, and protection of archives while uploads are pending.
 - Portable client encoding and compatibility.
 - JWT time tolerances and limits for cached keys.
 - Measured Free CPU and D1 costs.
