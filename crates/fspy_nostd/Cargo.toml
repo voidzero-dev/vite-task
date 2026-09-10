@@ -31,3 +31,6 @@ windows-sys = { workspace = true, features = [
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }

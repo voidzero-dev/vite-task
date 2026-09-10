@@ -12,6 +12,7 @@ mod freestanding {
     };
 
     fspy_nostd::main!(run);
+    fspy_nostd::no_global_alloc!();
 
     // The kernel enters with argc, argv, envp, and auxv on the initial stack.
     // Consume those views before exec_elf replaces the stack.

@@ -53,6 +53,9 @@ mod unix {
             const SHARED = imp::MAP_SHARED;
             /// Changes are private to this mapping.
             const PRIVATE = imp::MAP_PRIVATE;
+            /// Replace mappings at the requested address instead of using it as a hint.
+            #[cfg(any(target_os = "linux", target_os = "none"))]
+            const FIXED = linux_raw_sys::general::MAP_FIXED;
         }
     }
 

@@ -20,6 +20,8 @@
 /// This installs [`crate::panic_handler`], which prints panics and terminates
 /// with status 101. Stderr must remain open and unreplaced until termination.
 /// This does not initialize libc, TLS, or Rust's standard runtime.
+/// It does not apply dynamic relocations; link a fixed-address executable
+/// unless relocation has already been handled before entering `_start`.
 #[macro_export]
 macro_rules! main {
     ($run:path $(,)?) => {

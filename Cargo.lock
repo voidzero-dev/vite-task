@@ -1364,6 +1364,7 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.12.1",
  "syscalls",
+ "tempfile",
  "windows-sys 0.61.2",
 ]
 
