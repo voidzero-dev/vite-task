@@ -41,6 +41,8 @@ From this package directory, `pnpm dev` starts Wrangler with local bindings. App
 
 ## Setup
 
+For automatic PR previews, main-branch staging deployments, and tests against real Cloudflare resources, follow the [deployment and e2e plan](docs/e2e-plan.md). It includes GitHub environment configuration, the complete test matrix, manual verification, and preview teardown.
+
 Use a dedicated Worker, D1 database, and bucket. The operator requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in its environment. The token needs account permissions for Workers Scripts, D1, and Workers R2 Storage, plus route/zone permissions if using a custom domain. Enable R2 in the account first. Credentials stay in the operator process and Wrangler; they are never stored in namespace policy or passed as command arguments.
 
 Run from this package directory:

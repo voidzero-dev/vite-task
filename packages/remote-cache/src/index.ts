@@ -121,6 +121,7 @@ export default {
       release?.();
     }
     response.headers.set('X-Request-Id', id);
+    response.headers.set('X-Remote-Cache-Deployment', env.DEPLOYMENT_ID ?? 'local');
     const sample = Math.min(1, Math.max(0, Number(env.LOG_SAMPLE_RATE) || 0));
     // Fixed sampling bounds error volume as well as successful request volume.
     if (Math.random() < sample)
