@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev --test-scheduled",
     "build": "wrangler deploy --dry-run --outdir dist",
-    "types": "wrangler types .wrangler/worker-configuration.d.ts --env-interface Env --strict-vars false",
+    "types": "node -e \"require('node:fs').mkdirSync('.wrangler', { recursive: true })\" && wrangler types .wrangler/worker-configuration.d.ts --env-interface Env --strict-vars false",
     "check": "pnpm types && tsc --noEmit",
     "test": "node --import tsx --test test/index.test.ts",
     "smoke": "pnpm test && pnpm build",
