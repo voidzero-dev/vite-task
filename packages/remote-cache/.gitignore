@@ -3,3 +3,4 @@
 operator-state.json
 wrangler.operator.json
 benchmark-results.json
+e2e-results/

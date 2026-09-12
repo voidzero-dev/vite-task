@@ -12,7 +12,10 @@
     "test": "node --import tsx --test test/index.test.ts",
     "smoke": "pnpm test && pnpm build",
     "operator": "node --import tsx scripts/operator.ts",
-    "benchmark": "node --import tsx scripts/benchmark.ts"
+    "benchmark": "node --import tsx scripts/benchmark.ts",
+    "ci:deploy": "node --import tsx scripts/ci.ts deploy",
+    "ci:cleanup": "node --import tsx scripts/ci.ts cleanup",
+    "e2e": "node --import tsx scripts/ci.ts test"
   },
   "dependencies": {
     "jose": "6.2.12"
