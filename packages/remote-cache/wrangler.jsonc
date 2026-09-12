@@ -22,6 +22,7 @@
     { "name": "STORE_LIMITER", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
   ],
   "vars": {
+    "DEPLOYMENT_ID": "local",
     "NAMESPACES": "[]",
     "LIMITS": "{}",
     "GC_BATCH_SIZE": "16",

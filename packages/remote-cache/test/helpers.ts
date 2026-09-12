@@ -18,6 +18,8 @@ export async function harness(
     jwksStatus?: number;
     limits?: Record<string, number>;
     inspector?: boolean;
+    deploymentId?: string;
+    namespaces?: string[];
   } = {},
 ) {
   const pair = await generateKeyPair('RS256', { extractable: true });
@@ -45,7 +47,8 @@ export async function harness(
       d1Databases: ['INDEX'],
       r2Buckets: ['ARTIFACTS'],
       bindings: {
-        NAMESPACES: '["test","other"]',
+        DEPLOYMENT_ID: options.deploymentId ?? 'local',
+        NAMESPACES: JSON.stringify(options.namespaces ?? ['test', 'other']),
         LIMITS: JSON.stringify(options.limits ?? {}),
         GC_BATCH_SIZE: '16',
         LOG_SAMPLE_RATE: '0',

@@ -29,7 +29,7 @@ export interface OperatorIO {
   lifecycle(bucket: string, rules: unknown): Promise<void>;
   print(message: string): void;
 }
-type Config = {
+export type Config = {
   name: string;
   main: string;
   compatibility_date: string;
@@ -91,7 +91,7 @@ export async function resolveRepository(io: Pick<OperatorIO, 'github'>, name: st
   };
 }
 
-async function query(
+export async function query(
   io: OperatorIO,
   config: Config,
   sql: string,
@@ -503,7 +503,7 @@ async function jsonResponse(response: Response): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-const io: OperatorIO = {
+export const operatorIO: OperatorIO = {
   async api(path, method = 'GET', body) {
     const account = process.env['CLOUDFLARE_ACCOUNT_ID'];
     const token = process.env['CLOUDFLARE_API_TOKEN'];
@@ -563,7 +563,16 @@ const io: OperatorIO = {
     try {
       const path = join(dir, 'lifecycle.json');
       await writeFile(path, JSON.stringify(rules));
-      await io.wrangler(['r2', 'bucket', 'lifecycle', 'set', bucket, '--file', path, '--force']);
+      await operatorIO.wrangler([
+        'r2',
+        'bucket',
+        'lifecycle',
+        'set',
+        bucket,
+        '--file',
+        path,
+        '--force',
+      ]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -572,7 +581,7 @@ const io: OperatorIO = {
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runOperator(process.argv.slice(2), io).catch((error) => {
+  runOperator(process.argv.slice(2), operatorIO).catch((error) => {
     console.error(error instanceof Error ? error.message : 'Operator command failed');
     process.exitCode = 1;
   });

@@ -1,0 +1,159 @@
+name: Remote cache deployment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - packages/remote-cache/**
+      - .github/workflows/remote-cache-*.yml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - vite.config.ts
+  push:
+    branches: [main]
+    paths:
+      - packages/remote-cache/**
+      - .github/workflows/remote-cache-*.yml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - vite.config.ts
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Check real Cron cleanup (manual runs cannot authorize HTTP stores)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Share the group with PR teardown. Do not cancel a partially completed deployment.
+concurrency:
+  group: remote-cache-cloudflare-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: false
+
+env:
+  REMOTE_CACHE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  REMOTE_CACHE_PR_NUMBER: ${{ github.event.pull_request.number }}
+  REMOTE_CACHE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  REMOTE_CACHE_RESOURCE_PREFIX: ${{ vars.REMOTE_CACHE_RESOURCE_PREFIX || 'vp-cache-ci' }}
+  REMOTE_CACHE_WORKERS_SUBDOMAIN: ${{ vars.REMOTE_CACHE_WORKERS_SUBDOMAIN }}
+
+jobs:
+  check:
+    name: Check deployment source
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.REMOTE_CACHE_SOURCE_SHA }}
+          persist-credentials: false
+      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
+      - run: pnpm check-remote-cache
+
+  deploy:
+    name: Deploy and verify
+    needs: check
+    if: >-
+      vars.REMOTE_CACHE_DEPLOY_ENABLED == 'true' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: remote-cache-staging
+      url: ${{ steps.deploy.outputs.endpoint }}
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+    outputs:
+      endpoint: ${{ steps.deploy.outputs.endpoint }}
+    steps:
+      - name: Check that the PR still selects this commit
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: context.issue.number });
+            if (pr.state !== 'open' || pr.head.sha !== process.env.REMOTE_CACHE_SOURCE_SHA) {
+              core.setFailed('This PR deployment is obsolete.');
+            }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.REMOTE_CACHE_SOURCE_SHA }}
+          persist-credentials: false
+      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
+      - name: Deploy isolated Cloudflare resources
+        id: deploy
+        run: pnpm --filter @voidzero-dev/remote-cache ci:deploy
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Test the deployed Worker, D1, and R2
+        run: pnpm --filter @voidzero-dev/remote-cache e2e
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          REMOTE_CACHE_E2E_FULL: ${{ github.event_name == 'push' || inputs.full == true }}
+      - name: Save verification results and manual fixtures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: remote-cache-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: packages/remote-cache/e2e-results/
+          retention-days: 7
+          if-no-files-found: warn
+
+  notify:
+    name: Update PR verification instructions
+    if: >-
+      always() && github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
+    needs: [check, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          DEPLOY_ENDPOINT: ${{ needs.deploy.outputs.endpoint }}
+        with:
+          script: |
+            const marker = '<!-- remote-cache-preview -->';
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: context.issue.number });
+            if (pr.state !== 'open' || pr.head.sha !== process.env.REMOTE_CACHE_SOURCE_SHA) return;
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const docs = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/blob/${pr.head.sha}/packages/remote-cache/docs/e2e-plan.md`;
+            const passed = process.env.DEPLOY_RESULT === 'success';
+            let status;
+            if (passed) {
+              const endpoint = process.env.DEPLOY_ENDPOINT;
+              const expected = `https://${process.env.REMOTE_CACHE_RESOURCE_PREFIX}-pr-${pr.number}.${process.env.REMOTE_CACHE_WORKERS_SUBDOMAIN}.workers.dev/projects/manual`;
+              if (endpoint !== expected) throw new Error('Unexpected deployment endpoint');
+              status = `Cloudflare deployment and PR e2e checks passed. You can now perform manual verification.\n\n` +
+                `Endpoint: ${endpoint}\n\n` +
+                `Download the **remote-cache-e2e-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}** artifact from the [workflow run](${run}). ` +
+                `It contains \`manual-fetch.cbor\`, \`manual-manifest.json\`, and \`report.json\`.\n\n` +
+                `PR checks cover public reads and rejected writes. Main-branch push checks also cover authorized HTTP stores and real Cron cleanup. ` +
+                `The endpoint remains available until this PR closes or a later commit replaces it.`;
+            } else if (process.env.CHECK_RESULT !== 'success') {
+              status = `The source checks did not pass. No verified Cloudflare preview is ready. See the [workflow run](${run}).`;
+            } else if (process.env.DEPLOY_RESULT === 'skipped') {
+              status = `Cloudflare deployment is disabled. Configure the staging environment described in the [e2e plan](${docs}), ` +
+                `then set \`REMOTE_CACHE_DEPLOY_ENABLED=true\` and rerun this workflow. No live deployment passed verification.`;
+            } else {
+              status = `Cloudflare deployment or e2e verification failed. The preview is not marked ready. See the [workflow run](${run}).`;
+            }
+            const body = `${marker}\n### Remote cache preview\n\nCommit: \`${pr.head.sha}\`\n\n${status}\n\n[Manual checks and complete e2e plan](${docs}).`;
+            const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: pr.number, per_page: 100 });
+            const previous = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
+            if (previous) await github.rest.issues.updateComment({ ...context.repo, comment_id: previous.id, body });
+            else await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body });
