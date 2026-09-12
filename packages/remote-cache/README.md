@@ -20,7 +20,7 @@ Empty and non-UTF-8 keys work. CBOR definite and indefinite maps and byte string
 
 Fetch gives exact matches priority. A fallback follows the latest secondary-key association. A store replaces both mappings atomically. Reassigning a secondary key does not delete its former target. Replacing an entry changes the value seen through every association to that entry.
 
-**Draft contract difference:** this implementation follows RFC #716 and returns `404` for a fetch miss. The still-open API draft [#713 at `362f5bd9`](https://github.com/voidzero-dev/vite-task/blob/362f5bd91bb32806b512d3d9a5339ff435bf5f0a/docs/remote-cache-server-api.md) instead specifies HTTP `200` with `kind: "not_found"`. Reconcile the drafts before releasing a client against this service.
+HTTP status codes follow the [local RFC](docs/0001-remote-cache.md#4-http-api-mapping). A fetch returns `404` when neither key resolves to a live entry. An unavailable blob also returns `404`, including when its R2 object is missing. These responses use plain text. A missing or unreadable value for a live entry is a storage failure and returns `503`, as specified in [the read design](docs/0001-remote-cache.md#7-fetch-and-download-implementation).
 
 Errors have `Content-Type: text/plain; charset=utf-8`. Codes are `400` for invalid input, `401` for invalid/missing/expired tokens, `403` for a signed token that fails write policy, `404` for absent data or unavailable namespaces/routes, `413` for size limits, `429` for admission limits, `500` for an incomplete operation, and `503` for unavailable authorization/storage, failed publication guards, quotas, or concurrency admission. `429` and `503` include `Retry-After: 60`.
 
