@@ -140,16 +140,24 @@ void test('unknown-length requests reserve the full limit and cancellation preve
   try {
     const env = await h.mf.getBindings<Env>();
     const pending: Promise<unknown>[] = [];
-    const deadline = new Deadline(100);
+    const controller = new AbortController();
+    const deadline = new Deadline(10000, controller.signal);
     let cancelled = false;
     const requestInit = {
       method: 'POST',
       headers: { 'Content-Type': 'multipart/form-data; boundary=x' },
-      body: new ReadableStream({
-        cancel() {
-          cancelled = true;
+      body: new ReadableStream(
+        {
+          pull() {
+            controller.abort();
+          },
+          cancel() {
+            cancelled = true;
+          },
         },
-      }),
+        // Pull only after the reservation completes and the parser starts reading.
+        { highWaterMark: 0 },
+      ),
       duplex: 'half',
     };
     const request = new Request('https://cache.example.com/projects/test/store', requestInit);
@@ -168,6 +176,7 @@ void test('unknown-length requests reserve the full limit and cancellation preve
         { status: 503 },
       );
       await Promise.all(pending);
+      assert.equal(controller.signal.aborted, true);
       assert.equal(cancelled, true);
       const row = await h.db.prepare('SELECT charged_bytes, state FROM generations').first();
       assert.equal(row!.charged_bytes, defaults.store);
