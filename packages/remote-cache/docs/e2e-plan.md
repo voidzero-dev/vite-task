@@ -62,6 +62,8 @@ The operator seeds immutable objects and generation rows for read tests. This va
 
 “Local” refers to the existing regression suite and the new shared e2e-driver tests. “PR” and “Main” refer to real Cloudflare runs.
 
+Status assertions follow the [local RFC](0001-remote-cache.md#4-http-api-mapping). Fetch misses and unavailable blobs return plain-text `404`. A missing or unreadable value for a live entry returns `503`.
+
 | Case                                             | Local                         | PR                            | Main                      | Required result                                                                                                                  |
 | ------------------------------------------------ | ----------------------------- | ----------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Exact source revision                            | Yes                           | Yes                           | Yes                       | Expected deployment ID on responses; fail if the URL serves another revision                                                     |
