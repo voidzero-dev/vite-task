@@ -374,6 +374,23 @@ jobs:
           pnpm build-vite-task-client-types
           git diff --exit-code packages/vite-task-client/src/index.d.ts
 
+  remote-cache:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code-changed == 'true'
+    name: Remote cache (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - namespace-profile-linux-x64-default
+          - namespace-profile-mac-default
+          - namespace-profile-windows-4c-8g
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
+      - run: pnpm check-remote-cache
+
   done:
     runs-on: namespace-profile-linux-x64-default
     if: always()
@@ -384,6 +401,7 @@ jobs:
       - build-windows-tests
       - test-windows
       - fmt
+      - remote-cache
     steps:
       - run: exit 1
         # Thank you, next https://github.com/vercel/next.js/blob/canary/.github/workflows/build_and_test.yml#L379
