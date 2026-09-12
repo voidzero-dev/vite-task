@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vp-remote-cache",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "d1_databases": [
+    {
+      "binding": "INDEX",
+      "database_name": "vp-remote-cache",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "vp-remote-cache" }],
+  "ratelimits": [
+    { "name": "READ_LIMITER", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } },
+    { "name": "STORE_LIMITER", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
+  ],
+  "vars": {
+    "DEPLOYMENT_ID": "local",
+    "NAMESPACES": "[]",
+    "LIMITS": "{}",
+    "GC_BATCH_SIZE": "16",
+    "LOG_SAMPLE_RATE": "0.1",
+  },
+}

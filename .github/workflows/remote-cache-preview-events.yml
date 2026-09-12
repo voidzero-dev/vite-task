@@ -1,0 +1,91 @@
+name: Remote cache preview cleanup
+
+on:
+  pull_request:
+    types: [closed]
+    paths:
+      - packages/remote-cache/**
+      - .github/workflows/remote-cache-*.yml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - vite.config.ts
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Closed PR number whose preview resources should be removed
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  cleanup:
+    name: Remove closed PR resources
+    if: >-
+      vars.REMOTE_CACHE_DEPLOY_ENABLED == 'true' &&
+      ((github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.login != 'dependabot[bot]') ||
+        (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    concurrency:
+      group: remote-cache-cloudflare-${{ github.event.pull_request.number || inputs.pr }}
+      cancel-in-progress: false
+    environment: remote-cache-staging
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      REMOTE_CACHE_PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+      REMOTE_CACHE_SOURCE_SHA: ${{ github.sha }}
+      REMOTE_CACHE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      REMOTE_CACHE_RESOURCE_PREFIX: ${{ vars.REMOTE_CACHE_RESOURCE_PREFIX || 'vp-cache-ci' }}
+      REMOTE_CACHE_WORKERS_SUBDOMAIN: ${{ vars.REMOTE_CACHE_WORKERS_SUBDOMAIN }}
+    steps:
+      - name: Verify that the PR is closed
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const number = process.env.REMOTE_CACHE_PR_NUMBER;
+            if (!/^[1-9][0-9]{0,9}$/.test(number)) throw new Error('Invalid PR number');
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: Number(number) });
+            if (pr.state !== 'closed') throw new Error('Only closed PR previews can be removed');
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
+      - run: pnpm --filter @voidzero-dev/remote-cache ci:cleanup
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+  cleanup-notice:
+    if: always() && needs.cleanup.result != 'skipped'
+    needs: cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          CLEANUP_RESULT: ${{ needs.cleanup.result }}
+        with:
+          script: |
+            if (!/^[1-9][0-9]{0,9}$/.test(process.env.PR_NUMBER)) return;
+            const number = Number(process.env.PR_NUMBER);
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+            if (pr.state !== 'closed') return;
+            const marker = '<!-- remote-cache-preview -->';
+            const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: number, per_page: 100 });
+            const previous = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
+            if (!previous) return;
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const status = process.env.CLEANUP_RESULT === 'success'
+              ? 'The PR is closed. Its Cloudflare preview resources were removed.'
+              : 'The PR is closed, but preview cleanup did not finish. Check the workflow and rerun cleanup after Cron or lifecycle completes.';
+            await github.rest.issues.updateComment({ ...context.repo, comment_id: previous.id,
+              body: `${marker}\n### Remote cache preview\n\n${status}\n\n[Cleanup run](${run}).` });
