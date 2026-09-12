@@ -1,0 +1,33 @@
+{
+  "name": "@voidzero-dev/remote-cache",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "types": "wrangler types .wrangler/worker-configuration.d.ts --env-interface Env --strict-vars false",
+    "check": "pnpm types && tsc --noEmit",
+    "test": "node --import tsx --test test/index.test.ts",
+    "smoke": "pnpm test && pnpm build",
+    "operator": "node --import tsx scripts/operator.ts",
+    "benchmark": "node --import tsx scripts/benchmark.ts"
+  },
+  "dependencies": {
+    "jose": "6.2.12"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "cborg": "6.1.2",
+    "esbuild": "0.28.1",
+    "jsonc-parser": "3.3.1",
+    "miniflare": "5.20260911.0-alpha",
+    "tsx": "4.23.13",
+    "typescript": "catalog:",
+    "wrangler": "4.131.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
