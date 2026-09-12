@@ -53,6 +53,18 @@ jobs:
           persist-credentials: false
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
       - run: pnpm check-remote-cache
+      - name: Explain fork preview availability
+        if: >-
+          always() && github.event_name == 'pull_request' &&
+          (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]')
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            await core.summary.addHeading('Remote cache preview').addRaw(
+              'Fork and Dependabot PRs run local checks without Cloudflare credentials. ' +
+              'A maintainer can copy the reviewed commit to an internal branch and open a PR for a preview. ' +
+              'No live deployment passed verification for this PR.'
+            ).write();
 
   deploy:
     name: Deploy and verify

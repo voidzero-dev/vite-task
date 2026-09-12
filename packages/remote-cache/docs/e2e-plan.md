@@ -38,9 +38,9 @@ Set these **repository variables**, which the notification job also needs:
 
 Enable R2 in the account. The token must allow resource creation and deletion as well as data access. No custom domain or DNS permission is needed. Do not attach production bindings or secrets to these Workers. The GitHub environment can require a maintainer review if the repository needs one before a deployment.
 
-The workflow exposes Cloudflare credentials only to deployment, verification, and cleanup commands. Dependency installation runs before those credentials enter the step environment. Internal PR contributors must be trusted to change deployment code. Fork and Dependabot PRs run local checks without Cloudflare credentials. A separate `pull_request_target` workflow only posts their notice or executes cleanup code from the default branch; it never checks out PR code. To preview a fork change, a maintainer must copy the reviewed commit to a branch in this repository and open a PR.
+The workflow exposes Cloudflare credentials only to deployment, verification, and cleanup commands. Dependency installation runs before those credentials enter the step environment. Internal PR contributors must be trusted to change deployment code. Fork and Dependabot PRs run local checks without Cloudflare credentials. Their check summary explains why no preview is available; they receive no deployment comment. Cleanup uses ordinary closed-PR events for internal branches and executes code from the default branch. To preview a fork change, a maintainer must copy the reviewed commit to a branch in this repository and open a PR.
 
-The preview-events workflow must exist on the default branch before fork notices and automatic closed-PR cleanup can run. Merge the workflow setup before relying on those events. Manual deployment dispatches use the default branch and cannot select an arbitrary PR revision.
+Merge the workflow and cleanup script to the default branch before relying on automatic cleanup. GitHub can suppress `pull_request` workflows when a PR has merge conflicts. Use the manual cleanup workflow with the closed PR number if the close event does not run. Manual deployment dispatches use the default branch and cannot select an arbitrary PR revision.
 
 ## Authorization and test levels
 
@@ -135,7 +135,7 @@ PR previews intentionally reject publication tokens from PR workflows. Use the m
 
 Each CI deployment has a 2 GB byte budget, 1,000 entries, and 2,000 associations. Pending and retired objects remain charged. After verification, the runner expires `e2e` and `other` data and gives in-flight operations the normal ten-minute cleanup grace. It retains the `manual` fixture for developer checks. Subsequent runs explicitly restore CI-owned policy switches in case a prior process stopped during a withdrawal test.
 
-Closing a PR triggers `.github/workflows/remote-cache-preview-events.yml`. The cleanup job executes code from the default branch, confirms that the PR is closed, and checks resource ownership. It disables access, waits for Cron to drain generations, then deletes the empty bucket, D1 database, and Worker. It does not delete main staging. The PR comment reports cleanup success or failure.
+Closing an internal PR triggers `.github/workflows/remote-cache-preview-events.yml`. The cleanup job executes code from the default branch, confirms that the PR is closed, and checks resource ownership. It disables access, waits for Cron to drain generations, then deletes the empty bucket, D1 database, and Worker. It does not delete main staging. The PR comment reports cleanup success or failure.
 
 If Cron or orphan multipart uploads delay cleanup, the job fails instead of claiming that resources are gone. R2 lifecycle can require a day to abort an unrecorded upload. Rerun the cleanup workflow with the closed PR number after the backlog drains. Failed resource creation and partial teardown can also be retried. A nonempty bucket always blocks final removal.
 
