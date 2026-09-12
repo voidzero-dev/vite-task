@@ -1,6 +1,6 @@
 # Public remote cache service
 
-This package implements the server in [RFC #716](https://github.com/voidzero-dev/vite-task/pull/716): a TypeScript Worker, primary D1 metadata, and a private R2 Standard bucket. Anyone can read an enabled namespace. Only a signed GitHub Actions token for the registered public repository's main-branch `push` job can publish.
+This package implements the server in the [remote cache RFC](docs/0001-remote-cache.md) ([PR #716](https://github.com/voidzero-dev/vite-task/pull/716)): a TypeScript Worker, primary D1 metadata, and a private R2 Standard bucket. Anyone can read an enabled namespace. Only a signed GitHub Actions token for the registered public repository's main-branch `push` job can publish.
 
 The package contains no `vp run` client adapter. Cache keys, values, and blobs remain opaque. A successful lookup does not prove that a result is reusable; a client must validate its inputs and output archive.
 
