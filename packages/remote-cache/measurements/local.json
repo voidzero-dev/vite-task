@@ -1,0 +1,130 @@
+{
+  "measured_at": "2026-09-11T16:35:37.230Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpu": "Apple M4 Max",
+  "node": "v22.21.0",
+  "runtime": "workerd 1.20260911.1",
+  "concurrency": {
+    "stores": 2,
+    "metadata_reads": 4
+  },
+  "free_cpu_verified": false,
+  "caveat": "Local V8 sampling is diagnostic. It excludes some native work and is not provider CPU billing. Validate production CPU before enabling a Free release profile.",
+  "measurements": [
+    {
+      "name": "cold-jwks",
+      "wall_ms": 40.12,
+      "sampled_cpu_ms": 28.731,
+      "heap_bytes": 1552516,
+      "backing_storage_bytes": 6097748
+    },
+    {
+      "name": "warm-jwks",
+      "wall_ms": 9.59,
+      "sampled_cpu_ms": 8.312,
+      "heap_bytes": 1343620,
+      "backing_storage_bytes": 5529717
+    },
+    {
+      "name": "cbor-decode-250000",
+      "node_cpu_ms_per_operation": 0.00419
+    },
+    {
+      "name": "cbor-encode-250000",
+      "node_cpu_ms_per_operation": 0.06711
+    },
+    {
+      "name": "fetch-value-250000",
+      "wall_ms": 8.48,
+      "sampled_cpu_ms": 7.78,
+      "heap_bytes": 1608140,
+      "backing_storage_bytes": 11293169
+    },
+    {
+      "name": "fetch-response-250000",
+      "wall_ms": 7.23,
+      "sampled_cpu_ms": 5.831,
+      "heap_bytes": 1852152,
+      "backing_storage_bytes": 16294767
+    },
+    {
+      "name": "cbor-decode-4194304",
+      "node_cpu_ms_per_operation": 0.00368
+    },
+    {
+      "name": "cbor-encode-4194304",
+      "node_cpu_ms_per_operation": 0.27475
+    },
+    {
+      "name": "fetch-value-4194304",
+      "wall_ms": 50.1,
+      "sampled_cpu_ms": 45.651,
+      "heap_bytes": 3161464,
+      "backing_storage_bytes": 7968897
+    },
+    {
+      "name": "fetch-response-4194304",
+      "wall_ms": 17.15,
+      "sampled_cpu_ms": 13.373,
+      "heap_bytes": 4710864,
+      "backing_storage_bytes": 18648273
+    },
+    {
+      "name": "store-5000000-concurrency-1",
+      "wall_ms": 99.68,
+      "sampled_cpu_ms": 34.529,
+      "heap_bytes": 6111500,
+      "backing_storage_bytes": 20504341
+    },
+    {
+      "name": "store-5000000-concurrency-2",
+      "wall_ms": 197.69,
+      "sampled_cpu_ms": 193.841,
+      "heap_bytes": 12435204,
+      "backing_storage_bytes": 38597083
+    },
+    {
+      "name": "store-20000000-concurrency-1",
+      "wall_ms": 283.25,
+      "sampled_cpu_ms": 280.233,
+      "heap_bytes": 19072604,
+      "backing_storage_bytes": 41544287
+    },
+    {
+      "name": "store-20000000-concurrency-2",
+      "wall_ms": 504.93,
+      "sampled_cpu_ms": 458.933,
+      "heap_bytes": 19583376,
+      "backing_storage_bytes": 48028243
+    },
+    {
+      "name": "store-50000000-concurrency-1",
+      "wall_ms": 560.81,
+      "sampled_cpu_ms": 472.501,
+      "heap_bytes": 18188432,
+      "backing_storage_bytes": 28738528
+    },
+    {
+      "name": "store-50000000-concurrency-2",
+      "wall_ms": 1103.99,
+      "sampled_cpu_ms": 896.194,
+      "heap_bytes": 19111428,
+      "backing_storage_bytes": 34509917
+    },
+    {
+      "name": "store-67108864-concurrency-1",
+      "wall_ms": 773.37,
+      "sampled_cpu_ms": 729.105,
+      "heap_bytes": 17239424,
+      "backing_storage_bytes": 55903659
+    },
+    {
+      "name": "store-67108864-concurrency-2",
+      "wall_ms": 1443.97,
+      "sampled_cpu_ms": 1207.561,
+      "heap_bytes": 21261328,
+      "backing_storage_bytes": 40246099
+    }
+  ]
+}

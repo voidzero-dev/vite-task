@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "prepare": "vp config",
-    "build-vite-task-client-types": "tsc -p packages/vite-task-client/tsconfig.json"
+    "build-vite-task-client-types": "tsc -p packages/vite-task-client/tsconfig.json",
+    "check-remote-cache": "pnpm --filter @voidzero-dev/remote-cache check && pnpm --filter @voidzero-dev/remote-cache smoke"
   },
   "devDependencies": {
     "@tsconfig/strictest": "catalog:",
