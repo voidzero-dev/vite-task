@@ -2,6 +2,7 @@ packages:
   - .
   - packages/tools
   - packages/vite-task-client
+  - packages/remote-cache
 
 allowBuilds:
   '@playwright/browser-chromium': true
@@ -31,6 +32,16 @@ catalog:
   vitest: 4.1.11
 
 catalogMode: prefer
+minimumReleaseAgeExclude:
+  - '@cloudflare/workerd-darwin-64@1.20260911.1'
+  - '@cloudflare/workerd-darwin-arm64@1.20260911.1'
+  - '@cloudflare/workerd-linux-64@1.20260911.1'
+  - '@cloudflare/workerd-linux-arm64@1.20260911.1'
+  - '@cloudflare/workerd-windows-64@1.20260911.1'
+  - '@cloudflare/workers-types@5.20260911.1'
+  - miniflare@5.20260911.0-alpha
+  - workerd@1.20260911.1
+  - wrangler@4.131.1
 overrides:
   playwright: 1.62.1
   vite: 'catalog:'
