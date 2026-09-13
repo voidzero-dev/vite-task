@@ -9,13 +9,13 @@ allowBuilds:
   deno: true
 
 catalog:
-  '@anthropic-ai/sandbox-runtime': 0.0.74
-  '@openai/codex': 0.150.1
+  '@anthropic-ai/sandbox-runtime': 0.0.75
+  '@openai/codex': 0.154.0
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
-  '@playwright/browser-chromium': 1.62.1
+  '@playwright/browser-chromium': 1.63.0
   '@vitest/browser-playwright': 4.1.11
-  bun: 1.4.0
+  bun: 1.4.2
   cross-env: ^10.1.0
   deno: 2.9.6
   husky: ^9.1.7
@@ -24,7 +24,7 @@ catalog:
   oxlint: ^1.55.0
   oxlint-tsgolint: ^7.0.0
   # Playwright 1.52 pins the browser package to Chromium 136.
-  playwright: 1.62.1
+  playwright: 1.63.0
   typescript: ^6.0.3
   vite: npm:@voidzero-dev/vite-plus-core@0.3.1
   vite-plus: 0.3.1
@@ -32,13 +32,13 @@ catalog:
 
 catalogMode: prefer
 overrides:
-  playwright: 1.62.1
+  playwright: 1.63.0
   vite: 'catalog:'
   # The e2e harness symlinks packages/tools' `vite` binary into fixtures to
   # exercise the real vite-task-client integration. The global `vite: catalog:`
   # override above routes vite to the Vite+ toolchain fork, which does not carry
   # the integration — so scope vite-task-tools' `vite` to a real upstream build.
-  vite-task-tools>vite: 8.2.2
+  vite-task-tools>vite: 8.3.0
 peerDependencyRules:
   allowAny:
     - vite
