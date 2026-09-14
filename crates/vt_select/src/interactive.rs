@@ -189,15 +189,16 @@ impl<'a> State<'a> {
     }
 
     fn move_up(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
+        if self.item_count > 0 {
+            self.selected =
+                if self.selected == 0 { self.item_count - 1 } else { self.selected - 1 };
             self.ensure_selected_visible();
         }
     }
 
     fn move_down(&mut self) {
-        if self.item_count > 0 && self.selected < self.item_count - 1 {
-            self.selected += 1;
+        if self.item_count > 0 {
+            self.selected = (self.selected + 1) % self.item_count;
             self.ensure_selected_visible();
         }
     }
@@ -596,6 +597,113 @@ mod tests {
                 group: group.map(Str::from),
             })
             .collect()
+    }
+
+    #[test]
+    fn navigation_wraps_up_from_first_to_last() {
+        let items = make_items(&[("build", ""), ("lint", ""), ("test", "")]);
+        let mut state = State::new(&items, None, 2);
+
+        state.move_up();
+
+        assert_eq!(state.selected_item_index(), Some(2));
+        assert_eq!(state.visible_display_rows(), 1..3);
+    }
+
+    #[test]
+    fn navigation_wraps_down_from_last_to_first() {
+        let items = make_items(&[("build", ""), ("lint", ""), ("test", "")]);
+        let mut state = State::new(&items, None, 2);
+
+        state.move_down();
+        assert_eq!(state.selected_item_index(), Some(1));
+        state.move_down();
+        assert_eq!(state.selected_item_index(), Some(2));
+        assert_eq!(state.visible_display_rows(), 1..3);
+        state.move_down();
+
+        assert_eq!(state.selected_item_index(), Some(0));
+        assert_eq!(state.visible_display_rows(), 0..2);
+    }
+
+    #[test]
+    fn navigation_wraps_within_filtered_results() {
+        let items = make_items(&[("build-a", ""), ("lint", ""), ("build-b", ""), ("test", "")]);
+        let mut state = State::new(&items, None, 2);
+        state.move_up();
+        state.query.push_str("build");
+        state.refilter();
+        assert_eq!(state.item_count, 2);
+        assert_eq!(state.selected_item_index(), Some(0));
+        assert_eq!(state.scroll_offset, 0);
+
+        state.move_up();
+        assert_eq!(state.selected_item_index(), Some(2));
+        state.move_down();
+        assert_eq!(state.selected_item_index(), Some(0));
+        assert_eq!(state.query, "build");
+    }
+
+    #[test]
+    fn navigation_wraps_past_group_headers_and_scrolls_to_the_selected_item() {
+        let items = make_grouped_items(&[
+            ("lib#build", "build", "", Some("lib")),
+            ("lib#lint", "lint", "", Some("lib")),
+            ("app#build", "build", "", Some("app")),
+        ]);
+        let mut state = State::new(&items, None, 3);
+
+        state.move_up();
+        assert_eq!(state.selected_item_index(), Some(2));
+        assert_eq!(state.visible_display_rows(), 2..5);
+        state.move_down();
+        assert_eq!(state.selected_item_index(), Some(0));
+        assert_eq!(state.visible_display_rows(), 0..3);
+        assert!(matches!(state.display_rows[0], DisplayRow::Header(_)));
+
+        state.move_down();
+        assert_eq!(state.selected_item_index(), Some(1));
+        state.move_down();
+        assert_eq!(state.selected_item_index(), Some(2));
+        state.move_up();
+        assert_eq!(state.selected_item_index(), Some(1));
+    }
+
+    #[test]
+    fn navigation_with_no_items_is_a_noop() {
+        let mut state = State::new(&[], None, 2);
+
+        state.move_up();
+        state.move_down();
+
+        assert_eq!(state.selected, 0);
+        assert_eq!(state.selected_item_index(), None);
+        assert_eq!(state.visible_display_rows(), 0..0);
+    }
+
+    #[test]
+    fn navigation_with_no_matching_items_is_a_noop() {
+        let items = make_items(&[("build", ""), ("lint", "")]);
+        let mut state = State::new(&items, Some("zzz"), 2);
+
+        state.move_up();
+        state.move_down();
+
+        assert_eq!(state.selected, 0);
+        assert_eq!(state.selected_item_index(), None);
+        assert_eq!(state.visible_display_rows(), 0..0);
+    }
+
+    #[test]
+    fn navigation_with_one_matching_item_stays_on_that_item() {
+        let items = make_items(&[("build", ""), ("lint", "")]);
+        let mut state = State::new(&items, Some("lint"), 2);
+
+        state.move_up();
+        assert_eq!(state.selected_item_index(), Some(1));
+        state.move_down();
+        assert_eq!(state.selected_item_index(), Some(1));
+        assert_eq!(state.visible_display_rows(), 0..1);
     }
 
     /// Strip ANSI escape sequences from output for easier assertions.
