@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Cmd+Backspace on macOS now clears the interactive task selector's search query instead of inserting `u`.
 - **Fixed** `vp run` no longer hangs or fails when a task leaves a process running behind it, such as a dev server or a background helper, or when one of a task's processes is killed. The run finishes as soon as the task itself does, and the files the task used are still recorded ([#544](https://github.com/voidzero-dev/vite-task/issues/544), [#675](https://github.com/voidzero-dev/vite-task/pull/675)).
 - **Fixed** A task that reads or writes an unusually large number of files now runs to the end instead of being killed partway through. Vite+ reports the run as not cached, because it could not record every file the task used ([#533](https://github.com/voidzero-dev/vite-task/issues/533), [#675](https://github.com/voidzero-dev/vite-task/pull/675)).
 - **Fixed** Vite+ diagnostics now display individual paths and working directories without Rust debug formatting such as quoted paths or escaped Windows backslashes ([#534](https://github.com/voidzero-dev/vite-task/pull/534)).
