@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { parse, type ParseError } from 'jsonc-parser';
 
@@ -49,6 +50,16 @@ export type Config = {
   ratelimits: { name: string; namespace_id: string; simple: { limit: number; period: number } }[];
   vars: Record<string, string>;
 };
+
+function isolateRateLimits(config: Config) {
+  for (const binding of config.ratelimits) {
+    // Account-wide IDs must stay stable across revisions and differ between Workers/bindings.
+    const hash = createHash('sha256')
+      .update(`remote-cache:${config.name}:${binding.name}`)
+      .digest();
+    binding.namespace_id = String(hash.readUIntBE(0, 6) + 1);
+  }
+}
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -226,6 +237,32 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       db = created.map(object).find((item) => item['name'] === name);
     }
     if (!db) throw new Error('D1 creation did not return the database');
+    config = await readTemplate();
+    config.name = name;
+    config.d1_databases[0] = {
+      binding: 'INDEX',
+      database_name: name,
+      database_id: text(db['uuid']),
+      migrations_dir: 'migrations',
+    };
+    // New databases have no schema. Existing policies must pass validation before any writes.
+    const tables = await query(
+      io,
+      config,
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'scopes'",
+    );
+    if (tables.length) {
+      const scopes = await query(
+        io,
+        config,
+        'SELECT scope_id, endpoint, repository_id FROM scopes',
+      );
+      if (scopes.some((row) => new URL(text(row['endpoint'])).origin !== origin.origin))
+        throw new Error('Use a separate deployment for a different public origin');
+      const prior = scopes.find((row) => row['scope_id'] === namespace);
+      if (prior && prior['repository_id'] !== repo.id)
+        throw new Error('Use a new namespace for a different repository');
+    }
     try {
       const bucket = object(await io.api(`/r2/buckets/${name}`));
       if (bucket['storage_class'] && bucket['storage_class'] !== 'Standard')
@@ -247,25 +284,13 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
     if (!Array.isArray(domains['domains']) || domains['domains'].length)
       throw new Error('Remove R2 public custom domains before setup');
     await io.api(`/r2/buckets/${name}/domains/managed`, 'PUT', { enabled: false });
-    config = await readTemplate();
-    config.name = name;
-    config.d1_databases[0] = {
-      binding: 'INDEX',
-      database_name: name,
-      database_id: text(db['uuid']),
-      migrations_dir: 'migrations',
-    };
     config.r2_buckets[0] = { binding: 'ARTIFACTS', bucket_name: name };
     config.workers_dev = origin.hostname.endsWith('.workers.dev');
     if (!config.workers_dev) config.routes = [{ pattern: origin.hostname, custom_domain: true }];
     config.vars['GC_BATCH_SIZE'] = profile === 'free' ? '16' : '256';
+    isolateRateLimits(config);
     await io.writeConfig(config);
     await io.wrangler(['d1', 'migrations', 'apply', 'INDEX', '--remote', '--config', configPath]);
-    const prior = await query(io, config, 'SELECT repository_id FROM scopes WHERE scope_id = ?', [
-      namespace,
-    ]);
-    if (prior.length && prior[0]!['repository_id'] !== repo.id)
-      throw new Error('Use a new namespace for a different repository');
     // Repeated setup only creates a missing policy; it never re-enables a withdrawn scope.
     await query(
       io,
@@ -297,8 +322,6 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       ],
     );
     const scopes = await query(io, config, 'SELECT scope_id, endpoint FROM scopes');
-    if (scopes.some((row) => new URL(text(row['endpoint'])).origin !== origin.origin))
-      throw new Error('Use a separate deployment for a different public origin');
     config.vars['NAMESPACES'] = JSON.stringify(scopes.map((row) => text(row['scope_id'])));
     await io.writeConfig(config);
     await updateLifecycle(io, config);
@@ -308,6 +331,8 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
   }
   config = await io.readConfig();
   if (command === 'upgrade') {
+    isolateRateLimits(config);
+    await io.writeConfig(config);
     await io.wrangler(['d1', 'migrations', 'apply', 'INDEX', '--remote', '--config', configPath]);
     await updateLifecycle(io, config);
     await io.wrangler(['deploy', '--config', configPath]);

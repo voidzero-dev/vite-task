@@ -8,19 +8,19 @@ The package contains no `vp run` client adapter. Cache keys, values, and blobs r
 
 The endpoint is `https://<host>/projects/<namespace>`. Namespaces use 1–63 lowercase letters, digits, or hyphens, starting with a letter or digit. An operator can register up to 100 namespaces per deployment.
 
-| Request                                                                   | Success                                                                                                                                       |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /fetch`, `application/cbor`, `{ key: bytes, secondary_key: bytes }` | CBOR `{ kind: "exact", value: bytes, blob_id: string \| null }`, or `{ kind: "fallback", key: bytes, value: bytes, blob_id: string \| null }` |
-| `GET /blob/{blob_id}`                                                     | Raw bytes with `application/octet-stream`                                                                                                     |
-| `POST /store`, `multipart/form-data`                                      | CBOR `{ blob_id: string \| null }`                                                                                                            |
+| Request                                                                   | Success                                                                                                |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `POST /fetch`, `application/cbor`, `{ key: bytes, secondary_key: bytes }` | CBOR `{ kind: "exact", value: bytes, blob_id: string \| null }`, or `{ kind: "fallback", key: bytes }` |
+| `GET /blob/{blob_id}`                                                     | Raw bytes with `application/octet-stream`                                                              |
+| `POST /store`, `multipart/form-data`                                      | CBOR `{ blob_id: string \| null }`                                                                     |
 
 `/store` requires one `metadata` part with content type `application/cbor` and fields `{ key: bytes, secondary_key: bytes, value: bytes }`. An optional `blob` part has content type `application/octet-stream`. Either part order works. An omitted blob returns `null`; an empty blob gets an ID. Duplicate parts, unknown parts, duplicate envelope fields, extra fields, invalid types, and truncated bodies are rejected.
 
 Empty and non-UTF-8 keys work. CBOR definite and indefinite maps and byte strings work, including noncanonical lengths. The bounded envelope decoder supports only the protocol's map and string types. It never decodes `value` contents. Chunked strings have a 4,096-chunk bookkeeping limit.
 
-Fetch gives exact matches priority. A fallback follows the latest secondary-key association. A store replaces both mappings atomically. Reassigning a secondary key does not delete its former target. Replacing an entry changes the value seen through every association to that entry.
+Fetch gives exact matches priority. A fallback follows the latest secondary-key association and returns only the stored key, without reading R2. A store replaces both mappings atomically. Reassigning a secondary key does not delete its former target. Replacing an entry preserves the other associations to its key.
 
-HTTP status codes follow the [local RFC](docs/0001-remote-cache.md#4-http-api-mapping). A fetch returns `404` when neither key resolves to a live entry. An unavailable blob also returns `404`, including when its R2 object is missing. These responses use plain text. A missing or unreadable value for a live entry is a storage failure and returns `503`, as specified in [the read design](docs/0001-remote-cache.md#7-fetch-and-download-implementation).
+HTTP status codes follow the [local RFC](docs/0001-remote-cache.md#4-http-api-mapping). A fetch returns `404` when neither key resolves to a live entry. An unavailable blob also returns `404`, including when its R2 object is missing. These responses use plain text. A missing or unreadable value for a live exact match is a storage failure and returns `503`, as specified in [the read design](docs/0001-remote-cache.md#7-fetch-and-download-implementation).
 
 Errors have `Content-Type: text/plain; charset=utf-8`. Codes are `400` for invalid input, `401` for invalid/missing/expired tokens, `403` for a signed token that fails write policy, `404` for absent data or unavailable namespaces/routes, `413` for size limits, `429` for admission limits, `500` for an incomplete operation, and `503` for unavailable authorization/storage, failed publication guards, quotas, or concurrency admission. `429` and `503` include `Retry-After: 60`.
 
@@ -53,7 +53,7 @@ pnpm operator setup --name my-public-cache --namespace docs --repo owner/reposit
 
 Use the account's actual Workers subdomain. For a custom domain, set `--origin https://cache.example.com`. Setup disables the unused `workers.dev` alias for a custom domain and disables preview URLs. It rejects an R2 bucket with public custom domains and disables its `r2.dev` access.
 
-Setup discovers resources by name, creates missing resources, applies migrations, resolves public repository and owner IDs through GitHub, records the default branch and exact audience, installs lifecycle/Cron settings, deploys, and prints the endpoint. Repeated setup does not duplicate resources or re-enable a withdrawn namespace. Reusing an existing namespace for a different repository is rejected. Configuration is written to the ignored `wrangler.operator.json`; keep a secure backup of this non-secret file.
+Setup discovers resources by name, creates missing resources, applies migrations, resolves public repository and owner IDs through GitHub, records the default branch and exact audience, installs lifecycle/Cron settings, deploys, and prints the endpoint. Repeated setup does not duplicate resources or re-enable a withdrawn namespace. An incompatible origin or repository is rejected before setup changes existing policies, bucket settings, or saved configuration. Configuration is written to the ignored `wrangler.operator.json`; keep a secure backup of this non-secret file.
 
 The default `free` **resource profile** retains the RFC's 8 GB budget, 20,000 entries, 20,000 associations, and 16 generations per Cron run. It is not proof of compatibility with the Workers Free CPU limit. **Use Workers Paid for the full payload limits until production CPU measurements establish a supported Free profile.** Local measurements already exceed 10 ms in several cases. Setup does not purchase or change a Workers subscription.
 
@@ -90,7 +90,7 @@ GitHub authorization uses `jose`, `RS256`, the fixed issuer `https://token.actio
 
 Tokens are limited to 16 KiB. JWKS bodies are limited to 64 KiB, requests to five seconds, cached keys to ten minutes, and refresh attempts to one per 30 seconds per isolate, including failures. Unknown key IDs cannot cause unlimited refreshes. Missing usable keys fail closed. A maintainer's policy change increments its version; publication checks that version, current scope/deployment state, token expiry, lease, bytes, and identity quotas inside the D1 transaction.
 
-The rate bindings apply before database or object access. Defaults are 600 requests/minute for each namespace's fetch/blob operation and 30 store attempts/minute. Invalid credentials consume store admission too. Unknown routes share catch-all identities. Limits are approximate per Cloudflare location; they are not a global billing cap. Reads do not write D1 counters or refresh retention.
+The rate bindings apply before database or object access. Defaults are 600 requests/minute for each namespace's fetch/blob operation and 30 store attempts/minute. Invalid credentials consume store admission too. Unknown routes share catch-all identities. Setup and upgrade derive stable limiter IDs from the Worker and binding names, so separate deployments have separate counters. Run `pnpm operator upgrade` for an existing deployment to replace the old shared IDs. Limits are approximate per Cloudflare location; they are not a global billing cap. Reads do not write D1 counters or refresh retention.
 
 ## Operations
 
