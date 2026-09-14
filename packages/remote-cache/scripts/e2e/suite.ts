@@ -224,8 +224,6 @@ export async function runSuite(options: Options): Promise<Report> {
     assert.deepEqual(await envelope(await lookup(bytes('missing'), f.secondary)), {
       kind: 'fallback',
       key: f.key,
-      value: f.value,
-      blob_id: f.blobId,
     });
     assert.deepEqual(await body(await call('e2e', `blob/${f.blobId}`, 200)), f.blob);
     assert.deepEqual(
@@ -292,6 +290,10 @@ export async function runSuite(options: Options): Promise<Report> {
     try {
       await admin.delete(f.valueObject);
       await body(await lookup(f.key, f.secondary, 503));
+      assert.deepEqual(await envelope(await lookup(bytes('missing'), f.secondary)), {
+        kind: 'fallback',
+        key: f.key,
+      });
     } finally {
       await admin.put(f.valueObject, f.value);
     }
@@ -324,12 +326,16 @@ export async function runSuite(options: Options): Promise<Report> {
       const old = await envelope(await store(a, s, bytes('old'), bytes('old-blob')));
       await body(await store(b, s, bytes('B')));
       assert.deepEqual((await envelope(await lookup(a, s))).value, bytes('old'));
-      assert.deepEqual((await envelope(await lookup(bytes('missing'), s))).key, b);
+      assert.deepEqual(await envelope(await lookup(bytes('missing'), s)), {
+        kind: 'fallback',
+        key: b,
+      });
       await body(await store(a, t, bytes('replacement')));
-      assert.deepEqual(
-        (await envelope(await lookup(bytes('missing'), t))).value,
-        bytes('replacement'),
-      );
+      assert.deepEqual(await envelope(await lookup(bytes('missing'), t)), {
+        kind: 'fallback',
+        key: a,
+      });
+      assert.deepEqual((await envelope(await lookup(a, t))).value, bytes('replacement'));
       assert.deepEqual(
         await body(await call('e2e', `blob/${blobId(old)}`, 200)),
         bytes('old-blob'),
@@ -423,6 +429,7 @@ export async function runSuite(options: Options): Promise<Report> {
         [expired.generation],
       );
       await body(await lookup(expired.key, expired.secondary, 404));
+      await body(await lookup(bytes('missing'), expired.secondary, 404));
       await body(await call('e2e', `blob/${expired.blobId}`, 404));
       if (options.cron) {
         const until = Date.now() + (options.cronTimeoutMs ?? 25 * 60000);

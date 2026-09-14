@@ -17,6 +17,7 @@
     },
   ],
   "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "vp-remote-cache" }],
+  // Local defaults. Operator setup/upgrade derives stable IDs for each Worker and binding.
   "ratelimits": [
     { "name": "READ_LIMITER", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } },
     { "name": "STORE_LIMITER", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },

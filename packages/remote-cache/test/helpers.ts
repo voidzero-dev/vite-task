@@ -20,6 +20,7 @@ export async function harness(
     inspector?: boolean;
     deploymentId?: string;
     namespaces?: string[];
+    initializeDatabase?: boolean;
   } = {},
 ) {
   const pair = await generateKeyPair('RS256', { extractable: true });
@@ -84,13 +85,16 @@ export async function harness(
     const statements = migration.match(
       /CREATE TRIGGER[\s\S]*?\nEND;|(?:CREATE TABLE|CREATE (?:UNIQUE )?INDEX|INSERT INTO)[\s\S]*?;/g,
     )!;
-    await db.batch(statements.map((sql) => db.prepare(sql)));
-    for (const name of ['test', 'other'])
-      await db
-        .prepare(`INSERT INTO scopes (scope_id, endpoint, repository, repository_id, repository_owner_id, branch)
+    const migrate = () => db.batch(statements.map((sql) => db.prepare(sql)));
+    if (options.initializeDatabase !== false) {
+      await migrate();
+      for (const name of ['test', 'other'])
+        await db
+          .prepare(`INSERT INTO scopes (scope_id, endpoint, repository, repository_id, repository_owner_id, branch)
     VALUES (?, ?, 'owner/repo', '123', '456', 'refs/heads/main')`)
-        .bind(name, `https://cache.example.com/projects/${name}`)
-        .run();
+          .bind(name, `https://cache.example.com/projects/${name}`)
+          .run();
+    }
     async function token(claims: Record<string, unknown> = {}, kid = 'test-key') {
       const now = Math.floor(Date.now() / 1000);
       return new SignJWT({
@@ -154,6 +158,7 @@ export async function harness(
       mf,
       db,
       bucket,
+      migrate,
       token,
       store,
       fetch,
