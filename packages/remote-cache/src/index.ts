@@ -1,11 +1,11 @@
 import { authorize, githubKeys, type WriteIdentity } from './auth.ts';
-import { cborResponse, decodeEnvelope } from './cbor.ts';
-import { cleanup, getScope, selectBlob, selectEntry } from './database.ts';
-import { badRequest, errorResponse, HttpError, unavailable } from './errors.ts';
+import { cborResponse } from './cbor.ts';
+import { cleanup, getScope, selectBlob } from './database.ts';
+import { errorResponse, HttpError, unavailable } from './errors.ts';
+import { fetchMetadata } from './fetch.ts';
 import { limitsFrom } from './limits.ts';
-import { parameters } from './multipart.ts';
 import { store } from './store.ts';
-import { contentLength, Deadline, readBody } from './streams.ts';
+import { Deadline } from './streams.ts';
 import { Admission } from './admission.ts';
 import { Observations } from './observations.ts';
 
@@ -65,36 +65,9 @@ export default {
         response = await store(request, env, ctx, scope, identity, limits, deadline, stats);
         outcome = 'stored';
       } else if (operation === 'fetch') {
-        if (parameters(request.headers.get('Content-Type') ?? '').type !== 'application/cbor')
-          badRequest();
-        contentLength(request, limits.fetch);
-        const body = await readBody(request.body, limits.fetch, deadline);
-        stats.request_bytes = body.length;
-        const data = decodeEnvelope(body, false, limits);
-        const selected = await deadline.run(
-          selectEntry(env.INDEX, scopeId, data.key, data.secondary_key, stats),
-        );
-        if (!selected) {
-          outcome = 'miss';
-          throw new HttpError(404, 'miss');
-        }
-        stats.r2_operations++;
-        const object = await deadline
-          .run(env.ARTIFACTS.get(selected.value_object))
-          .catch(() => unavailable());
-        if (!object || object.size !== selected.value_size || object.size > limits.value)
-          unavailable();
-        const value = await readBody(object.body, limits.value, deadline).catch(() =>
-          unavailable(),
-        );
-        if (value.length !== selected.value_size) unavailable();
-        response = cborResponse({
-          kind: selected.kind,
-          ...(selected.kind === 'fallback' ? { key: new Uint8Array(selected.key) } : {}),
-          value,
-          blob_id: selected.blob_id,
-        });
-        outcome = selected.kind;
+        const result = await fetchMetadata(request, env, scopeId, limits, deadline, stats);
+        response = cborResponse(result);
+        outcome = result.kind;
       } else {
         const selected = await deadline.run(selectBlob(env.INDEX, scopeId, route[3]!, stats));
         if (!selected) throw new HttpError(404, 'blob_missing');

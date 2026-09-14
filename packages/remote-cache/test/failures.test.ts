@@ -4,10 +4,73 @@ import { encode } from 'cborg';
 import { harness, bytes, decodeResponse } from './helpers.ts';
 import { cleanup, getScope, reserve, publish } from '../src/database.ts';
 import { store } from '../src/store.ts';
+import { fetchMetadata } from '../src/fetch.ts';
 import { defaults } from '../src/limits.ts';
 import { Deadline } from '../src/streams.ts';
 import { Observations } from '../src/observations.ts';
 import { Admission } from '../src/admission.ts';
+
+void test('fallbacks return only opaque keys without R2 reads, while exact failures remain 503', async () => {
+  const h = await harness();
+  try {
+    const original = await h.mf.getBindings<Env>();
+    let reads = 0;
+    const bucket = new Proxy(original.ARTIFACTS, {
+      get(target, prop) {
+        if (prop === 'get')
+          return async () => {
+            reads++;
+            throw new Error('Injected R2 read failure');
+          };
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const request = (key: Uint8Array) =>
+      new Request('https://cache.example.com/projects/test/fetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/cbor' },
+        body: encode({ key, secondary_key: bytes('S') }),
+      });
+    const deadline = new Deadline(10000);
+    const stats = new Observations();
+    const env = { ...original, ARTIFACTS: bucket };
+    try {
+      for (const key of [
+        Uint8Array.of(0, 255),
+        new Uint8Array(),
+        new Uint8Array(defaults.key).fill(165),
+      ]) {
+        const stored = await h.store(key, bytes('S'), bytes('value'), bytes('blob'));
+        assert.equal(stored.status, 200);
+        await stored.arrayBuffer();
+        assert.deepEqual(
+          await fetchMetadata(request(bytes('missing')), env, 'test', defaults, deadline, stats),
+          { kind: 'fallback', key },
+        );
+        assert.equal(reads, 0);
+        assert.equal(stats.r2_operations, 0);
+      }
+      // An exact match still wins when the secondary key points at a different live entry.
+      await assert.rejects(
+        fetchMetadata(request(Uint8Array.of(0, 255)), env, 'test', defaults, deadline, stats),
+        { status: 503 },
+      );
+      assert.equal(reads, 1);
+      assert.equal(stats.r2_operations, 1);
+      await h.db.prepare("UPDATE generations SET expires_at = 0 WHERE state = 'ready'").run();
+      await assert.rejects(
+        fetchMetadata(request(bytes('missing')), env, 'test', defaults, deadline, stats),
+        { status: 404 },
+      );
+      assert.equal(reads, 1);
+    } finally {
+      deadline.dispose();
+    }
+  } finally {
+    await h.close();
+  }
+});
 
 function multipartRequest(blob?: Uint8Array): Request {
   const form = new FormData();
@@ -126,8 +189,12 @@ void test('failed deletion remains charged and a retry removes only the claimed 
       (await h.db.prepare('SELECT charged_bytes FROM deployment').first())!.charged_bytes,
       3,
     );
+    assert.deepEqual(await decodeResponse(await h.fetch(bytes('missing'), bytes('S'))), {
+      kind: 'fallback',
+      key: bytes('A'),
+    });
     assert.deepEqual(
-      (await decodeResponse(await h.fetch(bytes('missing'), bytes('S')))).value,
+      (await decodeResponse(await h.fetch(bytes('A'), bytes('S')))).value,
       bytes('new'),
     );
   } finally {
@@ -275,8 +342,12 @@ void test('cleanup preserves a recreated target and claims at most 16 generation
       },
     });
     await cleanup({ ...original, ARTIFACTS: bucket });
+    assert.deepEqual(await decodeResponse(await h.fetch(bytes('missing'), bytes('S'))), {
+      kind: 'fallback',
+      key: bytes('A'),
+    });
     assert.deepEqual(
-      (await decodeResponse(await h.fetch(bytes('missing'), bytes('S')))).value,
+      (await decodeResponse(await h.fetch(bytes('A'), bytes('S')))).value,
       bytes('new'),
     );
     const scope = await getScope(h.db, 'test');

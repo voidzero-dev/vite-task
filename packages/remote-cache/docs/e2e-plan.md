@@ -62,14 +62,14 @@ The operator seeds immutable objects and generation rows for read tests. This va
 
 “Local” refers to the existing regression suite and the new shared e2e-driver tests. “PR” and “Main” refer to real Cloudflare runs.
 
-Status assertions follow the [local RFC](0001-remote-cache.md#4-http-api-mapping). Fetch misses and unavailable blobs return plain-text `404`. A missing or unreadable value for a live entry returns `503`.
+Status assertions follow the [local RFC](0001-remote-cache.md#4-http-api-mapping). Fetch misses and unavailable blobs return plain-text `404`. An exact match with a missing or unreadable value returns `503`. A fallback returns only the stored key and makes no R2 read.
 
 | Case                                             | Local                         | PR                            | Main                      | Required result                                                                                                                  |
 | ------------------------------------------------ | ----------------------------- | ----------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Exact source revision                            | Yes                           | Yes                           | Yes                       | Expected deployment ID on responses; fail if the URL serves another revision                                                     |
 | Migrations and private R2                        | Yes                           | Yes                           | Yes                       | Setup succeeds, seeded data works, `r2.dev` is disabled, and custom R2 domains are absent                                        |
 | Anonymous exact lookup                           | Yes                           | Yes                           | Yes                       | `200` CBOR with exact opaque value and matching blob ID                                                                          |
-| Anonymous fallback                               | Yes                           | Yes                           | Yes                       | `200` CBOR with the associated stored key and matching value                                                                     |
+| Anonymous fallback                               | Yes                           | Yes                           | Yes                       | `200` CBOR with only `kind: "fallback"` and the associated stored key; no R2 read                                                |
 | Read-only accounting                             | Yes                           | Yes                           | Yes                       | Reads do not change charged bytes or entry/association counts                                                                    |
 | Missing entry/blob                               | Yes                           | Yes                           | Yes                       | Plain-text `404`, without redirects                                                                                              |
 | Namespace isolation                              | Yes                           | Yes                           | Yes                       | Another namespace cannot resolve the key, association, or blob ID                                                                |
@@ -147,17 +147,17 @@ Staging policies belong to CI. Do not use these names for an operator-managed pr
 
 Before a production release, record the commit, workflow URL, Cloudflare plan, region, and outcome for these controlled staging exercises:
 
-| Exercise                           | Procedure and acceptance criterion                                                                                                                                    |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Provider failure and recovery      | Restrict D1/R2 access in staging, exercise reads and stores, then restore access. Existing mappings survive; failures remain explicit; retries recover                |
-| Upload interruption                | Disconnect a real authorized multipart request after its first R2 part. Verify unchanged mappings, retained reservation, upload abortion, and eventual byte release   |
-| Lease/token expiry and policy race | Delay a staging upload across expiry or change policy before publication. Neither mapping changes; old data remains readable                                          |
-| Real hostile workflow identities   | Use controlled fork, tag, PR, `pull_request_target`, and `workflow_run` jobs. All writes fail; public reads still work                                                |
-| Rate limits                        | Send a bounded burst to the staging namespace. Check `429`, `Retry-After`, recovery, and a finite identity set for unknown routes                                     |
-| Retention and lifecycle            | Observe expiry, replacement grace, unfinished multipart abortion, and lifecycle deletion over actual retention windows                                                |
-| Migration and rollback             | Upgrade a populated staging database, verify old entries, and restore a compatible previous Worker version. Never roll code back across an incompatible schema change |
-| Partial restore                    | Restore D1 without deleted R2 data. Expect `503` for live missing values and `404` for missing blobs; withdraw or replace the namespace before reuse                  |
-| Load and CPU                       | Measure deployed CPU, memory, D1 rows/latency, R2 operations, and cleanup lag under sustained concurrency. Compare observed costs with configured budgets             |
+| Exercise                           | Procedure and acceptance criterion                                                                                                                                                      |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Provider failure and recovery      | Restrict D1/R2 access in staging, exercise reads and stores, then restore access. Existing mappings survive; failures remain explicit; retries recover                                  |
+| Upload interruption                | Disconnect a real authorized multipart request after its first R2 part. Verify unchanged mappings, retained reservation, upload abortion, and eventual byte release                     |
+| Lease/token expiry and policy race | Delay a staging upload across expiry or change policy before publication. Neither mapping changes; old data remains readable                                                            |
+| Real hostile workflow identities   | Use controlled fork, tag, PR, `pull_request_target`, and `workflow_run` jobs. All writes fail; public reads still work                                                                  |
+| Rate limits                        | Send a bounded burst to the staging namespace. Check `429`, `Retry-After`, recovery, and a finite identity set for unknown routes                                                       |
+| Retention and lifecycle            | Observe expiry, replacement grace, unfinished multipart abortion, and lifecycle deletion over actual retention windows                                                                  |
+| Migration and rollback             | Upgrade a populated staging database, verify old entries, and restore a compatible previous Worker version. Never roll code back across an incompatible schema change                   |
+| Partial restore                    | Restore D1 without deleted R2 data. Expect `503` for exact matches with missing values, key-only fallbacks, and `404` for missing blobs; withdraw or replace the namespace before reuse |
+| Load and CPU                       | Measure deployed CPU, memory, D1 rows/latency, R2 operations, and cleanup lag under sustained concurrency. Compare observed costs with configured budgets                               |
 
 These are explicit release exercises, not claims that fault injection or multi-day lifecycle behavior already ran in the PR workflow. Workers Free support still needs provider CPU measurements within its limits.
 

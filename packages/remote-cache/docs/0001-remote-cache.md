@@ -84,10 +84,10 @@ For a match, return HTTP `200`, `Content-Type: application/cbor`, with one of:
 
 ```text
 { kind: "exact", value: bytes, blob_id: string | null }
-{ kind: "fallback", key: bytes, value: bytes, blob_id: string | null }
+{ kind: "fallback", key: bytes }
 ```
 
-Check `key` first. If no live entry exists, resolve `secondary_key` to a stored key. Check that entry. Include the stored key only in the fallback variant. If neither resolves, return HTTP `404`. Fetch does not change entries or associations.
+Check `key` first. If no live entry exists, resolve `secondary_key` to a stored key. Check that entry. For a fallback match, return only the stored key so the client can explain what changed. If neither resolves, return HTTP `404`. Fetch does not change entries or associations.
 
 ### Download a blob
 
@@ -120,13 +120,13 @@ If the request omits the blob, return `null`. A present zero-byte blob receives 
 
 Each successful store replaces `entries[key]` and sets `associations[secondary_key] = key`. For example:
 
-| Operation           | Entries afterward                               | Association afterward |
-| ------------------- | ----------------------------------------------- | --------------------- |
-| Store `(A, S, VA)`  | `A → VA`                                        | `S → A`               |
-| Store `(B, S, VB)`  | `A → VA`, `B → VB`                              | `S → B`               |
-| Fetch `(A, S)`      | Unchanged; returns exact `VA`                   | Still `S → B`         |
-| Fetch `(C, S)`      | Unchanged; returns fallback key `B`, value `VB` | Still `S → B`         |
-| Store `(A, T, VA2)` | `A → VA2`, `B → VB`                             | `S → B`, `T → A`      |
+| Operation           | Entries afterward                   | Association afterward |
+| ------------------- | ----------------------------------- | --------------------- |
+| Store `(A, S, VA)`  | `A → VA`                            | `S → A`               |
+| Store `(B, S, VB)`  | `A → VA`, `B → VB`                  | `S → B`               |
+| Fetch `(A, S)`      | Unchanged; returns exact `VA`       | Still `S → B`         |
+| Fetch `(C, S)`      | Unchanged; returns fallback key `B` | Still `S → B`         |
+| Store `(A, T, VA2)` | `A → VA2`, `B → VB`                 | `S → B`, `T → A`      |
 
 Other secondary keys that already point to `A` also resolve to `VA2`. A change to `S` does not evict entry `A`.
 
@@ -359,7 +359,7 @@ First, apply rate limits. Check that the public scope is enabled. Decode CBOR wi
 
 Use one indexed D1 query to select the exact live entry, or the secondary fallback if no exact entry exists. Select the response kind, stored key, and generation references from one database snapshot. Separate exact and fallback reads could observe different commits.
 
-Read the selected generation's value from R2. Return the corresponding CBOR variant. Return `503` if D1 identifies a live generation but its value object is missing or unreadable. This condition is a storage failure. Expired or deleted entries count as absent. The client still validates the exact value before it downloads outputs.
+For an exact match, read the selected generation's value from R2 and return the exact CBOR variant. Return `503` if its value object is missing or unreadable. This condition is a storage failure. For a fallback match, return the stored key without reading R2. Expired or deleted entries count as absent. The client still validates the exact value before it downloads outputs.
 
 For `/blob/{blob_id}`, check that the public scope is enabled, without authentication. Resolve the blob ID in D1. Stream the R2 object to the response. A blob ID from another scope must not expose data.
 
@@ -607,7 +607,7 @@ Public reads require no identity subscription. GitHub issues tokens for publishi
 Use these variables for daily traffic:
 
 - `L`: Public fetches after local misses.
-- `F`: Fetches that return a value.
+- `F`: Exact fetches that return a value.
 - `H`: Blob downloads after successful client validation.
 - `P`: Entries successfully published through explicit CI pushes from the main branch, including overwrites.
 
@@ -621,7 +621,7 @@ Use these variables for stored data:
 - `E`: Live exact keys.
 - `R`: Retention days.
 
-Each store takes one Worker request. Each metadata fetch takes one request. The client makes a blob request only when it needs the blob. The Worker also reads the opaque value from R2. Internal R2 multipart upload changes storage operation counts but adds no client requests:
+Each store takes one Worker request. Each metadata fetch takes one request. The client makes a blob request only when it needs the blob. For an exact match, the Worker also reads the opaque value from R2. Internal R2 multipart upload changes storage operation counts but adds no client requests:
 
 ```text
 A per store = 1                         # no blob: value PUT
@@ -678,7 +678,7 @@ For planning, interpret the approximate KB values as decimal. `V = 250,000` byte
 
 D1's provisional 4 KiB estimate for each key covers index and generation records only. Validate it with the reported key sizes. Include repeated key bytes in indexes and associations.
 
-Every exact or fallback response transfers the value, even if client validation prevents a blob download. Before protocol overhead and retries, daily response payload equals `F * V + H * B` bytes. At the example's sizes, 1,000 fetches with values and 800 blob downloads transfer about 450 MB/day. This includes 250 MB of values. These transfers affect time, CBOR work, and memory. Request and R2 operation counts follow the same equations.
+Every exact response transfers the value, even if client validation prevents a blob download. Before protocol overhead and retries, daily value and blob payload equals `F * V + H * B` bytes. At the example's sizes, 1,000 fetches with values and 800 blob downloads transfer about 450 MB/day. This includes 250 MB of values. These transfers affect time, CBOR work, and memory. Request and R2 operation counts follow the same equations.
 
 ### Artifact-size evidence
 

@@ -25,8 +25,6 @@ void test('Workers D1/R2: exact/fallback, replacement, empty blobs, namespace is
     assert.deepEqual(await decodeResponse(await h.fetch(c, s)), {
       kind: 'fallback',
       key: b,
-      value: bytes('VB'),
-      blob_id: null,
     });
     const replacement = await h.store(a, t, bytes('VA2'), new Uint8Array(), { blobFirst: true });
     assert.equal(replacement.status, 200);
@@ -56,12 +54,15 @@ void test('Workers D1/R2: exact/fallback, replacement, empty blobs, namespace is
     );
     assert.deepEqual((await decodeResponse(await h.fetch(a, s, 'other'))).value, bytes('other'));
     assert.deepEqual((await decodeResponse(await h.fetch(a, s))).value, bytes('VA2'));
+    assert.deepEqual(await decodeResponse(await h.fetch(c, t)), { kind: 'fallback', key: a });
+    assert.equal((await h.fetch(c, t, 'other')).status, 404);
     const before = await h.db.prepare('SELECT * FROM deployment').first();
     await h.fetch(a, t);
     await h.fetch(c, t);
     assert.deepEqual(await h.db.prepare('SELECT * FROM deployment').first(), before);
     await h.db.prepare("UPDATE scopes SET enabled = 0 WHERE scope_id = 'test'").run();
     assert.equal((await h.fetch(a, t)).status, 404);
+    assert.equal((await h.fetch(c, t)).status, 404);
     assert.equal((await h.mf.dispatchFetch(`${endpoint}/blob/${firstBlob}`)).status, 404);
   } finally {
     await h.close();
@@ -341,6 +342,10 @@ void test('malformed stores cannot publish and missing live value is a storage f
     assert.equal(typeof g.value_object, 'string');
     await h.bucket.delete(String(g.value_object));
     assert.equal((await h.fetch(bytes('A'), bytes('S'))).status, 503);
+    assert.deepEqual(await decodeResponse(await h.fetch(bytes('missing'), bytes('S'))), {
+      kind: 'fallback',
+      key: bytes('A'),
+    });
   } finally {
     await h.close();
   }
