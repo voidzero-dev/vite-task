@@ -7,8 +7,8 @@ settings:
 catalogs:
   default:
     '@anthropic-ai/sandbox-runtime':
-      specifier: 0.0.75
-      version: 0.0.75
+      specifier: 0.0.76
+      version: 0.0.76
     '@openai/codex':
       specifier: 0.154.0
       version: 0.154.0
@@ -81,7 +81,7 @@ importers:
     dependencies:
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
-        version: 0.0.75
+        version: 0.0.76
       '@openai/codex':
         specifier: 'catalog:'
         version: 0.154.0
@@ -129,8 +129,8 @@ importers:
 
 packages:
 
-  '@anthropic-ai/sandbox-runtime@0.0.75':
-    resolution: {integrity: sha512-oqAKi6QtkT2DpLwFoDCDD757zw2i6ftpLTyV8rNSV9QWF53q2m1JxEs0RYXv2CIXtCoje4RGYQylagn15RKmww==}
+  '@anthropic-ai/sandbox-runtime@0.0.76':
+    resolution: {integrity: sha512-wIC++TvCopRPJcX/v/PCp/SjYOWk/cAVq+VF9v6E3WwkriFP9uu2wvPJ2E+wMrNa3i3h3ew9zTpHcmyGLBKo0w==}
     engines: {node: '>=20.11.0'}
     hasBin: true
 
@@ -1776,7 +1776,7 @@ packages:
 
 snapshots:
 
-  '@anthropic-ai/sandbox-runtime@0.0.75':
+  '@anthropic-ai/sandbox-runtime@0.0.76':
     dependencies:
       '@pondwader/socks5-server': 1.0.10
       commander: 12.1.0
