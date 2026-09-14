@@ -381,8 +381,8 @@ mod tests {
 
     use super::{SpawnStdio, spawn};
 
-    // https://github.com/voidzero-dev/vite-task/pull/675
-    // Nonblocking trace collection must not leave cancelled task descendants alive.
+    // https://github.com/voidzero-dev/vite-task/commit/88e796f4b49e2bcdf4bf30a781250594fc62a030
+    // Fast-fail cancellation must terminate the task's descendants.
     #[tokio::test]
     async fn cancelled_task_terminates_descendants() -> anyhow::Result<()> {
         let mut failures = Vec::new();
