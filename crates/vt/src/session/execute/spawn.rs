@@ -247,6 +247,13 @@ struct TaskProcess {
 }
 
 impl TaskProcess {
+    #[cfg_attr(
+        windows,
+        expect(
+            clippy::unused_self,
+            reason = "Windows console events are delivered without per-task forwarding"
+        )
+    )]
     const fn forwards_interrupt(&self) -> bool {
         #[cfg(unix)]
         {
