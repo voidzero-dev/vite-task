@@ -150,6 +150,7 @@ impl SpyImpl {
         };
 
         Ok(TrackedChild {
+            id: child.id().expect("newly spawned child has a process ID"),
             stdin: child.stdin.take(),
             stdout: child.stdout.take(),
             stderr: child.stderr.take(),

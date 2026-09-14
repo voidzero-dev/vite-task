@@ -25,9 +25,12 @@ impl OwnedJobHandle {
     ///
     /// This is needed when pipes to a grandchild process must be closed before
     /// the job handle is dropped (e.g., to unblock pipe reads in `spawn`).
-    pub(super) fn terminate(&self) {
+    pub(super) fn terminate(&self) -> io::Result<()> {
         // SAFETY: self.0 is a valid job handle from CreateJobObjectW.
-        unsafe { TerminateJobObject(self.0, 1) };
+        if unsafe { TerminateJobObject(self.0, 1) } == FALSE {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 }
 
