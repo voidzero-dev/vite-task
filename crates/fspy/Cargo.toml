@@ -28,7 +28,12 @@ fspy_seccomp_unotify = { workspace = true, features = ["supervisor"] }
 nix = { workspace = true, features = ["uio"] }
 tokio = { workspace = true, features = ["bytes"] }
 
-[target.'cfg(unix)'.dependencies]
+# The supervision machinery (`fspy_shared_unix` exec/payload helpers and the
+# `nix` syscalls) is only used by the Linux seccomp and macOS Detours backends
+# in `src/unix/`. FreeBSD builds the no-op backend in `src/freebsd.rs` and does
+# not compile `src/unix/`, so keep those deps off the FreeBSD build graph (and
+# out of its transitive `fspy_nostd`/`fspy_client_unix` subtree).
+[target.'cfg(all(unix, not(target_os = "freebsd")))'.dependencies]
 fspy_shared_unix = { workspace = true }
 nix = { workspace = true, features = ["fs", "process", "socket", "feature"] }
 
@@ -43,7 +48,7 @@ nix = { workspace = true, features = ["fs", "process", "socket", "feature"] }
 # preload) don't build a useless empty cdylib. Scoping artifact deps under
 # `[target.cfg…]` is only safe for normal deps: the same shape under
 # `[target.cfg….build-dependencies]` panics cargo's resolver on cross-compile.
-[target.'cfg(all(unix, not(target_env = "musl")))'.dependencies]
+[target.'cfg(all(unix, not(target_env = "musl"), not(target_os = "freebsd")))'.dependencies]
 fspy_preload_unix = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
