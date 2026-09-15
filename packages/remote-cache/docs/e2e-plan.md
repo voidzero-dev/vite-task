@@ -1,4 +1,4 @@
-# Cloudflare deployment and e2e verification
+# Cloudflare staging deployment and e2e verification
 
 This plan checks the service through its public HTTP endpoints after deployment to Cloudflare. A deployment dry run or a passing Miniflare test is not evidence of a successful Cloudflare deployment.
 
@@ -7,15 +7,15 @@ This plan checks the service through its public HTTP endpoints after deployment 
 `.github/workflows/remote-cache-deploy.yml` runs when a PR or a push to `main` changes this package, its deployment workflows, or the root dependency/build configuration. It also supports manual runs from the default branch.
 
 1. Check the exact source commit with `pnpm check-remote-cache`.
-2. Create or update dedicated staging resources and apply D1 migrations.
+2. Create or update the shared staging Worker, D1 database, and R2 bucket. Apply D1 migrations.
 3. Check that the R2 bucket has no public domain. Seed public test fixtures through the authenticated operator API.
-4. Test the deployed HTTP endpoints. Every response must identify the expected commit and workflow attempt through `X-Remote-Cache-Deployment`.
+4. Run smoke tests against the deployed HTTP endpoints. Every response must identify the expected commit and workflow attempt through `X-Remote-Cache-Deployment`.
 5. Save a JSON report and manual fixtures as a seven-day workflow artifact.
 6. Update one PR comment with the commit, result, endpoint, artifact link, and manual instructions. A failed or skipped deployment never gets a ready message.
 
-Each PR uses `<prefix>-pr-<number>` for its Worker, database, and bucket. Main uses `<prefix>-main`. The default prefix is `vp-cache-ci`. Each deployment has three public namespaces: `e2e`, `other`, and `manual`. Resources contain synthetic data only. They are separate from production and from other PRs.
+All internal PRs, main-branch pushes, and manual runs use `<prefix>-staging` for the Worker, database, and bucket. The default name is `vp-cache-ci-staging`. Setup reuses existing resources. This single environment has three public namespaces: `e2e`, `other`, and `manual`. Resources contain synthetic data only and are separate from production.
 
-Deployment and teardown use the same concurrency group. They do not cancel a resource operation in progress. An obsolete PR commit cannot start deployment or replace the current PR comment. A later commit can replace a preview at the same URL; manual checks must compare the deployment ID from the saved manifest.
+The workflow uses one `remote-cache-staging` concurrency group for all branches. It finishes deployment, smoke tests, and PR notification before another run can replace staging. It does not cancel a run in progress. An obsolete PR commit cannot start deployment or replace its PR comment. A later run from any PR or `main` replaces the code and manual fixture at the same URL. Manual checks must compare the response deployment ID with the saved manifest. Closing a PR leaves the staging resources in place.
 
 ## GitHub and Cloudflare setup
 
@@ -36,23 +36,23 @@ Set these **repository variables**, which the notification job also needs:
 | `REMOTE_CACHE_RESOURCE_PREFIX`   | Optional; defaults to `vp-cache-ci`. A custom prefix must end in `-ci` and use at most 34 lowercase letters, digits, or hyphens |
 | `REMOTE_CACHE_DEPLOY_ENABLED`    | Set to `true` after the environment and account are ready                                                                       |
 
-Enable R2 in the account. The token must allow resource creation and deletion as well as data access. No custom domain or DNS permission is needed. Do not attach production bindings or secrets to these Workers. The GitHub environment can require a maintainer review if the repository needs one before a deployment.
+Enable R2 in the account. The token must allow resource provisioning, updates, and fixture data access. No custom domain or DNS permission is needed. Do not attach production bindings or secrets to the staging Worker. The GitHub environment can require a maintainer review if the repository needs one before a deployment.
 
-The workflow exposes Cloudflare credentials only to deployment, verification, and cleanup commands. Dependency installation runs before those credentials enter the step environment. Internal PR contributors must be trusted to change deployment code. Fork and Dependabot PRs run local checks without Cloudflare credentials. Their check summary explains why no preview is available; they receive no deployment comment. Cleanup uses ordinary closed-PR events for internal branches and executes code from the default branch. To preview a fork change, a maintainer must copy the reviewed commit to a branch in this repository and open a PR.
+The workflow exposes Cloudflare credentials only to deployment and smoke-test commands. Dependency installation runs before those credentials enter the step environment. Internal PR contributors must be trusted to change deployment code. Fork and Dependabot PRs run local checks without Cloudflare credentials. Their check summary explains why staging deployment is unavailable; they receive no deployment comment. To deploy a fork change to staging, a maintainer must copy the reviewed commit to a branch in this repository and open a PR.
 
-Merge the workflow and cleanup script to the default branch before relying on automatic cleanup. GitHub can suppress `pull_request` workflows when a PR has merge conflicts. Use the manual cleanup workflow with the closed PR number if the close event does not run. Manual deployment dispatches use the default branch and cannot select an arbitrary PR revision.
+GitHub can suppress `pull_request` workflows when a PR has merge conflicts. Resolve the conflicts to run its checks and deployment. Manual deployment dispatches use the default branch and cannot select an arbitrary PR revision. There is no closed-PR trigger, resource teardown job, or cleanup workflow.
 
 ## Authorization and test levels
 
 The production write policy requires a real GitHub token with `event_name=push`, the registered repository and owner IDs, its configured main branch, and the exact namespace audience. A PR token or a `workflow_dispatch` token cannot pass this policy. GitHub signs the event claim; the test runner cannot change it.
 
-| Level                          | Trigger                                     | What it proves                                                                                                             |
-| ------------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Local regression               | Every normal CI run, on Linux/macOS/Windows | Protocol, storage state transitions, failures, and the e2e driver against workerd/D1/R2 emulators                          |
-| PR Cloudflare verification     | Related changes in an internal PR           | Deployment revision, migrations, private R2, real public HTTP reads, real rejected OIDC writes, policy changes, and expiry |
-| Main Cloudflare verification   | Related push to `main`                      | All PR cases plus real authorized HTTP writes, multipart uploads, concurrent maximum payloads, and the real Cron schedule  |
-| Manual Cloudflare verification | Default-branch workflow dispatch            | Public reads and rejected writes; `full=true` also waits for real Cron cleanup                                             |
-| Release / incident exercises   | Maintainer-controlled staging session       | Long-running limits, provider outages, lifecycle delays, restore, rollback, and real hostile workflow identities           |
+| Level                        | Trigger                                     | What it proves                                                                                                                           |
+| ---------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Local regression             | Every normal CI run, on Linux/macOS/Windows | Protocol, storage state transitions, failures, and the e2e driver against workerd/D1/R2 emulators                                        |
+| PR staging smoke tests       | Related changes in an internal PR           | Deployment revision, migrations, private R2, real public HTTP reads, real rejected OIDC writes, policy changes, and expiry               |
+| Main staging smoke tests     | Related push to `main`                      | All PR cases plus real authorized HTTP writes, multipart uploads, replacement, concurrency, and quota checks                             |
+| Manual staging smoke tests   | Default-branch workflow dispatch            | The same public-read and rejected-write checks as PR runs                                                                                |
+| Release / incident exercises | Maintainer-controlled staging session       | Maximum payloads, real Cron, long-running limits, provider outages, lifecycle delays, restore, rollback, and hostile workflow identities |
 
 The runner obtains tokens directly from GitHub with `id-token: write`. It checks the token request host, rejects redirects, bounds responses, and caches each audience separately for three minutes. Tokens remain in memory. Reports and artifacts contain no GitHub or Cloudflare credentials. The Worker has no alternate issuer, test signing key, administrative HTTP endpoint, or weakened write policy.
 
@@ -60,7 +60,7 @@ The operator seeds immutable objects and generation rows for read tests. This va
 
 ## Automated case matrix
 
-“Local” refers to the existing regression suite and the new shared e2e-driver tests. “PR” and “Main” refer to real Cloudflare runs.
+“Local” refers to the existing regression suite and the new shared e2e-driver tests. “PR” and “Main” refer to smoke tests against the shared Cloudflare staging environment.
 
 Status assertions follow the [local RFC](0001-remote-cache.md#4-http-api-mapping). Fetch misses and unavailable blobs return plain-text `404`. An exact match with a missing or unreadable value returns `503`. A fallback returns only the stored key and makes no R2 read.
 
@@ -87,28 +87,28 @@ Status assertions follow the [local RFC](0001-remote-cache.md#4-http-api-mapping
 | R2 multipart upload                              | Yes                           | No                            | Yes                       | Upload more than 5 MiB; download and compare the SHA-256 digest                                                                  |
 | Concurrent same-key stores                       | Yes                           | No                            | Yes                       | The selected value and blob belong to one complete generation                                                                    |
 | Malformed store / quota                          | Yes                           | No                            | Yes                       | `400` / `503`; preserve the previous value and mappings                                                                          |
-| Maximum payload concurrency                      | Yes                           | No                            | Yes                       | Two simultaneous 64 MiB blobs with 4 MiB values succeed and preserve digests                                                     |
+| Maximum payload concurrency                      | Yes                           | No                            | Release exercise          | Two simultaneous 64 MiB blobs with 4 MiB values succeed and preserve digests                                                     |
 | Expired generation                               | Yes                           | Yes                           | Yes                       | Metadata and blob become unavailable immediately                                                                                 |
-| Real Cron deletion                               | Direct scheduled-handler call | No                            | Yes                       | Scheduled cleanup removes the D1 generation and both R2 objects, and preserves accounting                                        |
+| Real Cron deletion                               | Direct scheduled-handler call | No                            | Release exercise          | Scheduled cleanup removes the D1 generation and both R2 objects, and preserves accounting                                        |
 | JWT claim classes / clock bounds / JWKS failures | Yes                           | Real wrong audience/event     | Real valid identity       | Full forged/fork/owner/visibility/ref/event/time matrix remains in local tests; controlled live identity exercises supplement it |
 | R2 failure injection / lease and policy races    | Yes                           | Selected missing-object cases | Selected quota cases      | Local deterministic failures never publish partial state or release charges before deletion                                      |
 | Operator retries and teardown guards             | Yes                           | Provisioning path             | Provisioning path         | Retry setup without duplicate resources; recover interrupted policy checks; refuse unrelated resources                           |
 
-The main run has 14 grouped e2e checks; the PR run has eight. A group can contain several requests and assertions. The local driver test runs the same main suite, including maximum payloads, with a directly invoked scheduled handler. That does not replace the Cloudflare Cron check. Both modes also check that the advertised manual endpoint serves its expected fixture.
+Main smoke runs have 13 grouped checks; PR and manual smoke runs have eight. A group can contain several requests and assertions. All modes check that the advertised manual endpoint serves its expected fixture. Local driver tests repeat both smoke modes against reused storage and retain the 14-group full suite, including maximum payloads and a directly invoked scheduled handler. Routine deployments do not wait for real Cron or run the maximum-payload case. Those require a controlled release exercise on Cloudflare.
 
 ## Pass criteria and failure evidence
 
 Every executed assertion must pass. The e2e command exits nonzero on failure. `report.json` records each completed group, its status, duration, deployment ID, endpoint, and authorization mode. The workflow uploads partial reports after failures too. Reports use generic error classes; credentials and opaque request bodies are excluded.
 
-Deployment readiness permits two minutes for the expected revision and fixture to appear. Normal HTTP requests have a 30-second deadline; stores have 130 seconds. Behavior tests do not retry failed writes or turn errors into passes. Only readiness and asynchronous cleanup use bounded polling.
+Deployment readiness permits two minutes for the expected revision and fixture to appear. Normal HTTP requests have a 30-second deadline; stores have 130 seconds. Behavior tests do not retry failed writes or turn errors into passes. Only deployment readiness uses polling during smoke tests.
 
-The main run waits at most 25 minutes for its expired fixture to disappear through the real five-minute Cron schedule. Cloudflare notes that Cron changes can take up to 15 minutes to propagate. The test also checks that both R2 objects disappear, the selected entry is gone, and charged bytes match generation totals. It never calls a fake public scheduled endpoint or performs the sentinel deletion itself.
+Smoke tests check that expired fixtures immediately become unavailable. The service’s normal Cron schedule later removes expired objects and releases accounting. A separate release exercise must verify real Cron execution: both R2 objects and the selected entry disappear, and charged bytes match generation totals. A directly invoked local scheduled handler does not prove the deployed schedule works.
 
 Use the artifact and workflow logs to identify the first failed group. For server diagnosis, correlate `X-Request-Id` with sampled Worker logs. Do not retry a failed assertion solely to obtain a green result. A new run should follow a fix or an identified transient deployment issue.
 
 ## Manual verification from a PR
 
-1. Wait for the PR comment to say that Cloudflare deployment and PR e2e checks passed. Confirm that its commit is the current PR head.
+1. Wait for the PR comment to say that Cloudflare staging deployment and smoke tests passed. Confirm that its commit is the current PR head.
 2. Open the linked workflow run. Download its `remote-cache-e2e-<run-id>-<attempt>` artifact and extract the files.
 3. Read `manual-manifest.json`. It contains the expected deployment ID, endpoint, blob URL, and expected public fixture contents.
 4. From the extracted directory, set `CACHE_ENDPOINT` to the manifest's endpoint and run:
@@ -131,17 +131,15 @@ For a CBOR decoder already available in this repository, run this from `packages
 node --input-type=module -e 'import { readFileSync } from "node:fs"; import { decode } from "cborg"; console.log(decode(readFileSync(process.argv[1])))' /path/to/fetch-response.cbor
 ```
 
-PR previews intentionally reject publication tokens from PR workflows. Use the main staging workflow to validate successful publication. The manual namespace contains synthetic public data and expires after one day unless another run refreshes it.
+Staging rejects publication tokens from PR and manual workflows. Use a main-branch push to validate successful publication. The manual namespace contains synthetic public data and expires after one day unless another run refreshes it. If the deployment ID differs from the manifest, another run has replaced staging; use the artifact for the currently deployed revision.
 
-## Cleanup, retries, and cost limits
+## Persistent resources, retries, and test data
 
-Each CI deployment has a 2 GB byte budget, 1,000 entries, and 2,000 associations. Pending and retired objects remain charged. After verification, the runner expires `e2e` and `other` data and gives in-flight operations the normal ten-minute cleanup grace. It retains the `manual` fixture for developer checks. Subsequent runs explicitly restore CI-owned policy switches in case a prior process stopped during a withdrawal test.
+Staging has a 2 GB byte budget, 1,000 entries, and 2,000 associations. Pending and retired objects remain charged. After verification, the runner expires `e2e` and `other` test data and gives in-flight operations the normal ten-minute deletion grace. It retains the `manual` fixture for developer checks. Normal cache retention, Cron, and R2 lifecycle rules bound test data growth; the workflow never deletes the Worker, database, or bucket.
 
-Closing an internal PR triggers `.github/workflows/remote-cache-preview-events.yml`. The cleanup job executes code from the default branch, confirms that the PR is closed, and checks resource ownership. It disables access, waits for Cron to drain generations, then deletes the empty bucket, D1 database, and Worker. It does not delete main staging. The PR comment reports cleanup success or failure.
+Subsequent runs restore CI-owned policy switches in case a prior process stopped during a withdrawal or quota test. Setup retries discover resources by name and apply outstanding migrations. Closing a PR has no effect on staging. No environment teardown or cleanup command is required.
 
-If Cron or orphan multipart uploads delay cleanup, the job fails instead of claiming that resources are gone. R2 lifecycle can require a day to abort an unrecorded upload. Rerun the cleanup workflow with the closed PR number after the backlog drains. Failed resource creation and partial teardown can also be retried. A nonempty bucket always blocks final removal.
-
-Staging policies belong to CI. Do not use these names for an operator-managed production cache. Monitor resource counts and Cloudflare allowances. Resource budgets do not guarantee zero cost. Disable `REMOTE_CACHE_DEPLOY_ENABLED` to stop automatic deployments; remove existing PR resources explicitly after pending runs finish.
+Staging policies belong to CI. Do not use these names for an operator-managed production cache. Monitor storage, deletion backlogs, and Cloudflare allowances. Resource budgets do not guarantee zero cost. Set `REMOTE_CACHE_DEPLOY_ENABLED=false` to stop automatic deployments; the existing staging environment remains available.
 
 ## Release and incident exercises
 
@@ -150,6 +148,7 @@ Before a production release, record the commit, workflow URL, Cloudflare plan, r
 | Exercise                           | Procedure and acceptance criterion                                                                                                                                                      |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Provider failure and recovery      | Restrict D1/R2 access in staging, exercise reads and stores, then restore access. Existing mappings survive; failures remain explicit; retries recover                                  |
+| Maximum payloads and real Cron     | Run two concurrent authorized stores with 4 MiB values and 64 MiB blobs; verify their digests. Expire a fixture and observe scheduled D1/R2 deletion and accounting release             |
 | Upload interruption                | Disconnect a real authorized multipart request after its first R2 part. Verify unchanged mappings, retained reservation, upload abortion, and eventual byte release                     |
 | Lease/token expiry and policy race | Delay a staging upload across expiry or change policy before publication. Neither mapping changes; old data remains readable                                                            |
 | Real hostile workflow identities   | Use controlled fork, tag, PR, `pull_request_target`, and `workflow_run` jobs. All writes fail; public reads still work                                                                  |
@@ -159,6 +158,6 @@ Before a production release, record the commit, workflow URL, Cloudflare plan, r
 | Partial restore                    | Restore D1 without deleted R2 data. Expect `503` for exact matches with missing values, key-only fallbacks, and `404` for missing blobs; withdraw or replace the namespace before reuse |
 | Load and CPU                       | Measure deployed CPU, memory, D1 rows/latency, R2 operations, and cleanup lag under sustained concurrency. Compare observed costs with configured budgets                               |
 
-These are explicit release exercises, not claims that fault injection or multi-day lifecycle behavior already ran in the PR workflow. Workers Free support still needs provider CPU measurements within its limits.
+These are explicit release exercises, not claims that maximum payloads, real Cron, fault injection, or multi-day lifecycle behavior ran in the staging smoke workflow. Workers Free support still needs provider CPU measurements within its limits.
 
-References: [Cloudflare GitHub Actions deployment](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/), [Cron propagation](https://developers.cloudflare.com/workers/configuration/cron-triggers/), [GitHub OIDC claims](https://docs.github.com/en/actions/reference/security/oidc), and [secure workflow use](https://docs.github.com/en/actions/reference/security/secure-use).
+References: [Cloudflare GitHub Actions deployment](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/), [workflow concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency), [GitHub OIDC claims](https://docs.github.com/en/actions/reference/security/oidc), and [secure workflow use](https://docs.github.com/en/actions/reference/security/secure-use).

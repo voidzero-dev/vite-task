@@ -14,7 +14,6 @@
     "operator": "node --import tsx scripts/operator.ts",
     "benchmark": "node --import tsx scripts/benchmark.ts",
     "ci:deploy": "node --import tsx scripts/ci.ts deploy",
-    "ci:cleanup": "node --import tsx scripts/ci.ts cleanup",
     "e2e": "node --import tsx scripts/ci.ts test"
   },
   "dependencies": {
