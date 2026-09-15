@@ -21,12 +21,19 @@ The workflow uses one `remote-cache-staging` concurrency group for all branches.
 
 Use a dedicated Cloudflare staging account or dedicated resources in an account that permits this CI workload. Select Workers Paid for the configured payload sizes. The `paid` operator profile controls cleanup batch size; it does not purchase a subscription.
 
-Create the GitHub environment `remote-cache-staging` and add these environment secrets:
+Add these repository secrets under **Settings → Secrets and variables → Actions**. Repository write access is sufficient. The workflow does not require a GitHub environment:
 
 | Secret                  | Purpose                                                                      |
 | ----------------------- | ---------------------------------------------------------------------------- |
 | `CLOUDFLARE_ACCOUNT_ID` | Account that owns the staging resources                                      |
 | `CLOUDFLARE_API_TOKEN`  | Account-scoped Workers Scripts, D1, and Workers R2 Storage write permissions |
+
+Use the GitHub CLI from an interactive terminal to enter each secret at its prompt:
+
+```sh
+gh secret set CLOUDFLARE_ACCOUNT_ID --repo voidzero-dev/vite-task
+gh secret set CLOUDFLARE_API_TOKEN --repo voidzero-dev/vite-task
+```
 
 Set these **repository variables**, which the notification job also needs:
 
@@ -34,9 +41,9 @@ Set these **repository variables**, which the notification job also needs:
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `REMOTE_CACHE_WORKERS_SUBDOMAIN` | Account subdomain only, for example `example` for `example.workers.dev`                                                         |
 | `REMOTE_CACHE_RESOURCE_PREFIX`   | Optional; defaults to `vp-cache-ci`. A custom prefix must end in `-ci` and use at most 34 lowercase letters, digits, or hyphens |
-| `REMOTE_CACHE_DEPLOY_ENABLED`    | Set to `true` after the environment and account are ready                                                                       |
+| `REMOTE_CACHE_DEPLOY_ENABLED`    | Set to `true` after the repository secrets, variables, and Cloudflare account are ready                                         |
 
-Enable R2 in the account. The token must allow resource provisioning, updates, and fixture data access. No custom domain or DNS permission is needed. Do not attach production bindings or secrets to the staging Worker. The GitHub environment can require a maintainer review if the repository needs one before a deployment.
+Enable R2 in the account. The token must allow resource provisioning, updates, and fixture data access. No custom domain or DNS permission is needed. Do not attach production bindings or secrets to the staging Worker.
 
 The workflow exposes Cloudflare credentials only to deployment and smoke-test commands. Dependency installation runs before those credentials enter the step environment. Internal PR contributors must be trusted to change deployment code. Fork and Dependabot PRs run local checks without Cloudflare credentials. Their check summary explains why staging deployment is unavailable; they receive no deployment comment. To deploy a fork change to staging, a maintainer must copy the reviewed commit to a branch in this repository and open a PR.
 
@@ -160,4 +167,4 @@ Before a production release, record the commit, workflow URL, Cloudflare plan, r
 
 These are explicit release exercises, not claims that maximum payloads, real Cron, fault injection, or multi-day lifecycle behavior ran in the staging smoke workflow. Workers Free support still needs provider CPU measurements within its limits.
 
-References: [Cloudflare GitHub Actions deployment](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/), [workflow concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency), [GitHub OIDC claims](https://docs.github.com/en/actions/reference/security/oidc), and [secure workflow use](https://docs.github.com/en/actions/reference/security/secure-use).
+References: [GitHub repository secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets#creating-secrets-for-a-repository), [Cloudflare GitHub Actions deployment](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/), [workflow concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency), [GitHub OIDC claims](https://docs.github.com/en/actions/reference/security/oidc), and [secure workflow use](https://docs.github.com/en/actions/reference/security/secure-use).

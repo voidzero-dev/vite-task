@@ -70,9 +70,6 @@ jobs:
       (github.event_name != 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: remote-cache-staging
-      url: ${{ steps.deploy.outputs.endpoint }}
     permissions:
       contents: read
       id-token: write
@@ -154,7 +151,7 @@ jobs:
             } else if (process.env.CHECK_RESULT !== 'success') {
               status = `The source checks did not pass. No verified Cloudflare staging deployment is ready. See the [workflow run](${run}).`;
             } else if (process.env.DEPLOY_RESULT === 'skipped') {
-              status = `Cloudflare deployment is disabled. Configure the staging environment described in the [e2e plan](${docs}), ` +
+              status = `Cloudflare deployment is disabled. Configure the repository secrets and variables described in the [e2e plan](${docs}), ` +
                 `then set \`REMOTE_CACHE_DEPLOY_ENABLED=true\` and rerun this workflow. No live deployment passed verification.`;
             } else {
               status = `Cloudflare deployment or e2e verification failed. The staging deployment is not marked ready. See the [workflow run](${run}).`;
