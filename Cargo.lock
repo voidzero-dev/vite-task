@@ -1338,7 +1338,23 @@ dependencies = [
 name = "fspy_elf_loader"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
+ "elf",
  "fspy_nostd",
+ "fspy_nostd_alloc",
+ "linux-raw-sys 0.12.1",
+ "tempfile",
+]
+
+[[package]]
+name = "fspy_elf_loader_tests"
+version = "0.0.0"
+dependencies = [
+ "elf",
+ "fspy_elf_loader",
+ "libc",
+ "ntest",
+ "tempfile",
 ]
 
 [[package]]
