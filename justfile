@@ -38,6 +38,9 @@ watch-check:
 test:
   cargo test
 
+remote-cache:
+  pnpm check-remote-cache
+
 lint:
   cargo clippy --workspace --all-targets --all-features -- --deny warnings
 

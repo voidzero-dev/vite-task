@@ -1,0 +1,18 @@
+{
+  "fetch": [
+    {
+      "name": "empty key and binary secondary key",
+      "hex": "a2636b6579406d7365636f6e646172795f6b65794200ff"
+    },
+    {
+      "name": "indefinite map and chunked byte strings",
+      "hex": "bf636b65795f40ff6d7365636f6e646172795f6b65795f410041ffffff"
+    },
+    {
+      "name": "noncanonical lengths",
+      "hex": "b80278036b657958006d7365636f6e646172795f6b65795a0000000200ff"
+    }
+  ],
+  "expectedKey": [],
+  "expectedSecondaryKey": [0, 255]
+}
