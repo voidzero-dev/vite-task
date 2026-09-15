@@ -72,6 +72,7 @@ CREATE INDEX associations_target ON associations(scope_id, target_key);
 CREATE TABLE maintenance (id INTEGER PRIMARY KEY CHECK (id = 1), scope_id TEXT NOT NULL, secondary_key BLOB NOT NULL);
 INSERT INTO maintenance VALUES (1, '', X'');
 
+-- Parenthesize CASE expressions so the D1 REST parser preserves each trigger body.
 -- Lifecycle rules must never shorten the life of an already published generation.
 CREATE TRIGGER initial_retention AFTER INSERT ON scopes BEGIN
   UPDATE deployment SET retention_high_water_seconds = max(retention_high_water_seconds, NEW.retention_seconds);
@@ -82,7 +83,7 @@ END;
 CREATE TRIGGER scope_limit BEFORE INSERT ON scopes
 WHEN NOT EXISTS (SELECT 1 FROM scopes WHERE scope_id = NEW.scope_id)
 BEGIN
-  SELECT CASE WHEN (SELECT count(*) FROM scopes) >= 100 THEN RAISE(ABORT, 'cache_scope_limit') END;
+  SELECT (CASE WHEN (SELECT count(*) FROM scopes) >= 100 THEN RAISE(ABORT, 'cache_scope_limit') END);
 END;
 
 -- Direct policy edits must invalidate uploads that captured the previous policy.
@@ -94,13 +95,13 @@ BEGIN
 END;
 
 CREATE TRIGGER reserve_capacity BEFORE INSERT ON generations BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM scopes s, deployment d WHERE s.scope_id = NEW.scope_id
       AND s.enabled = 1 AND s.writes_enabled = 1 AND d.enabled = 1 AND d.writes_enabled = 1
       AND s.policy_version = NEW.policy_version AND NEW.token_exp > unixepoch()
       AND s.charged_bytes + NEW.charged_bytes <= s.byte_limit
       AND d.charged_bytes + NEW.charged_bytes <= d.byte_limit
-  ) THEN RAISE(ABORT, 'cache_admission_denied') END;
+  ) THEN RAISE(ABORT, 'cache_admission_denied') END);
 END;
 CREATE TRIGGER charge_generation AFTER INSERT ON generations BEGIN
   UPDATE scopes SET charged_bytes = charged_bytes + NEW.charged_bytes WHERE scope_id = NEW.scope_id;
@@ -118,10 +119,10 @@ END;
 CREATE TRIGGER count_entry BEFORE INSERT ON entries
 WHEN NOT EXISTS (SELECT 1 FROM entries WHERE scope_id = NEW.scope_id AND key = NEW.key)
 BEGIN
-  SELECT CASE WHEN EXISTS (
+  SELECT (CASE WHEN EXISTS (
     SELECT 1 FROM scopes s, deployment d WHERE s.scope_id = NEW.scope_id
       AND (s.entry_count >= s.entry_limit OR d.entry_count >= d.entry_limit)
-  ) THEN RAISE(ABORT, 'cache_entry_limit') END;
+  ) THEN RAISE(ABORT, 'cache_entry_limit') END);
   UPDATE scopes SET entry_count = entry_count + 1 WHERE scope_id = NEW.scope_id;
   UPDATE deployment SET entry_count = entry_count + 1;
 END;
@@ -132,10 +133,10 @@ END;
 CREATE TRIGGER count_association BEFORE INSERT ON associations
 WHEN NOT EXISTS (SELECT 1 FROM associations WHERE scope_id = NEW.scope_id AND secondary_key = NEW.secondary_key)
 BEGIN
-  SELECT CASE WHEN EXISTS (
+  SELECT (CASE WHEN EXISTS (
     SELECT 1 FROM scopes s, deployment d WHERE s.scope_id = NEW.scope_id
       AND (s.association_count >= s.association_limit OR d.association_count >= d.association_limit)
-  ) THEN RAISE(ABORT, 'cache_association_limit') END;
+  ) THEN RAISE(ABORT, 'cache_association_limit') END);
   UPDATE scopes SET association_count = association_count + 1 WHERE scope_id = NEW.scope_id;
   UPDATE deployment SET association_count = association_count + 1;
 END;
@@ -150,7 +151,7 @@ CREATE TRIGGER publish_generation AFTER UPDATE OF state ON generations
 WHEN OLD.state = 'uploading' AND NEW.state = 'ready'
 BEGIN
   UPDATE generations SET state = 'retired', retired_at = unixepoch(),
-    gc_after = CASE WHEN expires_at > unixepoch() THEN unixepoch() + 600 ELSE unixepoch() END
+    gc_after = (CASE WHEN expires_at > unixepoch() THEN unixepoch() + 600 ELSE unixepoch() END)
     WHERE generation_id = (SELECT generation_id FROM entries WHERE scope_id = NEW.scope_id AND key = NEW.key) AND state = 'ready';
   INSERT INTO entries (scope_id, key, generation_id) VALUES (NEW.scope_id, NEW.key, NEW.generation_id)
     ON CONFLICT (scope_id, key) DO UPDATE SET generation_id = excluded.generation_id;
