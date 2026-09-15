@@ -18,6 +18,9 @@ mod freestanding {
     // Consume those views before exec_elf replaces the stack.
     #[expect(clippy::needless_pass_by_value, reason = "signature required by main!")]
     fn run(stack: fspy_nostd::env::InitialStack<'_>) -> ! {
+        // Invocation: launcher ELF_PATH TARGET_ARGV0 [TARGET_ARGS...].
+        // The kernel supplied this stack for the launcher; exec_elf will build
+        // another one for the target, with the first two arguments removed.
         let mut args = stack.args().iter().copied();
         let _launcher = args.next().expect("missing launcher argv[0]");
         let path = args.next().expect("missing target path");
@@ -27,13 +30,7 @@ mod freestanding {
         // parent selects a trusted fixture and kernel auxv references stay
         // valid until copied. There is no runtime requiring stack cleanup.
         unsafe {
-            fspy_elf_loader::exec_elf(
-                file,
-                path,
-                args,
-                stack.envs().iter().copied(),
-                stack.auxv().iter().copied(),
-            )
+            fspy_elf_loader::exec_elf(file, path, args, stack.envs().iter().copied(), stack.auxv())
         }
     }
 }

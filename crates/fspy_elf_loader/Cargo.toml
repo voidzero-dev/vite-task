@@ -8,7 +8,16 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
+elf = { workspace = true }
 fspy_nostd = { workspace = true }
+fspy_nostd_alloc = { workspace = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "none"))'.dependencies]
+linux-raw-sys = { workspace = true, features = ["auxvec", "no_std"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+tempfile = { workspace = true }
 
 [[bin]]
 name = "fspy_elf_loader_test_launcher"
