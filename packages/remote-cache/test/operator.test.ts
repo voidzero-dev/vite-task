@@ -153,7 +153,7 @@ void test('operator setup validates before writes and preserves withdrawal on re
 
 void test('operator upgrades isolate rate counters by Worker and retain them across revisions', async () => {
   const namespaces = new Set<string>();
-  for (const name of ['vp-cache-ci-pr-1', 'vp-cache-ci-pr-2', 'vp-cache-ci-main', 'production']) {
+  for (const name of ['vp-cache-ci-staging', 'custom-ci-staging', 'production']) {
     let config = await readTemplate();
     config.name = name;
     const limits = config.ratelimits.map((binding) => binding.simple);

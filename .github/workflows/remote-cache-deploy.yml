@@ -1,4 +1,4 @@
-name: Remote cache deployment
+name: Remote cache staging
 
 on:
   pull_request:
@@ -20,23 +20,17 @@ on:
       - pnpm-workspace.yaml
       - vite.config.ts
   workflow_dispatch:
-    inputs:
-      full:
-        description: Check real Cron cleanup (manual runs cannot authorize HTTP stores)
-        type: boolean
-        default: true
 
 permissions:
   contents: read
 
-# Share the group with PR teardown. Do not cancel a partially completed deployment.
+# All PRs and main share staging. Finish deployment, smoke tests, and notification before replacing it.
 concurrency:
-  group: remote-cache-cloudflare-${{ github.event.pull_request.number || 'main' }}
+  group: remote-cache-staging
   cancel-in-progress: false
 
 env:
   REMOTE_CACHE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  REMOTE_CACHE_PR_NUMBER: ${{ github.event.pull_request.number }}
   REMOTE_CACHE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   REMOTE_CACHE_RESOURCE_PREFIX: ${{ vars.REMOTE_CACHE_RESOURCE_PREFIX || 'vp-cache-ci' }}
   REMOTE_CACHE_WORKERS_SUBDOMAIN: ${{ vars.REMOTE_CACHE_WORKERS_SUBDOMAIN }}
@@ -53,21 +47,21 @@ jobs:
           persist-credentials: false
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
       - run: pnpm check-remote-cache
-      - name: Explain fork preview availability
+      - name: Explain staging deployment availability
         if: >-
           always() && github.event_name == 'pull_request' &&
           (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]')
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
-            await core.summary.addHeading('Remote cache preview').addRaw(
+            await core.summary.addHeading('Remote cache staging').addRaw(
               'Fork and Dependabot PRs run local checks without Cloudflare credentials. ' +
-              'A maintainer can copy the reviewed commit to an internal branch and open a PR for a preview. ' +
+              'A maintainer can copy the reviewed commit to an internal branch and open a PR to deploy to staging. ' +
               'No live deployment passed verification for this PR.'
             ).write();
 
   deploy:
-    name: Deploy and verify
+    name: Deploy staging and run smoke tests
     needs: check
     if: >-
       vars.REMOTE_CACHE_DEPLOY_ENABLED == 'true' &&
@@ -75,7 +69,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (github.event_name != 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 15
     environment:
       name: remote-cache-staging
       url: ${{ steps.deploy.outputs.endpoint }}
@@ -100,18 +94,17 @@ jobs:
           ref: ${{ env.REMOTE_CACHE_SOURCE_SHA }}
           persist-credentials: false
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
-      - name: Deploy isolated Cloudflare resources
+      - name: Create or update persistent staging resources
         id: deploy
         run: pnpm --filter @voidzero-dev/remote-cache ci:deploy
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      - name: Test the deployed Worker, D1, and R2
+      - name: Run smoke tests against the staging Worker, D1, and R2
         run: pnpm --filter @voidzero-dev/remote-cache e2e
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          REMOTE_CACHE_E2E_FULL: ${{ github.event_name == 'push' || inputs.full == true }}
       - name: Save verification results and manual fixtures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -122,7 +115,7 @@ jobs:
           if-no-files-found: warn
 
   notify:
-    name: Update PR verification instructions
+    name: Update PR staging verification instructions
     if: >-
       always() && github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -139,6 +132,7 @@ jobs:
           DEPLOY_ENDPOINT: ${{ needs.deploy.outputs.endpoint }}
         with:
           script: |
+            // Reuse the marker so existing PR comments are updated.
             const marker = '<!-- remote-cache-preview -->';
             const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: context.issue.number });
             if (pr.state !== 'open' || pr.head.sha !== process.env.REMOTE_CACHE_SOURCE_SHA) return;
@@ -148,23 +142,24 @@ jobs:
             let status;
             if (passed) {
               const endpoint = process.env.DEPLOY_ENDPOINT;
-              const expected = `https://${process.env.REMOTE_CACHE_RESOURCE_PREFIX}-pr-${pr.number}.${process.env.REMOTE_CACHE_WORKERS_SUBDOMAIN}.workers.dev/projects/manual`;
+              const expected = `https://${process.env.REMOTE_CACHE_RESOURCE_PREFIX}-staging.${process.env.REMOTE_CACHE_WORKERS_SUBDOMAIN}.workers.dev/projects/manual`;
               if (endpoint !== expected) throw new Error('Unexpected deployment endpoint');
-              status = `Cloudflare deployment and PR e2e checks passed. You can now perform manual verification.\n\n` +
+              status = `Cloudflare staging deployment and smoke tests passed. You can now perform manual verification.\n\n` +
                 `Endpoint: ${endpoint}\n\n` +
                 `Download the **remote-cache-e2e-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}** artifact from the [workflow run](${run}). ` +
                 `It contains \`manual-fetch.cbor\`, \`manual-manifest.json\`, and \`report.json\`.\n\n` +
-                `PR checks cover public reads and rejected writes. Main-branch push checks also cover authorized HTTP stores and real Cron cleanup. ` +
-                `The endpoint remains available until this PR closes or a later commit replaces it.`;
+                `PR checks cover public reads and rejected writes. Main-branch push checks also cover authorized HTTP stores. ` +
+                `This staging endpoint is shared by all PRs and main. A later deployment replaces its code and manual fixture. ` +
+                `Compare the deployment ID in the response with the artifact before manual verification. Closing this PR does not remove staging.`;
             } else if (process.env.CHECK_RESULT !== 'success') {
-              status = `The source checks did not pass. No verified Cloudflare preview is ready. See the [workflow run](${run}).`;
+              status = `The source checks did not pass. No verified Cloudflare staging deployment is ready. See the [workflow run](${run}).`;
             } else if (process.env.DEPLOY_RESULT === 'skipped') {
               status = `Cloudflare deployment is disabled. Configure the staging environment described in the [e2e plan](${docs}), ` +
                 `then set \`REMOTE_CACHE_DEPLOY_ENABLED=true\` and rerun this workflow. No live deployment passed verification.`;
             } else {
-              status = `Cloudflare deployment or e2e verification failed. The preview is not marked ready. See the [workflow run](${run}).`;
+              status = `Cloudflare deployment or e2e verification failed. The staging deployment is not marked ready. See the [workflow run](${run}).`;
             }
-            const body = `${marker}\n### Remote cache preview\n\nCommit: \`${pr.head.sha}\`\n\n${status}\n\n[Manual checks and complete e2e plan](${docs}).`;
+            const body = `${marker}\n### Remote cache staging\n\nCommit: \`${pr.head.sha}\`\n\n${status}\n\n[Manual checks and complete e2e plan](${docs}).`;
             const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: pr.number, per_page: 100 });
             const previous = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
             if (previous) await github.rest.issues.updateComment({ ...context.repo, comment_id: previous.id, body });

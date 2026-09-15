@@ -1,17 +1,8 @@
 import assert from 'node:assert/strict';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { URL, pathToFileURL } from 'node:url';
-import { setTimeout as delay } from 'node:timers/promises';
 import { encode } from 'cborg';
-import {
-  ApiError,
-  operatorIO,
-  query,
-  readTemplate,
-  runOperator,
-  type Config,
-  type OperatorIO,
-} from './operator.ts';
+import { ApiError, operatorIO, query, runOperator, type Config } from './operator.ts';
 import { retireTestData, seedManual, type Admin } from './e2e/fixtures.ts';
 import { runSuite, type Report } from './e2e/suite.ts';
 
@@ -28,9 +19,7 @@ export function settingsFrom(env: Record<string, string | undefined>) {
     throw new Error(
       'Set REMOTE_CACHE_WORKERS_SUBDOMAIN to the account subdomain, without workers.dev',
     );
-  const pr = env['REMOTE_CACHE_PR_NUMBER'] || undefined;
-  if (pr && !/^[1-9][0-9]{0,9}$/.test(pr)) throw new Error('Invalid PR number');
-  const name = `${prefix}-${pr ? `pr-${pr}` : 'main'}`;
+  const name = `${prefix}-staging`;
   const repository = env['GITHUB_REPOSITORY'];
   if (!repository || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))
     throw new Error('Invalid repository');
@@ -45,22 +34,21 @@ export function settingsFrom(env: Record<string, string | undefined>) {
   if (!run || !attempt || !/^\d+$/.test(run) || !/^\d+$/.test(attempt))
     throw new Error('Invalid workflow run identity');
   const defaultBranch = env['REMOTE_CACHE_DEFAULT_BRANCH'];
-  const writes =
-    !pr &&
-    env['GITHUB_EVENT_NAME'] === 'push' &&
-    env['GITHUB_REF'] === `refs/heads/${defaultBranch}`;
-  if (!pr && env['GITHUB_REF'] !== `refs/heads/${defaultBranch}`)
-    throw new Error('The main staging deployment requires the default branch');
+  const event = env['GITHUB_EVENT_NAME'];
+  if (!['pull_request', 'push', 'workflow_dispatch'].includes(event ?? ''))
+    throw new Error('Unsupported staging deployment event');
+  const onDefaultBranch = env['GITHUB_REF'] === `refs/heads/${defaultBranch}`;
+  if (event !== 'pull_request' && !onDefaultBranch)
+    throw new Error('Push and manual staging deployments require the default branch');
+  const writes = event === 'push' && onDefaultBranch;
   return {
     name,
-    pr,
     repository,
     repositoryId,
     revision,
     deployment: `${revision}-${run}-${attempt}`,
     origin: `https://${name}.${subdomain}.workers.dev`,
     writes,
-    full: writes || env['REMOTE_CACHE_E2E_FULL'] === 'true',
   };
 }
 type Settings = ReturnType<typeof settingsFrom>;
@@ -296,8 +284,8 @@ async function verify(settings: Settings) {
       request: fetch,
       token: githubTokens(process.env),
       writes: settings.writes,
-      full: settings.full,
-      cron: settings.full,
+      full: false,
+      cron: false,
       async record(value) {
         report = value;
         await writeFile(new URL('report.json', resultsDir), JSON.stringify(report, null, 2) + '\n');
@@ -316,81 +304,13 @@ async function verify(settings: Settings) {
   }
 }
 
-export async function cleanup(
-  settings: Settings,
-  io: OperatorIO = operatorIO,
-  sleep: (ms: number) => Promise<void> = delay,
-) {
-  if (!settings.pr) throw new Error('Automatic teardown is restricted to PR resources');
-  const config = await readTemplate();
-  const databases = (await io.api(`/d1/database?name=${settings.name}&per_page=100`)) as {
-    name: string;
-    uuid: string;
-  }[];
-  const db = databases.find((db) => db.name === settings.name);
-  config.name = settings.name;
-  config.r2_buckets[0]!.bucket_name = settings.name;
-  config.d1_databases[0]!.database_name = settings.name;
-  if (db) config.d1_databases[0]!.database_id = db.uuid;
-  await io.writeConfig(config);
-  if (db) {
-    const tables = await query(
-      io,
-      config,
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'generations'",
-    );
-    if (tables.length) {
-      const scopes = await query(io, config, 'SELECT repository_id, endpoint FROM scopes');
-      if (
-        scopes.some(
-          (scope) =>
-            scope['repository_id'] !== settings.repositoryId ||
-            !String(scope['endpoint']).startsWith(`${settings.origin}/projects/`),
-        )
-      )
-        throw new Error('Refusing to remove resources owned by another deployment');
-      await query(io, config, 'UPDATE deployment SET enabled = 0, writes_enabled = 0');
-      await query(
-        io,
-        config,
-        `UPDATE generations SET expires_at = 0,
-        lease_until = min(lease_until, unixepoch()), gc_after = min(gc_after, unixepoch() + 600)`,
-      );
-      const until = Date.now() + 25 * 60000;
-      while (
-        Number((await query(io, config, 'SELECT count(*) AS count FROM generations'))[0]!['count'])
-      ) {
-        if (Date.now() >= until)
-          throw new Error(
-            'Cleanup is still pending; rerun the cleanup workflow after Cron or lifecycle finishes',
-          );
-        await sleep(30000);
-      }
-    }
-  }
-  // Empty-bucket deletion also protects multipart uploads without a recorded ID.
-  try {
-    await io.api(`/r2/buckets/${settings.name}`);
-    await io.wrangler(['r2', 'bucket', 'delete', settings.name]);
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 404) throw error;
-  }
-  if (db) await io.wrangler(['d1', 'delete', db.uuid, '--skip-confirmation']);
-  try {
-    await io.api(`/workers/scripts/${settings.name}`, 'DELETE');
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 404) throw error;
-  }
-}
-
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const settings = settingsFrom(process.env);
     const command = process.argv[2];
     if (command === 'deploy') await deploy(settings);
     else if (command === 'test') await verify(settings);
-    else if (command === 'cleanup') await cleanup(settings);
-    else throw new Error('Use deploy, test, or cleanup');
+    else throw new Error('Use deploy or test');
   } catch (error) {
     console.error(error instanceof Error ? error.message : 'Cloudflare CI failed');
     process.exitCode = 1;
