@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process';
-import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL, URL } from 'node:url';
-import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { parse, type ParseError } from 'jsonc-parser';
+import { readJson } from './http.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const configPath = join(root, 'wrangler.operator.json');
@@ -51,7 +52,7 @@ export type Config = {
   vars: Record<string, string>;
 };
 
-function isolateRateLimits(config: Config) {
+function isolateRateLimits(config: Config): void {
   for (const binding of config.ratelimits) {
     // Account-wide IDs must stay stable across revisions and differ between Workers/bindings.
     const hash = createHash('sha256')
@@ -75,6 +76,9 @@ function positive(value: string | undefined, fallback: number): number {
   if (!Number.isSafeInteger(number) || number <= 0) throw new Error('Expected a positive integer');
   return number;
 }
+function optionalPositive(value: string | undefined): number | null {
+  return value ? positive(value, 1) : null;
+}
 function toggle(value: string | undefined): number | null {
   if (value === undefined) return null;
   if (value !== 'on' && value !== 'off') throw new Error('Use on or off');
@@ -86,7 +90,17 @@ function identifier(value: string | undefined): string {
   return value;
 }
 
-export async function resolveRepository(io: Pick<OperatorIO, 'github'>, name: string) {
+interface Repository {
+  name: string;
+  id: string;
+  owner: string;
+  branch: string;
+}
+
+export async function resolveRepository(
+  io: Pick<OperatorIO, 'github'>,
+  name: string,
+): Promise<Repository> {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(name)) throw new Error('Use owner/repository');
   const repo = object(await io.github(name));
   if (repo['private'] !== false || repo['visibility'] !== 'public')
@@ -107,7 +121,7 @@ export async function query(
   config: Config,
   sql: string,
   params: (string | number | null)[] = [],
-) {
+): Promise<Record<string, unknown>[]> {
   const result = await io.api(`/d1/database/${config.d1_databases[0]!.database_id}/query`, 'POST', {
     sql,
     params,
@@ -147,7 +161,7 @@ export function lifecycleRules(retentionDays: number) {
   };
 }
 
-async function updateLifecycle(io: OperatorIO, config: Config) {
+async function updateLifecycle(io: OperatorIO, config: Config): Promise<void> {
   const rows = await query(
     io,
     config,
@@ -155,6 +169,39 @@ async function updateLifecycle(io: OperatorIO, config: Config) {
   );
   const days = Math.ceil(Number(rows[0]?.['retention'] ?? 604800) / 86400);
   await io.lifecycle(config.r2_buckets[0]!.bucket_name, lifecycleRules(days));
+}
+
+async function findDatabase(
+  io: OperatorIO,
+  name: string,
+): Promise<Record<string, unknown> | undefined> {
+  const databases = await io.api(`/d1/database?name=${encodeURIComponent(name)}&per_page=100`);
+  if (!Array.isArray(databases)) throw new Error('Invalid D1 list');
+  return databases.map(object).find((database) => database['name'] === name);
+}
+
+async function ensurePrivateBucket(io: OperatorIO, name: string): Promise<void> {
+  try {
+    const bucket = object(await io.api(`/r2/buckets/${name}`));
+    if (bucket['storage_class'] && bucket['storage_class'] !== 'Standard')
+      throw new Error('Use an R2 Standard bucket');
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    await io.wrangler([
+      'r2',
+      'bucket',
+      'create',
+      name,
+      '--storage-class',
+      'Standard',
+      '--no-update-config',
+    ]);
+  }
+  // Refuse to adopt a bucket with public custom domains, then disable r2.dev.
+  const domains = object(await io.api(`/r2/buckets/${name}/domains/custom`));
+  if (!Array.isArray(domains['domains']) || domains['domains'].length)
+    throw new Error('Remove R2 public custom domains before setup');
+  await io.api(`/r2/buckets/${name}/domains/managed`, 'PUT', { enabled: false });
 }
 
 export async function runOperator(argv: string[], io: OperatorIO): Promise<void> {
@@ -202,7 +249,6 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
     throw new Error('Retention cannot exceed 365 days');
   toggle(values.enabled);
   toggle(values.writes);
-  let config: Config;
   if (command === 'setup') {
     const name = identifier(values.name);
     if (name.length < 3 || name.endsWith('-'))
@@ -227,17 +273,13 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       throw new Error('Use the deployment name and account subdomain in the workers.dev origin');
     const profile = values.profile ?? 'free';
     if (profile !== 'free' && profile !== 'paid') throw new Error('Use free or paid');
-    const databases = await io.api(`/d1/database?name=${encodeURIComponent(name)}&per_page=100`);
-    if (!Array.isArray(databases)) throw new Error('Invalid D1 list');
-    let db = databases.map(object).find((item) => item['name'] === name);
+    let db = await findDatabase(io, name);
     if (!db) {
       await io.wrangler(['d1', 'create', name, '--no-update-config']);
-      const created = await io.api(`/d1/database?name=${encodeURIComponent(name)}&per_page=100`);
-      if (!Array.isArray(created)) throw new Error('Invalid D1 list');
-      db = created.map(object).find((item) => item['name'] === name);
+      db = await findDatabase(io, name);
     }
     if (!db) throw new Error('D1 creation did not return the database');
-    config = await readTemplate();
+    const config = await readTemplate();
     config.name = name;
     config.d1_databases[0] = {
       binding: 'INDEX',
@@ -263,27 +305,7 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       if (prior && prior['repository_id'] !== repo.id)
         throw new Error('Use a new namespace for a different repository');
     }
-    try {
-      const bucket = object(await io.api(`/r2/buckets/${name}`));
-      if (bucket['storage_class'] && bucket['storage_class'] !== 'Standard')
-        throw new Error('Use an R2 Standard bucket');
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 404) throw error;
-      await io.wrangler([
-        'r2',
-        'bucket',
-        'create',
-        name,
-        '--storage-class',
-        'Standard',
-        '--no-update-config',
-      ]);
-    }
-    // Refuse to adopt a bucket with public custom domains, then disable r2.dev.
-    const domains = object(await io.api(`/r2/buckets/${name}/domains/custom`));
-    if (!Array.isArray(domains['domains']) || domains['domains'].length)
-      throw new Error('Remove R2 public custom domains before setup');
-    await io.api(`/r2/buckets/${name}/domains/managed`, 'PUT', { enabled: false });
+    await ensurePrivateBucket(io, name);
     config.r2_buckets[0] = { binding: 'ARTIFACTS', bucket_name: name };
     config.workers_dev = origin.hostname.endsWith('.workers.dev');
     if (!config.workers_dev) config.routes = [{ pattern: origin.hostname, custom_domain: true }];
@@ -316,9 +338,9 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       `UPDATE deployment SET byte_limit = coalesce(?, byte_limit),
       entry_limit = coalesce(?, entry_limit), association_limit = coalesce(?, association_limit)`,
       [
-        values['byte-limit'] ? positive(values['byte-limit'], 1) : null,
-        values['entry-limit'] ? positive(values['entry-limit'], 1) : null,
-        values['association-limit'] ? positive(values['association-limit'], 1) : null,
+        optionalPositive(values['byte-limit']),
+        optionalPositive(values['entry-limit']),
+        optionalPositive(values['association-limit']),
       ],
     );
     const scopes = await query(io, config, 'SELECT scope_id, endpoint FROM scopes');
@@ -329,7 +351,7 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
     io.print(text(scopes.find((row) => row['scope_id'] === namespace)?.['endpoint']));
     return;
   }
-  config = await io.readConfig();
+  const config = await io.readConfig();
   if (command === 'upgrade') {
     isolateRateLimits(config);
     await io.writeConfig(config);
@@ -373,9 +395,9 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       [
         toggle(values.enabled),
         toggle(values.writes),
-        values['byte-limit'] ? positive(values['byte-limit'], 1) : null,
-        values['entry-limit'] ? positive(values['entry-limit'], 1) : null,
-        values['association-limit'] ? positive(values['association-limit'], 1) : null,
+        optionalPositive(values['byte-limit']),
+        optionalPositive(values['entry-limit']),
+        optionalPositive(values['association-limit']),
       ],
     );
     return;
@@ -438,13 +460,10 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
     config.vars['NAMESPACES'] = JSON.stringify(all.map((row) => text(row['scope_id'])));
     await io.writeConfig(config);
     await io.wrangler(['deploy', '--config', configPath]);
-    io.print(
-      text(
-        (
-          await query(io, config, 'SELECT endpoint FROM scopes WHERE scope_id = ?', [namespace])
-        )[0]?.['endpoint'],
-      ),
-    );
+    const scopes = await query(io, config, 'SELECT endpoint FROM scopes WHERE scope_id = ?', [
+      namespace,
+    ]);
+    io.print(text(scopes[0]?.['endpoint']));
     return;
   }
   if (!existing.length) throw new Error('Namespace does not exist');
@@ -492,9 +511,9 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       toggle(values.enabled),
       toggle(values.writes),
       values['retention-days'] ? positive(values['retention-days'], 7) * 86400 : null,
-      values['byte-limit'] ? positive(values['byte-limit'], 1) : null,
-      values['entry-limit'] ? positive(values['entry-limit'], 1) : null,
-      values['association-limit'] ? positive(values['association-limit'], 1) : null,
+      optionalPositive(values['byte-limit']),
+      optionalPositive(values['entry-limit']),
+      optionalPositive(values['association-limit']),
       namespace,
     ],
   );
@@ -511,21 +530,7 @@ async function jsonResponse(response: Response): Promise<unknown> {
     void response.body?.cancel();
     throw new ApiError(response.status);
   }
-  const reader = response.body!.getReader();
-  let size = 0;
-  const chunks: Uint8Array[] = [];
-  try {
-    while (true) {
-      const part = await reader.read();
-      if (part.done) break;
-      size += part.value.length;
-      if (size > 4 * 1024 * 1024) throw new Error('API response too large');
-      chunks.push(part.value);
-    }
-  } finally {
-    await reader.cancel();
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  return readJson(response, 4 * 1024 * 1024, 'API response too large');
 }
 
 export const operatorIO: OperatorIO = {

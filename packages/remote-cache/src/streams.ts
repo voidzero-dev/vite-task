@@ -23,14 +23,14 @@ export class Deadline {
     void this.cancelled.catch(() => {});
     if (signal?.aborted) this.onAbort();
   }
-  check() {
+  check(): void {
     if (this.controller.signal.aborted) throw new HttpError(503, 'deadline');
   }
   async run<T>(operation: Promise<T>): Promise<T> {
     this.check();
     return Promise.race([operation, this.cancelled]);
   }
-  dispose() {
+  dispose(): void {
     clearTimeout(this.timer);
     this.signal?.removeEventListener('abort', this.onAbort);
   }
@@ -107,7 +107,7 @@ export class Input {
       if (this.buffer.length) yield this.take(this.buffer.length);
     } while (await this.fill());
   }
-  close() {
+  close(): void {
     void this.reader.cancel().catch(() => {});
   }
 }
@@ -116,7 +116,7 @@ export async function readBody(
   body: ReadableStream<Uint8Array> | null,
   limit: number,
   deadline: Deadline,
-) {
+): Promise<Uint8Array<ArrayBuffer>> {
   const input = new Input(body, limit, deadline);
   try {
     return await collect(input.rest(), limit);

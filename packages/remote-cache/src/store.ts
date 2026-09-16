@@ -1,4 +1,4 @@
-import { decodeEnvelope, cborResponse } from './cbor.ts';
+import { cborResponse, decodeEnvelope, type StoreMetadata } from './cbor.ts';
 import {
   abandon,
   publish,
@@ -21,7 +21,7 @@ async function uploadBlob(
   limit: number,
   deadline: Deadline,
   stats: Observations,
-) {
+): Promise<void> {
   let buffer = new Uint8Array(PART_SIZE);
   let used = 0;
   let upload: R2MultipartUpload | undefined;
@@ -91,7 +91,7 @@ export async function store(
   let input: Input | undefined;
   try {
     input = new Input(request.body, Math.min(length ?? limits.store, limits.store), deadline);
-    let metadata: ReturnType<typeof decodeEnvelope> | undefined;
+    let metadata: StoreMetadata | undefined;
     for await (const part of multipart(input, boundary, limits.headers)) {
       if (part.name === 'metadata') {
         metadata = decodeEnvelope(await collect(part.body, limits.metadata), true, limits);
