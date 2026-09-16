@@ -262,6 +262,7 @@ void test('operator setup creates resources and initializes an empty database', 
       io,
     );
     assert.ok(database && bucket && deployed);
+    assert.equal(config.vars['GC_BATCH_SIZE'], '16');
     assert.deepEqual(JSON.parse(config.vars['NAMESPACES']!), ['test']);
     const scope = await h.db.prepare("SELECT endpoint FROM scopes WHERE scope_id = 'test'").first();
     assert.equal(scope!.endpoint, 'https://cache.example.com/projects/test');
