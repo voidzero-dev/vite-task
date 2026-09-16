@@ -15,7 +15,7 @@ vp run --cache build      # run with caching enabled
 
 ## Remote cache service
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvoidzero-dev%2Fvite-task%2Ftree%2Fmain%2Fpackages%2Fremote-cache)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvoidzero-dev%2Fvite-task%2Ftree%2Ffeat%2Fpublic-remote-cache%2Fpackages%2Fremote-cache)
 
 To deploy the public remote cache service in your own Cloudflare account and bind it to a GitHub repository, follow the [self-hosting guide](packages/remote-cache/docs/self-hosting.md). The service is available in this source tree; the `vp run` remote-cache client adapter is not yet implemented here.
 
