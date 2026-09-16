@@ -5,10 +5,21 @@ import { encode } from 'cborg';
 import { ApiError, operatorIO, query, runOperator, type Config } from './operator.ts';
 import { retireTestData, seedManual, type Admin } from './e2e/fixtures.ts';
 import { runSuite, type Report } from './e2e/suite.ts';
+import { readJson } from './http.ts';
 
 const resultsDir = new URL('../e2e-results/', import.meta.url);
 
-export function settingsFrom(env: Record<string, string | undefined>) {
+interface Settings {
+  name: string;
+  repository: string;
+  repositoryId: string;
+  revision: string;
+  deployment: string;
+  origin: string;
+  writes: boolean;
+}
+
+export function settingsFrom(env: Record<string, string | undefined>): Settings {
   const prefix = env['REMOTE_CACHE_RESOURCE_PREFIX'] || 'vp-cache-ci';
   if (!/^[a-z0-9][a-z0-9-]{0,30}-ci$/.test(prefix))
     throw new Error(
@@ -29,8 +40,8 @@ export function settingsFrom(env: Record<string, string | undefined>) {
   const revision = env['REMOTE_CACHE_SOURCE_SHA'];
   if (!revision || !/^[a-f0-9]{40}$/.test(revision))
     throw new Error('Use the full source commit SHA');
-  const run = env['GITHUB_RUN_ID'],
-    attempt = env['GITHUB_RUN_ATTEMPT'];
+  const run = env['GITHUB_RUN_ID'];
+  const attempt = env['GITHUB_RUN_ATTEMPT'];
   if (!run || !attempt || !/^\d+$/.test(run) || !/^\d+$/.test(attempt))
     throw new Error('Invalid workflow run identity');
   const defaultBranch = env['REMOTE_CACHE_DEFAULT_BRANCH'];
@@ -51,9 +62,8 @@ export function settingsFrom(env: Record<string, string | undefined>) {
     writes,
   };
 }
-type Settings = ReturnType<typeof settingsFrom>;
 
-function checkConfig(config: Config, settings: Settings) {
+function checkConfig(config: Config, settings: Settings): void {
   if (
     config.name !== settings.name ||
     config.r2_buckets[0]?.bucket_name !== settings.name ||
@@ -62,7 +72,7 @@ function checkConfig(config: Config, settings: Settings) {
     throw new Error('CI can only operate on its dedicated staging resources');
 }
 
-async function checkAccountOrigin(settings: Settings) {
+async function checkAccountOrigin(settings: Settings): Promise<void> {
   const account = (await operatorIO.api('/workers/subdomain')) as { subdomain: string };
   assert.equal(
     new URL(settings.origin).hostname,
@@ -72,8 +82,8 @@ async function checkAccountOrigin(settings: Settings) {
 }
 
 export function cloudflareAdmin(config: Config): Admin {
-  const account = process.env['CLOUDFLARE_ACCOUNT_ID'],
-    token = process.env['CLOUDFLARE_API_TOKEN'];
+  const account = process.env['CLOUDFLARE_ACCOUNT_ID'];
+  const token = process.env['CLOUDFLARE_API_TOKEN'];
   if (!account || !/^[a-f0-9]{32}$/.test(account) || !token)
     throw new Error('Cloudflare staging credentials are required');
   const bucket = config.r2_buckets[0]!.bucket_name;
@@ -111,13 +121,13 @@ export function cloudflareAdmin(config: Config): Admin {
 export function githubTokens(
   env: Record<string, string | undefined>,
   request: typeof fetch = fetch,
-) {
+): (audience: string) => Promise<string> {
   const cached = new Map<string, { token: string; until: number }>();
-  return async (audience: string) => {
+  return async function token(audience: string): Promise<string> {
     const previous = cached.get(audience);
     if (previous && previous.until > Date.now()) return previous.token;
-    const raw = env['ACTIONS_ID_TOKEN_REQUEST_URL'],
-      credential = env['ACTIONS_ID_TOKEN_REQUEST_TOKEN'];
+    const raw = env['ACTIONS_ID_TOKEN_REQUEST_URL'];
+    const credential = env['ACTIONS_ID_TOKEN_REQUEST_TOKEN'];
     if (!raw || !credential) throw new Error('The e2e job requires id-token: write');
     const url = new URL(raw);
     if (
@@ -138,21 +148,9 @@ export function githubTokens(
       await response.body?.cancel();
       throw new Error('GitHub OIDC request failed');
     }
-    const reader = response.body!.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      while (true) {
-        const part = await reader.read();
-        if (part.done) break;
-        size += part.value.length;
-        if (size > 32768) throw new Error('OIDC response exceeds its limit');
-        chunks.push(part.value);
-      }
-    } finally {
-      await reader.cancel();
-    }
-    const data = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { value?: unknown };
+    const data = (await readJson(response, 32768, 'OIDC response exceeds its limit')) as {
+      value?: unknown;
+    };
     if (typeof data.value !== 'string' || data.value.length > 16384)
       throw new Error('Invalid GitHub OIDC response');
     cached.set(audience, { token: data.value, until: Date.now() + 180000 });
@@ -160,7 +158,7 @@ export function githubTokens(
   };
 }
 
-async function deploy(settings: Settings) {
+async function deploy(settings: Settings): Promise<void> {
   await checkAccountOrigin(settings);
   await runOperator(
     [
@@ -269,7 +267,7 @@ async function deploy(settings: Settings) {
     );
 }
 
-async function verify(settings: Settings) {
+async function verify(settings: Settings): Promise<void> {
   await checkAccountOrigin(settings);
   const config = await operatorIO.readConfig();
   checkConfig(config, settings);

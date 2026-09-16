@@ -8,10 +8,14 @@ export interface Admin {
   exists(key: string): Promise<boolean>;
 }
 
-export const bytes = (value: string) => new TextEncoder().encode(value);
+export function bytes(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
 // The REST fixture loader uses generated hexadecimal SQL literals for binary fields.
 // This conversion accepts bytes only, never SQL or HTTP input.
-export const sqlBytes = (value: Uint8Array) => `X'${Buffer.from(value).toString('hex')}'`;
+export function sqlBytes(value: Uint8Array): string {
+  return `X'${Buffer.from(value).toString('hex')}'`;
+}
 
 export interface Fixture {
   scope: string;
@@ -33,10 +37,10 @@ export async function seed(
   blob?: Uint8Array,
 ): Promise<Fixture> {
   const generation = randomUUID();
-  const key = bytes(label),
-    secondary = bytes(`${label}-secondary`);
-  const valueObject = `${scope}/${generation}/value`,
-    blobObject = `${scope}/${generation}/blob`;
+  const key = bytes(label);
+  const secondary = bytes(`${label}-secondary`);
+  const valueObject = `${scope}/${generation}/value`;
+  const blobObject = `${scope}/${generation}/blob`;
   const blobId = blob === undefined ? null : randomUUID();
   await admin.sql(
     `INSERT INTO generations

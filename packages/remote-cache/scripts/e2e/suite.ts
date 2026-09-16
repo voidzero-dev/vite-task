@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { encode, decode } from 'cborg';
+import { decode, encode } from 'cborg';
 import { defaults, MiB } from '../../src/limits.ts';
-import { bytes, seed, sqlBytes, type Admin, type Fixture } from './fixtures.ts';
+import { bytes, seed, sqlBytes, type Admin } from './fixtures.ts';
 
 export interface Result {
   name: string;
@@ -32,7 +32,9 @@ export interface Options {
   record?: (report: Report) => Promise<void>;
 }
 
-const digest = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
+function digest(value: Uint8Array): string {
+  return createHash('sha256').update(value).digest('hex');
+}
 function blobId(result: Record<string, unknown>): string {
   assert.equal(typeof result['blob_id'], 'string');
   return result['blob_id'] as string;
@@ -48,10 +50,11 @@ export async function runSuite(options: Options): Promise<Report> {
     results: [],
   };
   const prefix = randomUUID();
-  async function check(name: string, action: () => Promise<void>) {
+  async function check<T>(name: string, action: () => Promise<T>): Promise<T> {
     const start = Date.now();
+    let result: T;
     try {
-      await action();
+      result = await action();
       report.results.push({ name, status: 'passed', duration_ms: Date.now() - start });
     } catch (error) {
       // Reports contain test names, never request headers, tokens, or server bodies.
@@ -68,6 +71,7 @@ export async function runSuite(options: Options): Promise<Report> {
       throw new Error(`Cloudflare e2e failed: ${name}`, { cause: error });
     }
     await options.record?.(report);
+    return result;
   }
   async function call(scope: string, path: string, status: number, init: RequestInit = {}) {
     const response = await options.request(`${origin}/projects/${scope}/${path}`, {
@@ -129,17 +133,17 @@ export async function runSuite(options: Options): Promise<Report> {
     options: { blobFirst?: boolean; status?: number; token?: string; stream?: boolean } = {},
   ) {
     const form = new FormData();
-    const addBlob = () => {
+    function addBlob(): void {
       if (blob !== undefined)
         form.append('blob', new Blob([blob], { type: 'application/octet-stream' }));
-    };
+    }
     if (options.blobFirst) addBlob();
     form.append(
       'metadata',
       new Blob([encode({ key, secondary_key: secondary, value })], { type: 'application/cbor' }),
     );
     if (!options.blobFirst) addBlob();
-    const authorization = `Bearer ${options.token ?? (await optionsToken())}`;
+    const authorization = `Bearer ${options.token ?? (await storeToken())}`;
     if (!options.stream)
       return call('e2e', 'store', options.status ?? 200, {
         method: 'POST',
@@ -154,10 +158,11 @@ export async function runSuite(options: Options): Promise<Report> {
       duplex: 'half',
     } as RequestInit);
   }
-  const optionsToken = () => options.token(`${origin}/projects/e2e`);
-  let fixture: Fixture;
-  await check('deployed revision and D1/R2 readiness', async () => {
-    fixture = await seed(
+  function storeToken(): Promise<string> {
+    return options.token(`${origin}/projects/e2e`);
+  }
+  const fixture = await check('deployed revision and D1/R2 readiness', async () => {
+    const seeded = await seed(
       admin,
       'e2e',
       `${prefix}-fixture`,
@@ -169,7 +174,7 @@ export async function runSuite(options: Options): Promise<Report> {
       const response = await options.request(`${origin}/projects/e2e/fetch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/cbor' },
-        body: encode({ key: fixture.key, secondary_key: fixture.secondary }),
+        body: encode({ key: seeded.key, secondary_key: seeded.secondary }),
         redirect: 'error',
         signal: AbortSignal.timeout(15000),
       });
@@ -177,15 +182,14 @@ export async function runSuite(options: Options): Promise<Report> {
         response.status === 200 &&
         response.headers.get('X-Remote-Cache-Deployment') === deployment
       ) {
-        assert.deepEqual((await envelope(response)).value, fixture.value);
-        break;
+        assert.deepEqual((await envelope(response)).value, seeded.value);
+        return seeded;
       }
       await response.body?.cancel();
       assert.ok(Date.now() < until, 'Deployment did not become ready');
       await delay(options.pollMs ?? 3000);
     }
   });
-  const f = fixture!;
   await check('manual verification fixture is available at the advertised endpoint', async () => {
     const manual = await envelope(
       await lookup(
@@ -211,25 +215,25 @@ export async function runSuite(options: Options): Promise<Report> {
       association_count - (SELECT count(*) FROM associations) AS associations_delta FROM deployment`;
     const before = await admin.sql(
       'SELECT charged_bytes, expires_at, state FROM generations WHERE generation_id = ?',
-      [f.generation],
+      [fixture.generation],
     );
     assert.deepEqual(await admin.sql(accounting), [
       { bytes_delta: 0, entries_delta: 0, associations_delta: 0 },
     ]);
-    assert.deepEqual(await envelope(await lookup(f.key, f.secondary)), {
+    assert.deepEqual(await envelope(await lookup(fixture.key, fixture.secondary)), {
       kind: 'exact',
-      value: f.value,
-      blob_id: f.blobId,
+      value: fixture.value,
+      blob_id: fixture.blobId,
     });
-    assert.deepEqual(await envelope(await lookup(bytes('missing'), f.secondary)), {
+    assert.deepEqual(await envelope(await lookup(bytes('missing'), fixture.secondary)), {
       kind: 'fallback',
-      key: f.key,
+      key: fixture.key,
     });
-    assert.deepEqual(await body(await call('e2e', `blob/${f.blobId}`, 200)), f.blob);
+    assert.deepEqual(await body(await call('e2e', `blob/${fixture.blobId}`, 200)), fixture.blob);
     assert.deepEqual(
       await admin.sql(
         'SELECT charged_bytes, expires_at, state FROM generations WHERE generation_id = ?',
-        [f.generation],
+        [fixture.generation],
       ),
       before,
     );
@@ -239,8 +243,8 @@ export async function runSuite(options: Options): Promise<Report> {
   });
   await check('missing data, namespace isolation, and malformed reads', async () => {
     await body(await lookup(bytes(`${prefix}-missing`), bytes('missing'), 404));
-    await body(await lookup(f.key, f.secondary, 404, 'other'));
-    await body(await call('other', `blob/${f.blobId}`, 404));
+    await body(await lookup(fixture.key, fixture.secondary, 404, 'other'));
+    await body(await call('other', `blob/${fixture.blobId}`, 404));
     await body(await call('unknown', 'fetch', 404, { method: 'POST' }));
     await body(
       await call('e2e', 'fetch', 400, {
@@ -263,13 +267,15 @@ export async function runSuite(options: Options): Promise<Report> {
       }),
     );
     await body(
-      await store(f.key, f.secondary, bytes('rejected'), undefined, {
+      await store(fixture.key, fixture.secondary, bytes('rejected'), undefined, {
         token: await options.token(`${origin}/projects/other`),
         status: 403,
       }),
     );
     if (!options.writes)
-      await body(await store(f.key, f.secondary, bytes('rejected'), undefined, { status: 403 }));
+      await body(
+        await store(fixture.key, fixture.secondary, bytes('rejected'), undefined, { status: 403 }),
+      );
     assert.ok(
       (await admin.sql('SELECT generation_id FROM generations')).every((row) =>
         before.has(row['generation_id']),
@@ -279,29 +285,32 @@ export async function runSuite(options: Options): Promise<Report> {
   await check('policy withdrawal takes effect without redeployment', async () => {
     try {
       await admin.sql("UPDATE scopes SET enabled = 0 WHERE scope_id = 'e2e'");
-      await body(await lookup(f.key, f.secondary, 404));
-      await body(await call('e2e', `blob/${f.blobId}`, 404));
+      await body(await lookup(fixture.key, fixture.secondary, 404));
+      await body(await call('e2e', `blob/${fixture.blobId}`, 404));
     } finally {
       await admin.sql("UPDATE scopes SET enabled = 1 WHERE scope_id = 'e2e'");
     }
-    assert.deepEqual((await envelope(await lookup(f.key, f.secondary))).value, f.value);
+    assert.deepEqual(
+      (await envelope(await lookup(fixture.key, fixture.secondary))).value,
+      fixture.value,
+    );
   });
   await check('missing live R2 objects have the correct errors', async () => {
     try {
-      await admin.delete(f.valueObject);
-      await body(await lookup(f.key, f.secondary, 503));
-      assert.deepEqual(await envelope(await lookup(bytes('missing'), f.secondary)), {
+      await admin.delete(fixture.valueObject);
+      await body(await lookup(fixture.key, fixture.secondary, 503));
+      assert.deepEqual(await envelope(await lookup(bytes('missing'), fixture.secondary)), {
         kind: 'fallback',
-        key: f.key,
+        key: fixture.key,
       });
     } finally {
-      await admin.put(f.valueObject, f.value);
+      await admin.put(fixture.valueObject, fixture.value);
     }
     try {
-      await admin.delete(f.blobObject);
-      await body(await call('e2e', `blob/${f.blobId}`, 404));
+      await admin.delete(fixture.blobObject);
+      await body(await call('e2e', `blob/${fixture.blobId}`, 404));
     } finally {
-      await admin.put(f.blobObject, f.blob!);
+      await admin.put(fixture.blobObject, fixture.blob!);
     }
   });
 
@@ -364,7 +373,7 @@ export async function runSuite(options: Options): Promise<Report> {
       );
     });
     await check('malformed uploads and exhausted quotas preserve published data', async () => {
-      const token = await optionsToken();
+      const token = await storeToken();
       await body(
         await call('e2e', 'store', 400, {
           method: 'POST',
@@ -383,11 +392,18 @@ export async function runSuite(options: Options): Promise<Report> {
         await admin.sql(
           "UPDATE scopes SET byte_limit = max(1, charged_bytes) WHERE scope_id = 'e2e'",
         );
-        await body(await store(f.key, f.secondary, bytes('rejected'), undefined, { status: 503 }));
+        await body(
+          await store(fixture.key, fixture.secondary, bytes('rejected'), undefined, {
+            status: 503,
+          }),
+        );
       } finally {
         await admin.sql("UPDATE scopes SET byte_limit = ? WHERE scope_id = 'e2e'", [Number(limit)]);
       }
-      assert.deepEqual((await envelope(await lookup(f.key, f.secondary))).value, f.value);
+      assert.deepEqual(
+        (await envelope(await lookup(fixture.key, fixture.secondary))).value,
+        fixture.value,
+      );
     });
     if (options.full)
       await check('maximum values and concurrent 64 MiB HTTP uploads', async () => {

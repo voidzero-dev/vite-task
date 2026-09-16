@@ -682,7 +682,7 @@ Every exact response transfers the value, even if client validation prevents a b
 
 ### Artifact-size evidence
 
-Use 5 MB for a scenario with small outputs. On 2026-09-07, we measured published Vite frontend outputs from four established products. The [artifact study](remote-cache-size-study/README.md) records pinned sources, exact bytes, and a reproduction script.
+Use 5 MB for a scenario with small outputs. On 2026-09-07, we measured published Vite frontend outputs from four established products.
 
 | Product/release                 | Output MB | `tar.zst` MB | `tar.zst` MB without source maps |
 | ------------------------------- | --------: | -----------: | -------------------------------: |
