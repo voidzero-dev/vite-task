@@ -1,4 +1,7 @@
 .wrangler/
+node_modules/
+dist/
+.env*
 .dev.vars*
 operator-state.json
 wrangler.operator.json

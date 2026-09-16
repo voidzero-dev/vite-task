@@ -180,13 +180,13 @@ async function findDatabase(
   return databases.map(object).find((database) => database['name'] === name);
 }
 
-async function ensurePrivateBucket(io: OperatorIO, name: string): Promise<void> {
+async function ensurePrivateBucket(io: OperatorIO, name: string, create = true): Promise<void> {
   try {
     const bucket = object(await io.api(`/r2/buckets/${name}`));
     if (bucket['storage_class'] && bucket['storage_class'] !== 'Standard')
       throw new Error('Use an R2 Standard bucket');
   } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    if (!create || !(error instanceof ApiError) || error.status !== 404) throw error;
     await io.wrangler([
       'r2',
       'bucket',
@@ -204,7 +204,15 @@ async function ensurePrivateBucket(io: OperatorIO, name: string): Promise<void> 
   await io.api(`/r2/buckets/${name}/domains/managed`, 'PUT', { enabled: false });
 }
 
-export async function runOperator(argv: string[], io: OperatorIO): Promise<void> {
+export async function runOperator(
+  argv: string[],
+  io: OperatorIO,
+  // Deploy to Cloudflare supplies these bindings; never rediscover them by Worker name.
+  resources?: {
+    database: Config['d1_databases'][number];
+    bucket: Config['r2_buckets'][number];
+  },
+): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -273,7 +281,9 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       throw new Error('Use the deployment name and account subdomain in the workers.dev origin');
     const profile = values.profile ?? 'free';
     if (profile !== 'free' && profile !== 'paid') throw new Error('Use free or paid');
-    let db = await findDatabase(io, name);
+    let db = resources
+      ? object(await io.api(`/d1/database/${resources.database.database_id}`))
+      : await findDatabase(io, name);
     if (!db) {
       await io.wrangler(['d1', 'create', name, '--no-update-config']);
       db = await findDatabase(io, name);
@@ -283,7 +293,7 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
     config.name = name;
     config.d1_databases[0] = {
       binding: 'INDEX',
-      database_name: name,
+      database_name: resources ? text(db['name']) : name,
       database_id: text(db['uuid']),
       migrations_dir: 'migrations',
     };
@@ -305,8 +315,9 @@ export async function runOperator(argv: string[], io: OperatorIO): Promise<void>
       if (prior && prior['repository_id'] !== repo.id)
         throw new Error('Use a new namespace for a different repository');
     }
-    await ensurePrivateBucket(io, name);
-    config.r2_buckets[0] = { binding: 'ARTIFACTS', bucket_name: name };
+    const bucketName = resources?.bucket.bucket_name ?? name;
+    await ensurePrivateBucket(io, bucketName, !resources);
+    config.r2_buckets[0] = { binding: 'ARTIFACTS', bucket_name: bucketName };
     config.workers_dev = origin.hostname.endsWith('.workers.dev');
     if (!config.workers_dev) config.routes = [{ pattern: origin.hostname, custom_domain: true }];
     config.vars['GC_BATCH_SIZE'] = profile === 'free' ? '16' : '256';
