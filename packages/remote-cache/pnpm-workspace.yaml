@@ -1,0 +1,7 @@
+# Used when Deploy to Cloudflare copies this package into its own repository.
+packages:
+  - .
+
+allowBuilds:
+  esbuild: true
+  workerd: true
