@@ -19,7 +19,7 @@ The workflow uses one `remote-cache-staging` concurrency group for all branches.
 
 ## GitHub and Cloudflare setup
 
-Use a dedicated Cloudflare staging account or dedicated resources in an account that permits this CI workload. Select Workers Paid for the configured payload sizes. The `paid` operator profile controls cleanup batch size; it does not purchase a subscription.
+Use a dedicated Cloudflare staging account or dedicated resources in an account that permits this CI workload. Workers Free is the default starting point. Staging uses the `free` operator profile unless `REMOTE_CACHE_PROFILE=paid` is explicitly configured. The profile controls cleanup batch size; it does not purchase or change a subscription. Validate deployed CPU and usage against the account's limits, and select Workers Paid if the workload needs it. Passing local tests does not establish that maximum payloads fit Free.
 
 Add these repository secrets under **Settings → Secrets and variables → Actions**. Repository write access is sufficient. The workflow does not require a GitHub environment:
 
@@ -41,6 +41,7 @@ Set these **repository variables**, which the notification job also needs:
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `REMOTE_CACHE_WORKERS_SUBDOMAIN` | Account subdomain only, for example `example` for `example.workers.dev`                                                         |
 | `REMOTE_CACHE_RESOURCE_PREFIX`   | Optional; defaults to `vp-cache-ci`. A custom prefix must end in `-ci` and use at most 34 lowercase letters, digits, or hyphens |
+| `REMOTE_CACHE_PROFILE`           | Optional; defaults to `free`. Set to `paid` to opt into larger cleanup batches on a Workers Paid account                        |
 | `REMOTE_CACHE_DEPLOY_ENABLED`    | Set to `true` after the repository secrets, variables, and Cloudflare account are ready                                         |
 
 Enable R2 in the account. The token must allow resource provisioning, updates, and fixture data access. No custom domain or DNS permission is needed. Do not attach production bindings or secrets to the staging Worker.
@@ -69,7 +70,7 @@ The operator seeds immutable objects and generation rows for read tests. This va
 
 “Local” refers to the existing regression suite and the new shared e2e-driver tests. “PR” and “Main” refer to smoke tests against the shared Cloudflare staging environment.
 
-Status assertions follow the [local RFC](0001-remote-cache.md#4-http-api-mapping). Fetch misses and unavailable blobs return plain-text `404`. An exact match with a missing or unreadable value returns `503`. A fallback returns only the stored key and makes no R2 read.
+Status assertions follow the [local RFC](../rfcs/0001-remote-cache.md#4-http-api-mapping). Fetch misses and unavailable blobs return plain-text `404`. An exact match with a missing or unreadable value returns `503`. A fallback returns only the stored key and makes no R2 read.
 
 | Case                                             | Local                         | PR                            | Main                      | Required result                                                                                                                  |
 | ------------------------------------------------ | ----------------------------- | ----------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |

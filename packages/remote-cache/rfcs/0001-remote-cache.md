@@ -192,7 +192,7 @@ Upload in the background with bounded concurrency so dependent tasks can start w
 
 The operator binds a public repository during deployment. This form illustrates the setup inputs and automatic values:
 
-![Configuration form: repository, namespace, and main branch inputs; automatic IDs, access policy, and public endpoint.](images/repository-binding-form.svg)
+![Configuration form: repository, namespace, and main branch inputs; automatic IDs, access policy, and public endpoint.](../docs/images/repository-binding-form.svg)
 
 Setup saves both immutable IDs, the branch ref, and the audience in the server policy. The audience identifies the token's intended recipient. The client derives the same audience from its configured endpoint, without a trailing slash.
 
