@@ -23,6 +23,10 @@
     { "name": "STORE_LIMITER", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
   ],
   "vars": {
+    // Deploy to Cloudflare inputs. Set the repository before running pnpm deploy.
+    "CACHE_REPOSITORY": "",
+    "CACHE_NAMESPACE": "cache",
+    "CACHE_PROFILE": "free",
     "DEPLOYMENT_ID": "local",
     "NAMESPACES": "[]",
     "LIMITS": "{}",

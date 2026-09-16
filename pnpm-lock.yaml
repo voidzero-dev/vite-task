@@ -83,8 +83,11 @@ importers:
         specifier: 6.2.12
         version: 6.2.12
     devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 5.20260911.1
+        version: 5.20260911.1
       '@types/node':
-        specifier: 'catalog:'
+        specifier: 25.0.3
         version: 25.0.3
       cborg:
         specifier: 6.1.2
@@ -102,7 +105,7 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
       typescript:
-        specifier: 'catalog:'
+        specifier: 6.0.3
         version: 6.0.3
       wrangler:
         specifier: 4.131.1
@@ -2333,8 +2336,7 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20260911.1':
     optional: true
 
-  '@cloudflare/workers-types@5.20260911.1':
-    optional: true
+  '@cloudflare/workers-types@5.20260911.1': {}
 
   '@cspotcode/source-map-support@0.8.1':
     dependencies:

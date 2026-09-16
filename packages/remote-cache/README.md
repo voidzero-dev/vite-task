@@ -4,7 +4,9 @@ This package implements the server in the [remote cache RFC](rfcs/0001-remote-ca
 
 The package contains no `vp run` client adapter. Cache keys, values, and blobs remain opaque. A successful lookup does not prove that a result is reusable; a client must validate its inputs and output archive.
 
-**Start here:** [Deploy the service and bind your repository](docs/self-hosting.md). The guide covers Cloudflare credentials, deployment, custom domains, repository binding, and the current client-integration limitation.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvoidzero-dev%2Fvite-task%2Ftree%2Fmain%2Fpackages%2Fremote-cache)
+
+**Start here:** [Deploy the service and bind your repository](docs/self-hosting.md#quick-start-deploy-to-cloudflare). The button creates a standalone repository and provisions storage. Set `CACHE_REPOSITORY` to your public GitHub repository and keep the default `free` profile. The guide covers build-token permissions, deployment checks, custom domains, and the current client-integration limitation.
 
 ## Protocol
 
@@ -36,6 +38,8 @@ Use Node.js 22.12 or newer and the repository's pinned pnpm version. From the re
 pnpm install --frozen-lockfile
 pnpm check-remote-cache
 ```
+
+In the standalone repository created by the deployment button, run `pnpm install --frozen-lockfile`, `pnpm check`, and `pnpm smoke` instead. In the monorepo, `pnpm check-remote-cache-standalone` checks that an isolated copy installs and builds without workspace dependencies. Update both lockfiles when this package's dependencies change.
 
 `just remote-cache` runs the same checks. The command generates binding/runtime types, checks all source, operator, benchmark, and test files, runs isolated workerd/D1/R2 tests, and bundles a deployment dry run. Tests generate a temporary RSA key and intercept only GitHub's fixed JWKS URL. They need no Cloudflare account, GitHub credentials, or client adapter. CI runs them on Linux, macOS, and Windows.
 

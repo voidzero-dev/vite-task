@@ -4,6 +4,46 @@ This guide deploys the service in your Cloudflare account and gives your reposit
 
 **Current status:** the server and operator CLI work in this source tree. The `vp run` remote-cache client adapter is not implemented here. You can deploy and verify the HTTP service now. Automatic task uploads and reuse require a compatible client; the proposed Vite+ settings are described separately below.
 
+## Quick start: Deploy to Cloudflare
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvoidzero-dev%2Fvite-task%2Ftree%2Fmain%2Fpackages%2Fremote-cache)
+
+The button copies this package into a new GitHub repository in your account and connects it to Workers Builds. It provisions a Worker, a D1 database, and an R2 bucket. You do not need a local checkout or GitHub Actions secrets. The repository that hosts the Worker can differ from the application repository that uses its cache. See [Cloudflare's deployment-button guide](https://developers.cloudflare.com/workers/platform/deploy-buttons/).
+
+1. Enable R2 in your Cloudflare account and create a [Workers subdomain](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/). Workers Free is the default; R2 has separate usage allowances and billing.
+2. Click the button and connect your GitHub and Cloudflare accounts. Choose a name for the new source repository, Worker, D1 database, and R2 bucket. Use dedicated storage. The storage names can differ from the Worker name.
+3. Set the following variables in the setup form. They are public deployment settings, not secrets.
+
+   | Variable           | Value                                                                  |
+   | ------------------ | ---------------------------------------------------------------------- |
+   | `CACHE_REPOSITORY` | Your public GitHub repository, for example `acme/web-app`              |
+   | `CACHE_NAMESPACE`  | Endpoint namespace; defaults to `cache`                                |
+   | `CACHE_PROFILE`    | Keep `free`; choose `paid` only when you want the larger cleanup batch |
+
+4. Use `pnpm build` as the build command and `pnpm deploy` as the deploy command. The copied package includes its own dependency versions and lockfile. Use Node.js 22.12 or newer and the pinned pnpm version. The root directory in this new repository is `/`.
+5. Check the selected build API token's permissions. Deployment needs Workers, D1, and Workers R2 Storage write access. Cloudflare manages the build token, but its [documented default permissions](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/#api-token) do not include D1. Add D1 Edit / Write to that token under **My Profile → API Tokens**, or select a token with these permissions under **Worker → Settings → Build**. Keep the token in Cloudflare; do not add it as a Worker variable or commit it.
+6. Deploy. If you changed the token after the first build started, retry the build. The deploy command applies migrations, configures private storage and cleanup, binds your application repository, and checks the public endpoint. A successful log ends with `Deployment checks passed. Cache endpoint: ...`.
+
+For a Worker named `acme-build-cache` on `my-team.workers.dev`, the default endpoint is:
+
+```text
+https://acme-build-cache.my-team.workers.dev/projects/cache
+```
+
+Use that complete URL as the client endpoint and upload-token audience. Continue with [Connect your application build](#5-connect-your-application-build) below. Opening `/` in a browser returns `404`; the service has no dashboard.
+
+Workers Builds deploys subsequent pushes to the selected production branch. Disable non-production branch builds for this service so preview code does not share production storage. To change the deployment inputs, edit `vars.CACHE_REPOSITORY`, `vars.CACHE_NAMESPACE`, or `vars.CACHE_PROFILE` in the copied `wrangler.jsonc`, or set the same names as **build variables**. Build variables override the file. Runtime dashboard variable edits alone do not configure the deployment script.
+
+Keep the generated D1 ID and R2 name in `wrangler.jsonc`. Each build reconstructs `wrangler.operator.json` from those bindings and the stored policies. Repeat deployments preserve disabled namespaces and storage budgets. A namespace cannot be reassigned to a different repository. Repository transfers or default-branch changes require an explicit `operator bind`, as described below. Use the CLI path for custom domains.
+
+The automatic checks verify the new deployment ID, disabled HTTP caching, rejected anonymous uploads, invalid requests, and cache misses. They do not upload data or prove authorized GitHub OIDC writes. The [e2e plan](e2e-plan.md#deploy-to-cloudflare-button) covers the full acceptance checks.
+
+The button targets the package on `main`. Before this change is merged, test the flow by supplying the package URL at the reviewed PR commit to Cloudflare's deployment page.
+
+## CLI deployment
+
+Use the following steps for direct deployment or custom domains. If you already deployed with the button, skip to [Connect your application build](#5-connect-your-application-build). To run later operator commands, clone the repository created by the button, install dependencies at its root, set the Cloudflare credentials below, and run `pnpm deploy` once to reconstruct its operator configuration. Run `pnpm operator` commands from that root.
+
 ## 1. Prepare the deployment checkout
 
 Use a checkout of this repository that contains `packages/remote-cache`. Install Node.js 22.12 or newer and the pnpm version in the root `package.json`. From the repository root, run:
