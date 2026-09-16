@@ -6,7 +6,7 @@ This guide deploys the service in your Cloudflare account and gives your reposit
 
 ## Quick start: Deploy to Cloudflare
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvoidzero-dev%2Fvite-task%2Ftree%2Fmain%2Fpackages%2Fremote-cache)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvoidzero-dev%2Fvite-task%2Ftree%2Ffeat%2Fpublic-remote-cache%2Fpackages%2Fremote-cache)
 
 The button copies this package into a new GitHub repository in your account and connects it to Workers Builds. It provisions a Worker, a D1 database, and an R2 bucket. You do not need a local checkout or GitHub Actions secrets. The repository that hosts the Worker can differ from the application repository that uses its cache. See [Cloudflare's deployment-button guide](https://developers.cloudflare.com/workers/platform/deploy-buttons/).
 
@@ -38,7 +38,7 @@ Keep the generated D1 ID and R2 name in `wrangler.jsonc`. Each build reconstruct
 
 The automatic checks verify the new deployment ID, disabled HTTP caching, rejected anonymous uploads, invalid requests, and cache misses. They do not upload data or prove authorized GitHub OIDC writes. The [e2e plan](e2e-plan.md#deploy-to-cloudflare-button) covers the full acceptance checks.
 
-The button targets the package on `main`. Before this change is merged, test the flow by supplying the package URL at the reviewed PR commit to Cloudflare's deployment page.
+The button temporarily targets `feat/public-remote-cache` for PR #718's live e2e test. Before marking the PR ready for review, restore the buttons in the root README, package README, and this guide to `main`, and remove this note. The CI button check rejects temporary branch URLs on a PR that is ready for review.
 
 ## CLI deployment
 

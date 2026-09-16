@@ -4,7 +4,7 @@ This package implements the server in the [remote cache RFC](rfcs/0001-remote-ca
 
 The package contains no `vp run` client adapter. Cache keys, values, and blobs remain opaque. A successful lookup does not prove that a result is reusable; a client must validate its inputs and output archive.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvoidzero-dev%2Fvite-task%2Ftree%2Fmain%2Fpackages%2Fremote-cache)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvoidzero-dev%2Fvite-task%2Ftree%2Ffeat%2Fpublic-remote-cache%2Fpackages%2Fremote-cache)
 
 **Start here:** [Deploy the service and bind your repository](docs/self-hosting.md#quick-start-deploy-to-cloudflare). The button creates a standalone repository and provisions storage. Set `CACHE_REPOSITORY` to your public GitHub repository and keep the default `free` profile. The guide covers build-token permissions, deployment checks, custom domains, and the current client-integration limitation.
 

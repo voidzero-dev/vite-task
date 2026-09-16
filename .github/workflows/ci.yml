@@ -7,7 +7,7 @@ permissions:
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, ready_for_review, converted_to_draft]
   push:
     branches:
       - main
@@ -23,6 +23,35 @@ defaults:
     shell: bash
 
 jobs:
+  deploy-button-links:
+    name: Deploy button links
+    runs-on: namespace-profile-linux-x64-default
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { readFile } = require('node:fs/promises');
+            const main = 'https://github.com/voidzero-dev/vite-task/tree/main/packages/remote-cache';
+            const pr = context.payload.pull_request;
+            const temporary = pr?.draft
+              ? `https://github.com/${pr.head.repo.full_name}/tree/${pr.head.ref}/packages/remote-cache`
+              : undefined;
+            for (const file of ['README.md', 'packages/remote-cache/README.md', 'packages/remote-cache/docs/self-hosting.md']) {
+              const content = await readFile(file, 'utf8');
+              const buttons = [...content.matchAll(/\]\((https:\/\/deploy\.workers\.cloudflare\.com\/\?url=[^)]+)\)/g)];
+              if (!buttons.length) core.setFailed(`${file}: Deploy to Cloudflare button is missing.`);
+              for (const [, button] of buttons) {
+                const source = new URL(button).searchParams.get('url');
+                if (source === main) continue;
+                if (temporary && source === temporary) {
+                  core.warning(`${file}: Temporary PR branch URL. Restore the button to main before marking this PR ready for review.`);
+                } else {
+                  core.setFailed(`${file}: Restore the Deploy to Cloudflare source URL to ${main} before merge.`);
+                }
+              }
+            }
+
   detect-changes:
     runs-on: namespace-profile-linux-x64-default
     permissions:
@@ -396,6 +425,7 @@ jobs:
     runs-on: namespace-profile-linux-x64-default
     if: always()
     needs:
+      - deploy-button-links
       - clippy
       - test
       - test-musl
