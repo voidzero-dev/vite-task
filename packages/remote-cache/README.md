@@ -1,8 +1,10 @@
 # Public remote cache service
 
-This package implements the server in the [remote cache RFC](docs/0001-remote-cache.md) ([PR #716](https://github.com/voidzero-dev/vite-task/pull/716)): a TypeScript Worker, primary D1 metadata, and a private R2 Standard bucket. Anyone can read an enabled namespace. Only a signed GitHub Actions token for the registered public repository's main-branch `push` job can publish.
+This package implements the server in the [remote cache RFC](rfcs/0001-remote-cache.md) ([PR #716](https://github.com/voidzero-dev/vite-task/pull/716)): a TypeScript Worker, primary D1 metadata, and a private R2 Standard bucket. Anyone can read an enabled namespace. Only a signed GitHub Actions token for the registered public repository's main-branch `push` job can publish.
 
 The package contains no `vp run` client adapter. Cache keys, values, and blobs remain opaque. A successful lookup does not prove that a result is reusable; a client must validate its inputs and output archive.
+
+**Start here:** [Deploy the service and bind your repository](docs/self-hosting.md). The guide covers Cloudflare credentials, deployment, custom domains, repository binding, and the current client-integration limitation.
 
 ## Protocol
 
@@ -20,7 +22,7 @@ Empty and non-UTF-8 keys work. CBOR definite and indefinite maps and byte string
 
 Fetch gives exact matches priority. A fallback follows the latest secondary-key association and returns only the stored key, without reading R2. A store replaces both mappings atomically. Reassigning a secondary key does not delete its former target. Replacing an entry preserves the other associations to its key.
 
-HTTP status codes follow the [local RFC](docs/0001-remote-cache.md#4-http-api-mapping). A fetch returns `404` when neither key resolves to a live entry. An unavailable blob also returns `404`, including when its R2 object is missing. These responses use plain text. A missing or unreadable value for a live exact match is a storage failure and returns `503`, as specified in [the read design](docs/0001-remote-cache.md#7-fetch-and-download-implementation).
+HTTP status codes follow the [local RFC](rfcs/0001-remote-cache.md#4-http-api-mapping). A fetch returns `404` when neither key resolves to a live entry. An unavailable blob also returns `404`, including when its R2 object is missing. These responses use plain text. A missing or unreadable value for a live exact match is a storage failure and returns `503`, as specified in [the read design](rfcs/0001-remote-cache.md#7-fetch-and-download-implementation).
 
 Errors have `Content-Type: text/plain; charset=utf-8`. Codes are `400` for invalid input, `401` for invalid/missing/expired tokens, `403` for a signed token that fails write policy, `404` for absent data or unavailable namespaces/routes, `413` for size limits, `429` for admission limits, `500` for an incomplete operation, and `503` for unavailable authorization/storage, failed publication guards, quotas, or concurrency admission. `429` and `503` include `Retry-After: 60`.
 
@@ -41,6 +43,8 @@ From this package directory, `pnpm dev` starts Wrangler with local bindings. App
 
 ## Setup
 
+For your own service and application repository, use the [self-hosting guide](docs/self-hosting.md). The commands below are the operator reference.
+
 For continuous deployment and smoke tests against one persistent Cloudflare staging environment, follow the [deployment and e2e plan](docs/e2e-plan.md). Internal PRs and main-branch pushes share the same Worker, D1 database, and R2 bucket. The plan includes GitHub configuration, the complete test matrix, and manual verification. Closing a PR leaves staging available.
 
 Use a dedicated Worker, D1 database, and bucket. The operator requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in its environment. The token needs account permissions for Workers Scripts, D1, and Workers R2 Storage, plus route/zone permissions if using a custom domain. Enable R2 in the account first. Credentials stay in the operator process and Wrangler; they are never stored in namespace policy or passed as command arguments.
@@ -55,9 +59,11 @@ Use the account's actual Workers subdomain. For a custom domain, set `--origin h
 
 Setup discovers resources by name, creates missing resources, applies migrations, resolves public repository and owner IDs through GitHub, records the default branch and exact audience, installs lifecycle/Cron settings, deploys, and prints the endpoint. Repeated setup does not duplicate resources or re-enable a withdrawn namespace. An incompatible origin or repository is rejected before setup changes existing policies, bucket settings, or saved configuration. Configuration is written to the ignored `wrangler.operator.json`; keep a secure backup of this non-secret file.
 
-The default `free` **resource profile** retains the RFC's 8 GB budget, 20,000 entries, 20,000 associations, and 16 generations per Cron run. It is not proof of compatibility with the Workers Free CPU limit. **Use Workers Paid for the full payload limits until production CPU measurements establish a supported Free profile.** Local measurements already exceed 10 ms in several cases. Setup does not purchase or change a Workers subscription.
+Start with Workers Free. The operator defaults to the `free` resource profile: an 8 GB budget, 20,000 entries, 20,000 associations, and 16 generations per Cron run. A paid subscription is optional. Setup does not purchase or change a Workers subscription, and R2 must be enabled separately.
 
-`--profile paid` selects 256 generations per Cron run. It does not increase storage or retention. Select those independently with `--byte-limit` and `--retention-days`. Retention can be 1–365 days. For example:
+Check deployed CPU and usage for your workload. Workers Free currently allows [10 ms of CPU per invocation](https://developers.cloudflare.com/workers/platform/limits/); maximum payloads are not yet validated against that allowance. Local CPU measurements are diagnostic, not Cloudflare billing measurements. Lower payload limits or select Workers Paid if your workload exceeds Free limits.
+
+For a deployment on Workers Paid, explicitly select `--profile paid` when you need the larger cleanup batch of 256 generations per Cron run. This option does not upgrade the account or increase storage or retention. Select those independently with `--byte-limit` and `--retention-days`. Retention can be 1–365 days. For example:
 
 ```sh
 pnpm operator setup --name my-public-cache --namespace docs --repo owner/repository --origin https://cache.example.com --profile paid --retention-days 30 --byte-limit 30000000000

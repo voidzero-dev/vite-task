@@ -13,6 +13,10 @@ vp run -t @my/app#build   # run in a package and its transitive dependencies
 vp run --cache build      # run with caching enabled
 ```
 
+## Remote cache service
+
+To deploy the public remote cache service in your own Cloudflare account and bind it to a GitHub repository, follow the [self-hosting guide](packages/remote-cache/docs/self-hosting.md). The service is available in this source tree; the `vp run` remote-cache client adapter is not yet implemented here.
+
 ## Sponsors
 
 Thanks to [namespace.so](https://namespace.so) for powering our CI/CD pipelines with fast, free macOS and Linux runners.

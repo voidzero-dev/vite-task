@@ -17,9 +17,13 @@ interface Settings {
   deployment: string;
   origin: string;
   writes: boolean;
+  profile: 'free' | 'paid';
 }
 
 export function settingsFrom(env: Record<string, string | undefined>): Settings {
+  const profile = env['REMOTE_CACHE_PROFILE'] || 'free';
+  if (profile !== 'free' && profile !== 'paid')
+    throw new Error('Set REMOTE_CACHE_PROFILE to free or paid');
   const prefix = env['REMOTE_CACHE_RESOURCE_PREFIX'] || 'vp-cache-ci';
   if (!/^[a-z0-9][a-z0-9-]{0,30}-ci$/.test(prefix))
     throw new Error(
@@ -60,6 +64,7 @@ export function settingsFrom(env: Record<string, string | undefined>): Settings 
     deployment: `${revision}-${run}-${attempt}`,
     origin: `https://${name}.${subdomain}.workers.dev`,
     writes,
+    profile,
   };
 }
 
@@ -172,7 +177,7 @@ async function deploy(settings: Settings): Promise<void> {
       '--origin',
       settings.origin,
       '--profile',
-      'paid',
+      settings.profile,
       '--retention-days',
       '1',
       '--byte-limit',

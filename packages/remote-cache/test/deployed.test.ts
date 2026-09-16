@@ -116,6 +116,11 @@ void test('CI shares persistent staging across events and only permits writes on
   assert.equal(main.name, 'vp-cache-ci-staging');
   assert.equal(main.origin, 'https://vp-cache-ci-staging.example.workers.dev');
   assert.equal(main.writes, true);
+  assert.equal(main.profile, 'free');
+  assert.equal(settingsFrom({ ...env, REMOTE_CACHE_PROFILE: '' }).profile, 'free');
+  for (const profile of ['free', 'paid'])
+    assert.equal(settingsFrom({ ...env, REMOTE_CACHE_PROFILE: profile }).profile, profile);
+  assert.throws(() => settingsFrom({ ...env, REMOTE_CACHE_PROFILE: 'invalid' }), /free or paid/);
   for (const override of [
     { GITHUB_EVENT_NAME: 'workflow_dispatch' },
     { GITHUB_EVENT_NAME: 'pull_request', GITHUB_REF: 'refs/pull/718/merge' },
