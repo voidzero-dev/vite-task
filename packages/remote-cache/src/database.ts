@@ -33,17 +33,15 @@ export function binary(bytes: Uint8Array): ArrayBuffer {
 export async function getScope(db: D1Database, id: string, stats?: Observations): Promise<Scope> {
   let scope: Scope | null;
   try {
-    scope =
-      (
-        await measured(
-          db
-            .prepare(`SELECT s.*, (s.writes_enabled AND d.writes_enabled) AS writes_enabled
+    const { results } = await measured(
+      db
+        .prepare(`SELECT s.*, (s.writes_enabled AND d.writes_enabled) AS writes_enabled
       FROM scopes s, deployment d WHERE s.scope_id = ? AND s.enabled = 1 AND d.enabled = 1`)
-            .bind(id)
-            .all<Scope>(),
-          stats,
-        )
-      ).results[0] ?? null;
+        .bind(id)
+        .all<Scope>(),
+      stats,
+    );
+    scope = results[0] ?? null;
   } catch {
     unavailable();
   }
@@ -60,11 +58,9 @@ export async function selectEntry(
 ): Promise<Selection | null> {
   // Both branches use indexed identities in one SQLite snapshot.
   try {
-    return (
-      (
-        await measured(
-          db
-            .prepare(`
+    const { results } = await measured(
+      db
+        .prepare(`
       SELECT g.*, e.key, 'exact' AS kind, 0 AS priority
       FROM entries e JOIN generations g ON g.generation_id = e.generation_id
       JOIN scopes s ON s.scope_id = e.scope_id CROSS JOIN deployment d
@@ -78,12 +74,11 @@ export async function selectEntry(
       WHERE a.scope_id = ?1 AND a.secondary_key = ?3 AND g.state = 'ready' AND g.expires_at > unixepoch()
         AND s.enabled = 1 AND d.enabled = 1
       ORDER BY priority LIMIT 1`)
-            .bind(scope, binary(key), binary(secondary))
-            .all<Selection>(),
-          stats,
-        )
-      ).results[0] ?? null
+        .bind(scope, binary(key), binary(secondary))
+        .all<Selection>(),
+      stats,
     );
+    return results[0] ?? null;
   } catch {
     unavailable();
   }
@@ -96,19 +91,16 @@ export async function selectBlob(
   stats?: Observations,
 ): Promise<Generation | null> {
   try {
-    return (
-      (
-        await measured(
-          db
-            .prepare(`SELECT g.* FROM generations g JOIN scopes s ON s.scope_id = g.scope_id CROSS JOIN deployment d
+    const { results } = await measured(
+      db
+        .prepare(`SELECT g.* FROM generations g JOIN scopes s ON s.scope_id = g.scope_id CROSS JOIN deployment d
       WHERE g.scope_id = ? AND g.blob_id = ? AND s.enabled = 1 AND d.enabled = 1
         AND ((g.state = 'ready' AND g.expires_at > unixepoch()) OR (g.state = 'retired' AND g.gc_after > unixepoch()))`)
-            .bind(scope, blob)
-            .all<Generation>(),
-          stats,
-        )
-      ).results[0] ?? null
+        .bind(scope, blob)
+        .all<Generation>(),
+      stats,
     );
+    return results[0] ?? null;
   } catch {
     unavailable();
   }
@@ -162,7 +154,7 @@ export async function recordMultipart(
   generation: Generation,
   uploadId: string,
   stats?: Observations,
-) {
+): Promise<void> {
   const result = await measured(
     db
       .prepare(
@@ -272,7 +264,7 @@ export async function cleanup(env: Env): Promise<void> {
   console.log(JSON.stringify({ operation: 'cleanup', claimed: claimed.results.length, deleted }));
 }
 
-async function cleanAssociations(db: D1Database, limit: number) {
+async function cleanAssociations(db: D1Database, limit: number): Promise<void> {
   // Cursor bounds scanning as well as deletion, even when all associations are live.
   const batch = await db
     .prepare(`SELECT scope_id, secondary_key FROM associations

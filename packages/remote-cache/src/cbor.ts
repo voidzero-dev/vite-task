@@ -1,6 +1,15 @@
 import { badRequest, tooLarge } from './errors.ts';
 import type { Limits } from './limits.ts';
 
+export interface FetchRequest {
+  key: Uint8Array;
+  secondary_key: Uint8Array;
+}
+
+export interface StoreMetadata extends FetchRequest {
+  value: Uint8Array;
+}
+
 // This codec only decodes the protocol envelope. Opaque bytes are never decoded.
 // The accepted containers are one map and (possibly chunked) strings: depth <= 2.
 class Decoder {
@@ -65,17 +74,13 @@ export function join(chunks: Uint8Array[], size: number): Uint8Array<ArrayBuffer
   return data;
 }
 
+export function decodeEnvelope(data: Uint8Array, store: false, limits: Limits): FetchRequest;
+export function decodeEnvelope(data: Uint8Array, store: true, limits: Limits): StoreMetadata;
 export function decodeEnvelope(
   data: Uint8Array,
-  store: false,
+  store: boolean,
   limits: Limits,
-): { key: Uint8Array; secondary_key: Uint8Array };
-export function decodeEnvelope(
-  data: Uint8Array,
-  store: true,
-  limits: Limits,
-): { key: Uint8Array; secondary_key: Uint8Array; value: Uint8Array };
-export function decodeEnvelope(data: Uint8Array, store: boolean, limits: Limits) {
+): FetchRequest | StoreMetadata {
   const decoder = new Decoder(data);
   const count = decoder.head(5);
   const expected = store ? 3 : 2;
@@ -90,8 +95,8 @@ export function decodeEnvelope(data: Uint8Array, store: boolean, limits: Limits)
     } catch {
       badRequest();
     }
-    if (fields.has(name) || !['key', 'secondary_key', ...(store ? ['value'] : [])].includes(name))
-      badRequest();
+    const allowed = name === 'key' || name === 'secondary_key' || (store && name === 'value');
+    if (!allowed || fields.has(name)) badRequest();
     fields.set(name, decoder.string(2, name === 'value' ? limits.value : limits.key));
   }
   if ((count === null && !decoder.break()) || !decoder.finished()) badRequest();

@@ -100,7 +100,11 @@ export async function* multipart(
   await collect(input.rest(), headerLimit);
 }
 
-async function delimiterEnd(input: Input, start: number, limit: number) {
+async function delimiterEnd(
+  input: Input,
+  start: number,
+  limit: number,
+): Promise<{ end: number; closed: boolean } | null> {
   while (input.buffer.length < start + 2 && (await input.fill())) {}
   const closed = input.buffer[start] === 45 && input.buffer[start + 1] === 45;
   let end = start + (closed ? 2 : 0);

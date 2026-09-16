@@ -5,10 +5,14 @@ import { runSuite } from '../scripts/e2e/suite.ts';
 import { retireTestData, seedManual, type Admin } from '../scripts/e2e/fixtures.ts';
 import { githubTokens, settingsFrom } from '../scripts/ci.ts';
 
-for (const mode of ['read-only smoke', 'push smoke', 'push full'] as const)
+const modes = [
+  { mode: 'read-only smoke', writes: false, full: false, checks: 8, runs: 2 },
+  { mode: 'push smoke', writes: true, full: false, checks: 13, runs: 2 },
+  { mode: 'push full', writes: true, full: true, checks: 14, runs: 1 },
+];
+
+for (const { mode, writes, full, checks, runs } of modes)
   void test(`deployed HTTP suite runs against workerd: ${mode}`, async () => {
-    const writes = mode !== 'read-only smoke';
-    const full = mode === 'push full';
     const h = await harness({
       deploymentId: 'suite-local',
       namespaces: ['test', 'other', 'e2e', 'manual'],
@@ -43,7 +47,7 @@ for (const mode of ['read-only smoke', 'push smoke', 'push full'] as const)
         },
       };
       // Reuse storage for consecutive smoke runs, including previous test generations.
-      for (let attempt = 0; attempt < (full ? 1 : 2); attempt++) {
+      for (let attempt = 0; attempt < runs; attempt++) {
         const manual = await seedManual(admin, 'suite-local');
         const report = await runSuite({
           origin: 'https://cache.example.com',
@@ -73,7 +77,7 @@ for (const mode of ['read-only smoke', 'push smoke', 'push full'] as const)
             });
           },
         });
-        assert.equal(report.results.length, writes ? (full ? 14 : 13) : 8);
+        assert.equal(report.results.length, checks);
         assert.ok(report.results.every((result) => result.status === 'passed'));
         assert.equal(
           report.results.some((result) => result.name.startsWith('real Cron')),
@@ -140,7 +144,8 @@ void test('CI shares persistent staging across events and only permits writes on
 void test('OIDC requests use only GitHub, reject redirects, and reuse tokens only for the same audience', async () => {
   const calls: { url: string; init?: RequestInit }[] = [];
   const request: typeof fetch = async (url, init) => {
-    calls.push({ url: typeof url === 'string' ? url : 'href' in url ? url.href : url.url, init });
+    const requestUrl = url instanceof Request ? url.url : String(url);
+    calls.push({ url: requestUrl, init });
     return new Response(JSON.stringify({ value: 'signed-token' }));
   };
   const env = {
