@@ -1,6 +1,6 @@
 # Changelog
 
-- **Added** A self-hosted public remote cache service with GitHub Actions write authorization, storage limits, and automatic cleanup ([#718](https://github.com/voidzero-dev/vite-task/pull/718)).
+- **Added** A self-hosted public remote cache service with a Deploy to Cloudflare button, GitHub Actions write authorization, storage limits, and automatic cleanup ([#718](https://github.com/voidzero-dev/vite-task/pull/718)).
 - **Changed** When a task isn't cached because it wrote a file it also read, `vp run --last-details` now says the task read and wrote the file, and shows the `cache: { input, output }` exclusions that let the task be cached ([#784](https://github.com/voidzero-dev/vite-task/pull/784)).
 - **Changed** The run summary now says a task that wrote a file it also read was `not cached because it modified its inputs`, and the statistics in `vp run --verbose` and `vp run --last-details` use the singular for a count of one, e.g. `1 task • 1 cache miss` ([#783](https://github.com/voidzero-dev/vite-task/pull/783)).
 - **Fixed** An invalid glob in `--filter` no longer shows its error message twice ([#763](https://github.com/voidzero-dev/vite-task/pull/763)).

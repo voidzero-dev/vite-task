@@ -2,6 +2,26 @@
 
 This plan checks the service through its public HTTP endpoints after deployment to Cloudflare. A deployment dry run or a passing Miniflare test is not evidence of a successful Cloudflare deployment.
 
+## Deploy to Cloudflare button
+
+The [self-hosting quick start](self-hosting.md#quick-start-deploy-to-cloudflare) uses Cloudflare's deployment button. Its `pnpm deploy` command reuses the provisioned `INDEX` and `ARTIFACTS` bindings, applies migrations, registers the selected public repository, disables public R2 access, installs lifecycle rules, and deploys the Worker. Free is the default.
+
+Automated regression checks cover independently named resources, an empty D1 database, repository binding, optional Paid cleanup batches, retries from a clean checkout, preserved withdrawal and quotas, rejected repository reassignment, missing storage, and placeholder IDs. Post-deployment HTTP checks require the current deployment ID and `Cache-Control: no-store`. They check an anonymous upload (`401`), malformed fetch (`400`), and a valid cache miss (`404`). A disabled namespace must continue to return `404`. Polling allows for route/revision propagation and fails the build if checks never pass. These checks do not publish data or validate authorized uploads.
+
+Linux, macOS, and Windows CI also copy the package outside the monorepo, install with its standalone frozen lockfile, check types, and bundle the Worker. This catches accidental workspace dependencies that would break the button's subdirectory copy.
+
+Before releasing the button, complete this live acceptance exercise in a dedicated account or with dedicated test resources:
+
+1. Use the package URL at the candidate commit in Deploy to Cloudflare. Start from an account with R2 enabled and a Workers subdomain. Use Workers Free first.
+2. Choose distinct Worker, D1, and R2 names, and bind a public application repository different from the Worker source repository. Confirm build-token permissions, including D1, and the default build/deploy commands.
+3. Confirm migrations, private bucket settings, cleanup rules, correct repository IDs/default branch/audience, and successful HTTP checks. Inspect build logs and the copied repository for credential leaks.
+4. Push an update to the new source repository. Confirm the same resources and data remain, and the checks observe the new deployment ID. Retry after a failed deployment without creating duplicate resources.
+5. Disable the namespace, redeploy, and confirm it remains unavailable. Restore it explicitly before testing uploads. Confirm an invalid repository and insufficient D1 permissions fail the build without a success message.
+6. From a default-branch `push` job in the bound application repository, upload a small value and blob with a real GitHub OIDC token. Read both anonymously and compare bytes. Confirm a PR token cannot upload. This is separate from the unauthenticated deployment checks.
+7. Keep non-production builds disabled, then check deployed CPU and account usage. Exercise maximum payloads and Paid separately using the release matrix below.
+
+Local tests cannot prove the Cloudflare setup form, resource provisioning, build-token injection, or Free-plan CPU behavior. Record the live build URL and results when this exercise is complete. The shared staging workflow below continues to validate the service independently of this user deployment path.
+
 ## Deployment flow
 
 `.github/workflows/remote-cache-deploy.yml` runs when a PR or a push to `main` changes this package, its deployment workflows, or the root dependency/build configuration. It also supports manual runs from the default branch.

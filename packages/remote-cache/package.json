@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "wrangler dev --test-scheduled",
     "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "node --import tsx scripts/deploy.ts",
     "types": "node -e \"require('node:fs').mkdirSync('.wrangler', { recursive: true })\" && wrangler types .wrangler/worker-configuration.d.ts --env-interface Env --strict-vars false",
     "check": "pnpm types && tsc --noEmit",
     "test": "node --import tsx --test test/index.test.ts",
@@ -20,16 +21,37 @@
     "jose": "6.2.12"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
+    "@cloudflare/workers-types": "5.20260911.1",
+    "@types/node": "25.0.3",
     "cborg": "6.1.2",
     "esbuild": "0.28.1",
     "jsonc-parser": "3.3.1",
     "miniflare": "5.20260911.0-alpha",
     "tsx": "4.23.13",
-    "typescript": "catalog:",
+    "typescript": "6.0.3",
     "wrangler": "4.131.1"
   },
   "engines": {
     "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@11.24.0",
+  "cloudflare": {
+    "bindings": {
+      "CACHE_REPOSITORY": {
+        "description": "Public GitHub repository allowed to upload, in `owner/repository` form. This can differ from the repository that hosts this Worker."
+      },
+      "CACHE_NAMESPACE": {
+        "description": "Cache namespace in the endpoint. Use 1–63 lowercase letters, digits, or hyphens."
+      },
+      "CACHE_PROFILE": {
+        "description": "Use `free` by default. Choose `paid` for a larger cleanup batch on Workers Paid. This does not change your subscription."
+      },
+      "INDEX": {
+        "description": "Dedicated D1 database for cache metadata and repository authorization."
+      },
+      "ARTIFACTS": {
+        "description": "Dedicated private R2 Standard bucket for cache values and build artifacts. Enable R2 in your account first."
+      }
+    }
   }
 }
