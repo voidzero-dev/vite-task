@@ -1,119 +1,107 @@
+# Windows is skipped because the PTY launcher cannot execute pnpm command shims.
 [[e2e]]
 name = "entries_and_associations"
+cfg = "not(windows)"
 ignore = true
 steps = [
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "start",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
     "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'VA'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
     "metadata={\"key\": 'A', \"secondary_key\": 'U', \"value\": 'VA'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
     "metadata={\"key\": 'B', \"secondary_key\": 'S', \"value\": 'VB'}",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ], comment = "The exact entry survives reassignment of S to B." },
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'C', \"secondary_key\": 'S'}",
   ], comment = "The previous fetch did not change S. Fallback returns only B's key." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
     "metadata={\"key\": 'A', \"secondary_key\": 'T', \"value\": 'VA2'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'missing'}",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'C', \"secondary_key\": 'U'}",
   ], comment = "An older association to A still resolves after A is replaced." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'C', \"secondary_key\": 'T'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'C', \"secondary_key\": 'S'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "stop",
   ],
 ]
 
 [[e2e]]
 name = "blob_replacement"
+cfg = "not(windows)"
 ignore = true
 steps = [
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "start",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "GET",
     "/blob/missing",
   ],
@@ -124,8 +112,7 @@ steps = [
     "first archive",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -134,22 +121,19 @@ steps = [
     "blob=archive.txt",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "GET",
     "/blob/1",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-data",
@@ -158,44 +142,38 @@ steps = [
     "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'second'}",
   ], comment = "Accept blob before metadata, with neither part supplying a filename." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "GET",
     "/blob/2",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "GET",
     "/blob/1",
   ], comment = "Previously returned IDs retain their original bytes." },
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
     "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'no archive'}",
   ], comment = "Omitting blob clears the association." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -204,38 +182,34 @@ steps = [
     "blob=''",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "GET",
     "/blob/3",
   ], comment = "An empty blob has an ID and downloads as an empty byte string." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "stop",
   ],
 ]
 
 [[e2e]]
 name = "opaque_binary_data"
+cfg = "not(windows)"
 ignore = true
 steps = [
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "start",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -244,76 +218,67 @@ steps = [
     "blob=b64'AP+A'",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": b64'AP+A', \"secondary_key\": ''}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": '', \"secondary_key\": ''}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "GET",
     "/blob/1",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
     "metadata={\"key\": '', \"secondary_key\": '', \"value\": ''}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": '', \"secondary_key\": ''}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "stop",
   ],
 ]
 
 [[e2e]]
 name = "invalid_requests"
+cfg = "not(windows)"
 ignore = true
 steps = [
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "start",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "GET",
     "/missing",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--data",
     "'bad'",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--data",
@@ -322,40 +287,35 @@ steps = [
     "application/cbor",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": \"text\", \"secondary_key\": ''}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": ''}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "[]",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": '', \"key\": 'duplicate', \"secondary_key\": ''}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -364,32 +324,28 @@ steps = [
     "blob='original archive'",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--cbor",
     "{}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-data",
     "blob='missing metadata'",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
     "metadata={\"key\": 'A', \"secondary_key\": 'T', \"value\": \"wrong type\"}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -398,8 +354,7 @@ steps = [
     "metadata={}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -410,8 +365,7 @@ steps = [
     "blob='two'",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -420,16 +374,14 @@ steps = [
     "unexpected='part'",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-data",
     "metadata='wrong content type'",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--data",
@@ -438,48 +390,43 @@ steps = [
     "multipart/form-data; boundary=boundary",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ], comment = "Failed stores did not replace the value or blob." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "GET",
     "/blob/1",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'B', \"secondary_key\": 'T'}",
   ], comment = "Failed stores did not publish a secondary association." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "stop",
   ],
 ]
 
 [[e2e]]
 name = "request_limit"
+cfg = "not(windows)"
 ignore = true
 steps = [
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "start",
     "--max-request-bytes",
     "1024",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -491,8 +438,7 @@ steps = [
     "require('node:fs').writeFileSync('large.bin', Buffer.alloc(2048))",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
@@ -501,78 +447,68 @@ steps = [
     "blob=large.bin",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'B', \"secondary_key\": 'T'}",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "stop",
   ],
 ]
 
 [[e2e]]
 name = "daemon_lifecycle"
+cfg = "not(windows)"
 ignore = true
 steps = [
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "start",
     "--base-path",
     "/projects/test",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "start",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/store",
     "--form-cbor",
     "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'first daemon'}",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "stop",
   ], comment = "Connect before deleting cache.url, then wait for the connection to close before restarting." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "start",
   ],
   { argv = [
-    "node",
-    "../node_modules/vite-task-tools/src/cbor-http.ts",
+    "cbor-http",
     "POST",
     "/fetch",
     "--cbor",
     "{\"key\": 'A', \"secondary_key\": 'S'}",
   ], comment = "A new daemon starts with empty state." },
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "stop",
   ],
   [
-    "node",
-    "../node_modules/vite-task-tools/src/remote-cache/cli.ts",
+    "remote-cache-server",
     "stop",
   ],
 ]

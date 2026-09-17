@@ -44,4 +44,4 @@ Every response prints one EDN map containing `status`, `content_type`, and `body
 
 Run `pnpm --filter vite-task-tools check` for type checking and `pnpm --filter vite-task-tools test` for the EDN-formatting unit test. Run `cargo test -p vt_bin --test e2e_snapshots -- remote_cache_backend --ignored` for the backend snapshots.
 
-E2E steps invoke the TypeScript files with `node` through the existing `../node_modules/vite-task-tools` link. This avoids launching shell command shims as executables on Windows and preserves EDN arguments without shell quoting.
+The backend snapshots are skipped on Windows because the PTY launcher cannot execute pnpm command shims.
