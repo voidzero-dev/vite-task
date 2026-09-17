@@ -148,7 +148,9 @@ jobs:
         run: pnpm --filter vite-task-tools exec playwright install-deps chromium
 
       - name: Run ignored tests
-        run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }} -- --ignored
+        run: |
+          pnpm --filter vite-task-tools test
+          ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }} -- --ignored
 
   # Windows tests are cross-compiled on a fast Linux runner with cargo-xwin
   # (clang-cl + lld-link against the xwin-downloaded MSVC CRT/Windows SDK)
@@ -281,7 +283,9 @@ jobs:
 
       - name: Run ignored tests
         if: matrix.mode == 'ignored'
-        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
+        run: |
+          pnpm --filter vite-task-tools test
+          cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
 
   test-musl:
     needs: detect-changes
@@ -335,7 +339,9 @@ jobs:
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
 
       - name: Run ignored tests
-        run: cargo test -- --ignored
+        run: |
+          pnpm --filter vite-task-tools test
+          cargo test -- --ignored
 
   fmt:
     name: Format and Check Deps
@@ -373,6 +379,9 @@ jobs:
         run: |
           pnpm build-vite-task-client-types
           git diff --exit-code packages/vite-task-client/src/index.d.ts
+
+      - name: Check test utility types
+        run: pnpm --filter vite-task-tools check
 
   done:
     runs-on: namespace-profile-linux-x64-default

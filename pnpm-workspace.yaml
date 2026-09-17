@@ -10,12 +10,15 @@ allowBuilds:
 
 catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.75
+  '@fastify/busboy': 3.2.2
   '@openai/codex': 0.154.0
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.63.0
   '@vitest/browser-playwright': 4.1.11
   bun: 1.4.2
+  cbor-edn: 0.2.2
+  cbor2: 1.11.0
   cross-env: ^10.1.0
   deno: 2.9.6
   husky: ^9.1.7

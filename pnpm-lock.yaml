@@ -9,6 +9,9 @@ catalogs:
     '@anthropic-ai/sandbox-runtime':
       specifier: 0.0.75
       version: 0.0.75
+    '@fastify/busboy':
+      specifier: 3.2.2
+      version: 3.2.2
     '@openai/codex':
       specifier: 0.154.0
       version: 0.154.0
@@ -27,6 +30,12 @@ catalogs:
     bun:
       specifier: 1.4.2
       version: 1.4.2
+    cbor-edn:
+      specifier: 0.2.2
+      version: 0.2.2
+    cbor2:
+      specifier: 1.11.0
+      version: 1.11.0
     cross-env:
       specifier: ^10.1.0
       version: 10.1.0
@@ -82,6 +91,9 @@ importers:
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
         version: 0.0.75
+      '@fastify/busboy':
+        specifier: 'catalog:'
+        version: 3.2.2
       '@openai/codex':
         specifier: 'catalog:'
         version: 0.154.0
@@ -97,6 +109,12 @@ importers:
       bun:
         specifier: 'catalog:'
         version: 1.4.2
+      cbor-edn:
+        specifier: 'catalog:'
+        version: 0.2.2
+      cbor2:
+        specifier: 'catalog:'
+        version: 1.11.0
       cross-env:
         specifier: 'catalog:'
         version: 10.1.0
@@ -124,6 +142,10 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@25.0.3)(@vitest/browser-playwright@4.1.11)(@vitest/browser-preview@4.1.11)(vite@8.3.0(@types/node@25.0.3))
+    devDependencies:
+      vite-task-tools:
+        specifier: workspace:*
+        version: 'link:'
 
   packages/vite-task-client: {}
 
@@ -183,6 +205,9 @@ packages:
 
   '@epic-web/invariant@1.0.0':
     resolution: {integrity: sha512-lrTPqgvfFQtR/eY/qkIzp98OGdNJu0m5ji3q/nJI8v3SXkRKEnWiOxMmbvcSoAIzv/cGiuvRy57k4suKQSAdwA==}
+
+  '@fastify/busboy@3.2.2':
+    resolution: {integrity: sha512-yXSS27qPExaXeuLvMRMXOLtpipzfQYNjG3FkunDWKGfMYjKuhFXko9CVzqxm8jcF+lmtS9Fd89QNdh9XDjnbNg==}
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
@@ -1316,6 +1341,15 @@ packages:
     os: [darwin, linux, android, freebsd, win32]
     hasBin: true
 
+  cbor-edn@0.2.2:
+    resolution: {integrity: sha512-/zu3hPQmrkHtHoW1Bp73pYRlIg1R34rNiP4L87FMI2EbBf7l0cO3B2W/rBx3W8mvqDh3Qc4cJy3DcAnVaamQPQ==}
+    engines: {node: '>=18.7'}
+    hasBin: true
+
+  cbor2@1.11.0:
+    resolution: {integrity: sha512-teHnpDGcDzwouFJgCJLpDY2zMaEOYvYDryd6sln67wPrCuObmwriG1NAA1w7rUIf/l++bNdts4U7WeVdYTGwLg==}
+    engines: {node: '>=18.7'}
+
   chai@6.2.2:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
     engines: {node: '>=18'}
@@ -1810,6 +1844,8 @@ snapshots:
     optional: true
 
   '@epic-web/invariant@1.0.0': {}
+
+  '@fastify/busboy@3.2.2': {}
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
@@ -2580,6 +2616,12 @@ snapshots:
       '@oven/bun-linux-x64-musl': 1.4.2
       '@oven/bun-windows-aarch64': 1.4.2
       '@oven/bun-windows-x64': 1.4.2
+
+  cbor-edn@0.2.2:
+    dependencies:
+      cbor2: 1.11.0
+
+  cbor2@1.11.0: {}
 
   chai@6.2.2: {}
 
