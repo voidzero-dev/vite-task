@@ -11,9 +11,11 @@ cbor-http POST /fetch --cbor "{\"key\": 'A', \"secondary_key\": 'S'}"
 remote-cache-server stop
 ```
 
-`start` launches an in-memory daemon on a free loopback port and writes its endpoint to `cache.url` in the current directory. It returns when the daemon is ready. Each E2E case has its own directory and server state. Deleting `cache.url` stops the daemon; `stop` deletes it and waits for shutdown. The daemon also exits after five minutes so a failed test cannot leave it running indefinitely. Use `--max-lifetime-ms` on `start` for longer tests.
+`start` creates `cache.url` exclusively in the current directory, refusing to start if it already exists. It launches an in-memory daemon on a free loopback port and fills the file with its endpoint before returning. Each E2E case has its own directory and server state.
 
-`cache.lock` prevents overlapping starts in the same directory. It is removed after the server closes. Daemon output goes to `cache.log`, and startup failures include that log. These files stay in the test's directory.
+`stop` connects to the endpoint, deletes `cache.url`, and reads until EOF or a connection reset confirms shutdown. The daemon watches the directory for file changes and closes its listener before closing active connections. Wait for `stop` to finish before restarting in the same directory. Deleting the file manually also requests shutdown, but a later `stop` cannot wait for the server because the endpoint is gone. The harness enforces step timeouts and skips remaining steps when one times out. The detached daemon exits after five minutes so it is cleaned up even if `stop` never runs. Use `--max-lifetime-ms` on `start` for longer tests.
+
+Daemon output goes to `cache.log`, and startup failures include that log. The log stays in the test's directory.
 
 The backend implements `POST /fetch`, `POST /store`, and `GET /blob/{blob_id}` from the [remote cache RFC](https://github.com/voidzero-dev/vite-task/blob/rfc-cloudflare-remote-cache/docs/rfcs/0001-remote-cache.md#4-http-api-mapping). Keys and values are opaque bytes. Blobs remain unchanged until the daemon exits. Blob IDs are sequential strings to keep snapshots deterministic. There is no authentication or persistent storage.
 
@@ -34,10 +36,12 @@ The backend implements `POST /fetch`, `POST /store`, and `GET /blob/{blob_id}` f
 
 Multipart options can repeat and retain their order. Raw bodies and parts default to `application/octet-stream`. Parts have no filename, including binary metadata.
 
-Every response prints one EDN map containing `status`, `content_type`, and `body`. CBOR is decoded, text becomes a text string, and other bodies become byte strings. Byte strings use readable UTF-8 when possible and base64 EDN otherwise. HTTP error responses exit successfully so snapshots can assert their status and body. Argument errors, transport failures, and invalid CBOR responses exit unsuccessfully. Requests time out after ten seconds.
+Every response prints one EDN map containing `status`, `content_type`, and `body`. CBOR is decoded, text becomes a text string, and other bodies become byte strings. Byte strings use readable UTF-8 when possible and base64 EDN otherwise. HTTP error responses exit successfully so snapshots can assert their status and body. Argument errors, transport failures, and invalid CBOR responses exit unsuccessfully.
 
 ```text
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "exact", "value": 'record', "blob_id": null}}
 ```
 
-Run `pnpm --filter vite-task-tools check` for type checking and `pnpm --filter vite-task-tools test` for utility tests. Run `cargo test -p vt_bin --test e2e_snapshots -- remote_cache_backend --ignored` for the backend snapshots.
+Run `pnpm --filter vite-task-tools check` for type checking and `pnpm --filter vite-task-tools test` for the EDN-formatting unit test. Run `cargo test -p vt_bin --test e2e_snapshots -- remote_cache_backend --ignored` for the backend snapshots.
+
+E2E steps invoke the TypeScript files with `node` through the existing `../node_modules/vite-task-tools` link. This avoids launching shell command shims as executables on Windows and preserves EDN arguments without shell quoting.

@@ -1,90 +1,57 @@
 #!/usr/bin/env node
 import { fork } from 'node:child_process';
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { setTimeout as delay } from 'node:timers/promises';
+import { once } from 'node:events';
+import { open, readFile, rm, watch, writeFile } from 'node:fs/promises';
+import { createConnection } from 'node:net';
+import { Readable } from 'node:stream';
+import { setTimeout } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { createCacheServer } from './server.ts';
 
 const urlFile = 'cache.url';
-const lockDir = 'cache.lock';
 const logFile = 'cache.log';
-const startupTimeout = 10_000;
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw error;
-  }
-}
-
-async function waitUntil(check: () => Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + startupTimeout;
-  while (!(await check())) {
-    if (Date.now() >= deadline) throw new Error('Timed out waiting for remote cache server');
-    await delay(50);
-  }
-}
 
 async function start(args: string[]): Promise<void> {
   try {
-    await mkdir(lockDir);
+    const file = await open(urlFile, 'wx');
+    await file.close();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new Error('Remote cache server already started (cache.lock exists)');
+      throw new Error('Remote cache server already started (cache.url exists)');
     }
     throw error;
   }
   try {
-    if (await exists(urlFile)) throw new Error('cache.url already exists');
     const log = await open(logFile, 'w');
     const child = fork(import.meta.filename, ['serve', ...args], {
       detached: true,
       stdio: ['ignore', log.fd, log.fd, 'ipc'],
     });
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => reject(new Error('Remote cache server startup timed out')),
-          startupTimeout,
-        );
-        child.once('message', (message) => {
-          clearTimeout(timeout);
-          if (message === 'ready') resolve();
-          else reject(new Error('Unexpected daemon readiness message'));
-        });
-        child.once('error', (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        });
-        child.once('exit', () => {
-          clearTimeout(timeout);
-          reject(new Error('Remote cache server exited before readiness'));
-        });
-      });
+      const [message] = await once(child, 'message');
+      if (message !== 'ready') throw new Error('Unexpected daemon readiness message');
     } catch (error) {
-      // A failed startup must not leave a detached child or a stale lock.
-      if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
-        const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-        child.kill('SIGKILL');
-        await exited;
-      }
-      await rm(urlFile, { force: true });
-      throw new Error(
-        `${error instanceof Error ? error.message : String(error)}\n${await readFile(logFile, 'utf8')}`.trim(),
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}\n${await readFile(logFile, 'utf8')}`.trim());
     } finally {
       await log.close();
       if (child.connected) child.disconnect();
       child.unref();
     }
   } catch (error) {
-    await rm(lockDir, { recursive: true, force: true });
+    await rm(urlFile, { force: true });
     throw error;
   }
   console.log('Remote cache server started');
+}
+
+async function ownsUrlFile(url: string | undefined): Promise<boolean> {
+  try {
+    return (await readFile(urlFile, 'utf8')).trim() === url;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 async function serve(
@@ -93,58 +60,96 @@ async function serve(
   basePath: string,
 ): Promise<void> {
   const server = createCacheServer({ maxRequestBytes, basePath });
-  let stopping = false;
-  let ready = false;
+  const shutdown = new AbortController();
+  const { signal } = shutdown;
   let url: string | undefined;
-  process.on('SIGTERM', () => {
-    stopping = true;
-  });
-  process.on('SIGINT', () => {
-    stopping = true;
-  });
-  // If the starter disappears before readiness, nobody can use this instance.
-  process.on('disconnect', () => {
-    if (!ready) stopping = true;
-  });
-  try {
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
+
+  async function watchUrlFile(): Promise<void> {
+    // Watch the directory so deleting the file is observable on every platform.
+    for await (const { filename } of watch('.', { signal })) {
+      if ((filename === null || filename === urlFile) && !(await ownsUrlFile(url))) return;
+    }
+  }
+
+  async function announceReadiness(): Promise<void> {
+    // Check after subscribing to file changes, so startup cannot miss a deletion.
+    // If the starter disappeared, nobody can use this instance.
+    if (!(await ownsUrlFile(url)) || !process.connected || signal.aborted) return;
+    process.send?.('ready');
+    await setTimeout(maxLifetimeMs, undefined, { signal });
+  }
+
+  async function run(): Promise<void> {
+    const listening = once(server, 'listening', { signal });
+    server.listen(0, '127.0.0.1');
+    await listening;
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing server address');
     url = `http://127.0.0.1:${address.port}${basePath}`;
-    await writeFile(`${lockDir}/url.tmp`, `${url}\n`);
-    await rename(`${lockDir}/url.tmp`, urlFile);
-    if (process.connected) process.send?.('ready');
-    ready = true;
-    const deadline = Date.now() + maxLifetimeMs;
-    while (!stopping && Date.now() < deadline) {
-      try {
-        if ((await readFile(urlFile, 'utf8')).trim() !== url) break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') break;
-        throw error;
-      }
-      await delay(50);
-    }
+    // Fill the reserved file before reporting readiness. Do not recreate it if
+    // it was deleted during startup.
+    await writeFile(urlFile, `${url}\n`, { flag: 'r+' });
+    await Promise.race([watchUrlFile(), announceReadiness()]);
+  }
+
+  const pending = [
+    once(process, 'SIGTERM', { signal }),
+    once(process, 'SIGINT', { signal }),
+    run(),
+  ];
+  try {
+    await Promise.race(pending);
   } finally {
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve());
-      server.closeAllConnections();
-    });
-    // Removing the lock acknowledges that the listening socket has closed.
+    shutdown.abort();
+    await Promise.allSettled(pending);
+    // Finish file cleanup before closing the port, so a subsequent start after
+    // `stop` returns cannot have its URL file removed by this instance.
     try {
-      if ((await readFile(urlFile, 'utf8')).trim() === url) await rm(urlFile, { force: true });
+      if (await ownsUrlFile(url)) await rm(urlFile, { force: true });
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.error(error);
-        process.exitCode = 1;
-      }
+      console.error(error);
+      process.exitCode = 1;
     } finally {
-      await rm(lockDir, { recursive: true, force: true });
+      if (server.listening) {
+        const closed = server[Symbol.asyncDispose]();
+        server.closeAllConnections();
+        await closed;
+      }
     }
   }
+}
+
+async function stop(): Promise<void> {
+  let endpoint: string;
+  try {
+    endpoint = await readFile(urlFile, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    console.log('No remote cache endpoint found');
+    return;
+  }
+  const url = new URL(endpoint.trim());
+  const socket = createConnection({
+    host: url.hostname,
+    port: Number(url.port),
+  });
+  const reader = Readable.toWeb(socket).getReader();
+  try {
+    await once(socket, 'connect');
+    await rm(urlFile, { force: true });
+    // Shutdown closes the listener before this connection. EOF or a reset
+    // confirms the server has stopped accepting connections.
+    const { done } = await reader.read();
+    if (!done) throw new Error('Unexpected data while waiting for remote cache server shutdown');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ECONNREFUSED' && code !== 'ECONNRESET') throw error;
+    await rm(urlFile, { force: true });
+  } finally {
+    reader.releaseLock();
+    socket.destroy();
+  }
+  console.log('Remote cache server stopped');
 }
 
 function positiveInteger(value: string): number {
@@ -186,9 +191,7 @@ async function main(): Promise<void> {
       await serve(lifetime, limit, basePath);
       break;
     case 'stop':
-      await rm(urlFile, { force: true });
-      await waitUntil(async () => !(await exists(lockDir)));
-      console.log('Remote cache server stopped');
+      await stop();
       break;
     default:
       throw new Error('Usage: remote-cache-server start|stop');

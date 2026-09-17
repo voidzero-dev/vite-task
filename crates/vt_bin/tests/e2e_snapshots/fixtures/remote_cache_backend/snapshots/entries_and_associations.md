@@ -1,36 +1,36 @@
 # entries_and_associations
 
-## `remote-cache-server start`
+## `node ../node_modules/vite-task-tools/src/remote-cache/cli.ts start`
 
 ```
 Remote cache server started
 ```
 
-## `cbor-http POST /fetch --cbor '{"key": '\''A'\'', "secondary_key": '\''S'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /fetch --cbor '{"key": '\''A'\'', "secondary_key": '\''S'\''}'`
 
 ```
 {"status": 404, "content_type": "text/plain; charset=utf-8", "body": "Entry not found"}
 ```
 
-## `cbor-http POST /store --form-cbor 'metadata={"key": '\''A'\'', "secondary_key": '\''S'\'', "value": '\''VA'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /store --form-cbor 'metadata={"key": '\''A'\'', "secondary_key": '\''S'\'', "value": '\''VA'\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"blob_id": null}}
 ```
 
-## `cbor-http POST /store --form-cbor 'metadata={"key": '\''A'\'', "secondary_key": '\''U'\'', "value": '\''VA'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /store --form-cbor 'metadata={"key": '\''A'\'', "secondary_key": '\''U'\'', "value": '\''VA'\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"blob_id": null}}
 ```
 
-## `cbor-http POST /store --form-cbor 'metadata={"key": '\''B'\'', "secondary_key": '\''S'\'', "value": '\''VB'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /store --form-cbor 'metadata={"key": '\''B'\'', "secondary_key": '\''S'\'', "value": '\''VB'\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"blob_id": null}}
 ```
 
-## `cbor-http POST /fetch --cbor '{"key": '\''A'\'', "secondary_key": '\''S'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /fetch --cbor '{"key": '\''A'\'', "secondary_key": '\''S'\''}'`
 
 The exact entry survives reassignment of S to B.
 
@@ -38,7 +38,7 @@ The exact entry survives reassignment of S to B.
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "exact", "value": 'VA', "blob_id": null}}
 ```
 
-## `cbor-http POST /fetch --cbor '{"key": '\''C'\'', "secondary_key": '\''S'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /fetch --cbor '{"key": '\''C'\'', "secondary_key": '\''S'\''}'`
 
 The previous fetch did not change S. Fallback returns only B's key.
 
@@ -46,19 +46,19 @@ The previous fetch did not change S. Fallback returns only B's key.
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "fallback", "key": 'B'}}
 ```
 
-## `cbor-http POST /store --form-cbor 'metadata={"key": '\''A'\'', "secondary_key": '\''T'\'', "value": '\''VA2'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /store --form-cbor 'metadata={"key": '\''A'\'', "secondary_key": '\''T'\'', "value": '\''VA2'\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"blob_id": null}}
 ```
 
-## `cbor-http POST /fetch --cbor '{"key": '\''A'\'', "secondary_key": '\''missing'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /fetch --cbor '{"key": '\''A'\'', "secondary_key": '\''missing'\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "exact", "value": 'VA2', "blob_id": null}}
 ```
 
-## `cbor-http POST /fetch --cbor '{"key": '\''C'\'', "secondary_key": '\''U'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /fetch --cbor '{"key": '\''C'\'', "secondary_key": '\''U'\''}'`
 
 An older association to A still resolves after A is replaced.
 
@@ -66,19 +66,19 @@ An older association to A still resolves after A is replaced.
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "fallback", "key": 'A'}}
 ```
 
-## `cbor-http POST /fetch --cbor '{"key": '\''C'\'', "secondary_key": '\''T'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /fetch --cbor '{"key": '\''C'\'', "secondary_key": '\''T'\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "fallback", "key": 'A'}}
 ```
 
-## `cbor-http POST /fetch --cbor '{"key": '\''C'\'', "secondary_key": '\''S'\''}'`
+## `node ../node_modules/vite-task-tools/src/cbor-http.ts POST /fetch --cbor '{"key": '\''C'\'', "secondary_key": '\''S'\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "fallback", "key": 'B'}}
 ```
 
-## `remote-cache-server stop`
+## `node ../node_modules/vite-task-tools/src/remote-cache/cli.ts stop`
 
 ```
 Remote cache server stopped

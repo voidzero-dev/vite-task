@@ -156,7 +156,7 @@ export function createCacheServer({ maxRequestBytes = 64 * 1024 * 1024, basePath
     cbor(response, { blob_id: blobId });
   }
 
-  return createServer({ requestTimeout: 10_000 }, (request, response) => {
+  return createServer((request, response) => {
     void handle(request, response).catch((error: unknown) => {
       const known = error instanceof RequestError;
       if (!known) console.error(error);

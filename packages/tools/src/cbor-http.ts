@@ -84,7 +84,6 @@ async function main(): Promise<void> {
     method,
     ...(body === undefined ? {} : { body }),
     ...(contentType === undefined ? {} : { headers: { 'content-type': contentType } }),
-    signal: AbortSignal.timeout(10_000),
   });
   const responseType = response.headers.get('content-type') ?? '';
   const raw = new Uint8Array(await response.arrayBuffer());
