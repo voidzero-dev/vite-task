@@ -238,6 +238,53 @@ steps = [
 ]
 
 [[e2e]]
+name = "output_config_changed"
+comment = """
+Changing only the task's output configuration causes a cache miss. Restoring the original configuration reuses its existing entry.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "populate the original entry" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache hit with the original output config" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "\"env\": [\"MY_ENV\"]",
+    "\"env\": [\"MY_ENV\"], \"output\": []",
+  ], comment = "change only the output config" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache miss: output configuration changed" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache hit with the new output config" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "\"env\": [\"MY_ENV\"], \"output\": []",
+    "\"env\": [\"MY_ENV\"]",
+  ], comment = "restore the original output config" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "cache hit: the original entry is still available" },
+]
+
+[[e2e]]
 name = "glob_input_changes"
 comment = """
 Modifying, adding, or removing files matched by a glob `input` pattern should each invalidate the cache.
