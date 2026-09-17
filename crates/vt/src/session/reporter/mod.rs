@@ -477,6 +477,7 @@ pub mod test_fixtures {
                 execution_item_display: test_display(name),
                 kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(SpawnExecution {
                     cache_metadata: None,
+                    remote_cache: None,
                     spawn_command: SpawnCommand {
                         program_path: test_path(),
                         args: Arc::from([]),

@@ -172,6 +172,9 @@ pub enum Error {
     )]
     NoPackagesMatched { sources: Vec<Str> },
 
+    #[error(transparent)]
+    RemoteCache(#[from] crate::remote_cache::RemoteCacheConfigError),
+
     #[error("Invalid value for VP_RUN_CONCURRENCY_LIMIT: {0:?}")]
     InvalidConcurrencyLimitEnv(Arc<OsStr>),
 

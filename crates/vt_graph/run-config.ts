@@ -26,6 +26,12 @@ base: InputBase, };
 
 export type InputBase = "package" | "workspace";
 
+export type RemoteCacheConfig = {
+/**
+ * HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
+ */
+url: string, };
+
 export type Task = {
 /**
  * Command to run, or an array of commands to run in order.
@@ -45,7 +51,11 @@ cwd?: string,
  *   `{ "task": "build", "from": "dependencies" }` runs `build` in each
  *   direct workspace dependency that defines a `build` task.
  */
-dependsOn?: Array<DependsOnEntry>, } & ({
+dependsOn?: Array<DependsOnEntry>,
+/**
+ * Disable remote caching for this task while retaining local caching.
+ */
+remoteCache?: false, } & ({
 /**
  * Whether to cache the task
  */
@@ -126,6 +136,10 @@ export type RunConfig = {
  * Setting it in a package's config will result in an error.
  */
 cache?: UserGlobalCacheConfig,
+/**
+ * Remote cache endpoint. Only allowed in the workspace root config.
+ */
+remoteCache?: RemoteCacheConfig,
 /**
  * Task definitions: full task objects, command strings, or command string arrays.
  */

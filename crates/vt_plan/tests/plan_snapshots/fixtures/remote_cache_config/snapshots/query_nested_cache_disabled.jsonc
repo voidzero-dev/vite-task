@@ -1,0 +1,87 @@
+// run cache-off
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "cache-off"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/remote-cache-config",
+          "task_name": "cache-off",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/remote-cache-config",
+                "task_name": "cache-off",
+                "package_path": "<workspace>/"
+              },
+              "command": "vt run --no-cache build",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Expanded": {
+                "graph": [
+                  {
+                    "key": [
+                      "<workspace>/",
+                      "build"
+                    ],
+                    "node": {
+                      "task_display": {
+                        "package_name": "@test/remote-cache-config",
+                        "task_name": "build",
+                        "package_path": "<workspace>/"
+                      },
+                      "items": [
+                        {
+                          "execution_item_display": {
+                            "task_display": {
+                              "package_name": "@test/remote-cache-config",
+                              "task_name": "build",
+                              "package_path": "<workspace>/"
+                            },
+                            "command": "vtt print-file package.json",
+                            "cwd": "<workspace>/"
+                          },
+                          "kind": {
+                            "Leaf": {
+                              "Spawn": {
+                                "cache_metadata": null,
+                                "spawn_command": {
+                                  "program_path": "<tools>/vtt",
+                                  "args": [
+                                    "print-file",
+                                    "package.json"
+                                  ],
+                                  "spawn_envs": {
+                                    "NO_COLOR": "1",
+                                    "PATH": "<workspace>/node_modules/.bin:<tools>",
+                                    "VP_RUN": "1"
+                                  },
+                                  "cwd": "<workspace>/"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "neighbors": []
+                  }
+                ],
+                "concurrency_limit": 4
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

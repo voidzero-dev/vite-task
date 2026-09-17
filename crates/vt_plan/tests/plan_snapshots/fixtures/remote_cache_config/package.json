@@ -1,0 +1,15 @@
+{
+  "name": "@test/remote-cache-config",
+  "scripts": {
+    "inherit": "vt run build",
+    "deep": "vt run inherit",
+    "env-off": "VP_REMOTE_CACHE=off vt run build",
+    "cli-read": "VP_REMOTE_CACHE=off vt run --remote-cache=read build",
+    "siblings": "VP_REMOTE_CACHE=off vt run build && vt run build",
+    "endpoints": "VP_REMOTE_CACHE_URL=https://other.example/projects/nested vt run build && vt run build",
+    "cache-on": "vt run --cache build",
+    "cache-off": "vt run --no-cache build",
+    "invalid-nested": "VP_REMOTE_CACHE=invalid vt run build",
+    "prefix": "VP_REMOTE_CACHE=off VP_REMOTE_CACHE_URL=https://other.example vtt print-file package.json"
+  }
+}

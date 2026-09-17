@@ -48,6 +48,10 @@ pub struct RunFlags {
     #[clap(long, conflicts_with = "cache")]
     pub no_cache: bool,
 
+    /// Remote cache mode (planning only; remote transfers are not yet implemented).
+    #[clap(long, value_name = "off|read|read-write")]
+    pub remote_cache: Option<vt_plan::remote_cache::RemoteCacheMode>,
+
     /// How task output is displayed.
     #[clap(long, default_value = "interleaved")]
     pub log: LogMode,
@@ -233,6 +237,7 @@ impl ResolvedRunCommand {
                 plan_options: PlanOptions {
                     extra_args: self.additional_args.into(),
                     cache_override,
+                    remote_cache: self.flags.remote_cache,
                     concurrency_limit,
                     parallel,
                     fail_if_no_match,

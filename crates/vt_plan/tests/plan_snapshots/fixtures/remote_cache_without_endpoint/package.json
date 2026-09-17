@@ -1,0 +1,7 @@
+{
+  "name": "@test/remote-cache-without-endpoint",
+  "scripts": {
+    "build": "vtt print-file package.json",
+    "with-url": "VP_REMOTE_CACHE_URL=https://cache.example/projects/inner vt run build"
+  }
+}
