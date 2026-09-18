@@ -8,6 +8,10 @@ allowBuilds:
   bun: true
   deno: true
 
+minimumReleaseAgeExclude:
+  - vite-plus
+  - '@voidzero-dev/*'
+
 catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.75
   '@fastify/busboy': 3.2.2
