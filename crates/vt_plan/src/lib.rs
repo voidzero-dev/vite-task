@@ -31,6 +31,15 @@ use vt_str::Str;
 /// like resolved environment variables, current working directory, and additional args from cli.
 #[derive(Debug, Serialize)]
 pub struct SpawnExecution {
+    /// A nested persistent runner owns its own file tracing session.
+    #[serde(skip)]
+    pub nested_watch: bool,
+    /// Inputs for watch mode, retained independently of cache metadata.
+    #[serde(skip)]
+    pub input_config: vt_graph::config::ResolvedGlobConfig,
+    /// Planning environment for runner-aware APIs in uncached watch tasks.
+    #[serde(skip)]
+    pub unfiltered_envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
     /// Cache metadata for this execution. `None` means caching is disabled.
     pub cache_metadata: Option<cache_metadata::CacheMetadata>,
 
@@ -74,6 +83,10 @@ where
 /// Represents how a task should be executed. It's the node type for the execution graph. Each node corresponds to a task.
 #[derive(Debug, Serialize)]
 pub struct TaskExecution {
+    /// Explicit inputs are retained even for commands executed in process.
+    #[serde(skip)]
+    pub input_config: vt_graph::config::ResolvedGlobConfig,
+
     /// The task this execution corresponds to
     pub task_display: TaskDisplay,
 

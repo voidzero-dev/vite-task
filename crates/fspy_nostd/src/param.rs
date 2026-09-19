@@ -7,7 +7,7 @@
 //! it; the retroactive interfaces (`prctl(PR_GET_AUXV)`, `/proc/self/auxv`)
 //! need a 6.4 kernel or a mounted `/proc`. So instead of the auxiliary
 //! vector, the value is learned from syscall behavior that any kernel
-//! version guarantees: see [`linux::page_size`].
+//! version guarantees: see the Linux implementation of `page_size`.
 //!
 //! On macOS, where every syscall goes through libSystem by platform contract
 //! anyway, it calls `sysconf` directly.

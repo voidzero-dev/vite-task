@@ -81,6 +81,8 @@ pub enum CacheNotUpdatedReason {
     /// - Fast-fail: a sibling task failed, triggering cancellation
     ///   while this task was still running.
     Cancelled,
+    /// A watch generation was superseded or the watch session was stopped.
+    WatchCancelled,
     /// Task modified files it read during execution (read-write overlap detected by fspy).
     /// Caching such tasks is unsound because the prerun input hashes become stale.
     InputModified {

@@ -83,7 +83,11 @@ output?: Array<string | GlobWithBase | AutoTracking>, } | {
 /**
  * Whether to cache the task
  */
-cache: false, });
+cache: false,
+/**
+ * Files used by watch mode even when caching is disabled.
+ */
+input?: Array<UserInputEntry>, });
 
 export type TaskDefinition = Task | Command;
 
@@ -107,6 +111,8 @@ scripts?: boolean,
  * Default: `true`
  */
 tasks?: boolean, };
+
+export type UserInputEntry = string | GlobWithBase | AutoTracking;
 
 export type UserPackageDependency = {
 /**

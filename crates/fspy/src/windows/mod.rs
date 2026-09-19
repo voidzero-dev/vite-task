@@ -1,3 +1,5 @@
+mod job;
+
 use std::{
     ffi::{CStr, c_char},
     io,
@@ -78,6 +80,9 @@ impl SpyImpl {
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
         let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
+        let observer = command.access_observer.take();
+        let kill_process_tree = command.kill_process_tree;
+        let mut job = None;
         command.env("FSPY", "1");
         let mut command = command.into_tokio_command();
 
@@ -90,7 +95,17 @@ impl SpyImpl {
         let spawn_success = &mut spawn_success;
         let mut child = command
             .spawn_with(|std_command| {
-                let std_child = std_command.spawn()?;
+                let mut std_child = std_command.spawn()?;
+                if kill_process_tree {
+                    match job::assign_to_kill_on_close_job(std_child.as_raw_handle()) {
+                        Ok(handle) => job = Some(handle),
+                        Err(error) => {
+                            let _ = std_child.kill();
+                            let _ = std_child.wait();
+                            return Err(error);
+                        }
+                    }
+                }
                 *spawn_success = true;
 
                 let mut dll_paths = ansi_dll_path_with_nul.as_ptr().cast::<c_char>();
@@ -157,13 +172,19 @@ impl SpyImpl {
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
             // because we need to stop the supervisor and close the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
-                let status = tokio::select! {
-                    status = child.wait() => status?,
-                    () = cancellation_token.cancelled() => {
-                        child.start_kill()?;
-                        child.wait().await?
-                    }
+                let wait = async {
+                    let status = tokio::select! {
+                        status = child.wait() => status?,
+                        () = cancellation_token.cancelled() => {
+                            if let Some(job) = &job { job.terminate(); }
+                            child.start_kill()?;
+                            child.wait().await?
+                        }
+                    };
+                    drop(job);
+                    io::Result::Ok(status)
                 };
+                let status = crate::ipc::wait_observed(&receiver, observer.as_ref(), wait).await?;
                 // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
                 let path_accesses = ChannelAccesses::try_from(receiver)

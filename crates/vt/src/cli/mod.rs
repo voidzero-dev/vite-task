@@ -60,6 +60,10 @@ pub struct RunFlags {
     /// unless `--concurrency-limit` is also specified.
     #[clap(long, default_value = "false")]
     pub parallel: bool,
+
+    /// Watch task inputs and restart affected tasks when they change.
+    #[clap(long, default_value = "false")]
+    pub watch: bool,
 }
 
 impl RunFlags {
@@ -240,5 +244,32 @@ impl ResolvedRunCommand {
             },
             is_cwd_only,
         ))
+    }
+}
+
+#[cfg(test)]
+mod watch_tests {
+    use super::*;
+
+    #[test]
+    fn watch_before_task_is_runner_option() {
+        let command = RunCommand::try_parse_from(["run", "--watch", "build", "--verbose"])
+            .unwrap()
+            .into_resolved();
+        assert!(command.flags.watch);
+        assert_eq!(command.additional_args, [Str::from("--verbose")]);
+    }
+
+    #[test]
+    fn watch_after_task_is_forwarded() {
+        let command =
+            RunCommand::try_parse_from(["run", "build", "--watch"]).unwrap().into_resolved();
+        assert!(!command.flags.watch);
+        assert_eq!(command.additional_args, [Str::from("--watch")]);
+    }
+
+    #[test]
+    fn watch_conflicts_with_last_details() {
+        assert!(RunCommand::try_parse_from(["run", "--watch", "--last-details"]).is_err());
     }
 }

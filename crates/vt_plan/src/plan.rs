@@ -237,6 +237,7 @@ async fn plan_task_as_execution_node(
                         },
                     )?;
 
+                let nested_watch = matches!(plan_request, Some(PlanRequest::Watch(_)));
                 let execution_item_kind: ExecutionItemKind = match plan_request {
                     // Expand task query like `vp run -r build`
                     Some(PlanRequest::Query(query_plan_request)) => {
@@ -285,7 +286,10 @@ async fn plan_task_as_execution_node(
                         ExecutionItemKind::Expanded(nested_plan.graph)
                     }
                     // Synthetic task (from CommandHandler)
-                    Some(PlanRequest::Synthetic(synthetic_plan_request)) => {
+                    Some(
+                        PlanRequest::Synthetic(synthetic_plan_request)
+                        | PlanRequest::Watch(synthetic_plan_request),
+                    ) => {
                         let task_effective_cache = effective_cache_config(
                             task_node.resolved_config.resolved_options.cache_config.as_ref(),
                             task_node.source,
@@ -296,7 +300,7 @@ async fn plan_task_as_execution_node(
                             .map_or(ParentCacheConfig::Disabled, |config| {
                                 ParentCacheConfig::Inherited(config.clone())
                             });
-                        let spawn_execution = plan_synthetic_request(
+                        let mut spawn_execution = plan_synthetic_request(
                             context.workspace_path(),
                             &and_item.envs,
                             synthetic_plan_request,
@@ -305,6 +309,18 @@ async fn plan_task_as_execution_node(
                             package_path,
                             parent_cache_config,
                         )?;
+                        spawn_execution.nested_watch = nested_watch;
+                        let parent_inputs =
+                            &task_node.resolved_config.resolved_options.input_config;
+                        spawn_execution.input_config.includes_auto = parent_inputs.includes_auto;
+                        spawn_execution
+                            .input_config
+                            .positive_globs
+                            .extend(parent_inputs.positive_globs.iter().cloned());
+                        spawn_execution
+                            .input_config
+                            .negative_globs
+                            .extend(parent_inputs.negative_globs.iter().cloned());
                         ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                     }
                     // Normal 3rd party tool command (like `tsc --noEmit`), using potentially mutated script_command
@@ -322,6 +338,11 @@ async fn plan_task_as_execution_node(
                                 context.workspace_path(),
                             );
                         let resolved_options = ResolvedTaskOptions {
+                            input_config: task_node
+                                .resolved_config
+                                .resolved_options
+                                .input_config
+                                .clone(),
                             cwd: Arc::clone(&script_command.cwd),
                             cache_config: effective_cache_config(
                                 task_node.resolved_config.resolved_options.cache_config.as_ref(),
@@ -379,6 +400,7 @@ async fn plan_task_as_execution_node(
             }
 
             let resolved_options = ResolvedTaskOptions {
+                input_config: task_node.resolved_config.resolved_options.input_config.clone(),
                 cwd: Arc::clone(&cwd),
                 cache_config: effective_cache_config(
                     task_node.resolved_config.resolved_options.cache_config.as_ref(),
@@ -427,7 +449,11 @@ async fn plan_task_as_execution_node(
         items.extend(post_execution.items);
     }
 
-    Ok(TaskExecution { task_display: task_node.task_display.clone(), items })
+    Ok(TaskExecution {
+        input_config: task_node.resolved_config.resolved_options.input_config.clone(),
+        task_display: task_node.task_display.clone(),
+        items,
+    })
 }
 
 /// Cache configuration inherited from the parent task that contains a synthetic command.
@@ -555,14 +581,28 @@ pub fn plan_synthetic_request(
     let program_path = which(&program, &envs, cwd)?;
     let (program_path, args) =
         crate::ps1_shim::rewrite_cmd_shim_with_args(program_path, args, cwd, workspace_path);
+    let synthetic_inputs =
+        ResolvedGlobConfig::from_user_config(cache_config.input(), package_dir, workspace_path)
+            .map_err(Error::ResolveTaskConfig)?;
+    let inherited_inputs = match &parent_cache_config {
+        ParentCacheConfig::Inherited(config) => Some(config.input_config.clone()),
+        _ => None,
+    };
     let resolved_cache_config = resolve_synthetic_cache_config(
         parent_cache_config,
         cache_config,
         package_dir,
         workspace_path,
     )?;
-    let resolved_options =
-        ResolvedTaskOptions { cwd: Arc::clone(cwd), cache_config: resolved_cache_config };
+    let resolved_options = ResolvedTaskOptions {
+        cwd: Arc::clone(cwd),
+        input_config: resolved_cache_config
+            .as_ref()
+            .map(|config| config.input_config.clone())
+            .or(inherited_inputs)
+            .unwrap_or(synthetic_inputs),
+        cache_config: resolved_cache_config,
+    };
 
     plan_spawn_execution(
         workspace_path,
@@ -690,6 +730,9 @@ fn plan_spawn_execution(
     }));
 
     Ok(SpawnExecution {
+        nested_watch: false,
+        input_config: resolved_task_options.input_config.clone(),
+        unfiltered_envs: Arc::clone(envs),
         spawn_command: SpawnCommand {
             program_path,
             args: Arc::clone(&args),
@@ -859,6 +902,9 @@ pub async fn plan_query_request(
         }
     }
 
+    let impact_edges =
+        inner_graph.raw_edges().iter().map(|edge| (edge.source(), edge.target())).collect();
+
     // If --parallel, discard all edges so tasks run independently.
     if parallel {
         inner_graph.clear_edges();
@@ -867,7 +913,7 @@ pub async fn plan_query_request(
     // Validate the graph is acyclic.
     // `try_from_graph` performs a DFS; if a cycle is found, it returns
     // `CycleError` containing the full cycle path as node indices.
-    let graph =
+    let mut graph =
         ExecutionGraph::try_from_graph(inner_graph, effective_concurrency).map_err(|cycle| {
             // Map each execution node index in the cycle path to its human-readable TaskDisplay.
             // Every node in the cycle was added via `inner_graph.add_node()` above,
@@ -891,6 +937,7 @@ pub async fn plan_query_request(
             Error::CycleDependencyDetected(displays)
         })?;
 
+    graph.impact_edges = impact_edges;
     Ok(crate::PlanResult { graph, no_packages_matched })
 }
 

@@ -4,6 +4,7 @@ pub mod glob;
 mod hash;
 pub mod pipe;
 mod scheduler;
+pub use scheduler::execute_watched_task;
 pub mod spawn;
 #[cfg(fspy)]
 pub mod tracked_accesses;
@@ -37,6 +38,7 @@ use super::{
         ExecutionError,
     },
     reporter::{LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion},
+    watch::inputs::LeafWatch,
 };
 
 /// Outcome of a spawned execution.
@@ -158,6 +160,7 @@ impl<'a> ExecutionMode<'a> {
         cache_metadata: Option<&'a CacheMetadata>,
         stdio_config: StdioConfig,
         globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+        watch: Option<&LeafWatch>,
     ) -> Result<Self, ExecutionError> {
         let Some(metadata) = cache_metadata else {
             return Ok(Self::Uncached {
@@ -181,9 +184,11 @@ impl<'a> ExecutionMode<'a> {
         // Bind runner IPC for every cached task. The merged cache-control API
         // (`disableCache`) must work even when a task uses explicit inputs and
         // therefore does not need fspy auto-input inference.
-        let (ipc_envs, ServerHandle { driver, stop_accepting }) =
-            serve(Recorder::new(Arc::clone(&metadata.unfiltered_envs)))
-                .map_err(ExecutionError::IpcServerBind)?;
+        let (ipc_envs, ServerHandle { driver, stop_accepting }) = serve(
+            Recorder::new(Arc::clone(&metadata.unfiltered_envs))
+                .with_input_observer(watch.map(LeafWatch::ignore_observer)),
+        )
+        .map_err(ExecutionError::IpcServerBind)?;
         let tracking =
             Tracking { fspy, ipc_envs: ipc_envs.collect(), ipc_server_fut: driver, stop_accepting };
 
@@ -338,6 +343,7 @@ pub async fn execute_spawn(
     program_name: &str,
     fast_fail_token: CancellationToken,
     interrupt_token: CancellationToken,
+    watch: Option<&LeafWatch>,
 ) -> SpawnOutcome {
     let pipeline = run(
         leaf_reporter.as_mut(),
@@ -348,10 +354,14 @@ pub async fn execute_spawn(
         program_name,
         fast_fail_token,
         interrupt_token,
+        watch,
     );
     let report = match pipeline.await {
         Ok(report) | Err(report) => report,
     };
+    if let (Some(watch), Report::Failed { error, .. }) = (watch, &report) {
+        watch.fail(vt_str::format!("Watch execution failed: {error}"));
+    }
     report.finish(leaf_reporter)
 }
 
@@ -372,8 +382,14 @@ async fn run(
     program_name: &str,
     fast_fail_token: CancellationToken,
     interrupt_token: CancellationToken,
+    watch: Option<&LeafWatch>,
 ) -> Result<Report, Report> {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
+    if let Some(watch) = watch
+        && cache_metadata.is_none()
+    {
+        return run_uncached_watch(reporter, spawn_execution, fast_fail_token, watch).await;
+    }
 
     // 1. Determine cache status FIRST by trying cache hit, so the reporter can
     //    display cache status immediately when execution begins. On a lookup
@@ -385,6 +401,11 @@ async fn run(
     //    to execute the command — or carry the globbed inputs into the run.
     let (stdio_config, globbed_inputs) = match lookup {
         CacheLookup::Hit(cached) => {
+            if let Some(watch) = watch {
+                watch
+                    .cached_result(&cached, cache_dir)
+                    .map_err(|error| Report::failed(ExecutionError::PostRunFingerprint(error)))?;
+            }
             let mut stdio_config =
                 reporter.start(CacheStatus::Hit { replayed_duration: cached.duration });
             return Ok(replay_cache_hit(
@@ -405,7 +426,7 @@ async fn run(
     };
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
-    let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
+    let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs, watch)
         .map_err(Report::failed)?;
 
     // Measure end-to-end duration here — spawn() doesn't track time.
@@ -420,6 +441,7 @@ async fn run(
         spawn_stdio,
         fast_fail_token.clone(),
         mode.injected_envs(),
+        watch,
     )
     .await
     .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
@@ -432,20 +454,8 @@ async fn run(
     //    Box::pin keeps the child-and-pipe stack off the enclosing future:
     //    pipe_stdio alone makes the combined future large enough to trip
     //    clippy::large_futures in every caller otherwise.
-    let RunHandles { sinks, ipc } = mode.run_handles();
-    let (wait_result, ipc_server_result) = if let Some(IpcHandles { stop_accepting, driver }) = ipc
-    {
-        let child_work =
-            Box::pin(run_child(child, sinks, Some(stop_accepting), fast_fail_token.clone()));
-        let (wait_result, join_result) = tokio::join!(child_work, driver);
-        if let Err(e) = &join_result {
-            tracing::warn!(?e, "IPC server failed; cache will not be updated");
-        }
-        (wait_result, Some(join_result.map(Recorder::into_reports)))
-    } else {
-        let child_work = Box::pin(run_child(child, sinks, None, fast_fail_token.clone()));
-        (child_work.await, None)
-    };
+    let (wait_result, ipc_server_result) =
+        run_with_ipc(child, mode.run_handles(), fast_fail_token.clone()).await;
     let outcome = wait_result.map_err(Report::failed)?;
     let duration = start.elapsed();
 
@@ -459,6 +469,9 @@ async fn run(
         }
         None => None,
         Some(Err(err)) => {
+            if let Some(watch) = watch {
+                watch.fail(vt_str::format!("Watch input reporting failed: {err}"));
+            }
             return Err(Report::Spawned {
                 exit_status: outcome.exit_status,
                 cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(
@@ -472,7 +485,9 @@ async fn run(
     // 7. Decide the cache update (only when we were in `Cached` mode). Cache
     //    update errors are reported but do not affect the exit status we
     //    return — the process ran, so we return its actual status.
-    let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
+    let cancelled = fast_fail_token.is_cancelled()
+        || interrupt_token.is_cancelled()
+        || watch.is_some_and(LeafWatch::changed);
     let (cache_update, error) = match mode {
         ExecutionMode::Cached { state, .. } => {
             cache_update::update_cache(
@@ -493,6 +508,11 @@ async fn run(
         }
     };
 
+    let cache_update = if watch.is_some() && cancelled {
+        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::WatchCancelled)
+    } else {
+        cache_update
+    };
     Ok(Report::Spawned { exit_status: outcome.exit_status, cache_update, error })
 }
 
@@ -590,34 +610,88 @@ async fn run_child(
     stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
 ) -> Result<ChildOutcome, ExecutionError> {
-    let pipe_result: Result<(), ExecutionError> = if let Some(sinks) = sinks {
+    let wait_result = if let Some(sinks) = sinks {
         let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
         let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        #[expect(
-            clippy::large_futures,
-            reason = "pipe_stdio streams child I/O and creates a large future"
-        )]
-        let r = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        r.map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()))
+        let drain = async {
+            let result = Box::pin(pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone())).await;
+            if result.is_err() {
+                fast_fail_token.cancel();
+            }
+            result.map_err(|error| ExecutionError::ForwardTaskProcessOutput(error.into()))
+        };
+        let (pipes, outcome) = tokio::join!(Box::pin(drain), child.wait);
+        pipes.and_then(|()| {
+            outcome.map_err(|error| ExecutionError::WaitForTaskProcessExit(error.into()))
+        })
     } else {
-        Ok(())
-    };
-
-    let wait_result = match pipe_result {
-        Ok(()) => {
-            child.wait.await.map_err(|err| ExecutionError::WaitForTaskProcessExit(err.into()))
-        }
-        Err(err) => {
-            // Pipe failed — cancel so `child.wait` kills the child instead of
-            // orphaning it. Still signal the server below so it can drain.
-            fast_fail_token.cancel();
-            let _ = child.wait.await;
-            Err(err)
-        }
+        child.wait.await.map_err(|error| ExecutionError::WaitForTaskProcessExit(error.into()))
     };
 
     if let Some(stop_accepting) = stop_accepting {
         stop_accepting.signal();
     }
     wait_result
+}
+
+/// Uncached watch commands still need live input tracing and runner IPC.
+async fn run_uncached_watch(
+    reporter: &mut dyn LeafExecutionReporter,
+    execution: &SpawnExecution,
+    cancel: CancellationToken,
+    watch: &LeafWatch,
+) -> Result<Report, Report> {
+    let stdio = reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+    let mut writers = stdio.writers;
+    let recorder = Recorder::new(Arc::clone(&execution.unfiltered_envs))
+        .with_input_observer(Some(watch.ignore_observer()));
+    let (envs, ServerHandle { driver, stop_accepting }) =
+        serve(recorder).map_err(|error| Report::failed(ExecutionError::IpcServerBind(error)))?;
+    let mut envs: Vec<_> = envs.collect();
+    envs.push((
+        OsStr::new(NODE_CLIENT_PATH_ENV_NAME),
+        crate::napi_client::napi_client_path().as_path().as_os_str().to_owned(),
+    ));
+    let child =
+        spawn(&execution.spawn_command, true, SpawnStdio::Piped, cancel.clone(), envs, Some(watch))
+            .await
+            .map_err(|error| Report::failed(ExecutionError::Spawn(error)))?;
+    let sinks = PipeSinks {
+        stdout_writer: &mut writers.stdout_writer,
+        stderr_writer: &mut writers.stderr_writer,
+        capture: None,
+    };
+    let (outcome, reports) = tokio::join!(
+        Box::pin(run_child(child, Some(sinks), Some(&stop_accepting), cancel.clone())),
+        driver
+    );
+    let outcome = outcome.map_err(Report::failed)?;
+    if let Err(error) = reports {
+        watch.fail(vt_str::format!("Watch input reporting failed: {error}"));
+    }
+    let reason = if cancel.is_cancelled() || watch.changed() {
+        CacheNotUpdatedReason::WatchCancelled
+    } else {
+        CacheNotUpdatedReason::CacheDisabled
+    };
+    Ok(Report::Spawned {
+        exit_status: outcome.exit_status,
+        cache_update: CacheUpdateStatus::NotUpdated(reason),
+        error: None,
+    })
+}
+
+async fn run_with_ipc(
+    child: ChildHandle,
+    handles: RunHandles<'_>,
+    cancel: CancellationToken,
+) -> (Result<ChildOutcome, ExecutionError>, Option<Result<Reports, vt_server::Error>>) {
+    let RunHandles { sinks, ipc } = handles;
+    if let Some(IpcHandles { stop_accepting, driver }) = ipc {
+        let (outcome, reports) =
+            tokio::join!(Box::pin(run_child(child, sinks, Some(stop_accepting), cancel)), driver);
+        (outcome, Some(reports.map(Recorder::into_reports)))
+    } else {
+        (Box::pin(run_child(child, sinks, None, cancel)).await, None)
+    }
 }

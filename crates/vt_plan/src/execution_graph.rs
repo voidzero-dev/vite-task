@@ -171,6 +171,9 @@ pub const DEFAULT_CONCURRENCY_LIMIT: usize = 4;
 /// graphs carry their own concurrency limit, enabling per-level control.
 #[derive(Debug, Serialize)]
 pub struct ExecutionGraph {
+    /// Logical dependencies used for watch invalidation, even with parallel execution.
+    #[serde(skip)]
+    pub impact_edges: Vec<(ExecutionNodeIndex, ExecutionNodeIndex)>,
     /// The underlying acyclic task execution graph.
     pub graph: AcyclicGraph<TaskExecution, ExecutionIx>,
 
@@ -189,7 +192,9 @@ impl ExecutionGraph {
         graph: InnerExecutionGraph,
         concurrency_limit: usize,
     ) -> Result<Self, CycleError<ExecutionIx>> {
-        Ok(Self { graph: AcyclicGraph::try_from_graph(graph)?, concurrency_limit })
+        let impact_edges =
+            graph.raw_edges().iter().map(|edge| (edge.source(), edge.target())).collect();
+        Ok(Self { graph: AcyclicGraph::try_from_graph(graph)?, concurrency_limit, impact_edges })
     }
 }
 

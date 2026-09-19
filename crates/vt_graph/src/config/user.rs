@@ -169,6 +169,8 @@ pub enum UserCacheConfig {
         /// Whether to cache the task
         #[cfg_attr(all(test, not(clippy)), ts(type = "false"))]
         cache: MustBe!(false),
+        /// Files used by watch mode even when caching is disabled.
+        input: Option<UserInputsConfig>,
     },
 }
 
@@ -179,10 +181,19 @@ impl UserCacheConfig {
         Self::Enabled { cache: Some(MustBe!(true)), enabled_cache_config: config }
     }
 
+    /// Input patterns, independent of whether results are cached.
+    #[must_use]
+    pub const fn input(&self) -> Option<&UserInputsConfig> {
+        match self {
+            Self::Enabled { enabled_cache_config, .. } => enabled_cache_config.input.as_ref(),
+            Self::Disabled { input, .. } => input.as_ref(),
+        }
+    }
+
     /// Create a disabled cache config.
     #[must_use]
     pub const fn disabled() -> Self {
-        Self::Disabled { cache: MustBe!(false) }
+        Self::Disabled { cache: MustBe!(false), input: None }
     }
 }
 
@@ -586,7 +597,7 @@ mod tests {
             options.depends_on.as_ref().unwrap().as_ref(),
             [UserDependsOnEntry::Task(Str::from("build"))]
         );
-        assert_eq!(options.cache_config, UserCacheConfig::Disabled { cache: MustBe!(false) });
+        assert_eq!(options.cache_config, UserCacheConfig::disabled());
     }
 
     #[test]
@@ -684,10 +695,7 @@ mod tests {
             "cache": false
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(
-            user_config.options.cache_config,
-            UserCacheConfig::Disabled { cache: MustBe!(false) }
-        );
+        assert_eq!(user_config.options.cache_config, UserCacheConfig::disabled());
     }
 
     #[test]
@@ -884,13 +892,14 @@ mod tests {
     }
 
     #[test]
-    fn test_input_with_cache_false_error() {
-        // input with cache: false should produce a serde error due to deny_unknown_fields
+    fn test_input_with_cache_false() {
+        // Uncached commands still declare inputs for watch mode.
         let user_config_json = json!({
             "cache": false,
             "input": ["src/**"]
         });
-        assert!(serde_json::from_value::<UserCacheConfig>(user_config_json).is_err());
+        let config = serde_json::from_value::<UserCacheConfig>(user_config_json).unwrap();
+        assert_eq!(config.input(), Some(&vec![UserInputEntry::Glob("src/**".into())]));
     }
 
     #[test]

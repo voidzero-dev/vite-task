@@ -66,3 +66,42 @@ impl ChannelAccesses {
         })
     }
 }
+
+/// Poll the live trace while waiting for a child. The final drain happens before
+/// sealing, including for a child that exits before the first timer tick.
+pub async fn wait_observed<F: std::future::Future>(
+    receiver: &Receiver<Global>,
+    observer: Option<&crate::AccessObserver>,
+    wait: F,
+) -> F::Output {
+    let Some(observer) = observer else {
+        return wait.await;
+    };
+    let mut cursor = fspy_shared::ipc::channel::FrameCursor::default();
+    let mut lost = false;
+    let mut poll = || {
+        if !lost
+            && receiver
+                .poll(&mut cursor, |frame| {
+                    observer(Ok(wincode::deserialize_exact(frame)
+                        .expect("committed access record is complete")));
+                })
+                .is_err()
+        {
+            lost = true;
+            observer(Err(TrackingIncomplete));
+        }
+    };
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(25));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    tokio::pin!(wait);
+    loop {
+        tokio::select! {
+            result = &mut wait => {
+                poll();
+                return result;
+            }
+            _ = interval.tick() => poll(),
+        }
+    }
+}

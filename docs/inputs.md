@@ -229,17 +229,18 @@ If you encounter a case where fspy fails to detect a file read, please [report t
 
 ### Cache Disabled
 
-The `inputs` field cannot be used with `cache: false`:
+The `input` field can be used with `cache: false` to select files for `vp run --watch`:
 
 ```json
-// ERROR: inputs cannot be specified when cache is disabled
 {
   "tasks": {
     "dev": {
       "command": "vite dev",
       "cache": false,
-      "inputs": ["src/**"] // This will cause a parse error
+      "input": ["src/**"]
     }
   }
 }
 ```
+
+See [Watching tasks](watch.md) for restart behavior and automatic input discovery.

@@ -25,7 +25,7 @@ mod writer;
 use std::ptr::slice_from_raw_parts_mut;
 
 use fspy_shm::Mapping;
-pub use reader::{SealError, ShmReader};
+pub use reader::{FrameCursor, SealError, ShmReader};
 // Only tests name a claim's failure; a sender skips the record either
 // way, so production matches on `Ok`/`Err` alone.
 #[cfg(test)]
@@ -300,6 +300,43 @@ mod tests {
         assert!(iter.next().unwrap() == b"foo");
         assert!(iter.next().unwrap() == b"bar");
         assert!(iter.next() == None);
+    }
+
+    #[test]
+    fn live_cursor_revisits_late_frames_without_sealing() {
+        let shm = MockedShm::alloc(1024);
+        // SAFETY: the test mapping is initialized and has the standard slot count.
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
+        let mut early = writer.claim_frame(3.try_into().unwrap()).unwrap();
+        early.copy_from_slice(b"one");
+        assert!(writer.try_write_frame(b"two"));
+        let mut cursor = FrameCursor::default();
+        let mut frames = Vec::new();
+        // SAFETY: cursor and writer refer to the same live test mapping.
+        unsafe { cursor.poll(&shm, S, |frame| frames.push(frame.to_vec())) }.unwrap();
+        assert_eq!(frames, [b"two".to_vec()]);
+        early.finish();
+        assert!(writer.try_write_frame(b"end"));
+        // SAFETY: same mapping, still alive and open.
+        unsafe { cursor.poll(&shm, S, |frame| frames.push(frame.to_vec())) }.unwrap();
+        assert_eq!(frames, [b"two".to_vec(), b"one".to_vec(), b"end".to_vec()]);
+        // SAFETY: same mapping; completed frames must not be emitted twice.
+        unsafe { cursor.poll(&shm, S, |_| panic!("duplicate frame")) }.unwrap();
+        let sealed = collect_frames(&shm);
+        assert_eq!(sealed.iter().count(), 3);
+    }
+
+    #[test]
+    fn live_cursor_reports_lost_records() {
+        let shm = MockedShm::alloc(1024);
+        // SAFETY: initialized test mapping.
+        let writer = unsafe { ShmWriter::new(shm.clone(), S) }.unwrap();
+        for _ in 0..15 {
+            assert!(writer.try_write_frame(b"x"));
+        }
+        assert!(!writer.try_write_frame(b"x"));
+        // SAFETY: the mapping remains valid even after capacity was exhausted.
+        assert!(unsafe { FrameCursor::default().poll(&shm, S, |_| {}) }.is_err());
     }
 
     #[test]

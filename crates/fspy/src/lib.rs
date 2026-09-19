@@ -21,6 +21,10 @@ use std::{env::temp_dir, fs::create_dir, io, process::ExitStatus, sync::LazyLock
 
 pub use command::Command;
 pub use error::TrackingIncomplete;
+/// Observes file accesses before process exit. Callbacks must not block.
+/// An error means the trace is incomplete and must not be trusted.
+pub type AccessObserver =
+    std::sync::Arc<dyn Fn(Result<PathAccess<'_>, TrackingIncomplete>) + Send + Sync>;
 pub use fspy_shared::ipc::{AccessMode, PathAccess};
 use futures_util::future::BoxFuture;
 pub use os_impl::PathAccessIterable;

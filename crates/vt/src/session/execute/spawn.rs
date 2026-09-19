@@ -14,6 +14,8 @@ use tokio::process::{ChildStderr, ChildStdout};
 use tokio_util::sync::CancellationToken;
 use vt_plan::SpawnCommand;
 
+use crate::session::watch::inputs::LeafWatch;
+
 /// How the child's stdin/stdout/stderr are configured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnStdio {
@@ -65,18 +67,26 @@ pub async fn spawn<E, K, V>(
     stdio: SpawnStdio,
     cancellation_token: CancellationToken,
     extra_envs: E,
+    watch: Option<&LeafWatch>,
 ) -> anyhow::Result<ChildHandle>
 where
     E: IntoIterator<Item = (K, V)>,
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
+    let nested_watch = watch.is_some_and(|watch| watch.nested_watch);
+    // A persistent child runner establishes its own tracing session. Injecting
+    // this session's preload into it would conflict with its children's trace.
     #[cfg(fspy)]
-    if fspy {
-        return spawn_fspy(cmd, stdio, cancellation_token, extra_envs).await;
+    if !nested_watch && (fspy || watch.is_some()) {
+        return spawn_fspy(cmd, stdio, cancellation_token, extra_envs, watch).await;
     }
     #[cfg(not(fspy))]
     let _ = fspy;
+    #[cfg(not(fspy))]
+    if watch.is_some() {
+        anyhow::bail!("Watch mode requires file access tracing on this platform");
+    }
 
     let mut tokio_cmd = tokio::process::Command::new(cmd.program_path.as_path());
     tokio_cmd.args(cmd.args.iter().map(vt_str::Str::as_str));
@@ -85,7 +95,7 @@ where
     tokio_cmd.envs(extra_envs);
     tokio_cmd.current_dir(&*cmd.cwd);
     apply_stdio(&mut tokio_cmd, stdio);
-    spawn_tokio(tokio_cmd, cancellation_token)
+    spawn_tokio(tokio_cmd, cancellation_token, nested_watch)
 }
 
 #[cfg(fspy)]
@@ -94,6 +104,7 @@ async fn spawn_fspy<E, K, V>(
     stdio: SpawnStdio,
     cancellation_token: CancellationToken,
     extra_envs: E,
+    watch: Option<&LeafWatch>,
 ) -> anyhow::Result<ChildHandle>
 where
     E: IntoIterator<Item = (K, V)>,
@@ -105,6 +116,9 @@ where
     fspy_cmd.envs(cmd.spawn_envs.iter());
     fspy_cmd.envs(extra_envs);
     fspy_cmd.current_dir(&*cmd.cwd);
+    if let Some(watch) = watch {
+        fspy_cmd.observe_accesses(watch.observer()).kill_process_tree(true);
+    }
 
     match stdio {
         SpawnStdio::Inherited => {
@@ -124,7 +138,7 @@ where
         }
     }
 
-    let mut tracked = fspy_cmd.spawn(cancellation_token).await?;
+    let mut tracked = fspy_cmd.spawn(cancellation_token.clone()).await?;
 
     // On Windows, assign the child to a Job Object so that killing the child
     // also kills all descendant processes (e.g., node.exe via a .cmd shim).
@@ -139,7 +153,15 @@ where
     let wait_handle = tracked.wait_handle;
 
     let wait = async move {
-        let termination = wait_handle.await?;
+        tokio::pin!(wait_handle);
+        let termination = tokio::select! {
+            result = &mut wait_handle => result?,
+            () = cancellation_token.cancelled() => {
+                #[cfg(windows)]
+                job.terminate();
+                wait_handle.await?
+            }
+        };
         // Drop order: `job` drops here, KILL_ON_JOB_CLOSE kills any descendants
         // still alive. fspy's wait handle already watched the cancellation
         // token and killed the direct child.
@@ -158,26 +180,37 @@ where
 fn spawn_tokio(
     mut cmd: tokio::process::Command,
     cancellation_token: CancellationToken,
+    process_tree: bool,
 ) -> anyhow::Result<ChildHandle> {
+    #[cfg(unix)]
+    if process_tree {
+        cmd.process_group(0);
+    }
+    #[cfg(unix)]
     let mut child = cmd.spawn()?;
-
     #[cfg(windows)]
-    let job = {
-        use std::os::windows::io::{AsRawHandle, BorrowedHandle};
-        // Duplicate the process handle so the job outlives tokio's handle.
-        // SAFETY: The child was just spawned, so its raw handle is valid.
-        let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
-        let owned = borrowed.try_clone_to_owned()?;
-        super::win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?
-    };
+    let (mut child, job) = spawn_in_job(&mut cmd)?;
+    #[cfg(windows)]
+    let _ = process_tree;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
+    #[cfg(unix)]
+    let process_id = child.id();
     let wait = async move {
         let exit_status = tokio::select! {
             status = child.wait() => status?,
             () = cancellation_token.cancelled() => {
+                #[cfg(unix)]
+                if process_tree {
+                    interrupt_group(process_id);
+                    // The nested runner must finish reaping its separate task
+                    // groups before we reap it. Bound unresponsive runners.
+                    if tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await.is_err() {
+                        kill_group(process_id);
+                    }
+                }
                 child.start_kill()?;
                 // Eagerly kill descendants; KILL_ON_JOB_CLOSE on drop is a backstop.
                 #[cfg(windows)]
@@ -185,6 +218,10 @@ fn spawn_tokio(
                 child.wait().await?
             }
         };
+        #[cfg(unix)]
+        if process_tree {
+            kill_group(process_id);
+        }
         // `job` drops here on Windows, terminating any stragglers.
         #[cfg(windows)]
         drop(job);
@@ -243,4 +280,55 @@ fn clear_stdio_cloexec() -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn interrupt_group(id: Option<u32>) {
+    if let Some(id) = id.and_then(|id| i32::try_from(id).ok()) {
+        let _ = nix::sys::signal::killpg(
+            nix::unistd::Pid::from_raw(id),
+            nix::sys::signal::Signal::SIGINT,
+        );
+    }
+}
+
+#[cfg(unix)]
+fn kill_group(id: Option<u32>) {
+    if let Some(id) = id.and_then(|id| i32::try_from(id).ok()) {
+        let _ = nix::sys::signal::killpg(
+            nix::unistd::Pid::from_raw(id),
+            nix::sys::signal::Signal::SIGKILL,
+        );
+    }
+}
+
+#[cfg(windows)]
+fn spawn_in_job(
+    cmd: &mut tokio::process::Command,
+) -> io::Result<(tokio::process::Child, super::win_job::OwnedJobHandle)> {
+    use std::os::windows::{io::AsRawHandle as _, process::ChildExt as _};
+
+    use winapi::um::{processthreadsapi::ResumeThread, winbase::CREATE_SUSPENDED};
+    cmd.creation_flags(CREATE_SUSPENDED);
+    let mut job = None;
+    let child = cmd.spawn_with(|cmd| {
+        let mut child = cmd.spawn()?;
+        let result = (|| {
+            job = Some(super::win_job::assign_to_kill_on_close_job(child.as_raw_handle())?);
+            // SAFETY: this is the suspended primary thread of the new process.
+            if unsafe { ResumeThread(child.main_thread_handle().as_raw_handle().cast()) }
+                == u32::MAX
+            {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        Ok(child)
+    })?;
+    Ok((child, job.expect("spawned child has a job")))
 }

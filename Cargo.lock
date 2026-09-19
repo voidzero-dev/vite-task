@@ -4249,6 +4249,7 @@ dependencies = [
  "futures-util",
  "materialized_artifact",
  "nix 0.31.2",
+ "notify",
  "once_cell",
  "owo-colors",
  "petgraph",

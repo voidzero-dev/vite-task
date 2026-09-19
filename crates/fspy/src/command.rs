@@ -14,6 +14,9 @@ use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 
 #[derive(derive_more::Debug)]
 pub struct Command {
+    #[debug(skip)]
+    pub(crate) access_observer: Option<crate::AccessObserver>,
+    pub(crate) kill_process_tree: bool,
     program: OsString,
     args: Vec<OsString>,
     envs: FxHashMap<OsString, OsString>,
@@ -36,6 +39,8 @@ impl Command {
     /// To inherit, explicitly use `.envs(std::env::vars_os())`.
     pub fn new<P: AsRef<OsStr>>(program: P) -> Self {
         Self {
+            access_observer: None,
+            kill_process_tree: false,
             program: program.as_ref().to_os_string(),
             args: Vec::new(),
             envs: FxHashMap::default(),
@@ -91,6 +96,18 @@ impl Command {
                 )
             })
             .collect();
+    }
+
+    /// Observe accesses during execution as well as collecting the final trace.
+    pub fn observe_accesses(&mut self, observer: crate::AccessObserver) -> &mut Self {
+        self.access_observer = Some(observer);
+        self
+    }
+
+    /// Isolate this command so cancellation terminates its descendants too.
+    pub const fn kill_process_tree(&mut self, enabled: bool) -> &mut Self {
+        self.kill_process_tree = enabled;
+        self
     }
 
     pub fn env_remove<K: AsRef<OsStr>>(&mut self, key: K) -> &mut Self {

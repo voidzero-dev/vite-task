@@ -61,3 +61,20 @@ pub fn extract_output_archive(
     archive.unpack(workspace_root.as_path())?;
     Ok(())
 }
+
+/// Visit archived output paths before restoring them in watch mode.
+pub fn visit_output_paths(
+    archive_path: &AbsolutePath,
+    mut visit: impl FnMut(&vt_path::RelativePath),
+) -> anyhow::Result<()> {
+    let file = File::open(archive_path.as_path())?;
+    let decoder = zstd::stream::read::Decoder::new(file)?;
+    let mut archive = tar::Archive::new(decoder);
+    for entry in archive.entries()? {
+        let entry = entry?;
+        let path = entry.path()?;
+        let path = RelativePathBuf::new(path.as_ref())?;
+        visit(&path);
+    }
+    Ok(())
+}

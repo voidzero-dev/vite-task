@@ -21,6 +21,7 @@ ctrlc = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "from"] }
 futures-util = { workspace = true }
 once_cell = { workspace = true }
+notify = { workspace = true }
 owo-colors = { workspace = true, features = ["supports-colors"] }
 petgraph = { workspace = true }
 pty_terminal_test_client = { workspace = true }
@@ -39,6 +40,7 @@ tokio = { workspace = true, features = [
   "macros",
   "process",
   "sync",
+  "time",
 ] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
@@ -73,7 +75,13 @@ fspy = { workspace = true }
 nix = { workspace = true, features = ["dir"] }
 
 [target.'cfg(windows)'.dependencies]
-winapi = { workspace = true, features = ["handleapi", "jobapi2", "winnt"] }
+winapi = { workspace = true, features = [
+  "handleapi",
+  "jobapi2",
+  "winnt",
+  "winbase",
+  "processthreadsapi",
+] }
 
 [lib]
 doctest = false

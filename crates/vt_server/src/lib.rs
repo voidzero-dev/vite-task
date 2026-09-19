@@ -68,7 +68,11 @@ pub struct InvalidGlob {
 ///
 /// Call [`Recorder::into_reports`] after the driver future completes to
 /// recover the collected [`Reports`].
+/// Callback for input exclusions reported while a command is running.
+pub type InputObserver = Arc<dyn Fn(&Arc<AbsolutePath>) + Send + Sync>;
+
 pub struct Recorder {
+    input_observer: Option<InputObserver>,
     ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
     ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     cache_disabled: bool,
@@ -109,6 +113,7 @@ impl Recorder {
     #[must_use]
     pub fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
         Self {
+            input_observer: None,
             ignored_inputs: FxHashSet::default(),
             ignored_outputs: FxHashSet::default(),
             cache_disabled: false,
@@ -116,6 +121,13 @@ impl Recorder {
             tracked_get_envs: FxHashMap::default(),
             envs,
         }
+    }
+
+    /// Observe input exclusions without waiting for the command to exit.
+    #[must_use]
+    pub fn with_input_observer(mut self, observer: Option<InputObserver>) -> Self {
+        self.input_observer = observer;
+        self
     }
 
     #[must_use]
@@ -132,6 +144,9 @@ impl Recorder {
 
 impl Handler for Recorder {
     fn ignore_input(&mut self, path: &Arc<AbsolutePath>) {
+        if let Some(observer) = &self.input_observer {
+            observer(path);
+        }
         self.ignored_inputs.insert(Arc::clone(path));
     }
 

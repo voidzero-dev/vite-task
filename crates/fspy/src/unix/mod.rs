@@ -7,7 +7,7 @@ mod macos_artifacts;
 use std::{io, path::Path};
 
 #[cfg(target_os = "linux")]
-use fspy_seccomp_unotify::supervisor::supervise;
+use fspy_seccomp_unotify::supervisor::supervise_with_handler;
 use fspy_shared::ipc::PathAccess;
 #[cfg(not(target_env = "musl"))]
 use fspy_shared::ipc::{IpcStr, channel::channel};
@@ -83,8 +83,14 @@ impl SpyImpl {
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
+        let observer = command.access_observer.take();
+        let kill_process_tree = command.kill_process_tree;
         #[cfg(target_os = "linux")]
-        let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
+        let supervisor = {
+            let observer = observer.clone();
+            supervise_with_handler(move || SyscallHandler::with_observer(observer.clone()))
+                .map_err(SpawnError::Supervisor)?
+        };
 
         #[cfg(not(target_env = "musl"))]
         let ipc_receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
@@ -121,7 +127,11 @@ impl SpyImpl {
             ExecResolveConfig::search_path_enabled(None),
             &encoded_payload,
             |mode, path| {
-                exec_resolve_accesses.add(PathAccess { mode, path: path.into() });
+                let access = PathAccess { mode, path: path.into() };
+                if let Some(observer) = &observer {
+                    observer(Ok(access));
+                }
+                exec_resolve_accesses.add(access);
             },
         )
         .map_err(|err| SpawnError::Injection(err.into()))?;
@@ -129,6 +139,9 @@ impl SpyImpl {
         command.env("FSPY", "1");
 
         let mut tokio_command = command.into_tokio_command();
+        if kill_process_tree {
+            tokio_command.process_group(0);
+        }
 
         // SAFETY: the pre_exec closure only calls pre_exec.run() which is safe to call in a fork context
         unsafe {
@@ -155,13 +168,12 @@ impl SpyImpl {
             // Keep polling for the child to exit in the background even if `wait_handle` is not awaited,
             // because we need to stop the supervisor and close the channel as soon as the child exits.
             wait_handle: tokio::spawn(async move {
-                let status = tokio::select! {
-                    status = child.wait() => status?,
-                    () = cancellation_token.cancelled() => {
-                        child.start_kill()?;
-                        child.wait().await?
-                    }
-                };
+                let wait = wait_child(&mut child, &cancellation_token, kill_process_tree);
+                #[cfg(not(target_env = "musl"))]
+                let status =
+                    crate::ipc::wait_observed(&ipc_receiver, observer.as_ref(), wait).await?;
+                #[cfg(target_env = "musl")]
+                let status = wait.await?;
 
                 let arenas = std::iter::once(exec_resolve_accesses);
                 // Stop the supervisor and collect path accesses from it.
@@ -177,7 +189,6 @@ impl SpyImpl {
 
                 // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
-                #[cfg(not(target_env = "musl"))]
                 #[cfg(not(target_env = "musl"))]
                 let path_accesses = ChannelAccesses::try_from(ipc_receiver)
                     .map(|ipc_accesses| PathAccessIterable { arenas, ipc_accesses });
@@ -213,4 +224,53 @@ impl PathAccessIterable {
             accesses_in_arena
         }
     }
+}
+
+async fn wait_child(
+    child: &mut tokio::process::Child,
+    cancellation: &CancellationToken,
+    tree: bool,
+) -> io::Result<std::process::ExitStatus> {
+    let process_id = child.id();
+    let status = tokio::select! {
+        status = child.wait() => status?,
+        () = cancellation.cancelled() => {
+            if tree {
+                // Nested persistent runners need a chance to clean up their
+                // own process groups before their parent is terminated.
+                signal_group(process_id, libc::SIGINT);
+                if let Ok(status) = tokio::time::timeout(std::time::Duration::from_secs(1), child.wait()).await {
+                    status?
+                } else {
+                    signal_group(process_id, libc::SIGKILL);
+                    child.wait().await?
+                }
+            } else {
+                child.start_kill()?;
+                child.wait().await?
+            }
+        }
+    };
+    if tree && signal_group(process_id, libc::SIGINT) {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        while signal_group(process_id, 0) && tokio::time::Instant::now() < deadline {
+            // Grandchildren are not waitable children of this process. Unix
+            // has no completion notification for an entire process group.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "poll termination of non-child group members"
+            )]
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        signal_group(process_id, libc::SIGKILL);
+    }
+    Ok(status)
+}
+
+fn signal_group(process_id: Option<u32>, signal: i32) -> bool {
+    process_id.and_then(|id| i32::try_from(id).ok()).is_some_and(|process_id| {
+        // SAFETY: the child was placed in its own group before exec. A negative
+        // PID targets only that group, including descendants holding pipes.
+        unsafe { libc::kill(-process_id, signal) == 0 }
+    })
 }

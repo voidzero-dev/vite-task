@@ -101,6 +101,8 @@ pub struct SyntheticPlanRequest {
 pub enum PlanRequest {
     /// The request to run tasks queried from the task graph, like `vp run ...`.
     Query(QueryPlanRequest),
+    /// A persistent child runner owns its own tracing and watch session.
+    Watch(SyntheticPlanRequest),
     /// The request to run a synthetic task (not defined in the task graph), e.g., from `TaskSynthesizer`.
     Synthetic(SyntheticPlanRequest),
 }

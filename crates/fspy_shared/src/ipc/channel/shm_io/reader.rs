@@ -25,6 +25,65 @@ use super::{
     layout::{CLOSED, MappedLayout, SlotState, to_usize},
 };
 
+/// Progress through a live channel. Unfinished slots are revisited: a writer
+/// may publish them after a later writer has already finished.
+#[derive(Default)]
+pub struct FrameCursor {
+    next: usize,
+    pending: Vec<usize>,
+}
+
+impl FrameCursor {
+    /// Visit newly committed frames without sealing the channel.
+    ///
+    /// # Safety
+    /// The mapping must remain valid and stable throughout this call. It must
+    /// have been zero-initialized and accessed only through the channel protocol;
+    /// `slots` must be the slot count used to create it. A cursor must only be
+    /// used with one mapping.
+    ///
+    /// # Errors
+    /// Returns an error if the mapping is invalid or records were lost.
+    pub unsafe fn poll<M: AsRawSlice>(
+        &mut self,
+        mem: &M,
+        slots: usize,
+        mut visit: impl FnMut(&[u8]),
+    ) -> Result<(), SealError> {
+        // SAFETY: the caller guarantees the channel mapping's lifetime and layout.
+        let mapped = unsafe { MappedLayout::new(mem.as_raw_slice(), slots) }
+            .ok_or(SealError::UnsupportedRegion)?;
+        let claims = mapped.claims().load(Ordering::Relaxed);
+        if claims & CLOSED != 0 {
+            return Err(SealError::Closed);
+        }
+        let end = to_usize(claims).min(mapped.table().len());
+        let mut read = |index: usize| {
+            let value = mapped.table()[index].load(Ordering::Acquire);
+            let SlotState::Committed { offset, len } = SlotState::decode(value) else {
+                return false;
+            };
+            // SAFETY: Acquire observes the immutable, fully published payload.
+            // Its reservation lies in the mapping, borrowed for this callback.
+            visit(unsafe {
+                slice::from_raw_parts(
+                    mapped.payload_start.add(to_usize(offset)).as_ptr(),
+                    to_usize(len.get()),
+                )
+            });
+            true
+        };
+        self.pending.retain(|&index| !read(index));
+        for index in self.next..end {
+            if !read(index) {
+                self.pending.push(index);
+            }
+        }
+        self.next = end;
+        Ok(())
+    }
+}
+
 /// Why a channel could not be sealed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SealError {

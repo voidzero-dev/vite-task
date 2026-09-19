@@ -155,6 +155,9 @@ pub trait GraphExecutionReporterBuilder {
 /// Creates [`LeafExecutionReporter`] instances for individual leaf executions
 /// and finalizes the session with `finish()`.
 pub trait GraphExecutionReporter {
+    /// Start a new generation, replacing results from the previous execution.
+    fn restart_task(&mut self, _task: &vt_plan::TaskExecution) {}
+
     /// Create a new leaf execution reporter for the given leaf.
     fn new_leaf_execution(
         &mut self,
@@ -472,10 +475,14 @@ pub mod test_fixtures {
     /// Create a `TaskExecution` with a single spawn leaf.
     pub fn spawn_task(name: &str) -> TaskExecution {
         TaskExecution {
+            input_config: vt_graph::config::ResolvedGlobConfig::default_auto(),
             task_display: test_task_display(name),
             items: vec![ExecutionItem {
                 execution_item_display: test_display(name),
                 kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(SpawnExecution {
+                    nested_watch: false,
+                    input_config: vt_graph::config::ResolvedGlobConfig::default_auto(),
+                    unfiltered_envs: Arc::default(),
                     cache_metadata: None,
                     spawn_command: SpawnCommand {
                         program_path: test_path(),
@@ -491,6 +498,7 @@ pub mod test_fixtures {
     /// Create a `TaskExecution` with a single in-process leaf (echo).
     pub fn in_process_task(name: &str) -> TaskExecution {
         TaskExecution {
+            input_config: vt_graph::config::ResolvedGlobConfig::default_auto(),
             task_display: test_task_display(name),
             items: vec![ExecutionItem {
                 execution_item_display: test_display(name),

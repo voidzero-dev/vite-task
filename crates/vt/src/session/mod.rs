@@ -2,6 +2,7 @@ mod cache;
 mod event;
 mod execute;
 pub(crate) mod reporter;
+mod watch;
 
 // Re-export types that are part of the public API
 use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, sync::Arc};
@@ -126,6 +127,11 @@ impl vt_plan::PlanRequestParser for PlanRequestParser<'_> {
             HandledCommand::ViteTaskCommand(cli_command) => match cli_command.into_resolved() {
                 ResolvedCommand::Cache { .. } | ResolvedCommand::RunLastDetails => {
                     Ok(Some(PlanRequest::Synthetic(
+                        command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                    )))
+                }
+                ResolvedCommand::Run(run_command) if run_command.flags.watch => {
+                    Ok(Some(PlanRequest::Watch(
                         command.to_synthetic_plan_request(UserCacheConfig::disabled()),
                     )))
                 }
@@ -303,7 +309,8 @@ impl<'a> Session<'a> {
                             return Ok(());
                         }
                         let has_execution_flags = run_command.flags.concurrency_limit.is_some()
-                            || run_command.flags.parallel;
+                            || run_command.flags.parallel
+                            || run_command.flags.watch;
                         if is_cwd_only && !has_execution_flags {
                             let qpr = self.handle_no_task(is_interactive, &run_command).await?;
                             self.plan_from_query(qpr).await?
@@ -367,46 +374,29 @@ impl<'a> Session<'a> {
                     )),
                 };
 
-                let builder = Box::new(SummaryReporterBuilder::new(
-                    inner,
-                    workspace_path,
-                    Box::new(std::io::stdout()),
-                    run_command.flags.verbose,
-                    Some(self.make_summary_writer()),
-                    self.program_name.clone(),
-                    color_support,
-                ));
-                // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
-                // the signal directly from the terminal driver and handle it
-                // themselves. Cancelling the interrupt token prevents scheduling
-                // new tasks and caching results of in-flight tasks.
-                //
-                // On Windows, an ancestor process (e.g. cargo) may have been
-                // created with CREATE_NEW_PROCESS_GROUP, which sets a per-process
-                // flag that silently drops CTRL_C_EVENT before it reaches
-                // registered handlers. Clear it so our handler fires.
-                //
-                // SAFETY: Passing (None, FALSE) clears the inherited
-                // CTRL_C ignore flag.
-                #[cfg(windows)]
-                unsafe {
-                    unsafe extern "system" {
-                        fn SetConsoleCtrlHandler(
-                            handler: Option<unsafe extern "system" fn(u32) -> i32>,
-                            add: i32,
-                        ) -> i32;
-                    }
-                    SetConsoleCtrlHandler(None, 0);
-                }
-                let interrupt_token = tokio_util::sync::CancellationToken::new();
-                let ct = interrupt_token.clone();
-                ctrlc::set_handler(move || {
-                    ct.cancel();
-                })?;
+                let builder = Box::new(
+                    SummaryReporterBuilder::new(
+                        inner,
+                        workspace_path,
+                        Box::new(std::io::stdout()),
+                        run_command.flags.verbose,
+                        Some(self.make_summary_writer()),
+                        self.program_name.clone(),
+                        color_support,
+                    )
+                    .latest_only(run_command.flags.watch),
+                );
+                let interrupt_token = install_interrupt_handler()?;
 
-                self.execute_graph(graph, builder, interrupt_token)
-                    .await
-                    .map_err(SessionError::EarlyExit)
+                if run_command.flags.watch {
+                    self.watch_graph(graph, builder, interrupt_token)
+                        .await
+                        .map_err(SessionError::EarlyExit)
+                } else {
+                    self.execute_graph(graph, builder, interrupt_token)
+                        .await
+                        .map_err(SessionError::EarlyExit)
+                }
             }
         }
     }
@@ -724,6 +714,7 @@ impl<'a> Session<'a> {
             self.program_name.as_str(),
             tokio_util::sync::CancellationToken::new(),
             tokio_util::sync::CancellationToken::new(),
+            None,
         )
         .await;
         match outcome {
@@ -855,4 +846,31 @@ fn stderr_supports_color() -> bool {
     use std::sync::OnceLock;
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| supports_color::on(supports_color::Stream::Stderr).is_some())
+}
+
+/// The session owns interrupt handling; watched children have separate groups.
+fn install_interrupt_handler() -> Result<tokio_util::sync::CancellationToken, ctrlc::Error> {
+    // On Windows, an ancestor process (e.g. cargo) may have been
+    // created with CREATE_NEW_PROCESS_GROUP, which sets a per-process
+    // flag that silently drops CTRL_C_EVENT before it reaches
+    // registered handlers. Clear it so our handler fires.
+    //
+    // SAFETY: Passing (None, FALSE) clears the inherited
+    // CTRL_C ignore flag.
+    #[cfg(windows)]
+    unsafe {
+        unsafe extern "system" {
+            fn SetConsoleCtrlHandler(
+                handler: Option<unsafe extern "system" fn(u32) -> i32>,
+                add: i32,
+            ) -> i32;
+        }
+        SetConsoleCtrlHandler(None, 0);
+    }
+    let interrupt_token = tokio_util::sync::CancellationToken::new();
+    let ct = interrupt_token.clone();
+    ctrlc::set_handler(move || {
+        ct.cancel();
+    })?;
+    Ok(interrupt_token)
 }

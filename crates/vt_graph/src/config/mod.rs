@@ -2,7 +2,6 @@ pub mod user;
 
 use std::{collections::BTreeSet, sync::Arc};
 
-use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
@@ -39,6 +38,9 @@ pub struct ResolvedTaskConfig {
 
 #[derive(Debug, Serialize)]
 pub struct ResolvedTaskOptions {
+    /// Inputs remain available when caching is disabled.
+    #[serde(skip)]
+    pub input_config: ResolvedGlobConfig,
     /// The working directory for the task
     pub cwd: Arc<AbsolutePath>,
     /// Cache-related config. None means caching is disabled.
@@ -63,8 +65,13 @@ impl ResolvedTaskOptions {
             Some(ref cwd) if !cwd.as_str().is_empty() => dir.join(cwd).into(),
             _ => Arc::clone(dir),
         };
+        let input_config = ResolvedGlobConfig::from_user_config(
+            user_options.cache_config.input(),
+            dir,
+            workspace_root,
+        )?;
         let cache_config = match user_options.cache_config {
-            UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
+            UserCacheConfig::Disabled { .. } => None,
             UserCacheConfig::Enabled { cache: _, enabled_cache_config } => {
                 let mut untracked_env: FxHashSet<Str> =
                     enabled_cache_config.untracked_env.unwrap_or_default().into_iter().collect();
@@ -95,7 +102,7 @@ impl ResolvedTaskOptions {
                 })
             }
         };
-        Ok(Self { cwd, cache_config })
+        Ok(Self { input_config, cwd, cache_config })
     }
 }
 

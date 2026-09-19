@@ -15,6 +15,10 @@ fn main() {
     let path = args[2].as_str();
 
     match action {
+        "open_read_wait" => {
+            let _ = File::open(path);
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
         "open_read" => {
             let _ = File::open(path);
         }

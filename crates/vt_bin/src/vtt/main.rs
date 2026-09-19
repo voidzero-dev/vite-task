@@ -28,6 +28,7 @@ mod small_dev_shm;
 mod stat_file;
 mod stat_many;
 mod touch_file;
+mod watch_probe;
 mod write_file;
 
 fn main() {
@@ -77,6 +78,7 @@ fn main() {
         }
         "stat-many" => stat_many::run(&args[2..]),
         "touch-file" => touch_file::run(&args[2..]),
+        "watch-probe" => watch_probe::run(&args[2..]),
         "write-file" => write_file::run(&args[2..]),
         other => {
             eprintln!("Unknown subcommand: {other}");

@@ -13,6 +13,7 @@ use allocator_api2::alloc::Allocator;
 use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::Mapping;
+pub use shm_io::FrameCursor;
 use shm_io::{SealError, ShmReader, ShmWriter};
 
 /// Reads the committed frames of a sealed channel; borrows the shared
@@ -276,6 +277,21 @@ unsafe impl<A: Allocator + Send> Send for Receiver<A> {}
 unsafe impl<A: Allocator + Sync> Sync for Receiver<A> {}
 
 impl<A: Allocator> Receiver<A> {
+    /// Visit newly published frames while senders are still running.
+    /// Use a separate cursor for each receiver. Does not consume final records.
+    ///
+    /// # Errors
+    /// Returns [`RecordsLost`] if the channel can no longer record all accesses.
+    pub fn poll(
+        &self,
+        cursor: &mut FrameCursor,
+        visit: impl FnMut(&[u8]),
+    ) -> Result<(), RecordsLost> {
+        // SAFETY: channel() established the mapping and slot layout; this
+        // borrow keeps it alive throughout all callbacks.
+        unsafe { cursor.poll(&self.mapping, SLOTS, visit) }.map_err(|_| RecordsLost)
+    }
+
     /// Returns the serializable configuration other processes pass to
     /// [`ChannelConf::sender`], borrowing this receiver's storage.
     #[must_use]

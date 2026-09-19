@@ -120,3 +120,33 @@ async fn execve() {
     let accesses = track_test_bin(&["execve", "/hello"], None).await;
     assert_contains(&accesses, Path::new("/hello"), fspy::AccessMode::READ);
 }
+
+#[test(tokio::test)]
+async fn live_seccomp_observation_arrives_before_exit() {
+    use std::{process::Stdio, sync::Arc, time::Duration};
+
+    use tokio::io::AsyncWriteExt as _;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut command = fspy::Command::new(test_bin_path());
+    command.args(["open_read_wait", "/live-seccomp-input"]).stdin(Stdio::piped()).observe_accesses(
+        Arc::new(move |access| {
+            let access = access.unwrap();
+            if access.path.strip_path_prefix(Path::new("/live-seccomp-input"), |path| {
+                path.is_ok_and(|path| path.as_os_str().is_empty())
+            }) {
+                let _ = tx.send(access.mode);
+            }
+        }),
+    );
+    let mut child = command.spawn(tokio_util::sync::CancellationToken::new()).await.unwrap();
+    let mode = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    assert!(mode.contains(fspy::AccessMode::READ));
+    child.stdin.take().unwrap().write_all(b"exit\n").await.unwrap();
+    let termination = child.wait_handle.await.unwrap();
+    assert!(termination.status.success());
+    assert_contains(
+        &termination.path_accesses.unwrap(),
+        Path::new("/live-seccomp-input"),
+        fspy::AccessMode::READ,
+    );
+}

@@ -31,6 +31,7 @@ pub struct SummaryReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     show_details: bool,
+    latest_only: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
 }
@@ -49,7 +50,22 @@ impl SummaryReporterBuilder {
         program_name: Str,
         _color_support: ColorSupport,
     ) -> Self {
-        Self { inner, workspace_path, writer, show_details, write_summary, program_name }
+        Self {
+            inner,
+            workspace_path,
+            writer,
+            show_details,
+            latest_only: false,
+            write_summary,
+            program_name,
+        }
+    }
+}
+
+impl SummaryReporterBuilder {
+    pub const fn latest_only(mut self, latest_only: bool) -> Self {
+        self.latest_only = latest_only;
+        self
     }
 }
 
@@ -61,6 +77,7 @@ impl GraphExecutionReporterBuilder for SummaryReporterBuilder {
             workspace_path: self.workspace_path,
             writer: self.writer,
             show_details: self.show_details,
+            latest_only: self.latest_only,
             write_summary: self.write_summary,
             program_name: self.program_name,
         })
@@ -73,6 +90,7 @@ struct SummaryGraphReporter {
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     show_details: bool,
+    latest_only: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
 }
@@ -91,6 +109,30 @@ impl GraphExecutionReporter for SummaryGraphReporter {
             workspace_path: Arc::clone(&self.workspace_path),
             cache_status: None,
         })
+    }
+
+    fn restart_task(&mut self, task: &vt_plan::TaskExecution) {
+        self.inner.restart_task(task);
+        if self.latest_only {
+            for item in &task.items {
+                match &item.kind {
+                    vt_plan::ExecutionItemKind::Expanded(graph) => {
+                        for task in graph.graph.node_weights() {
+                            self.restart_task(task);
+                        }
+                    }
+                    vt_plan::ExecutionItemKind::Leaf(_) => {
+                        let display = &item.execution_item_display;
+                        let cwd = display.cwd.strip_prefix(&self.workspace_path).ok().flatten();
+                        self.tasks.borrow_mut().retain(|task| {
+                            task.package_name != display.task_display.package_name
+                                || task.task_name != display.task_display.task_name
+                                || cwd.as_ref().is_none_or(|cwd| task.cwd.as_str() != cwd.as_str())
+                        });
+                    }
+                }
+            }
+        }
     }
 
     fn finish(self: Box<Self>) -> Result<(), ExitStatus> {
@@ -180,7 +222,14 @@ impl LeafExecutionReporter for SummaryLeafReporter {
         // Record task summary before forwarding to inner.
         let saved_error = error.as_ref().map(SavedExecutionError::from_execution_error);
 
-        if let Some(ref cache_status) = self.cache_status {
+        if let Some(ref cache_status) = self.cache_status
+            && !matches!(
+                cache_update_status,
+                CacheUpdateStatus::NotUpdated(
+                    crate::session::event::CacheNotUpdatedReason::WatchCancelled
+                )
+            )
+        {
             let cwd_relative =
                 if let Ok(Some(rel)) = self.display.cwd.strip_prefix(&self.workspace_path) {
                     Str::from(rel.as_str())

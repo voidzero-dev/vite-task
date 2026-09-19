@@ -37,6 +37,7 @@ struct ExecutionContext<'a> {
     /// The graph-level reporter, used to create leaf reporters via `new_leaf_execution()`.
     /// Wrapped in `RefCell` for shared access from concurrent task futures.
     reporter: &'a RefCell<Box<dyn GraphExecutionReporter>>,
+    watch: Option<&'a crate::session::watch::inputs::RunInputs>,
     /// The execution cache for looking up and storing cached results.
     cache: &'a ExecutionCache,
     /// Workspace root that relative paths in cache entries (inputs, outputs,
@@ -209,6 +210,7 @@ impl ExecutionContext<'_> {
                     self.program_name,
                     self.fast_fail_token.clone(),
                     self.interrupt_token.clone(),
+                    self.watch.map(|watch| watch.leaf(spawn_execution)),
                 )
                 .await;
                 match outcome {
@@ -256,6 +258,7 @@ impl Session<'_> {
 
         let execution_context = ExecutionContext {
             reporter: &reporter,
+            watch: None,
             cache,
             workspace_root: &self.workspace_path,
             cache_dir: &self.cache_path,
@@ -272,4 +275,28 @@ impl Session<'_> {
         // by the reporter.
         reporter.into_inner().finish()
     }
+}
+
+/// Executes one restartable task, retaining nested graph scheduling semantics.
+pub async fn execute_watched_task(
+    session: &Session<'_>,
+    graph: &ExecutionGraph,
+    node: ExecutionNodeIndex,
+    reporter: &RefCell<Box<dyn GraphExecutionReporter>>,
+    cancel: CancellationToken,
+    inputs: &crate::session::watch::inputs::RunInputs,
+) -> bool {
+    reporter.borrow_mut().restart_task(&graph.graph[node]);
+    let context = ExecutionContext {
+        reporter,
+        watch: Some(inputs),
+        cache: session.cache().expect("watch initialized cache"),
+        workspace_root: &session.workspace_path,
+        cache_dir: &session.cache_path,
+        program_name: session.program_name.as_str(),
+        fast_fail_token: cancel.clone(),
+        interrupt_token: CancellationToken::new(),
+    };
+    context.execute_node(graph, node).await;
+    !cancel.is_cancelled()
 }

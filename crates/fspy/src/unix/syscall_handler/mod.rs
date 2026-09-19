@@ -21,19 +21,25 @@ use crate::arena::PathAccessArena;
 
 const PATH_MAX: usize = libc::PATH_MAX as usize;
 
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct SyscallHandler {
+    #[debug(skip)]
+    observer: Option<crate::AccessObserver>,
     arena: PathAccessArena,
     path_read_buf: [u8; PATH_MAX],
 }
 
 impl Default for SyscallHandler {
     fn default() -> Self {
-        Self { arena: PathAccessArena::default(), path_read_buf: [0; PATH_MAX] }
+        Self { observer: None, arena: PathAccessArena::default(), path_read_buf: [0; PATH_MAX] }
     }
 }
 
 impl SyscallHandler {
+    pub fn with_observer(observer: Option<crate::AccessObserver>) -> Self {
+        Self { observer, ..Self::default() }
+    }
+
     pub fn into_arena(self) -> PathAccessArena {
         self.arena
     }
@@ -57,23 +63,31 @@ impl SyscallHandler {
             }
             path = Cow::Owned(resolved_path);
         }
-        self.arena.add(PathAccess {
+        let access = PathAccess {
             mode: match flags & libc::O_ACCMODE {
                 libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
                 libc::O_WRONLY => AccessMode::WRITE,
                 _ => AccessMode::READ,
             },
             path: path.as_os_str().into(),
-        });
+        };
+        if let Some(observer) = &self.observer {
+            observer(Ok(access));
+        }
+        self.arena.add(access);
         Ok(())
     }
 
     fn handle_open_dir(&mut self, caller: Caller, fd: Fd) -> io::Result<()> {
         let path = fd.get_path(caller)?;
-        self.arena.add(PathAccess {
+        let access = PathAccess {
             mode: AccessMode::READ_DIR,
             path: OsStr::from_bytes(path.as_bytes()).into(),
-        });
+        };
+        if let Some(observer) = &self.observer {
+            observer(Ok(access));
+        }
+        self.arena.add(access);
         Ok(())
     }
 }

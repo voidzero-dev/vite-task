@@ -1,3 +1,5 @@
+#![cfg_attr(windows, feature(windows_process_extensions_main_thread_handle))]
+
 mod cli;
 mod collections;
 mod napi_client;
