@@ -1,0 +1,1 @@
+Failed to plan tasks from `VP_REMOTE_CACHE=invalid vt run build` in task @test/remote-cache-config#invalid-nested: Invalid remote cache mode "invalid": expected off, read, or read-write

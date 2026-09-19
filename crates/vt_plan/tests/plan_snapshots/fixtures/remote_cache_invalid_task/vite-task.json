@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt print-file package.json",
+      "remoteCache": true
+    }
+  }
+}

@@ -8,6 +8,7 @@ mod path_env;
 mod plan;
 pub mod plan_request;
 mod ps1_shim;
+pub mod remote_cache;
 
 use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 
@@ -33,6 +34,10 @@ use vt_str::Str;
 pub struct SpawnExecution {
     /// Cache metadata for this execution. `None` means caching is disabled.
     pub cache_metadata: Option<cache_metadata::CacheMetadata>,
+
+    /// Remote access resolved during planning, separate from cache identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_cache: Option<remote_cache::RemoteCacheConfig>,
 
     /// All information about a command to be spawned
     pub spawn_command: SpawnCommand,
@@ -206,10 +211,7 @@ pub async fn plan_query(
 ) -> Result<PlanResult, Error> {
     let indexed_task_graph = task_graph_loader.load_task_graph().await?;
 
-    let resolved_global_cache = resolve_cache_with_override(
-        *indexed_task_graph.global_cache_config(),
-        query_plan_request.plan_options.cache_override,
-    );
+    let resolved_global_cache = *indexed_task_graph.global_cache_config();
 
     let QueryPlanRequest { query, plan_options } = query_plan_request;
     let query = Arc::new(query);
@@ -264,5 +266,6 @@ pub fn plan_synthetic(
         cwd,
         cwd,
         ParentCacheConfig::None,
+        None,
     )
 }

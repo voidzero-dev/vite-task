@@ -51,6 +51,8 @@ pub struct PlanContext<'a> {
     /// Final resolved global cache config, combining the graph's config with any CLI override.
     resolved_global_cache: ResolvedGlobalCacheConfig,
 
+    remote_cache: Option<crate::remote_cache::RemoteCacheConfig>,
+
     /// The query that caused the current expansion.
     /// Used by the skip rule to detect and skip duplicate nested expansions.
     parent_query: Arc<TaskQuery>,
@@ -75,6 +77,7 @@ impl<'a> PlanContext<'a> {
             indexed_task_graph,
             extra_args: Arc::default(),
             resolved_global_cache,
+            remote_cache: None,
             parent_query,
         }
     }
@@ -129,6 +132,11 @@ impl<'a> PlanContext<'a> {
         }
         let envs = Arc::make_mut(&mut self.envs);
         for (key, value) in new_envs {
+            // Windows env names are case-insensitive. Remove a differently
+            // cased inherited control before inserting the explicit override.
+            if cfg!(windows) && crate::remote_cache::is_control_env(key.as_ref()) {
+                envs.retain(|name, _| !name.eq_ignore_ascii_case(key.as_ref()));
+            }
             envs.insert(Arc::from(key.as_ref()), Arc::from(value.as_ref()));
         }
     }
@@ -147,6 +155,28 @@ impl<'a> PlanContext<'a> {
 
     pub const fn set_resolved_global_cache(&mut self, config: ResolvedGlobalCacheConfig) {
         self.resolved_global_cache = config;
+    }
+
+    pub fn resolve_remote_cache(
+        &mut self,
+        mode: Option<crate::remote_cache::RemoteCacheMode>,
+    ) -> Result<(), crate::Error> {
+        self.remote_cache = crate::remote_cache::resolve(
+            self.indexed_task_graph.remote_cache_config(),
+            &self.envs,
+            mode,
+        )?;
+        // Make the explicit CLI choice the inherited environment value.
+        // A nested prefix assignment can then override it, even when that
+        // assignment repeats the original process environment's value.
+        if let Some(mode) = mode {
+            self.add_envs(std::iter::once((crate::remote_cache::MODE_ENV, mode.as_str())));
+        }
+        Ok(())
+    }
+
+    pub const fn remote_cache(&self) -> Option<&crate::remote_cache::RemoteCacheConfig> {
+        self.remote_cache.as_ref()
     }
 
     pub fn parent_query(&self) -> &TaskQuery {
@@ -173,6 +203,7 @@ impl<'a> PlanContext<'a> {
             indexed_task_graph: self.indexed_task_graph,
             extra_args: Arc::clone(&self.extra_args),
             resolved_global_cache: self.resolved_global_cache,
+            remote_cache: self.remote_cache.clone(),
             parent_query: Arc::clone(&self.parent_query),
         }
     }

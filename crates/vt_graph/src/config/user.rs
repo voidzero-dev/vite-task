@@ -243,6 +243,10 @@ pub struct UserTaskOptions {
     ///   direct workspace dependency that defines a `build` task.
     pub depends_on: Option<Arc<[UserDependsOnEntry]>>,
 
+    /// Disable remote caching for this task while retaining local caching.
+    #[cfg_attr(all(test, not(clippy)), ts(type = "false", optional))]
+    pub remote_cache: Option<MustBe!(false)>,
+
     /// Cache-related fields
     #[serde(flatten)]
     pub cache_config: UserCacheConfig,
@@ -256,6 +260,7 @@ impl Default for UserTaskOptions {
             cwd_relative_to_package: None,
             // No dependencies
             depends_on: None,
+            remote_cache: None,
             // Caching enabled with no fingerprinted env
             cache_config: UserCacheConfig::Enabled {
                 cache: None,
@@ -369,6 +374,15 @@ impl ResolvedGlobalCacheConfig {
     }
 }
 
+/// Remote cache endpoint shared by tasks in a workspace.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "RemoteCacheConfig"))]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct UserRemoteCacheConfig {
+    /// HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
+    pub url: Str,
+}
+
 /// User configuration structure for `run` field in `vite.config.*`
 #[derive(Debug, Default, Deserialize)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
@@ -380,6 +394,9 @@ pub struct UserRunConfig {
     /// This option can only be set in the workspace root's config file.
     /// Setting it in a package's config will result in an error.
     pub cache: Option<UserGlobalCacheConfig>,
+
+    /// Remote cache endpoint. Only allowed in the workspace root config.
+    pub remote_cache: Option<UserRemoteCacheConfig>,
 
     /// Task definitions: full task objects, command strings, or command string arrays.
     pub tasks: Option<FxHashMap<Str, UserTaskDefinition>>,

@@ -1,0 +1,50 @@
+[[plan]]
+name = "default_off"
+args = ["run", "build"]
+
+[[plan]]
+name = "explicit_off"
+args = ["run", "--remote-cache=off", "build"]
+
+[[plan]]
+name = "env_endpoint_enables_read"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE_URL" = "https://cache.example/projects/test" }
+
+[[plan]]
+name = "nested_endpoint_enables_read"
+args = ["run", "with-url"]
+
+[[plan]]
+name = "missing_cli_endpoint"
+args = ["run", "--remote-cache=read", "build"]
+
+[[plan]]
+name = "missing_env_endpoint"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE" = "read-write" }
+
+[[plan]]
+name = "invalid_env_mode"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE" = "invalid" }
+
+[[plan]]
+name = "invalid_cli_mode"
+args = ["run", "--remote-cache=invalid", "build"]
+
+[[plan]]
+name = "invalid_endpoint"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE_URL" = "cache.example/projects/test" }
+
+[[plan]]
+name = "unsupported_endpoint_scheme"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE_URL" = "file:///cache" }
+
+[[plan]]
+name = "empty_endpoint"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE_URL" = "" }
+

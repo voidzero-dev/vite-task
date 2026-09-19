@@ -1,0 +1,16 @@
+platform = "windows"
+
+[[plan]]
+name = "case_insensitive_controls"
+args = ["run", "build"]
+env = { "vp_remote_cache" = "read-write", "vp_remote_cache_url" = "https://other.example/projects/test" }
+
+[[plan]]
+name = "prefix_overrides_cli"
+args = ["run", "--remote-cache=read", "outer"]
+
+[[plan]]
+name = "cli_overrides_inherited_case"
+args = ["run", "--remote-cache=off", "inherit"]
+env = { "vp_remote_cache" = "read-write" }
+

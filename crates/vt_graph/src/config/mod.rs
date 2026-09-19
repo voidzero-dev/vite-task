@@ -83,6 +83,7 @@ impl ResolvedTaskOptions {
                 )?;
 
                 Some(CacheConfig {
+                    remote_cache: user_options.remote_cache.is_none(),
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
                             .env
@@ -100,14 +101,18 @@ impl ResolvedTaskOptions {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "env_config, input_config, output_config are distinct config categories, not a naming smell"
-)]
 pub struct CacheConfig {
+    /// Whether this task permits remote caching when local caching is enabled.
+    #[serde(skip_serializing_if = "remote_cache_enabled")]
+    pub remote_cache: bool,
     pub env_config: EnvConfig,
     pub input_config: ResolvedGlobConfig,
     pub output_config: ResolvedGlobConfig,
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde passes a field reference")]
+const fn remote_cache_enabled(enabled: &bool) -> bool {
+    *enabled
 }
 
 /// Resolved input configuration for cache fingerprinting.

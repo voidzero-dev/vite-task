@@ -1,0 +1,3 @@
+error: invalid value 'invalid' for '--remote-cache <off|read|read-write>': Invalid remote cache mode "invalid": expected off, read, or read-write
+
+For more information, try '--help'.

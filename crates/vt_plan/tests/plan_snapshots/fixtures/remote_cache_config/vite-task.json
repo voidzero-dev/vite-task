@@ -1,0 +1,30 @@
+{
+  "cache": true,
+  "remoteCache": {
+    "url": "https://cache.example/projects/test"
+  },
+  "tasks": {
+    "build": {
+      "command": "vtt print-file package.json",
+      "env": ["*", "!PATH"]
+    },
+    "local-only": {
+      "command": "vtt print-file package.json",
+      "remoteCache": false
+    },
+    "uncached": {
+      "command": "vtt print-file package.json",
+      "cache": false,
+      "remoteCache": false
+    },
+    "synthetic": {
+      "command": "vt tool print-file package.json",
+      "remoteCache": false
+    },
+    "tracked-controls": {
+      "command": "vtt print-file package.json",
+      "env": ["VP_REMOTE_CACHE", "VP_REMOTE_CACHE_URL"],
+      "untrackedEnv": ["VP_REMOTE_CACHE", "VP_REMOTE_CACHE_URL"]
+    }
+  }
+}
