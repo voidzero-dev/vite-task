@@ -6,7 +6,7 @@ use libc::{c_char, c_int};
 use with_argv::with_argv;
 
 use crate::{
-    client::{global_client, raw_exec::RawExec},
+    client::{ExecInjectionError, global_client, raw_exec::RawExec},
     macros::intercept,
 };
 
@@ -32,8 +32,13 @@ fn handle_exec(
     argv: *const *const libc::c_char,
     envp: *const *const libc::c_char,
 ) -> libc::c_int {
-    let client =
-        global_client().expect("exec unexpectedly called before client initialized in ctor");
+    let Some(client) = global_client() else {
+        // The ctor left the client unset (no readable environment, or no
+        // valid payload): run untracked by forwarding to the real exec.
+        // SAFETY: prog, argv, and envp are valid pointers forwarded from the
+        // interposed exec function.
+        return unsafe { execve::original()(prog, argv, envp) };
+    };
     // SAFETY: prog, argv, and envp are valid pointers to C strings/arrays forwarded from the interposed exec function
     let result = unsafe {
         client.handle_exec(
@@ -50,9 +55,23 @@ fn handle_exec(
     };
     match result {
         Ok(ret) => ret,
-        Err(errno) => {
+        Err(ExecInjectionError::Resolution(errno)) => {
+            // Resolution failed the way the real exec would have; the errno
+            // is authentic.
             errno.set();
             -1
+        }
+        Err(ExecInjectionError::Injection(_)) => {
+            // The injection machinery failed (e.g. the seccomp filter cannot
+            // be installed under a restrictive sandbox). Mark the run's trace
+            // incomplete so it is not cached, then run untracked with the
+            // original arguments. The original envp still carries
+            // LD_PRELOAD/FSPY_PAYLOAD, so each generation independently
+            // attempts tracking and independently degrades.
+            client.report_loss();
+            // SAFETY: prog, argv, and envp are the interposed exec function's
+            // own valid arguments.
+            unsafe { execve::original()(prog, argv, envp) }
         }
     }
 }

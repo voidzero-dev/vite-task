@@ -16,9 +16,34 @@ use fspy_shared::ipc::{PathAccess, channel::Sender};
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{EncodedPayload, decode_payload_from_env},
-    spawn::{PreExec, handle_exec},
+    spawn::{PreExec, prepare_exec, resolve_exec},
 };
 use raw_exec::RawExec;
+
+/// Why [`Client::handle_exec`] failed.
+#[derive(Debug)]
+pub enum ExecInjectionError {
+    /// Program resolution failed the way the real exec would have; the errno
+    /// is authentic and the caller should surface it as the exec's own
+    /// failure (set errno and return -1, or return it from `posix_spawn`).
+    Resolution(nix::Error),
+    /// The tracing injection machinery failed after the program resolved;
+    /// the exec was never attempted. The caller should mark the run's trace
+    /// incomplete ([`Client::report_loss`]) and perform the operation
+    /// untracked.
+    Injection(nix::Error),
+}
+
+impl std::fmt::Display for ExecInjectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Resolution(errno) => write!(f, "exec resolution failed: {errno}"),
+            Self::Injection(errno) => write!(f, "exec injection failed: {errno}"),
+        }
+    }
+}
+
+impl std::error::Error for ExecInjectionError {}
 
 pub struct Client<'a> {
     encoded_payload: EncodedPayload<'a>,
@@ -51,16 +76,18 @@ impl<'a> Client<'a> {
     /// with no further ceremony — and the client never retains the
     /// allocator itself (see the `Send + Sync` assertion above).
     ///
-    /// # Panics
-    ///
-    /// Panics when the payload is missing, malformed, or cannot be decoded,
-    /// and when the channel is there but cannot be attached to (see
-    /// [`ChannelConf::sender`](fspy_shared::ipc::channel::ChannelConf::sender)).
+    /// Returns `None` when the payload is missing, malformed, or cannot be
+    /// decoded — e.g. a leaked `LD_PRELOAD` in an env-scrubbed sandbox. The
+    /// host process then runs untracked rather than dying in its preload
+    /// constructor. When the payload decodes but its channel cannot be
+    /// attached to, the client still functions with `ipc_sender: None`: it
+    /// reports nothing, and [`Client::report_loss`] is a no-op.
+    #[must_use]
     pub fn from_env(
         envs: impl Iterator<Item = fspy_nostd::env::Entry>,
         allocator: impl Allocator + Clone + 'a,
-    ) -> Self {
-        let encoded_payload = decode_payload_from_env(envs, allocator.clone()).unwrap();
+    ) -> Option<Self> {
+        let encoded_payload = decode_payload_from_env(envs, allocator.clone()).ok()?;
 
         // `None` when the channel is already over, which happens when this
         // process starts after the root target exited. Nothing is said
@@ -68,7 +95,7 @@ impl<'a> Client<'a> {
         // stderr corrupts whatever that process is printing.
         let ipc_sender = encoded_payload.payload.ipc_channel_conf.sender(allocator);
 
-        Self { encoded_payload, ipc_sender }
+        Some(Self { encoded_payload, ipc_sender })
     }
 
     fn send(&self, mode: fspy_shared::ipc::AccessMode, path: &Path) {
@@ -87,7 +114,25 @@ impl<'a> Client<'a> {
         ipc_sender.send(&PathAccess { mode, path: path.into() });
     }
 
+    /// Marks the run's trace incomplete, so the receiver treats it as
+    /// untracked (and the runner does not cache it). Used before executing
+    /// something untracked, e.g. when the injection machinery failed and the
+    /// exec is forwarded to the OS as-is. A no-op when this client has no
+    /// channel sender.
+    pub fn report_loss(&self) {
+        if let Some(ipc_sender) = &self.ipc_sender {
+            ipc_sender.report_loss();
+        }
+    }
+
     /// Resolves and reports an exec before forwarding its transformed arguments.
+    ///
+    /// The callback contract: capture the real exec's own outcome (return
+    /// value, errno) into `R` and return it as `Ok`, even when the exec
+    /// itself fails. Reserve `Err` for injection machinery failures, such as
+    /// [`PreExec::run`] failing to install the seccomp filter — the caller
+    /// maps those to [`ExecInjectionError::Injection`], marks the trace
+    /// incomplete, and retries the operation untracked.
     ///
     /// # Safety
     ///
@@ -97,22 +142,27 @@ impl<'a> Client<'a> {
     ///
     /// # Errors
     ///
-    /// Returns errors from exec resolution, platform preparation, or the
-    /// forwarding callback.
+    /// [`ExecInjectionError::Resolution`] when program resolution fails the
+    /// way the real exec would have; [`ExecInjectionError::Injection`] when
+    /// the injection machinery fails after the program resolved.
     pub unsafe fn handle_exec<R>(
         &self,
         config: ExecResolveConfig,
         raw_exec: RawExec,
         allocator: impl Allocator,
         f: impl FnOnce(RawExec, Option<PreExec>) -> nix::Result<R>,
-    ) -> nix::Result<R> {
+    ) -> Result<R, ExecInjectionError> {
         // SAFETY: raw_exec contains valid pointers to C strings and
         // null-terminated arrays, as provided by the caller.
         let mut exec = unsafe { raw_exec.to_exec() };
-        let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |mode, path| {
+        resolve_exec(&mut exec, config, |mode, path| {
             self.send(mode, path);
-        })?;
+        })
+        .map_err(ExecInjectionError::Resolution)?;
+        let pre_exec = prepare_exec(&mut exec, &self.encoded_payload)
+            .map_err(ExecInjectionError::Injection)?;
         RawExec::from_exec(exec, allocator, |raw_command| f(raw_command, pre_exec))
+            .map_err(ExecInjectionError::Injection)
     }
 
     /// Resolves and reports one intercepted file access.

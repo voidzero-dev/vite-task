@@ -1,5 +1,6 @@
 use std::{
     ffi::{OsStr, OsString},
+    io,
     path::{Path, PathBuf},
     process::Stdio,
 };
@@ -167,13 +168,18 @@ impl Command {
     ///
     /// # Errors
     ///
-    /// Returns [`SpawnError`] if program resolution fails or the process cannot be spawned.
+    /// Returns [`SpawnError`] if program resolution fails, the tracking
+    /// machinery cannot be initialized (e.g. the preload library cannot be
+    /// materialized), or the process cannot be spawned.
     pub async fn spawn(
         mut self,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
         self.resolve_program()?;
-        SPY_IMPL.spawn(self, cancellation_token).await
+        match &*SPY_IMPL {
+            Ok(spy) => spy.spawn(self, cancellation_token).await,
+            Err(e) => Err(SpawnError::Injection(io::Error::new(e.kind(), e.to_string()))),
+        }
     }
 
     /// Resolve program name to full path using `PATH` and cwd.
