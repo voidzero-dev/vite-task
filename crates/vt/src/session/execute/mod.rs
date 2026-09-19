@@ -419,6 +419,7 @@ async fn run(
         fspy_enabled,
         spawn_stdio,
         fast_fail_token.clone(),
+        interrupt_token.clone(),
         mode.injected_envs(),
     )
     .await
@@ -590,31 +591,31 @@ async fn run_child(
     stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
 ) -> Result<ChildOutcome, ExecutionError> {
-    let pipe_result: Result<(), ExecutionError> = if let Some(sinks) = sinks {
-        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        #[expect(
-            clippy::large_futures,
-            reason = "pipe_stdio streams child I/O and creates a large future"
-        )]
-        let r = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        r.map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()))
-    } else {
-        Ok(())
-    };
-
-    let wait_result = match pipe_result {
-        Ok(()) => {
-            child.wait.await.map_err(|err| ExecutionError::WaitForTaskProcessExit(err.into()))
-        }
-        Err(err) => {
-            // Pipe failed — cancel so `child.wait` kills the child instead of
-            // orphaning it. Still signal the server below so it can drain.
+    let wait = child.wait;
+    let pipe = async {
+        let result = if let Some(sinks) = sinks {
+            let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
+            let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
+            #[expect(
+                clippy::large_futures,
+                reason = "pipe_stdio streams child I/O and creates a large future"
+            )]
+            let result = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
+            result.map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()))
+        } else {
+            Ok(())
+        };
+        if result.is_err() {
             fast_fail_token.cancel();
-            let _ = child.wait.await;
-            Err(err)
         }
+        result
     };
+    // The lifetime future forwards cancellation and terminal interruption to
+    // owned task groups while output is still being drained.
+    let (pipe_result, wait_result) = tokio::join!(pipe, wait);
+    let wait_result = pipe_result.and_then(|()| {
+        wait_result.map_err(|err| ExecutionError::WaitForTaskProcessExit(err.into()))
+    });
 
     if let Some(stop_accepting) = stop_accepting {
         stop_accepting.signal();

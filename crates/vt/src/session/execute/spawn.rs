@@ -30,8 +30,9 @@ pub enum SpawnStdio {
 ///
 /// `stdout` and `stderr` are `Some` iff [`SpawnStdio::Piped`] was requested.
 /// `wait` resolves when the child exits and handles cancellation internally:
-/// when the token fires, the child (and on Windows its descendants via the Job
-/// Object) is killed before the future resolves.
+/// when the token fires, noninteractive tasks terminate their owned process group
+/// (or Windows Job Object). Interactive Unix tasks keep the terminal foreground
+/// group and its existing signal delivery.
 pub struct ChildHandle {
     pub stdout: Option<ChildStdout>,
     pub stderr: Option<ChildStderr>,
@@ -64,6 +65,7 @@ pub async fn spawn<E, K, V>(
     fspy: bool,
     stdio: SpawnStdio,
     cancellation_token: CancellationToken,
+    interrupt_token: CancellationToken,
     extra_envs: E,
 ) -> anyhow::Result<ChildHandle>
 where
@@ -73,7 +75,7 @@ where
 {
     #[cfg(fspy)]
     if fspy {
-        return spawn_fspy(cmd, stdio, cancellation_token, extra_envs).await;
+        return spawn_fspy(cmd, stdio, cancellation_token, interrupt_token, extra_envs).await;
     }
     #[cfg(not(fspy))]
     let _ = fspy;
@@ -85,7 +87,7 @@ where
     tokio_cmd.envs(extra_envs);
     tokio_cmd.current_dir(&*cmd.cwd);
     apply_stdio(&mut tokio_cmd, stdio);
-    spawn_tokio(tokio_cmd, cancellation_token)
+    spawn_tokio(tokio_cmd, stdio, cancellation_token, interrupt_token)
 }
 
 #[cfg(fspy)]
@@ -93,6 +95,7 @@ async fn spawn_fspy<E, K, V>(
     cmd: &SpawnCommand,
     stdio: SpawnStdio,
     cancellation_token: CancellationToken,
+    interrupt_token: CancellationToken,
     extra_envs: E,
 ) -> anyhow::Result<ChildHandle>
 where
@@ -124,14 +127,29 @@ where
         }
     }
 
-    let mut tracked = fspy_cmd.spawn(cancellation_token).await?;
+    #[cfg(unix)]
+    let group = isolate_process_group(stdio);
+    #[cfg(unix)]
+    if group {
+        fspy_cmd.process_group(0);
+    }
+    // Task ownership includes descendants. Keep cancellation here so the
+    // whole task scope terminates before the trace is collected.
+    let mut tracked = fspy_cmd.spawn(CancellationToken::new()).await?;
+    #[cfg(unix)]
+    let process_scope = TaskProcess {
+        id: nix::unistd::Pid::from_raw(tracked.id.try_into().expect("process ID fits pid_t")),
+        group,
+    };
 
     // On Windows, assign the child to a Job Object so that killing the child
     // also kills all descendant processes (e.g., node.exe via a .cmd shim).
     #[cfg(windows)]
-    let job = {
-        use std::os::windows::io::AsRawHandle;
-        super::win_job::assign_to_kill_on_close_job(tracked.process_handle.as_raw_handle())?
+    let process_scope = TaskProcess {
+        job: {
+            use std::os::windows::io::AsRawHandle;
+            super::win_job::assign_to_kill_on_close_job(tracked.process_handle.as_raw_handle())?
+        },
     };
 
     let stdout = tracked.stdout.take();
@@ -139,12 +157,9 @@ where
     let wait_handle = tracked.wait_handle;
 
     let wait = async move {
-        let termination = wait_handle.await?;
-        // Drop order: `job` drops here, KILL_ON_JOB_CLOSE kills any descendants
-        // still alive. fspy's wait handle already watched the cancellation
-        // token and killed the direct child.
-        #[cfg(windows)]
-        drop(job);
+        let termination =
+            wait_for_termination(wait_handle, process_scope, cancellation_token, interrupt_token)
+                .await?;
         Ok(ChildOutcome {
             exit_status: termination.status,
             path_accesses: Some(termination.path_accesses),
@@ -157,37 +172,54 @@ where
 
 fn spawn_tokio(
     mut cmd: tokio::process::Command,
+    stdio: SpawnStdio,
     cancellation_token: CancellationToken,
+    interrupt_token: CancellationToken,
 ) -> anyhow::Result<ChildHandle> {
+    #[cfg(unix)]
+    let group = isolate_process_group(stdio);
+    #[cfg(unix)]
+    if group {
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    let _ = stdio;
     let mut child = cmd.spawn()?;
+    #[cfg(unix)]
+    let process_scope = TaskProcess {
+        id: nix::unistd::Pid::from_raw(
+            child
+                .id()
+                .expect("new child has a process ID")
+                .try_into()
+                .expect("process ID fits pid_t"),
+        ),
+        group,
+    };
 
     #[cfg(windows)]
-    let job = {
-        use std::os::windows::io::{AsRawHandle, BorrowedHandle};
-        // Duplicate the process handle so the job outlives tokio's handle.
-        // SAFETY: The child was just spawned, so its raw handle is valid.
-        let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
-        let owned = borrowed.try_clone_to_owned()?;
-        super::win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?
+    let process_scope = TaskProcess {
+        job: {
+            use std::os::windows::io::{AsRawHandle, BorrowedHandle};
+            // Duplicate the process handle so the job outlives tokio's handle.
+            // SAFETY: The child was just spawned, so its raw handle is valid.
+            let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
+            let owned = borrowed.try_clone_to_owned()?;
+            super::win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?
+        },
     };
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
     let wait = async move {
-        let exit_status = tokio::select! {
-            status = child.wait() => status?,
-            () = cancellation_token.cancelled() => {
-                child.start_kill()?;
-                // Eagerly kill descendants; KILL_ON_JOB_CLOSE on drop is a backstop.
-                #[cfg(windows)]
-                job.terminate();
-                child.wait().await?
-            }
-        };
-        // `job` drops here on Windows, terminating any stragglers.
-        #[cfg(windows)]
-        drop(job);
+        let exit_status = wait_for_termination(
+            async move { child.wait().await },
+            process_scope,
+            cancellation_token,
+            interrupt_token,
+        )
+        .await?;
         Ok(ChildOutcome {
             exit_status,
             #[cfg(fspy)]
@@ -197,6 +229,96 @@ fn spawn_tokio(
     .boxed_local();
 
     Ok(ChildHandle { stdout, stderr, wait })
+}
+
+#[cfg(unix)]
+fn isolate_process_group(stdio: SpawnStdio) -> bool {
+    use std::io::IsTerminal;
+    stdio == SpawnStdio::Piped || !std::io::stdin().is_terminal()
+}
+
+struct TaskProcess {
+    #[cfg(unix)]
+    id: nix::unistd::Pid,
+    #[cfg(unix)]
+    group: bool,
+    #[cfg(windows)]
+    job: super::win_job::OwnedJobHandle,
+}
+
+impl TaskProcess {
+    #[cfg_attr(
+        windows,
+        expect(
+            clippy::unused_self,
+            reason = "Windows console events are delivered without per-task forwarding"
+        )
+    )]
+    const fn forwards_interrupt(&self) -> bool {
+        #[cfg(unix)]
+        {
+            self.group
+        }
+        #[cfg(windows)]
+        {
+            false
+        }
+    }
+
+    fn terminate(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            self.signal(nix::sys::signal::Signal::SIGKILL)
+        }
+        #[cfg(windows)]
+        {
+            self.job.terminate()
+        }
+    }
+
+    #[cfg(unix)]
+    fn interrupt(&self) -> io::Result<()> {
+        self.signal(nix::sys::signal::Signal::SIGINT)
+    }
+
+    #[cfg(unix)]
+    fn signal(&self, signal: nix::sys::signal::Signal) -> io::Result<()> {
+        use nix::{
+            errno::Errno,
+            sys::signal::{kill, killpg},
+        };
+        // Only piped or noninteractive tasks enter a fresh group. Never signal the
+        // runner's own foreground group or a group discovered by enumeration.
+        let result = if self.group { killpg(self.id, signal) } else { kill(self.id, signal) };
+        match result {
+            Ok(()) | Err(Errno::ESRCH) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+async fn wait_for_termination<T>(
+    termination: impl std::future::Future<Output = io::Result<T>>,
+    process_scope: TaskProcess,
+    cancellation_token: CancellationToken,
+    interrupt_token: CancellationToken,
+) -> io::Result<T> {
+    tokio::pin!(termination);
+    let mut interrupted = false;
+    loop {
+        tokio::select! {
+            result = &mut termination => return result,
+            () = cancellation_token.cancelled() => {
+                process_scope.terminate()?;
+                return termination.await;
+            }
+            () = interrupt_token.cancelled(), if process_scope.forwards_interrupt() && !interrupted => {
+                #[cfg(unix)]
+                process_scope.interrupt()?;
+                interrupted = true;
+            }
+        }
+    }
 }
 
 fn apply_stdio(cmd: &mut tokio::process::Command, stdio: SpawnStdio) {
@@ -243,4 +365,107 @@ fn clear_stdio_cloexec() -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{io, sync::Arc, time::Duration};
+
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    use tokio_util::sync::CancellationToken;
+    use vt_path::AbsolutePath;
+    use vt_plan::SpawnCommand;
+
+    use super::{SpawnStdio, spawn};
+
+    // https://github.com/voidzero-dev/vite-task/commit/88e796f4b49e2bcdf4bf30a781250594fc62a030
+    // Fast-fail cancellation must terminate the task's descendants.
+    #[tokio::test]
+    async fn cancelled_task_terminates_descendants() -> anyhow::Result<()> {
+        let mut failures = Vec::new();
+        for tracked in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let address = vt_str::Str::from(listener.local_addr()?.to_string());
+            let command = subprocess_test::command_for_fn!(address, |address: vt_str::Str| {
+                use std::io::Read;
+                // Do not spawn descendants until the runner has finished
+                // attaching the task's scope (including Windows Job Objects).
+                let mut started = std::net::TcpStream::connect(address.as_str()).unwrap();
+                started.read_exact(&mut [0u8]).unwrap();
+                drop(started);
+                let descendant =
+                    subprocess_test::command_for_fn!(address, |address: vt_str::Str| {
+                        use std::io::{Read, Write};
+                        let mut stream = std::net::TcpStream::connect(address.as_str()).unwrap();
+                        stream.write_all(&std::process::id().to_ne_bytes()).unwrap();
+                        // Only the owning test can release this barrier. Cancellation
+                        // must terminate the descendant without releasing it.
+                        let _ = stream.read_exact(&mut [0u8]);
+                    });
+                let mut command = std::process::Command::from(descendant);
+                command.stdin(std::process::Stdio::null());
+                command.stdout(std::process::Stdio::null());
+                command.stderr(std::process::Stdio::null());
+                command.spawn().unwrap().wait().unwrap();
+            });
+            let command = SpawnCommand {
+                program_path: Arc::from(AbsolutePath::new(&command.program).unwrap()),
+                args: command.args.iter().map(|arg| arg.to_str().unwrap().into()).collect(),
+                spawn_envs: Arc::new(
+                    command.envs.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+                ),
+                cwd: Arc::from(AbsolutePath::new(&command.cwd).unwrap()),
+            };
+            let cancelled = CancellationToken::new();
+            let mut child = spawn(
+                &command,
+                tracked,
+                SpawnStdio::Piped,
+                cancelled.clone(),
+                CancellationToken::new(),
+                std::iter::empty::<(&str, &str)>(),
+            )
+            .await?;
+            let (mut started, _) = listener.accept().await?;
+            started.write_all(b"x").await?;
+            drop(started);
+            let (mut stream, _) = listener.accept().await?;
+            let mut pid = [0u8; 4];
+            stream.read_exact(&mut pid).await?;
+            let descendant_pid = u32::from_ne_bytes(pid);
+            cancelled.cancel();
+
+            let mut outcome = None;
+            let mut byte = [0u8];
+            let settled = tokio::time::timeout(Duration::from_secs(2), async {
+                let (eof, status) = tokio::join!(stream.read(&mut byte), async {
+                    outcome = Some(child.wait.as_mut().await?);
+                    io::Result::Ok(())
+                });
+                status?;
+                assert_eq!(eof?, 0, "descendant barrier was unexpectedly released");
+                io::Result::Ok(())
+            })
+            .await;
+            if let Ok(result) = settled {
+                result?;
+            } else {
+                // Clean up the known descendant on the red implementation.
+                // This release is never used to satisfy the assertion.
+                stream.write_all(b"x").await?;
+                if outcome.is_none() {
+                    outcome = Some(child.wait.await?);
+                }
+                failures.push(vt_str::format!(
+                    "tracking={tracked}: cancellation left descendant {descendant_pid} alive"
+                ));
+            }
+            assert!(!outcome.unwrap().exit_status.success());
+        }
+        assert!(failures.is_empty(), "{failures:?}");
+        Ok(())
+    }
 }

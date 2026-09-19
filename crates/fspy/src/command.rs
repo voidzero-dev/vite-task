@@ -20,6 +20,8 @@ pub struct Command {
     cwd: Option<PathBuf>,
     #[cfg(unix)]
     arg0: Option<OsString>,
+    #[cfg(unix)]
+    process_group: Option<i32>,
 
     stderr: Option<Stdio>,
     stdout: Option<Stdio>,
@@ -42,12 +44,22 @@ impl Command {
             cwd: None,
             #[cfg(unix)]
             arg0: None,
+            #[cfg(unix)]
+            process_group: None,
             stderr: None,
             stdout: None,
             stdin: None,
             #[cfg(unix)]
             pre_exec_closures: Vec::new(),
         }
+    }
+
+    /// Set the child process group, matching `std::process::Command`.
+    /// A value of zero creates a group whose ID is the child's process ID.
+    #[cfg(unix)]
+    pub const fn process_group(&mut self, process_group: i32) -> &mut Self {
+        self.process_group = Some(process_group);
+        self
     }
 
     #[cfg(unix)]
@@ -237,6 +249,10 @@ impl Command {
         #[cfg(unix)]
         if let Some(arg0) = self.arg0 {
             tokio_cmd.arg0(arg0);
+        }
+        #[cfg(unix)]
+        if let Some(process_group) = self.process_group {
+            tokio_cmd.process_group(process_group);
         }
         tokio_cmd.args(self.args);
         tokio_cmd.env_clear();
