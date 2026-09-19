@@ -78,7 +78,7 @@ impl<'a> InitialStack<'a> {
         Self { arguments, environment, auxiliary }
     }
 
-    /// Borrows arguments, including argv[0], without the null terminator.
+    /// Borrows arguments, including `argv[0]`, without the null terminator.
     #[must_use]
     pub const fn args(&self) -> &'a [CStr<'a, Thin>] {
         self.arguments
