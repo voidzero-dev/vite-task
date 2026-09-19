@@ -196,6 +196,7 @@ impl ExecutionContext<'_> {
                     None,
                     CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
                     None,
+                    false,
                 );
                 false
             }
@@ -212,7 +213,7 @@ impl ExecutionContext<'_> {
                 )
                 .await;
                 match outcome {
-                    SpawnOutcome::CacheHit => false,
+                    SpawnOutcome::CacheHit | SpawnOutcome::Unchanged => false,
                     SpawnOutcome::Spawned(status) => !status.success(),
                     SpawnOutcome::Failed => true,
                 }

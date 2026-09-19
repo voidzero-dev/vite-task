@@ -12,7 +12,8 @@ use socket_ipc::{Server as TransportServer, ServerConnection as Stream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use vt_ipc_shared::{
-    EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request,
+    EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME,
+    ReportUnchangedResponse, Request,
 };
 use vt_path::AbsolutePath;
 use wincode::{SchemaWrite, config::DefaultConfig};
@@ -21,6 +22,7 @@ pub trait Handler {
     fn ignore_input(&mut self, path: &Arc<AbsolutePath>);
     fn ignore_output(&mut self, path: &Arc<AbsolutePath>);
     fn disable_cache(&mut self);
+    fn report_unchanged(&mut self);
     fn get_env(&mut self, name: &OsStr, tracked: bool) -> Option<Arc<OsStr>>;
     /// Returns the subset of the env map whose names match `query`.
     ///
@@ -72,6 +74,7 @@ pub struct Recorder {
     ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
     ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     cache_disabled: bool,
+    reported_unchanged: bool,
     tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
     tracked_get_envs: FxHashMap<EnvQuery, EnvQueryRecord>,
     /// The envs `get_env` resolves against. The runner supplies these for the
@@ -101,6 +104,7 @@ pub struct Reports {
     pub ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
     pub ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     pub cache_disabled: bool,
+    pub reported_unchanged: bool,
     pub tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
     pub tracked_get_envs: FxHashMap<EnvQuery, EnvQueryRecord>,
 }
@@ -112,6 +116,7 @@ impl Recorder {
             ignored_inputs: FxHashSet::default(),
             ignored_outputs: FxHashSet::default(),
             cache_disabled: false,
+            reported_unchanged: false,
             tracked_get_env: FxHashMap::default(),
             tracked_get_envs: FxHashMap::default(),
             envs,
@@ -124,6 +129,7 @@ impl Recorder {
             ignored_inputs: self.ignored_inputs,
             ignored_outputs: self.ignored_outputs,
             cache_disabled: self.cache_disabled,
+            reported_unchanged: self.reported_unchanged,
             tracked_get_env: self.tracked_get_env,
             tracked_get_envs: self.tracked_get_envs,
         }
@@ -137,6 +143,10 @@ impl Handler for Recorder {
 
     fn ignore_output(&mut self, path: &Arc<AbsolutePath>) {
         self.ignored_outputs.insert(Arc::clone(path));
+    }
+
+    fn report_unchanged(&mut self) {
+        self.reported_unchanged = true;
     }
 
     fn disable_cache(&mut self) {
@@ -368,6 +378,16 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
                 let path = ipc_str_to_abs_path(ns)?;
                 handler.borrow_mut().ignore_output(&path);
             }
+            Request::ReportUnchanged => {
+                handler.borrow_mut().report_unchanged();
+                if let Err(err) = write_response(&mut stream, &ReportUnchangedResponse).await {
+                    return if is_client_gone(&err) {
+                        Ok(())
+                    } else {
+                        Err(Error::WriteResponse(err))
+                    };
+                }
+            }
             Request::DisableCache => {
                 handler.borrow_mut().disable_cache();
             }
@@ -426,12 +446,23 @@ fn ipc_str_to_abs_path(ns: &IpcStr) -> Result<Arc<AbsolutePath>, Error> {
 
 async fn read_frame(stream: &mut Stream, buf: &mut Vec<u8>) -> io::Result<()> {
     let mut len_bytes = [0u8; 4];
-    stream.read_exact(&mut len_bytes).await?;
+    // EOF before a frame starts is a normal disconnect. Once any byte has
+    // arrived, losing the rest is an incomplete report, not a clean shutdown.
+    stream.read_exact(&mut len_bytes[..1]).await?;
+    stream.read_exact(&mut len_bytes[1..]).await.map_err(incomplete_frame)?;
     let len = u32::from_le_bytes(len_bytes) as usize;
     buf.clear();
     buf.resize(len, 0);
-    stream.read_exact(buf).await?;
+    stream.read_exact(buf).await.map_err(incomplete_frame)?;
     Ok(())
+}
+
+fn incomplete_frame(error: io::Error) -> io::Error {
+    if is_client_gone(&error) {
+        io::Error::new(io::ErrorKind::InvalidData, "incomplete message from the task")
+    } else {
+        error
+    }
 }
 
 async fn write_response<T>(stream: &mut Stream, response: &T) -> io::Result<()>

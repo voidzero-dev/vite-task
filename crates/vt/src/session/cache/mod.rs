@@ -359,6 +359,17 @@ impl ExecutionCache {
         Ok(Err(CacheMiss::NotFound))
     }
 
+    /// Retrieve the previous outputs only when command and cache configuration match.
+    pub(crate) async fn previous_output_archive(
+        &self,
+        metadata: &CacheMetadata,
+    ) -> anyhow::Result<Option<Str>> {
+        Ok(self
+            .get_by_cache_key(&CacheEntryKey::from_metadata(metadata))
+            .await?
+            .and_then(|entry| entry.output_archive))
+    }
+
     /// Update cache after successful execution.
     ///
     /// If a previous entry exists for the same cache key with a different

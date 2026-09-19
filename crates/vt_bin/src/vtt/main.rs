@@ -22,6 +22,7 @@ mod print_env;
 mod print_file;
 mod read_stdin;
 mod replace_file_content;
+mod report_unchanged;
 mod rm;
 #[cfg(target_os = "linux")]
 mod small_dev_shm;
@@ -65,6 +66,7 @@ fn main() {
         "print-env" => print_env::run(&args[2..]),
         "print-file" => print_file::run(&args[2..]),
         "read-stdin" => read_stdin::run(),
+        "report-unchanged" => report_unchanged::run(&args[2..]),
         "replace-file-content" => replace_file_content::run(&args[2..]),
         "rm" => rm::run(&args[2..]),
         #[cfg(target_os = "linux")]

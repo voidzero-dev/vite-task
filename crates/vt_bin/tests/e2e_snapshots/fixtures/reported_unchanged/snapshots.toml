@@ -1,0 +1,362 @@
+[[e2e]]
+name = "reports_and_replays"
+comment = "Reports are distinct from cache hits; explicit, automatic, uncached, and CLI reporting work."
+steps = [
+  [
+    "vt",
+    "run",
+    "report",
+  ],
+  [
+    "vt",
+    "run",
+    "report",
+  ],
+  [
+    "vt",
+    "run",
+    "auto",
+  ],
+  [
+    "vt",
+    "run",
+    "auto",
+  ],
+  [
+    "vt",
+    "run",
+    "uncached",
+  ],
+  [
+    "vt",
+    "run",
+    "uncached",
+  ],
+  [
+    "vt",
+    "run",
+    "cli",
+  ],
+  [
+    "vt",
+    "run",
+    "--last-details",
+  ],
+]
+
+[[e2e]]
+name = "log_modes"
+comment = "Every output mode and saved details display unchanged without adding cache hits or saved time."
+steps = [
+  [
+    "vt",
+    "run",
+    "--no-cache",
+    "--log",
+    "interleaved",
+    "report",
+  ],
+  [
+    "vt",
+    "run",
+    "--no-cache",
+    "--log",
+    "labeled",
+    "report",
+  ],
+  [
+    "vt",
+    "run",
+    "--no-cache",
+    "--log",
+    "grouped",
+    "report",
+  ],
+  [
+    "vt",
+    "run",
+    "--no-cache",
+    "--verbose",
+    "report",
+  ],
+  [
+    "vt",
+    "run",
+    "--last-details",
+  ],
+]
+
+[[e2e]]
+name = "failures_and_invalid_reports"
+comment = "Nonzero exits and incomplete IPC never become unchanged results. Standalone reporting succeeds, but broken IPC fails."
+steps = [
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "failed",
+  ],
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "failed",
+  ],
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "invalid",
+  ],
+  [
+    "vt",
+    "run",
+    "--last-details",
+  ],
+  [
+    "vt",
+    "run",
+    "--report-unchanged",
+  ],
+]
+
+[[e2e]]
+name = "archives_survive_unchanged_runs"
+comment = "An unchanged run records the new inputs and preserves automatically inferred outputs for restoration."
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "input.txt",
+    "unchanged",
+  ],
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "rm",
+    "artifact.txt",
+  ],
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "print-file",
+    "artifact.txt",
+  ],
+]
+
+[[e2e]]
+name = "damaged_archive_is_not_replaced"
+comment = "An unreadable existing output archive prevents caching the new inputs instead of silently discarding the outputs."
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "report-unchanged",
+    "corrupt-archive",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "input.txt",
+    "unchanged",
+  ],
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "build",
+  ],
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "build",
+  ],
+]
+
+[[e2e]]
+name = "chain_and_independent_inputs"
+comment = "A report preserves downstream cache validation, independent input changes, direct requests, and uncached dependents."
+steps = [
+  [
+    "vt",
+    "run",
+    "cold-dependent",
+  ],
+  [
+    "vt",
+    "run",
+    "c",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "a.txt",
+    "unchanged",
+  ],
+  [
+    "vt",
+    "run",
+    "c",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "b.txt",
+    "changed own source",
+  ],
+  [
+    "vt",
+    "run",
+    "c",
+  ],
+  [
+    "vt",
+    "run",
+    "--no-cache",
+    "b",
+  ],
+  [
+    "vt",
+    "run",
+    "uncached-dependent",
+  ],
+  [
+    "vt",
+    "run",
+    "uncached-dependent",
+  ],
+]
+
+[[e2e]]
+name = "diamond_dependency_changes"
+comment = "An unchanged prerequisite does not hide another prerequisite changing the dependent input."
+steps = [
+  [
+    "vt",
+    "run",
+    "--concurrency-limit",
+    "1",
+    "diamond",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "a.txt",
+    "unchanged",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "d.txt",
+    "changed other dependency",
+  ],
+  [
+    "vt",
+    "run",
+    "--concurrency-limit",
+    "1",
+    "diamond",
+  ],
+]
+
+[[e2e]]
+name = "command_scope"
+comment = "Reports apply to one command, including a standalone marker and actual nested runner processes."
+steps = [
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "compound",
+  ],
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "marker",
+  ],
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "nested",
+  ],
+]
+
+[[e2e]]
+name = "stdin_and_tty"
+comment = "Reporting works with inherited terminal descriptors and does not change stdin behavior."
+steps = [
+  [
+    "vt",
+    "run",
+    "--no-cache",
+    "tty",
+  ],
+  [
+    "vt",
+    "run",
+    "tty",
+  ],
+  [
+    "vtt",
+    "pipe-stdin",
+    "from-stdin",
+    "--",
+    "vt",
+    "run",
+    "--no-cache",
+    "stdin",
+  ],
+  [
+    "vtt",
+    "pipe-stdin",
+    "from-stdin",
+    "--",
+    "vt",
+    "run",
+    "stdin",
+  ],
+]
+
+[[e2e]]
+name = "interruption_invalidates_report"
+comment = "An acknowledged report is discarded after Ctrl+C, including a child that handles the signal and exits successfully."
+steps = [
+  { "argv" = [
+    "vt",
+    "run",
+    "--verbose",
+    "interrupted",
+  ], "interactions" = [
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ] },
+  { "argv" = [
+    "vt",
+    "run",
+    "--verbose",
+    "interrupted",
+  ], "interactions" = [
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ] },
+]

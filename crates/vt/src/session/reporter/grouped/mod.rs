@@ -127,6 +127,7 @@ impl LeafExecutionReporter for GroupedLeafReporter {
         _status: Option<StdExitStatus>,
         _cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
+        reported_unchanged: bool,
     ) {
         // Build grouped block: header + buffered output.
         let mut extra = Vec::new();
@@ -144,7 +145,7 @@ impl LeafExecutionReporter for GroupedLeafReporter {
             }
         }
 
-        write_leaf_trailing_output(&self.writer, error, self.started, &extra);
+        write_leaf_trailing_output(&self.writer, error, self.started, &extra, reported_unchanged);
     }
 }
 

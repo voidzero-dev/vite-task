@@ -81,8 +81,8 @@ impl RunFlags {
 
 /// Arguments for the `run` subcommand as parsed by clap.
 ///
-/// Contains the `--last-details` flag which is resolved into a separate
-/// `ResolvedCommand::RunLastDetails` variant internally.
+/// The exclusive `--last-details` and `--report-unchanged` flags resolve into
+/// separate action variants internally.
 ///
 /// `trailing_var_arg` at the command level makes clap stop matching flags once
 /// the trailing positional starts being filled. This means all tokens after the
@@ -100,6 +100,10 @@ pub struct RunCommand {
     /// Display the detailed summary of the last run.
     #[clap(long, exclusive = true)]
     pub(crate) last_details: bool,
+
+    /// Report unchanged outputs for the command invoking this process.
+    #[clap(long, exclusive = true)]
+    pub(crate) report_unchanged: bool,
 
     #[clap(
         allow_hyphen_values = true,
@@ -127,6 +131,26 @@ pub enum Command {
 }
 
 impl Command {
+    /// Handle a report command before initializing a workspace or session.
+    ///
+    /// Embedding CLIs should call this before `Session::init`. Returns `None`
+    /// for ordinary commands, and succeeds without IPC when invoked standalone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a configured runner cannot receive the report.
+    #[must_use]
+    pub fn handle_report_command(&self) -> Option<std::io::Result<()>> {
+        if !matches!(self, Self::Run(run) if run.report_unchanged) {
+            return None;
+        }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "report command bootstraps runner IPC without a workspace"
+        )]
+        Some(report_unchanged(std::env::vars_os()))
+    }
+
     /// Resolve the clap-parsed command into the dispatched [`ResolvedCommand`] enum.
     ///
     /// When `--last-details` is set on the `run` subcommand, this produces
@@ -135,6 +159,7 @@ impl Command {
     #[must_use]
     pub(crate) fn into_resolved(self) -> ResolvedCommand {
         match self {
+            Self::Run(run) if run.report_unchanged => ResolvedCommand::RunReportUnchanged,
             Self::Run(run) if run.last_details => ResolvedCommand::RunLastDetails,
             Self::Run(run) => ResolvedCommand::Run(run.into_resolved()),
             Self::Cache { subcmd } => ResolvedCommand::Cache { subcmd },
@@ -157,6 +182,8 @@ pub enum ResolvedCommand {
     Run(ResolvedRunCommand),
     /// Display the saved detailed summary of the last run (`--last-details`).
     RunLastDetails,
+    /// Report unchanged outputs to the invoking command.
+    RunReportUnchanged,
     /// Manage the task cache.
     Cache { subcmd: CacheSubcommand },
 }
@@ -240,5 +267,45 @@ impl ResolvedRunCommand {
             },
             is_cwd_only,
         ))
+    }
+}
+
+/// Send a report using the caller's environment, without loading task configuration.
+pub fn report_unchanged(
+    envs: impl Iterator<Item = (impl AsRef<std::ffi::OsStr>, impl AsRef<std::ffi::OsStr>)>,
+) -> std::io::Result<()> {
+    if let Some(client) = vt_client::Client::from_envs(envs)? {
+        client.report_unchanged()?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod report_tests {
+    use super::*;
+
+    #[test]
+    fn report_flag_is_exclusive_and_preserves_task_arguments() {
+        for args in [
+            vec!["vp", "run", "--report-unchanged", "build"],
+            vec!["vp", "run", "--report-unchanged", "--no-cache"],
+            vec!["vp", "run", "--report-unchanged", "--last-details"],
+            vec!["vp", "run", "--report-unchanged", "--verbose"],
+        ] {
+            assert!(Command::try_parse_from(args).is_err());
+        }
+        let command = Command::try_parse_from(["vp", "run", "--report-unchanged"]).unwrap();
+        assert!(matches!(command.into_resolved(), ResolvedCommand::RunReportUnchanged));
+        let command =
+            Command::try_parse_from(["vp", "run", "build", "--report-unchanged"]).unwrap();
+        let ResolvedCommand::Run(run) = command.into_resolved() else {
+            panic!("regular task");
+        };
+        assert_eq!(run.additional_args, ["--report-unchanged"]);
+    }
+
+    #[test]
+    fn report_without_runner_is_noop() {
+        report_unchanged(std::iter::empty::<(&str, &str)>()).unwrap();
     }
 }

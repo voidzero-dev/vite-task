@@ -61,3 +61,20 @@ pub fn extract_output_archive(
     archive.unpack(workspace_root.as_path())?;
     Ok(())
 }
+
+/// Read the entire archive before retaining it for a newly fingerprinted run.
+///
+/// # Errors
+///
+/// Returns an error for a missing, truncated, or invalid archive.
+pub fn validate_output_archive(archive_path: &AbsolutePath) -> anyhow::Result<()> {
+    let file = File::open(archive_path.as_path())?;
+    let decoder = zstd::Decoder::new(file)?;
+    let mut archive = tar::Archive::new(decoder);
+    for entry in archive.entries()? {
+        io::copy(&mut entry?, &mut io::sink())?;
+    }
+    // Read beyond tar's end marker as well, to validate the zstd frame's end.
+    io::copy(&mut archive.into_inner(), &mut io::sink())?;
+    Ok(())
+}

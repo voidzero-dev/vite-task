@@ -117,8 +117,9 @@ impl LeafExecutionReporter for LabeledLeafReporter {
         _status: Option<StdExitStatus>,
         _cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
+        reported_unchanged: bool,
     ) {
-        write_leaf_trailing_output(&self.writer, error, self.started, &[]);
+        write_leaf_trailing_output(&self.writer, error, self.started, &[], reported_unchanged);
     }
 }
 

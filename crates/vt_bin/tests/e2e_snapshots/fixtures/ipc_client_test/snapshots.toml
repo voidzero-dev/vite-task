@@ -670,3 +670,36 @@ steps = [
     ],
   ], comment = "cache hit: changed match set was requested with tracked: false" },
 ]
+
+[[e2e]]
+name = "report_unchanged_from_js"
+ignore = true
+steps = [
+  [
+    "node",
+    "scripts/report_unchanged.mjs",
+  ],
+  [
+    "vt",
+    "run",
+    "report-unchanged",
+  ],
+  [
+    "vt",
+    "run",
+    "report-unchanged",
+  ],
+  [
+    "vt",
+    "run",
+    "--no-cache",
+    "report-unchanged",
+  ],
+  [
+    "vt",
+    "run",
+    "--verbose",
+    "report-unchanged",
+    "--fail",
+  ],
+]

@@ -45,6 +45,7 @@ tracing = { workspace = true }
 twox-hash = { workspace = true }
 materialized_artifact = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+vt_client = { workspace = true }
 vt_glob = { workspace = true }
 vt_path = { workspace = true }
 vt_select = { workspace = true }

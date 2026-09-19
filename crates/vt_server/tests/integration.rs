@@ -414,3 +414,45 @@ fn get_envs_invalid_pattern_surfaces_error() {
         other => panic!("unexpected error variant: {other:?}"),
     }
 }
+
+#[test]
+fn unchanged_report_is_acknowledged_and_idempotent() {
+    let reports = run_with_server(env_map(&[]), |envs| {
+        let client = connect(&envs);
+        client.report_unchanged().unwrap();
+        client.report_unchanged().unwrap();
+        // No extra round-trip: the report itself confirms acceptance, including
+        // when the client exits immediately on Windows named pipes.
+    })
+    .expect("reports drained");
+    assert!(reports.reported_unchanged);
+    assert!(!reports.cache_disabled);
+}
+
+#[test]
+fn unchanged_reports_are_isolated_between_commands() {
+    let reported = run_with_server(env_map(&[]), |envs| {
+        connect(&envs).report_unchanged().unwrap();
+    })
+    .unwrap();
+    let other = run_with_server(env_map(&[]), |envs| flush(&connect(&envs))).unwrap();
+    assert!(reported.reported_unchanged);
+    assert!(!other.reported_unchanged);
+}
+
+#[test]
+fn partial_frame_after_unchanged_report_invalidates_reports() {
+    for partial in [&[4u8][..], &[4u8, 0, 0, 0, 1][..]] {
+        let result = run_with_server(env_map(&[]), move |envs| {
+            let mut stream = connect_raw(&envs[0].1);
+            send_frame(&mut stream, &Request::ReportUnchanged);
+            assert_eq!(recv_response_len(&mut stream), 0);
+            stream.write_all(partial).unwrap();
+            stream.flush().unwrap();
+            // Dropping the accepted connection ends either a partial header or body.
+        });
+        assert!(
+            matches!(result, Err(Error::ReadFrame(ref error)) if error.kind() == io::ErrorKind::InvalidData)
+        );
+    }
+}

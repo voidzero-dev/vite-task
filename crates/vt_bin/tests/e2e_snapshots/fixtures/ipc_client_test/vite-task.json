@@ -99,6 +99,12 @@
     "inner-prefixed": {
       "command": "PREFIXED_B=b node scripts/fetch_env.mjs PREFIXED_A PREFIXED_B",
       "cache": true
+    },
+    "report-unchanged": {
+      "command": "node scripts/report_unchanged.mjs",
+      "cache": true,
+      "input": [],
+      "output": []
     }
   }
 }

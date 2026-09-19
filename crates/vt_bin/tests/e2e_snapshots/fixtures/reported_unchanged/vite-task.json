@@ -1,0 +1,118 @@
+{
+  "tasks": {
+    "report": {
+      "command": "vtt report-unchanged",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "cli": {
+      "command": "vtt report-unchanged cli",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "failed": {
+      "command": "vtt report-unchanged fail",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "interrupted": {
+      "command": "vtt report-unchanged interrupt",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "invalid": {
+      "command": "vtt report-unchanged invalid-ipc",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "stdin": {
+      "command": "vtt report-unchanged stdin",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "tty": {
+      "command": "vtt report-unchanged tty",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "uncached": {
+      "command": "vtt report-unchanged",
+      "cache": false
+    },
+    "auto": {
+      "command": "vtt report-unchanged",
+      "cache": true
+    },
+    "build": {
+      "command": "vtt report-unchanged build input.txt artifact.txt",
+      "cache": true,
+      "input": ["input.txt"]
+    },
+    "a": {
+      "command": "vtt report-unchanged build a.txt artifact.txt",
+      "cache": true,
+      "input": ["a.txt"]
+    },
+    "b": {
+      "command": "vtt print-file b.txt artifact.txt",
+      "cache": true,
+      "input": ["b.txt", "artifact.txt"],
+      "output": [],
+      "dependsOn": ["a"]
+    },
+    "c": {
+      "command": "vtt print-file c.txt",
+      "cache": true,
+      "input": ["c.txt"],
+      "output": [],
+      "dependsOn": ["b"]
+    },
+    "d": {
+      "command": "vtt cp d.txt d-output.txt",
+      "cache": true,
+      "input": ["d.txt"]
+    },
+    "diamond": {
+      "command": "vtt print-file b.txt artifact.txt d-output.txt",
+      "cache": true,
+      "input": ["b.txt", "artifact.txt", "d-output.txt"],
+      "output": [],
+      "dependsOn": ["a", "d"]
+    },
+    "uncached-dependent": {
+      "command": "vtt print-file b.txt",
+      "cache": false,
+      "dependsOn": ["report"]
+    },
+    "compound": {
+      "command": "vtt report-unchanged && vtt print changed",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "marker": {
+      "command": "vtt print changed && vt run --report-unchanged",
+      "cache": true,
+      "input": [],
+      "output": []
+    },
+    "nested": {
+      "command": "vtt report-unchanged nested",
+      "cache": false
+    },
+    "cold-dependent": {
+      "command": "vtt print-file b.txt",
+      "cache": true,
+      "input": ["b.txt"],
+      "output": [],
+      "dependsOn": ["report"]
+    }
+  }
+}

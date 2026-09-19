@@ -176,6 +176,7 @@ impl LeafExecutionReporter for SummaryLeafReporter {
         status: Option<StdExitStatus>,
         cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
+        reported_unchanged: bool,
     ) {
         // Record task summary before forwarding to inner.
         let saved_error = error.as_ref().map(SavedExecutionError::from_execution_error);
@@ -198,12 +199,13 @@ impl LeafExecutionReporter for SummaryLeafReporter {
                     status,
                     saved_error.as_ref(),
                     &cache_update_status,
+                    reported_unchanged,
                 ),
             };
 
             self.tasks.borrow_mut().push(task_summary);
         }
 
-        self.inner.finish(status, cache_update_status, error);
+        self.inner.finish(status, cache_update_status, error, reported_unchanged);
     }
 }

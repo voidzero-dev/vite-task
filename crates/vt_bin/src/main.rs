@@ -11,6 +11,15 @@ fn main() -> ! {
 
 async fn run() -> ExitStatus {
     let args = Command::parse();
+    if let Some(result) = args.handle_report_command() {
+        return match result {
+            Ok(()) => ExitStatus::SUCCESS,
+            Err(err) => {
+                vt::print_error(&err.into());
+                ExitStatus::FAILURE
+            }
+        };
+    }
     let mut owned_config = OwnedSessionConfig::default();
     let session = match Session::init(owned_config.as_config()) {
         Ok(session) => session,

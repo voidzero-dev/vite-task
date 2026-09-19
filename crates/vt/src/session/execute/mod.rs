@@ -23,7 +23,7 @@ use vt_glob::path::PathGlobSet;
 use vt_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::{SpawnExecution, cache_metadata::CacheMetadata};
-use vt_server::{Recorder, Reports, ServerHandle, StopAccepting, serve};
+use vt_server::{Recorder, ServerHandle, StopAccepting, serve};
 
 use self::{
     glob::compute_globbed_inputs,
@@ -49,6 +49,8 @@ pub enum SpawnOutcome {
     CacheHit,
     /// Process was spawned and exited with this status.
     Spawned(std::process::ExitStatus),
+    /// The process succeeded and explicitly reported unchanged outputs.
+    Unchanged,
     /// An infrastructure error prevented the process from running
     /// (cache lookup failure or spawn failure).
     /// Already reported through the leaf reporter.
@@ -77,6 +79,7 @@ enum ExecutionMode<'a> {
         /// writers were dropped here so we don't hold `std::io::Stdout` while
         /// the child writes to the same FD.
         pipe_writers: Option<PipeWriters>,
+        tracking: Tracking,
     },
 }
 
@@ -93,7 +96,8 @@ struct CacheState<'a> {
     /// available, and fspy path tracing is attached only when auto input or
     /// output inference needs it. Parts are borrowed in place during the
     /// wait/join; the struct is never moved out.
-    tracking: Tracking<'a>,
+    tracking: Tracking,
+    fspy: Option<FspyTracking<'a>>,
 }
 
 /// The IPC server's driver future: resolves with the recorded reports after
@@ -107,13 +111,26 @@ struct FspyTracking<'a> {
     output_negative_globs: PathGlobSet<'a>,
 }
 
-/// Per-task runner-aware tracking: IPC server handle plus optional fspy state.
+/// Per-command IPC state, independent of caching and file tracing.
 /// Lifetime-tied to a single `execute_spawn` call.
-struct Tracking<'a> {
-    fspy: Option<FspyTracking<'a>>,
+struct Tracking {
     ipc_envs: Vec<(&'static OsStr, OsString)>,
     ipc_server_fut: IpcDriver,
     stop_accepting: StopAccepting,
+}
+
+impl Tracking {
+    fn new(
+        envs: Arc<rustc_hash::FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    ) -> Result<Self, ExecutionError> {
+        let (ipc_envs, ServerHandle { driver, stop_accepting }) =
+            serve(Recorder::new(envs)).map_err(ExecutionError::IpcServerBind)?;
+        Ok(Self { ipc_envs: ipc_envs.collect(), ipc_server_fut: driver, stop_accepting })
+    }
+
+    fn handles(&mut self) -> IpcHandles<'_> {
+        IpcHandles { stop_accepting: &self.stop_accepting, driver: &mut self.ipc_server_fut }
+    }
 }
 
 /// The IPC server's handles for the run phase. The two halves are
@@ -135,8 +152,8 @@ struct RunHandles<'m> {
     /// Pipe writers + capture slot. `None` only in the inherited-uncached
     /// case, where there are no pipes to drain.
     sinks: Option<PipeSinks<'m>>,
-    /// The IPC server's handles. `None` iff execution is uncached.
-    ipc: Option<IpcHandles<'m>>,
+    /// IPC is available independently of caching and stdio mode.
+    ipc: IpcHandles<'m>,
 }
 
 impl<'a> ExecutionMode<'a> {
@@ -155,14 +172,22 @@ impl<'a> ExecutionMode<'a> {
     ///  `cache_metadata.is_some_and(_)`) at every downstream use site.
     /// ─────────────────────────────────────────────────────────────────────
     fn build(
-        cache_metadata: Option<&'a CacheMetadata>,
+        execution: &'a SpawnExecution,
         stdio_config: StdioConfig,
         globbed_inputs: BTreeMap<RelativePathBuf, u64>,
     ) -> Result<Self, ExecutionError> {
-        let Some(metadata) = cache_metadata else {
+        let Some(metadata) = execution.cache_metadata.as_ref() else {
             return Ok(Self::Uncached {
                 pipe_writers: (stdio_config.suggestion == StdioSuggestion::Piped)
                     .then_some(stdio_config.writers),
+                tracking: Tracking::new(Arc::new(
+                    execution
+                        .spawn_command
+                        .spawn_envs
+                        .iter()
+                        .map(|(name, value)| (Arc::clone(name), Arc::clone(value)))
+                        .collect(),
+                ))?,
             });
         };
 
@@ -178,27 +203,20 @@ impl<'a> ExecutionMode<'a> {
             None
         };
 
-        // Bind runner IPC for every cached task. The merged cache-control API
-        // (`disableCache`) must work even when a task uses explicit inputs and
-        // therefore does not need fspy auto-input inference.
-        let (ipc_envs, ServerHandle { driver, stop_accepting }) =
-            serve(Recorder::new(Arc::clone(&metadata.unfiltered_envs)))
-                .map_err(ExecutionError::IpcServerBind)?;
-        let tracking =
-            Tracking { fspy, ipc_envs: ipc_envs.collect(), ipc_server_fut: driver, stop_accepting };
+        let tracking = Tracking::new(Arc::clone(&metadata.unfiltered_envs))?;
 
         Ok(Self::Cached {
             pipe_writers: stdio_config.writers,
-            state: CacheState { metadata, globbed_inputs, std_outputs: Vec::new(), tracking },
+            state: CacheState { metadata, globbed_inputs, std_outputs: Vec::new(), tracking, fspy },
         })
     }
 
     /// The extra envs to inject into the child: IPC connection info + the
-    /// napi addon path runner-aware tools `require()`. Empty when execution
-    /// is uncached.
+    /// napi addon path runner-aware tools `require()`, including uncached commands.
     fn injected_envs(&self) -> Vec<(&OsStr, &OsStr)> {
         match self {
-            Self::Cached { state: CacheState { tracking: t, .. }, .. } => {
+            Self::Cached { state: CacheState { tracking: t, .. }, .. }
+            | Self::Uncached { tracking: t, .. } => {
                 let mut envs: Vec<(&OsStr, &OsStr)> =
                     t.ipc_envs.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
                 envs.push((
@@ -207,7 +225,6 @@ impl<'a> ExecutionMode<'a> {
                 ));
                 envs
             }
-            Self::Uncached { .. } => Vec::new(),
         }
     }
 
@@ -215,9 +232,9 @@ impl<'a> ExecutionMode<'a> {
     /// whether fspy tracking is on.
     const fn spawn_config(&self) -> (SpawnStdio, bool) {
         match self {
-            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.fspy.is_some()),
-            Self::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
-            Self::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
+            Self::Cached { state, .. } => (SpawnStdio::Piped, state.fspy.is_some()),
+            Self::Uncached { pipe_writers: Some(_), .. } => (SpawnStdio::Piped, false),
+            Self::Uncached { pipe_writers: None, .. } => (SpawnStdio::Inherited, false),
         }
     }
 
@@ -232,21 +249,17 @@ impl<'a> ExecutionMode<'a> {
                     stderr_writer: &mut pipe_writers.stderr_writer,
                     capture: Some(&mut state.std_outputs),
                 });
-                let ipc = Some(IpcHandles {
-                    stop_accepting: &state.tracking.stop_accepting,
-                    driver: &mut state.tracking.ipc_server_fut,
-                });
+                let ipc = state.tracking.handles();
                 RunHandles { sinks, ipc }
             }
-            Self::Uncached { pipe_writers: Some(pipe_writers) } => RunHandles {
-                sinks: Some(PipeSinks {
-                    stdout_writer: &mut pipe_writers.stdout_writer,
-                    stderr_writer: &mut pipe_writers.stderr_writer,
+            Self::Uncached { pipe_writers, tracking } => RunHandles {
+                sinks: pipe_writers.as_mut().map(|writers| PipeSinks {
+                    stdout_writer: &mut writers.stdout_writer,
+                    stderr_writer: &mut writers.stderr_writer,
                     capture: None,
                 }),
-                ipc: None,
+                ipc: tracking.handles(),
             },
-            Self::Uncached { pipe_writers: None } => RunHandles { sinks: None, ipc: None },
         }
     }
 }
@@ -272,6 +285,7 @@ enum Report {
         exit_status: std::process::ExitStatus,
         cache_update: CacheUpdateStatus,
         error: Option<ExecutionError>,
+        reported_unchanged: bool,
     },
 }
 
@@ -289,7 +303,7 @@ impl Report {
     fn finish(self, reporter: Box<dyn LeafExecutionReporter>) -> SpawnOutcome {
         match self {
             Self::Failed { cache_update, error } => {
-                reporter.finish(None, cache_update, Some(error));
+                reporter.finish(None, cache_update, Some(error), false);
                 SpawnOutcome::Failed
             }
             Self::CacheHit => {
@@ -297,12 +311,17 @@ impl Report {
                     None,
                     CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
                     None,
+                    false,
                 );
                 SpawnOutcome::CacheHit
             }
-            Self::Spawned { exit_status, cache_update, error } => {
-                reporter.finish(Some(exit_status), cache_update, error);
-                SpawnOutcome::Spawned(exit_status)
+            Self::Spawned { exit_status, cache_update, error, reported_unchanged } => {
+                reporter.finish(Some(exit_status), cache_update, error, reported_unchanged);
+                if reported_unchanged {
+                    SpawnOutcome::Unchanged
+                } else {
+                    SpawnOutcome::Spawned(exit_status)
+                }
             }
         }
     }
@@ -405,7 +424,7 @@ async fn run(
     };
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
-    let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
+    let mut mode = ExecutionMode::build(spawn_execution, stdio_config, globbed_inputs)
         .map_err(Report::failed)?;
 
     // Measure end-to-end duration here — spawn() doesn't track time.
@@ -432,39 +451,28 @@ async fn run(
     //    Box::pin keeps the child-and-pipe stack off the enclosing future:
     //    pipe_stdio alone makes the combined future large enough to trip
     //    clippy::large_futures in every caller otherwise.
-    let RunHandles { sinks, ipc } = mode.run_handles();
-    let (wait_result, ipc_server_result) = if let Some(IpcHandles { stop_accepting, driver }) = ipc
-    {
-        let child_work =
-            Box::pin(run_child(child, sinks, Some(stop_accepting), fast_fail_token.clone()));
-        let (wait_result, join_result) = tokio::join!(child_work, driver);
-        if let Err(e) = &join_result {
-            tracing::warn!(?e, "IPC server failed; cache will not be updated");
-        }
-        (wait_result, Some(join_result.map(Recorder::into_reports)))
-    } else {
-        let child_work = Box::pin(run_child(child, sinks, None, fast_fail_token.clone()));
-        (child_work.await, None)
-    };
+    let RunHandles { sinks, ipc: IpcHandles { stop_accepting, driver } } = mode.run_handles();
+    let child_work = Box::pin(run_child(child, sinks, stop_accepting, fast_fail_token.clone()));
+    let (wait_result, ipc_server_result) = tokio::join!(child_work, driver);
     let outcome = wait_result.map_err(Report::failed)?;
     let duration = start.elapsed();
 
     // Extract reports, or short-circuit when the IPC server failed. An Err
     // here means reports may be incomplete: caching this run would risk
     // stale inputs/outputs, so skip all cache-related computation entirely.
-    let reports: Option<Reports> = match ipc_server_result {
-        Some(Ok(reports)) => {
+    let reports = match ipc_server_result.map(Recorder::into_reports) {
+        Ok(reports) => {
             tracing::debug!(?reports, "runner-aware tools reported");
-            Some(reports)
+            reports
         }
-        None => None,
-        Some(Err(err)) => {
+        Err(err) => {
             return Err(Report::Spawned {
                 exit_status: outcome.exit_status,
                 cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(
                     err,
                 )),
                 error: None,
+                reported_unchanged: false,
             });
         }
     };
@@ -481,7 +489,7 @@ async fn run(
                 cache_dir,
                 state,
                 &outcome,
-                reports.as_ref(),
+                Some(&reports),
                 duration,
                 cancelled,
             )
@@ -493,7 +501,17 @@ async fn run(
         }
     };
 
-    Ok(Report::Spawned { exit_status: outcome.exit_status, cache_update, error })
+    let reported_unchanged = reports.reported_unchanged
+        && outcome.exit_status.success()
+        && error.is_none()
+        && !fast_fail_token.is_cancelled()
+        && !interrupt_token.is_cancelled();
+    Ok(Report::Spawned {
+        exit_status: outcome.exit_status,
+        cache_update,
+        error,
+        reported_unchanged,
+    })
 }
 
 /// Outcome of the cache-lookup phase. Each variant carries exactly what that
@@ -587,7 +605,7 @@ fn replay_cache_hit(
 async fn run_child(
     mut child: ChildHandle,
     sinks: Option<PipeSinks<'_>>,
-    stop_accepting: Option<&StopAccepting>,
+    stop_accepting: &StopAccepting,
     fast_fail_token: CancellationToken,
 ) -> Result<ChildOutcome, ExecutionError> {
     let pipe_result: Result<(), ExecutionError> = if let Some(sinks) = sinks {
@@ -616,8 +634,6 @@ async fn run_child(
         }
     };
 
-    if let Some(stop_accepting) = stop_accepting {
-        stop_accepting.signal();
-    }
+    stop_accepting.signal();
     wait_result
 }

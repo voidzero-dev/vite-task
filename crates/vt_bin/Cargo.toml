@@ -26,6 +26,8 @@ clap = { workspace = true, features = ["derive"] }
 jsonc-parser = { workspace = true, features = ["serde"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+vt_client = { workspace = true }
+socket_ipc = { workspace = true }
 vt_path = { workspace = true }
 vt_str = { workspace = true }
 vt = { workspace = true }

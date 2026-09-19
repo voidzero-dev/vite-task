@@ -198,6 +198,7 @@ pub trait LeafExecutionReporter {
     ///
     /// - `status`: The process exit status, or `None` for cache hits and in-process commands.
     /// - `cache_update_status`: Whether the cache was updated after execution.
+    /// - `reported_unchanged`: A report accepted after successful, uncancelled execution.
     /// - `error`: If `Some`, an error occurred during this leaf's execution (cache lookup
     ///   failure, spawn failure, fingerprint creation failure, cache update failure).
     ///
@@ -207,6 +208,7 @@ pub trait LeafExecutionReporter {
         status: Option<StdExitStatus>,
         cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
+        reported_unchanged: bool,
     );
 }
 
@@ -315,10 +317,14 @@ fn write_leaf_trailing_output(
     error: Option<ExecutionError>,
     started: bool,
     extra: &[u8],
+    reported_unchanged: bool,
 ) {
     let mut buf = Vec::new();
 
     buf.extend_from_slice(extra);
+    if reported_unchanged {
+        buf.extend_from_slice(format_unchanged_message().as_bytes());
+    }
 
     if let Some(error) = error {
         let message = vt_str::format!("{:#}", anyhow::Error::from(error));
@@ -334,6 +340,10 @@ fn write_leaf_trailing_output(
         let _ = writer.write_all(&buf);
         let _ = writer.flush();
     }
+}
+
+fn format_unchanged_message() -> Str {
+    vt_str::format!("{}\n", "◉ unchanged (reported by task)".style(Style::new().green()))
 }
 
 /// Format the "cache hit, logs replayed" message for synthetic executions without display info.

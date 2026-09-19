@@ -18,7 +18,7 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 ///
 /// `IgnoreInput`, `IgnoreOutput`, and `DisableCache` are fire-and-forget:
 /// the runner processes them when they arrive and never writes a response.
-/// `GetEnv` and `GetEnvs` are round-trips and pair with the matching response
+/// `ReportUnchanged`, `GetEnv`, and `GetEnvs` are round-trips and pair with the matching response
 /// types below.
 ///
 /// Fire-and-forget is safe because nothing in the runner observes individual
@@ -30,10 +30,21 @@ pub const NODE_CLIENT_PATH_ENV_NAME: &str = "VP_RUN_NODE_CLIENT_PATH";
 pub enum Request<'a> {
     IgnoreInput(&'a IpcStr),
     IgnoreOutput(&'a IpcStr),
-    GetEnv { name: &'a IpcStr, tracked: bool },
-    GetEnvs { query: EnvQuery<'a>, tracked: bool },
+    GetEnv {
+        name: &'a IpcStr,
+        tracked: bool,
+    },
+    GetEnvs {
+        query: EnvQuery<'a>,
+        tracked: bool,
+    },
     DisableCache,
+    /// The current command reports unchanged outputs. Acknowledged before returning.
+    ReportUnchanged,
 }
+
+#[derive(Debug, SchemaWrite, SchemaRead)]
+pub struct ReportUnchangedResponse;
 
 #[derive(Debug, Clone, Copy, SchemaWrite, SchemaRead)]
 pub enum EnvQuery<'a> {

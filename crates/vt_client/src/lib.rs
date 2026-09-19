@@ -9,7 +9,8 @@ use fspy_ipc_str::IpcStr;
 use rustc_hash::FxHashMap;
 use socket_ipc::Client as Stream;
 use vt_ipc_shared::{
-    EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request,
+    EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME,
+    ReportUnchangedResponse, Request,
 };
 use vt_path::{self, AbsolutePath};
 use wincode::{SchemaRead, config::DefaultConfig};
@@ -78,6 +79,21 @@ impl Client {
     pub fn ignore_output(&self, path: &OsStr) -> io::Result<()> {
         let ns = resolve_path(path)?;
         self.send(&Request::IgnoreOutput(&ns))
+    }
+
+    /// Report that this command's outputs have not changed.
+    ///
+    /// Waits for the runner to acknowledge receipt. The report only takes effect
+    /// after the command exits successfully, and does not bypass cache validation
+    /// for dependent commands. Repeated calls have the same effect as one call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if sending the report or receiving its acknowledgement fails.
+    pub fn report_unchanged(&self) -> io::Result<()> {
+        self.send(&Request::ReportUnchanged)?;
+        let _: ReportUnchangedResponse = self.recv()?;
+        Ok(())
     }
 
     /// Temporary no-op.

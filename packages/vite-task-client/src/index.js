@@ -23,6 +23,7 @@ import { createRequire } from 'node:module';
  *   ignoreInput: (path: string) => void,
  *   ignoreOutput: (path: string) => void,
  *   disableCache: () => void,
+ *   reportUnchanged?: () => void,
  *   getEnv: (name: string, options?: GetEnvOptions) => string | undefined,
  *   getEnvs: (query: GetEnvsQuery, options?: GetEnvOptions) => Record<string, string>,
  * } | null | undefined}
@@ -73,6 +74,21 @@ export function ignoreInput(path) {
  */
 export function ignoreOutput(path) {
   load()?.ignoreOutput(path);
+}
+
+/**
+ * Report that the current command's outputs have not changed.
+ *
+ * Takes effect only after the command exits successfully. Dependent commands
+ * still validate their own inputs and cache entries. Call after checking all
+ * outputs; this is a declaration by the tool, not an automatic comparison.
+ *
+ * No-op outside a runner or with an older runner that does not support reports.
+ *
+ * @returns {void}
+ */
+export function reportUnchanged() {
+  load()?.reportUnchanged?.();
 }
 
 /**

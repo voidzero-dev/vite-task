@@ -99,6 +99,9 @@ pub enum SpawnOutcome {
     /// May have a post-execution infrastructure error (cache update or fingerprint failed).
     /// These only run after exit 0, so this field only exists on the success path.
     Success {
+        /// The command explicitly reported unchanged outputs after executing.
+        #[serde(default)]
+        reported_unchanged: bool,
         infra_error: Option<SavedExecutionError>,
         /// First path that was both read and written, causing cache to be skipped.
         /// Only set when fspy detected a read-write overlap.
@@ -177,6 +180,7 @@ pub enum SavedCacheErrorKind {
 struct SummaryStats {
     total: usize,
     cache_hits: usize,
+    unchanged: usize,
     cache_misses: usize,
     cache_disabled: usize,
     failed: usize,
@@ -190,6 +194,7 @@ impl SummaryStats {
         let mut stats = Self {
             total: tasks.len(),
             cache_hits: 0,
+            unchanged: 0,
             cache_misses: 0,
             cache_disabled: 0,
             failed: 0,
@@ -207,6 +212,9 @@ impl SummaryStats {
                     stats.cache_disabled += 1;
                 }
                 TaskResult::Spawned { cache_status, outcome } => {
+                    if matches!(outcome, SpawnOutcome::Success { reported_unchanged: true, .. }) {
+                        stats.unchanged += 1;
+                    }
                     match cache_status {
                         SpawnedCacheStatus::Miss(_) => stats.cache_misses += 1,
                         SpawnedCacheStatus::Disabled => stats.cache_disabled += 1,
@@ -328,6 +336,7 @@ impl TaskResult {
         exit_status: Option<std::process::ExitStatus>,
         saved_error: Option<&SavedExecutionError>,
         cache_update_status: &CacheUpdateStatus,
+        reported_unchanged: bool,
     ) -> Self {
         let input_modified_path = match cache_update_status {
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified { path }) => {
@@ -354,7 +363,7 @@ impl TaskResult {
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
         );
 
-        match cache_status {
+        let mut result = match cache_status {
             CacheStatus::Hit { replayed_duration } => {
                 Self::CacheHit { saved_duration_ms: duration_to_ms(*replayed_duration) }
             }
@@ -385,7 +394,15 @@ impl TaskResult {
                     tracking_incomplete,
                 ),
             },
+        };
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { reported_unchanged: value, .. },
+            ..
+        } = &mut result
+        {
+            *value = reported_unchanged;
         }
+        result
     }
 }
 
@@ -404,6 +421,7 @@ fn spawn_outcome_from_execution(
         (None, Some(err)) => SpawnOutcome::SpawnError(err.clone()),
         // Process exited successfully, possible infra error
         (Some(status), _) if status.success() => SpawnOutcome::Success {
+            reported_unchanged: false,
             infra_error: saved_error.cloned(),
             input_modified_path,
             fspy_unsupported,
@@ -425,6 +443,7 @@ fn spawn_outcome_from_execution(
         // handled by TaskResult::CacheHit / InProcess before reaching here.
         // If we somehow get here, treat as success.
         (None, None) => SpawnOutcome::Success {
+            reported_unchanged: false,
             infra_error: None,
             input_modified_path: None,
             fspy_unsupported: false,
@@ -720,6 +739,9 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
     if !cache_disabled_str.is_empty() {
         let _ = write!(buf, " {cache_disabled_str}");
     }
+    if stats.unchanged > 0 {
+        let _ = write!(buf, " • {} unchanged", stats.unchanged);
+    }
     if !failed_str.is_empty() {
         let _ = write!(buf, " {failed_str}");
     }
@@ -797,6 +819,20 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         }
         let _ = writeln!(buf);
 
+        if matches!(
+            task.result,
+            TaskResult::Spawned {
+                outcome: SpawnOutcome::Success { reported_unchanged: true, .. },
+                ..
+            }
+        ) {
+            let _ = writeln!(
+                buf,
+                "      {}",
+                "→ Unchanged (reported by task)".style(Style::new().green())
+            );
+        }
+
         // Cache status detail
         let cache_detail = task.result.format_cache_detail();
         let _ = writeln!(buf, "      {}", cache_detail.style(task.result.cache_detail_style()));
@@ -839,7 +875,8 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
 /// Render a compact summary (one-liner or empty).
 ///
 /// Rules:
-/// - Single task + not cache hit → empty (no summary at all)
+/// - Single task + ordinary execution → empty unless its input was modified
+/// - Single task + unchanged report → show the reported result without saved time
 /// - Single task + cache hit → thin line + "vp run: cache hit, {duration} saved."
 /// - Multi-task → thin line + "vp run: {hits}/{total} cache hit ({rate}%), {duration} saved."
 ///   with optional failure count and `--verbose` hint.
@@ -848,8 +885,12 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
 
     let is_single_task = summary.tasks.len() == 1;
 
-    // Single task + not cache hit + no input modification → no summary
-    if is_single_task && stats.cache_hits == 0 && stats.input_modified_task_names.is_empty() {
+    // Ordinary single executions need no summary.
+    if is_single_task
+        && stats.cache_hits == 0
+        && stats.unchanged == 0
+        && stats.input_modified_task_names.is_empty()
+    {
         return Vec::new();
     }
 
@@ -868,6 +909,13 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
             "{} cache hit, {} saved.",
             run_label.as_str().style(Style::new().blue().bold()),
             formatted_total_saved.style(Style::new().green().bold()),
+        );
+        show_last_details_hint = false;
+    } else if is_single_task && stats.unchanged > 0 {
+        let _ = write!(
+            buf,
+            "{} unchanged (reported by task).",
+            run_label.as_str().style(Style::new().blue().bold())
         );
         show_last_details_hint = false;
     } else if !is_single_task {
@@ -901,6 +949,9 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
             );
         }
 
+        if stats.unchanged > 0 {
+            let _ = write!(buf, ", {} unchanged", stats.unchanged);
+        }
         if stats.failed > 0 {
             let n = stats.failed;
             let _ = write!(buf, ", {} failed", n.style(Style::new().red()));
@@ -967,5 +1018,56 @@ mod tests {
             saved.display_message().as_str(),
             "Failed to forward task process output: Resource temporarily unavailable (os error 11)"
         );
+    }
+}
+
+#[cfg(test)]
+mod unchanged_tests {
+    use super::*;
+
+    fn legacy_summary() -> LastRunSummary {
+        serde_json::from_value(serde_json::json!({
+            "tasks": [{
+                "package_name": "pkg", "task_name": "build", "command": "builder", "cwd": "",
+                "result": { "Spawned": {
+                    "cache_status": "Disabled",
+                    "outcome": { "Success": {
+                        "infra_error": null, "input_modified_path": null,
+                        "ipc_server_error": null, "tool_disabled_cache": false
+                    }}
+                }}
+            }], "exit_code": 0
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn summaries_without_reports_remain_readable() {
+        let summary = legacy_summary();
+        let stats = SummaryStats::compute(&summary.tasks);
+        assert_eq!(stats.unchanged, 0);
+        assert!(format_compact_summary(&summary, "vp").is_empty());
+    }
+
+    #[test]
+    fn reported_execution_is_not_a_cache_hit_or_saved_time() {
+        let mut summary = legacy_summary();
+        let TaskResult::Spawned {
+            outcome: SpawnOutcome::Success { reported_unchanged, .. }, ..
+        } = &mut summary.tasks[0].result
+        else {
+            panic!("spawned success");
+        };
+        *reported_unchanged = true;
+        let restored: LastRunSummary =
+            serde_json::from_slice(&serde_json::to_vec(&summary).unwrap()).unwrap();
+        let stats = SummaryStats::compute(&restored.tasks);
+        assert_eq!(stats.unchanged, 1);
+        assert_eq!(stats.cache_hits, 0);
+        assert_eq!(stats.total_saved, Duration::ZERO);
+        let compact = format_compact_summary(&restored, "vp");
+        let text = std::str::from_utf8(&compact).unwrap();
+        assert!(text.contains("unchanged (reported by task)"));
+        assert!(!text.contains("saved"));
     }
 }

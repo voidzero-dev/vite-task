@@ -59,8 +59,8 @@ pub(super) async fn update_cache(
     duration: Duration,
     cancelled: bool,
 ) -> (CacheUpdateStatus, Option<ExecutionError>) {
-    let CacheState { metadata, globbed_inputs, std_outputs, tracking } = state;
-    let fspy = tracking.fspy.as_ref();
+    let CacheState { metadata, globbed_inputs, std_outputs, fspy, .. } = state;
+    let fspy = fspy.as_ref();
 
     if let Some(reports) = reports
         && reports.cache_disabled
@@ -164,18 +164,17 @@ pub(super) async fn update_cache(
     };
 
     let output_archive = match collect_and_archive_outputs(
+        cache,
         metadata,
         fspy_outcome.as_ref(),
         workspace_root,
         cache_dir,
-    ) {
+        reports.is_some_and(|reports| reports.reported_unchanged),
+    )
+    .await
+    {
         Ok(archive) => archive,
-        Err(err) => {
-            return (
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source: err }),
-            );
-        }
+        Err(err) => return cache_update_error(err),
     };
 
     let new_cache_value = CacheEntryValue {
@@ -187,15 +186,19 @@ pub(super) async fn update_cache(
     };
     match cache.update(metadata, new_cache_value, cache_dir).await {
         Ok(()) => (CacheUpdateStatus::Updated, None),
-        Err(err) => (
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-            Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source: err }),
-        ),
+        Err(err) => cache_update_error(err),
     }
 }
 
+const fn cache_update_error(source: anyhow::Error) -> (CacheUpdateStatus, Option<ExecutionError>) {
+    (
+        CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+        Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source }),
+    )
+}
+
 /// Summarize the run's fspy observations. `Some` iff tracking was both
-/// requested (`tracking.fspy.is_some()`) and compiled in (`cfg(fspy)`). On a
+/// requested (`fspy.is_some()`) and compiled in (`cfg(fspy)`). On a
 /// `cfg(not(fspy))` build this is always `None`, and [`update_cache`]
 /// short-circuits to `FspyUnsupported` when tracking was needed.
 ///
@@ -375,12 +378,21 @@ fn collect_tracked_env_queries(reports: &Reports) -> anyhow::Result<TrackedEnvQu
 ///   fspy-tracked writes before this function receives them
 ///
 /// Returns `Some(archive_filename)` if files were archived, `None` if no output files.
-fn collect_and_archive_outputs(
+async fn collect_and_archive_outputs(
+    cache: &ExecutionCache,
     cache_metadata: &CacheMetadata,
     tracking: Option<&TrackingOutcome>,
     workspace_root: &AbsolutePath,
     cache_dir: &AbsolutePath,
+    reported_unchanged: bool,
 ) -> anyhow::Result<Option<Str>> {
+    if reported_unchanged
+        && let Some(previous) = cache.previous_output_archive(cache_metadata).await?
+    {
+        // No writes are expected on an unchanged run. Retain restoration data.
+        archive::validate_output_archive(&cache_dir.join(previous.as_str()))?;
+        return Ok(Some(previous));
+    }
     let output_config = &cache_metadata.output_config;
 
     let mut output_files: FxHashSet<RelativePathBuf> = FxHashSet::default();

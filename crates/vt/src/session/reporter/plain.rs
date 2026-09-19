@@ -102,7 +102,12 @@ impl LeafExecutionReporter for PlainReporter {
         _status: Option<std::process::ExitStatus>,
         _cache_update_status: CacheUpdateStatus,
         error: Option<ExecutionError>,
+        reported_unchanged: bool,
     ) {
+        if reported_unchanged {
+            let _ = self.writer.write_all(super::format_unchanged_message().as_bytes());
+            let _ = self.writer.flush();
+        }
         // Handle errors — format the full error chain and print inline.
         if let Some(error) = error {
             let message = vt_str::format!("{:#}", anyhow::Error::from(error));

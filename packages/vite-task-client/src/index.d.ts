@@ -17,6 +17,18 @@ export function ignoreInput(path: string): void;
  */
 export function ignoreOutput(path: string): void;
 /**
+ * Report that the current command's outputs have not changed.
+ *
+ * Takes effect only after the command exits successfully. Dependent commands
+ * still validate their own inputs and cache entries. Call after checking all
+ * outputs; this is a declaration by the tool, not an automatic comparison.
+ *
+ * No-op outside a runner or with an older runner that does not support reports.
+ *
+ * @returns {void}
+ */
+export function reportUnchanged(): void;
+/**
  * Tell the runner not to cache this run.
  *
  * No-op when not running inside a runner.

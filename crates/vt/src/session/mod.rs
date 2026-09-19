@@ -124,11 +124,11 @@ impl vt_plan::PlanRequestParser for PlanRequestParser<'_> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
             HandledCommand::ViteTaskCommand(cli_command) => match cli_command.into_resolved() {
-                ResolvedCommand::Cache { .. } | ResolvedCommand::RunLastDetails => {
-                    Ok(Some(PlanRequest::Synthetic(
-                        command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                    )))
-                }
+                ResolvedCommand::Cache { .. }
+                | ResolvedCommand::RunLastDetails
+                | ResolvedCommand::RunReportUnchanged => Ok(Some(PlanRequest::Synthetic(
+                    command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                ))),
                 ResolvedCommand::Run(run_command) => {
                     match run_command.into_query_plan_request(&command.cwd) {
                         Ok((query_plan_request, _)) => {
@@ -279,6 +279,8 @@ impl<'a> Session<'a> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
+            ResolvedCommand::RunReportUnchanged => crate::cli::report_unchanged(self.envs.iter())
+                .map_err(|err| SessionError::Anyhow(err.into())),
             ResolvedCommand::Run(run_command) => {
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
@@ -728,7 +730,9 @@ impl<'a> Session<'a> {
         .await;
         match outcome {
             // Cache hit — no process was spawned, success
-            execute::SpawnOutcome::CacheHit => Ok(ExitStatus::SUCCESS),
+            execute::SpawnOutcome::CacheHit | execute::SpawnOutcome::Unchanged => {
+                Ok(ExitStatus::SUCCESS)
+            }
             // Process ran successfully
             execute::SpawnOutcome::Spawned(status) if status.success() => Ok(ExitStatus::SUCCESS),
             // Process ran but exited with non-zero status

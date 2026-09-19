@@ -80,6 +80,11 @@ impl RunnerClient {
     }
 
     #[napi]
+    pub fn report_unchanged(&self) -> Result<()> {
+        self.client.report_unchanged().map_err(|err| err_string(vt_str::format!("{err}")))
+    }
+
+    #[napi]
     pub fn disable_cache(&self) -> Result<()> {
         self.client.disable_cache().map_err(|err| err_string(vt_str::format!("{err}")))
     }
