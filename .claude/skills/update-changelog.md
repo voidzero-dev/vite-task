@@ -29,7 +29,7 @@ Do not add entries for:
 - CI/CD changes
 - Dependency bumps
 - Test-only fixes (flaky tests, test infrastructure)
-- Documentation changes (CLAUDE.md, README, etc.)
+- Documentation changes (AGENTS.md, README, etc.)
 - Chore/tooling changes
 
 The changelog is for **end-users only**.
