@@ -45,7 +45,7 @@ cargo test                                      # Default suite (also: just test
 
 ## Commits, Pull Requests, and Changelog
 
-- Use `gh stack` **if** creating pull request stacks.
+- Use `gh pr` for standalone pull requests and `gh stack` for pull request stacks.
 - PR titles use [Conventional Commits](https://www.conventionalcommits.org): `type(scope): summary`, with optional scope.
 - AI-assisted commits require a `Co-authored-by:` trailer naming the actual model and version.
 - PR descriptions require a `Motivation` section. Ask before creating the PR only if the request and context do not establish its motivation. Do not add `Validation`, `Test plan`, or similar sections.
