@@ -100,6 +100,33 @@ steps = [
 ]
 
 [[e2e]]
+name = "interactive_ctrl_u_clears_query"
+comment = """
+Ctrl+U should clear the current query and reset the selection, while other control characters are ignored and Shift characters remain searchable.
+"""
+cwd = "packages/app"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+  ], interactions = [
+    { "expect-milestone" = "task-select::0" },
+    { "write" = "lin" },
+    { "expect-milestone" = "task-select:lin:0" },
+    { "write-key" = "ctrl-w" },
+    { "write-key" = "backspace" },
+    { "expect-milestone" = "task-select:li:0" },
+    { "write" = "N" },
+    { "expect-milestone" = "task-select:liN:0" },
+    { "write-key" = "down" },
+    { "expect-milestone" = "task-select:liN:1" },
+    { "write-key" = "ctrl-u" },
+    { "expect-milestone" = "task-select::0" },
+    { "write-key" = "enter" },
+  ] },
+]
+
+[[e2e]]
 name = "recursive_without_task_errors"
 comment = """
 `vt run -r` with no task argument is not treated as a bare run — it should error instead of opening the selector.
