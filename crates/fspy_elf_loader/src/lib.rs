@@ -26,7 +26,7 @@ mod stack;
 ///
 /// Takes ownership of a private executable descriptor and closes it after
 /// mapping. Loads the executable and its `PT_INTERP`, builds an initial stack,
-/// and transfers control to the interpreter or executable entry point.
+/// and transfers control to the interpreter entry point.
 ///
 /// `execfn` is the original execution name used for `AT_EXECFN`; it need not
 /// match `argv[0]`. Arguments and environment entries are copied to the new
@@ -42,8 +42,10 @@ mod stack;
 /// Loading failures terminate the process; they cannot return to the program
 /// that executed the loader.
 ///
-/// Currently supports native little-endian ELF64 dynamic PIE executables on
+/// Currently supports native little-endian ELF64 dynamic executables on
 /// `AArch64` and x86-64, with an ELF interpreter and a non-executable stack.
+/// Both PIE (`ET_DYN`) and fixed-address (`ET_EXEC`) executables are supported.
+/// Fixed-address images must not overlap any existing process mappings.
 /// The new stack has a fixed 8 MiB capacity and a guard page. Existing loader
 /// mappings, the old stack, and kernel process metadata (including `/proc`
 /// identity and `brk`) are retained. This does not emulate a complete exec.

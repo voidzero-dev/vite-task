@@ -48,6 +48,9 @@ fn main() {
         );
         let phdr = headers.iter().find(|ph| ph.p_type == libc::PT_PHDR).unwrap();
         let bias = aux(libc::AT_PHDR).checked_sub(usize::try_from(phdr.p_vaddr).unwrap()).unwrap();
+        if std::env::var_os("EXPECT_FIXED_ADDRESS").is_some() {
+            assert_eq!(bias, 0, "fixed-address executable was relocated");
+        }
         let entry = aux(libc::AT_ENTRY);
         assert!(headers.iter().any(|ph| {
             ph.p_type == libc::PT_LOAD

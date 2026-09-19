@@ -73,8 +73,11 @@ impl File {
         assert_eq!(header.e_machine, MACHINE, "ELF architecture mismatch");
         // ET_DYN permits a load bias chosen for the available address space.
         // Position-independent executables (PIE) and their interpreters use it.
-        // ET_EXEC requires fixed addresses, which could overlap our loader.
-        assert_eq!(header.e_type, abi::ET_DYN, "only ET_DYN images are supported");
+        // ET_EXEC instead uses its declared addresses with no load bias.
+        assert!(
+            matches!(header.e_type, abi::ET_DYN | abi::ET_EXEC),
+            "only ET_DYN and ET_EXEC images are supported"
+        );
         assert_eq!(header.version, u32::from(abi::EV_CURRENT), "invalid ELF version");
         assert_eq!(header.e_phentsize, 56, "invalid program-header size");
         // 0xffff is an escape to a count stored in section metadata. This MVP
@@ -156,12 +159,19 @@ impl File {
         // Reserve the whole image, including holes, before replacing pages
         // with MAP_FIXED. That flag discards existing mappings at its address;
         // restricting it to our reservation protects the loader and old stack.
-        // Extra space lets us align the bias, even if p_align exceeds a page.
-        let mapping = Mapping::reserve(add(span, alignment));
-        let base = mapping.ptr.as_ptr().expose_provenance();
-        let bias =
-            align_up(base.checked_sub(low).expect("unsupported ELF address range"), alignment);
-        assert!(add(bias, high) <= add(base, mapping.len), "ELF exceeds reservation");
+        let (mapping, bias) = if self.header.e_type == abi::ET_EXEC {
+            // Fixed-address executables cannot move. Refuse collisions rather
+            // than replacing resident loader code or other process state.
+            (Mapping::reserve_at(low, span), 0)
+        } else {
+            // Extra space aligns the bias even when p_align exceeds a page.
+            let mapping = Mapping::reserve(add(span, alignment));
+            let base = mapping.ptr.as_ptr().expose_provenance();
+            let bias =
+                align_up(base.checked_sub(low).expect("unsupported ELF address range"), alignment);
+            assert!(add(bias, high) <= add(base, mapping.len), "ELF exceeds reservation");
+            (mapping, bias)
+        };
         let mut phdr = None;
         let mut executable_entry = false;
         // All segments share one bias, preserving their relative addresses.

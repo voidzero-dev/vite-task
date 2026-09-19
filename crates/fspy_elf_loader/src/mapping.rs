@@ -45,6 +45,33 @@ impl Mapping {
         Self::new(ptr.cast(), len)
     }
 
+    pub fn reserve_at(address: usize, len: usize) -> Self {
+        Self::check_len(len);
+        // Reserve the complete fixed-address image before replacing any of
+        // its pages. A collision with the loader, stack, or another mapping
+        // must fail without changing that mapping.
+        // SAFETY: FIXED_NOREPLACE never replaces existing mappings, and the
+        // fresh reservation has no references or accessible pages.
+        let ptr = unsafe {
+            mm::mmap_anonymous(
+                ptr::with_exposed_provenance_mut(address),
+                len,
+                ProtFlags::empty(),
+                MapFlags::PRIVATE | MapFlags::FIXED_NOREPLACE,
+            )
+        }
+        .expect("cannot reserve fixed ELF address range");
+        let mapping = Self::new(ptr.cast(), len);
+        // Older kernels can ignore FIXED_NOREPLACE and choose another address.
+        // Release that reservation before failing; MAP_FIXED below must never
+        // run unless we own the exact requested range.
+        if mapping.ptr.as_ptr().addr() != address {
+            drop(mapping);
+            panic!("cannot reserve fixed ELF address range at the requested address");
+        }
+        mapping
+    }
+
     pub fn file(fd: BorrowedFd<'_>, len: usize) -> Self {
         Self::check_len(len);
         // One contiguous view makes file-offset parsing possible. This is

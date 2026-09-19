@@ -1,6 +1,42 @@
 use super::*;
 
 #[test]
+fn fixed_image_collision_preserves_existing_memory() {
+    let page = fspy_nostd::param::page_size();
+    let occupied = Mapping::reserve(4 * page);
+    // SAFETY: this reservation is exclusively owned here with no references.
+    unsafe {
+        mm::mprotect(
+            occupied.ptr.as_ptr().cast(),
+            occupied.len,
+            MprotectFlags::READ | MprotectFlags::WRITE,
+        )
+        .unwrap();
+        ptr::write_bytes(occupied.ptr.as_ptr(), 0x5a, occupied.len);
+    }
+    let base = align_up(occupied.ptr.as_ptr().addr(), 2 * page);
+    let mut bytes = fixture(page, page + 0x180, abi::PF_R | abi::PF_W);
+    bytes[16..18].copy_from_slice(&abi::ET_EXEC.to_le_bytes());
+    bytes[24..32].copy_from_slice(&u64::try_from(base + 0x200).unwrap().to_le_bytes());
+    for (index, start) in [(0, base), (1, base + page + 0x200)] {
+        let offset = 64 + index * 56 + 16;
+        bytes[offset..offset + 8].copy_from_slice(&u64::try_from(start).unwrap().to_le_bytes());
+    }
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), bytes).unwrap();
+    let path = std::ffi::CString::new(file.path().as_os_str().as_encoded_bytes()).unwrap();
+    let path = CStr::from_units_with_nul(path.as_bytes_with_nul()).unwrap();
+    let image = File::new(
+        fs::openat(fspy_nostd::CWD, path, fs::OFlags::RDONLY, fs::Mode::empty()).unwrap(),
+    );
+    assert!(std::panic::catch_unwind(|| image.map(page)).is_err());
+    // SAFETY: a failed reservation must leave the original readable mapping
+    // intact, including the pages later LOAD segments would have replaced.
+    let bytes = unsafe { core::slice::from_raw_parts(occupied.ptr.as_ptr(), occupied.len) };
+    assert!(bytes.iter().all(|byte| *byte == 0x5a));
+}
+
+#[test]
 fn zeroes_the_entire_last_file_page_and_anonymous_bss() {
     let page = fspy_nostd::param::page_size();
     // Exercise both direct writes and temporarily writable pages. The final
