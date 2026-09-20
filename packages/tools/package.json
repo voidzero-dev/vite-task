@@ -26,7 +26,7 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "playwright": "catalog:",
-    "typescript": "7.1.0-dev.20260910.1",
+    "typescript": "7.1.0-dev.20260917.1",
     "vite": "catalog:",
     "vitest": "catalog:"
   },
