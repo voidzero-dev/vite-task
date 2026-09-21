@@ -83,6 +83,7 @@ impl ResolvedTaskOptions {
                 )?;
 
                 Some(CacheConfig {
+                    remote_cache: true,
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
                             .env
@@ -100,11 +101,9 @@ impl ResolvedTaskOptions {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "env_config, input_config, output_config are distinct config categories, not a naming smell"
-)]
 pub struct CacheConfig {
+    /// Whether this task permits remote caching when local caching is enabled.
+    pub remote_cache: bool,
     pub env_config: EnvConfig,
     pub input_config: ResolvedGlobConfig,
     pub output_config: ResolvedGlobConfig,

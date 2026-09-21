@@ -34,6 +34,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/another-empty",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -95,6 +96,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/another-empty",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -134,6 +136,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/another-empty",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -173,6 +176,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/empty-name",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -212,6 +216,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/empty-name",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -251,6 +256,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/empty-name",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -290,6 +296,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/normal-package",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -329,6 +336,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/normal-package",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

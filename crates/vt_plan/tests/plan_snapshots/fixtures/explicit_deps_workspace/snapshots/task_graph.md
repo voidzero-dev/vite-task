@@ -37,6 +37,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/app",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -98,6 +99,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/app",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -137,6 +139,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/app",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -176,6 +179,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/core",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -215,6 +219,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/core",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -254,6 +259,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/core",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -293,6 +299,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/core",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -332,6 +339,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/utils",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -371,6 +379,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/utils",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -410,6 +419,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/utils",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

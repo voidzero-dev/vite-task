@@ -63,7 +63,8 @@
                       "includes_auto": true,
                       "positive_globs": [],
                       "negative_globs": []
-                    }
+                    },
+                    "remote_cache": null
                   },
                   "spawn_command": {
                     "program_path": "<os_shell_path>",
