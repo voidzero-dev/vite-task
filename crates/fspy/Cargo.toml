@@ -49,6 +49,7 @@ fspy_preload_unix = { workspace = true }
 [target.'cfg(target_os = "windows")'.dependencies]
 fspy_detours_sys = { workspace = true }
 fspy_preload_windows = { workspace = true }
+ntapi = { workspace = true }
 winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi"] }
 winsafe = { workspace = true, features = ["kernel"] }
 

@@ -1253,6 +1253,7 @@ dependencies = [
  "libc",
  "materialized_artifact",
  "nix 0.31.2",
+ "ntapi",
  "ntest",
  "ouroboros",
  "rustc-hash",

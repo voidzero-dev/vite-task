@@ -1,7 +1,10 @@
 use std::{
     ffi::{CStr, c_char},
     io,
-    os::windows::{ffi::OsStrExt, io::AsRawHandle, process::ChildExt as _},
+    os::windows::{
+        ffi::OsStrExt,
+        io::{AsRawHandle, BorrowedHandle},
+    },
     path::Path,
     sync::Arc,
 };
@@ -13,10 +16,11 @@ use fspy_shared::{
 };
 use futures_util::FutureExt;
 use materialized_artifact::{Artifact, artifact};
+use ntapi::{ntpsapi::NtResumeProcess, ntrtl::RtlNtStatusToDosError};
 use tokio_util::sync::CancellationToken;
 use winapi::{
-    shared::minwindef::TRUE,
-    um::{processthreadsapi::ResumeThread, winbase::CREATE_SUSPENDED},
+    shared::{minwindef::TRUE, ntdef::NT_SUCCESS},
+    um::winbase::CREATE_SUSPENDED,
 };
 use winsafe::co::{CP, WC};
 
@@ -77,77 +81,71 @@ impl SpyImpl {
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
-        let ansi_dll_path_with_nul = Arc::clone(&self.ansi_dll_path_with_nul);
+        let ansi_dll_path_with_nul = &self.ansi_dll_path_with_nul;
         command.env("FSPY", "1");
-        let mut command = command.into_tokio_command();
-
-        command.creation_flags(CREATE_SUSPENDED);
 
         let receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
             .map_err(SpawnError::ChannelCreation)?;
 
-        let mut spawn_success = false;
-        let spawn_success = &mut spawn_success;
-        let mut child = command
-            .spawn_with(|std_command| {
-                let std_child = std_command.spawn()?;
-                *spawn_success = true;
-
-                let mut dll_paths = ansi_dll_path_with_nul.as_ptr().cast::<c_char>();
-                let process_handle = std_child.as_raw_handle().cast::<winapi::ctypes::c_void>();
-                // SAFETY: process_handle is a valid handle to the just-spawned child process,
-                // dll_paths points to a valid null-terminated ANSI string
-                let success =
-                    unsafe { DetourUpdateProcessWithDll(process_handle, &raw mut dll_paths, 1) };
-                if success != TRUE {
-                    return Err(io::Error::last_os_error());
-                }
-
-                let payload = Payload {
-                    channel_conf: receiver.conf(),
-                    ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
-                };
-                let payload_bytes = wincode::serialize(&payload).unwrap();
-                // SAFETY: process_handle is valid, PAYLOAD_ID is a static GUID,
-                // payload_bytes is a valid buffer with correct length
-                let success = unsafe {
-                    DetourCopyPayloadToProcess(
-                        process_handle,
-                        &PAYLOAD_ID,
-                        payload_bytes.as_ptr().cast(),
-                        payload_bytes.len().try_into().unwrap(),
-                    )
-                };
-                if success != TRUE {
-                    return Err(io::Error::last_os_error());
-                }
-
-                let main_thread_handle = std_child.main_thread_handle();
-                // SAFETY: main_thread_handle is a valid thread handle from the spawned child
-                let resume_thread_ret =
-                    unsafe { ResumeThread(main_thread_handle.as_raw_handle().cast()) }
-                        .cast_signed();
-
-                if resume_thread_ret == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-
-                Ok(std_child)
-            })
-            .map_err(|err| {
-                if *spawn_success { SpawnError::OsSpawn(err) } else { SpawnError::Injection(err) }
-            })?;
-
-        // Duplicate the process handle before the child is moved into the background
-        // task. The duplicate is independently owned (its own ref count), so it stays
-        // valid even after tokio closes its copy when the process exits.
-        let process_handle = {
-            use std::os::windows::io::BorrowedHandle;
-            // SAFETY: The child was just spawned and hasn't been moved yet, so its
-            // raw handle is valid. `borrow_raw` creates a temporary borrow.
-            let borrowed = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
-            borrowed.try_clone_to_owned().map_err(SpawnError::OsSpawn)?
+        let payload = Payload {
+            channel_conf: receiver.conf(),
+            ansi_dll_path_with_nul: ansi_dll_path_with_nul.to_bytes(),
         };
+        let payload_bytes = wincode::serialize(&payload).unwrap();
+        let payload_len = payload_bytes.len().try_into().unwrap();
+
+        let mut command = command.into_tokio_command();
+        command.creation_flags(CREATE_SUSPENDED);
+        let mut child = command.spawn().map_err(SpawnError::OsSpawn)?;
+
+        let preparation = (|| {
+            // Duplicate the process handle before the child is moved into the background
+            // task so it stays valid after Tokio closes its copy when the process exits.
+            // SAFETY: the child owns this handle and is not waited on during this borrow.
+            let process = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
+            let process_handle = process.try_clone_to_owned().map_err(SpawnError::OsSpawn)?;
+            let raw_process = process_handle.as_raw_handle().cast::<winapi::ctypes::c_void>();
+            let mut dll_paths = ansi_dll_path_with_nul.as_ptr().cast::<c_char>();
+            // SAFETY: raw_process is a valid handle to the suspended child process,
+            // dll_paths points to a valid null-terminated ANSI string.
+            let success = unsafe { DetourUpdateProcessWithDll(raw_process, &raw mut dll_paths, 1) };
+            if success != TRUE {
+                return Err(SpawnError::Injection(io::Error::last_os_error()));
+            }
+
+            // SAFETY: raw_process is valid, PAYLOAD_ID is a static GUID,
+            // payload_bytes is a valid buffer with the correct length.
+            let success = unsafe {
+                DetourCopyPayloadToProcess(
+                    raw_process,
+                    &PAYLOAD_ID,
+                    payload_bytes.as_ptr().cast(),
+                    payload_len,
+                )
+            };
+            if success != TRUE {
+                return Err(SpawnError::Injection(io::Error::last_os_error()));
+            }
+
+            // Resume using the process handle, without the nightly main-thread handle API.
+            // SAFETY: raw_process is a valid child process handle with PROCESS_SUSPEND_RESUME access.
+            let status = unsafe { NtResumeProcess(raw_process) };
+            if !NT_SUCCESS(status) {
+                // SAFETY: RtlNtStatusToDosError accepts any NTSTATUS value. Native APIs
+                // return their status directly; GetLastError would report a stale error.
+                let error = unsafe { RtlNtStatusToDosError(status) };
+                return Err(SpawnError::Injection(io::Error::from_raw_os_error(
+                    error.cast_signed(),
+                )));
+            }
+
+            Ok(process_handle)
+        })();
+
+        let process_handle = preparation.inspect_err(|_| {
+            // Do not leave a suspended process behind if tracking initialization fails.
+            let _ = child.start_kill();
+        })?;
 
         Ok(TrackedChild {
             stdin: child.stdin.take(),
