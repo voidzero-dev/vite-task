@@ -144,7 +144,7 @@ socket_ipc = { path = "crates/socket_ipc" }
 stackalloc = "1.2.1"
 subprocess_test = { path = "crates/subprocess_test" }
 supports-color = "3.0.1"
-syn = "2"
+syn = "3"
 syscalls = { version = "0.8.0", default-features = false }
 tar = "0.4.45"
 tempfile = "3.14.0"
