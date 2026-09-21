@@ -3,3 +3,12 @@
 [[plan]]
 name = "shell_fallback_for_pipe_command"
 args = ["run", "pipe-test"]
+
+[[plan]]
+name = "shell_fallback_for_unquoted_glob"
+args = ["run", "unquoted-glob"]
+platform = "unix"
+
+[[plan]]
+name = "direct_spawn_for_quoted_glob"
+args = ["run", "quoted-glob"]
