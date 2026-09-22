@@ -233,7 +233,7 @@ If you encounter a case where fspy fails to detect a file read, please [report t
 
 ### Cache Disabled
 
-`input` is part of the `cache` object, so it cannot be combined with `cache: false`. Setting `input` at the top level of a task is deprecated, and combining it with `cache: false` or a `cache` object is a parse error:
+`input` is part of the `cache` object, so it cannot be used with `cache: false`. The deprecated top-level `input` field is also rejected with `cache: false`:
 
 ```json
 // ERROR: top-level input cannot be combined with cache: false
