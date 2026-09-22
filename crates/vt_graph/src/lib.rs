@@ -126,6 +126,11 @@ pub enum TaskGraphLoadError {
     CacheInNonRootPackage { package_path: Arc<AbsolutePath> },
 
     #[error(
+        "`remoteCache` can only be set in the workspace root config, but found in {package_path}"
+    )]
+    RemoteCacheInNonRootPackage { package_path: Arc<AbsolutePath> },
+
+    #[error(
         "`enablePrePostScripts` can only be set in the workspace root config, but found in {package_path}"
     )]
     PrePostScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
@@ -236,6 +241,9 @@ pub struct IndexedTaskGraph {
     /// Global cache configuration resolved from the workspace root config.
     resolved_global_cache: ResolvedGlobalCacheConfig,
 
+    /// Remote cache endpoint from the workspace root.
+    remote_cache: Option<config::user::UserRemoteCacheConfig>,
+
     /// Whether pre/post script hooks are enabled (from `enablePrePostScripts` in workspace root config).
     pre_post_scripts_enabled: bool,
 }
@@ -275,6 +283,7 @@ impl IndexedTaskGraph {
 
         // First pass: load all configs, extract root cache config, validate
         let mut root_cache = None;
+        let mut remote_cache = None;
         let mut root_pre_post_scripts_enabled = None;
         let mut package_configs: Vec<(PackageNodeIndex, Arc<AbsolutePath>, UserRunConfig)> =
             Vec::with_capacity(package_graph.node_count());
@@ -301,6 +310,15 @@ impl IndexedTaskGraph {
                         package_path: package_dir.clone(),
                     });
                 }
+            }
+
+            if let Some(config) = &user_config.remote_cache {
+                if !is_workspace_root {
+                    return Err(TaskGraphLoadError::RemoteCacheInNonRootPackage {
+                        package_path: package_dir.clone(),
+                    });
+                }
+                remote_cache = Some(config.clone());
             }
 
             if let Some(val) = user_config.enable_pre_post_scripts {
@@ -434,6 +452,7 @@ impl IndexedTaskGraph {
             node_indices_by_task_id,
             task_ids_by_node_index,
             resolved_global_cache,
+            remote_cache,
             pre_post_scripts_enabled: root_pre_post_scripts_enabled.unwrap_or(true),
         };
 
@@ -598,6 +617,11 @@ impl IndexedTaskGraph {
     #[must_use]
     pub const fn global_cache_config(&self) -> &ResolvedGlobalCacheConfig {
         &self.resolved_global_cache
+    }
+
+    #[must_use]
+    pub const fn remote_cache_config(&self) -> Option<&config::user::UserRemoteCacheConfig> {
+        self.remote_cache.as_ref()
     }
 
     /// Whether pre/post script hooks are enabled workspace-wide.

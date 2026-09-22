@@ -1,0 +1,51 @@
+[[plan]]
+name = "default_read"
+args = ["run", "build"]
+
+[[plan]]
+name = "cli_overrides_invalid_env"
+args = ["run", "--remote-cache=read-write", "build"]
+env = { "VP_REMOTE_CACHE" = "invalid" }
+
+[[plan]]
+name = "task_local_only"
+args = ["run", "--remote-cache=read-write", "local-only"]
+
+[[plan]]
+name = "no_cache"
+args = ["run", "--no-cache", "build"]
+
+[[plan]]
+name = "synthetic_local_only"
+args = ["run", "synthetic"]
+
+[[plan]]
+name = "controls_excluded"
+args = ["run", "tracked-controls"]
+env = { "VP_REMOTE_CACHE" = "read-write", "VP_REMOTE_CACHE_URL" = "https://other.example/projects/test" }
+
+[[plan]]
+name = "prefix_controls_excluded"
+args = ["run", "prefix"]
+
+[[plan]]
+name = "nested_inherits_cli"
+args = ["run", "--remote-cache=off", "inherit"]
+env = { "VP_REMOTE_CACHE" = "read-write" }
+
+[[plan]]
+name = "nested_env_override"
+args = ["run", "--remote-cache=read", "env-off"]
+env = { "VP_REMOTE_CACHE" = "off" }
+
+[[plan]]
+name = "nested_cli_overrides_env"
+args = ["run", "--remote-cache=off", "cli-read"]
+
+[[plan]]
+name = "sibling_mode_isolation"
+args = ["run", "siblings"]
+
+[[plan]]
+name = "sibling_endpoint_isolation"
+args = ["run", "endpoints"]

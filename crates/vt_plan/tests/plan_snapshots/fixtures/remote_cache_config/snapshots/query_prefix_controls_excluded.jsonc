@@ -1,0 +1,95 @@
+// run prefix
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "prefix"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/remote-cache-config",
+          "task_name": "prefix",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/remote-cache-config",
+                "task_name": "prefix",
+                "package_path": "<workspace>/"
+              },
+              "command": "VP_REMOTE_CACHE=off VP_REMOTE_CACHE_URL=https://other.example vtt print-file package.json",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "cwd": "",
+                      "program_fingerprint": {
+                        "OutsideWorkspace": {
+                          "program_name": "vtt"
+                        }
+                      },
+                      "args": [
+                        "print-file",
+                        "package.json"
+                      ],
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "execution_cache_key": {
+                      "UserTask": {
+                        "task_name": "prefix",
+                        "command_item_index": 0,
+                        "and_item_index": 0,
+                        "extra_args": [],
+                        "package_path": ""
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    },
+                    "output_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    },
+                    "remote_cache": {
+                      "mode": "read",
+                      "url": "https://cache.example/projects/test"
+                    }
+                  },
+                  "spawn_command": {
+                    "program_path": "<tools>/vtt",
+                    "args": [
+                      "print-file",
+                      "package.json"
+                    ],
+                    "spawn_envs": {
+                      "FORCE_COLOR": "1",
+                      "PATH": "<workspace>/node_modules/.bin:<tools>",
+                      "VP_RUN": "1"
+                    },
+                    "cwd": "<workspace>/"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4
+}

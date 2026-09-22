@@ -151,7 +151,12 @@ impl EnvFingerprints {
             fingerprinted_envs,
             // Save untracked_env names sorted for deterministic cache fingerprinting
             untracked_env_config: {
-                let mut sorted: Vec<Str> = env_config.untracked_env.iter().cloned().collect();
+                let mut sorted: Vec<Str> = env_config
+                    .untracked_env
+                    .iter()
+                    .filter(|name| !crate::remote_cache::is_control_env(EnvName::from_ref(*name)))
+                    .cloned()
+                    .collect();
                 sorted.sort();
                 sorted.into()
             },

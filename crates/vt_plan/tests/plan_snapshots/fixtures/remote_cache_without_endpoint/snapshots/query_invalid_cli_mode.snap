@@ -1,0 +1,4 @@
+error: invalid value 'invalid' for '--remote-cache <REMOTE_CACHE>'
+  [possible values: off, read, read-write]
+
+For more information, try '--help'.

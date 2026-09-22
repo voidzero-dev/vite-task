@@ -209,10 +209,7 @@ pub async fn plan_query(
 ) -> Result<PlanResult, Error> {
     let indexed_task_graph = task_graph_loader.load_task_graph().await?;
 
-    let resolved_global_cache = resolve_cache_with_override(
-        *indexed_task_graph.global_cache_config(),
-        query_plan_request.plan_options.cache_override,
-    );
+    let resolved_global_cache = *indexed_task_graph.global_cache_config();
 
     let QueryPlanRequest { query, plan_options } = query_plan_request;
     let query = Arc::new(query);
@@ -267,5 +264,6 @@ pub fn plan_synthetic(
         cwd,
         cwd,
         ParentCacheConfig::None,
+        None,
     )
 }

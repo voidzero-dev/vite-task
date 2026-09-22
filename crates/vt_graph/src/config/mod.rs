@@ -82,7 +82,7 @@ impl ResolvedTaskOptions {
                 )?;
 
                 Some(CacheConfig {
-                    remote_cache: true,
+                    remote_cache: enabled_cache_config.remote.unwrap_or(true),
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
                             .env

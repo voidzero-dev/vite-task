@@ -99,6 +99,7 @@ impl vt::CommandHandler for CommandHandler {
                         untracked_env: None,
                         input: None,
                         output: None,
+                        remote: None,
                     }),
                     envs: Arc::clone(&command.envs),
                 }))

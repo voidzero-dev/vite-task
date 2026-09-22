@@ -41,6 +41,7 @@ use crate::{
         CacheOverride, PlanOptions, PlanRequest, QueryPlanRequest, ScriptCommand,
         SyntheticPlanRequest,
     },
+    remote_cache::{self, RemoteCacheConfig},
     resolve_cache_with_override,
 };
 
@@ -88,6 +89,7 @@ fn effective_cache_config(
 async fn plan_task_as_execution_node(
     task_node_index: TaskNodeIndex,
     mut context: PlanContext<'_>,
+    remote_cache: Option<&RemoteCacheConfig>,
     with_hooks: bool,
 ) -> Result<TaskExecution, Error> {
     // Check for recursions in the task call stack.
@@ -120,7 +122,8 @@ async fn plan_task_as_execution_node(
         // Extra args (e.g. `vt run test --coverage`) must not be forwarded to hooks.
         pre_context.set_extra_args(Arc::new([]));
         let pre_execution =
-            Box::pin(plan_task_as_execution_node(pre_hook_idx, pre_context, false)).await?;
+            Box::pin(plan_task_as_execution_node(pre_hook_idx, pre_context, remote_cache, false))
+                .await?;
         items.extend(pre_execution.items);
     }
 
@@ -305,6 +308,7 @@ async fn plan_task_as_execution_node(
                             &cwd,
                             package_path,
                             parent_cache_config,
+                            remote_cache,
                         )?;
                         ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                     }
@@ -335,6 +339,7 @@ async fn plan_task_as_execution_node(
                             Some(task_execution_cache_key),
                             &and_item.envs,
                             &resolved_options,
+                            remote_cache,
                             &script_command.envs,
                             program_path,
                             spawn_args,
@@ -402,6 +407,7 @@ async fn plan_task_as_execution_node(
                 }),
                 &BTreeMap::new(),
                 &resolved_options,
+                remote_cache,
                 context.envs(),
                 Arc::clone(&*SHELL_PROGRAM_PATH),
                 SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
@@ -424,7 +430,8 @@ async fn plan_task_as_execution_node(
         // Extra args must not be forwarded to hooks.
         post_context.set_extra_args(Arc::new([]));
         let post_execution =
-            Box::pin(plan_task_as_execution_node(post_hook_idx, post_context, false)).await?;
+            Box::pin(plan_task_as_execution_node(post_hook_idx, post_context, remote_cache, false))
+                .await?;
         items.extend(post_execution.items);
     }
 
@@ -490,8 +497,9 @@ fn resolve_synthetic_cache_config(
             Ok(match synthetic_cache_config.into_enabled() {
                 Option::None => Option::None,
                 Some(enabled_cache_config) => {
-                    let EnabledCacheConfig { env, untracked_env, input, output } =
+                    let EnabledCacheConfig { env, untracked_env, input, output, remote } =
                         enabled_cache_config;
+                    parent_config.remote_cache &= remote.unwrap_or(true);
                     parent_config.env_config.fingerprinted_envs.extend(env.unwrap_or_default());
                     parent_config
                         .env_config
@@ -542,6 +550,10 @@ fn resolve_synthetic_cache_config(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "remote policy is separate from local cache configuration"
+)]
 pub fn plan_synthetic_request(
     workspace_path: &Arc<AbsolutePath>,
     prefix_envs: &BTreeMap<EnvName<Str>, Str>,
@@ -550,6 +562,7 @@ pub fn plan_synthetic_request(
     cwd: &Arc<AbsolutePath>,
     package_dir: &AbsolutePath,
     parent_cache_config: ParentCacheConfig,
+    remote_cache: Option<&RemoteCacheConfig>,
 ) -> Result<SpawnExecution, Error> {
     let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
@@ -570,6 +583,7 @@ pub fn plan_synthetic_request(
         execution_cache_key,
         prefix_envs,
         &resolved_options,
+        remote_cache,
         &envs,
         program_path,
         args,
@@ -597,19 +611,33 @@ fn strip_prefix_for_cache(
     clippy::needless_pass_by_value,
     reason = "program_path ownership is needed for Arc construction"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "remote policy is separate from local cache configuration"
+)]
 fn plan_spawn_execution(
     workspace_path: &Arc<AbsolutePath>,
     execution_cache_key: Option<ExecutionCacheKey>,
     prefix_envs: &BTreeMap<EnvName<Str>, Str>,
     resolved_task_options: &ResolvedTaskOptions,
+    remote_cache: Option<&RemoteCacheConfig>,
     envs: &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     program_path: Arc<AbsolutePath>,
     args: Arc<[Str]>,
 ) -> Result<SpawnExecution, Error> {
-    // The child env starts from the full context and is filtered in place by
-    // `EnvFingerprints::resolve` below — this clone is the one place the map's
-    // contents are actually copied per spawn.
-    let mut spawn_envs = (**envs).clone();
+    // Controls are for planning only. Remove them before either task env
+    // filtering or post-run environment tracking can observe them.
+    let envs = if envs.keys().any(|name| crate::remote_cache::is_control_env(name)) {
+        Arc::new(
+            envs.iter()
+                .filter(|(name, _)| !crate::remote_cache::is_control_env(name))
+                .map(|(name, value)| (name.clone(), Arc::clone(value)))
+                .collect(),
+        )
+    } else {
+        Arc::clone(envs)
+    };
+    let mut spawn_envs = (*envs).clone();
     let cwd = Arc::clone(&resolved_task_options.cwd);
 
     let mut resolved_cache_metadata = None;
@@ -624,6 +652,9 @@ fn plan_spawn_execution(
         // differently, like `foo` for `Foo=1` on Windows.
         let fingerprinted_envs = &mut env_fingerprints.fingerprinted_envs;
         for (name, value) in prefix_envs {
+            if crate::remote_cache::is_control_env(name) {
+                continue;
+            }
             fingerprinted_envs.retain(|existing, _| EnvName::from_ref(existing) != name);
             fingerprinted_envs.insert(name.inner().clone(), EnvValueHash::new(value.as_str()));
         }
@@ -675,8 +706,8 @@ fn plan_spawn_execution(
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
-                remote_cache: None,
-                unfiltered_envs: Arc::clone(envs),
+                remote_cache: if cache_config.remote_cache { remote_cache.cloned() } else { None },
+                unfiltered_envs: Arc::clone(&envs),
             });
         }
     }
@@ -692,6 +723,9 @@ fn plan_spawn_execution(
     // spelling, so remove the entry first: the task then sees the
     // assignment's spelling, which is the one fingerprinted above.
     for (name, value) in prefix_envs {
+        if crate::remote_cache::is_control_env(name) {
+            continue;
+        }
         let name = EnvName::new(Arc::<OsStr>::from(OsStr::new(name.inner().as_str())));
         spawn_envs.remove(&name);
         spawn_envs.insert(name, OsStr::new(value.as_str()).into());
@@ -744,6 +778,14 @@ pub async fn plan_query_request(
         );
         context.set_resolved_global_cache(final_cache);
     }
+    // Inherit explicit choices through the environment. Leave defaults unset so
+    // each invocation can choose its default using the endpoint available to it.
+    if let Some(mode) = plan_options.remote_cache {
+        context.add_envs(std::iter::once((remote_cache::MODE_ENV, mode.as_str())));
+    }
+    let remote_cache =
+        remote_cache::resolve(context.indexed_task_graph().remote_cache_config(), context.envs())?;
+
     // Resolve effective concurrency for this level.
     //
     // Priority (highest to lowest):
@@ -831,7 +873,9 @@ pub async fn plan_query_request(
             task_context.set_extra_args(Arc::clone(&empty_extra_args));
         }
         let task_execution =
-            plan_task_as_execution_node(task_index, task_context, true).boxed_local().await?;
+            plan_task_as_execution_node(task_index, task_context, remote_cache.as_ref(), true)
+                .boxed_local()
+                .await?;
         execution_node_indices_by_task_index
             .insert(task_index, inner_graph.add_node(task_execution));
     }
@@ -980,6 +1024,7 @@ mod tests {
                 untracked_env: None,
                 input: None,
                 output: None,
+                remote: None,
             }),
             &pkg,
             &ws,
@@ -1002,6 +1047,7 @@ mod tests {
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
                 output: None,
+                remote: None,
             }),
             &pkg,
             &ws,
@@ -1024,6 +1070,7 @@ mod tests {
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
                 output: None,
+                remote: None,
             }),
             &pkg,
             &ws,
@@ -1052,6 +1099,7 @@ mod tests {
                     UserInputEntry::Auto(vt_graph::config::user::AutoTracking { auto: true }),
                 ]),
                 output: None,
+                remote: None,
             }),
             &pkg,
             &ws,
@@ -1078,6 +1126,7 @@ mod tests {
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
                 output: None,
+                remote: None,
             }),
             &pkg,
             &ws,
@@ -1102,6 +1151,7 @@ mod tests {
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
                 output: None,
+                remote: None,
             }),
             &pkg,
             &ws,
@@ -1125,6 +1175,27 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_disables_remote_cache_despite_parent() {
+        let (pkg, ws) = test_paths();
+        let parent = parent_config(true, &["src/**"]);
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: None,
+                output: None,
+                remote: Some(false),
+            }),
+            &pkg,
+            &ws,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!result.remote_cache);
+    }
+
+    #[test]
     fn synthetic_negative_globs_merged() {
         let (pkg, ws) = test_paths();
         let parent = parent_config(true, &["src/**"]);
@@ -1135,6 +1206,7 @@ mod tests {
                 untracked_env: None,
                 input: Some(vec![UserInputEntry::Glob("!dist/**".into())]),
                 output: None,
+                remote: None,
             }),
             &pkg,
             &ws,

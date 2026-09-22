@@ -1,0 +1,34 @@
+[[plan]]
+name = "default_off"
+args = ["run", "build"]
+
+[[plan]]
+name = "nested_endpoint_enables_read"
+args = ["run", "with-url"]
+
+[[plan]]
+name = "nested_endpoint_preserves_explicit_off"
+args = ["run", "--remote-cache=off", "with-url"]
+
+[[plan]]
+name = "missing_cli_endpoint"
+args = ["run", "--remote-cache=read", "build"]
+
+[[plan]]
+name = "invalid_env_mode"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE" = "invalid" }
+
+[[plan]]
+name = "invalid_cli_mode"
+args = ["run", "--remote-cache=invalid", "build"]
+
+[[plan]]
+name = "invalid_endpoint"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE_URL" = "cache.example/projects/test" }
+
+[[plan]]
+name = "unsupported_endpoint_scheme"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE_URL" = "file:///cache" }

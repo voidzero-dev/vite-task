@@ -231,6 +231,9 @@ pub struct EnabledCacheConfig {
     #[serde(default)]
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
     pub output: Option<Vec<UserOutputEntry>>,
+
+    /// Whether this task can use the remote cache. Defaults to `true`.
+    pub remote: Option<bool>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -383,6 +386,15 @@ impl ResolvedGlobalCacheConfig {
     }
 }
 
+/// Remote cache endpoint shared by tasks in a workspace.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "RemoteCacheConfig"))]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct UserRemoteCacheConfig {
+    /// HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
+    pub url: Str,
+}
+
 /// User configuration structure for `run` field in `vite.config.*`
 #[derive(Debug, Default, Deserialize)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
@@ -394,6 +406,9 @@ pub struct UserRunConfig {
     /// This option can only be set in the workspace root's config file.
     /// Setting it in a package's config will result in an error.
     pub cache: Option<UserGlobalCacheConfig>,
+
+    /// Remote cache endpoint. Only allowed in the workspace root config.
+    pub remote_cache: Option<UserRemoteCacheConfig>,
 
     /// Task definitions: full task objects, command strings, or command string arrays.
     pub tasks: Option<FxHashMap<Str, UserTaskDefinition>>,
@@ -733,6 +748,7 @@ mod tests {
                 "untrackedEnv": ["FOO"],
                 "input": ["src/**"],
                 "output": ["dist/**"],
+                "remote": false,
             },
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json.clone()).unwrap();
@@ -744,6 +760,7 @@ mod tests {
                 untracked_env: Some(std::iter::once("FOO".into()).collect()),
                 input: Some(vec![UserInputEntry::Glob("src/**".into())]),
                 output: Some(vec![UserOutputEntry::Glob("dist/**".into())]),
+                remote: Some(false),
             })
         );
     }
@@ -753,6 +770,15 @@ mod tests {
         let user_config_json = json!({
             "command": "echo test",
             "cache": { "foo": 42 },
+        });
+        assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
+    }
+
+    #[test]
+    fn test_top_level_remote_cache_error() {
+        let user_config_json = json!({
+            "command": "echo test",
+            "remoteCache": false,
         });
         assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
     }

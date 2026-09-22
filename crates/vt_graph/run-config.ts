@@ -26,6 +26,12 @@ base: InputBase, };
 
 export type InputBase = "package" | "workspace";
 
+export type RemoteCacheConfig = {
+/**
+ * HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
+ */
+url: string, };
+
 export type Task = {
 /**
  * Command to run, or an array of commands to run in order.
@@ -87,7 +93,11 @@ input?: Array<string | GlobWithBase | AutoTracking>,
  * - `{auto: true}` enables automatic output tracking
  * - Negative patterns (e.g. `"!dist/cache/**"`) exclude matched files
  */
-output?: Array<string | GlobWithBase | AutoTracking>, };
+output?: Array<string | GlobWithBase | AutoTracking>,
+/**
+ * Whether this task can use the remote cache. Defaults to `true`.
+ */
+remote?: boolean, };
 
 export type TaskDefinition = Task | Command;
 
@@ -131,6 +141,10 @@ export type RunConfig = {
  * Setting it in a package's config will result in an error.
  */
 cache?: UserGlobalCacheConfig,
+/**
+ * Remote cache endpoint. Only allowed in the workspace root config.
+ */
+remoteCache?: RemoteCacheConfig,
 /**
  * Task definitions: full task objects, command strings, or command string arrays.
  */

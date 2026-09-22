@@ -50,6 +50,8 @@ pub enum CacheOverride {
 pub struct PlanOptions {
     pub extra_args: Arc<[Str]>,
     pub cache_override: CacheOverride,
+    /// Remote mode for this invocation. None inherits the planning environment.
+    pub remote_cache: Option<crate::remote_cache::RemoteCacheMode>,
     /// Per-level concurrency limit. `None` means inherit from the parent level
     /// (or default to [`crate::DEFAULT_CONCURRENCY_LIMIT`] at the root).
     pub concurrency_limit: Option<usize>,

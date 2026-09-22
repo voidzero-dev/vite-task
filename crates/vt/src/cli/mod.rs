@@ -19,6 +19,27 @@ pub enum LogMode {
     Grouped,
 }
 
+/// Remote cache access selected on the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum RemoteCacheMode {
+    /// Remote caching is disabled.
+    Off,
+    /// Cached results are downloaded.
+    Read,
+    /// Cached results are downloaded and new results are uploaded after successful execution.
+    ReadWrite,
+}
+
+impl From<RemoteCacheMode> for vt_plan::remote_cache::RemoteCacheMode {
+    fn from(mode: RemoteCacheMode) -> Self {
+        match mode {
+            RemoteCacheMode::Off => Self::Off,
+            RemoteCacheMode::Read => Self::Read,
+            RemoteCacheMode::ReadWrite => Self::ReadWrite,
+        }
+    }
+}
+
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum CacheSubcommand {
     /// Clean up all the cache
@@ -47,6 +68,13 @@ pub struct RunFlags {
     /// Force caching off for all tasks and scripts.
     #[clap(long, conflicts_with = "cache")]
     pub no_cache: bool,
+
+    /// How the remote cache is accessed.
+    ///
+    /// If you don't pass this flag, `VP_REMOTE_CACHE` selects the mode. If neither
+    /// is set, the mode is `read` when an endpoint is configured, or `off` otherwise.
+    #[clap(long)]
+    pub remote_cache: Option<RemoteCacheMode>,
 
     /// How task output is displayed.
     #[clap(long, default_value = "interleaved")]
@@ -233,6 +261,7 @@ impl ResolvedRunCommand {
                 plan_options: PlanOptions {
                     extra_args: self.additional_args.into(),
                     cache_override,
+                    remote_cache: self.flags.remote_cache.map(Into::into),
                     concurrency_limit,
                     parallel,
                     fail_if_no_match,
