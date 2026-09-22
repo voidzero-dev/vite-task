@@ -53,7 +53,8 @@ struct ExecutionContext<'a> {
     fast_fail_token: CancellationToken,
     /// Token cancelled by Ctrl-C. Unlike `fast_fail_token` (which kills
     /// children), this only prevents scheduling new tasks and caching
-    /// results — running processes are left to handle SIGINT naturally.
+    /// results. Foreground processes receive SIGINT from the terminal; isolated
+    /// piped task groups receive the forwarded signal.
     interrupt_token: CancellationToken,
 }
 

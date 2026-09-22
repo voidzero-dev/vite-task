@@ -64,16 +64,23 @@ wax = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["net", "time"] }
+ctor = { workspace = true }
+subprocess_test = { workspace = true }
 tempfile = { workspace = true }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 fspy = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["dir"] }
+nix = { workspace = true, features = ["dir", "signal"] }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { workspace = true, features = ["handleapi", "jobapi2", "winnt"] }
 
 [lib]
 doctest = false
+
+[package.metadata.cargo-shear]
+# Expanded by subprocess_test::command_for_fn! in the cancellation regression.
+ignored = ["ctor"]
