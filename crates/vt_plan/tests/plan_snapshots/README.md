@@ -28,6 +28,43 @@ The test runner:
 4. For each plan test, parses CLI args and generates an execution plan
 5. Compares against snapshots in `fixtures/<name>/snapshots/`
 
+## Selecting plan snapshot fields
+
+Set `fields` at the file level to keep each plan snapshot focused on the behavior
+the fixture tests. For example, the `cache_keys` fixture retains task identities,
+commands, and execution cache keys:
+
+```toml
+[fields]
+key = true
+neighbors = true
+execution_item_display = { command = true }
+cache_metadata = { execution_cache_key = true }
+
+[[plan]]
+name = "normal_task_with_extra_args"
+args = ["run", "hello", "a.txt"]
+```
+
+The harness recursively searches for the keys directly under `[fields]`. Once a
+key matches, nested selection tables match only direct children. `true` keeps the
+entire value. For example, the selection above finds `cache_metadata` at any depth
+and keeps its direct child `execution_cache_key` in full.
+
+Arrays apply the selection to each element. Ancestors and array positions are
+preserved; unmatched elements become `"<unselected>"` during recursive discovery.
+
+Selected nulls, empty collections, and scalar values remain visible. For example,
+`cache_metadata = { execution_cache_key = true }` preserves `cache_metadata: null`
+when caching is disabled. `false` is rejected during deserialization. Empty
+selection tables fail when reached during projection; selections for absent fields
+are not visited. A selection that matches no outer fields also fails.
+
+Omitting `fields`, or setting `fields = true` before any TOML table, keeps the full
+plan. The option applies to non-compact plan cases in the file; it is not accepted
+inside `[[plan]]`. Cases with `compact = true` keep their compact format and ignore
+`fields`. Task graph Markdown and error snapshots are unaffected.
+
 ## Adding a new test
 
 1. Create a new fixture directory under `fixtures/`

@@ -4634,6 +4634,7 @@ dependencies = [
  "cow-utils",
  "futures-util",
  "libtest-mimic",
+ "monostate",
  "pathdiff",
  "petgraph",
  "rustc-hash",
