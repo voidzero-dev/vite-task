@@ -17,6 +17,14 @@ pub enum RemoteCacheMode {
 /// Remote endpoint and access mode for a cacheable execution.
 #[derive(Debug, Clone, Serialize)]
 pub struct RemoteCacheConfig {
+    pub mode: RemoteCacheAccess,
     pub url: Arc<Url>,
-    pub mode: RemoteCacheMode,
+}
+
+/// Access permitted when remote caching is enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteCacheAccess {
+    Read,
+    ReadWrite,
 }
