@@ -1,3 +1,18 @@
+[fields]
+key = true
+
+[fields.cache_metadata]
+remote_cache = true
+spawn_fingerprint.env_fingerprints.untracked_env_config = true
+
+[fields.cache_metadata.spawn_fingerprint.env_fingerprints.fingerprinted_envs]
+VP_REMOTE_CACHE = true
+VP_REMOTE_CACHE_URL = true
+
+[fields.spawn_command.spawn_envs]
+VP_REMOTE_CACHE = true
+VP_REMOTE_CACHE_URL = true
+
 [[plan]]
 name = "default_read"
 args = ["run", "build"]

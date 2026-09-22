@@ -1,3 +1,7 @@
+[fields]
+key = true
+cache_metadata = { remote_cache = true }
+
 [[plan]]
 name = "default_off"
 args = ["run", "build"]

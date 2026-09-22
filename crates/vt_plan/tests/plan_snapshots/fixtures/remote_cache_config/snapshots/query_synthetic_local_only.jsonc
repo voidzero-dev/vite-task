@@ -7,37 +7,13 @@
         "synthetic"
       ],
       "node": {
-        "task_display": {
-          "package_name": "@test/remote-cache-config",
-          "task_name": "synthetic",
-          "package_path": "<workspace>/"
-        },
         "items": [
           {
-            "execution_item_display": {
-              "task_display": {
-                "package_name": "@test/remote-cache-config",
-                "task_name": "synthetic",
-                "package_path": "<workspace>/"
-              },
-              "command": "vt tool print-file package.json",
-              "cwd": "<workspace>/"
-            },
             "kind": {
               "Leaf": {
                 "Spawn": {
                   "cache_metadata": {
                     "spawn_fingerprint": {
-                      "cwd": "",
-                      "program_fingerprint": {
-                        "OutsideWorkspace": {
-                          "program_name": "vtt"
-                        }
-                      },
-                      "args": [
-                        "print-file",
-                        "package.json"
-                      ],
                       "env_fingerprints": {
                         "fingerprinted_envs": {},
                         "untracked_env_config": [
@@ -45,48 +21,17 @@
                         ]
                       }
                     },
-                    "execution_cache_key": {
-                      "UserTask": {
-                        "task_name": "synthetic",
-                        "command_item_index": 0,
-                        "and_item_index": 0,
-                        "extra_args": [],
-                        "package_path": ""
-                      }
-                    },
-                    "input_config": {
-                      "includes_auto": true,
-                      "positive_globs": [],
-                      "negative_globs": []
-                    },
-                    "output_config": {
-                      "includes_auto": true,
-                      "positive_globs": [],
-                      "negative_globs": []
-                    },
                     "remote_cache": null
                   },
                   "spawn_command": {
-                    "program_path": "<tools>/vtt",
-                    "args": [
-                      "print-file",
-                      "package.json"
-                    ],
-                    "spawn_envs": {
-                      "FORCE_COLOR": "1",
-                      "PATH": "<workspace>/node_modules/.bin:<tools>",
-                      "VP_RUN": "1"
-                    },
-                    "cwd": "<workspace>/"
+                    "spawn_envs": {}
                   }
                 }
               }
             }
           }
         ]
-      },
-      "neighbors": []
+      }
     }
-  ],
-  "concurrency_limit": 4
+  ]
 }
