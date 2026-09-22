@@ -7,7 +7,7 @@ use vt_graph::{
 use vt_path::AbsolutePath;
 use vt_str::Str;
 
-use crate::{PlanRequestParser, path_env::prepend_path_env};
+use crate::{PlanRequestParser, envs::extend_envs, path_env::prepend_path_env};
 
 #[derive(Debug, thiserror::Error)]
 #[error(
@@ -127,10 +127,7 @@ impl<'a> PlanContext<'a> {
         if new_envs.peek().is_none() {
             return;
         }
-        let envs = Arc::make_mut(&mut self.envs);
-        for (key, value) in new_envs {
-            envs.insert(Arc::from(key.as_ref()), Arc::from(value.as_ref()));
-        }
+        extend_envs(Arc::make_mut(&mut self.envs), new_envs);
     }
 
     pub const fn extra_args(&self) -> &Arc<[Str]> {

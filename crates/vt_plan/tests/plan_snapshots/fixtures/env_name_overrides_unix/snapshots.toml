@@ -1,0 +1,25 @@
+platform = "unix"
+
+[fields]
+key = true
+
+[fields.spawn_command.spawn_envs]
+FOO = true
+Foo = true
+foo = true
+VP_RUN = true
+vp_run = true
+FORCE_COLOR = true
+force_color = true
+
+[fields.cache_metadata.spawn_fingerprint.env_fingerprints.fingerprinted_envs]
+FOO = true
+Foo = true
+foo = true
+vp_run = true
+force_color = true
+
+[[plan]]
+name = "nested_prefix_overrides"
+args = ["run", "outer"]
+env = { foo = "inherited" }

@@ -1,3 +1,5 @@
+mod env_name;
+
 use std::{collections::BTreeMap, fmt::Display, ops::Range};
 
 use brush_parser::{
@@ -10,6 +12,7 @@ use brush_parser::{
     word::{WordPiece, WordPieceWithSource},
 };
 use diff::Diff;
+pub use env_name::EnvName;
 use serde::{Deserialize, Serialize};
 use vt_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
@@ -18,7 +21,7 @@ use wincode::{SchemaRead, SchemaWrite};
 #[derive(SchemaWrite, SchemaRead, Serialize, Deserialize, Debug, PartialEq, Eq, Diff, Clone)]
 #[diff(attr(#[derive(Debug)]))]
 pub struct TaskParsedCommand {
-    pub envs: BTreeMap<Str, Str>,
+    pub envs: BTreeMap<EnvName, Str>,
     pub program: Str,
     pub args: Vec<Str>,
 }
@@ -105,7 +108,7 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
     let SimpleCommand { prefix, word_or_name: Some(program), suffix } = simple_command else {
         return None;
     };
-    let mut envs = BTreeMap::<Str, Str>::new();
+    let mut envs = BTreeMap::<EnvName, Str>::new();
     if let Some(prefix) = prefix {
         let CommandPrefix(items) = prefix;
         for item in items {
@@ -236,6 +239,26 @@ mod tests {
 
         // Verify the order is alphabetical (BTreeMap sorts by key)
         assert!(str1.starts_with("ALPHA=first MIDDLE=middle ZEBRA=last"));
+    }
+
+    #[test]
+    fn prefix_env_overrides_follow_source_order() {
+        for (first, last) in [("FOO", "Foo"), ("Foo", "FOO")] {
+            let source = vt_str::format!("{first}=first {last}=last program");
+            let parsed = try_parse_as_and_list(&source).unwrap();
+            let command = &parsed[0].0;
+            assert_eq!(command.envs.len(), if cfg!(windows) { 1 } else { 2 });
+            assert_eq!(command.envs[&EnvName::from(last)], "last");
+            assert_eq!(
+                command.envs[&EnvName::from(first)],
+                if cfg!(windows) { "last" } else { "first" },
+            );
+
+            let bytes = wincode::serialize(command).unwrap();
+            let decoded: TaskParsedCommand = wincode::deserialize(&bytes).unwrap();
+            assert_eq!(decoded, *command);
+            assert_eq!(decoded.envs[&EnvName::from(last)], "last");
+        }
     }
 
     #[test]

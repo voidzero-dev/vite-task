@@ -17,6 +17,19 @@ const SHA256_PREFIX: &str = "sha256:";
 /// been invoked directly.
 pub const MARKER_ENV_NAME: &str = "VP_RUN";
 
+/// Apply overrides to the OS environment, matching the shell's name comparison rules.
+pub fn extend_envs(
+    envs: &mut FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    overrides: impl IntoIterator<Item = (impl AsRef<OsStr>, impl AsRef<OsStr>)>,
+) {
+    for (name, value) in overrides {
+        if cfg!(windows) {
+            envs.retain(|key, _| !key.eq_ignore_ascii_case(name.as_ref()));
+        }
+        envs.insert(Arc::from(name.as_ref()), Arc::from(value.as_ref()));
+    }
+}
+
 /// SHA-256 digest of a fingerprinted environment variable value.
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Clone, Copy)]
 pub struct EnvValueHash([u8; SHA256_DIGEST_LEN]);

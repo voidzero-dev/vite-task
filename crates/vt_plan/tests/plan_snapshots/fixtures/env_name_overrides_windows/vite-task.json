@@ -1,0 +1,12 @@
+{
+  "cache": true,
+  "tasks": {
+    "outer": {
+      "command": "FOO=outer vt run inner"
+    },
+    "inner": {
+      "command": "Foo=first FOO=last vp_run=custom force_color=0 vt tool print-env FOO",
+      "env": ["FOO", "Foo", "foo"]
+    }
+  }
+}

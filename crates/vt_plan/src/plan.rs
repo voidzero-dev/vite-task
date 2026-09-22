@@ -24,14 +24,14 @@ use vt_graph::{
     query::TaskQuery,
 };
 use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::InvalidPathDataError};
-use vt_shell::try_parse_as_and_list;
+use vt_shell::{EnvName, try_parse_as_and_list};
 use vt_str::Str;
 
 use crate::{
     ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, PlanContext,
     SpawnCommand, SpawnExecution, TaskExecution,
     cache_metadata::{CacheMetadata, ExecutionCacheKey, ProgramFingerprint, SpawnFingerprint},
-    envs::{EnvFingerprints, EnvValueHash, MARKER_ENV_NAME},
+    envs::{EnvFingerprints, EnvValueHash, MARKER_ENV_NAME, extend_envs},
     error::{CdCommandError, Error, PathFingerprintError, PathFingerprintErrorKind, PathType},
     execution_graph::{ExecutionGraph, ExecutionNodeIndex, InnerExecutionGraph},
     in_process::InProcessExecution,
@@ -543,7 +543,7 @@ fn resolve_synthetic_cache_config(
 
 pub fn plan_synthetic_request(
     workspace_path: &Arc<AbsolutePath>,
-    prefix_envs: &BTreeMap<Str, Str>,
+    prefix_envs: &BTreeMap<EnvName, Str>,
     synthetic_plan_request: SyntheticPlanRequest,
     execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
@@ -599,7 +599,7 @@ fn strip_prefix_for_cache(
 fn plan_spawn_execution(
     workspace_path: &Arc<AbsolutePath>,
     execution_cache_key: Option<ExecutionCacheKey>,
-    prefix_envs: &BTreeMap<Str, Str>,
+    prefix_envs: &BTreeMap<EnvName, Str>,
     resolved_task_options: &ResolvedTaskOptions,
     envs: &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
     program_path: Arc<AbsolutePath>,
@@ -622,7 +622,7 @@ fn plan_spawn_execution(
         env_fingerprints.fingerprinted_envs.extend(
             prefix_envs
                 .iter()
-                .map(|(name, value)| (name.clone(), EnvValueHash::new(value.as_str()))),
+                .map(|(name, value)| (name.as_str().into(), EnvValueHash::new(value.as_str()))),
         );
 
         let program_fingerprint = match strip_prefix_for_cache(&program_path, workspace_path) {
@@ -683,12 +683,10 @@ fn plan_spawn_execution(
     // drop it, and always to `1`, so a stale value in the parent environment
     // cannot make a task look like it was invoked directly. A prefix
     // assignment (`VP_RUN=… command`) still wins: those are applied below.
-    spawn_envs.insert(OsStr::new(MARKER_ENV_NAME).into(), OsStr::new("1").into());
+    extend_envs(&mut spawn_envs, [(MARKER_ENV_NAME, "1")]);
 
     // Add prefix envs to spawn envs.
-    spawn_envs.extend(prefix_envs.iter().map(|(name, value)| {
-        (OsStr::new(name.as_str()).into(), OsStr::new(value.as_str()).into())
-    }));
+    extend_envs(&mut spawn_envs, prefix_envs);
 
     Ok(SpawnExecution {
         spawn_command: SpawnCommand {
